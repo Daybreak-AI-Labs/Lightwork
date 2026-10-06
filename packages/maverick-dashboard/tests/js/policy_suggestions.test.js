@@ -12,7 +12,8 @@ const pkg = path.resolve(__dirname, "../../maverick_dashboard");
 const ui = fs.readFileSync(path.join(pkg, "static/lightwork-ui.js"), "utf8");
 const script = fs.readFileSync(path.join(pkg, "static/lightwork-policy-suggestions.js"), "utf8");
 const partial = fs.readFileSync(path.join(pkg, "templates/_policy_suggestions.html"), "utf8")
-  .replace(/{#[\s\S]*?#}/g, "").replace(/{%[\s\S]*?%}/g, "").replace(/<script[\s\S]*?<\/script>/g, "");
+  .replace(/{#[\s\S]*?#}/g, "").replace(/{%[\s\S]*?%}/g, "").replace(/<script[\s\S]*?<\/script>/g, "")
+  .replace(/{{ kind }}/g, "ai-policy").replace(/{{ heading }}/g, "h4").replace(/{{ next_step }}/g, "");
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise(setImmediate); };
 
 const SUGGESTION = {id: 4, document_id: "customer-data", document_title: "Customer data rules",
@@ -23,8 +24,8 @@ const LIST = {suggestions: [SUGGESTION], recent: [], can_decide: true, ai_on: tr
   rules: [{id: "customer-data", title: "Customer data rules", parts: [{field: "title", label: "Title"},
     {field: "statement:no-export", label: "Rule: no export"}]}]};
 
-function boot(list) {
-  const dom = new JSDOM(`<div id="mv-toasts"></div><div id="mv-toasts-alert"></div><main id="content">${partial}</main>`,
+function boot(list, markup = partial) {
+  const dom = new JSDOM(`<div id="mv-toasts"></div><div id="mv-toasts-alert"></div><main id="content">${markup}</main>`,
     {url: "https://fixture.invalid/security/assurance", runScripts: "outside-only", pretendToBeVisual: true});
   const w = dom.window, calls = [];
   w.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
@@ -32,7 +33,7 @@ function boot(list) {
   let current = list;
   w.mvFetchJSON = async (url, opts) => {
     calls.push({url, opts: opts || {}});
-    if (url.endsWith("/accept")) { current = {...current, suggestions: []}; return {suggestion: {applied_version: 2}}; }
+    if (url.endsWith("/accept")) { current = {...current, suggestions: []}; return {suggestion: {applied_version: 2}, next_step: "Saved as version 2. Turn it on above when you are ready."}; }
     if (url.endsWith("/reject")) { current = {...current, suggestions: []}; return {suggestion: {state: "rejected"}}; }
     if (url.endsWith("/ai")) return {id: 5};
     return current;
@@ -62,7 +63,8 @@ test("accepting sends the optional reason and says which version was saved", asy
   await flush();
   const sent = calls.find((c) => c.url.endsWith("/4/accept"));
   assert.deepEqual({...sent.opts.body}, {reason: "Agreed in review."});
-  assert.match(d.querySelector("[data-suggestion-list]").textContent, /Saved as version 2 of “Customer data rules”/);
+  assert.match(d.querySelector("[data-suggestion-list]").textContent, /Accepted for “Customer data rules”\. Saved as version 2\./);
+  assert.ok(calls.some((c) => c.url === "/api/v1/policy-suggestions?kind=ai-policy"));
 });
 
 test("an outdated suggestion can only be rejected, and a viewer sees no buttons", async () => {
@@ -70,7 +72,7 @@ test("an outdated suggestion can only be rejected, and a viewer sees no buttons"
   await flush();
   const accept = ui.d.querySelector("#suggestion-4 button");
   assert.equal(accept.disabled, true);
-  assert.match(ui.d.getElementById("suggestion-4").textContent, /changed since this was suggested/);
+  assert.match(ui.d.getElementById("suggestion-4").textContent, /changed since it was suggested/);
   ui = boot({...LIST, can_decide: false, ai_on: false, rules: []});
   await flush();
   assert.equal(ui.d.querySelectorAll("#suggestion-4 button").length, 0);
@@ -91,4 +93,14 @@ test("the AI assistant is asked only when a person sends the form", async () => 
   const asked = calls.find((c) => c.url.endsWith("/ai"));
   assert.deepEqual({...asked.opts.body}, {id: "customer-data", field: "title", instruction: "Make it shorter."});
   assert.match(form.querySelector("[data-suggestion-status]").textContent, /Nothing changes until someone accepts it/);
+});
+
+test("a data use rule's suggestions load by their kind and offer no AI drafting", async () => {
+  const markup = partial.replace('data-kind="ai-policy"', 'data-kind="data-use-rule"').replace(/<form[\s\S]*?<\/form>/, "");
+  const {d, calls} = boot({...LIST, ai_on: false, rules: [], suggestions: [{...SUGGESTION, kind: "data-use-rule",
+    field: "document", field_label: "Rule", proposer_kind: "person", proposed_by: "ana@corp.com"}]}, markup);
+  await flush();
+  assert.equal(calls[0].url, "/api/v1/policy-suggestions?kind=data-use-rule");
+  assert.equal(d.querySelector("[data-suggestion-ask]"), null);
+  assert.match(d.getElementById("suggestion-4").textContent, /Suggested by ana@corp\.com\. Why: Cover the UK too\./);
 });

@@ -1,13 +1,14 @@
-{# Suggested edits to AI use rules (NOT-4): proposed by agents, colleagues or
-   the AI assistant, shown inline with exactly what changes, accepted or
-   rejected by a person. Filled by static/lightwork-policy-suggestions.js. #}
-{% macro policy_suggestions() %}
-<section class="mv-suggestions" data-policy-suggestions aria-labelledby="policy-suggestions-title">
-  <h4 id="policy-suggestions-title">Suggested changes</h4>
-  <p class="assurance-muted">Agents, colleagues and the AI assistant can suggest new wording. Nothing changes until a person accepts a suggestion.
-    Accepting saves it as a new version. The version in use stays the same until someone turns the new one on.</p>
+{# Suggested edits to policy documents (NOT-4): proposed by agents, colleagues
+   or the AI assistant, shown inline with exactly what changes, accepted or
+   rejected by a person. Accepting creates the document's next draft through
+   its own flow. Filled by static/lightwork-policy-suggestions.js. #}
+{% macro policy_suggestions(kind="ai-policy", next_step="The version in use stays the same until someone turns the new one on.", heading="h4") %}
+<section class="mv-suggestions" data-policy-suggestions data-kind="{{ kind }}" aria-labelledby="policy-suggestions-title-{{ kind }}">
+  <{{ heading }} id="policy-suggestions-title-{{ kind }}">Suggested changes</{{ heading }}>
+  <p class="assurance-muted muted">Agents and colleagues can suggest changes. Nothing changes until a person accepts a suggestion.
+    Accepting saves it as a new draft version. {{ next_step }}</p>
   <div class="mv-suggestions__list" data-suggestion-list aria-live="polite"><p class="assurance-muted">Loading suggestions…</p></div>
-  <form class="assurance-form mv-suggestions__ask" data-suggestion-ask hidden>
+  {% if kind == "ai-policy" %}<form class="assurance-form mv-suggestions__ask" data-suggestion-ask hidden>
     <p class="assurance-form__wide"><strong>Ask the AI assistant for a suggestion.</strong> It drafts new wording for one part. You then accept or reject it.</p>
     <label>Rules<select class="select" name="id" required></select></label>
     <label>Part<select class="select" name="field" required></select></label>
@@ -16,7 +17,7 @@
       <button class="btn" type="submit">Get a suggestion</button>
       <span data-suggestion-status role="status" aria-live="polite"></span>
     </div>
-  </form>
+  </form>{% endif %}
 </section>
-<script src="/static/lightwork-policy-suggestions.js" defer></script>
 {% endmacro %}
+{% macro policy_suggestions_script() %}<script src="/static/lightwork-policy-suggestions.js" defer></script>{% endmacro %}

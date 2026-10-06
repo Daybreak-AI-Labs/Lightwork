@@ -7118,15 +7118,15 @@ def pick_collaboration() -> dict[str, Any]:
 
 
 def pick_suggestions() -> dict[str, Any]:
-    """Suggested edits to AI use rules. ON by default, AI drafting included.
+    """Suggested edits to AI use rules, data use rules and privacy notices. ON by default.
 
     Agents and colleagues suggest new wording; each suggestion changes nothing
     until a person accepts it. Written as ``[collaboration] suggestions`` and
     ``ai_suggestions`` (``maverick.policy_suggestions``); declining writes false.
     """
     if not _q_confirm(
-        "Let agents and colleagues suggest edits to your AI use rules? Each suggestion shows what it "
-        "changes and why, and changes nothing until a person accepts it.",
+        "Let agents and colleagues suggest edits to your AI use rules, data use rules and privacy notices? "
+        "Each suggestion shows what it changes and why. Accepting one creates a draft that still needs its usual approval.",
         default=True,
     ):
         return {"suggestions": False}

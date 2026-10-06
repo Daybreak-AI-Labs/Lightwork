@@ -923,7 +923,7 @@ usability_survey = false      # optional ease-of-use survey (SUS + one question 
 
 [collaboration]
 comments = true               # comments and @mentions on tasks, runs, approvals and policies; mentions reach personal notifications
-suggestions = true            # agents and colleagues suggest edits to AI use rules; a person accepts or rejects each one
+suggestions = true            # agents and colleagues suggest edits to AI use rules, data use rules and privacy notices; accepting creates a draft that keeps its own approval
 ai_suggestions = true         # the AI assistant drafts a suggested edit when a person asks (within the per-task spending cap)
 
 [env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered

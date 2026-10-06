@@ -21,15 +21,6 @@ def home(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
-VERSION = {
-    "version": 1, "title": "Customer data rules", "description": "How AI may use customer data.",
-    "statements": [
-        {"statement_id": "no-export", "text": "AI must not send customer data outside the EU.",
-         "effect": "prohibit", "applicability": {}, "required_control_ids": []},
-    ],
-}
-
-
 def test_a_suggestion_is_stored_with_who_proposed_it_and_why_and_changes_nothing():
     from maverick import policy_suggestions as ps
 
@@ -79,22 +70,6 @@ def test_a_suggestion_is_refused_when_it_changes_nothing_or_names_no_part():
     with pytest.raises(ps.SuggestionError):
         ps.propose("ai-policy", "p", field="title", before="a", after="b", base_version=1,
                    proposer="user:a@b.c", proposer_kind="robot", reason="")
-
-
-def test_the_suggested_text_is_placed_into_the_latest_version_only_where_it_still_fits():
-    from maverick import policy_suggestions as ps
-
-    assert ps.field_text(VERSION, "title") == "Customer data rules"
-    assert ps.field_text(VERSION, "statement:no-export").startswith("AI must not")
-    assert ps.field_text(VERSION, "statement:missing") is None
-    suggestion = {"field": "statement:no-export", "before": VERSION["statements"][0]["text"],
-                  "after": "AI must not send customer data outside the EU or the UK."}
-    title, description, statements = ps.apply(VERSION, suggestion)
-    assert title == "Customer data rules" and description == "How AI may use customer data."
-    assert statements[0]["text"].endswith("or the UK.") and statements[0]["effect"] == "prohibit"
-    assert VERSION["statements"][0]["text"].endswith("the EU.")  # the version itself is not changed
-    with pytest.raises(ps.SuggestionOutdated):
-        ps.apply(VERSION, {**suggestion, "before": "Older wording."})
 
 
 def test_the_settings_turn_suggestions_and_ai_suggestions_off(home):

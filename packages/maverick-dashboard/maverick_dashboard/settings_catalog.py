@@ -955,9 +955,9 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "People & access", True, "maverick.comments",
       aliases="comment comments mention mentions discuss discussion thread collaborate"),
     S("collaboration", "suggestions", "Suggested edits to rules",
-      "Let agents and colleagues suggest new wording for AI use rules. A suggestion shows exactly what "
-      "it changes, who or what proposed it and why, and changes nothing until a person accepts it. "
-      "On by default.",
+      "Let agents and colleagues suggest changes to AI use rules, data use rules and privacy notices. "
+      "A suggestion shows exactly what it changes, who or what proposed it and why. Accepting it creates "
+      "a draft that still goes through that document's own approval. On by default.",
       "toggle", "People & access", True, "maverick.policy_suggestions",
       aliases="suggest suggestion suggestions edit review accept reject tracked changes rules policy"),
     S("collaboration", "ai_suggestions", "AI-drafted suggestions",

@@ -155,6 +155,7 @@
   <div class="section-head"><h2>Suggested updates</h2></div>
   <p class="muted">Recorded fingerprints and research references for an independent decision. Original files are not retained here; acceptance does not publish a notice or establish legal applicability.</p>
   <div class="panel" id="png-proposals"><p class="muted">Loading…</p></div>
+  {% if suggestions_enabled is defined and suggestions_enabled() %}<div class="panel">{% from "_policy_suggestions.html" import policy_suggestions, policy_suggestions_script %}{{ policy_suggestions("privacy-notice", "A new notice version still needs submitting, its approvals and scheduling before anyone sees it.", "h3") }}{{ policy_suggestions_script() }}</div>{% endif %}
 
   <div class="section-head"><h2>Approval rules</h2>
     {% if can_admin %}<button type="button" class="btn btn--ghost" id="png-new-policy">Add an approval rule</button>{% endif %}</div>

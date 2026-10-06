@@ -32,6 +32,7 @@
   function setup(root) {
     if (root.dataset.suggestionsReady) return;
     root.dataset.suggestionsReady = '1';
+    var kind = root.dataset.kind || 'ai-policy';
     var list = root.querySelector('[data-suggestion-list]');
     var ask = root.querySelector('[data-suggestion-ask]');
     var status = root.querySelector('[data-suggestion-status]');
@@ -43,10 +44,9 @@
       buttons.forEach(function (b) { b.disabled = true; });
       var action = verb === 'accept' ? 'accept the suggestion' : 'reject the suggestion';
       call(API + '/' + encodeURIComponent(s.id) + '/' + verb, {reason: reasonBox.value}, action).then(function (done) {
-        var version = done.suggestion && done.suggestion.applied_version;
         load(verb === 'accept'
-          ? 'Accepted. Saved as version ' + version + ' of “' + s.document_title + '”. Turn it on above when you are ready.'
-          : 'Rejected. The rules did not change.');
+          ? 'Accepted for “' + s.document_title + '”. ' + (done.next_step || '')
+          : 'Rejected. Nothing changed.');
       }, function (error) {
         buttons.forEach(function (b) { b.disabled = false; });
         say(note, errorText(error, action), true);
@@ -61,7 +61,7 @@
       item.appendChild(changeLine(s.diff));
       var note = el('p', 'mv-suggestions__note');
       note.setAttribute('role', 'status');
-      if (s.outdated) note.textContent = 'These rules changed since this was suggested, so it can only be rejected.';
+      if (s.outdated) note.textContent = 'This changed since it was suggested, so the suggestion can only be rejected.';
       item.appendChild(note);
       if (!canDecide) return item;
       var label = el('label', 'mv-suggestions__reason', 'Reason (optional) ');
@@ -100,6 +100,7 @@
         details.appendChild(ul); list.appendChild(details);
       }
       rules = data.rules || [];
+      if (!ask) return;
       ask.hidden = !(data.ai_on && rules.length);
       if (!ask.hidden && !ask.elements.id.options.length) {
         rules.forEach(function (r) { ask.elements.id.appendChild(new Option(r.title, r.id)); });
@@ -107,12 +108,12 @@
       }
     }
     function load(message) {
-      return call(API, null, 'load the suggestions').then(function (data) { render(data, message); }, function (error) {
+      return call(API + '?kind=' + encodeURIComponent(kind), null, 'load the suggestions').then(function (data) { render(data, message); }, function (error) {
         list.replaceChildren(el('p', 'assurance-muted', errorText(error, 'load the suggestions')));
       });
     }
-    ask.elements.id.addEventListener('change', fillParts);
-    ask.addEventListener('submit', function (event) {
+    if (ask) ask.elements.id.addEventListener('change', fillParts);
+    if (ask) ask.addEventListener('submit', function (event) {
       event.preventDefault();
       var button = ask.querySelector('button[type="submit"]');
       button.disabled = true;

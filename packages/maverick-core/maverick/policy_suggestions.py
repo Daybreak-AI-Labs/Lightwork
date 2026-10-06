@@ -8,7 +8,9 @@ and why. A suggestion never changes the document. A person accepts it, which
 the dashboard applies through the document's own save path and permission
 check, or rejects it; either decision is recorded with an optional reason.
 
-Documents: ``ai-policy`` (AI use rules, ``maverick.ai_policy_management``).
+Documents: ``ai-policy`` (AI use rules), ``data-use-rule`` and
+``privacy-notice``; the dashboard saves an accepted one through each
+document's own flow (``maverick_dashboard.suggestion_documents``).
 The store is one small SQLite file per workspace; reads never create it.
 
 Settings: ``[collaboration] suggestions`` (on by default) and
@@ -17,7 +19,6 @@ suggestion only when a person asks, within the task spending caps).
 """
 from __future__ import annotations
 
-import copy
 import difflib
 import re
 import sqlite3
@@ -26,13 +27,13 @@ from collections.abc import Mapping
 from contextlib import closing
 from typing import Any
 
-KINDS = ("ai-policy",)
+KINDS = ("ai-policy", "data-use-rule", "privacy-notice")
 PROPOSER_KINDS = ("ai", "agent", "person")
 STATES = ("open", "accepted", "rejected")
-MAX_TEXT = 4000
+MAX_TEXT = 20000
 MAX_REASON = 1000
 _DOCUMENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
-_FIELD = re.compile(r"(?:title|description|statement:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\Z")
+_FIELD = re.compile(r"(?:title|description|document|jurisdictions|locales|statement:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\Z")
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS suggestions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,10 +60,6 @@ CREATE INDEX IF NOT EXISTS suggestions_document ON suggestions (kind, document_i
 
 class SuggestionError(ValueError):
     """A suggestion the store refuses, with a plain sentence for the page."""
-
-
-class SuggestionOutdated(SuggestionError):
-    """The document changed since the suggestion was made."""
 
 
 def _section() -> Mapping[str, Any]:
@@ -104,21 +101,36 @@ def _connect() -> sqlite3.Connection:
 
 
 def diff(before: str, after: str) -> list[dict]:
-    """Word-level changes: ``[{"op": "same"|"del"|"ins", "text": ...}]``."""
+    """Word-level changes: ``[{"op": "same"|"del"|"ins", "text": ...}]``.
+
+    Changes separated only by spaces read as one change ("hide part of each
+    value" becomes "block it"), not as word-by-word swaps.
+    """
     old, new = re.findall(r"\S+|\s+", before), re.findall(r"\S+|\s+", after)
+    opcodes = difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes()
     out: list[dict] = []
+    removed: list[str] = []
+    added: list[str] = []
 
-    def add(op: str, words: list[str]) -> None:
-        text = "".join(words)
-        if text:
-            out.append({"op": op, "text": text.strip() if op != "same" else text})
+    def flush() -> None:
+        for op, words in (("del", removed), ("ins", added)):
+            text = "".join(words).strip()
+            if text:
+                out.append({"op": op, "text": text})
+        removed.clear()
+        added.clear()
 
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
-        if tag == "equal":
-            add("same", old[i1:i2])
-        else:
-            add("del", old[i1:i2])
-            add("ins", new[j1:j2])
+    for index, (tag, i1, i2, j1, j2) in enumerate(opcodes):
+        words = old[i1:i2]
+        between = (tag == "equal" and (removed or added) and index + 1 < len(opcodes)
+                   and not "".join(words).strip())
+        if tag != "equal" or between:
+            removed.extend(words)
+            added.extend(new[j1:j2])
+            continue
+        flush()
+        out.append({"op": "same", "text": "".join(words)})
+    flush()
     return out
 
 
@@ -139,11 +151,11 @@ def propose(kind: str, document_id: str, *, field: str, before: str, after: str,
             proposer: str, proposer_kind: str, reason: str = "", model: str = "") -> dict:
     """Keep one suggested change. Nothing in the document changes."""
     if kind not in KINDS:
-        raise SuggestionError("Suggestions work on AI use rules.")
+        raise SuggestionError("Suggestions work on AI use rules, data use rules and privacy notices.")
     if not _DOCUMENT_ID.fullmatch(str(document_id or "")):
         raise SuggestionError("Choose the rules to suggest a change to.")
     if not _FIELD.fullmatch(str(field or "")):
-        raise SuggestionError("Choose the part of the rules to change: the title, the description or one rule.")
+        raise SuggestionError("Choose the part of the document to change.")
     if proposer_kind not in PROPOSER_KINDS or not str(proposer or "").strip():
         raise SuggestionError("A suggestion needs to say who or what proposed it.")
     old = _text(before, "current text", MAX_TEXT)
@@ -199,43 +211,6 @@ def decide(suggestion_id: int, *, accepted: bool, by: str, reason: str = "",
              applied_version, int(suggestion_id))).rowcount
         row = db.execute("SELECT * FROM suggestions WHERE id = ?", (int(suggestion_id),)).fetchone()
     return _row(row) if changed and row else None
-
-
-def field_text(version: Mapping[str, Any], field: str) -> str | None:
-    """The current text of one part of a policy version (None if it is gone)."""
-    if field in ("title", "description"):
-        return str(version.get(field) or "")
-    if field.startswith("statement:"):
-        wanted = field.split(":", 1)[1]
-        for statement in version.get("statements") or []:
-            if statement.get("statement_id") == wanted:
-                return str(statement.get("text") or "")
-    return None
-
-
-def apply(version: Mapping[str, Any], suggestion: Mapping[str, Any]) -> tuple[str, str, list[dict]]:
-    """(title, description, statements) for the next version with the change made.
-
-    Raises SuggestionOutdated when that part no longer reads as it did when
-    the suggestion was made, so a person never overwrites a newer edit.
-    """
-    field = str(suggestion["field"])
-    if field_text(version, field) != suggestion["before"]:
-        raise SuggestionOutdated(
-            "These rules changed since this was suggested. Reject it, or ask for a new suggestion.")
-    title, description = str(version.get("title") or ""), str(version.get("description") or "")
-    statements = copy.deepcopy(list(version.get("statements") or []))
-    if field == "title":
-        title = suggestion["after"]
-    elif field == "description":
-        description = suggestion["after"]
-    else:
-        wanted = field.split(":", 1)[1]
-        for statement in statements:
-            if statement.get("statement_id") == wanted:
-                statement["text"] = suggestion["after"]
-    return title, description, statements
-
 
 
 def count_by(principal: str) -> int:
