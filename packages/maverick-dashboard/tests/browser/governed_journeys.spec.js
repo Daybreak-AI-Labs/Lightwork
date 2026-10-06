@@ -70,7 +70,7 @@ test('explicit consent publication resolves through an enrolled public client, r
   await expect(page.locator('#cpp-preview-result')).toContainText('Synthetic privacy choices');
   await expect(page.locator('#cpp-preview-result')).toContainText('Synthetic analytics');
   expect(publishes).toBe(0);expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(0);
-  await promotion.getByRole('button',{name:'Publish',exact:true}).click();
+  await promotion.getByRole('button',{name:'Publish version',exact:true}).click();
   await expect(page.locator('#mv-confirm-msg')).toContainText('Publish to Browser publish web?');await page.locator('#mv-confirm-ok').click();
   await expect(page.locator('#cpp-status')).toHaveText('Published to Browser publish web.');expect(publishes).toBe(1);
   const published=(await ok(await request.get(API+'/properties/'+property+'/history'))).items[0];expect(published.action).toBe('publish');
@@ -134,7 +134,7 @@ test('a rejected website address is explained plainly and keeps the other fields
   await form.getByLabel('Name').fill('Browser consumer web');await form.getByLabel('Consent group').fill('Browser consumers');
   await form.locator('[name="web_domains"]').fill('not a valid address!');
   const rejected=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().endsWith('/properties/browser-consumer-web'));
-  await form.getByRole('button',{name:'Save',exact:true}).click();const rejection=await rejected;expect(rejection.status()).toBe(422);
+  await form.getByRole('button',{name:'Save property',exact:true}).click();const rejection=await rejected;expect(rejection.status()).toBe(422);
   // The page generated the request reference it sent; a person never types it.
   const enrollmentKey=rejection.request().postDataJSON().idempotency_key;expect(enrollmentKey).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{7,}$/);
   await expect(page.locator('#cpp-status')).toContainText('Check the website addresses');
@@ -144,7 +144,7 @@ test('a rejected website address is explained plainly and keeps the other fields
   await expect(form.locator('[name="idempotency_key"]')).toHaveValue(enrollmentKey);
   await form.locator('[name="web_domains"]').fill('browser-consumer.example.test');
   await expect(form.locator('[name="idempotency_key"]')).not.toHaveValue(enrollmentKey);
-  await form.getByRole('button',{name:'Save',exact:true}).click();
+  await form.getByRole('button',{name:'Save property',exact:true}).click();
   await expect(page.locator('#cpp-status')).toHaveText('Saved Browser consumer web.');
   await expect(page.locator('#cpp-property-table')).toContainText('browser-consumer.example.test');
   await page.setViewportSize({width:320,height:800});await fits(page);
