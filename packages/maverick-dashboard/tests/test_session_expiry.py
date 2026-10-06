@@ -59,6 +59,8 @@ def test_a_signed_in_page_says_when_sign_in_ends_and_how_to_keep_it():
         assert _meta(page, "lightwork-session-renew") == "renew"
         assert _meta(page, "lightwork-session-sign-in") == "/auth/local-login"
         assert "lightwork-session.js" in page
+        script = client.get("/static/lightwork-session.js")
+        assert script.status_code == 200 and "javascript" in script.headers["content-type"]
         chat = client.get("/chat").text
         assert _meta(chat, "lightwork-session-expires") and "lightwork-session.js" in chat
 
