@@ -167,7 +167,7 @@ def context(request: Request) -> dict:
         try:
             from .auth import caller_principal
 
-            spending = practice.spending(caller_principal(request) or "local")
+            spending = practice.spending(caller_principal(request) or "user:local")
         except Exception:  # pragma: no cover -- the marker still renders, without the amount
             spending = None
     return {"practice_mode": on, "practice_available": available, "practice_spending": spending,
@@ -198,7 +198,7 @@ async def practice_state(request: Request) -> dict:
     if on:
         from .auth import caller_principal
 
-        state["spending"] = await run_in_threadpool(practice.spending, caller_principal(request) or "local")
+        state["spending"] = await run_in_threadpool(practice.spending, caller_principal(request) or "user:local")
     state["blocked"] = blocked_list()
     return state
 

@@ -97,7 +97,7 @@ def _practice_cost(actor) -> str:
     real provider money but never counts against their limits."""
     from maverick import practice, practice_costs
     try:
-        state = practice.spending(actor or "local")
+        state = practice.spending(actor or "user:local")  # runs are charged to user:local
     except Exception:  # noqa: BLE001 -- the page still renders without the line
         return ""
     if not state["spent_today"]:

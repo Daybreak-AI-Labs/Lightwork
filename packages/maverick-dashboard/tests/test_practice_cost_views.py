@@ -44,7 +44,7 @@ def practised(client):
         goal = world.create_goal("Practice: chase the PO", owner="")
         episode = world.start_episode(goal)
         world.end_episode(episode, "ok", "done", cost_dollars=0.42, input_tokens=1000, output_tokens=200)
-        quotas.record_usage("local", 0.42)
+        quotas.record_usage("user:local", 0.42)  # a local caller's runs are charged here
         provider_cost_cap.record("anthropic", 0.42)  # what the provider actually charged
     return client
 
@@ -111,10 +111,10 @@ def test_compare_cost_records_lists_practice_beside_the_runtime_record(practised
 def test_practice_spend_never_counts_against_limits_or_quotas(practised):
     from maverick import quotas, spending_limits
 
-    spending_limits.set_user_limit("local", 0.50, "day", actor="admin")
-    assert quotas.UsageLedger().usage("local")["dollars"] == 0
-    assert spending_limits.start_refusal("local") is None
-    assert spending_limits.recorded_spend("day", "local") == 0.0
+    spending_limits.set_user_limit("user:local", 0.50, "day", actor="admin")
+    assert quotas.UsageLedger().usage("user:local")["dollars"] == 0
+    assert spending_limits.start_refusal("user:local") is None
+    assert spending_limits.recorded_spend("day", "user:local") == 0.0
 
 
 def test_invoice_shows_practice_as_information_not_a_charge(practised):
