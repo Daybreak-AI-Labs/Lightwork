@@ -41,6 +41,9 @@ _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _OP_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}\Z")
 _MAX_JSON_BYTES = 2 * 1024 * 1024
 _MAX_PAGE_SIZE = 500
+_MAX_QUERY_CATALOGS = 10_000
+_MAX_QUERY_CATALOG_BYTES = 16 * 1024 * 1024
+_MAX_QUERY_ORDERS = 128
 _MIN_RETENTION_SECONDS = 24 * 60 * 60
 _MAX_RETENTION_SECONDS = 5 * 365 * 24 * 60 * 60
 
@@ -819,6 +822,7 @@ class ConsentCustomIndexStore:
         after = "" if cursor is None else _id(cursor, "cursor")
         query_value = _query_value(value)
         with self._connect() as connection:
+            connection.execute("BEGIN")  # One consistent index/source/history read.
             _, index = self._get_row(connection, tenant, index_key)
             if index.state != "ready":
                 raise ConsentCustomIndexConflict("custom index is not ready")
@@ -830,12 +834,13 @@ class ConsentCustomIndexStore:
                     "custom index is stale and must be rebuilt before search"
                 )
             key = _key(self._key_resolver(tenant, index.key_version))
-            token = _value_token(key, tenant, index.element_name, query_value)
+            tokens = self._query_tokens(connection, key, tenant, index.element_name, query_value)
+            placeholders = ",".join("?" for _ in tokens)
             rows = connection.execute(
                 "SELECT * FROM consent_custom_index_entries "
-                "WHERE tenant_id=? AND index_id=? AND value_token=? AND profile_id>? "
+                f"WHERE tenant_id=? AND index_id=? AND value_token IN ({placeholders}) AND profile_id>? "
                 "ORDER BY profile_id LIMIT ?",
-                (tenant, index_key, token, after, page_size + 1),
+                (tenant, index_key, *tokens, after, page_size + 1),
             ).fetchall()
             for row in rows:
                 body = {
@@ -863,6 +868,61 @@ class ConsentCustomIndexStore:
                 ),
                 source_fresh=True,
             )
+
+    @staticmethod
+    def _query_tokens(connection, key, tenant: str, element: str, value) -> tuple[str, ...]:
+        """Search every retained published ordering without rewriting old tokens."""
+        tokens = {_value_token(key, tenant, element, value)}
+        if not isinstance(value, list):
+            return tuple(tokens)
+        from .consent_profile_data import (
+            ConsentProfileDataValidationError,
+            _definitions,
+            _normalize_value,
+        )
+        count = size = 0
+        after, version = "", 0
+        while True:
+            rows = connection.execute(
+                "SELECT * FROM catalogs WHERE tenant_id=? "
+                "AND (catalog_id>? OR (catalog_id=? AND version>?)) "
+                "ORDER BY catalog_id,version LIMIT 32",
+                (tenant, after, after, version),
+            ).fetchall()
+            if not rows:
+                return tuple(sorted(tokens))
+            for row in rows:
+                count += 1
+                size += len(str(row["payload_json"]).encode("utf-8"))
+                if count > _MAX_QUERY_CATALOGS or size > _MAX_QUERY_CATALOG_BYTES:
+                    raise ConsentCustomIndexConflict(
+                        "The published question history exceeds this search's supported size. No incomplete results were returned."
+                    )
+                payload = ConsentCustomIndexStore._payload(row, "preference catalog")
+                after, version = str(row["catalog_id"]), row["version"]
+                if (payload.get("tenant_id") != tenant or payload.get("catalog_id") != after
+                        or not _ID_RE.fullmatch(after) or type(version) is not int
+                        or not 1 <= version <= 1_000_000 or type(payload.get("version")) is not int
+                        or payload.get("version") != version):
+                    raise ConsentCustomIndexIntegrityError("published question history could not be verified")
+                if payload.get("state") != "published":
+                    continue
+                try:
+                    definitions = _definitions(payload.get("definitions"))
+                except ConsentProfileDataValidationError as exc:
+                    raise ConsentCustomIndexIntegrityError("published question choices could not be verified") from exc
+                for definition in definitions:
+                    if definition["preference_id"] != element or definition["value_type"] != "multi_select":
+                        continue
+                    try:
+                        normalized = _normalize_value(definition, value)
+                    except ConsentProfileDataValidationError:
+                        continue  # These choices were not present in this published version.
+                    tokens.add(_value_token(key, tenant, element, normalized))
+                    if len(tokens) > _MAX_QUERY_ORDERS:
+                        raise ConsentCustomIndexConflict(
+                            "The published answer history exceeds this search's supported size. No incomplete results were returned."
+                        )
 
     def revoke_index(
         self,

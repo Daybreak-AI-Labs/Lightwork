@@ -144,7 +144,21 @@ async def readiness(request: Request) -> dict:
 
 # ---- installation health (maverick doctor) ---------------------------------
 
-def _doctor() -> dict[str, Any]:
+def installation_health_context(request: Request, expected: str | None = None) -> dict[str, str]:
+    from .draft_api import context_for
+    _admin(request)
+    context = context_for(request)
+    if expected is not None and expected != context:
+        raise HTTPException(409, "The signed-in account or workspace changed. Reload Help before running a check.")
+    return {"context": context}
+
+
+@router.get("/health-context")
+def health_context(request: Request) -> dict[str, str]:
+    return installation_health_context(request)
+
+
+def _doctor(*, before_check=None) -> dict[str, Any]:
     from maverick import health
     rows: list[dict[str, str]] = []
 
@@ -161,6 +175,8 @@ def _doctor() -> dict[str, Any]:
     # diagnose() prints through health._row; collect the rows instead. One run
     # at a time: the collector is swapped in for the duration of the check.
     with _DOCTOR_LOCK:
+        if before_check is not None:
+            before_check()
         original = health._row
         health._row = collect
         try:
@@ -184,10 +200,27 @@ def _doctor() -> dict[str, Any]:
             "technical": rows}
 
 
+def _health_worker(request: Request, context: str) -> dict[str, Any]:
+    def current() -> None:
+        with auth.fresh_configuration():
+            installation_health_context(request, context)
+    current()
+    return _doctor(before_check=current)
+
+
 @router.post("/health-check")
 async def health_check(request: Request) -> dict:
     _mutation(request)  # runs live checks (it may contact your AI provider)
-    return await run_in_threadpool(_doctor)
+    context = installation_health_context(request, request.headers.get("X-Lightwork-Health-Context"))["context"]
+    try:
+        result = await run_in_threadpool(_health_worker, request, context)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, "The health check could not finish. No settings were repaired or changed. Ask an installation administrator to review the saved safety settings.") from exc
+    with auth.fresh_configuration():
+        installation_health_context(request, context)
+    return result
 
 
 # ---- settings file check (maverick config-lint) ----------------------------

@@ -20,6 +20,9 @@
   .gov-render { max-height:28rem; overflow:auto; padding:var(--space-3); border:1px solid var(--border); border-radius: var(--radius-md); }
   .gov-trainings { display:grid; gap:var(--space-2); }
   .gov-training-row { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto; gap:var(--space-2); align-items:end; }
+  .gov-role-choices { max-height:16rem; overflow:auto; margin:var(--space-2) 0; }
+  .gov-role-choices label { overflow-wrap:anywhere; }
+  .gov-role-choices label[hidden] { display:none; }
 </style>
 
 {% set ASSET_NAMES = {} %}{% for a in governed_assets %}{% set _ = ASSET_NAMES.update({a.asset_id: a.display_name or 'Unnamed AI system'}) %}{% endfor %}
@@ -461,7 +464,13 @@
     </label>
     <fieldset class="gov-form__wide">
       <legend>Roles</legend>
-      {% for role in literacy_roles %}<label class="gov-check"><input type="checkbox" name="roles" value="{{ role }}"> {{ role|humanize }}</label>{% else %}<p class="muted">Add a role above first.</p>{% endfor %}
+      {% if literacy_roles %}
+      <label>Find a role<input class="input" type="search" id="literacy-role-search" maxlength="128" aria-describedby="literacy-role-count" placeholder="Type part of its name"></label>
+      <p class="muted" id="literacy-role-count" role="status" aria-live="polite"></p>
+      <div class="gov-role-choices" id="literacy-role-choices">
+      {% for role in literacy_roles %}<label class="gov-check"><input type="checkbox" name="roles" value="{{ role }}"> <span>{{ role|humanize }}</span></label>{% endfor %}
+      </div>
+      {% else %}<p class="muted">Add a role above first.</p>{% endif %}
     </fieldset>
     <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit"{% if not literacy_roles %} disabled{% endif %}>Save roles</button>
       <span id="literacy-assign-status" class="muted" role="status" aria-live="polite"></span></div>
@@ -474,11 +483,17 @@
         {% for person in tracked_people %}<option value="{{ person.person }}">{{ person.person }}</option>{% else %}<option value="">Give someone a role first</option>{% endfor %}
       </select>
     </label>
+    <label>Find a training
+      <input class="input" id="literacy-training-search" type="search" maxlength="256" placeholder="Type part of its name" aria-describedby="literacy-training-count">
+    </label>
     <label>Training
-      <select class="select" name="training" required>
-        {% for training in literacy_training_keys %}<option value="{{ training.key }}">{{ training.title or training.key|humanize }}</option>{% else %}<option value="">Add a training to a role first</option>{% endfor %}
+      <select class="select" id="literacy-training-choice" name="training" required aria-describedby="literacy-training-count">
+        <option value="">{% if literacy_training_keys %}Choose a training{% else %}Add a training to a role first{% endif %}</option>
+        {% for training in literacy_training_keys[:100] %}<option value="{{ training.key }}">{{ training.title or training.key|humanize }}</option>{% endfor %}
       </select>
     </label>
+    <p class="muted gov-form__wide" id="literacy-training-count" role="status" aria-live="polite">{% if literacy_training_keys|length > 100 %}Showing the first 100 of {{ literacy_training_keys|length }} trainings. Type more of the name to find another training.{% endif %}</p>
+    <script type="application/json" id="literacy-training-choices">{{ literacy_training_keys|tojson }}</script>
     <label>Finished on
       <input class="input" name="completed_at" type="date" required>
     </label>
@@ -1072,6 +1087,43 @@
   });
 
   // ---- Staff AI training ----------------------------------------------------
+  const roleSearch = document.getElementById("literacy-role-search");
+  const roleChoices = document.getElementById("literacy-role-choices");
+  if (roleSearch && roleChoices) {
+    const labels = [...roleChoices.querySelectorAll("label")];
+    const filterRoles = () => {
+      const query = roleSearch.value.trim().toLocaleLowerCase(); let matching = 0, selected = 0;
+      labels.forEach(label => {
+        const input = label.querySelector('input[name="roles"]');
+        const matches = label.textContent.toLocaleLowerCase().includes(query) || input.value.toLocaleLowerCase().includes(query);
+        if (matches) matching++; if (input.checked) selected++;
+        label.hidden = !matches && !input.checked;
+      });
+      status("literacy-role-count", matching + " of " + labels.length + " roles match. " + selected + " selected. Selected roles stay visible.");
+    };
+    roleSearch.addEventListener("input", filterRoles); roleChoices.addEventListener("change", filterRoles); filterRoles();
+  }
+  const trainingSearch = document.getElementById("literacy-training-search");
+  const trainingChoice = document.getElementById("literacy-training-choice");
+  const trainingData = document.getElementById("literacy-training-choices");
+  if (trainingSearch && trainingChoice && trainingData) {
+    const choices = JSON.parse(trainingData.textContent);
+    const trainingLabel = item => item.title || item.key.replace(/[_-]+/g, " ");
+    const filterTrainings = () => {
+      const selected = choices.find(item => item.key === trainingChoice.value);
+      const query = trainingSearch.value.trim().toLocaleLowerCase();
+      const matches = choices.filter(item => trainingLabel(item).toLocaleLowerCase().includes(query) || item.key.toLocaleLowerCase().includes(query));
+      const shown = matches.slice(0, 100);
+      trainingChoice.replaceChildren(new Option(choices.length ? "Choose a training" : "Add a training to a role first", ""));
+      if (selected && !shown.some(item => item.key === selected.key)) trainingChoice.append(new Option(trainingLabel(selected), selected.key));
+      shown.forEach(item => trainingChoice.append(new Option(trainingLabel(item), item.key)));
+      if (selected) trainingChoice.value = selected.key;
+      status("literacy-training-count", matches.length > 100
+        ? "Showing the first 100 of " + matches.length + " matching trainings. Type more of the name to find another training."
+        : matches.length + " matching " + (matches.length === 1 ? "training." : "trainings.") + (selected ? " Your selected training is kept." : ""));
+    };
+    trainingSearch.addEventListener("input", filterTrainings); filterTrainings();
+  }
   const slug = text => String(text || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
   const trainingRows = document.getElementById("literacy-training-rows");
   const addTrainingRow = () => {
@@ -1095,7 +1147,7 @@
   const literacyRequire = document.getElementById("literacy-require");
   if (literacyRequire) literacyRequire.addEventListener("submit", async event => {
     event.preventDefault();
-    const role = slug(literacyRequire.elements.role_choice.value || literacyRequire.elements.role_new.value);
+    const role = literacyRequire.elements.role_choice.value || slug(literacyRequire.elements.role_new.value);
     if (!role) { status("literacy-require-status", "Choose a role or type a new role name."); return; }
     const trainings = [...trainingRows.querySelectorAll(".gov-training-row")].map(row => {
       const title = row.querySelector('[data-field="title"]').value.trim();

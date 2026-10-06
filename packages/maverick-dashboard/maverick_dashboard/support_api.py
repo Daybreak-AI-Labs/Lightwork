@@ -150,6 +150,7 @@ async def support_page(request: Request):
     from .help_menu import help_request
     from .help_topics import TOPICS
     response = templates.TemplateResponse(request, "support.html", {"support_context": context_for(request),
+        "can_check_installation": has_global_permission(request, "admin"),
         "can_prepare_support": has_global_permission(request, "admin") and _enabled(),
         "support_enabled": _enabled(), "help_request": await run_in_threadpool(help_request, request),
         "help_topics": TOPICS})

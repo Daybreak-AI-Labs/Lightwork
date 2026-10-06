@@ -5,6 +5,17 @@
 <section id="support-center" data-context="{{ support_context }}" data-draft-recovery="off">
   <h1 class="page-title">Help and diagnostics</h1>
   <p class="page-subtitle">Make a report about this installation for your support contact. Private details are removed. You review it here first, then download exactly what you reviewed.</p>
+  <section class="panel" id="installation-health" aria-labelledby="installation-health-title" data-draft-recovery="off" data-context="{{ support_context }}">
+    <h2 id="installation-health-title">Installation health</h2>
+    {% if can_check_installation %}
+    <p>Check the installation and the services it uses. This remains available when saved safety settings prevent other pages from opening.</p>
+    <p class="muted">The check may contact configured services, including your AI provider. It does not change safety settings or repair them, and its result is not a release approval.</p>
+    <p><label><input type="checkbox" id="installation-health-consent"> I want to run these checks and allow those service checks.</label></p>
+    <button type="button" class="btn btn--primary" id="installation-health-run" disabled>Run health check</button>
+    <p id="installation-health-status" role="status" aria-live="polite">No check has run from this page.</p>
+    <details id="installation-health-details" hidden><summary>Check details for your installation administrator</summary><ul class="maintenance-list" id="installation-health-results"></ul></details>
+    {% else %}<p>An installation administrator can run this check. Ask the person who looks after your Lightwork installation.</p>{% endif %}
+  </section>
   <section class="panel support-scope" aria-labelledby="support-scope-title">
     <h2 id="support-scope-title">What the report includes</h2>
     <ul>

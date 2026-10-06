@@ -185,7 +185,7 @@ async def test_async_plugin_precedence_and_hybrid_outcomes(monkeypatch):
     picker = SimpleNamespace(pick=lambda messages: ("summarize", "test"),
                              record=lambda *args, **kwargs: records.append(kwargs))
     monkeypatch.setattr(cp, "_configured_name", lambda: "")
-    monkeypatch.setattr(cp, "_HYBRID_PICKER", picker)
+    monkeypatch.setattr(cp, "_hybrid_picker", lambda: picker)
     monkeypatch.setitem(cp._REGISTRY, "learned", marker)
     assert await cp.compact_with_async(source) == [{"role": "user", "content": "marker"}]
     assert records == [{"success": True}]

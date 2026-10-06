@@ -6134,3 +6134,26 @@ orders by actual last update, including after reopening the native store.
 
 Task maps package their pinned Cytoscape library locally with its MIT notice.
 Map, ordinary task navigation and live updates no longer need a public CDN.
+
+### Available recovery controls and accurate learning signals
+
+The safety-settings error page opens real installation health controls on Help,
+which remains available when the normal Settings page cannot read its policy.
+A current installation administrator explicitly consents to service checks;
+Copilot opens that protected form without starting a check or repairing settings.
+
+AI-literacy assignment and completion forms expose every supported role and
+training choice through ordinary search while keeping selected choices. Hybrid
+context compaction keeps each workspace's existing weights and outcomes in its
+own native storage. Read-only file denials now remain refused tool results,
+instead of successful signals for an agent or its learning loop.
+
+Vendor evidence keeps incomplete sets visibly incomplete and their work-item
+freshness unknown. Failed documents no longer contribute an epoch date to usable
+source freshness. API reference pages package their fixed Swagger distribution
+and notices locally, retaining the ordinary endpoints and sign-in behavior.
+
+The installer explains license enforcement in plain language and points to the
+existing License and All settings pages for later review instead of requiring
+configuration-file edits. Native scheduled skill retirement was also confirmed
+to stay within its current tenant and configured skills directory.

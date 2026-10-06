@@ -237,6 +237,26 @@
           else { var visibilityLink = node('a', 'Open complete local practice controls', visibilityDestination); visibilityLink.href = '/learning/recovery-visibility'; visibilityLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'installation_health') {
+          var healthForm = entry[1], healthStarted = generation, healthSelection = JSON.stringify(context());
+          if (!healthForm || Array.isArray(healthForm) || Object.keys(healthForm).join(',') !== 'context' ||
+              typeof healthForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(healthForm.context)) return;
+          var healthDestination = node('dd', undefined, list), healthControl = window.LightworkInstallationHealth;
+          if (healthControl && typeof healthControl.open === 'function') button('Open installation health checks', healthDestination, async function (event) {
+            var isCurrent = function () { return active(healthStarted) && JSON.stringify(context()) === healthSelection; };
+            if (!isCurrent() || busy) return;
+            var healthButton = event.currentTarget; healthButton.disabled = true;
+            try {
+              var opened = await healthControl.open(healthForm.context, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected health controls are open. Review and start the checks there.' : 'The current installation or access changed. Reload Help to review the checks.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The health controls could not be opened. Open Help to review the current checks.'; }
+            finally { if (isCurrent() && healthButton.isConnected) healthButton.disabled = false; }
+          });
+          else { var healthLink = node('a', 'Open installation health checks', healthDestination); healthLink.href = '/help#installation-health'; healthLink.className = 'btn btn--ghost'; }
+          return;
+        }
         if (entry[0] === 'settings_catalog_form') {
           var catalogForm = entry[1], catalogStarted = generation, catalogSelection = JSON.stringify(context());
           if (!catalogForm || Array.isArray(catalogForm) || Object.keys(catalogForm).sort().join(',') !== 'context,original' ||

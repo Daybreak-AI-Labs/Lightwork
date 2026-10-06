@@ -1706,3 +1706,57 @@ pin. Its page uses the normal same-origin security policy. Native map,
 keyboard task navigation, live updates and existing Graph Editor review work
 with outside browser requests blocked. The map remains a view of native tasks;
 it does not introduce another execution path.
+
+## October 6 independent recovery and truthful learning inputs
+
+The policy-error page opens the actual installation-health form on Help rather
+than an unrelated help link or a Settings page that fails on the same malformed
+policy. The form requires current installation-admin authority, exact context
+and separate consent before the existing native diagnostic. Its protected
+Copilot handoff focuses those controls without running a check. Interrupted
+diagnostic replies remain unconfirmed without automatic retry; these checks
+retain no original-result store and do not repair settings or establish release
+acceptance. The existing support-report draft survives the handoff.
+
+Ordinary AI-literacy role and training pickers retain every supported saved
+choice, including the last of 500 native roles and courses. Search displays a
+bounded first 100 matches with an explicit notice and keeps earlier selections.
+Required training begins unset. Submitting an existing role preserves its exact
+native name instead of changing it into a different identifier.
+
+Hybrid compaction caches native pickers by the exact current tenant and resolved
+weights/outcome paths, with a 64-entry cache. Storage loading, actual compaction
+and native outcome writes occur outside the global cache lock. Returning to an
+earlier tenant reuses its own picker and changing the installation path selects
+independent storage. Disabled hybrid selection and explicit strategy precedence
+remain unchanged. These native local history files are not signed audit records;
+separate tenant histories do not establish better model accuracy.
+
+Read-only folder denials preserve the native not-executed result and are
+classified as refused and erroneous in the model tool-result envelope. A refused
+file write neither changes the actual original bytes nor becomes a successful
+learning signal. Local qualification used the native tool dispatcher with a
+declared local runner boundary, not a paid model or an external sandbox service.
+
+Vendor evidence aggregation excludes failed documents when calculating the
+usable sources' freshness. An incomplete set retains its actual failure state,
+and the overall work-item contract explicitly records unknown freshness. The
+ordinary page distinguishes available source dates from unconfirmed failed
+sources and asks for current evidence before reliance. All-missing evidence
+shows no false validity date. Local document adapters were fictional; this does
+not qualify a real Google Drive account.
+
+The API reference serves pinned official Swagger UI 5.33.1 code, styling,
+Apache license, notice and third-party license text from the installation.
+Only these fixed public assets are sign-in exempt; ordinary API calls retain
+their current authorization. The existing OpenAPI and OAuth callback paths and local favicon remain
+available. Deployment-prefix URLs were qualified separately with sign-in
+disabled; authenticated reference access was qualified at the ordinary path.
+The external Swagger validator is disabled. Redoc's existing distribution is outside this repair.
+
+The installer license explanation names the actual Settings > License and
+Settings > All settings controls without raw configuration-section markup.
+Its default and decline behavior remain unchanged. An additional native
+scheduled retirement check confirmed the existing current-tenant directory
+selection, preserving another tenant's same-name skill and the configured floor;
+this confirmation required no production-code change.

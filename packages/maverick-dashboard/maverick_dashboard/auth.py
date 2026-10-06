@@ -88,6 +88,13 @@ PUBLIC_STATIC_PATHS = frozenset(
         # unstyled (system serif font, full-size logo, sideways scrolling).
         "/static/lightwork.css",
         "/static/daybreak-logo.jpg",
+        # Fixed public API-reference code and its retained upstream notices.
+        "/static/swagger-ui-5.33.1-bundle.js",
+        "/static/swagger-ui-5.33.1.css",
+        "/static/swagger-ui-5.33.1-LICENSE.txt",
+        "/static/swagger-ui-5.33.1-NOTICE.txt",
+        "/static/swagger-ui-bundle.js.LICENSE.txt",
+
         "/static/daybreak-mark.png",
         # The self-hosted fonts lightwork.css references.
         "/static/fonts/manrope-var.woff2",

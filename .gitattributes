@@ -39,3 +39,10 @@
 
 # Preserve upstream bytes for the locally served, integrity-pinned task-map library.
 /packages/maverick-dashboard/maverick_dashboard/static/cytoscape-3.30.2.min.js -text
+
+# Preserve the pinned Swagger distribution and its complete upstream notices.
+/packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-5.33.1-bundle.js -text
+/packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-5.33.1.css -text
+/packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-5.33.1-LICENSE.txt -text
+/packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-5.33.1-NOTICE.txt -text
+/packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-bundle.js.LICENSE.txt -text whitespace=-blank-at-eol

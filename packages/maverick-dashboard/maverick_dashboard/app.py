@@ -69,6 +69,7 @@ from ._shared import _world_cache as _world_cache  # re-export: tests clear app.
 from ._shared import dashboard_token as _dashboard_token
 from .action_center_api import router as action_center_router
 from .api import router as api_router
+from .api_documentation import router as api_documentation_router
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
     BOARD_SCOPE_DETAIL,
@@ -1298,6 +1299,7 @@ async def enforce_expected_workspace_tenant(
 
 app = FastAPI(
     title="Lightwork Dashboard + REST API",
+    docs_url=None,
     description="Local browser UI plus REST API for programmatic access.",
     version="0.1.0",
     # Global authentication dependency, applied to every route. It composes
@@ -1488,6 +1490,7 @@ attach_unified_audit_composition(app)
 install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
+app.include_router(api_documentation_router)
 app.include_router(draft_router)
 
 app.include_router(preferences_router)
@@ -3417,7 +3420,7 @@ async def security_headers(request: Request, call_next):
     # This matters because the dashboard renders agent-produced text;
     # if any of it ever reaches an HTML sink, CSP is the backstop.
     path = request.url.path
-    if path in {"/docs", "/redoc"}:
+    if path == "/redoc":
         csp = _DOCS_CSP
     else:
         csp = _DEFAULT_CSP
@@ -6312,10 +6315,10 @@ async def _governance_workspace_page_data(
                 )
         data["literacy_training_keys"] = [
             {"key": key, "title": title} for key, title in sorted(keys.items())
-        ][:200]
+        ]
         data["literacy_roles"] = sorted(
             {str(row.get("role")) for row in requirements if row.get("role")}
-        )[:200]
+        )
     if data["grc_sync_enabled"]:
         status_result, outbound_result = await asyncio.gather(
             run_in_threadpool(sync.sync_status),

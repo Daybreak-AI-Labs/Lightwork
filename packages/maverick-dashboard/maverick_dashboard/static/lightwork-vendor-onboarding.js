@@ -667,10 +667,14 @@
     const evidence = record.evidence;
     byId("evidence").replaceChildren();
     if (evidence) {
-      element("p", `Overall: ${friendly(evidence.status)}`, byId("evidence"));
+      element("p", evidence.status === "available" ? "Overall: Available" : `Evidence is incomplete: ${friendly(evidence.status)}. Obtain current evidence before relying on it.`, byId("evidence"));
       const list = document.createElement("ul"); byId("evidence").append(list);
-      for (const item of evidenceDocuments(record))
-        element("li", `${item.name || documentName(record, item.document_id || record.document_id)} (${item.source === "upload" ? "uploaded" : "Google Drive"}) · ${friendly(item.status || evidence.status)} · dated ${date(item.modified_at)} (${item.source === "upload" ? "uploader asserted" : "last changed in Drive"}) · valid until ${date(item.fresh_until)}`, list);
+      for (const item of evidenceDocuments(record)) {
+        const freshness = item.status === "available" && Number.isFinite(item.fresh_until) && item.fresh_until > 0
+          ? `dated ${date(item.modified_at)} (${item.source === "upload" ? "uploader asserted" : "last changed in Drive"}) · valid until ${date(item.fresh_until)}`
+          : "Freshness could not be confirmed";
+        element("li", `${item.name || documentName(record, item.document_id || record.document_id)} (${item.source === "upload" ? "uploaded" : "Google Drive"}) · ${friendly(item.status || evidence.status)} · ${freshness}`, list);
+      }
     } else show("evidence", "No evidence yet. Add documents, then choose Obtain current evidence.");
     if (byId("uploaded-documents")) {
       byId("uploaded-documents").replaceChildren();

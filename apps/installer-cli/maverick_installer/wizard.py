@@ -7395,11 +7395,10 @@ def pick_license() -> dict[str, Any]:
         "(Gold/Platinum features, add-on suites like fleet)."
     )
     console.print(
-        "[dim]Fail-open by default: the kernel runs with no license. "
-        "Turn enforcement on only for a licensed production deployment. "
-        "A missing/expired license never stops the core — only paid "
-        "add-ons gate off. Editable later under [license] in "
-        "~/.maverick/config.toml.[/dim]"
+        "[dim]License checks are off by default. Turn them on for a licensed "
+        "deployment. A missing or expired license blocks paid add-ons; "
+        "core functions remain available. Later, review or install a license "
+        "in Settings > License and change enforcement in Settings > All settings.[/dim]"
     )
     if not _q_confirm("  Enforce paid-feature entitlements on this deployment?", default=False):
         return {}

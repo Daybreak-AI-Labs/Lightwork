@@ -131,3 +131,75 @@
   window.addEventListener('pagehide', function () { ++generation; clear(); });
   controls(); load(false);
 })();
+
+/* Explicit installation checks also work from the safe Help page. */
+(function () {
+  'use strict';
+  const panel = document.getElementById('installation-health');
+  const run = document.getElementById('installation-health-run');
+  if (!panel || !run) return;
+  const consent = document.getElementById('installation-health-consent');
+  const status = document.getElementById('installation-health-status');
+  const details = document.getElementById('installation-health-details');
+  const rows = document.getElementById('installation-health-results');
+  const initial = panel.dataset.context;
+  let generation = 0, controller = null, busy = false, allowed = true;
+  function say(text) { window.mvStatus(status, text); }
+  function controls() { consent.disabled = busy || !allowed; run.disabled = busy || !allowed || !consent.checked; }
+  function clear() {
+    ++generation; allowed = false; if (controller) controller.abort();
+    rows.replaceChildren(); details.hidden = true; consent.checked = false; controls();
+    say('Your account, workspace or access changed. Reload Help before running a check.');
+  }
+  async function request(path, method, signal) {
+    return window.mvFetchJSON('/api/v1/admin/system/' + path, {method: method || 'GET',
+      cache: 'no-store', signal, timeout: 30000, plainDetail: true, headers: {'X-Lightwork-Health-Context': initial},
+      onAccess: clear, accessStatuses: [401, 403, 409]}, 'check this installation');
+  }
+  async function current(signal) {
+    const value = await request('health-context', 'GET', signal);
+    if (!value || value.context !== initial) { clear(); throw new Error('Your account or workspace changed. Reload Help.'); }
+  }
+  function show(value) {
+    if (!value || typeof value.summary !== 'string' || !Array.isArray(value.technical) || value.technical.length > 200 ||
+        value.technical.some(row => !row || !['ok', 'attention', 'problem'].includes(row.state) ||
+          ['label', 'detail', 'fix'].some(key => typeof row[key] !== 'string' || row[key].length > 20000))) {
+      throw new Error('The check reply could not be verified. No complete result is shown.');
+    }
+    rows.replaceChildren();
+    value.technical.forEach(row => {
+      const item = document.createElement('li');
+      item.style.overflowWrap = 'anywhere'; item.style.whiteSpace = 'pre-wrap';
+      item.textContent = ({ok: 'Checked', attention: 'Needs attention', problem: 'Problem'})[row.state] + ': ' + row.label +
+        (row.detail ? '\n' + row.detail : '') + (row.fix ? '\nSuggested next step: ' + row.fix : '');
+      rows.appendChild(item);
+    });
+    details.hidden = !value.technical.length; say(value.summary);
+  }
+  consent.addEventListener('change', controls);
+  run.addEventListener('click', async function () {
+    if (busy || !allowed || !consent.checked) return;
+    const stamp = generation; busy = true; controller = new AbortController(); controls();
+    rows.replaceChildren(); details.hidden = true; say('Checking the installation. Configured services may be contacted.');
+    try {
+      await current(controller.signal); if (stamp !== generation) return;
+      const value = await request('health-check', 'POST', controller.signal);
+      await current(controller.signal); if (stamp !== generation) return;
+      show(value);
+    } catch (error) {
+      if (stamp === generation) say(error.status === 503 ? error.message :
+        'The check result could not be confirmed. No settings were repaired. It will not run again automatically. Review current access and choose explicitly whether to run a new check.');
+    } finally { busy = false; controller = null; controls(); }
+  });
+  window.LightworkInstallationHealth = {open: async function (expected, isCurrent) {
+    const stamp = generation;
+    if (busy || !allowed || expected !== initial || (isCurrent && !isCurrent())) return false;
+    try { await current(); } catch (_) { return false; }
+    if (stamp !== generation || !allowed || (isCurrent && !isCurrent())) return false;
+    panel.scrollIntoView({block: 'start'}); consent.focus(); return true;
+  }};
+  ['workspace-changed', 'account-context-changed'].forEach(name => document.addEventListener(name, clear));
+  window.addEventListener('lightwork:copilot-context-changed', clear);
+  window.addEventListener('pagehide', clear);
+  controls();
+})();

@@ -2870,7 +2870,7 @@ class Agent:
             reason="read_only_path",
         )
         return (
-            f"DENIED by sandbox policy: path {rendered!r} is read-only. "
+            f"⚠ DENIED by sandbox policy: path {rendered!r} is read-only. "
             "The tool was not executed."
         )
 
