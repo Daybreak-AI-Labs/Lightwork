@@ -53,7 +53,7 @@ async function ready(page) {
 const PROBE = `(() => {
   let armed = false;
   new MutationObserver(() => { if (armed) { armed = false; window.__lwEditMark('change', Date.now()); } })
-    .observe(document.documentElement, {subtree: true, childList: true, attributes: true, characterData: true});
+    .observe(document, {subtree: true, childList: true, attributes: true, characterData: true});
   addEventListener('pointerdown', () => { armed = true; window.__lwEditMark('input', Date.now()); }, {capture: true});
 })();`;
 
