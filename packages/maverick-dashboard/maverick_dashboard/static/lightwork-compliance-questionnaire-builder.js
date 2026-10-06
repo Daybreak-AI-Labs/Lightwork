@@ -206,6 +206,7 @@
       document.getElementById('cqb-notice').textContent = current.notice;
       await loadSource(identity || '', started); if (valid(started) && !(pending && pending.uncertain)) say('Name your questions and rules, then review the complete new version.');
       panel.scrollIntoView({block: 'start'});
+      if (valid(started) && fields.name) fields.name.focus({preventScroll: true});
     } catch (error) { if (valid(started)) fail(error); }
     finally { if (valid(started)) lock(false); }
   }

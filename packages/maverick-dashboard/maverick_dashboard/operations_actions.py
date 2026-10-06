@@ -15,8 +15,10 @@ from . import (
     code_actions_api,
     immune_actions_api,
     learning_actions_api,
+    learning_holdout_setup_api,
     learning_loop_api,
     learning_ops_api,
+    learning_pending_cases_api,
     learning_test_cases_api,
     privacy_notice_proposals_api,
     research_actions_api,
@@ -36,6 +38,8 @@ api_router.include_router(benchmark_actions_api.router)
 api_router.include_router(value_proof_api.router)
 api_router.include_router(learning_ops_api.router)
 api_router.include_router(learning_test_cases_api.router)
+api_router.include_router(learning_holdout_setup_api.router)
+api_router.include_router(learning_pending_cases_api.router)
 api_router.include_router(privacy_notice_proposals_api.router)
 api_router.include_router(training_ops_api.router)
 api_router.include_router(workforce_ops_api.router)

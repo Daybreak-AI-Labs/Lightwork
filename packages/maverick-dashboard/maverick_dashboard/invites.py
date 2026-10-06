@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import secrets
 import string
 import threading
@@ -104,6 +105,7 @@ class Invite:
     used_by: str | None = None
     tenant: str = ""  # set: the role applies inside this workspace only
     workspace_admin_invite: bool = False  # recheck the issuing member's authority on acceptance
+    grant_confirmed_at: float | None = None  # written only after the native role save returns
 
     @property
     def pending(self) -> bool:
@@ -161,8 +163,6 @@ def _decode_json(raw: str) -> object:
 
 
 def _validate_record(invite_id: str, rec: object) -> dict:
-    from .rbac import is_known_role
-
     if not invite_id or invite_id != invite_id.strip() or len(invite_id) > 128:
         raise InviteStoreError("invite store corrupt: invalid invite id")
     if not isinstance(rec, dict) or rec.get("id") != invite_id:
@@ -178,7 +178,9 @@ def _validate_record(invite_id: str, rec: object) -> dict:
         or "@" not in email
     ):
         raise InviteStoreError(f"invite store corrupt: invalid email for {invite_id!r}")
-    if not is_known_role(role):
+    # Historical invitation material outlives mutable custom role definitions.
+    # Current role authority is checked under reservation when redeeming.
+    if not isinstance(role, str) or re.fullmatch(r"[a-z][a-z0-9_-]{1,31}", role) is None:
         raise InviteStoreError(f"invite store corrupt: invalid role for {invite_id!r}")
     if (
         not isinstance(token_hash, str)
@@ -213,6 +215,12 @@ def _validate_record(invite_id: str, rec: object) -> dict:
     workspace_admin_invite = rec.get("workspace_admin_invite", False)
     if not isinstance(workspace_admin_invite, bool) or (workspace_admin_invite and not tenant):
         raise InviteStoreError(f"invite store corrupt: invalid workspace issuer for {invite_id!r}")
+    confirmed = rec.get("grant_confirmed_at")
+    if confirmed is not None and (
+        isinstance(confirmed, bool) or not isinstance(confirmed, (int, float))
+        or not math.isfinite(confirmed) or used_at is None or not used_by or confirmed < used_at
+    ):
+        raise InviteStoreError(f"invite store corrupt: invalid grant confirmation for {invite_id!r}")
     clean = dict(rec)
     clean["created_at"] = created
     clean["expires_at"] = expires
@@ -232,7 +240,8 @@ def _to_invite(rec: dict) -> Invite:
                   expires_at=float(rec.get("expires_at", 0)),
                   used_at=rec.get("used_at"), used_by=rec.get("used_by"),
                   tenant=rec.get("tenant", ""),
-                  workspace_admin_invite=rec.get("workspace_admin_invite", False))
+                  workspace_admin_invite=rec.get("workspace_admin_invite", False),
+                  grant_confirmed_at=rec.get("grant_confirmed_at"))
 
 
 def create_invite(email: str, role: str, *, created_by: str,
@@ -297,12 +306,32 @@ def revoke_invite(invite_id: str) -> bool:
 def peek_invite(token: str) -> Invite | None:
     """The pending invite for ``token``, WITHOUT consuming it (the GET
     confirmation page — inert for link scanners). None when unknown/used/expired."""
-    h = _hash(token or "")
+    inv = lookup_invite(token)
+    return inv if inv is not None and inv.pending else None
+
+
+def lookup_invite(token: str) -> Invite | None:
+    """Read the original record, including used links; callers must authorize receipts."""
+    if not isinstance(token, str) or not token.startswith("inv_") or len(token) > 128:
+        return None
+    h = _hash(token)
     for rec in _load().values():
         if secrets.compare_digest(rec.get("token_sha256", ""), h):
-            inv = _to_invite(rec)
-            return inv if inv.pending else None
+            return _to_invite(rec)
     return None
+
+
+def confirm_grant(invite_id: str, principal: str) -> Invite:
+    """Record a completed native grant, never infer one from the current roster."""
+    with _locked(store_path()):
+        data = _load()
+        rec = data.get(invite_id)
+        if rec is None or rec.get("used_at") is None or rec.get("used_by") != principal:
+            raise InviteStoreError("original invitation redemption changed")
+        if rec.get("grant_confirmed_at") is None:
+            rec["grant_confirmed_at"] = max(time.time(), rec["used_at"])
+            _write(data)
+        return _to_invite(rec)
 
 
 def consume_invite(token: str, *, used_by: str | None = None,
@@ -315,13 +344,17 @@ def consume_invite(token: str, *, used_by: str | None = None,
     ``before_commit(invite)`` runs under the same lock just before the link is
     marked used (it saves the colleague's passphrase). If it raises, the link
     stays unused and the error propagates."""
+    from maverick.authority_effects import authority_effect_fence
+
+    from .rbac import is_known_role
+
     h = _hash(token or "")
-    with _locked(store_path()):
+    with authority_effect_fence(), _locked(store_path()):
         data = _load()
         for rec in data.values():
             if secrets.compare_digest(rec.get("token_sha256", ""), h):
                 inv = _to_invite(rec)
-                if not inv.pending:
+                if not inv.pending or not is_known_role(inv.role):
                     return None
                 if before_commit is not None:
                     before_commit(inv)

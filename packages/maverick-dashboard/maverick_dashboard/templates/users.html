@@ -443,7 +443,7 @@
   <div class="section-head"><h2>Workspace members</h2></div>
   {% if not global_admin %}<p class="muted">You can invite colleagues and change roles in the workspaces listed below. Installation-wide access remains with installation administrators.</p>{% endif %}
   {% if workspace_options and invites_on %}
-  <section class="panel" aria-labelledby="wi-title">
+  <section id="wi-root" class="panel" aria-labelledby="wi-title">
     <h3 id="wi-title" class="users-subhead">Invite someone to a workspace</h3>
     <p class="muted">Their role applies only in the workspace you choose. Send the one-time link to the person you invite; it expires in 7 days.</p>
     {% if workspace_invite_link %}
@@ -460,6 +460,7 @@
     {% endif %}
     <form method="post" action="/users/workspace-invite" class="users-row-form">
       {{ workspace_binding() }}
+      <input type="hidden" name="expected_context" value="{{ workspace_people_context }}">
       <label class="users-field" for="wi-tenant">Workspace
         <select id="wi-tenant" name="tenant" class="select" required>{% for w in workspace_options %}<option value="{{ w.id }}"{% if w.id == wm_tenant %} selected{% endif %}>{{ w.name }}</option>{% endfor %}</select>
       </label>
@@ -481,6 +482,7 @@
         <form method="post" action="/users/workspace-invite/revoke" class="users-inline"
               data-users-confirm="Cancel the workspace invitation for {{ inv.email }}? The link will stop working." data-users-ok="Cancel invitation">
           {{ workspace_binding() }}
+          <input type="hidden" name="expected_context" value="{{ workspace_people_context }}">
           <input type="hidden" name="invite_id" value="{{ inv.id }}" />
           <button type="submit" class="btn btn--danger" aria-label="Cancel the workspace invitation for {{ inv.email }}">Cancel invitation</button>
         </form>
@@ -488,11 +490,23 @@
       {% endfor %}
     </ul>
     {% endif %}
+    {% if workspace_recent_invites %}
+    <details><summary>Recent invitation results</summary>
+      <p class="muted users-help">These are the latest 20 saved invitation results. Current membership appears below and may have changed since acceptance. An unconfirmed result is not retried.</p>
+      <ul class="users-list">{% for inv in workspace_recent_invites %}<li>
+        <span class="users-grow">{{ inv.email }} · {{ workspace_names.get(inv.tenant, inv.tenant) }}</span>
+        <span class="badge">{{ 'Access save confirmed' if inv.grant_confirmed_at else 'Access save unconfirmed' }}</span>
+        <span class="muted">{{ (inv.grant_confirmed_at or inv.used_at) | datetime }}</span>
+      </li>{% endfor %}</ul>
+      <p class="muted users-help">For an unconfirmed result, check the colleague's current role and send a replacement invitation if needed. The original link cannot save access again.</p>
+    </details>
+    {% endif %}
   </section>
   {% elif workspace_options and not global_admin %}
   <p class="muted">Invitations are turned off. Ask an installation administrator to enable them before adding a new colleague.</p>
   {% endif %}
   <section id="wm-root" class="panel" data-tenant="{{ wm_tenant }}" data-expected="{{ workspace_tenant_selection }}"
+           data-context="{{ workspace_people_context }}"
            data-labels='{{ people_labels | tojson }}' data-role-labels='{{ role_labels | tojson }}'
            data-global-admin="{{ 'true' if global_admin else 'false' }}" data-you="{{ you or '' }}"
            data-role-permissions='{{ role_permissions | tojson }}'

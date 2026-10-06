@@ -1450,6 +1450,143 @@ def authored_corpus_effect(corpus_path: str | Path, binding: str) -> dict | None
         return dict(value) if isinstance(value, Mapping) else None
 
 
+def _pending_families(corpus_path: str | Path) -> dict:
+    return {"live": _authoring_raw(corpus_path),
+            "pending": _authoring_raw(pending_corpus_path(corpus_path)),
+            "rejected": _authoring_raw(rejected_corpus_path(corpus_path))}
+
+
+def _pending_view(key, index, row):
+    view = _case_view(key, index, row)
+    if view["supported"] and not _shared_case_current(row):
+        view.update(supported=False, question="Suggestion unavailable for learning", expected="",
+                    notice="Current permission for the original shared work could not be verified. The retained suggestion stays in place.")
+    if view["supported"]:
+        view["_source_guard"] = {name: row[name] for name in ("privacy_schema", "source_goal_ids", "added_at") if name in row}
+    return view
+
+
+def _selected_pending(raw, key, reference):
+    rows = raw.get(key, [])
+    if isinstance(rows, list):
+        for index, row in enumerate(rows):
+            if _case_ref(key, index, row) == reference:
+                view = _pending_view(key, index, row)
+                if not view["supported"]:
+                    raise ValueError(view["notice"])
+                return rows, index, row
+    raise ValueError("The selected suggestion changed. Choose it again from the current collection.")
+
+
+def pending_authoring_state(corpus_path: str | Path, key: str | None = None, *, offset: int = 0) -> dict:
+    """Exact three-family state and a bounded named page; no normalized rewrite."""
+    from .file_lock import cross_process_lock
+    if type(offset) is not int or offset < 0:
+        raise ValueError("Choose a current page of suggested questions.")
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        families = _pending_families(corpus_path)
+        pending = families["pending"]
+        result = {"revision": _corpus_revision(families),
+                  "counts": {str(model): len(rows) for model, rows in pending.items() if isinstance(rows, list)}}
+        if key is not None:
+            rows = pending.get(key, [])
+            if not isinstance(rows, list):
+                raise ValueError("This model's suggested questions need attention. The saved information remains unchanged.")
+            result.update(total=len(rows), offset=offset, next=offset + 20 if offset + 20 < len(rows) else None,
+                          cases=[_pending_view(key, index, rows[index]) for index in range(offset, min(len(rows), offset + 20))])
+        return result
+
+
+def _pending_decision(families: dict, key: str, reference: str, action: str) -> dict:
+    rows, index, row = _selected_pending(families["pending"], key, reference)
+    before = dict(row)
+    live = families["live"].get(key, [])
+    rejected = families["rejected"].get(key, [])
+    if not isinstance(live, list) or not isinstance(rejected, list):
+        raise ValueError("This model's saved learning information needs attention before a decision can be saved.")
+    forgotten = 0
+    if action == "accept":
+        if any(isinstance(item, Mapping) and item.get("goal") == row["goal"] for item in live):
+            raise ValueError("This question is already saved. Review the saved question or reject this duplicate suggestion.")
+        live.append(dict(row))
+        families["live"][key] = live
+    elif action == "reject":
+        if row["goal"] not in rejected:
+            rejected = [*rejected, row["goal"]]
+            recognized = sum(isinstance(value, str) for value in rejected)
+            forgotten = max(0, recognized - _REJECTED_CAP)
+            remaining = forgotten
+            kept = []
+            for value in rejected:
+                if remaining and isinstance(value, str):
+                    remaining -= 1
+                else:
+                    kept.append(value)
+            families["rejected"][key] = kept
+    else:
+        raise ValueError("Choose use or reject for this suggested question.")
+    del rows[index]
+    if not rows:
+        families["pending"].pop(key, None)
+    return {"before": {"question": before["goal"], "expected": before["expected"]},
+            "source_guard": {name: before[name] for name in ("privacy_schema", "source_goal_ids", "added_at") if name in before},
+            "before_digest": _corpus_revision(before), "forgotten_rejections": forgotten,
+            "live_after": len(live), "pending_after": len(rows)}
+
+
+def review_pending_decision(corpus_path: str | Path, key: str, reference: str, action: str) -> dict:
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        families = _pending_families(corpus_path)
+        revision = _corpus_revision(families)
+        result = _pending_decision(families, key, reference, action)
+        return {**result, "revision": revision}
+
+
+def decide_reviewed_pending(corpus_path: str | Path, key: str, reference: str, action: str, *,
+                            expected_revision: str, before_digest: str, binding: str,
+                            authorize: Callable[[], None], before_write: Callable[[], None]) -> None:
+    """Native reviewed decision; a marker proves completion, never equal text.
+
+    World families and completion marker share a transaction. File mode writes
+    prerequisites then removes the suggestion, finally writes the completion
+    marker. Any interrupted file sequence is unconfirmed and never replayed.
+    """
+    from .file_lock import cross_process_lock
+    if len(binding) != 64 or any(char not in "0123456789abcdef" for char in binding):
+        raise ValueError("This reviewed decision could not be protected.")
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        families = _pending_families(corpus_path)
+        if _corpus_revision(families) != expected_revision:
+            raise ValueError("The learning questions changed. Refresh and review the current suggestion.")
+        _, _, source = _selected_pending(families["pending"], key, reference)
+        result = _pending_decision(families, key, reference, action)
+        if result["before_digest"] != before_digest:
+            raise ValueError("The selected suggestion changed. Refresh and review it again.")
+        effects = families["live"].setdefault(_CASE_EFFECTS, {})
+        if not isinstance(effects, dict) or len(effects) >= 10000 or binding in effects:
+            raise ValueError("The saved question-decision history needs attention. Nothing was changed.")
+        effect = {"action": "pending_" + action, "model": key, "before_digest": before_digest}
+        effects[binding] = effect
+        if any(len(json.dumps(raw, allow_nan=False).encode()) > 5 * 1024 * 1024 for raw in families.values()):
+            raise ValueError("The learning collections are too large to change here.")
+        authorize()
+        require_cases_current([source])
+        before_write()
+        if _world_corpus_kind(corpus_path) is not None:
+            from .learning_store import write_corpus_families_db
+            write_corpus_families_db(families)
+        else:
+            del effects[binding]
+            if action == "accept":
+                _write_corpus_file(Path(corpus_path), families["live"])
+            else:
+                _write_corpus_file(rejected_corpus_path(corpus_path), families["rejected"], seal=True)
+            _write_corpus_file(pending_corpus_path(corpus_path), families["pending"], seal=True)
+            effects[binding] = effect
+            _write_corpus_file(Path(corpus_path), families["live"])
+
+
 def append_reviewed_corpus_case(corpus_path: str | Path, key: str, goal: str,
                                 expected: str, *, expected_revision: str,
                                 binding: str, authorize: Callable[[], None],

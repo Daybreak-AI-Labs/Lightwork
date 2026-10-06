@@ -8,8 +8,8 @@ global administrator and runs as a background job the page polls. None of
 these calls a model to generate text: model-improvement scoring is
 deterministic, the reward model is a small local model trained on this
 server, and the shorthand is learned from recorded messages. The only
-provider call is the optional exact token count, which costs nothing, is
-offered only while learning may contact the AI provider, and uses the main
+provider call is the optional Anthropic token-count estimate, offered only
+for its direct configured connection while learning may contact it. It uses the main
 assistant model (``model_for_role("orchestrator")``).
 """
 from __future__ import annotations
@@ -280,7 +280,7 @@ def _exact_allowed() -> bool:
         return False
 
 
-def _counter(exact: bool):
+def _counter(exact: bool, request: Request | None = None):
     from maverick.codec_probe import resolve_counter
     if not exact:
         return resolve_counter()
@@ -290,17 +290,39 @@ def _counter(exact: bool):
     from maverick.llm import model_for_role, require_model_allowed
     model = model_for_role("orchestrator")
     require_model_allowed(model)
-    return resolve_counter(model=model)
+    from .draft_api import context_for
+    from .learning_ops_api import _halt_preflight
+    context = context_for(request) if request is not None else None
+
+    def check_current():
+        if request is not None:
+            require_global_permission(request, "admin")
+            if context_for(request) != context:
+                raise HTTPException(409, "Your account, workspace or access changed. No further messages were sent.")
+        _halt_preflight("codec-count")
+        if not _exact_allowed() or model_for_role("orchestrator") != model:
+            raise HTTPException(409, "Learning access or the selected model changed. No further messages were sent.")
+
+    check_current()
+    return resolve_counter(model=model, official_only=True, before_count=check_current)
 
 
 def _codec_view() -> dict:
     from maverick import emergent_protocol, emergent_tokens
     book = emergent_protocol.shared().book()
     tokens = emergent_tokens.shared().book()
+    available = False
+    if _exact_allowed():
+        try:
+            from maverick.codec_probe import anthropic_counting_available
+            from maverick.llm import model_for_role
+            available = anthropic_counting_available(model_for_role("orchestrator"))
+        except (HTTPException, ValueError, RuntimeError, ImportError, OSError, TypeError):
+            pass
     return {"shorthand": {"codes": int(book.size), "on": bool(emergent_protocol.enabled()),
                           "phrases": [_clip(p, 160) for p in list(book.forward)[:10]]},
             "token_codes": {"codes": int(tokens.size), "on": bool(emergent_tokens.enabled())},
-            "exact_count_available": _exact_allowed()}
+            "exact_count_available": available}
 
 
 @router.get("/codec")
@@ -334,7 +356,7 @@ async def learn_shorthand(request: Request, body: CodecIn) -> dict:
 async def learn_token_codes(request: Request, body: CodecIn) -> dict:
     """``codec-learn``: learn the token-saving codes and keep them."""
     require_global_permission(request, "admin")
-    counter = await run_in_threadpool(_safe_counter, body.exact)
+    counter = await run_in_threadpool(_safe_counter, body.exact, request)
     await run_in_threadpool(lambda: _record(request, "codec_learn", messages=body.how_many, exact=body.exact))
 
     def _run(job) -> dict:
@@ -354,7 +376,7 @@ async def learn_token_codes(request: Request, body: CodecIn) -> dict:
 async def measure_codec(request: Request, body: CodecIn) -> dict:
     """``codec-probe``: does the shorthand save tokens, not just characters?"""
     require_global_permission(request, "admin")
-    counter = await run_in_threadpool(_safe_counter, body.exact)
+    counter = await run_in_threadpool(_safe_counter, body.exact, request)
 
     def _run(job) -> dict:
         from maverick.codec_probe import measure
@@ -372,9 +394,9 @@ async def measure_codec(request: Request, body: CodecIn) -> dict:
     return start_job(request, "codec_probe", "Measuring the shorthand", _run)
 
 
-def _safe_counter(exact: bool):
+def _safe_counter(exact: bool, request: Request | None = None):
     try:
-        return _counter(exact)
+        return _counter(exact, request)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 -- counter unavailable (no tokenizer / blocked model)

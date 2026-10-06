@@ -19,54 +19,15 @@
     models.forEach(function (m) { var o = el('option', null, m.label); o.value = m.value; select.appendChild(o); });
   }
 
-  function settingsLink() {
-    var a = el('a', 'btn btn--ghost', 'Open All settings');
-    a.href = '/settings/all';
-    return a;
-  }
-
-  function holdout(plan) {
-    var box = $('lpo-holdout');
-    box.textContent = '';
-    if (!plan.hold_out.set_up) {
-      box.appendChild(el('p', 'muted', 'Choose where to keep it first, in ' + plan.places.hold_out + '.'));
-      box.appendChild(settingsLink());
-      return;
-    }
-    if (plan.hold_out.exists) {
-      box.appendChild(el('p', 'muted', 'The hold-out record is set up. Check it with “Check the hold-out record” above.'));
-      return;
-    }
-    var btn = el('button', 'btn btn--primary', 'Set up the hold-out record');
-    btn.type = 'button';
-    btn.addEventListener('click', async function () {
-      if (!(await window.mvConfirm('Set up the hold-out record now? This can only be done once; it is never replaced afterwards.',
-        { okText: 'Set it up' }))) return;
-      btn.disabled = true;
-      try {
-        var d = await J.request(API + '/hold-out/set-up', { method: 'POST', json: { confirm: true } });
-        box.textContent = '';
-        box.appendChild(el('p', null, 'The hold-out record is set up. Write down its record number and keep it somewhere separate from this server, so anyone can later confirm the record was never swapped:'));
-        box.appendChild(el('p', 'lpo-number', d.record_number));
-        say('lpo-holdout-status', '');
-      } catch (failure) {
-        say('lpo-holdout-status', await J.problem(failure, 'set up the hold-out record'));
-        btn.disabled = false;
-      }
-    });
-    box.appendChild(btn);
-  }
-
   function loadPlan() {
     J.request(API + '/plan').then(function (d) {
       var parts = [d.enabled ? 'Self-coaching is on.' : 'Self-coaching is off. Some tools below need it on: turn on ' + d.places.self_coaching + '.'];
-      parts.push(d.test_cases_set_up ? '' : 'Test cases are not set up yet; choose where to keep them in ' + d.places.test_cases + '.');
+      parts.push(d.test_cases_set_up ? '' : 'Test cases are not set up yet. Use Self-coaching questions below to choose Lightwork’s managed location.');
       parts.push(d.spending_limit != null ? 'Testing can spend up to ' + J.money(d.spending_limit) + ' per run.' : '');
       say('lpo-plan', parts.filter(Boolean).join(' '));
       addOptions($('lpo-clash-model'), d.models);
       addOptions($('lpo-transfer-source'), d.models);
       addOptions($('lpo-transfer-target'), d.models);
-      holdout(d);
     }).catch(async function (failure) {
       say('lpo-plan', await J.problem(failure, 'load the self-coaching tools'));
     });

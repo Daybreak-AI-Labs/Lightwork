@@ -438,99 +438,86 @@ async def get_active_tenant(request: Request) -> dict:
     }
 
 
+def select_active_tenant(request: Request, tenant_id: str | None) -> dict:
+    """Native selection and audit share the current authority reservation."""
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        require_permission(request, "view")
+        import os
+
+        if os.environ.get("MAVERICK_TENANT", "").strip():
+            raise HTTPException(409, "This installation uses a fixed workspace. Ask your installation administrator to change it.")
+        from maverick import config as _cfg
+        from maverick.tenant import registry as tenant_registry
+
+        from . import settings_store, workspace_tenants
+
+        principal = caller_principal(request)
+        previous_tenant: str | None
+        if principal:
+            previous_tenant = workspace_tenants.get_selection(principal)
+            if tenant_id is not None:
+                rec = tenant_registry.get_tenant(tenant_id)
+                if (
+                    rec is None
+                    or not rec.active
+                    or not workspace_tenants.principal_can_select(principal, tenant_id)
+                ):
+                    # Keep tenant existence confidential from principals without a
+                    # membership while still giving a useful picker failure.
+                    raise HTTPException(
+                        status_code=404, detail="no such accessible active tenant"
+                    )
+            workspace_tenants.set_selection(principal, tenant_id)
+            source = "principal_selection"
+        else:
+            require_global_permission(request, "admin")
+            previous_tenant = settings_store.active_tenant()
+            try:
+                settings_store.set_active_tenant(tenant_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            _cfg.reset_config_cache()
+            source = "local_selection"
+
+        # Workspace selection changes the confidentiality boundary for every
+        # tenant-scoped page and mutation that follows. Anchor the human decision
+        # in the deployment-global chain; on an explicit custody/policy refusal,
+        # restore the previous selection so the state cannot change unaudited.
+        from maverick.audit import AuditRefused, EventKind, audit_event
+
+        try:
+            audit_event(EventKind.WORKSPACE_SELECTED,
+                agent=principal or "local",
+                _global=True,
+                actor=principal or "local",
+                previous_tenant=previous_tenant,
+                tenant=tenant_id,
+                source=source,)
+        except AuditRefused as exc:
+            try:
+                if principal:
+                    workspace_tenants.set_selection(principal, previous_tenant)
+                else:
+                    settings_store.set_active_tenant(previous_tenant)
+                    _cfg.reset_config_cache()
+            except Exception as rollback_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="audit refused workspace selection and rollback failed",
+                ) from rollback_exc
+            raise HTTPException(
+                status_code=503,
+                detail="audit custody refused workspace selection; previous workspace restored",
+            ) from exc
+        return {"tenant_id": tenant_id, "source": source if tenant_id else None}
+
+
 @router.put("/workspace/active-tenant")
 async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
-    """Select or clear this caller's tenant-scoped workspace.
-
-    Authenticated users may select only tenants where they hold a membership;
-    global tenant administrators may select any active tenant. Genuine local
-    mode and the static operator token retain the single-operator persisted
-    selection introduced by the self-service picker. Both stores validate the
-    selected tenant, and a preference never grants access by itself.
-    """
-    require_permission(request, "view")
-    import os
-
-    if os.environ.get("MAVERICK_TENANT", "").strip():
-        raise HTTPException(409, "This installation uses a fixed workspace. Ask your installation administrator to change it.")
-    from maverick import config as _cfg
-    from maverick.tenant import registry as tenant_registry
-
-    from maverick_dashboard import settings_store, workspace_tenants
-
-    principal = caller_principal(request)
-    tenant_id = body.tenant_id
-    previous_tenant: str | None
-    if principal:
-        previous_tenant = await run_in_threadpool(
-            workspace_tenants.get_selection, principal
-        )
-        if tenant_id is not None:
-            rec = await run_in_threadpool(tenant_registry.get_tenant, tenant_id)
-            if (
-                rec is None
-                or not rec.active
-                or not await run_in_threadpool(
-                    workspace_tenants.principal_can_select, principal, tenant_id
-                )
-            ):
-                # Keep tenant existence confidential from principals without a
-                # membership while still giving a useful picker failure.
-                raise HTTPException(
-                    status_code=404, detail="no such accessible active tenant"
-                )
-        await run_in_threadpool(
-            workspace_tenants.set_selection, principal, tenant_id
-        )
-        source = "principal_selection"
-    else:
-        require_global_permission(request, "admin")
-        previous_tenant = await run_in_threadpool(settings_store.active_tenant)
-        try:
-            await run_in_threadpool(settings_store.set_active_tenant, tenant_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        _cfg.reset_config_cache()
-        source = "local_selection"
-
-    # Workspace selection changes the confidentiality boundary for every
-    # tenant-scoped page and mutation that follows. Anchor the human decision
-    # in the deployment-global chain; on an explicit custody/policy refusal,
-    # restore the previous selection so the state cannot change unaudited.
-    from maverick.audit import AuditRefused, EventKind, audit_event
-
-    try:
-        await run_in_threadpool(
-            audit_event,
-            EventKind.WORKSPACE_SELECTED,
-            agent=principal or "local",
-            _global=True,
-            actor=principal or "local",
-            previous_tenant=previous_tenant,
-            tenant=tenant_id,
-            source=source,
-        )
-    except AuditRefused as exc:
-        try:
-            if principal:
-                await run_in_threadpool(
-                    workspace_tenants.set_selection, principal, previous_tenant
-                )
-            else:
-                await run_in_threadpool(
-                    settings_store.set_active_tenant, previous_tenant
-                )
-                _cfg.reset_config_cache()
-        except Exception as rollback_exc:
-            raise HTTPException(
-                status_code=500,
-                detail="audit refused workspace selection and rollback failed",
-            ) from rollback_exc
-        raise HTTPException(
-            status_code=503,
-            detail="audit custody refused workspace selection; previous workspace restored",
-        ) from exc
-    return {"tenant_id": tenant_id, "source": source if tenant_id else None}
+    """Choose or clear the caller's workspace through the native selection service."""
+    return await run_in_threadpool(select_active_tenant, request, body.tenant_id)
 
 
 @router.get("/workforce/posture")
@@ -1438,6 +1425,9 @@ def _require_tenant_roles_admin(request: Request, tenant_id: str) -> bool:
     ``require_permission`` result cannot authorize this route.
     """
     from . import auth, rbac
+    from .invite_routes import require_people_context
+
+    require_people_context(request, request.headers.get("X-Lightwork-Workspace-People-Context"))
 
     if auth.has_global_permission(request, "admin"):
         return True

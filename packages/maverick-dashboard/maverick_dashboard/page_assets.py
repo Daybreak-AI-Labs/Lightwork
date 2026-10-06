@@ -53,6 +53,8 @@ ASSETS = (
     "lightwork-learning-loop.js",
     "lightwork-learning-jobs.js",
     "lightwork-learning-test-cases.js",
+    "lightwork-learning-holdout-setup.js",
+    "lightwork-learning-pending-cases.js",
     "lightwork-value-proof.js",
     "lightwork-assurance-forms.js",
     "lightwork-feature-actions.js",

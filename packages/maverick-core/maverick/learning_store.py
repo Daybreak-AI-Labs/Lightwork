@@ -575,24 +575,42 @@ def write_corpus_db(kind: str, data: dict) -> None:
     """Whole-family replace for ``kind``, mirroring the file store's atomic
     rewrite. For ``"live"``, non-list top-level values are preserved under the
     ``extra`` kind so operator annotations survive the round-trip."""
+    with _conn() as c:
+        _write_corpus_family(c, kind, data)
+
+
+def _write_corpus_family(c, kind: str, data: dict) -> None:
     pred, tp = _tenant_predicate()
     tcol, tph, tparam = _tenant_column()
+    _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}{_and(pred)}", (str(kind), *tp))
+    if kind == "live":
+        _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}{_and(pred)}", ("extra", *tp))
+    for key, val in (data or {}).items():
+        if kind == "live" and not isinstance(val, list):
+            _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row{tcol}) VALUES ({_ph(4)}{tph})",
+                  ("extra", str(key), 0, _encode_corpus_row("extra", val), *tparam))
+            continue
+        for i, row in enumerate(val if isinstance(val, list) else []):
+            _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row{tcol}) VALUES ({_ph(4)}{tph})",
+                  (str(kind), str(key), i, _encode_corpus_row(str(kind), row), *tparam))
+
+
+def write_corpus_families_db(families: dict[str, dict]) -> None:
+    """One native transaction for a reviewed pending/live/rejected decision.
+
+    Callers retain the existing corpus authority and RMW locks. Validation is
+    complete before DELETE; unsupported non-list secondary-family data is never
+    silently discarded. Native encoding and tenant predicates are unchanged.
+    """
+    if set(families) != {"live", "pending", "rejected"} or any(not isinstance(value, dict) for value in families.values()):
+        raise ValueError("The current learning collections could not be changed safely.")
+    for kind, value in families.items():
+        if (len(json.dumps(value, allow_nan=False).encode()) > 5 * 1024 * 1024
+                or kind != "live" and any(not isinstance(rows, list) for rows in value.values())):
+            raise ValueError("The current learning collections could not be changed safely.")
     with _conn() as c:
-        _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}{_and(pred)}",
-              (str(kind), *tp))
-        if kind == "live":
-            _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}{_and(pred)}",
-                  ("extra", *tp))
-        for key, val in (data or {}).items():
-            if kind == "live" and not isinstance(val, list):
-                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row{tcol}) "
-                         f"VALUES ({_ph(4)}{tph})",
-                      ("extra", str(key), 0, _encode_corpus_row("extra", val), *tparam))
-                continue
-            for i, row in enumerate(val if isinstance(val, list) else []):
-                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row{tcol}) "
-                         f"VALUES ({_ph(4)}{tph})",
-                      (str(kind), str(key), i, _encode_corpus_row(str(kind), row), *tparam))
+        for kind in ("live", "rejected", "pending"):
+            _write_corpus_family(c, kind, families[kind])
 
 
 __all__ = [

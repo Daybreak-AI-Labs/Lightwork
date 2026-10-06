@@ -198,6 +198,26 @@
           }
           return;
         }
+        if (entry[0] === 'workspace_people') {
+          var people = entry[1], peopleStarted = generation;
+          if (!people || Array.isArray(people) || Object.keys(people).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(people.context || '')) return;
+          var peopleDestination = node('dd', undefined, list), peopleForm = window.LightworkWorkspacePeople;
+          if (peopleForm && typeof peopleForm.open === 'function') button('Manage workspace people', peopleDestination, async function (event) {
+            if (!active(peopleStarted) || busy) return;
+            event.currentTarget.disabled = true;
+            try {
+              var opened = await peopleForm.open(people.context);
+              if (!active(peopleStarted)) return;
+              status.textContent = opened ? 'The workspace people controls are open.' : 'These controls changed or are unavailable. Refresh People before continuing.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) {
+              if (active(peopleStarted)) status.textContent = 'The workspace people controls could not be opened. Check current access in People.';
+            } finally { if (active(peopleStarted)) event.currentTarget.disabled = false; }
+          });
+          else { var peopleLink = node('a', 'Manage workspace people', peopleDestination); peopleLink.href = '/users#wi-title'; peopleLink.className = 'btn btn--ghost'; }
+          return;
+        }
         if (entry[0] === 'plugin_practice_page') {
           var practice = entry[1], practiceStarted = generation;
           if (!practice || Array.isArray(practice) || Object.keys(practice).sort().join(',') !== 'fingerprint,receipt' ||

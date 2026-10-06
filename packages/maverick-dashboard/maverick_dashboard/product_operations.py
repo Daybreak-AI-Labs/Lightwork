@@ -196,8 +196,10 @@ def _adapter_modules():
         product_operations_learning_cases,
         product_operations_learning_cycles,
         product_operations_learning_history,
+        product_operations_learning_holdout_setup,
         product_operations_learning_jobs,
         product_operations_learning_lessons,
+        product_operations_learning_pending_cases,
         product_operations_learning_program,
         product_operations_local_runtime,
         product_operations_models,
@@ -223,6 +225,7 @@ def _adapter_modules():
         product_operations_webhook_recovery,
         product_operations_workflow_explanation,
         product_operations_workflows,
+        product_operations_workspace_people,
     )
     return (
         product_operations_approvals,
@@ -259,12 +262,14 @@ def _adapter_modules():
         product_operations_form_recovery,
         product_operations_knowledge,
         product_operations_learning_cases,
+        product_operations_learning_holdout_setup,
         product_operations_learning_cycles,
         product_operations_learning_history,
         product_operations_learning_jobs,
         product_operations_instruction_capture,
         product_operations_installation_security,
         product_operations_learning_lessons,
+        product_operations_learning_pending_cases,
         product_operations_learning_program,
         product_operations_local_runtime,
         product_operations_today,
@@ -285,6 +290,7 @@ def _adapter_modules():
         product_operations_personal_data,
         product_operations_workflow_explanation,
         product_operations_workflows,
+        product_operations_workspace_people,
         product_operations_webhook_recovery,
     )
 

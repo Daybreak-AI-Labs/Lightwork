@@ -992,6 +992,8 @@ def _users_context(request: Request) -> dict:
     from maverick.proxy_auth import proxy_auth_enabled
 
     from . import rbac
+    from .draft_api import context_for
+    people_context = context_for(request)
     global_admin = auth.has_global_permission(request, "admin")
     workspace_options, wm_tenant = _workspace_options(request)
     workspace_names = {option["id"]: option["name"] for option in workspace_options}
@@ -1027,6 +1029,7 @@ def _users_context(request: Request) -> dict:
                 if rbac.permissions_for(role).issubset(actor_permissions)
             ]
         return {
+            "workspace_people_context": people_context,
             "global_admin": False, "people": people,
             "people_labels": {p["principal"]: p["label"] for p in people},
             "role_labels": {r: role_label(r) for r in rbac.known_roles()},
@@ -1045,6 +1048,7 @@ def _users_context(request: Request) -> dict:
             "invites_on": invites.invites_enabled(),
             "invite_sso_on": invites.invites_enabled() and not invites.local_login_mode(),
             "workspace_pending_invites": [inv for inv in workspace_invites if inv.pending],
+            "workspace_recent_invites": [inv for inv in workspace_invites if inv.used_at is not None][:20],
         }
     auth_on = (auth.caller_principal(request) is not None
                or oidc_enabled() or proxy_auth_enabled())
@@ -1105,6 +1109,7 @@ def _users_context(request: Request) -> dict:
         channel_links = []
     return {
         "global_admin": True,
+        "workspace_people_context": people_context,
         "first_login": first_login_preview(),
         "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
         "role_descriptions": role_descriptions(),
@@ -1142,6 +1147,8 @@ def _users_context(request: Request) -> dict:
         "pending_invites": [i for i in all_invites if i.pending and not i.tenant],
         "workspace_pending_invites": [i for i in all_invites
                                       if i.pending and i.tenant in workspace_names],
+        "workspace_recent_invites": [i for i in all_invites
+                                     if i.used_at is not None and i.tenant in workspace_names][:20],
         "invite_labels": labels,
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
@@ -1456,6 +1463,7 @@ def _workspace_invite_authority(request: Request, tenant: str, role: str | None 
 @router.post("/users/workspace-invite", response_class=HTMLResponse)
 def users_workspace_invite(
     request: Request, tenant: str = Form(...), email: str = Form(...), role: str = Form(...),
+    expected_context: str | None = Form(default=None),
 ) -> HTMLResponse:
     """Create a single-use invitation for one existing workspace only."""
     _app()._require_same_origin(request)
@@ -1470,6 +1478,8 @@ def users_workspace_invite(
     step_up.require_recent_mfa(request, "change_role")
     invited_by = auth.caller_principal(request) or "local-admin"
     with authority_effect_fence():
+        from .invite_routes import require_people_context
+        require_people_context(request, expected_context)
         installation_admin = _workspace_invite_authority(request, tenant, role)
         try:
             inv, token = invites.create_invite(
@@ -1492,6 +1502,7 @@ def users_workspace_invite(
 @router.post("/users/workspace-invite/revoke")
 def users_workspace_invite_revoke(
     request: Request, invite_id: str = Form(...),
+    expected_context: str | None = Form(default=None),
 ) -> RedirectResponse:
     """Cancel a pending invite only when the caller administers its workspace."""
     _app()._require_same_origin(request)
@@ -1502,6 +1513,8 @@ def users_workspace_invite_revoke(
     if not invites.invites_enabled():
         raise HTTPException(404, "Invitations are not enabled.")
     with authority_effect_fence():
+        from .invite_routes import require_people_context
+        require_people_context(request, expected_context)
         invite = next((item for item in invites.list_invites()
                        if item.id == invite_id.strip() and item.tenant and item.pending), None)
         if invite is None:

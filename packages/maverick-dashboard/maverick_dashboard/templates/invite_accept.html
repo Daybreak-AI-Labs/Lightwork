@@ -6,7 +6,23 @@
 {% block head_extra %}{{ styles() }}{% endblock %}
 {% block content %}
 <div class="panel own">
-  {% if invite %}
+  {% if state in ('accepted', 'unconfirmed') %}
+  <h1 class="page-title">{{ 'Invitation accepted' if state == 'accepted' else 'Invitation result not confirmed' }}</h1>
+  {% if state == 'accepted' %}
+  <p class="own__lede">Your original invitation for {{ invite.email }} was accepted{% if invite.workspace %} to {{ invite.workspace }}{% endif %} as <strong>{{ invite.role | role_label }}</strong>.</p>
+  <p class="own__hint">The saved grant was confirmed {{ grant_confirmed_at | datetime }}. Reopening this link reads that result; it does not give access again.</p>
+  <p>Current direct role: <strong>{{ current_role | role_label if current_role else 'No direct membership' }}</strong>. Your administrator may have changed your access since acceptance.</p>
+  {% else %}
+  <p class="own__lede">The one-time link was used by your account, but the original access save was not confirmed.</p>
+  <p>Current membership alone cannot confirm that request. It will not be retried. Ask your administrator to check your workspace role and issue a replacement invitation if needed.</p>
+  {% endif %}
+  {% if message %}<p class="own__alert" role="alert">{{ message }}</p>{% endif %}
+  <div class="own__actions">
+    {% if can_open %}<form method="post" action="/auth/invite/{{ invite.token }}/workspace" data-draft-recovery="off">
+      <button type="submit" class="btn btn--primary">Open {{ invite.workspace }}</button>
+    </form>{% else %}<a href="/workspace/tenant?next=/" class="btn">Choose an available workspace</a>{% endif %}
+  </div>
+  {% elif invite %}
   <h1 class="page-title">{{ 'Use the invited account' if state == 'wrong_account' else "You're invited" }}</h1>
   <p class="own__lede">{{ invite.email }} is invited {% if invite.workspace %}to the {{ invite.workspace }} workspace{% else %}to Lightwork{% endif %} as <strong>{{ invite.role | role_label }}</strong>{% if invite.role_help %}:
     you can {{ invite.role_help }}{% endif %}.</p>
@@ -43,8 +59,8 @@
   {% endif %}
   {% elif state == 'bind_failed' %}
   <h1 class="page-title">Invitation could not be completed</h1>
-  <p class="own__lede">Your access could not be saved. This one-time link cannot be tried again.</p>
-  <p>Ask your administrator for a new invitation link.</p>
+  <p class="own__lede">Your access save could not be confirmed. This one-time link cannot save access again.</p>
+  <p>Ask your administrator to check your current workspace role and send a new invitation link if needed.</p>
   {% elif state == 'gone' %}
   <h1 class="page-title">Invitation not available</h1>
   <p class="own__lede">This invitation link is invalid, expired, already used, or revoked.</p>

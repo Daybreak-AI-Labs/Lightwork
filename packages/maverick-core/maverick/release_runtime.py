@@ -95,7 +95,7 @@ def verify_full_release_runtime() -> int:
     """Run every packaged-feature check ``maverick release-runtime-check`` runs.
 
     Providers, document parsers and worker source, offline SQL with the bundled
-    PostgreSQL driver, MathML and metrics. Returns the bundled libpq version
+    PostgreSQL driver, MathML, metrics and offline token estimates. Returns the bundled libpq version
     number; raises the first failing check's exception unchanged.
     """
     from . import providers
@@ -107,6 +107,7 @@ def verify_full_release_runtime() -> int:
     verify_release_mathml_runtime()
     verify_release_metrics_runtime()
     verify_release_plugin_runtime()
+    verify_release_token_counter_runtime()
     return libpq_version
 
 
@@ -130,6 +131,19 @@ def verify_release_plugin_runtime() -> None:
     for name in ("plugin_probe.py", "plugin_contracts.py"):
         source = Path(__file__).parent / "sandbox" / name
         compile(source.read_bytes(), str(source), "exec")
+
+
+def verify_release_token_counter_runtime() -> None:
+    """Exercise the bundled vocabulary and native tokenizer without networking."""
+    from .local_token_counter import counter
+
+    count = counter()
+    if count("") != 0 or count("hello world") != 2:
+        raise RuntimeError("Packaged token estimates returned an unexpected result")
+    # Reserved-looking customer content remains ordinary text. Include real
+    # Unicode so this exercises the native wheel, not a character approximation.
+    if count("<|endoftext|>") <= 1 or count("你好 👋") <= 0:
+        raise RuntimeError("Packaged token estimates could not count ordinary text")
 
 
 def libpq_label(libpq_version: int) -> str:

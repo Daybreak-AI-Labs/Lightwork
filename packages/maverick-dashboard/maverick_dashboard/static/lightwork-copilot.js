@@ -431,6 +431,9 @@
   }
 
   function close() {
+    var destination = document.activeElement;
+    var nativeFocus = destination && destination !== document.body && destination !== fab &&
+      !panel.contains(destination) && destination.isConnected && !destination.closest('[hidden]') && !destination.disabled;
     if (sending) note.textContent = "The earlier request may still finish on the server. Its reply will not appear after closing; sending again starts a new request.";
     generation += 1; sending = false; input.readOnly = false; sendButton.disabled = false; sendButton.removeAttribute('aria-busy');
     if (controller()) controller().release();
@@ -438,7 +441,7 @@
     panel.hidden = true;
     fab.setAttribute("aria-expanded", "false");
     pageTriggers.forEach(function (trigger) { trigger.setAttribute("aria-expanded", "false"); });
-    if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
+    if (!nativeFocus && opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
   }
 
   fab.addEventListener("click", function () { panel.hidden ? open() : close(); });

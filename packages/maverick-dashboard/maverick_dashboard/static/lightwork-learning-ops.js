@@ -262,8 +262,9 @@
       if (d.shorthand.phrases.length) { nodes.push(el('h4', null, 'Phrases with a code')); nodes.push(list(d.shorthand.phrases)); }
       fill('lo-cd-state', nodes);
       var exact = $('lo-cd-exact');
+      if (exact) Array.from(exact.options).filter(function (option) { return option.value !== '0'; }).forEach(function (option) { option.remove(); });
       if (exact && d.exact_count_available && exact.options.length === 1) {
-        var o = el('option', null, 'Exact count from your AI provider (free, sends the messages to it)');
+        var o = el('option', null, 'Anthropic count estimate (sends these messages to your connected service)');
         o.value = '1';
         exact.appendChild(o);
       }
@@ -273,8 +274,8 @@
   }
   function codecBody() { return { how_many: Number($('lo-cd-count').value), exact: $('lo-cd-exact').value === '1' }; }
   async function exactOk(body) {
-    return !body.exact || window.mvConfirm('Use your AI provider to count exactly? The recent messages between agents are sent to it for counting. Counting is free.',
-      { okText: 'Use exact count' });
+    return !body.exact || window.mvConfirm('Ask your connected Anthropic service to estimate token counts? Recent messages between agents are sent to it. This does not generate an answer or establish the cost of future work.',
+      { okText: 'Use provider count' });
   }
   J.wire($('lo-cd-learn'), async function () {
     if (!(await window.mvConfirm('Relearn the shorthand from recent messages between agents? The new codes replace the old ones.',

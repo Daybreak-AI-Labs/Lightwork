@@ -607,3 +607,113 @@ the original database and seal bytes. This removes redundant replay work. Fresh
 active AI calls still verify the complete retained history; the addition is not
 a claim that arbitrary history size has constant cost or that a live financial
 integration has been qualified.
+
+## October 5 reviewing suggested learning questions
+
+The default review-first search for new learning questions now leads to a named
+Suggestions form on Learning. An administrator selects a model and the complete
+question and expected answer, then reviews Use this question or Reject this
+suggestion. The selected-question Copilot action uses the same native writer.
+Accepting makes the question available to the existing self-coaching checker;
+rejecting remembers the question so later searches avoid suggesting it again.
+The review states when the bounded rejection history will release an older entry.
+No AI runs as part of either decision.
+
+Both decisions recheck the complete saved, suggested and rejected collections,
+the selected model, storage source, learning permission and current account.
+Unknown imported information is retained instead of being silently discarded.
+SQLite commits those three collections and the exact original effect receipt
+together. File storage reports a partially interrupted decision as unconfirmed;
+it never automatically repeats that decision. Matching text or a missing
+suggestion alone cannot confirm an original operation. Withdrawn learning
+permission also withholds private question text from original receipts.
+
+The native 320px and Copilot journeys saved and rejected real retained suggestions,
+fed the accepted answer to the offline checker, excluded the rejected question
+from subsequent searches, and recovered interrupted original replies after a
+real process restart. Stale collections, a changed storage source, unavailable
+storage and foreign account/workspace requests were refused. This qualifies the
+existing single-host file and SQLite paths, not live model improvement.
+
+## October 5 managed unseen-question record setup
+
+Learning now offers Choose the managed location, followed by a separate reviewed
+Initialize record action. Neither step needs a file path or terminal command.
+Location setup changes only the existing setting through the canonical Settings
+writer. Initialization uses the existing exclusive native record writer; it
+never replaces an existing record or runs a check, changes a learning switch,
+selects a model, schedules work or spends money. Copilot offers those same two
+reviews and a read-only current record check. The former direct initialization
+endpoint now guides the administrator to this reviewed journey.
+
+An installation-wide attempted-once anchor follows the canonical physical
+record location. Deleting the record, choosing an equivalent path or moving the
+dashboard settings file cannot silently reset that anchor. A retained original
+completion, an interrupted unconfirmed request and a separately verified current
+record remain distinct. The ordinary checker reads the same created record.
+Both native and Copilot reviews recheck current authority and source under the
+writer reservation; an expired review cannot proceed after waiting for a lock.
+Verification follows the actual runtime path rules rather than treating a
+resolved alias as proof that the checker can use the configured path.
+
+Actual native and Copilot setup, lost replies, independent current readback,
+original recovery without a second initialization, deployment-owned settings,
+stale reviews and missing previously initialized records passed locally. The
+record stays on this server; this setup does not create independent audit custody
+or qualify multi-host storage.
+
+## October 5 workspace invitations and member controls
+
+Accepting an invitation now shows its original outcome and current membership.
+Opening the invited workspace is an explicit separate action through the native
+workspace selection and audit service. Reopening a completed link does not grant
+the role again. A signed-in person must match the invited verified email; an
+opaque sign-in subject is no longer presented as the person's email. Local
+passphrase invitations retain their own ordinary acceptance journey.
+
+A completed role grant receives a retained confirmation only after the native
+write returns. A burned invitation with interrupted confirmation stays
+unconfirmed, even when today's membership happens to match. Its page explains
+current access and the administrator's replacement path. Historical invitations
+remain readable after a custom role is deleted; redeeming a pending invitation
+still requires that the role and issuer's authority are currently valid.
+
+The People form now binds invitations and member changes to its actual account
+and workspace. Switching accounts within the same workspace cannot submit an
+earlier private form as the new person. Access loss clears private form details;
+temporary connection failure keeps entered work. Copilot's protected People
+handoff verifies current context, preserves current work and focuses the ordinary
+destination. Closing Copilot manually retains its ordinary focus behavior.
+
+Native 320px journeys covered signed matching-email acceptance, local passphrase
+acceptance, lost replies, reopening original outcomes, explicit workspace
+selection, changed and removed memberships, expired/revoked links, deleted custom
+roles, stale accounts and protected handoff focus. No external sign-in or email
+delivery service was contacted.
+
+## October 5 offline and configured token estimates
+
+The default server estimate now includes its tokenizer and reviewed vocabulary
+in the normal core installation. It counts Unicode and literal reserved-looking
+text without downloading a vocabulary or reading a populated cache. The native
+authenticated measurement job completed with outbound connections and download
+helpers blocked and an initially empty cache that remained empty. An isolated
+installed wheel also loaded the Windows native tokenizer and its verified
+vocabulary, license and provenance. Frozen-release collection and the offline
+release-runtime check were qualified; a complete frozen installer was not built.
+
+Optional provider counting now uses the native configured Anthropic connection,
+including the credential and residency headers saved through Settings, rather
+than constructing a client from ambient environment variables. It normalizes
+the configured model and offers this choice only for the qualified direct
+connection. The interface calls this a provider estimate and explicitly states
+that the selected messages are sent to that service. Each count, including a
+cached result, rechecks current access, learning permission, model and connection.
+A changed credential or workspace refuses the remaining measurement. The
+bounded per-measurement cache removes repeated identical count requests.
+
+Actual native configuration, SDK serialization and authenticated measurement
+jobs were exercised with only the HTTP transport replaced by a local response.
+Wrong providers, gateways, credential rotation and withdrawn permission were
+refused without further transport calls. This is not a live-provider quality,
+pricing or customer acceptance claim.

@@ -28,7 +28,7 @@
   const ask=(message,okText)=>window.mvConfirm?window.mvConfirm(message,{okText}):Promise.resolve(false);
   const access=window.LightworkAccessState.create(()=>tenant()+":"+expected(),lock);
   function node(tag,text,cls){const item=document.createElement(tag);item.textContent=text;if(cls)item.className=cls;return item;}
-  function lock(){denied=true;el("list").replaceChildren();el("principal").value="";el("role").selectedIndex=0;root.querySelectorAll("button,input,select").forEach(control=>control.disabled=true);}
+  function lock(){denied=true;labels={};root.dataset.labels="{}";el("list").replaceChildren();el("principal").replaceChildren();el("role").selectedIndex=0;root.querySelectorAll("button,input,select").forEach(control=>control.disabled=true);const invite=document.getElementById("wi-root");if(invite)invite.replaceChildren(node("p","Your account, workspace or administrator access changed. Reload Users before continuing.","muted"));el("status").textContent="Your account, workspace or administrator access changed. Reload Users before continuing.";}
   function roleHasAdmin(role){return (rolePermissions[role]||[]).includes("admin");}
   function syncRoles(){
     if(globalAdmin||!Object.keys(roleOptions).length)return;
@@ -49,15 +49,19 @@
   function problem(response,action){return window.mvErrorText?window.mvErrorText(response,action):"Could not "+action+". Please try again.";}
   async function api(path,options={},action="load the workspace members"){
     const token=access.capture();
-    const headers={"Content-Type":"application/json"},exp=expected();if(exp)headers["X-Lightwork-Expected-Tenant"]=exp;
-    const response=await fetch(base()+path,{...options,credentials:"same-origin",headers});
+    const headers={"Content-Type":"application/json","X-Lightwork-Workspace-People-Context":root.dataset.context},exp=expected();if(exp)headers["X-Lightwork-Expected-Tenant"]=exp;
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
+    let response,data;try{
+    response=await fetch(base()+path,{...options,credentials:"same-origin",headers,signal:controller.signal});
+    if(response.redirected){access.invalidate("session");throw new Error("Sign in again and reload Users.");}
     access.assertCurrent(token);
     if(["session","scope"].includes(access.observe(response,null,{forbiddenScope:true}).kind)){throw new Error("Your sign-in or administrator access changed. Sign in again and reload Users.");}
     if(response.status===204)return null;
-    let data;try{data=await response.json();}catch(_){throw new Error(problem(response.ok?{status:500}:response,action));}
+    try{data=await response.json();}catch(_){throw new Error(problem(response.ok?{status:500}:response,action));}
     access.assertCurrent(token);
-    if(access.observe(response,data,{forbiddenScope:true,contextMessage:/active workspace changed/i}).kind==="context")throw new Error("The workspace changed. Reload Users before continuing.");
+    if(access.observe(response,data,{forbiddenScope:true,contextMessage:/account or workspace changed|active workspace changed/i}).kind==="context")throw new Error("The account or workspace changed. Reload Users before continuing.");
     if(!response.ok)throw new Error(problem({status:response.status,detail:data&&data.detail},action));return data;
+    }finally{clearTimeout(timeout);}
   }
   async function load(){
     const members=await api("");el("list").replaceChildren();syncMembers(members);
@@ -85,4 +89,16 @@
     await api("/"+encodeURIComponent(principal),{method:"PUT",body:JSON.stringify({role})},"save this workspace member");await load();
   });});
   if(root.dataset.autoload==="true")action(load);
+  window.addEventListener("lightwork:context-changed",()=>access.invalidate("context"));
+  window.addEventListener("storage",event=>{if(event.key==="lightwork-workspace-changed")access.invalidate("context");});
+  window.LightworkWorkspacePeople={open:async context=>{
+    if(denied||busy||context!==root.dataset.context)return false;
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
+    try{const response=await fetch("/api/v1/users/workspace-context",{credentials:"same-origin",signal:controller.signal});
+      if(response.redirected||[401,403].includes(response.status)){access.invalidate("scope");return false;}
+      const current=await response.json();if(!response.ok)return false;
+      if(current.context!==context){access.invalidate("context");return false;}
+      const target=document.getElementById("wi-email")||picker||el("refresh");target.scrollIntoView({block:"center"});target.focus();requestAnimationFrame(()=>{if(!denied&&context===root.dataset.context&&target.isConnected){target.scrollIntoView({block:"center"});target.focus();}});return true;
+    }catch(_){return false;}finally{clearTimeout(timeout);}
+  }};
 })();

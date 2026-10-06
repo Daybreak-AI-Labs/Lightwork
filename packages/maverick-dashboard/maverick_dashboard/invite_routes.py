@@ -24,6 +24,7 @@ Every route 404s while ``[dashboard] invites`` is off (fail-closed default).
 """
 from __future__ import annotations
 
+import hmac
 import logging
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -37,8 +38,19 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def require_people_context(request: Request, expected: str | None) -> None:
+    """Optional legacy seam; ordinary controls always bind their rendered actor."""
+    from .draft_api import context_for
+
+    if expected is not None and (
+        len(expected) != 64 or any(char not in "0123456789abcdef" for char in expected)
+        or not hmac.compare_digest(expected, context_for(request))
+    ):
+        raise HTTPException(409, "The account or workspace changed. Reload Users before continuing.")
+
 class _InviteBindFailed(RuntimeError):
-    """The one-time link was redeemed, but the role store refused the grant."""
+    """The link was redeemed, but the original grant/confirmation is uncertain."""
 
 
 # What each built-in role can do, in the words the People page uses.
@@ -51,7 +63,8 @@ ROLE_HELP = {
 
 
 def _page(request: Request, state: str, *, status: int = 200, inv=None, token: str = "",
-          message: str = "", principal: str = "") -> HTMLResponse:
+          message: str = "", principal: str = "", current_role: str | None = None,
+          can_open: bool = False) -> HTMLResponse:
     """The invitation page, in the shared public shell (no app nav or session)."""
     from .app import templates
 
@@ -71,7 +84,8 @@ def _page(request: Request, state: str, *, status: int = 200, inv=None, token: s
     response = templates.TemplateResponse(
         request, "invite_accept.html",
         {"state": state, "invite": invite, "message": message, "principal": principal,
-         "passphrase_sign_in": local_passphrases.available()},
+         "passphrase_sign_in": local_passphrases.available(), "current_role": current_role,
+         "can_open": can_open, "grant_confirmed_at": inv.grant_confirmed_at if inv else None},
         status_code=status)
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Robots-Tag"] = "noindex"
@@ -175,11 +189,13 @@ def _consume_and_bind(token: str, principal=None, *, prepared_passphrase: dict |
     from maverick.authority_effects import authority_effect_fence
 
     with authority_effect_fence():
+        from . import rbac
         pending = invites.peek_invite(token)
         if pending is None:
             return None
         target = principal.principal if principal is not None else f"user:{pending.email}"
-        if ((principal is not None and not _matches_invited_account(principal, pending))
+        if (not rbac.is_known_role(pending.role)
+                or (principal is not None and not _matches_invited_account(principal, pending))
                 or not _global_invite_issuer_allowed(pending)
                 or not _workspace_invite_allowed(pending, target)):
             return None
@@ -198,13 +214,46 @@ def _consume_and_bind(token: str, principal=None, *, prepared_passphrase: dict |
             return None
         try:
             _bind_role(target, consumed)
+            consumed = invites.confirm_grant(consumed.id, target)
         except Exception as exc:
             # Two distinct control-plane stores cannot commit atomically. Burn
             # the bearer token on uncertainty rather than let it grant another
             # identity; tell the person to request a replacement link.
-            log.exception("invitation role binding failed after redemption")
+            log.exception("invitation access save or confirmation failed after redemption")
             raise _InviteBindFailed from exc
         return consumed
+
+
+def _original_receipt(request: Request, token: str):
+    """Original accepted actor only; current membership is a separate observation."""
+    from maverick.tenant.registry import get_tenant
+
+    from . import rbac
+
+    principal = _session_principal(request)
+    inv = invites.lookup_invite(token)
+    if principal is None or inv is None or inv.used_at is None or inv.used_by != principal.principal:
+        return None
+    if (invites.local_login_mode() and principal.principal != f"user:{inv.email}") or (
+        not invites.local_login_mode() and not _matches_invited_account(principal, inv)
+    ):
+        return None
+    workspace = get_tenant(inv.tenant) if inv.tenant else None
+    current = rbac.get_tenant_role(inv.tenant, inv.used_by) if inv.tenant else rbac.get_stored_role(inv.used_by)
+    return inv, current, bool(workspace and workspace.active and current is not None)
+
+
+def _receipt_page(request: Request, token: str):
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        receipt = _original_receipt(request, token)
+        if receipt is None:
+            return None
+        inv, role, available = receipt
+        return _page(request, "accepted" if inv.grant_confirmed_at else "unconfirmed",
+                     inv=inv, token=token, current_role=role,
+                     can_open=available and inv.grant_confirmed_at is not None)
 
 
 def _matches_invited_account(principal, inv) -> bool:
@@ -231,7 +280,11 @@ async def invite_confirm(request: Request, token: str):
         return _page(request, "not_found", status=404)
     inv = invites.peek_invite(token)
     if inv is None:
-        return _gone(request)
+        return _receipt_page(request, token) or _gone(request)
+    from . import rbac
+    if not rbac.is_known_role(inv.role):
+        return _page(request, "unavailable", status=410, inv=inv, token=token,
+                     message="This invitation's role is no longer available. The link has not been used. Ask your administrator for a new invitation.")
     if invites.local_login_mode():
         return _page(request, "local", inv=inv, token=token)
     principal = _session_principal(request)
@@ -240,7 +293,7 @@ async def invite_confirm(request: Request, token: str):
         return _page(request, "sso_sign_in", inv=inv, token=token)
     if not _matches_invited_account(principal, inv):
         return _wrong_account(request, inv, token)
-    return _page(request, "sso_accept", inv=inv, token=token, principal=principal.sub)
+    return _page(request, "sso_accept", inv=inv, token=token, principal=inv.email)
 
 
 async def _passphrase_fields(request: Request) -> tuple[str, str]:
@@ -265,7 +318,7 @@ async def _accept_locally(request: Request, token: str) -> HTMLResponse | Redire
     """Local mode: set the passphrase, use up the link, sign the browser in."""
     inv = invites.peek_invite(token)
     if inv is None:
-        return _gone(request)
+        return _receipt_page(request, token) or _gone(request)
     try:
         password, _ = await _passphrase_fields(request)
         # Slow on purpose (scrypt): off the event loop, before the link is used.
@@ -286,7 +339,7 @@ async def _accept_locally(request: Request, token: str) -> HTMLResponse | Redire
     if used is None:
         return _gone(request)
     log.info("invite accepted (local): %s as %s", used.email, used.role)
-    response = RedirectResponse("/", status_code=303)
+    response = RedirectResponse(f"/auth/invite/{token}", status_code=303)
     from .oidc_login import _cookie_secure, _set_cookie
     _set_cookie(response, "mvk_session", invites.mint_local_session(used.email, request=request),
                 max_age=invites.session_ttl_seconds(),
@@ -308,7 +361,7 @@ async def invite_accept(request: Request, token: str):
         return _page(request, "sign_in_required", status=401)
     pending = invites.peek_invite(token)
     if pending is None:
-        return _gone(request)
+        return _receipt_page(request, token) or _gone(request)
     if not _matches_invited_account(principal, pending):
         return _wrong_account(request, pending, token)
     try:
@@ -319,4 +372,52 @@ async def invite_accept(request: Request, token: str):
         return _gone(request)
     log.info("invite accepted (sso): %s bound to %s (invite for %s)",
              principal.principal, inv.role, inv.email)
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/auth/invite/{token}", status_code=303)
+
+
+def _open_workspace(request: Request, token: str):
+    from maverick.authority_effects import authority_effect_fence
+
+    from .api import select_active_tenant
+
+    with authority_effect_fence():
+        receipt = _original_receipt(request, token)
+        if receipt is None:
+            return _gone(request)
+        inv, _role, available = receipt
+        if not available or inv.grant_confirmed_at is None:
+            return _page(request, "accepted" if inv.grant_confirmed_at else "unconfirmed", inv=inv,
+                         message="This workspace is not currently available to your account.")
+        try:
+            select_active_tenant(request, inv.tenant)
+        except HTTPException as exc:
+            return _page(request, "accepted", status=exc.status_code, inv=inv,
+                         message="This workspace could not be opened. Your installation may use a fixed workspace, or your access changed. Ask your administrator.")
+        return RedirectResponse("/", status_code=303)
+
+
+@router.post("/auth/invite/{token}/workspace")
+async def invite_open_workspace(request: Request, token: str):
+    """Explicit navigation after confirmed acceptance; never repeat a grant."""
+    if not invites.invites_enabled():
+        return _page(request, "not_found", status=404)
+    if not _same_origin(request):
+        return _page(request, "blocked", status=400)
+    return await run_in_threadpool(_open_workspace, request, token)
+
+
+@router.get("/api/v1/users/workspace-context")
+def workspace_people_context(request: Request):
+    """Protected form handoff contains no invitation links or roster material."""
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import auth
+    from .admin_pages import _workspace_options
+    from .draft_api import context_for
+
+    with authority_effect_fence():
+        auth.require_permission(request, "admin")
+        options, _ = _workspace_options(request)
+        if not options and not auth.has_global_permission(request, "admin"):
+            raise HTTPException(403, "You no longer manage a workspace.")
+        return {"context": context_for(request)}

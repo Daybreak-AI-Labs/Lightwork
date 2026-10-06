@@ -680,30 +680,13 @@ async def import_cases(request: Request, replace: bool = Query(default=False),
 
 @router.post("/self-harness/hold-out/set-up")
 async def set_up_hold_out(request: Request, body: ConfirmIn) -> dict:
-    """``self-harness holdout provision``: create the configured hold-out
-    record exactly once. An existing record is never replaced."""
+    """Older clients must enter the current exact reviewed setup journey."""
     require_global_permission(request, "admin")
     if not body.confirm:
         raise HTTPException(status_code=422, detail="Confirm the change first.")
-    from maverick.config import get_self_harness
-    from maverick.self_harness_holdout import HoldoutLedgerError, HoldoutQueryLedger
-    target = str(get_self_harness().get("holdout_ledger") or "").strip()
-    if not target:
-        raise HTTPException(status_code=409, detail=(
-            f"Choose where to keep the hold-out record first, in {setting_place('self_harness.holdout_ledger')}."))
-    if Path(target).exists():
-        raise HTTPException(status_code=409, detail="The hold-out record is already set up. It is never replaced.")
-    await run_in_threadpool(lambda: _record(request, "self_harness_holdout_provision"))
-
-    def _make() -> str:
-        return str(HoldoutQueryLedger.provision(Path(target)).verify().ledger_id)
-    try:
-        ledger_id = await run_in_threadpool(_make)
-    except (HoldoutLedgerError, OSError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail=(
-            "The hold-out record could not be created. It may already exist, or the folder "
-            "cannot be written.")) from exc
-    return {"created": True, "record_number": ledger_id}
+    _halt_preflight("self-harness")
+    raise HTTPException(409, {"message": "Review the exact current location and one-time initialization in Learned. Nothing was initialized by this call.",
+                              "open_review": "/learned#learning-holdout-setup"})
 
 
 # ---- suggested instruction changes: before/after preview ---------------------------

@@ -31,6 +31,8 @@ dependencies = [
     "anthropic>=0.40.0,<2",
     "click>=8.3.3",
     "httpx>=0.27",
+    # Normal in-product estimates must work offline after installation.
+    "tiktoken>=0.14,<1",
     "h11>=0.16,<1",  # Explicit bounded HTTP/1.1 model-proxy listener contract.
     # idna is pulled transitively (httpx/anthropic); floor it past PYSEC-2026-215
     # / GHSA-65pc-fj4g-8rjx so a fresh install can't resolve a vulnerable <3.15.
@@ -216,6 +218,7 @@ include = ["maverick*"]
 # they are present in a built wheel, not only an editable/source checkout.
 "maverick" = [
     "data/*.json",
+    "data/tokenizer/*",
     "domains/*.toml",
     "evaluator_anchors.lock.json",
     "evaluator_anchors/*.ndjson",

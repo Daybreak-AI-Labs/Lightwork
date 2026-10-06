@@ -36,6 +36,7 @@
     <h3 id="lpo-cases-h">Test cases</h3>
     <p class="muted">Test questions help compare how Lightwork responds before and after a proposed change.</p>
     {% include "_learning_test_cases.html" %}
+    {% include "_learning_pending_cases.html" %}
     <div class="lpo-row">
       <label for="lpo-harvest-mode">New test cases from past work</label>
       <select id="lpo-harvest-mode" class="select">
@@ -60,11 +61,7 @@
     <p class="muted" id="lpo-cases-status" role="status" aria-live="polite"></p>
     <div id="lpo-cases-out"></div>
 
-    <h3 id="lpo-holdout-h">Hold-out record</h3>
-    <p class="muted">A private record of every use of the questions kept aside for fair testing. It is set up once and
-      never replaced.</p>
-    <div id="lpo-holdout"></div>
-    <p class="muted" id="lpo-holdout-status" role="status" aria-live="polite"></p>
+    {% include '_learning_holdout_setup.html' %}
   </div>
 </div>
 <style>
