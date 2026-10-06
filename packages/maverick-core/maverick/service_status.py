@@ -31,6 +31,11 @@ TASKS_DOWN = ("Tasks that need an AI answer now stop and show “Failed”. "
               "What they already finished is kept; run them again once the service is back.")
 TASKS_REDUCED = ("Steps that need {paused} move to a backup model where one is set up; "
                  "otherwise that task stops and shows “Failed”. Tasks that use {healthy} keep working.")
+#: Another way to get the work done meanwhile (CTL-5: the fourth thing a
+#: failure message says, after what broke, what is safe and when it returns).
+ALTERNATIVE_DOWN = ("Meanwhile, an administrator can set up another AI service under Settings > AI models "
+                    "so tasks can carry on, and urgent steps can be done by hand.")
+ALTERNATIVE_REDUCED = "Meanwhile, start new work as usual: it uses {healthy}."
 
 
 def provider_name(provider: str) -> str:
@@ -101,10 +106,11 @@ def current(*, breakers: list[dict] | None = None, in_use: set[str] | None = Non
         return {"level": "reduced", "affected": affected,
                 "title": f"{affected} {verb} paused after repeated errors. Lightwork is still working with {healthy_names}.",
                 "tasks": TASKS_REDUCED.format(paused=affected, healthy=healthy_names),
+                "alternative": ALTERNATIVE_REDUCED.format(healthy=healthy_names),
                 "checks": checks, "healthy": [provider_name(name) for name in healthy]}
     return {"level": "down", "affected": affected,
             "title": f"{affected} {verb} paused after repeated errors, and no other AI service is set up to take over.",
-            "tasks": TASKS_DOWN, "checks": checks, "healthy": []}
+            "tasks": TASKS_DOWN, "alternative": ALTERNATIVE_DOWN, "checks": checks, "healthy": []}
 
 
 def safe_current() -> dict[str, Any] | None:
@@ -116,4 +122,4 @@ def safe_current() -> dict[str, Any] | None:
         return None
 
 
-__all__ = ["TASKS_DOWN", "TASKS_REDUCED", "current", "provider_name", "providers_in_use", "safe_current"]
+__all__ = ["ALTERNATIVE_DOWN", "ALTERNATIVE_REDUCED", "TASKS_DOWN", "TASKS_REDUCED", "current", "provider_name", "providers_in_use", "safe_current"]
