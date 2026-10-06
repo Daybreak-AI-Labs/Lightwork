@@ -483,7 +483,7 @@
         { label: "Checked", value: function (v) { return R.when(v.prepared_at); } },
       ], res.items || [], [
         { label: "Approve", kind: "primary", when: function () { return can.admin; }, run: approveReview },
-      ], { text: "Nothing is waiting for approval." });
+      ], { text: "Nothing is waiting for approval. Findings from a scan appear here for review." });
     } catch (f) { box.textContent = R.errorText(f, "load the approvals"); }
   }
 

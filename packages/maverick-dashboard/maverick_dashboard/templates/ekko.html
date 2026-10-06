@@ -306,7 +306,7 @@
     var target = document.getElementById('ekko-allowed-apps');
     target.textContent = '';
     if (!status.allowed_apps.length) {
-      target.appendChild(mvEl('span', 'muted', 'None yet — nothing is noticed'));
+      target.appendChild(mvEl('span', 'muted', 'None yet. Nothing is noticed until you turn watching on for this device.'));
       return;
     }
     status.allowed_apps.forEach(function (name) {

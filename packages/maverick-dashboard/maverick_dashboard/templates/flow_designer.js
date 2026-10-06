@@ -734,7 +734,7 @@
     say('Copied ' + stepName(n) + ' — press Ctrl+V to paste it.');
   }
   function pasteNode() {
-    if (!clipboard) { say('Nothing copied yet.'); return; }
+    if (!clipboard) { say('Nothing copied yet. Select a step and choose Copy first.'); return; }
     pushHistory();
     var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
     flow.nodes.push(copy); selectNode(copy.id); render();
@@ -2304,7 +2304,7 @@
           row.appendChild(nm); row.appendChild(copy); row.appendChild(rm); wl.appendChild(row);
         });
         if (mine.length) wl.appendChild(hint('In the other app, send a web request to the copied address and include the start’s name.'));
-        else wl.appendChild(hint('None yet.'));
+        else wl.appendChild(hint('None yet. Use “Let another app start this flow” below.'));
         wl.appendChild(addButton('Let another app start this flow', function () {
           apiFetch('/api/v1/triggers', { method: 'POST', body: JSON.stringify({ flow: rootFlow.id }) })
             .then(function (r) { return r.json().catch(function () { return {}; }).then(function (jj) { return { ok: r.ok, r: r, j: jj }; }); })

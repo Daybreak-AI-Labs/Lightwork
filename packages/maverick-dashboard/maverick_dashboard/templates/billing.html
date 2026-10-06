@@ -237,7 +237,7 @@
         </details></td></tr>
     {% endfor %}</tbody>
   </table></div>
-  {% else %}<p class="muted">No interrupted tasks needed an adjustment.</p>{% endif %}
+  {% else %}<p class="muted">No interrupted tasks needed an adjustment. Adjustments appear here when a stopped task is charged less.</p>{% endif %}
   {% if usage_receipts.offset > 0 %}<a class="btn" href="/billing?receipt_offset={{ [0, usage_receipts.offset - 50]|max }}#usage-reconciliation">Newer</a>{% endif %}
   {% if usage_receipts.has_more %}<a class="btn" href="/billing?receipt_offset={{ usage_receipts.offset + 50 }}#usage-reconciliation">Older</a>{% endif %}
 </section>

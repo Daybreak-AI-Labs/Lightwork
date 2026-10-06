@@ -459,7 +459,7 @@
     var list = $('llp-log');
     return get('/log?limit=30').then(function (data) {
       list.textContent = '';
-      if (!data.events.length) { list.appendChild(el('li', 'muted', 'Nothing has been learned or removed yet.')); return; }
+      if (!data.events.length) { list.appendChild(el('li', 'muted', 'Nothing has been learned or removed yet. Each change appears here when it is adopted or removed.')); return; }
       data.events.forEach(function (e) {
         var li = el('li');
         li.appendChild(el('strong', null, (when(e.when) || 'Recently') + ': ' + e.what));

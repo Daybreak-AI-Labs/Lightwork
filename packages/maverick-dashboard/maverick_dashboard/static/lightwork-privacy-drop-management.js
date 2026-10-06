@@ -587,7 +587,7 @@
   // requests, and asking would only fail. If the check itself fails, try anyway.
   refreshStatus().then(function (st) {
     if (st && st.enabled === false) {
-      showNothing("Nothing to show: California DROP requests are turned off.");
+      showNothing("Nothing to show: California DROP requests are turned off. An administrator can turn them on in Settings.");
       return;
     }
     return load();

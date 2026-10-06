@@ -119,11 +119,15 @@ def test_goal_destructive_actions_and_attachment_failures_recover():
     assert 'tabindex="-1"' in source
 
 
-def test_webhook_deletion_is_confirmed_and_surfaces_server_failure():
+def test_webhook_deletion_offers_undo_and_surfaces_server_failure():
+    # One action with a way back (CTL-1): the start leaves the list with an
+    # Undo toast naming the consequence; a refused delete puts it back and
+    # says why (window.mvUndo reports it with its action words).
     source = (TEMPLATES / "workflow_builder.html").read_text(encoding="utf-8")
-    assert "Other apps will no longer be able to start this workflow." in source
-    assert "var detail = plainErr(resp, 'delete it');" in source
-    assert "var message = plainErr(e, 'delete it');" in source
+    ui = (TEMPLATES.parent / "static" / "lightwork-ui.js").read_text(encoding="utf-8")
+    assert "Other apps can no longer start this workflow." in source
+    assert "mvUndo(translated('{name} deleted." in source and "action: 'delete it'," in source
+    assert "if (opts.undo) opts.undo();\n              window.mvFail(failure, opts.action || 'delete it');" in ui
     assert "translated('Delete the start {name}',{name:t.name})" in source
 
 

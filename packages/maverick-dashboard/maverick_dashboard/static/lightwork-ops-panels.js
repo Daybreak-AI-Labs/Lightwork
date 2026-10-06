@@ -219,7 +219,7 @@
             (v.keys_pinned ? ' Every checkpoint is signed with a pinned key.' : '') +
             (v.pinned ? ' Your kept receipt matches too.' : ' Choose a receipt you kept independently to compare checkpoint history through that receipt.')));
         } else if (v.none_yet) {
-          result.appendChild(el('p', null, 'No checkpoints have been published yet.'));
+          result.appendChild(el('p', null, 'No checkpoints have been published yet. Publish one above to fix the audit history at this point.'));
         } else {
           result.appendChild(el('p', null, 'Problems were found:'));
           var ul = el('ul');
@@ -605,7 +605,7 @@
       var data = await request('/api/v1/governance-ops/gateway');
       box.textContent = '';
       box.appendChild(el('p', null, data.summary));
-      if (!data.callers.length) { box.appendChild(el('p', 'muted', 'No app has used the AI gateway yet.')); return; }
+      if (!data.callers.length) { box.appendChild(el('p', 'muted', 'No app has used the AI gateway yet. Apps appear here after their first request through the gateway.')); return; }
       box.appendChild(table(['App', 'Team', 'AI model', 'Requests', 'Last result', 'Last used'], data.callers.map(function (c) {
         return [c.app, c.team, c.model, String(c.calls), c.last_result, when(c.last_seen)];
       }), 'Apps that used the AI gateway, most recent first'));

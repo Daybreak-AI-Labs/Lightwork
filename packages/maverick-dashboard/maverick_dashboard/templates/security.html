@@ -213,7 +213,7 @@
         <span class="muted">{{ framework.controls_implemented }} in place, {{ framework.controls_partial }} partly, of
           {{ framework.controls_applicable }} that apply</span>
       </div>
-      {% else %}<p class="sec-empty">No controls yet.</p>{% endfor %}
+      {% else %}<p class="sec-empty">No controls yet. Set them up under Controls below.</p>{% endfor %}
     </div>
   </section>
   <section class="panel">
@@ -236,7 +236,7 @@
               <td>{{ references | join(', ') if references else '—' }}</td>
             {% endfor %}
           </tr>
-        {% else %}<tr><td colspan="10" class="sec-empty">No matches yet.</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="10" class="sec-empty">No matches yet. Matches appear here once your controls are set up.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -266,7 +266,7 @@
           <td>{{ (ends | datetime) if ends is number else (ends or '—') }}</td>
           <td><span class="badge {{ 'blocked' if row.get('exception_expired') else 'warn' }}">
             {{ 'Ended' if row.get('exception_expired') else 'Ending soon' }}</span></td></tr>
-      {% else %}<tr><td colspan="4" class="sec-empty">No exceptions ending soon.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="4" class="sec-empty">No exceptions ending soon. Exceptions due within 30 days appear here.</td></tr>{% endfor %}
       </tbody>
     </table>
   </section>
@@ -440,7 +440,7 @@
       <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}" data-method="PATCH"><label>Status<select class="select" name="status">{% for st in ['open','in_progress','blocked','complete','accepted','closed'] %}<option value="{{ st }}"{% if st == row.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label><label>Note<input class="input" name="note" maxlength="2000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>
       <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}/review"><label>Why it needs another look<input class="input" name="reason" required maxlength="1000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Ask for a review</button><span role="status" class="muted"></span></form></details></td>
       <td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td><td class="{{ 'sec-overdue' if row.get('overdue') else '' }}">{{ (row.get('due_at') | datetime) if row.get('due_at') is number else (row.get('due_at') or '—') }}{% if row.get('overdue') %} (overdue){% endif %}</td><td>{{ status_words.get(row.get('status','open')) or (row.get('status') | humanize) }}</td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No fix plans yet.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No fix plans yet. Add one above for each gap you plan to close.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section {{ tab_panel('vendors', 'controls', id='sec') }}>
@@ -496,7 +496,7 @@
         </details>
         {% else %}<span class="muted">Retired. No further changes.</span>{% endif %}
       </td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No policies yet.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No policies yet. Add your first policy above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section {{ tab_panel('incidents', 'controls', id='sec') }}>
@@ -550,7 +550,7 @@
         {% for finding in row.get('findings',[]) %}<form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/findings" data-method="PATCH"><input type="hidden" name="finding_id" value="{{ finding.id }}"><p>{{ finding.get('title') or 'Finding' }}</p><label>Status<select class="select" name="status">{% for st in ['open','in_progress','resolved','remediated','accepted','closed'] %}<option value="{{ st }}"{% if st == finding.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>{% endfor %}
         {% else %}<p class="muted">This audit is finished, so its work is locked. Set it back to “In review” to change anything.</p>{% endif %}
       </details></td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No audits yet.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No audits yet. Record one above when an audit starts.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 </div>
 {% endif %}
@@ -607,7 +607,7 @@
         })
         .then(function (body) {
           if (!body.enabled) {
-            status.textContent = 'No document source is connected yet. ';
+            status.textContent = 'No document source is connected yet. Connect one in Connections to import policies. ';
             var link = document.createElement('a');
             link.className = 'btn btn--ghost'; link.href = '/connections'; link.textContent = 'Connect a document source';
             status.appendChild(link);

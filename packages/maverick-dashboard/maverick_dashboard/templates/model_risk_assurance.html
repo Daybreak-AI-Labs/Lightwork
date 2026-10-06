@@ -184,7 +184,7 @@
       <div class="assurance-table"><table><caption>Latest supplier reviews</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Risk</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
       {% for row in ai_vendor_items %}<tr><th scope="row">{{ row.vendor }}</th><td>{{ row.risk_rating|humanize }}</td><td>{{ MRA_STATUS.get(row.status, row.status|humanize) }}</td><td>{% if gateway_admin and row.status == 'pending_review' %}<button class="btn btn--ghost" type="button" data-vendor-review="{{ row.id }}" data-revision="{{ row.revision }}" aria-label="Review the {{ row.vendor }} assessment">Review</button>{% elif gateway_admin and row.status == 'approved' %}<button class="btn btn--ghost" type="button" data-vendor-project="{{ row.id }}" aria-label="Attach the {{ row.vendor }} review to an AI system">Attach to an AI system</button>{% else %}<span class="assurance-muted">—</span>{% endif %}</td></tr>{% endfor %}
       </tbody></table></div>
-      {% else %}<p class="assurance-empty">No supplier reviews yet.</p>{% endif %}
+      {% else %}<p class="assurance-empty">No supplier reviews yet. Start one below when you take on a new AI supplier.</p>{% endif %}
       <details>
         <summary>Start a supplier review</summary>
         <form id="ai-vendor-create" class="assurance-form">
@@ -243,7 +243,7 @@
       <div class="assurance-table"><table><caption>Recent drift checks</caption><thead><tr><th scope="col">AI system</th><th scope="col">Data</th><th scope="col">Result</th><th scope="col">Checked</th></tr></thead><tbody>
       {% for row in drift_monitoring_items[:20] %}<tr><th scope="row">{{ mra_name(row.asset_id) }}</th><td>{{ row.source_id|humanize }}</td><td>{{ MRA_STATUS.get(row.result, row.result|humanize) }}</td><td>{% if row.observed_at %}{{ row.observed_at|datetime }}{% else %}—{% endif %}</td></tr>{% endfor %}
       </tbody></table></div>
-      {% else %}<p class="assurance-empty">No drift checks yet.</p>{% endif %}
+      {% else %}<p class="assurance-empty">No drift checks yet. Results appear here once a monitored AI system reports a check.</p>{% endif %}
       {% endif %}
     </section>
   </div>
@@ -579,7 +579,7 @@
           <td>Not checked yet</td><td>Never finished</td><td>0</td>
           {% endif %}
         </tr>
-      {% else %}<tr><td colspan="4">No accounts are connected yet.</td></tr>{% endfor %}</tbody>
+      {% else %}<tr><td colspan="4">No accounts are connected yet. Connect a cloud account to find its AI systems.</td></tr>{% endfor %}</tbody>
     </table></div>
 
     {% if gateway_admin and ai_inventory_connectors %}
@@ -633,7 +633,7 @@
           <td>{{ row.connector|humanize }}</td>
           <td>{{ MRA_STATUS.get(row.status, row.status|humanize) }}{% if row.error_type %}<br><span class="assurance-status-stale">It failed.</span>{% endif %}</td>
           <td>{{ row.asset_count|default(0, true) }}</td>
-        </tr>{% else %}<tr><td colspan="4">No checks yet.</td></tr>{% endfor %}</tbody>
+        </tr>{% else %}<tr><td colspan="4">No checks yet. Each search of a connected account appears here.</td></tr>{% endfor %}</tbody>
       </table></div>
     </details>
   {% endif %}
@@ -668,7 +668,7 @@
           <span class="assurance-muted">as of {{ row.framework.as_of|default("unknown", true) }}</span></td>
         <td>{{ row.coverage|humanize }}<br>{{ row.control_count }} control(s)</td>
         <td>{{ row.provenance_kind|humanize }}</td>
-      </tr>{% else %}<tr><td colspan="4">No packs are prepared yet.</td></tr>{% endfor %}</tbody>
+      </tr>{% else %}<tr><td colspan="4">No packs are prepared yet. An administrator can prepare one.</td></tr>{% endfor %}</tbody>
     </table></div>
     {% if policy_pack_catalog.truncated %}<p class="assurance-muted">Only the first page of prepared packs is shown.</p>{% endif %}
 
@@ -1339,7 +1339,7 @@ window.mraFailure = response => {
         } else { action.textContent = "—"; }
         portalInvitations.appendChild(row);
       });
-      if (!invitations.length) emptyRow(portalInvitations, "No access codes yet.", 4);
+      if (!invitations.length) emptyRow(portalInvitations, "No access codes yet. Create one to invite a supplier to answer.", 4);
       const submissions = Array.isArray(submissionPage.items) ? submissionPage.items : [];
       submissions.forEach(item => {
         const row = document.createElement("tr"); cell(row, item.vendor); cell(row, STATUS[item.status] || human(item.status)); cell(row, when(item.submitted_at)); const action = cell(row, "");
@@ -1356,7 +1356,7 @@ window.mraFailure = response => {
         } else { action.textContent = "—"; }
         portalSubmissions.appendChild(row);
       });
-      if (!submissions.length) emptyRow(portalSubmissions, "No answers received yet.", 4);
+      if (!submissions.length) emptyRow(portalSubmissions, "No answers received yet. Answers appear here when a supplier sends them.", 4);
     } catch (error) {
       // Neither list arrived: say so in both tables instead of "Loading…"; the
       // line above them says why and what to do.

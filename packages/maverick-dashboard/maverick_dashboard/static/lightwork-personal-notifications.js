@@ -119,7 +119,7 @@
     const active = document.activeElement;
     const restoreId = active && active.dataset ? active.dataset.alertId : null;
     items.replaceChildren();
-    if (!state.items.length) { const empty = document.createElement('p'); empty.textContent = 'No current personal alerts. Action Center remains available for decisions.'; items.append(empty); }
+    if (!state.items.length) { const empty = document.createElement('p'); empty.textContent = 'No current personal alerts. Alerts appear here when a task you started needs you or finishes; decisions stay in Action Center.'; items.append(empty); }
     state.items.forEach(function (item) {
       const row = document.createElement('article');
       const heading = document.createElement('h3'); const link = document.createElement('a');

@@ -83,7 +83,7 @@
     {% endif %}
   </p>
   {% else %}
-  <p class="muted">Nothing needs attention right now.</p>
+  <p class="muted">Nothing needs attention right now. Items appear here when a control fails or a review is due.</p>
   {% endif %}
   {% for name, section in attention.sections.items() %}{% if section.error %}
   <p class="muted">{{ name|humanize }} alerts could not be loaded. The other alerts are shown above.</p>
@@ -109,7 +109,7 @@
       <td><button class="btn btn--ghost" type="button" data-fria-open-record="{{ row.id }}" data-revision="{{ row.revision }}" aria-label="Work on the assessment for {{ ASSET_NAMES.get(row.asset_id, 'this AI system') }}">Work on it</button></td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">No assessments yet. Starting one takes under a minute.</p>{% endif %}
+  {% else %}<p class="muted">No assessments yet. Start one below; it takes under a minute.</p>{% endif %}
   <form id="fria-open" class="gov-form">
     {{ asset_select('Which AI system is being assessed?') }}
     <label>Where will it be used?
@@ -222,7 +222,7 @@
       <td><button class="btn btn--ghost" type="button" data-pmm-review="{{ row.asset_id }}" data-revision="{{ row.revision }}" aria-label="Record a review of the plan for {{ ASSET_NAMES.get(row.asset_id, 'this AI system') }}">Record a review</button></td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">No monitoring plans recorded yet.</p>{% endif %}
+  {% else %}<p class="muted">No monitoring plans recorded yet. Record one below for each AI system you watch after launch.</p>{% endif %}
   <form id="pmm-record" class="gov-form">
     {{ asset_select('Which AI system?') }}
     <label>Link to the plan
@@ -244,7 +244,7 @@
       <td>{{ REGISTRY.get(row.registry, row.registry|humanize) }}</td><td>{{ row.reference }}</td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">No registrations recorded yet.</p>{% endif %}
+  {% else %}<p class="muted">No registrations recorded yet. Record one below when an AI system is registered with a regulator.</p>{% endif %}
   <form id="registration-record" class="gov-form">
     {{ asset_select('Which AI system?') }}
     <label>Why is it registered?
@@ -624,7 +624,7 @@
       <td>{{ row.remote_id or "—" }}</td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">Nothing has been sent yet.</p>{% endif %}
+  {% else %}<p class="muted">Nothing has been sent yet. Records sent with the form below are listed here.</p>{% endif %}
   <form id="gov-grc-run" class="gov-form">
     <details class="gov-form__wide"><summary>Options</summary>
       <label>Most records to send this time<input class="input" type="number" name="limit" min="1" max="200" step="1" value="50" required></label>

@@ -1005,7 +1005,7 @@
       <p class="assurance-muted">Only an administrator who is signed in can use the agent identity controls.</p>
       {% endif %}
     </details>
-    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session.</p>
+    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session. Choose a connected service and select Read now.</p>
     <details open>
       <summary>Identities</summary>
       <div class="assurance-table"><table>
@@ -2117,7 +2117,7 @@
         displayTime(item.expires_at)
       ], {kind: "signal", key: item.signal_id || item.id, label: words(item.signal_code || item.category),
           fields: {signal_id: item.signal_id || item.id, expected_revision: item.revision}}));
-      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet.");
+      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet. Signals appear here as monitoring reports on it.");
       document.querySelectorAll("select[data-signal-options]").forEach(select => {
         select.replaceChildren(new Option("Choose the newer signal", ""));
         signals.forEach(item => select.appendChild(new Option(`${words(item.signal_code || item.category)} (${displayTime(item.observed_at)})`, item.signal_id || item.id)));
@@ -3077,7 +3077,7 @@
         displayTime(item.observed_at), item.current === true ? "Yes" : "No"
       ], {kind: "observation", key: item.observation_id, label: words(item.normalized?.ai_product_code || "observation"),
           fields: {observation_id: item.observation_id}}));
-      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. No discovery-completeness conclusion is shown.");
+      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. Observations appear here after a discovery run. No discovery-completeness conclusion is shown.");
       setStatus("ai-discovery-observation-list-status", `${rows.length} observation(s) shown.`);
     } catch (error) {
       clear(target); emptyRow(target, 5, "Observations could not be loaded. No live collection or completeness conclusion is shown. Refresh the page and try again.");

@@ -128,7 +128,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions in this window.' }}</p>
+    <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions in this window. Stops, holds and approvals appear here when a person or rule steps in.' }}</p>
     {% endif %}
   </div>
 
@@ -184,7 +184,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions on this day.' }}</p>
+      <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions on this day. Choose another day above to compare.' }}</p>
       <p><button type="button" class="btn btn--ghost" id="ov-pick-day">Pick another day</button></p>
     {% endif %}
   </div>
@@ -293,7 +293,7 @@
           (window.mvMoney ? window.mvMoney(Number(d.cost_dollars || 0)) : '$' + Number(d.cost_dollars || 0).toFixed(2)) + (counts ? ' · ' + counts : '')));
         var evs = d.events || [];
         if (!evs.length) {
-          panel.appendChild(el('p', 'muted', 'No steps recorded yet.'));
+          panel.appendChild(el('p', 'muted', 'No steps recorded yet. Steps appear here as the task runs.'));
         } else {
           var ol = el('ol');
           evs.forEach(function (e) {

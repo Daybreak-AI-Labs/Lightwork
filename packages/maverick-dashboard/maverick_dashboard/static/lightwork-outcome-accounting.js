@@ -902,7 +902,7 @@
     }
     const records = node('section', undefined, 'op-accounting-records');
     records.appendChild(node('h3', 'Visible outcome records'));
-    if (!validated.records.length) records.appendChild(node('p', 'No admitted outcome records are visible in this scope.'));
+    if (!validated.records.length) records.appendChild(node('p', 'No admitted outcome records are visible in this scope. Records appear here when a pilot task finishes and its outcome is recorded.'));
     validated.records.forEach((record, index) => records.appendChild(renderRecord(record, index, generation)));
     fragments.push(records);
     host.replaceChildren(...fragments);

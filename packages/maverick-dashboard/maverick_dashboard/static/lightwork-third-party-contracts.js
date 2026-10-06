@@ -239,7 +239,7 @@
         { label: "What happened", value: function (h) { return words(h.event_type); } },
         { label: "By", value: function (h) { return personName(h.actor_ref); } },
         { label: "Changed", value: function (h) { return (h.changed_fields || []).map(words).join(", ") || "—"; } },
-      ], d.items || [], [], { text: "No history yet." });
+      ], d.items || [], [], { text: "No history yet. Changes to this record appear here." });
     }, fail(listStatus, "load the history"));
   }
   function tombstone(r, host) {

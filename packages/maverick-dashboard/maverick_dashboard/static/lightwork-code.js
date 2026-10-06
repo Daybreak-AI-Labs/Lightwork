@@ -123,7 +123,7 @@
     var props = summary.proposals || [];
     if (!props.length) {
       var start = canAdmin && (summary.repos || []).length ? button("Start a change", "btn--primary", function () { pickRepo(""); }) : null;
-      emptyRow(body, 7, "No proposed changes yet.", start);
+      emptyRow(body, 7, "No proposed changes yet. Changes appear here when an agent proposes one; ask for one in Chat.", start);
       return;
     }
     props.forEach(function (p) {

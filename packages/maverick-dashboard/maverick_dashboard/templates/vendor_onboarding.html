@@ -121,7 +121,7 @@
           <label for="vo-document-target">Add search results to</label><select id="vo-document-target" class="select"><option value="new">New request</option><option value="selected">Selected request</option></select>
           <button id="vo-search-documents" class="btn" type="button">Search Drive</button>
           <div id="vo-document-results" aria-live="polite"></div>
-          <div id="vo-new-documents" aria-live="polite">No Drive documents selected for the new request.</div>
+          <div id="vo-new-documents" aria-live="polite">No Drive documents selected for the new request. Choose documents above to attach them.</div>
           <div hidden><label for="vo-document">Chosen Drive documents</label><textarea id="vo-document" maxlength="2056" rows="3"></textarea></div>
           <label for="vo-project">Jira project (short name shown in ticket numbers, like VEND)</label><input id="vo-project" class="input" required maxlength="32">
           <label for="vo-purpose">What you plan to use this vendor for</label><textarea id="vo-purpose" class="input" required maxlength="2000"></textarea>
@@ -155,7 +155,7 @@
           <button id="vo-assess" class="btn" type="button" disabled>Build assessment</button>
           <button id="vo-renew" class="btn" type="button" disabled>Start renewal or reevaluation</button>
         </div>
-        <h3>Evidence</h3><div id="vo-evidence">No request selected.</div>
+        <h3>Evidence</h3><div id="vo-evidence">No request selected. Choose a request in the list to see its evidence.</div>
         <div id="vo-evidence-controls">
           <p>Use Search Drive and choose “Selected request” to add another document.</p>
           <div id="vo-selected-documents"></div>
@@ -209,7 +209,7 @@
       <section class="vo-card" aria-labelledby="vo-action-title">
         <h2 id="vo-action-title">Jira ticket</h2>
         <p>Review the ticket below. Your approval applies only to this exact ticket.</p>
-        <div id="vo-operation">No ticket prepared.</div>
+        <div id="vo-operation">No ticket prepared. Choose a request, then prepare its ticket here.</div>
         <details hidden><summary>Technical details</summary><pre id="vo-operation-record"></pre></details>
         <div class="vo-actions">
           <button id="vo-approve" class="btn btn--primary" type="button" disabled>Approve this exact Jira task</button>

@@ -88,7 +88,7 @@
     R.table(document.getElementById('png-records'), [
       { label: 'Notice', value: function (e) { return name(e.notice_id); } },
       { label: 'Created', value: function (e) { return R.when(e.created_at); } },
-    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet.' });
+    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet. Records appear here when a notice version is published.' });
 
     var q = data.queue || {};
     var waiting = (q.pending || 0) + (q.leased || 0);

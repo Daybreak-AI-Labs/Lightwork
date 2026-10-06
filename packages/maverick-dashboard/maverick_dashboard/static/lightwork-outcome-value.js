@@ -647,7 +647,7 @@
       selector.replaceChildren(node('option', 'Choose an admitted case'));
       selector.firstChild.value = '';
       exportButton.disabled = true;
-      statusHost.textContent = 'No pilot cohort selected.';
+      statusHost.textContent = 'No pilot cohort selected. Choose a cohort above to see its value.';
       return false;
     }
     statusHost.textContent = 'Loading the exact pilot cohort…';

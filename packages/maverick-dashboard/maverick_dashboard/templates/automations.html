@@ -507,7 +507,7 @@
     var sum = data.summary || {}, runs = data.runs || [];
     var total = Object.keys(sum).reduce(function (a, k) { return a + sum[k]; }, 0);
     into.textContent = '';
-    if (!total) { into.textContent = 'No runs yet'; return; }
+    if (!total) { into.textContent = 'No runs yet. Runs appear here after the first scheduled or connected start.'; return; }
     var failed = (sum.failed || 0) + (sum.error || 0);
     into.appendChild(document.createTextNode(total + (total === 1 ? ' run' : ' runs')));
     if (sum.done) into.appendChild(document.createTextNode(' · ✓ ' + sum.done));

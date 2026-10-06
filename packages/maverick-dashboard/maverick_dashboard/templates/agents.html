@@ -1418,7 +1418,7 @@
       (jd.responsibilities||[]).forEach(function(w){
         var li=document.createElement('li'); li.textContent=w.name?(w.name+' — '+(w.instruction||'')):String(w); resp.appendChild(li);
       });
-      if(!(jd.responsibilities||[]).length){ resp.innerHTML='<li class="sub">No steps listed yet.</li>'; }
+      if(!(jd.responsibilities||[]).length){ resp.innerHTML='<li class="sub">No steps listed yet. Add steps to its playbook in the editor.</li>'; }
       el('jc-deliver').textContent=(jd.deliverable||'—')+
         (jd.cadence?(' · '+jd.cadence):'')+(jd.gate?(' · needs '+(jd.gate==='approval'?'someone to approve':'someone to review')):'');
       chips(el('jc-tools'), (jd.tools||[]).map(function(t){ return window.mvHuman?mvHuman(t):t; }));

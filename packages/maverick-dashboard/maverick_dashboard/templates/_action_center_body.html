@@ -42,7 +42,7 @@
       if (!r.ok) throw r;
       var q = await r.json();
       counts.textContent = q.waiting + ' waiting · ' + q.running + ' running · ' + q.finished + ' finished · ' + q.failed + ' failed';
-      if (!q.failed_items.length) { box.append(el('p', 'muted', 'Nothing has failed.')); return; }
+      if (!q.failed_items.length) { box.append(el('p', 'muted', 'Nothing has failed. Failed work appears here with what went wrong.')); return; }
       var table = el('table'), head = el('thead'), row = el('tr');
       ['What', 'Problem', 'Tries', 'When', ''].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; row.append(th); });
       head.append(row); table.append(head);

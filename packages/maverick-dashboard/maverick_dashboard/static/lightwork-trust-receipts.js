@@ -335,7 +335,7 @@
 
   loadStatus().then(function (st) {
     if (st.days.length) { return loadRows(st.days[0]); }
-    say("rcp-rows-note", "No activity has been recorded yet.");
+    say("rcp-rows-note", "No activity has been recorded yet. Receipts appear here as agents act.");
     return null;
   }).catch(function (failure) {
     mark("danger", "Unavailable", "Trust receipts are not available", errorText(failure, "load trust receipts"));

@@ -504,7 +504,7 @@
     ], c.tasks || [], [
       { label: "Mark complete", when: function (t) { return !c.decision && t.status === "open"; }, run: function (t) { caseTask(c, t, "complete"); } },
       { label: "Not needed", when: function (t) { return !c.decision && t.status === "open"; }, run: function (t) { caseTask(c, t, "waived"); } },
-    ], { text: "No tasks yet." });
+    ], { text: "No tasks yet. Tasks appear here when a review asks for follow-up." });
     host.appendChild(R.el("p", "muted", (c.evidence || []).length + " piece(s) of evidence recorded."));
     window.mvReveal(host);
   }
@@ -571,7 +571,7 @@
       { label: "Vendor", value: function (a) { return vendorName(a.vendor_id); } },
       { label: "Found", value: function (a) { return R.when(a.created_at); } },
       { label: "Source", value: function (a) { return (a.citations || []).map(function (c) { return c.title; }).join(", ") || "—"; } },
-    ], S.alerts.slice().sort(function (a, b) { return b.created_at - a.created_at; }), [], { text: "No changes found yet." });
+    ], S.alerts.slice().sort(function (a, b) { return b.created_at - a.created_at; }), [], { text: "No changes found yet. Changes appear here when a watched source reports one." });
   }
   function watch(v) {
     var kinds = availableKinds("monitoring");

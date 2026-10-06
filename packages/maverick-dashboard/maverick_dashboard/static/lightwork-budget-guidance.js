@@ -61,7 +61,7 @@
     }
     var forecast = document.getElementById('budget-forecast'); forecast.replaceChildren();
     paragraph(forecast, value.forecast.message || value.forecast.price_basis || states[value.forecast.state] || 'Forecast unavailable. Refresh the preview in a minute.');
-    if (value.forecast.state === 'available' && !value.forecast.items.length) paragraph(forecast, 'No owned active schedule is currently due before the daily reset.');
+    if (value.forecast.state === 'available' && !value.forecast.items.length) paragraph(forecast, 'No schedule of yours runs before the daily reset. Schedules you set up in Automations appear here when they are due.');
     value.forecast.items.forEach(function (row) { var item = node('p'); item.appendChild(link(row.title, row.href, true)); item.appendChild(node('span', ' — {date}: {risk}. ', {date:date(row.due_at), risk:text(row.risk)})); item.appendChild(node('span', row.detail)); forecast.appendChild(item); });
     if (value.warnings_state !== 'available') paragraph(out, 'Budget notices could not be refreshed; the ledger preview remains separate. Refresh the page and try again.');
     (value.warnings || []).forEach(function (row) {
@@ -77,7 +77,7 @@
       var data = await call('/api/v1/budget/cases', null, signal);
       if (signal.aborted || data.context !== context) return;
       out.replaceChildren();
-      if (!data.items.length) paragraph(out, 'No accounting help requests in your current scope.');
+      if (!data.items.length) paragraph(out, 'No accounting help requests yet. Requests appear here when someone asks Finance to review a cost.');
       data.items.forEach(function (row) {
         var card = node('section'); card.className = 'panel'; var heading = node('h3'); heading.appendChild(content('bdi', row.provider)); heading.append(' · '); heading.appendChild(content('bdi', period(row.period))); card.appendChild(heading);
         paragraph(card, '{reference}: {state}. Assigned to: {assignee}', {reference:row.id, state:state(row.state), assignee:row.assigned_to || text('Installation administrator queue')});

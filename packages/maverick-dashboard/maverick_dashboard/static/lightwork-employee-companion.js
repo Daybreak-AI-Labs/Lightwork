@@ -390,7 +390,7 @@
     var events = el("ec-events");
     events.textContent = "";
     var activity = Array.isArray(data.events) ? data.events : [];
-    if (!activity.length) { tableEmpty(events, "No companion activity recorded yet."); }
+    if (!activity.length) { tableEmpty(events, "No companion activity recorded yet. Activity appears here when you use your companion."); }
     var actions = {
       policy_updated: "Policy changed", policy_changed: "Policy changed", policy_saved: "Policy saved",
       reply: "Companion question answered", message: "Task question answered", message_answered: "Task question answered", read: "Task status checked",

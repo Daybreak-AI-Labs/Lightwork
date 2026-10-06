@@ -5,5 +5,5 @@
      {{ spend_freshness(view.spend_recorded_at, live=true) }}
 #}
 {% macro spend_freshness(ts, live=false, extra_class='') -%}
-<p class="muted mv-freshness{{ ' ' ~ extra_class if extra_class }}" data-mv-freshness>{% if ts %}Spending updated {{ ts | datetime }}.{% if live %} Work still running counts as it spends.{% endif %}{% else %}No spending recorded yet.{% endif %}</p>
+<p class="muted mv-freshness{{ ' ' ~ extra_class if extra_class }}" data-mv-freshness>{% if ts %}Spending updated {{ ts | datetime }}.{% if live %} Work still running counts as it spends.{% endif %}{% else %}No spending recorded yet. It appears here once a task uses an AI service.{% endif %}</p>
 {%- endmacro %}

@@ -129,7 +129,7 @@
         {% if row.get('declared_status') and row.get('declared_status') != row.get('status') %}
           <span class="rpt-muted">(marked {{ row.get('declared_status') | humanize | lower }})</span>
         {% endif %}</td></tr>
-  {% else %}<tr><td colspan="4" class="muted">No gaps to show.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="4" class="muted">No gaps to show. Gaps appear here when a control fails its check.</td></tr>{% endfor %}
   </tbody></table>
 </div>
 <script>
