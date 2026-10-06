@@ -70,7 +70,7 @@
     {# Destinations arrive from GET /nav/finder only when the finder opens. #}
     <ul class="navfinder__results" id="navfinder-results" role="listbox"
         aria-label="{{ ut("Search results") }}" lang="{{ ul("Search results") }}"
-        data-navfinder-src="/nav/finder"{% if _people_search %} data-navfinder-people="/nav/finder/people"{% endif %}{% if record_search_context %} data-navfinder-records{% endif %}>
+        data-navfinder-src="/nav/finder" data-navfinder-find="/nav/finder/find"{% if _people_search %} data-navfinder-people="/nav/finder/people"{% endif %}{% if record_search_context %} data-navfinder-records{% endif %}>
       {% for _id in _commands %}{% set _copy = _command_copy[_id] %}
       <li role="none"><a id="navfinder-action-{{ _id }}" href="{{ _copy.href }}" role="option" tabindex="-1" aria-selected="false"
          data-navfinder-action="{{ _id }}" data-label="{{ _copy.label }}|{{ ut(_copy.label) }}" data-heading=""

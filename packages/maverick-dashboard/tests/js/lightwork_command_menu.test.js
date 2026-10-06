@@ -48,7 +48,7 @@ function commandItems(names) {
     `><span class="navfinder__label">${label}</span><span class="navfinder__group">Command</span></a></li>`).join("");
 }
 
-function menu({ people = true, records = true, composer = false, armed = false, commands = null, sidebar = "" } = {}) {
+function menu({ people = true, records = true, composer = false, armed = false, commands = null, sidebar = "", find = false } = {}) {
   const dom = new JSDOM(`<!doctype html><body class="${armed ? "halt-armed" : ""}">${sidebar}
     <button id="navfinder-open"></button><button id="nav-toggle"></button>
     <a href="#" id="halt-pill" role="button" data-can-halt="true">Running</a>
@@ -56,7 +56,7 @@ function menu({ people = true, records = true, composer = false, armed = false, 
     <dialog id="navfinder-dialog"><button id="navfinder-close"></button>
       <div><span id="navfinder-mode" hidden></span><input id="navfinder-input"></div>
       <p id="navfinder-count"></p>
-      <ul id="navfinder-results"${people ? ' data-navfinder-people="/nav/finder/people"' : ""}${records ? " data-navfinder-records" : ""}>${pageItems()}${commandItems(commands)}</ul>
+      <ul id="navfinder-results"${find ? ' data-navfinder-find="/nav/finder/find"' : ""}${people ? ' data-navfinder-people="/nav/finder/people"' : ""}${records ? " data-navfinder-records" : ""}>${pageItems()}${commandItems(commands)}</ul>
       <p id="navfinder-empty" hidden>No matching pages. Try a broader search.</p>
       <template id="navfinder-empty-copy"><span data-scope="actions">No matching commands.</span><span data-scope="people">No matching people.</span><span data-scope="approvals">Nothing is waiting for your decision.</span></template>
     </dialog></body>`, { runScripts: "outside-only", url: "https://lightwork.test/overview" });
@@ -318,5 +318,48 @@ test("an empty box starts with the person's pinned and recent pages, which also 
   // "support" are synonyms that do); among equal matches -- an "s" inside the
   // name -- pinned pages lead, in pin order, before other pages.
   assert.deepEqual(ui.type("/ s"), ["/settings", "/agent-control-plane", "/help", "/users", "/goals", "/approvals"]);
+  ui.dom.window.close();
+});
+
+test("plain search also finds people, agents and specialists, approvals and help from the server", async () => {
+  const ui = menu({ find: true });
+  ui.responses.push({ ok: true, json: { results: [
+    { kind: "specialist", title: "Finance", labels: ["Finance", "Finance specialist"], context: "Financial analysis", href: "/agents?name=finance" },
+    { kind: "approval", title: "Shell", labels: ["Shell"], context: "High risk", href: "/approvals#approval-7" },
+    { kind: "person", title: "Dana Admin", labels: ["Dana Admin"], context: "Administrator", href: "/users?q=Dana%20Admin#people" },
+    { kind: "help", title: "Invite a colleague", labels: ["Invite a colleague"], context: "Administrator", href: "/help#how-invite" },
+    { kind: "agent", title: "Smuggled", labels: ["Smuggled"], context: "", href: "https://evil.example/" },
+    { kind: "secret", title: "Unknown kind", labels: [], context: "", href: "/agents?name=x" },
+  ] } });
+  ui.type("finance specialist");
+  assert.equal(ui.timers.length, 1);
+  ui.timers.shift()();
+  await ui.flush();
+  assert.deepEqual(ui.fetches.map((call) => [call.method, call.url]), [["GET", "/nav/finder/find?q=finance%20specialist"]]);
+  // The exact name ranks first; rows the server did not vouch for are dropped.
+  assert.equal(ui.visible()[0], "/agents?name=finance");
+  assert.ok(!ui.visible().some((href) => href.startsWith("https:") || href === "/agents?name=x"));
+  const option = ui.doc.querySelector('[href="/agents?name=finance"]');
+  assert.match(option.textContent, /Specialist › Financial analysis/);
+  // A narrowed search hides them, and a one-letter search asks for nothing.
+  ui.type(">finance specialist");
+  assert.ok(!ui.visible().includes("/agents?name=finance"));
+  ui.type("f");
+  assert.equal(ui.timers.length, 0);
+  ui.dom.window.close();
+});
+
+test("a match only in an agent's description stays below the named records", async () => {
+  const ui = menu({ find: true });
+  ui.responses.push({ ok: true, json: { results: [
+    { kind: "specialist", title: "Curator", labels: ["Curator", "Curator specialist"], context: "Turns stale drafts into articles", href: "/agents?name=cx_kb_curator" },
+  ] } });
+  ui.type("stale draft");
+  ui.timers.shift()();
+  await ui.flush();
+  ui.finder.setRecords([{ kind: "task", id: "2", title: "Archive the stale draft files", href: "/chat/goal/2", state: "done", revision: "" }]);
+  assert.deepEqual(ui.visible(), ["/chat/goal/2", "/agents?name=cx_kb_curator"]);
+  const order = [...ui.doc.querySelectorAll("#navfinder-results a[role=option]:not([hidden])")].map((option) => option.getAttribute("href"));
+  assert.deepEqual(order, ["/chat/goal/2", "/agents?name=cx_kb_curator"], "the screen order matches the arrow-key order");
   ui.dom.window.close();
 });

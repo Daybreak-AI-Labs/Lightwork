@@ -38,6 +38,9 @@
     var recordOptions = [];
     var settingOptions = [];
     var peopleOptions = [];
+    // People, agents and specialists, waiting approvals and help from the
+    // server's own permission-checked search (/nav/finder/find).
+    var foundOptions = [], weakFound = [];
     var choiceOptions = [];
     var activeIndex = -1;
     var returnFocus = null;
@@ -52,6 +55,8 @@
     var peopleSource = results.getAttribute("data-navfinder-people");
     var recordsOn = results.getAttribute("data-navfinder-records") !== null;
     var peopleTimer = null, peopleGeneration = 0;
+    var findSource = results.getAttribute("data-navfinder-find");
+    var findTimer = null, findGeneration = 0;
     // The destinations are server-rendered by GET /nav/finder (the same
     // role-filtered registry as the sidebar) and inserted on first open, so
     // every page does not carry the whole list. The list is never built here.
@@ -175,16 +180,29 @@
           entries.push({option: option, kind: mine ? 1 + mine[0] : 3, index: mine ? mine[1] : index});
         });
       }
+      // A person, agent, approval or help topic named exactly what was typed
+      // outranks a page that only partly matches; equal matches list pages first.
+      if (scope === "all" && terms.length) {
+        foundOptions.forEach(function (option, index) { entries.push({option: option, kind: 4, index: index}); });
+      }
       entries.forEach(function (entry) {
         entry.score = terms.length ? score(entry.option, query, terms) : 1;
         // Before the commands while nothing is typed.
         if (!terms.length && (entry.kind === 1 || entry.kind === 2)) entry.kind -= 3;
+        // The server matched it (question words aside), so it always shows.
+        if (entry.kind === 4 && !entry.score) entry.score = 1;
       });
+      // A person, agent or topic that matched only in its description waits
+      // below the records (filterResults), so it never pushes a named task down.
+      weakFound = entries.filter(function (entry) { return entry.kind === 4 && entry.score <= 1; })
+        .map(function (entry) { return entry.option; });
+      entries = entries.filter(function (entry) { return !(entry.kind === 4 && entry.score <= 1); });
       return entries.sort(function (a, b) { return b.score - a.score || a.kind - b.kind || a.index - b.index; });
     }
 
     function rankable(item) {
-      return !!(item.querySelector && (item.querySelector("[data-navfinder-target]") || item.querySelector("[data-navfinder-action]")));
+      return !!(item.querySelector && (item.querySelector("[data-navfinder-target]") || item.querySelector("[data-navfinder-action]") ||
+        item.querySelector("[data-navfinder-found]")));
     }
 
     // Keep the listbox in the order people hear and arrow through: ranked
@@ -257,6 +275,9 @@
         parts.push(["{count} setting shown", "{count} settings shown", shown(settingOptions)]);
       }
       if (scope === "people") parts.push(["{count} person shown", "{count} people shown", shown(peopleOptions)]);
+      if (scope === "all" && shown(foundOptions)) {
+        parts.push(["{count} person, agent, approval or help topic", "{count} people, agents, approvals or help topics", shown(foundOptions)]);
+      }
       return parts;
     }
 
@@ -319,6 +340,7 @@
       var ranked = rank(scope, normalise(query.text));
       actionOptions.forEach(function (option) { hide(option, true); });
       pageOptions.forEach(function (option) { hide(option, true); });
+      foundOptions.forEach(function (option) { hide(option, true); });
       ranked.forEach(function (entry) { hide(entry.option, !entry.score); });
       var order = ranked.map(function (entry) { return entry.option.id; }).join(",");
       if (order !== placedOrder) {
@@ -332,8 +354,12 @@
       });
       peopleOptions.forEach(function (option) { hide(option, scope !== "people"); });
       choiceOptions.forEach(function (option) { hide(option, scope !== mode || !matchesChoice(option, query.text)); });
+      weakFound.forEach(function (option) {
+        hide(option, false);
+        if (option.parentElement && typeof results.appendChild === "function") results.appendChild(option.parentElement);
+      });
       options = ranked.map(function (entry) { return entry.option; })
-        .concat(recordOptions, settingOptions, peopleOptions, choiceOptions);
+        .concat(recordOptions, weakFound, settingOptions, peopleOptions, choiceOptions);
 
       var visible = visibleOptions();
       writeCount(scope);
@@ -434,6 +460,8 @@
       var query = parsed();
       if (query.scope === "people") searchPeople(query.text);
       else if (peopleOptions.length) setPeople([]);
+      if (query.scope === "all") searchFound(query.text);
+      else if (foundOptions.length) setFound([]);
       filterResults();
       queryChanged("input");
     });
@@ -612,6 +640,48 @@
       }, 200);
     }
 
+    // People, agents and specialists, approvals and help topics for an
+    // ordinary search. Each row is checked on the server for this person;
+    // only these destinations are accepted.
+    var FOUND_KINDS = {person: "People", specialist: "Specialist", agent: "Agent", approval: "Approval waiting", help: "Help"};
+    var FOUND_HREF = /^\/(?:users\?q=[^#\s]*#people|agents\?name=[A-Za-z0-9%_.-]+|approvals#approval-[A-Za-z0-9_-]{1,64}|help#how-[a-z0-9-]+)$/;
+    function setFound(rows) {
+      foundOptions.forEach(function (option) { option.parentElement.remove(); }); foundOptions = [];
+      rows.forEach(function (row, index) {
+        if (!row || !FOUND_KINDS[row.kind] || typeof row.title !== "string" || typeof row.href !== "string" || !FOUND_HREF.test(row.href)) return;
+        var built = resultRow("navfinder-found-", index, row, row.kind !== "help");
+        var labels = Array.isArray(row.labels) ? row.labels.filter(function (label) { return typeof label === "string"; }) : [];
+        built.option.setAttribute("data-navfinder-found", row.kind);
+        built.option.setAttribute("data-label", (labels.length ? labels : [row.title]).join("|"));
+        built.option.setAttribute("data-search", row.title + " " + (row.context || ""));
+        var kind = doc.createElement("span"); copy(kind, FOUND_KINDS[row.kind]);
+        built.description.appendChild(kind);
+        if (row.context) {
+          var context = doc.createElement("bdi"); context.lang = "und"; context.dir = "auto"; context.setAttribute("data-user-content", "");
+          context.textContent = String(row.context).slice(0, 160); built.description.append(doc.createTextNode(" › "), context);
+        }
+        results.appendChild(built.entry);
+        foundOptions.push(built.option); bindOption(built.option);
+      });
+      placedOrder = "";
+      filterResults();
+    }
+
+    function searchFound(text) {
+      var generation = ++findGeneration;
+      if (findTimer) global.clearTimeout(findTimer);
+      if (!findSource || Array.from(String(text || "").replace(/\s+/g, "")).length < 2) { if (foundOptions.length) setFound([]); return; }
+      findTimer = global.setTimeout(function () {
+        findTimer = null;
+        global.mvFetchJSON(findSource + "?q=" + encodeURIComponent(text.slice(0, 100)), {cache: "no-store"})
+          .then(function (data) {
+            if (generation !== findGeneration || parsed().scope !== "all") return;
+            setFound(data && Array.isArray(data.results) ? data.results : []);
+          })
+          .catch(function () { if (generation === findGeneration) setFound([]); });
+      }, 200);
+    }
+
     // "Approve or reject…": the requests this person may decide, from the
     // Approvals page's own permission-checked list. Choosing one opens its
     // card on the Approvals page, where the page's buttons and confirmation
@@ -753,6 +823,7 @@
       setRecords: setRecords,
       setSettings: setSettings,
       setPeople: setPeople,
+      setFound: setFound,
       // What record search should look for, without a prefix, and where.
       query: function () { return parsed().text; },
       scope: function () { return parsed().scope; },
