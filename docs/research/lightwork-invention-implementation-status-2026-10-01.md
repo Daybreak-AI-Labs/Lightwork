@@ -261,6 +261,17 @@ correctness repairs to existing learning, not a new research algorithm or proof
 of answer accuracy, causal value or independent audit custody. Counts remain
 6 partial product foundations, 18 bounded pilots and 4 parked/rejected results.
 
+Read-only connection diagnostics follow-through removes a false mutation phase
+from an existing Copilot operation. Its current scoped status stays usable with
+writes disabled and agrees with ordinary native records. This is product
+correctness, not a new research mechanism; the 28-item status counts are unchanged.
+
+Recovery checkpoint follow-through keeps a person's selected source date and
+collection effect visible across reads, paging and errors in the existing
+ordinary/Copilot form. Exact native bindings remain internal. This repairs an
+interpretation trap without claiming external-effect verification, independent
+custody or a new learning mechanism. The research status counts are unchanged.
+
 October 6 recovery follow-through narrows F03/F04/F06: an administrator can
 completely review and separately restore verified historical deployment safety
 settings through Help and protected Copilot, including original unknown-outcome

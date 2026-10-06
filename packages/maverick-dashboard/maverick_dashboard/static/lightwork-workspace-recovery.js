@@ -454,13 +454,28 @@
     function edited() {
       confirmation.checked = false;
       fields.forEach(function (record) { if (!record.fixed) draft.values[record.input.name] = record.input.value; record.error.hidden = true; record.input.removeAttribute("aria-invalid"); });
+      if (selectedCheckpoint) showSelectedCheckpoint();
       controls();
     }
     var zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "your device's time zone";
     var checked = field("checked_at", "When did you check the service?", "datetime-local", "Your local time (" + zone + "). " + (finishing ? "The original saved observation time is retained." : "Check within the last 15 minutes."));
     var reference = field("evidence_reference", "Evidence reference", "text", "Use a ticket, receipt, or service record that supports your findings. At least 8 characters.");
     if (finishing) { checked.value = localTime(recorded.checked_at); reference.value = recorded.evidence_reference; }
-    var execution, delivery, chunkFields = [], position, resume;
+    var execution, delivery, chunkFields = [], position, resume, selectedCheckpoint, manual;
+    function showSelectedCheckpoint() {
+      var retained = draft.sourceCheckpoint;
+      if (retained && (retained.position !== position.value || retained.checked_at !== checked.value || retained.evidence_reference !== reference.value)) {
+        delete draft.sourceCheckpoint; retained = null;
+      }
+      if (retained) {
+        var date = window.LightworkI18n ? window.LightworkI18n.formatDate(retained.source_at) : new Date(retained.source_at).toLocaleString();
+        selectedCheckpoint.textContent = retained.empty_source ? "Selected checkpoint: the source was confirmed empty at " + date + ". No earlier messages will be collected."
+          : "Selected checkpoint: collect only after " + date + ". Collection will skip through this checkpoint. Unknown delivery outcomes remain unknown.";
+      } else if (position.value) {
+        selectedCheckpoint.textContent = "A manual source position is entered. Review its complete details below before confirming.";
+        manual.open = true;
+      } else selectedCheckpoint.textContent = "No source checkpoint selected. Look up the configured source and choose where collection resumes.";
+    }
     if (descriptor.kind === "message") {
       execution = field("execution", "Did the requested action happen?", null, "Use the service's action history, not an assumption based on delivery.", descriptor.execution_choices);
       delivery = field("delivery", "Was the message delivered?", null, "Check the service's delivery record.", descriptor.delivery_choices);
@@ -485,8 +500,10 @@
       position.inputMode = "numeric"; position.maxLength = isMessage ? 4096 : 40;
       if (finishing) position.value = recorded.position;
       if (!finishing) {
-        var manual = document.createElement("details"), manualTitle = document.createElement("summary");
-        manualTitle.textContent = "Manual source position (advanced)"; manual.append(manualTitle, position.parentNode); form.append(manual);
+        manual = document.createElement("details"); var manualTitle = document.createElement("summary");
+        manualTitle.textContent = "Manual source position and evidence (advanced)"; manual.append(manualTitle, position.parentNode, reference.parentNode); form.append(manual);
+        selectedCheckpoint = document.createElement("p"); selectedCheckpoint.className = "wrec-field-help"; selectedCheckpoint.setAttribute("role", "status");
+        form.insertBefore(selectedCheckpoint, manual); showSelectedCheckpoint();
         var lookupPanel = document.createElement("div"), lookupButton = document.createElement("button"), olderButton = document.createElement("button"), choices = document.createElement("select"), lookupStatus = document.createElement("p"), lookupLabel = document.createElement("label");
         lookupButton.type = "button"; lookupButton.textContent = "Look up source checkpoints";
         olderButton.type = "button"; olderButton.textContent = "Show older checkpoints"; olderButton.hidden = true;
@@ -508,7 +525,7 @@
             var prompt = document.createElement("option"); prompt.value = ""; prompt.textContent = "Select a dated checkpoint after reviewing its evidence"; choices.append(prompt);
             result.candidates.forEach(function (candidate, candidateIndex) {
               if (!/^[0-9]{1,40}$/.test(candidate.position) || !Number.isFinite(Date.parse(candidate.source_at)) || !/^[a-f0-9]{64}$/.test(candidate.evidence_digest || "") || typeof candidate.evidence_reference !== "string") throw new Error("The source evidence is incomplete. Keep this review unresolved.");
-              var option = document.createElement("option"); option.value = String(candidateIndex); option.textContent = (candidate.empty_source ? "Source confirmed empty at " : "Collect only after ") + (window.LightworkI18n ? window.LightworkI18n.formatDate(candidate.source_at) : new Date(candidate.source_at).toLocaleString()) + " (evidence " + candidate.evidence_digest.slice(0, 12) + ")"; choices.append(option);
+              var option = document.createElement("option"); option.value = String(candidateIndex); option.textContent = (candidate.empty_source ? "Source confirmed empty at " : "Collect only after ") + (window.LightworkI18n ? window.LightworkI18n.formatDate(candidate.source_at) : new Date(candidate.source_at).toLocaleString()) + " · Checkpoint " + (candidateIndex + 1); choices.append(option);
             });
             choices.hidden = !result.candidates.length; olderButton.hidden = !result.next_before;
             lookupStatus.textContent = result.candidates.length ? result.notice : "No selectable current checkpoint was returned. Keep this item unresolved or review the original service; no checkpoint was guessed.";
@@ -521,8 +538,9 @@
           var selected = sourcePage.candidates[Number(choices.value)];
           if (!selected) return;
           position.value = selected.position; checked.value = localTime(sourcePage.observed_at); reference.value = selected.evidence_reference;
+          draft.sourceCheckpoint = { position: position.value, checked_at: checked.value, evidence_reference: reference.value, source_at: selected.source_at, empty_source: selected.empty_source === true };
           edited();
-          lookupStatus.textContent = "Selected source evidence " + selected.evidence_digest + ". Collection will skip through this checkpoint. Delivery receipts and unknown outcomes remain unchanged. Review the date and explicitly confirm below.";
+          lookupStatus.textContent = "The selected checkpoint stays visible while browsing other dates. Review it and explicitly confirm below. Delivery receipts and unknown outcomes remain unchanged.";
         });
       }
     } else if (descriptor.kind === "poll_time") {
@@ -575,7 +593,7 @@
         if (!resultAnswers.resume_time) invalid("resume_time", "Choose the date and time to start checking for new posts.");
         else if (Date.parse(resultAnswers.resume_time) < Date.parse(descriptor.restored_at) || (observed && Date.parse(resultAnswers.resume_time) > Date.parse(observed) + 60000)) invalid("resume_time", "Choose a time after restoration and no later than the time you checked the service.");
       }
-      if (errors.length) { if (showErrors) { form.hidden = false; draft.open = true; fieldByName.get(errors[0]).input.focus(); } return null; }
+      if (errors.length) { if (showErrors) { form.hidden = false; draft.open = true; if (["position", "evidence_reference"].includes(errors[0]) && manual) manual.open = true; fieldByName.get(errors[0]).input.focus(); } return null; }
       return resultAnswers;
     }
     async function refreshStatus() {

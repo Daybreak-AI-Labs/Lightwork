@@ -6358,3 +6358,18 @@ before their entry point loads. Older supported contracts and add-ons without a
 manifest retain their existing behavior. The add-on page shows the reason, and
 Copilot offers a complete count summary plus a selected add-on's current
 compatibility and practice-readiness details, including refused add-ons.
+
+### Read connection status without enabling actions
+
+Copilot connection diagnostics use a read-only control, so they remain available
+when its write actions are disabled. The summary shows the saved credential's
+presence, dated check, permitted related-work counts and coverage gaps, with a
+link to Connections. An earlier credential revision or unconfirmed check time
+is explicit. Current ownership and account context still apply. Reading this
+summary contacts no service and does not prove current task access.
+
+Recovery's source-checkpoint form keeps the chosen date and collection effect
+visible when paging or another lookup fails. A new read clears confirmation;
+manual changes are identified, and invalid manual fields reveal their remedy.
+The ordinary form and its Copilot host retain the same exact checkpoint binding.
+Choosing a collection checkpoint does not confirm an earlier message's delivery.

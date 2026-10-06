@@ -1,6 +1,7 @@
 """Typed native connection diagnostics and durable schedule controls for Copilot."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import HTTPException
@@ -56,18 +57,57 @@ def connection_snapshot(request, selection):
 
 
 def connection_prepare(request, selection, arguments):
-    from .connection_dependencies import impact
+    from .connection_dependencies import impact, owned_connections, require_review
 
     value = impact(request, arguments["name"])
-    return Preview("Review the current connection and its scoped dependencies. No provider call or credential change occurs.",
-        native={"name": value["name"], "revision": value["revision"], "impact_version": value["impact_version"], "context": value["context"]})
+    value = require_review(request, value["name"], value["revision"], value["impact_version"], expected_context=value["context"])
+    record = next((row for row in owned_connections(request) if row["name"] == value["name"]), None)
+    if record is None or record["revision"] != value["revision"]:
+        raise HTTPException(409, "This connection changed. Refresh its current status before proceeding.")
+    work = {}
+    labels = {"flow": "Saved workflows", "flow_schedule": "Workflow schedules", "active_flow": "Active workflow runs",
+              "active_task": "Active tasks", "schedule": "Saved schedules", "discovery_source": "Privacy scan sources"}
+    for item in value["items"]:
+        label = labels.get(item["kind"], "Other recorded work")
+        work[label] = work.get(label, 0) + 1
+    states = {"current": "Checked in the permitted saved records", "partial": "Only part of the permitted records was checked",
+              "unavailable": "Could not check these records", "disabled": "Not enabled", "administrator-only": "Installation administrator access needed"}
+    areas = {"saved flows": "Saved workflows", "active flows and approvals": "Active workflows and requests",
+             "tasks with possible dynamic use": "Tasks that may choose this account", "declared schedule references": "Saved schedules",
+             "discovery sources": "Privacy scan sources", "agent-selected tools and unstructured instructions": "Actions chosen while work runs"}
+    coverage = [{"Area": areas.get(row["kind"], "Other permitted records"), "Coverage": states.get(row["state"], "Cannot determine from saved setup; review with affected owners")}
+                for row in value["coverage"]]
+    details = {"Open complete account controls": {"href": "/connections#cx-list", "label": "Open saved connections"},
+               "Connection": value["name"], "Credential": "Saved" if record["has_token"] else "Not saved",
+               "Recorded access check": _connection_check(record),
+               "Related work shown": work or "No related work found in the checked records",
+               "Exact saved references": sum(item.get("binding") == "exact reference" for item in value["items"]),
+               "Coverage": coverage,
+               "Scope": "This summarizes permitted saved records, including possible uses; it is not a complete dependency list or a live service test. A saved credential or earlier authentication check does not prove current task access. Unknown external outcomes remain unknown."}
+    if record.get("oauth"):
+        oauth = record["oauth"]
+        details["Account sign-in"] = oauth.get("recovery_action") or (
+            "Renewal is ready; exact task access remains separate" if oauth.get("renewal_state") == "ready" else "Renewal is not confirmed; review this account in Connections")
+    return Preview("Current scoped account status. No service was contacted, credential changed or work started.", native=details)
 
 
-def connection_execute(request, selection, arguments, native, operation):
-    from .connection_dependencies import require_review
-
-    value = require_review(request, native["name"], native["revision"], native["impact_version"], expected_context=native["context"])
-    return Outcome("confirmed", "Current scoped diagnostics reviewed. Authentication and exact task access remain separate checks.", value)
+def _connection_check(record):
+    check = record.get("last_test")
+    if not check:
+        return "Access not checked. A saved key does not prove task access."
+    if check.get("revision") != record["revision"]:
+        return "Earlier credential check; test the current saved credential."
+    labels = {"authenticated": "Authentication verified at check time", "access_unverified": "Reachable; access not verified",
+              "sign_in_refused": "Sign-in refused", "blocked_by_policy": "Blocked by connection policy",
+              "unreachable": "Service unreachable", "address_missing": "Service address needed"}
+    try:
+        stamp = datetime.fromtimestamp(float(check["tested_at"]), tz=timezone.utc)
+        when = stamp.strftime("%b %d, %Y at %H:%M UTC")
+        age = (datetime.now(timezone.utc) - stamp).total_seconds()
+        previous = "Check time is unconfirmed: " if age < 0 else "Previous check (stale): " if age > 86400 else ""
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        when, previous = "Date not available", "Previous check: "
+    return previous + labels.get(check.get("outcome"), "Access not verified") + " · " + when + ". Service address only; exact task permissions remain separate."
 
 
 class ScheduleInput(StrictInput):
@@ -305,7 +345,7 @@ def receipt_prepare(request, selection, arguments):
 def entries():
     return (
         Adapter("templates.accounts", "Review a workflow account selection", "connections", "/templates", ("/templates", "/workflow-builder", "/connections"), TemplateAccountInput, account_snapshot, account_prepare),
-        Adapter("connections.review", "Review connection diagnostics", "connections", "/connections", ("/connections", "/automations"), ConnectionInput, connection_snapshot, connection_prepare, connection_execute, aliases=("check my connection",)),
+        Adapter("connections.review", "Review connection diagnostics", "connections", "/connections", ("/connections", "/automations"), ConnectionInput, connection_snapshot, connection_prepare, aliases=("check my connection",)),
         Adapter("schedules.change", "Change future schedule runs", "schedules", "/automations", ("/automations",), ScheduleInput, schedule_snapshot, schedule_prepare, schedule_execute, schedule_recover, aliases=("pause my schedule",), read_recovery=schedule_recover),
         Adapter("schedules.recovery", "Review parked schedule recovery", "schedules", "/automations", ("/automations",), RecoveryInput, recovery_snapshot, recovery_prepare),
         Adapter("schedules.repair", "Repair reviewed future recurrence", "schedules", "/automations", ("/automations",), RepairInput, repair_snapshot, repair_prepare, repair_execute, repair_recover, read_recovery=repair_recover),
