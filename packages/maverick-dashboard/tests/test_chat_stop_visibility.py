@@ -40,7 +40,7 @@ def test_provider_failure_is_stopped_with_a_working_connection_route(chat_env):
 
     page = client.get(f"/chat/goal/{goal_id}")
     assert page.status_code == 200
-    assert 'data-status="blocked" hidden>stopped</span>' in page.text
+    assert 'data-status="blocked" hidden>Stopped</span>' in page.text
     # AI keys live in Settings (Connections > Provider keys), row focused.
     assert 'id="halt-action-link" href="/settings?focus=ai-provider#settings-integrations"' in page.text
     assert "couldn&#39;t reach the AI service" in page.text or "couldn&#x27;t reach the AI service" in page.text
