@@ -45,24 +45,6 @@
     return J.readFile(file);
   }
 
-  // ---- improvement flywheel ------------------------------------------------
-  J.wire($('lo-fw-run'), async function () {
-    if (!(await window.mvConfirm('Turn the improvement flywheel now? It updates what agents avoid and the habits they keep, for the whole installation.',
-      { okText: 'Turn now' }))) return null;
-    return { url: LO + '/flywheel/turn', init: { method: 'POST', json: {} } };
-  }, ui('lo-fw', 'turn the flywheel', function (d) {
-    if (!d.acted) return el('p', 'muted', 'Nothing to learn yet. It needs more finished tasks to look at.');
-    var out = [el('p', null, 'Looked at ' + plural(d.tasks, 'task') + '. Learned ' + plural(d.counts.avoid, 'thing') +
-      ' to avoid and ' + plural(d.counts.habits, 'habit') + ' that help, and suggested ' + plural(d.counts.ideas, 'better step') + ' to test.')];
-    if (d.avoid.length) { out.push(el('h4', null, 'Now avoids')); out.push(list(d.avoid.map(window.mvHuman || String))); }
-    if (d.habits.length) { out.push(el('h4', null, 'Habits that help')); out.push(list(d.habits.map(window.mvHuman || String))); }
-    if (d.ideas.length) {
-      out.push(el('h4', null, 'Better steps to test'));
-      out.push(list(d.ideas.map(function (i) { return 'Instead of “' + i.instead_of + '”, try “' + i.try + '”'; })));
-    }
-    return out;
-  }));
-
   // ---- improve how new agents are built -----------------------------------------
   var faPreview = $('lo-fa-preview');
   if (faPreview) faPreview.addEventListener('click', async function () {

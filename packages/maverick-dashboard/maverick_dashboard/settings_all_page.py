@@ -169,6 +169,8 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
     provider = _resolve_provider_field(setting, layers)
     if provider is not None:
         return provider
+    if setting.section == "features":
+        return _resolve_feature(setting, layers)
     if setting.section.startswith("channels."):
         name = setting.section.removeprefix("channels.")
         access = catalog.CHANNEL_ALLOWLISTS.get(name)
@@ -216,6 +218,22 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
         return {"source": "installer", "locked": False, "value": value, "known": True}
     return {"source": "default", "locked": False, "value": _default_in(setting, layers),
             "known": True}
+
+
+def _resolve_feature(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
+    """Use the switch's real native layers; installation trust is global only."""
+    if any(name in os.environ for name in setting.env):
+        return {"source": "deployment", "locked": True, "value": None, "known": False}
+    names = ("operator", "here", "base") if setting.key == "signing_identity_transition" else (
+        "tenant", "operator", "here", "base")
+    for name in names:
+        present, value = _layer_value(setting, layers[name])
+        if present:
+            source = {"tenant": "deployment", "operator": "deployment",
+                      "here": "here", "base": "installer"}[name]
+            return {"source": source, "locked": name in {"tenant", "operator"},
+                    "value": value, "known": type(value) is bool}
+    return {"source": "default", "locked": False, "value": setting.default, "known": True}
 
 
 def _resolve_provider_field(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any] | None:
@@ -1645,7 +1663,8 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
         return JSONResponse({'detail': str(exc), 'message': str(exc)}, status_code=409, headers={'Cache-Control': 'no-store'})
     except _Refused as exc:
         return JSONResponse({'detail': exc.message, 'message': exc.message}, status_code=exc.status, headers={'Cache-Control': 'no-store'})
-    if any(c["setting"].id in settings_access_guard.SIGN_IN_IDS
+    if any(c["setting"].section == "features"
+           or c["setting"].id in settings_access_guard.SIGN_IN_IDS
            or c["setting"].id.startswith(settings_access_guard.SIGN_IN_PREFIXES)
            or c["setting"].id.startswith(settings_access_guard.KEY_PREFIXES)
            for c in changes):

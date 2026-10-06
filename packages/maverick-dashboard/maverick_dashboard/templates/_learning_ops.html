@@ -11,13 +11,23 @@
 
   <div class="panel" id="lo-flywheel">
     <h3 class="lrn__section-h" id="lo-fw-h">Improvement flywheel</h3>
-    <p class="lrn__section-sub">Looks over how recent tasks went, learns what to avoid and which habits help, and
-      suggests better steps to test. No AI model is used.</p>
+    <p class="lrn__section-sub">Review currently permitted work, refresh shared safeguards and habits,
+      and suggest changes to test. No AI model is used. A safety copy is required before changes.</p>
     {% if learning_can_manage %}
-    <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fw-run">Turn the flywheel now</button></div>
+    <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fw-run" disabled>Review an improvement cycle</button>
+      <button type="button" class="btn btn--ghost" id="lo-fw-refresh">Refresh current work</button></div>
+    <div id="lo-fw-review" hidden>
+      <h4>Review this cycle</h4><div id="lo-fw-review-rows"></div>
+      <label><input type="checkbox" id="lo-fw-reviewed"> I reviewed the shared changes, source scope and recovery limits.</label>
+      <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fw-apply" disabled>Start this reviewed cycle</button>
+        <button type="button" class="btn btn--ghost" id="lo-fw-dismiss">Keep current guidance</button></div>
+    </div>
+    <label for="lo-fw-original">Original improvement cycle</label><select id="lo-fw-original" class="select"><option value="">Choose a recorded cycle</option></select>
+    <button type="button" class="btn btn--ghost" id="lo-fw-read" disabled>Read original outcome</button>
     {% endif %}
     <p class="muted" id="lo-fw-status" role="status" aria-live="polite"></p>
     <div id="lo-fw-out"></div>
+    {% if learning_can_manage %}<script src="/static/lightwork-learning-flywheel.js" defer></script>{% endif %}
   </div>
 
   <div class="panel" id="lo-factory">

@@ -101,12 +101,19 @@ class MemoryStore:
         if self.path is not None:
             self._load()
 
-    def update(self, memories) -> None:
+    def update(self, memories, *, strict: bool = False, before_write=None) -> None:
         from .learning_store import derived_guidance_fence
 
         with derived_guidance_fence(), self._lock:
+            if before_write is not None:
+                before_write()
+            previous = self._mem
             self._mem = {m.action: m for m in memories}
-            self._save()
+            try:
+                self._save(strict=strict, before_write=before_write)
+            except Exception:
+                self._mem = previous
+                raise
 
     def recall(self, *, top_k: int = 5) -> list[Memory]:
         """The strongest consolidated habits -- a learned prior the planner can
@@ -142,7 +149,7 @@ class MemoryStore:
             except (KeyError, TypeError, ValueError):
                 continue
 
-    def _save(self) -> None:
+    def _save(self, *, strict: bool = False, before_write=None) -> None:
         if self.path is None:
             return
         try:
@@ -151,8 +158,11 @@ class MemoryStore:
                 json.dumps(
                     [m.to_dict() for m in self._mem.values()], sort_keys=True,
                 ),
+                **({"effect_guard": before_write} if before_write is not None else {}),
             )
         except Exception:  # pragma: no cover -- best-effort
+            if strict:
+                raise
             log.debug("procedural memory save failed", exc_info=True)
 
 

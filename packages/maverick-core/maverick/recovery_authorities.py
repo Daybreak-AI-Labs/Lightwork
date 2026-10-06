@@ -102,6 +102,7 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "manual-skill-removal-requests": "manual_skill_removal_authority",
     "learning-conflict-requests": "learning_check_admission_authority",
     "learning-pass-requests": "learning_pass_admission_authority",
+    "learning-flywheel-requests": "learning_flywheel_admission_authority",
     "learning-distinction-requests": "learning_distinction_admission_authority",
     "reward-training-requests": "ranking_training_admission_authority",
     "shared-decision-evidence": "decision_evidence_permission_authority",

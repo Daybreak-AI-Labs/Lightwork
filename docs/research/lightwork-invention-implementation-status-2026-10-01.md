@@ -298,3 +298,24 @@ URLs and revalidate unchanged public bytes after native authorization. Cached
 ordinary UI remained usable across both current-worker file changes and a native
 restart. This is deployment continuity, not an invention or quality-lift claim;
 research status counts remain unchanged.
+
+Configured-screen failure and finite web-content admission close correctness and
+resource-control gaps in current native operation. The native client receives a
+refusal when its chosen checker is unavailable, and bounded workflow inputs
+agree with native fetch execution. Neither repair establishes a new security or
+learning algorithm; the research status counts remain unchanged.
+
+Reviewed flywheel follow-through adds complete ordinary/Copilot before/after
+guidance review, native source and authority checks at replacement, and retained
+partial/uncertain outcomes rather than silent empty success. Empty work preserves
+existing guidance, and original reads do not repeat the cycle or flush pending
+audit writes. The existing causal promotion gates remain unchanged. This improves
+operating correctness and usability; it does not establish a new learning
+algorithm or independent quality lift. The register status counts remain unchanged.
+
+Product-switch and queue follow-through improve native configuration review and
+failure attribution. Product switches use the existing Settings authority and
+receipts, while unavailable queued tasks distinguish actual slot refusal from
+missing or unconfirmed work and stop uncertain scheduled creation from duplicating
+a task. These are operating repairs, not new invention mechanisms; the research
+status counts remain unchanged.

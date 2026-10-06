@@ -163,7 +163,8 @@ def _guard(request, value, body):
     if planned != value["plan"]:
         raise HTTPException(409, "The available setting choices changed after review. Your draft is kept; review them again.")
     native._guard(request, writes, changes, layers)
-    if any(c["setting"].id in native.settings_access_guard.SIGN_IN_IDS
+    if any(c["setting"].section == "features"
+           or c["setting"].id in native.settings_access_guard.SIGN_IN_IDS
            or c["setting"].id.startswith(native.settings_access_guard.SIGN_IN_PREFIXES)
            or c["setting"].id.startswith(native.settings_access_guard.KEY_PREFIXES) for c in changes):
         step_up.require_recent_mfa(request, "change_auth_settings")

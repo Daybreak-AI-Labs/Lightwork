@@ -6231,3 +6231,50 @@ content-versioned URLs as the shell. Public unchanged scripts and styles can
 revalidate without another response body; private or refused assets keep their
 native authorization and cache policy. File metadata changes refresh cached
 hashes, including a file that appears after an earlier missing-file check.
+
+### Configured gateway screening and bounded web content
+
+When request screening is explicitly enabled, an unavailable built-in checker
+returns a readable service refusal before upstream forwarding or spending
+admission. Existing text-free and screening-off behavior stays available, and
+actual detector refusals remain blocked. Activity keeps digest/count metadata;
+private request or exception payloads are not copied into the new refusal.
+
+Web-page reads keep their 64KB default and accept at most 10MiB of retained
+response content. Invalid download limits refuse before request preflight.
+The ordinary workflow input uses the same native schema range; exact-limit
+completion is distinguished from actual omitted content with one extra byte.
+
+### Reviewed improvement cycles and visible incomplete learning
+
+Learning and Copilot offer the same reviewed improvement cycle. Before it starts,
+the customer sees the complete current and proposed safeguards and habits,
+including removals and strength changes, the workspace, permitted work and local
+cost limit. The cycle uses existing recorded work and native causal admission;
+observational patterns alone do not qualify new guidance as proven improvements.
+
+The reviewed source, permission, settings and guidance are checked again before
+native writes. Empty permitted work preserves existing guidance. A required
+learning safety copy and stop controls remain in place. Failed writes or missing
+activity confirmations produce a visible incomplete or uncertain outcome,
+including any earlier saved changes. The original task stays readable after an
+interrupted reply without automatically repeating the cycle.
+
+The combined nightly command also stops with a nonzero exit when this cycle is
+incomplete or halted. Earlier changes may remain saved; failure is not reported
+as a successful empty review.
+
+### Reviewed product switches and truthful queued-task outcomes
+
+All current product switches are available through the existing reviewed Settings
+controls, with plain On/Off comparisons and original-save recovery. The Features
+overview opens those controls. An old whole-form Features submission refuses
+instead of overwriting newer switches. Current configuration precedence and
+configured administrator verification are checked before physical replacement.
+
+Queued tasks defer for a confirmed concurrency-slot refusal. A deleted task,
+closed admission or unconfirmed outcome stops with its actual reason instead of
+repeatedly reporting a busy slot. Scheduled task creation records its intent
+before creation; a later attempt with an unconfirmed original creation reads that
+state and stops instead of creating another task. Ordinary confirmed task failure
+keeps the existing retry policy, and future schedule occurrences keep clean inputs.

@@ -29,11 +29,28 @@ import math
 import os
 import threading
 import time
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 from ._envparse import env_float
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GoalRunUnavailable:
+    """Current invocation's unavailable result; only a slot refusal permits defer.
+
+    This does not certify the absence of effects in earlier task attempts.
+    Legacy callers receive ``None`` instead and cannot reconstruct this result.
+    """
+
+    reason: Literal["concurrency_slot", "missing", "admission_closed", "unknown"]
+
+
+def _unavailable_goal_run(reason, *, detailed_outcome: bool):
+    return GoalRunUnavailable(reason) if detailed_outcome else None
+
 
 # Two-level fair concurrency so people don't wait behind each other:
 #
@@ -374,7 +391,8 @@ def run_goal_in_thread(
     allowed_suites: frozenset[str] | None = None,
     acquire_timeout: float | None = None,
     usage_observer=None,
-) -> str | None:
+    detailed_outcome: bool = False,
+) -> str | None | GoalRunUnavailable:
     """Synchronously run a goal under the global concurrency semaphore.
 
     Designed to be passed to ``fastapi.BackgroundTasks.add_task`` or any
@@ -390,10 +408,11 @@ def run_goal_in_thread(
     a whole worker thread for up to ``_ACQUIRE_TIMEOUT`` per semaphore.
 
     Returns the goal's terminal status string (``"done"`` / ``"blocked"``
-    / ...) so the worker daemon can decide whether the *job* succeeded:
-    a goal that ends ``blocked``/``failed`` -- or ``None`` when the run
-    could not even start (no slot) -- must surface as a job failure so the
-    queue's retry/backoff actually runs. Polling callers ignore the value.
+    / ...), or the legacy ``None`` when admission/setup/readback is unavailable.
+    With ``detailed_outcome=True`` that unavailable result identifies an actual
+    semaphore refusal separately from a missing task or an unconfirmed outcome.
+    The worker defers only a semaphore refusal; intentional blocked results do
+    not restart the task. Polling callers keep their existing default contract.
 
     Acquires a fresh WorldModel + LLM + Sandbox per call so each
     background goal gets its own connection (SQLite WAL + check_same_thread
@@ -414,7 +433,7 @@ def run_goal_in_thread(
             "%.0fs (goal_id=%s, principal=%s); refusing run",
             MAX_CONCURRENT_GOALS_PER_PRINCIPAL, timeout, goal_id, lane_principal,
         )
-        return None
+        return _unavailable_goal_run("concurrency_slot", detailed_outcome=detailed_outcome)
     # Global ceiling next: only a host-wide saturation makes anyone wait here.
     if not _run_semaphore.acquire(timeout=timeout):
         principal_sem.release()
@@ -422,12 +441,12 @@ def run_goal_in_thread(
             "run_goal_in_thread: no global concurrency slot within %.0fs "
             "(goal_id=%s); refusing run", timeout, goal_id,
         )
-        return None
+        return _unavailable_goal_run("concurrency_slot", detailed_outcome=detailed_outcome)
     if not _mark_inflight_started(require_admission=True):
         _run_semaphore.release()
         principal_sem.release()
         log.info("run_goal_in_thread: shutdown admission is closed (goal_id=%s)", goal_id)
-        return None
+        return _unavailable_goal_run("admission_closed", detailed_outcome=detailed_outcome)
     world = None
     sandbox = None
     budget = None
@@ -457,13 +476,13 @@ def run_goal_in_thread(
         )
         goal = world.get_goal(goal_id)
         if goal is None:
-            return None
+            return _unavailable_goal_run("missing", detailed_outcome=detailed_outcome)
         from .task_handoffs import closure
         if closure(world, goal_id):
             return "blocked"
         principal_matches = _runner_principal_binding(world, goal, execution_principal)
         if principal_matches is None:
-            return None
+            return _unavailable_goal_run("unknown", detailed_outcome=detailed_outcome)
         if not principal_matches:
             # A rejected caller has no authority to change the goal. In
             # particular, it must not interrupt another principal's live run.
@@ -504,10 +523,13 @@ def run_goal_in_thread(
         except Exception as exc:
             return _goal_run_exception_status(world, goal_id, exc)
         # Read back the terminal status so the worker can decide retry.
-        return _finished_goal_status(world, goal_id)
+        status = _finished_goal_status(world, goal_id)
+        return status if status is not None else _unavailable_goal_run(
+            "unknown", detailed_outcome=detailed_outcome,
+        )
     except Exception:
         log.exception("background goal run failed (goal_id=%s)", goal_id)
-        return None
+        return _unavailable_goal_run("unknown", detailed_outcome=detailed_outcome)
     finally:
         if usage_observer is not None and budget is not None:
             # Internal flow accounting observes the completed meter. It cannot

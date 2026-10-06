@@ -661,17 +661,20 @@
 
   <div class="section-head" data-settings-group="controls"><h2>Features</h2></div>
   <div class="panel" data-settings-group="controls" id="settings-features">
-    <p class="muted settings-lead">Parts of Lightwork you can switch on or off for everyone.</p>
-    <form method="post" action="/settings/features">
+    <p class="muted settings-lead">Review each switch in All settings before changing it.
+      Only your selected changes are saved; other feature choices are kept.
+      Deployment and workspace policies still take precedence.</p>
       {% for f in features %}
-      <label class="settings-toggle" data-settings-search-item id="feature-{{ f.name }}">
-        <span class="settings-toggle__text">{{ f.name|feature_label }}
-          {% if f.info %}<br><span class="muted settings-toggle__help">{{ f.info }}</span>{% endif %}</span>
-        <input type="checkbox" name="{{ f.name }}"{% if f.enabled %} checked{% endif %} />
-      </label>
+      <div class="settings-toggle" data-settings-search-item id="feature-{{ f.name }}">
+        <span class="settings-toggle__text">{{ 'Live progress outside the dashboard' if f.name == 'streaming' else f.name|feature_label }}
+          <br><span class="muted settings-toggle__help">Currently {{ 'on' if f.enabled else 'off' }}.
+          {% if f.name == 'streaming' %}Show progress for tasks started outside the dashboard. Chat has its own live responses.
+          {% elif f.info %}{{ f.info }}{% endif %}</span></span>
+        <a class="btn" href="/settings/all?id=features.{{ f.name }}">Review choice</a>
+      </div>
       {% endfor %}
-      <p class="settings-foot"><button type="submit" class="btn">Save features</button></p>
-    </form>
+      <p class="settings-foot"><a class="btn" href="/settings/all?q=features">Review product features</a>
+        <a href="/settings/all#settings-original-requests">Read my original settings requests</a></p>
   </div>
 
   <div class="section-head" data-settings-group="access" id="settings-access"><h2 id="api-keys">Access keys for scripts and integrations</h2></div>
@@ -945,6 +948,9 @@
     .settings-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline); }
     .settings-toggle__text { flex: 1; }
     .settings-toggle__help { font-size: var(--text-sm); font-weight: normal; }
+    #settings-features .settings-toggle { flex-wrap: wrap; }
+    #settings-features .settings-toggle__text { flex: 1 1 16rem; min-width: 0; }
+    #settings-features .btn { flex: 0 1 auto; max-width: 100%; white-space: normal; }
     .settings-toggle input, #settings-sections td input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
     .settings-group-row { padding-top: var(--space-4); }
     .settings-note { font-size: var(--text-xs); }

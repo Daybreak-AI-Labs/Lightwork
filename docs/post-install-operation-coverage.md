@@ -1900,3 +1900,57 @@ after a separately stopped and restarted native process. Unchanged bundled graph
 library bytes retained their upstream digest and returned a bodyless 304. This
 qualifies package asset continuity, not arbitrary privileged same-metadata file
 tampering or avoidance of every underlying local file read.
+
+## October 6 configured screen refusal and finite fetch admission
+
+Configured built-in gateway checker failures return the native client protocol
+service refusal before upstream resolution or native team spending admission.
+The existing privacy ledger records safe digest/count metadata. Actual detector
+refusal, screen-off and text-free behavior retain their original meaning. Six
+native HTTP cases used declared failing-checker and local-only transport
+boundaries; three allowed requests reached the loopback upstream, with zero
+paid/external calls. This does not requalify every production network transport.
+
+The native web-content tool enforces a finite 10MiB ceiling while keeping the
+64KB ordinary default. Its retained decoded accumulator is bounded to the chosen
+limit plus one byte, so exact-limit EOF is complete and omitted bytes are shown
+as truncation. Invalid bounds/types refuse before network preflight. The native
+Designer refused zero without changing its saved draft, then saved/published a
+valid limit and executed the fetch after separate human approval and resume.
+Authorized Workflow Copilot changed the same draft field with Undo/Redo and
+explicit Save. These bounds apply to retained fetch content; they do not certify
+a hard process-memory ceiling for HTTP decompression internals.
+
+## October 6 reviewed improvement-cycle controls
+
+Ordinary Learning and typed Copilot share the same current native cycle review,
+including every proposed safeguard and habit before/after value. Removed guidance
+and reduced habit strength are shown explicitly. Oversized or unreadable complete
+reviews refuse instead of hiding part of the change. Admission and physical
+replacement check the current source, authority, settings and approved guidance;
+empty eligible work preserves both stores.
+
+The existing retained learning task records the actual result. Strict persistence
+and activity confirmation distinguish saved, incomplete and uncertain effects;
+an interrupted reply can read the original without another learning dispatch.
+The original reader does not flush pending audit writes. The cycle uses no AI
+provider calls and has a 60-second local ceiling or tighter current organization
+limit. Native causal evidence gates remain unchanged. These controls establish
+reviewable operation and truthful recovery, not measured customer learning lift.
+
+## October 6 product-switch and queued-task follow-through
+
+The current native feature catalog supplies all 45 product switches to the same
+reviewed Settings writer, current-source check and original receipt. The Features
+overview links to these actual controls; its legacy unreviewed whole-form save
+refuses without writes. Human comparisons use On/Off while native audit values
+stay booleans. Physical replacement rechecks configured recent administrator
+verification and forwards the existing guard into atomic replacement retries.
+
+The queue worker opts into a detailed native unavailable result while other
+runner callers retain their prior contract. Only confirmed semaphore refusal
+causes concurrency deferral. Missing or unconfirmed work becomes a terminal
+owned-attempt failure without automatic replay. Scheduled creation saves an
+occurrence-only uncertainty marker before creating its task; a successor lease
+cannot create another task from an unconfirmed first creation. Existing actual
+task failure retries and clean future schedule inputs are preserved.

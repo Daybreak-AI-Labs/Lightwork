@@ -356,6 +356,10 @@ def _learning_job_projection(request, value, revision, original):
     from .draft_api import context_for
     status = _JOB_STATES[value["state"]]
     notice = "Recorded observations describe this task's results. Business improvement needs separate evidence."
+    if (value.get('kind') == 'flywheel' and value['result_retained'] and isinstance(value.get('result'), dict)
+            and value['result'].get('complete') is False):
+        status = "Guidance outcome unconfirmed" if value['result'].get('state') == 'uncertain' else "Cycle did not finish"
+        notice = value['result']['message'] + ' ' + notice
     if value["state"] in {"admitted", "running", "stopping"} and not value["worker_available"]:
         status = "Last recorded: " + status + ". Active worker unavailable on this server"
         notice += " This is retained progress, not proof the work stopped, failed or completed. This server cannot request a stop for that worker. Nothing is resumed or repeated automatically."
@@ -761,26 +765,62 @@ async def refine_preview(request: Request, proposal_id: str) -> dict:
 
 # ---- improvement flywheel --------------------------------------------------------
 
-@router.post("/flywheel/turn")
-async def turn_flywheel(request: Request) -> dict:
-    require_global_permission(request, "admin")
-    from maverick import data_engine
-    if not data_engine.enabled():
-        raise HTTPException(status_code=409, detail=f"Turn on {part_place('data_engine')} first.")
-    _halt_preflight("flywheel")
-    await run_in_threadpool(lambda: _record(request, "flywheel_turn"))
+class FlywheelReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
-    def _run(job: jobs.Job) -> dict:
-        from maverick.flywheel import maybe_run
-        rep = maybe_run()
-        return {"acted": bool(rep.acted), "tasks": int(rep.n_episodes),
-                "avoid": [_clip(g.action, 120) for g in rep.guardrails[:10]],
-                "habits": [_clip(m.action, 120) for m in rep.memories[:10]],
-                "ideas": [{"instead_of": _clip(h.baseline_action, 120), "try": _clip(h.candidate_action, 120)}
-                          for h in rep.hypotheses[:10]],
-                "counts": {"avoid": len(rep.guardrails), "habits": len(rep.memories),
-                           "ideas": len(rep.hypotheses)}}
-    return start_job(request, "flywheel", "Turning the improvement flywheel", _run)
+
+class FlywheelStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str = Field(min_length=1, max_length=262144)
+    confirmed: Literal[True]
+
+
+@router.get("/flywheel")
+async def current_flywheel(request: Request):
+    from . import learning_flywheel as cycle
+    return JSONResponse(await run_in_threadpool(cycle.catalog, request), headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/flywheel/review")
+async def review_flywheel(request: Request, body: FlywheelReviewIn):
+    import secrets
+    import time
+
+    from maverick import crypto_at_rest
+
+    from . import learning_flywheel as cycle
+    prepared = await run_in_threadpool(cycle.prepare, request, context=body.context, revision=body.revision)
+    material = {"purpose": "lightwork.flywheel.v1", "prepared": prepared,
+                "operation": secrets.token_hex(16), "expires": time.time() + cycle.TTL}
+    token = crypto_at_rest.seal_to_str(json.dumps(material, ensure_ascii=False, separators=(",", ":")))
+    if len(token) > 262144:
+        raise HTTPException(409, "The complete cycle review is too large. No cycle was admitted.")
+    return JSONResponse({"token": token, "operation": material["operation"], "context": prepared["context"],
+                         "rows": cycle.review_rows(prepared)}, headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/flywheel/turn")
+async def turn_flywheel(request: Request, body: FlywheelStartIn):
+    from maverick import crypto_at_rest
+
+    from . import learning_flywheel as cycle
+    cycle._authority(request, write=True)
+    try:
+        material = json.loads(crypto_at_rest.unseal_from_str(body.token))
+        if material["purpose"] != "lightwork.flywheel.v1":
+            raise ValueError("review purpose")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(409, "This cycle review is unavailable. Refresh and review current work again.") from exc
+    result = await run_in_threadpool(cycle.start, request, material["prepared"], material["operation"], expires=material["expires"])
+    return JSONResponse(result, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/flywheel/original/{operation}")
+async def original_flywheel(request: Request, operation: str):
+    from . import learning_flywheel as cycle
+    return JSONResponse(await run_in_threadpool(cycle.original, request, operation), headers={"Cache-Control": "private, no-store"})
 
 
 # ---- improving how new agents are built (factory-learn) ----------------------------

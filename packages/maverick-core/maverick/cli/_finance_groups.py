@@ -239,19 +239,34 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
         # Cognitive Data Engine: turn the flywheel as part of the nightly cycle --
         # triage failures by causal impact, mine self-correcting guardrails,
         # consolidate beneficial habits, propose improvements, all grounded in real
-        # outcomes. No-op unless [data_engine] is enabled; never breaks dreaming.
+        # outcomes. No-op unless [data_engine] is enabled; incomplete work is visible.
+        from ..learning_guard import Halted
         try:
             from .. import data_engine
             if data_engine.enabled():
                 from ..flywheel import maybe_run
                 fw = maybe_run()
+                if not fw.complete:
+                    raise RuntimeError("The improvement cycle did not finish")
                 if fw.acted:
                     click.echo(
                         f"[flywheel] {len(fw.guardrails)} guardrails, {len(fw.memories)} "
                         f"habits, {len(fw.hypotheses)} improvements "
                         f"(recoverable lift ~{fw.predicted_lift:.2f})")
-        except Exception:  # pragma: no cover -- the flywheel must never break dreaming
-            pass
+        except Halted as exc:
+            raise click.ClickException(
+                "The improvement cycle was stopped by the learning safety policy. "
+                "Earlier learning changes may already be saved. Review Learning "
+                "before starting another cycle."
+            ) from exc
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "The improvement cycle could not finish (%s).", type(exc).__name__
+            )
+            raise click.ClickException(
+                "The improvement cycle could not finish. Earlier learning changes "
+                "may already be saved. Review Learning before trying again."
+            ) from exc
         _run_self_harness_nightly(world)
     if not rehearse:
         return

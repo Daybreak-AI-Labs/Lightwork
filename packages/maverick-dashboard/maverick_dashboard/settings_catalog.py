@@ -44,7 +44,7 @@ Deliberately NOT in the catalog:
   their own module's names (settings_catalog_privacy).
 * Settings that already have a dedicated control elsewhere: provider keys,
   models, installing and issuing licenses (Settings > License), the per-task
-  spending cap, capabilities, features, the chat
+  spending cap, capabilities, the chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
   connections (the account-connection and desktop-return switches are on
   the Connections page, vendor onboarding's connections and owner on its
@@ -2391,6 +2391,7 @@ SETTINGS = (SETTINGS + _channel_settings() + _CHANNEL_FIELDS + _MORE + _env_hunt
 from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_access,
     settings_catalog_budget_guidance,
+    settings_catalog_features,
     settings_catalog_governance,
     settings_catalog_integrations,
     settings_catalog_learning,
@@ -2400,7 +2401,7 @@ from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_structured,
 )
 
-_GROUP_MODULES = (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
+_GROUP_MODULES = (settings_catalog_access, settings_catalog_features, settings_catalog_runtime, settings_catalog_learning,
                   settings_catalog_privacy, settings_catalog_governance,
                   settings_catalog_integrations, settings_catalog_structured, settings_catalog_personalization, settings_catalog_budget_guidance)
 for _group in _GROUP_MODULES:
