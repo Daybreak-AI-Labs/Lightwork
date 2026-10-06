@@ -20,9 +20,42 @@ NEXT = re.compile(r"\b(?:add|start|create|choose|use|open|run|connect|turn on|se
                   r"select|install|upload|invite|approve|review|save|record|import|link|enter|pick|describe|draft|"
                   r"build|write|come back|appear|appears|shows? up|will show|once|after|when|recalculate|check|"
                   r"enroll|prepare|decide|assign|schedule|send|test|update|refresh|collect|request|publish|"
-                  r"generate|fill|load|go to|visit|finish|until|below|above)\b", re.IGNORECASE)
+                  r"generate|fill|load|go to|visit|finish|until|below|above|view|analyze)\b", re.IGNORECASE)
+# Short values in a table cell, badge, select placeholder, summary field or
+# flow-step chip: they describe one field of a row, not an empty screen, so a
+# next step would not fit. (file, text) -> where it sits.
+VALUES = {
+    ("_governance_operations.html", "None yet"): "policy version cell",
+    ("compliance.html", "Nothing to show yet"): "header status value next to its badge",
+    ("compliance.html", "No owner yet"): "owner cell of an obligation row",
+    ("consent_experiments.html", "No experiments yet"): "select placeholder",
+    ("consumer_trust_center_authority.html", "Nothing yet"): "summary field",
+    ("external_agent_detail.html", "No access key yet"): "badge",
+    ("external_agents.html", "None yet"): "access key cell",
+    ("learning.html", "No saved points yet"): "select placeholder",
+    ("learning.html", "None yet"): "recent activity cell",
+    ("model_risk_assurance.html", "None yet"): "frameworks summary field",
+    ("security_report.html", "No evidence cited yet."): "evidence cell of a report row",
+    ("shoring.html", "No data yet"): "service-level status word",
+    ("tenants_overview.html", "No tasks yet"): "tasks cell of a workspace row",
+    ("users.html", "No description yet."): "role description field",
+    ("lightwork-agent-control-plane.js", "No agents or people yet"): "select placeholder",
+    ("lightwork-ai-cloud-agent-governance.js", "No policies are available from your policy service yet"): "select placeholder",
+    ("lightwork-ai-entity-tasks.js", "No AI systems in inventory yet"): "select placeholder",
+    ("lightwork-compliance-scope-actions.js", "None yet"): "task plan cell",
+    ("lightwork-feature-actions.js", "None yet"): "departments summary field",
+    ("lightwork-learning-loop.js", "No models yet"): "select placeholder",
+    ("lightwork-maintenance-ops.js", "No baseline recorded yet"): "select placeholder",
+    ("lightwork-ops-panels.js", "No days recorded yet"): "select placeholder",
+    ("lightwork-privacy-rights-consumer-delivery.js", "None yet"): "delivery code cell",
+    ("lightwork-third-party-intelligence.js", "None yet"): "latest data or decision cell",
+    ("lightwork-trust-receipts.js", "No activity recorded yet"): "select placeholder",
+    ("flow_designer.js", "No instructions yet"): "flow-step chip",
+    ("flow_designer.js", "No action chosen yet"): "flow-step chip",
+    ("flow_designer.js", "No question yet"): "flow-step chip",
+}
 # The most this may be. Lower it when you fix one; never raise it.
-MAX_WITHOUT_NEXT_STEP = 60  # 6 October 2026: 134 before the ONB-2 pass
+MAX_WITHOUT_NEXT_STEP = 0  # 6 October 2026: 134 before the ONB-2 pass
 
 
 def _messages():
@@ -51,7 +84,13 @@ def _messages():
 
 
 def without_next_step() -> list[tuple[str, int, str]]:
-    return [(name, number, text) for name, number, text, rest in _messages() if not NEXT.search(rest)]
+    return [(name, number, text) for name, number, text, rest in _messages()
+            if not NEXT.search(rest) and (name, text) not in VALUES]
+
+
+def test_every_listed_value_is_still_there():
+    found = {(name, text) for name, _number, text, _rest in _messages()}
+    assert set(VALUES) - found == set(), "A listed value is gone; drop it from VALUES"
 
 
 def test_hand_written_empty_messages_without_a_next_step_do_not_grow():

@@ -3377,7 +3377,7 @@
       renderIdentityChoices();
       setStatus("ai-identity-choices-status", result.available === true
         ? `${identityChoices.federation_bindings.length} agent identit${identityChoices.federation_bindings.length === 1 ? "y" : "ies"} and ${identityChoices.purview_intents.length} prepared change(s) available.`
-        : "No agent identities are enrolled for this workspace yet. Whoever runs Lightwork enrolls them on the server.");
+        : "No agent identities are enrolled for this workspace yet. Ask whoever runs Lightwork to enroll them on the server.");
     } catch (error) {
       purviewLabels.loaded = true;
       renderPurviewLabels();

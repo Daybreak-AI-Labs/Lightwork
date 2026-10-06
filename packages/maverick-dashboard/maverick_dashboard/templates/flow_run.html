@@ -537,7 +537,7 @@
     var keys = Object.keys(data || {});
     if (!keys.length) {
       var tr0 = document.createElement('tr'); var td0 = document.createElement('td'); td0.colSpan = 2; td0.className = 'muted';
-      td0.textContent = 'Nothing yet.'; tr0.appendChild(td0); body.appendChild(tr0); return;
+      td0.textContent = 'Nothing yet. Values appear here as the run produces them.'; tr0.appendChild(td0); body.appendChild(tr0); return;
     }
     keys.forEach(function (k) {
       var v = data[k], text;

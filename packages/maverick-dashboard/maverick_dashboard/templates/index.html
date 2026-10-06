@@ -156,7 +156,7 @@
             ? 'Task titles are not shown in the whole-workspace view. The counts above cover everyone\'s tasks.'
             : statusFilter
               ? 'No recent tasks with status "' + statusFilter + '".'
-              : 'No tasks yet.');
+              : 'No tasks yet. Start one in Chat and it appears here.');
           return;
         }
         box.textContent = '';
@@ -268,7 +268,7 @@
                        title: r.label + ' — ' + r.done + ' delivered of ' + r.total };
             }), 'Tasks by department: delivered against taken on.');
         } else {
-          B.empty(document.getElementById('bd-domains'), 'No departmental work yet.');
+          B.empty(document.getElementById('bd-domains'), 'No departmental work yet.', 'Work appears here once a deployed team starts tasks.');
         }
         renderRecent();
       }

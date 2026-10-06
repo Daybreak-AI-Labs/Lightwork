@@ -85,7 +85,7 @@
       if (request !== filter.request) return;
       filter.names = result.suggested.map(function (item) { return item.name; });
       filter.mode = filter.names.length ? 'suggested' : 'all';
-      filter.notice = filter.names.length ? 'Review suggestions before use.' : 'No suggestions yet.';
+      filter.notice = filter.names.length ? 'Review suggestions before use.' : 'No suggestions yet. Browse all templates below.';
       renderFilters();
     } catch (error) {
       if (request !== filter.request) return;

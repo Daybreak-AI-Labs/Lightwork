@@ -352,7 +352,7 @@
             {label: "What happened", value: function (e) { return EVENTS[e.event_type] || CW.human(e.event_type); }},
             {label: "Destination", value: function (e) { return e.details && e.details.destination_id ? CW.human(e.details.destination_id) : ""; }},
           ],
-          empty: {title: "Nothing has happened yet."},
+          empty: {title: "Nothing has happened yet.", body: "Deliveries appear here once a destination receives a consent update."},
         });
       } catch (error) { $("cd-history-table").replaceChildren(); CW.fail(status, error, "load delivery history"); }
     }

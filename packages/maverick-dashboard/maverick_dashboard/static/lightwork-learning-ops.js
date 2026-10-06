@@ -51,7 +51,7 @@
       { okText: 'Turn now' }))) return null;
     return { url: LO + '/flywheel/turn', init: { method: 'POST', json: {} } };
   }, ui('lo-fw', 'turn the flywheel', function (d) {
-    if (!d.acted) return el('p', 'muted', 'Nothing to learn yet. It needs more finished tasks to look at.');
+    if (!d.acted) return el('p', 'muted', 'Nothing to learn yet. Lessons appear once more tasks have finished.');
     var out = [el('p', null, 'Looked at ' + plural(d.tasks, 'task') + '. Learned ' + plural(d.counts.avoid, 'thing') +
       ' to avoid and ' + plural(d.counts.habits, 'habit') + ' that help, and suggested ' + plural(d.counts.ideas, 'better step') + ' to test.')];
     if (d.avoid.length) { out.push(el('h4', null, 'Now avoids')); out.push(list(d.avoid.map(window.mvHuman || String))); }
@@ -214,7 +214,7 @@
   function loadRewardModels() {
     J.request(TO + '/reward-models').then(function (d) {
       var nodes = [el('p', 'muted', plural(d.waiting_outlines, 'task outline') + ' waiting on this server to learn from.')];
-      if (!d.models.length) nodes.push(el('p', 'muted', admin ? 'No scoring guide yet. Learn from eligible task approaches below.' : 'No scoring guide yet.'));
+      if (!d.models.length) nodes.push(el('p', 'muted', admin ? 'No scoring guide yet. Learn from eligible task approaches below.' : 'No scoring guide yet. It appears here once an administrator trains one.'));
       else nodes.push(J.table(['Trained', 'Comparisons', 'Agreed with the checker', ''], d.models.map(function (m) {
         var link = el('a', 'btn btn--ghost', 'Download');
         link.href = TO + '/reward-models/' + encodeURIComponent(m.name) + '/download';

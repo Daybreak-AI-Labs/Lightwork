@@ -428,7 +428,7 @@
           { label: "When", value: (e) => when(e.occurred_at) },
           { label: "What happened", value: (e) => EVENTS[e.event_type] || human(e.event_type) },
         ],
-        empty: { title: "No changes recorded yet." },
+        empty: { title: "No changes recorded yet.", body: "Each saved change to these settings appears here." },
       });
     } catch (error) { explain(operationStatus, error, "load the history"); }
   }

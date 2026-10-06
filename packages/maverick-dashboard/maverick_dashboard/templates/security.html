@@ -96,7 +96,7 @@
 <fieldset class="sec-pick"><legend>{{ label }}</legend>
   {% if help %}<p class="sec-empty">{{ help }}</p>{% endif %}
   {% if items %}<div class="sec-pick__list">{% for item in items %}<label><input type="checkbox" name="{{ name }}" value="{{ item.value }}"{% if item.value in selected %} checked{% endif %}> {{ item.label }}</label>{% endfor %}</div>
-  {% else %}<p class="sec-empty">None yet.</p>{% endif %}
+  {% else %}<p class="sec-empty">None yet. Add them in their own section first, then choose them here.</p>{% endif %}
 </fieldset>
 {%- endmacro %}
 

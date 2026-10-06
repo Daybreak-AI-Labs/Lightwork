@@ -235,7 +235,7 @@
         var tr = el('tr');
         var td = el('td', null, admin && data.enabled
           ? 'No changes have been suggested yet. Use "Suggest a change" below when an agent keeps making the same mistake.'
-          : 'No changes have been suggested yet.');
+          : 'No changes have been suggested yet. Suggestions appear here when an administrator makes one.');
         td.colSpan = admin ? 4 : 3;
         tr.appendChild(td);
         rows.appendChild(tr);

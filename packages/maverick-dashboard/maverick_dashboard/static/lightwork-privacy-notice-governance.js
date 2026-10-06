@@ -284,7 +284,7 @@
   document.getElementById('png-effective').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var prop = document.getElementById('png-eff-property').value;
-    if (!prop) { say('There are no notices yet.'); return; }
+    if (!prop) { say('There are no notices yet. Create a notice first, then check which version is live.'); return; }
     var q = '?jurisdiction=' + encodeURIComponent(document.getElementById('png-eff-jur').value) +
       '&locale=' + encodeURIComponent(document.getElementById('png-eff-lang').value);
     var at = R.toEpoch(document.getElementById('png-eff-at').value);

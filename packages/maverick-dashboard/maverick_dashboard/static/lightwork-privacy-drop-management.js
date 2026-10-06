@@ -244,7 +244,7 @@
       { label: "Record the result", when: function (r) { return can.admin && r.usable && r.request && r.request.status === "PENDING" && !activeOutcome(r); }, run: openOutcome },
       { label: "Close request", kind: "primary", when: function (r) { return can.admin && r.usable && r.request && r.request.status === "PENDING" && activeOutcome(r); }, run: closeRequest },
       { label: "Withdraw", kind: "danger", when: function (r) { return can.admin && r.state === "active"; }, run: withdrawRecord }
-    ], { text: can.admin ? "No DROP requests yet. Use “Add a DROP request” when DROP sends you one." : "No DROP requests yet." });
+    ], { text: can.admin ? "No DROP requests yet. Use “Add a DROP request” when DROP sends you one." : "No DROP requests yet. They appear here when an administrator adds one." });
 
     var waiting = byId("drop-waiting");
     if (waiting) {
@@ -266,7 +266,7 @@
         { label: "Registration valid until", value: function (b) { return b.valid_until ? R.day(b.valid_until) : ""; } }
       ], state.brokers, [
         { label: "Remove", kind: "danger", when: function (b) { return can.admin && b.state === "active"; }, run: removeBroker }
-      ], { text: can.admin ? "No data brokers yet. Add the broker registration your DROP requests arrive under." : "No data brokers yet." });
+      ], { text: can.admin ? "No data brokers yet. Add the broker registration your DROP requests arrive under." : "No data brokers yet. They appear here when an administrator adds one." });
     }
     fillBrokers();
   }
