@@ -261,6 +261,14 @@ correctness repairs to existing learning, not a new research algorithm or proof
 of answer accuracy, causal value or independent audit custody. Counts remain
 6 partial product foundations, 18 bounded pilots and 4 parked/rejected results.
 
+Access-request follow-through replaces internal action-name entry with named
+ordinary/Copilot choices and complete current-policy review. Read-only exact
+request and decision recovery uses existing native custody without replay or
+activity effects. The pure inventory does not execute add-on factories or
+generated-action probes; unavailable add-on names are disclosed. These are
+usability and recovery repairs, not a new learning mechanism, independently held
+audit trail or proven customer benefit. Research status counts remain unchanged.
+
 Read-only connection diagnostics follow-through removes a false mutation phase
 from an existing Copilot operation. Its current scoped status stays usable with
 writes disabled and agrees with ordinary native records. This is product

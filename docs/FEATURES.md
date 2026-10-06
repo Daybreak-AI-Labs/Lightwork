@@ -6373,3 +6373,19 @@ visible when paging or another lookup fails. A new read clears confirmation;
 manual changes are identified, and invalid manual fields reveal their remedy.
 The ordinary form and its Copilot host retain the same exact checkpoint binding.
 Choosing a collection checkpoint does not confirm an earlier message's delivery.
+
+### Named access requests and interrupted decisions
+
+Access requests offer named dashboard and tool actions, search and ordinary
+paging instead of requiring an internal action name. The complete review shows
+the selected action, current policies, responsible administrator and business
+reason. Copilot uses the same choices and native review. Supported built-in
+actions and authorized personally created actions are discoverable without
+loading add-on code; the interface explains that add-on choices are unavailable
+through this listing. A listed action is not evidence that its connection works.
+
+A request or review whose reply was lost offers a read-only check of the exact
+saved operation in Copilot. It rechecks the current account and workspace and
+does not submit another request, decision or activity write. Incomplete history
+or a pending activity receipt remains explicitly unconfirmed. Recording a review
+does not grant access; only the actual current policy can confirm permission.
