@@ -75,7 +75,7 @@ def test_pending_approval_shows_on_page(monkeypatch, tmp_path):
     assert "saved but not in effect yet" in text
     assert "This older request is missing the details needed to approve it safely" in text
     assert 'data-action="approve" disabled' in text
-    assert 'data-action="deny">Reject</button>' in text
+    assert 'data-action="deny">Reject "Rm rf"</button>' in text
     assert 'data-action="revise">Send back for changes</button>' in text
     assert "window.prompt" not in text
     assert "'Failed: '" not in text and "String(e)" not in text
@@ -485,7 +485,7 @@ def test_approval_card_reads_plainly_with_fingerprints_tucked_away(monkeypatch, 
     assert "This is Lightwork's suggestion — the decision is yours." in text
     assert "Up to $0.25" in text
     assert "Technical details (for auditors)" in text
-    assert 'data-action="approve">Approve</button>' in text or '>Approve</button>' in text
+    assert '>Approve "Send email"</button>' in text
     # Fingerprints only appear inside the collapsed auditor section.
     before_tech = text.split("Technical details (for auditors)")[0]
     assert card["target"]["sha256"] not in before_tech

@@ -92,8 +92,8 @@
       {% if own_note %}<p class="muted approval-own-note" id="approval-own-note-{{ a.id }}">{{ own_note }}</p>{% endif %}
       <div class="approval-actions">
         <button type="button" class="btn btn--ghost approval-copilot" data-id="{{ a.id }}">Review with Copilot</button>
-        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_note %} disabled title="{{ own_note }}" aria-describedby="approval-own-note-{{ a.id }}"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% elif progress and progress.recorded %} disabled{% endif %}>Approve</button>
-        <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
+        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_note %} disabled title="{{ own_note }}" aria-describedby="approval-own-note-{{ a.id }}"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% elif progress and progress.recorded %} disabled{% endif %}>Approve "{{ action_label | truncate(48, true, '…') }}"</button>
+        <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject "{{ action_label | truncate(48, true, '…') }}"</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
         {% if progress %}<p class="approval-quorum" data-approval-quorum-status="1">{{ progress.text }}</p>{% endif %}
       </div>
@@ -150,7 +150,7 @@
     <p id="approval-confirm-err" class="mv-form__err" role="alert"></p>
     <div class="mv-confirm__row">
       <button type="button" class="btn btn--ghost" id="approval-confirm-cancel">Cancel</button>
-      <button type="submit" class="btn btn--primary" id="approval-confirm-ok">Yes, approve</button>
+      <button type="submit" class="btn btn--primary" id="approval-confirm-ok">Approve this action</button>
     </div>
   </form>
 </dialog>
@@ -278,6 +278,32 @@
     function itemFor(id) {
       return document.querySelector('article.approval-item[data-id="' + id + '"]');
     }
+    // The page header's "N requests waiting" follows the queue: a decision,
+    // an undo or a send-back changes it at once, as the list does.
+    const countBox = document.getElementById('approvals-current-state');
+    function refreshCount() {
+      if (!countBox) return;
+      const open = queue.querySelectorAll(':scope > article.approval-item').length +
+        (parseInt(countBox.dataset.flowCount, 10) || 0);
+      const hidden = parseInt(countBox.dataset.privateCount, 10) || 0;
+      const checked = countBox.dataset.coverage === 'current';
+      const name = countBox.querySelector('.hero-statebox__row strong');
+      if (name) {
+        name.textContent = open ? open + (open === 1 ? ' request waiting' : ' requests waiting')
+          : hidden ? hidden + (hidden === 1 ? " request is waiting that you can't open here"
+            : " requests are waiting that you can't open here")
+          : '0 requests waiting';
+      }
+      const badge = countBox.querySelector('.hero-statebox__row .badge');
+      if (badge) {
+        badge.textContent = open || countBox.dataset.inChat === '1' ? 'Action needed'
+          : hidden ? 'Waiting' : checked ? 'All clear' : 'Check needed';
+        badge.className = 'badge ' + (open || hidden || !checked ? 'warn' : 'ok');
+      }
+    }
+    if (countBox && queue && typeof MutationObserver === 'function') {
+      new MutationObserver(refreshCount).observe(queue, {childList: true});
+    }
     function showEmptyIfNeeded() {
       if (queue.querySelector('article.approval-item')) return;
       const title = 'Nothing needs your decision right now';
@@ -335,6 +361,9 @@
       const opener = document.activeElement;
       document.getElementById('approval-confirm-title').textContent =
         'Approve "' + (item.dataset.label || 'this request') + '"?';
+      // The button names the action it approves, never a bare "Yes".
+      document.getElementById('approval-confirm-ok').textContent =
+        'Approve "' + (item.dataset.label || 'this request') + '"';
       document.getElementById('approval-confirm-risk').textContent = critical
         ? 'This is a critical risk action.' : 'This is a high risk action.';
       // Say so when the person deciding is the person who asked.
@@ -536,7 +565,7 @@
         const answers = window.mvForm ? await window.mvForm('Reject "' + label + '"', [
           { key: 'reason', label: 'Why are you rejecting it? (optional)', type: 'text', required: false,
             help: 'Written to the audit log next to your decision.' },
-        ], { okText: 'Reject' }) : {};
+        ], { okText: 'Reject "' + label + '"' }) : {};
         if (answers === null) { say('Nothing was changed.'); return; }
         const reason = ((answers && answers.reason) || '').trim();
         if (reason) body.reason = reason;
@@ -546,7 +575,7 @@
         const answers = window.mvForm ? await window.mvForm('Send back for changes', [
           { key: 'rationale', label: 'What should the requester change?', type: 'text', required: true,
             help: 'The requester sees this note and prepares a new request.' },
-        ], { okText: 'Send back' }) : null;
+        ], { okText: 'Send back for changes' }) : null;
         revisionRationale = ((answers && answers.rationale) || '').trim();
         if (!revisionRationale) {
           say(answers ? 'Add a note saying what should change.' : '');

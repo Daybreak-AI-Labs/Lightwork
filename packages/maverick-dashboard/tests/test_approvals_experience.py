@@ -281,3 +281,28 @@ def test_link_to_an_approval_no_longer_waiting_has_a_note_and_a_way_on(tmp_path)
     assert "This approval was already decided or no longer exists." in page.text
     assert 'href="#request-decision-history"' in page.text
     assert 'href="/audit">find it in the Activity log' in page.text
+
+
+def test_decision_buttons_name_the_action_they_decide(tmp_path):
+    w = _world(tmp_path)
+    _queue(w, action="send_email", risk="medium")
+    text = _client().get("/approvals").text
+    assert re.search(r'data-action="approve"[^>]*>Approve "Send email"</button>', text)
+    assert re.search(r'data-action="deny">Reject "Send email"</button>', text)
+    source = TEMPLATE.read_text(encoding="utf-8")
+    # No bare yes or generic OK on any approval button or confirmation.
+    assert "Yes, approve" not in source
+    assert not re.search(r"okText:\s*['\"](OK|Yes|Confirm|Continue|Reject|Send back)['\"]", source)
+    assert "'Approve \"' + label + '\"'" in source or "'Approve \"' + (item.dataset.label" in source
+
+
+def test_the_waiting_count_in_the_header_follows_the_queue(tmp_path):
+    w = _world(tmp_path)
+    _queue(w, risk="medium")
+    _queue(w, action="send_email", risk="medium")
+    text = _client().get("/approvals").text
+    box = re.search(r'<div id="approvals-current-state"[^>]*>', text)
+    assert box and 'data-flow-count="0"' in box.group(0) and 'data-private-count="0"' in box.group(0)
+    assert "2 requests waiting" in text
+    source = TEMPLATE.read_text(encoding="utf-8")
+    assert "approvals-current-state" in source and "MutationObserver" in source
