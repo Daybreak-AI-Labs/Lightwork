@@ -5195,6 +5195,18 @@ def pick_advanced() -> dict[str, Any]:
             "Enable private task calculations? Check a bounded rule using a permitted task attachment and release only a separately approved fixed answer. Original data stays private.",
             default=False,
         ),
+        "allow_procedure_interactions": _q_confirm(
+            "Enable check local rules together? Compare two owned local rules in both orders and check all supported starting values before any combined use.", default=False,
+        ),
+        "allow_request_program": _q_confirm(
+            "Enable prepare an answer for this request? Check bounded arrangements of your existing taught rules against permitted original cases for one request. Nothing is published automatically.", default=False,
+        ),
+        "allow_commitment_economic_alternatives": _q_confirm(
+            "Enable compare additional-work economics? Compare reported offer prices and full incremental costs with currently protected commitments. Results remain conditional on your stated facts.", default=False,
+        ),
+        "allow_workflow_step_checks": _q_confirm(
+            "Enable try one workflow step? Check one owned taught step against ordinary entered values without running the whole workflow or any connected action.", default=False,
+        ),
         "allow_recovery_visibility": _q_confirm(
             "Enable missing-reply practice? Practice with fictional sign-offs to see when identical visible status hides different original outcomes. No live approval or connected service is used.", default=False,
         ),
@@ -9088,6 +9100,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("portable_competence = true")
     if advanced.get("allow_private_task_computation") is True:
         _feature_locks.append("private_task_computation = true")
+    if advanced.get("allow_procedure_interactions") is True:
+        _feature_locks.append("procedure_interactions = true")
+    if advanced.get("allow_request_program") is True:
+        _feature_locks.append("request_program = true")
+    if advanced.get("allow_commitment_economic_alternatives") is True:
+        _feature_locks.append("commitment_economic_alternatives = true")
+    if advanced.get("allow_workflow_step_checks") is True:
+        _feature_locks.append("workflow_step_checks = true")
     if advanced.get("allow_recovery_visibility") is True:
         _feature_locks.append("recovery_visibility = true")
     if advanced.get("allow_semantic_rule_reuse") is True:

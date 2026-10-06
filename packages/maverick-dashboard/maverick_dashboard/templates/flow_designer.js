@@ -926,15 +926,26 @@
     var head = document.createElement('div'); head.style.fontWeight = '600'; head.style.marginBottom = 'var(--space-3)';
     head.textContent = (KIND_ICON[n.kind] || '') + ' ' + kindLabel(n.kind);
     props.appendChild(head);
+    if (flow === rootFlow && n.kind === 'agent' && n.learned_operator && n.learned_fallback === false) {
+      var tryStep = document.createElement('button'); tryStep.type = 'button'; tryStep.className = 'btn btn--ghost';
+      tryStep.textContent = 'Try only this step';
+      tryStep.addEventListener('click', function () {
+        if (window.LWWorkflowStepChecks) void window.LWWorkflowStepChecks.openSelected();
+        else say('The step controls could not be opened. Refresh this page; your work is kept.', true);
+      });
+      props.appendChild(tryStep);
+    }
     props.appendChild(field('Step name (optional)', input(n.label, function (v) { n.label = v; render(); }, 'Shown on the step')));
     if (n.kind === 'agent') {
       var briefTa = textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize the customer request and draft a reply');
       props.appendChild(withPills(n.id, field('Brief (what the agent should do)', briefTa), briefTa));
       if (n.learned_operator != null) {
-        props.appendChild(hint('Learned computation attached. The original agent handles inputs the learned rules cannot resolve. Remove this attachment before changing the brief or output.'));
+        props.appendChild(hint(n.learned_fallback === false
+          ? 'Taught local rules are attached. An answer is produced only when all retained rules agree. Remove the rules before changing the brief or output.'
+          : 'Taught local rules are attached. The AI task handles inputs these rules cannot resolve. Remove the rules before changing the brief or output.'));
         var removeLearned = document.createElement('button');
         removeLearned.className = 'btn btn--ghost'; removeLearned.type = 'button';
-        removeLearned.textContent = 'Remove learned computation';
+        removeLearned.textContent = 'Remove taught rules';
         removeLearned.addEventListener('click', function () {
           pushHistory(); delete n.learned_operator; renderProps(); render();
         });

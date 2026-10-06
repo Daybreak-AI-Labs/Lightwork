@@ -136,6 +136,8 @@
     {% if can_open_page('/learning/recheck-rules') %}<a class="btn btn--ghost" href="/learning/recheck-rules">Recheck affected rules</a>{% endif %}
     {% if can_open_page('/learning/distinctions') %}<a class="btn btn--ghost" href="/learning/distinctions">Find missing distinctions</a>{% endif %}
     {% if can_open_page('/private-task-computation') %}<a class="btn btn--ghost" href="/private-task-computation">Private task calculations</a>{% endif %}
+    {% if can_open_page('/learning/rules-together') %}<a class="btn btn--ghost" href="/learning/rules-together">Check local rules together</a>{% endif %}
+    {% if can_open_page('/learning/request-program') %}<a class="btn btn--ghost" href="/learning/request-program">Prepare an answer for this request</a>{% endif %}
     {% if can_open_page('/learning/recovery-visibility') %}<a class="btn btn--ghost" href="/learning/recovery-visibility">Understand a missing reply</a>{% endif %}
     {% if can_open_page('/learning/portable-rules') %}<a class="btn btn--ghost" href="/learning/portable-rules">Share and qualify local rule structures</a>{% endif %}
     {% if can_open_page('/learning/work-restructuring') %}<a class="btn btn--ghost" href="/learning/work-restructuring">Share preparation safely</a>{% endif %}
@@ -1003,3 +1005,4 @@
   </script>
 
 {% endblock %}
+{% block scripts_extra %}<script src="{{ asset('lightwork-procedure-interactions.js') }}" defer></script>{% endblock %}

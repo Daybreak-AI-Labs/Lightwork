@@ -186,6 +186,7 @@ async def page(request: Request):
         {"review_context": context_for(request) if enabled else "",
          "review_enabled": enabled,
          "capability_enabled": enabled and config.get_features().get("commitment_capability_learning") is True,
+         "economic_alternatives_enabled": enabled and config.get_features().get("commitment_economic_alternatives") is True,
          "review_admin": has_global_permission(request, "admin")},
         headers={"Cache-Control": "private, no-store"})
 

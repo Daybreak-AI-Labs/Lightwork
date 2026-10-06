@@ -232,6 +232,14 @@
   .fd-scard__main{ min-width: 0; flex: 1; background: none; border: 0; padding: 0; text-align: start; color: inherit; font: inherit; cursor: pointer; }
   .fd-scard__tools{ display: flex; gap: var(--space-1); flex: none; }
   .fd-scard__tools .btn{ padding: 0.25rem 0.55rem; font-size: var(--text-xs); }
+  @media (max-width: 640px) {
+    .fd-scard { flex-wrap: wrap; }
+    .fd-scard__ic { flex: none; }
+    .fd-scard__main { flex: 1 1 0; }
+    .fd-scard__t { overflow-wrap: anywhere; }
+    .fd-scard__tools { flex-basis: 100%; flex-wrap: wrap; justify-content: flex-end; }
+    .fd-scard__tools .btn { max-width: 100%; white-space: normal; }
+  }
   .fd-simple__add{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
   /* In the Steps view the selected step's settings open in the side rail. */
   .fd[data-view="steps"] .fdx-rail .fd__props{ display: block; }
@@ -448,6 +456,14 @@
         <div id="fd-sample-fields"></div>
         <button class="btn btn--ghost" type="button" id="fd-sample-add">Add a sample value</button>
       </details>
+      <section id="fd-selected-step-check" aria-labelledby="fd-step-check-title">
+        <h3 id="fd-step-check-title">Try one taught step</h3>
+        <p class="fdx-mini">Select a taught local rule with AI fallback off. Check ordinary named values without running the rest of this workflow.</p>
+        <a class="btn btn--ghost" href="/settings#feature-workflow_step_checks">Manage one-step checks</a>
+        <p id="fd-step-check-status" class="fdx-mini" role="status" aria-live="polite"></p>
+        <button class="btn btn--ghost" type="button" id="fd-step-check-read" hidden>Read the original step check</button>
+        <div id="fd-step-check-result" style="min-width:0;overflow-wrap:anywhere;"></div>
+      </section>
       <label class="fdx-mini" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
         <input type="checkbox" id="fd-notify" /> Tell me when it needs approval or finishes
       </label>
@@ -484,6 +500,7 @@
 </script>
 <script>{% include "flow_designer_action_fields.js" %}</script>
 <script src="{{ asset('lightwork-flow-retirement.js') }}"></script>
+<script src="{{ asset('lightwork-workflow-step-checks.js') }}" defer></script>
 <script>{% include "flow_hardening_review.js" %}</script>
 <script>
 {% include "flow_designer.js" %}
@@ -579,6 +596,12 @@
         }
         main.addEventListener('click', function () { showProps(); engine().select(n.id); render(); });
         var tools = document.createElement('span'); tools.className = 'fd-scard__tools';
+        if (original && original.kind === 'agent' && original.learned_operator && original.learned_fallback === false) {
+          tools.appendChild(btn('Try', 'btn--ghost', 'Try only “' + n.title + '”', function () {
+            showProps(); engine().select(n.id);
+            if (window.LWWorkflowStepChecks) void window.LWWorkflowStepChecks.openSelected();
+          }));
+        }
         if (i > 0) tools.appendChild(btn('Move up', 'btn--ghost', 'Move “' + n.title + '” up', function () { if (engine().move(n.id, -1)) render(); }));
         if (i < steps.length - 1) tools.appendChild(btn('Move down', 'btn--ghost', 'Move “' + n.title + '” down', function () { if (engine().move(n.id, 1)) render(); }));
         tools.appendChild(btn('Remove', 'btn--ghost btn--danger', 'Remove “' + n.title + '”', async function () {

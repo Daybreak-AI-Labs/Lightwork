@@ -91,7 +91,7 @@ class PrepareInput(ContextInput):
     operation: str = Field(min_length=3, max_length=100)
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
     revision: str = Field(min_length=1, max_length=128)
-    arguments: dict[str, Any] = Field(default_factory=dict, max_length=30)
+    arguments: dict[str, Any] = Field(default_factory=dict, max_length=64)
 
 
 class RecoveryInput(StrictInput):
@@ -171,6 +171,7 @@ def _adapter_modules():
         product_operations_budget,
         product_operations_channel_people,
         product_operations_commitment_capability,
+        product_operations_commitment_economic_alternatives,
         product_operations_commitments,
         product_operations_companion,
         product_operations_companion_admin,
@@ -224,9 +225,11 @@ def _adapter_modules():
         product_operations_preferences,
         product_operations_privacy_notice_proposals,
         product_operations_private_task_computation,
+        product_operations_procedure_interactions,
         product_operations_projects,
         product_operations_record_history,
         product_operations_recovery_visibility,
+        product_operations_request_program,
         product_operations_retention,
         product_operations_reward_training,
         product_operations_skills,
@@ -258,6 +261,7 @@ def _adapter_modules():
         product_operations_companion_conversation,
         product_operations_commitments,
         product_operations_commitment_capability,
+        product_operations_commitment_economic_alternatives,
         product_operations_competence_transport,
         product_operations_compliance_mappings,
         product_operations_compliance_questionnaires,
@@ -309,6 +313,8 @@ def _adapter_modules():
         product_operations_stop,
         product_operations_identity,
         product_operations_record_history,
+        product_operations_procedure_interactions,
+        product_operations_request_program,
         product_operations_recovery_visibility,
         product_operations_retention,
         product_operations_reward_training,

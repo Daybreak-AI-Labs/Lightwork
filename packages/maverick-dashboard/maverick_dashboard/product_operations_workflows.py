@@ -467,10 +467,32 @@ def rule_refine_prepare(request, selection, _arguments):
 FLOW_EDITOR_PAGES = ("/flows/designer/*", "/workflow-builder")
 
 
+def step_check_snapshot(request, selection):
+    from . import workflow_step_checks as checks
+    flow_id = _flow_id(selection)
+    node_id = selection.get("node_id")
+    if not node_id:
+        raise HTTPException(409, "Select a taught step in this workflow first.")
+    source = native.get_flow_endpoint(request, flow_id)
+    value = checks.call(lambda: checks.material(request, {"flow": source, "step": node_id}))
+    return Snapshot(digest([value["context"], value["saved_source"], node_id, value["version"]]),
+                    "Current owned workflow and selected taught step",
+                    "Open ordinary named inputs for one local taught step. No other step, AI call or connected action runs.",
+                    details={"workflow_step_check_form": {"context": value["context"], "flow": flow_id, "step": node_id}})
+
+
+def step_check_prepare(request, selection, _arguments):
+    value = step_check_snapshot(request, selection)
+    return Preview(value.summary + " Review every entered value in the protected native controls before starting.", native=value.details)
+
+
 def entries():
     return (Adapter("learning.workflow_run", "Run this published workflow", "learning", "/flows/designer",
                     FLOW_EDITOR_PAGES, EmptyInput, snapshot, prepare,
                     aliases=("run this workflow", "start this workflow", "run published workflow")),
+            Adapter("learning.workflow_step_check", "Try only the selected taught step", "learning", "/flows/designer",
+                    FLOW_EDITOR_PAGES, EmptyInput, step_check_snapshot, step_check_prepare,
+                    aliases=("test selected step", "try one step", "check this taught step")),
             Adapter("learning.workflow_harden", "Review fixed action for this step", "learning", "/workflows",
                     FLOW_EDITOR_PAGES, HardeningBindings, harden_snapshot, harden_prepare, harden_execute,
                     aliases=("harden this step", "make this step a fixed action", "apply flow improvement")),

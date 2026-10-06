@@ -283,14 +283,14 @@
               var v0 = window.prompt((problem ? problem + '\n' : '') + promptLabel,
                 boolField ? String(booleanDefault(s.default)) : s.default != null ? String(s.default) : '');
               if (v0 === null) return Promise.resolve(null);
-              v0 = v0.trim();
-              if (!v0 && s.required) { problem = productText('This field is required.'); continue; }
+              if (!s.preserveWhitespace) v0 = v0.trim();
+              if (!v0 && s.required && !s.allowEmpty) { problem = productText('This field is required.'); continue; }
               if (boolField) {
                 if (!/^(true|false|yes|no|1|0)$/i.test(v0)) {
                   problem = productText('Enter true or false.'); continue;
                 }
                 out0[s.key] = /^(true|yes|1)$/i.test(v0);
-              } else if (v0) {
+              } else if (v0 || s.allowEmpty) {
                 if (s.type === 'number' && !Number.isFinite(Number(v0))) {
                   problem = productText('Enter a valid number.'); continue;
                 }
@@ -364,13 +364,14 @@
             controls.forEach(function (c) {
               c.ctl.removeAttribute('aria-invalid');
               if (c.f.type === 'bool' || c.f.type === 'checkbox') { out[c.f.key] = c.ctl.checked; return; }
-              var val = (c.ctl.value || '').trim();
-              if (!val && c.f.required) {
+              var val = c.ctl.value || '';
+              if (!c.f.preserveWhitespace) val = val.trim();
+              if (!val && c.f.required && !c.f.allowEmpty) {
                 missing.push(c.f.label || c.f.key); c.ctl.setAttribute('aria-invalid', 'true');
                 if (!firstMissing) firstMissing = c.ctl;
                 return;
               }
-              if (val) out[c.f.key] = val;
+              if (val || c.f.allowEmpty) out[c.f.key] = val;
             });
             if (missing.length) {
               if (window.LightworkI18n) window.LightworkI18n.set(errEl, 'Required: {fields}', {fields: missing.join(', ')});

@@ -45,6 +45,7 @@ var FDCore = (function () {
     // The server validates it and its binding; silently dropping it here would
     // replace learned execution with model work on an unrelated layout save.
     if (n.learned_operator != null) o.learned_operator = n.learned_operator;
+    if (typeof n.learned_fallback === 'boolean') o.learned_fallback = n.learned_fallback;
     if (n.recipe_step != null) o.recipe_step = n.recipe_step;
     if (n.seconds) o.seconds = n.seconds;
     if (n.retries) o.retries = n.retries;

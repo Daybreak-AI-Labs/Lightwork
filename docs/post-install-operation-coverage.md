@@ -1210,3 +1210,94 @@ Three stale learned-store callers in scheduled skill retirement, hindsight and
 signed operating-record export now resolve the active tenant's actual store,
 preserving explicit custom retirement locations. They no longer import a removed
 process-wide constant or silently omit the tenant's learned skills from export.
+
+## October 6 request-specific work and interactions between taught rules
+
+Learning now offers Check local rules together and Prepare an answer for this
+request. Both use ordinary named selections and typed inputs, full protected
+reviews, retained original requests and the same authorized Copilot contracts.
+Their default-off Features controls have actual installer choices. Private
+values require current source permission; disabling new work leaves authorized
+original history readable. Superseded Copilot handoffs preserve the current form.
+
+The joint-rule journey qualifies two owned published pure rules using real
+permitted native case receipts. It runs every supported finite starting value,
+both orders, repetition and fresh independent native comparisons. A native
+journey completed twenty-four runs across thirty-six current-source boundaries,
+then exercised an ordinary combined answer and a typed Copilot answer. Four
+original case permissions remained distinct. Full alternatives and ambiguous
+orders remain visible; this does not infer connected actions or remote effects.
+Native permission withdrawal, expired writer admission, source changes, foreign
+ownership, real role loss/restoration, interrupted replies and original recovery
+were exercised. An unresolved request is never resumed automatically.
+The original selectors retain every owned request within their one-thousand
+record bound; older requests are no longer silently dropped after fifty entries.
+
+The request-specific journey combines selected existing taught steps through
+three positions, including repeated steps. Every combination receives every
+selected original case and its explicitly entered desired answer. All surviving
+combinations then receive the current request. An answer requires their complete
+agreement. The native journey checked fourteen arrangements, retained all
+seventy-one completed native steps and returned twelve from Double allowance →
+Double allowance → Produce final allowance instead of the published arrangement.
+The native renderer displayed every arrangement and complete source alternatives.
+The description is context, not an executable specification; there is no
+arbitrary code generation, connected effect or publication. Actual lost replies,
+calculation-to-receipt failure, writer expiry, current case withdrawal, role loss,
+foreign ownership and disabled original history were checked without replay.
+
+## October 6 ordinary single-step checks in the workflow designer
+
+An owned saved workflow's selected taught step can be tried using its current
+unsaved graph when AI fallback is explicitly off. Ordinary text, exact whole
+numbers and Yes/No values lead to complete input/source review and one actual
+native step. The same protected form is available through Copilot. No AI or
+connected action is invoked. Unsupported step kinds still require their normal
+workflow run; this closes the taught-step part of original backlog UX-386.
+
+The serializer now preserves explicit AI fallback off through Save, unrelated
+edits and Undo. A refused input retains its exact draft. Empty text and spaces
+are preserved when the field permits them. Lost replies recover the retained
+original; interrupted calculation-to-receipt outcomes remain unknown without
+rerunning the step. Native source changes, physical writer expiry, actual role
+loss, foreign records and superseded handoffs were exercised. The actual step
+card controls fit within a 320px viewport, including Try and Remove. The shared
+form changes are opt-in and keep other callers' existing text behavior.
+
+## October 6 complete reported economics for additional-work choices
+
+Promise reviews now compare current additional-work offers and possible resource
+additions while protecting every accepted commitment across every surviving
+entered capacity explanation. Ordinary financial controls and typed Copilot
+author complete offer/addition rows, currency, price, incremental expense,
+shared expense, cash-outlay limit, source basis and use permission. Financial
+amounts use exact decimal input and exact integer-unit strings on the wire;
+effort points remain separate. Complete native reviews include all assumptions.
+
+Native comparisons retained every inclusion-minimal feasible addition set and
+checked each result with the existing independent feasibility engine. The core
+journey found nine minimal alternatives from twenty-two feasible alternatives
+across eight current models. One reported comparison retained revenue 180.10,
+cost 115.00 and contribution 65.10 while protecting two accepted commitments.
+Those figures describe the fixture's entered premises, not a measured business
+result. Missing, expired or withdrawn permission and exhausted work allowances
+cannot produce an old frontier. Actual interrupted replies, post-calculation
+receipt failure, independent stop acknowledgement, lifetime allowance after
+removal, changed native sources, real role loss and foreign records were checked.
+Nothing purchases, reserves, accepts, sends or fulfils business work.
+The full four-offer, six-addition native journey retained all 135 minimal
+alternatives. Copilot's complete fifty-seven-field Edit and permission Scope
+preserved each row, exact monetary bounds and decimal round trips. Actual waits
+on both the namespace admission and physical create record lock refused expired
+or exhausted reviews before any record was created; a fresh review then worked.
+
+## October 6 workflow retry setting
+
+All settings accepts zero through ten retries, matching the native runner.
+Zero remains zero when the effective configuration is read, rather than silently
+becoming the default five. Eleven is outside the supported bound. The ordinary
+help explains that steps above the chosen ceiling need adjustment before running.
+This narrow correction closes the original UX-648 setting mismatch. Generic
+catalog-save original receipts and typed Copilot write coverage are a separate
+operating gap; inspecting the current setting after a lost reply does not prove
+that a particular original save succeeded.

@@ -237,6 +237,81 @@
           else { var visibilityLink = node('a', 'Open complete local practice controls', visibilityDestination); visibilityLink.href = '/learning/recovery-visibility'; visibilityLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'commitment_economic_author') {
+          var economicAuthor = entry[1], economicStarted = generation, economicSelection = JSON.stringify(context());
+          if (!economicAuthor || Array.isArray(economicAuthor) || Object.keys(economicAuthor).sort().join(',') !== 'binding,context,parent' ||
+              typeof economicAuthor.context !== 'string' || !/^[a-f0-9]{64}$/.test(economicAuthor.context) ||
+              typeof economicAuthor.binding !== 'string' || !/^[a-f0-9]{64}$/.test(economicAuthor.binding) ||
+              typeof economicAuthor.parent !== 'string' || !/^CMV-[a-f0-9]{48}$/.test(economicAuthor.parent)) return;
+          var economicDestination = node('dd', undefined, list), economicControl = window.LWCommitmentEconomics;
+          if (economicControl && typeof economicControl.openAuthor === 'function') button('Open all financial assumptions and choices', economicDestination, async function (event) {
+            var isCurrent = function () { return active(economicStarted) && JSON.stringify(context()) === economicSelection; };
+            if (!isCurrent() || busy) return;
+            var economicButton = event.currentTarget; economicButton.disabled = true;
+            try {
+              var opened = await economicControl.openAuthor(economicAuthor, {isCurrent: isCurrent});
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete protected financial form is open.' : 'Your entered assumptions are kept. Review the current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The financial form could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && economicButton.isConnected) economicButton.disabled = false; }
+          });
+          else { var economicLink = node('a', 'Open all financial assumptions and choices', economicDestination); economicLink.href = '/commitment-reviews?review=' + encodeURIComponent(economicAuthor.parent) + '#cea-author'; economicLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'workflow_step_check_form') {
+          var stepForm = entry[1], stepStarted = generation, stepSelection = JSON.stringify(context());
+          if (!stepForm || Array.isArray(stepForm) || Object.keys(stepForm).sort().join(',') !== 'context,flow,step' ||
+              typeof stepForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(stepForm.context) ||
+              typeof stepForm.flow !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$/.test(stepForm.flow) ||
+              typeof stepForm.step !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(stepForm.step)) return;
+          var stepDestination = node('dd', undefined, list), stepControl = window.LWWorkflowStepChecks;
+          if (stepControl && typeof stepControl.open === 'function') button('Open named values for this taught step', stepDestination, async function (event) {
+            var isCurrent = function () { return active(stepStarted) && JSON.stringify(context()) === stepSelection; };
+            if (!isCurrent() || busy) return;
+            var stepButton = event.currentTarget; stepButton.disabled = true;
+            try {
+              var opened = await stepControl.open(stepForm, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected input form is open. Nothing has run yet.' : 'Your current step and entered work are kept. Review the current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The step form could not be opened. Your work is kept.'; }
+            finally { if (isCurrent() && stepButton.isConnected) stepButton.disabled = false; }
+          });
+          else { var stepLink = node('a', 'Open the workflow and select this taught step', stepDestination); stepLink.href = '/flows/designer/' + encodeURIComponent(stepForm.flow) + '#fd-selected-step-check'; stepLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'procedure_interaction_form' || entry[0] === 'request_program_form') {
+          var combinedForm = entry[1], combinedStarted = generation, combinedSelection = JSON.stringify(context());
+          var joint = entry[0] === 'procedure_interaction_form';
+          if (!combinedForm || Array.isArray(combinedForm) ||
+              Object.keys(combinedForm).sort().join(',') !== (joint ? 'context,first,second' : 'context') ||
+              typeof combinedForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(combinedForm.context) ||
+              (joint && ['first', 'second'].some(function (key) { return typeof combinedForm[key] !== 'string' ||
+                !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(combinedForm[key]); }))) return;
+          var combinedDestination = node('dd', undefined, list);
+          var combinedControl = joint ? window.LightworkJointRules : window.LightworkRequestProgram;
+          var combinedLabel = joint ? 'Open complete joint rule controls' : 'Open the complete request form';
+          if (combinedControl && typeof combinedControl.open === 'function') button(combinedLabel, combinedDestination, async function (event) {
+            var isCurrent = function () { return active(combinedStarted) && JSON.stringify(context()) === combinedSelection; };
+            if (!isCurrent() || busy) return;
+            var combinedButton = event.currentTarget; combinedButton.disabled = true;
+            try {
+              var opened = await combinedControl.open(joint ? combinedForm : combinedForm.context, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete protected form is open.' : 'Your current work is kept. Review the current form.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The form could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && combinedButton.isConnected) combinedButton.disabled = false; }
+          });
+          else {
+            var combinedLink = node('a', combinedLabel, combinedDestination);
+            combinedLink.href = joint ? '/learning/rules-together?first=' + encodeURIComponent(combinedForm.first) +
+              '&second=' + encodeURIComponent(combinedForm.second) : '/learning/request-program';
+            combinedLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
         if (entry[0] === 'grc_draft_form') {
           var draft = entry[1], draftStarted = generation, draftSelection = JSON.stringify(context());
           if (!draft || Array.isArray(draft) || Object.keys(draft).sort().join(',') !== 'context,original' ||
@@ -813,9 +888,15 @@
               : item.id.startsWith('commitments.capability.')
                 ? !!(window.LWCommitmentCapability && window.LWCommitmentCapability.renderReview &&
                      window.LWCommitmentCapability.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('commitments.economics.')
+                ? !!(window.LWCommitmentEconomics && window.LWCommitmentEconomics.renderReview &&
+                     window.LWCommitmentEconomics.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('tasks.private_check.')
                 ? !!(window.LWPrivateTaskComputation && window.LWPrivateTaskComputation.renderReview &&
                      window.LWPrivateTaskComputation.renderReview(formHost, review.changes) === true)
+              : item.id === 'learning.run_joint_rules'
+                ? !!(window.LightworkJointRules && window.LightworkJointRules.renderReview &&
+                     window.LightworkJointRules.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)

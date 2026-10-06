@@ -267,3 +267,12 @@ comparison, with no measured advantage over ordinary indexed finite functions.
 ## Change record
 
 - October 1, 2026: created the cumulative register with six product foundations, sixteen earlier research directions, and six new candidates. Preserved the previous three learning proposals and the archived unfavorable results. Added explicit relationships between related candidates, comparison obligations, customer journeys, and rejection criteria. No invention result or implementation is claimed by creating this record.
+
+October 6 follow-through adds bounded P02 joint native rule checks, P09
+request-specific native rule arrangements and P12 conditional economic alternatives.
+The implementation-status register records their exact native scope. Full source
+alternatives, separately qualified current cases, independent native comparisons,
+ordinary controls and protected Copilot are retained. None supplies a general
+remote-effect contract, unbounded executable intent, actual demand, realized profit,
+future accuracy or an independently demonstrated research advantage. Rejected
+P06/P07/P11/P14 experiments remain retained.

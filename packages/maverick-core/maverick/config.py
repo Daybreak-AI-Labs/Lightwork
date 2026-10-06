@@ -1135,6 +1135,10 @@ def get_features() -> dict:
         "commitment_viability": cfg.get("commitment_viability", False) is True,
         "commitment_capability_learning": cfg.get("commitment_capability_learning", False) is True,
         "semantic_rule_reuse": cfg.get("semantic_rule_reuse", False) is True,
+        "procedure_interactions": cfg.get("procedure_interactions", False) is True,
+        "request_program": cfg.get("request_program", False) is True,
+        "commitment_economic_alternatives": cfg.get("commitment_economic_alternatives", False) is True,
+        "workflow_step_checks": cfg.get("workflow_step_checks", False) is True,
         "recovery_visibility": cfg.get("recovery_visibility", False) is True,
         "private_task_computation": cfg.get("private_task_computation", False) is True,
         "portable_competence": cfg.get("portable_competence", False) is True,
@@ -3473,7 +3477,7 @@ def get_flows() -> dict:
     if not isinstance(cfg, dict):
         cfg = {}
     try:
-        max_node_retries = int(cfg.get("max_node_retries", 5) or 5)
+        max_node_retries = int(cfg.get("max_node_retries", 5))
     except (TypeError, ValueError):
         max_node_retries = 5
     return {
