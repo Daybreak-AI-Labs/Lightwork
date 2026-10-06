@@ -16,12 +16,21 @@ Config::
 """
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from .local import ExecResult, scrub_env
+
+
+def _ssh_env() -> dict:
+    """Keep local agent authentication while removing provider credentials."""
+    env = scrub_env()
+    if socket_path := os.environ.get("SSH_AUTH_SOCK"):
+        env["SSH_AUTH_SOCK"] = socket_path
+    return env
 
 # Connection options applied to BOTH the verify probe and every exec(): fail
 # fast on an auth prompt / key change instead of blocking the agent loop on a
@@ -81,7 +90,7 @@ class SSHBackend:
             )
         check = subprocess.run(
             ["ssh", *self._ssh_opts(), *self.ssh_args, self.host, "true"],
-            capture_output=True, timeout=15, env=scrub_env(),
+            capture_output=True, timeout=15, env=_ssh_env(),
         )
         if check.returncode != 0:
             stderr = check.stderr.decode("utf-8", errors="replace").strip()
@@ -127,7 +136,7 @@ class SSHBackend:
         try:
             result = subprocess.run(
                 args, capture_output=True, text=True, timeout=effective,
-                env=scrub_env(),
+                env=_ssh_env(),
             )
             return ExecResult(
                 stdout=result.stdout[-8000:],

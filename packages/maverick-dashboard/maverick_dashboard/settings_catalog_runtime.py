@@ -1074,10 +1074,6 @@ def _switches(S) -> tuple:
           warning="Skills from any web address, which may not have been reviewed, can be "
                   "installed."),
         # ------------------------------------------------------------ caching
-        S("cache", "llm_responses", "Reuse identical AI answers",
-          "Keep AI answers on this server and reuse one when exactly the same request is "
-          "made again.", "toggle", "Performance", False, "maverick.cache.llm",
-          subgroup="Caching", env=("MAVERICK_LLM_CACHE",)),
         S("cache", "messages", "Cache conversation history with Claude",
           "Ask Claude's service to keep the stable part of long conversations, which makes "
           "follow-up turns cheaper.", "toggle", "Performance", True,

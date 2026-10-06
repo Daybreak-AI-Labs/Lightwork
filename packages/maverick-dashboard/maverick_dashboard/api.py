@@ -1306,6 +1306,11 @@ async def delete_tenant(
 ) -> Response:
     require_global_permission(request, "admin")
     step_up.require_recent_mfa(request, "delete_workspace")
+    if purge:
+        raise HTTPException(status_code=409, detail=(
+            "Remove the workspace first. Then use Workspaces > Removed workspaces > Review erasure "
+            "to review and confirm every local record selected for permanent removal."
+        ))
     import os
 
     from maverick.tenant import registry as tenant_registry

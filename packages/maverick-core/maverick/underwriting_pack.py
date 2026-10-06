@@ -98,27 +98,16 @@ def _conformity_posture() -> dict[str, Any]:
 
 
 def _incident_posture(now: float) -> dict[str, Any]:
-    try:
-        from . import ai_incident_reporting as air
+    from .governance_alerts import incident_reporting_posture
 
-        if not air.enabled():
-            return {"enabled": False}
-        rows = air.list_declarations(now=now)
-        return {
-            "enabled": True,
-            "declarations": len(rows),
-            "overdue": sum(1 for row in rows if row["clock"]["overdue"]),
-            "withdrawn": sum(
-                1 for row in rows if row.get("status") == "withdrawn"
-            ),
-            "reported": sum(
-                1
-                for row in rows
-                if row.get("status") in {"initial_reported", "complete_reported"}
-            ),
-        }
-    except Exception:
-        return {"enabled": False, "error": "unavailable"}
+    section = incident_reporting_posture(now)
+    return {
+        "enabled": section["enabled"], "complete": section["complete"],
+        "declarations": section["record_count"], "overdue": section["overdue_count"],
+        "withdrawn": section["withdrawn"], "reported": section["reported"],
+        "unavailable_registers": section["unavailable_registers"],
+        "registers": section["registers"], "notice": section["notice"],
+    }
 
 
 def _literacy_posture(now: float) -> dict[str, Any]:

@@ -1,7 +1,7 @@
 """Per-agent autonomy levels wired into the agent tool chokepoint.
 
 Exercises ``_run_tool`` directly (no live LLM): the hire's autonomy rung gates a
-*consequential* tool -- OBSERVE denies, SUGGEST/REQUEST require a human, AUTO
+*consequential* tool -- OBSERVE denies, SUGGEST stages, REQUEST asks a human, AUTO
 runs -- composed strictest-wins with org governance. Off by default and
 low-risk tools are never gated.
 """
@@ -116,13 +116,19 @@ async def test_observe_denies_consequential(monkeypatch, tmp_path, _high_risk_ac
 
 
 @pytest.mark.asyncio
-async def test_suggest_requires_human(monkeypatch, tmp_path, _high_risk_act):
+async def test_suggest_stages_without_execution(monkeypatch, tmp_path, _high_risk_act):
     _enable(monkeypatch)
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")  # silent auto != a human
     agent = _agent(tmp_path, AutonomyProfile(default=AutonomyLevel.SUGGEST, onboarding=False))
     out = await agent._run_tool("act", {})
     assert "done" not in out
-    assert "human approval" in out.lower()
+    from maverick.agent import _NotExecutedToolResult
+    assert isinstance(out, _NotExecutedToolResult)
+    assert "no approval to run it was requested" in out.lower()
+    saved = agent.ctx.world.artifacts_for_goal(agent.ctx.goal_id)
+    assert len(saved) == 1
+    assert saved[0]["title"] == "Suggested action for a person"
+    assert '"a consequential action"' in saved[0]["content"]
 
 
 @pytest.mark.asyncio

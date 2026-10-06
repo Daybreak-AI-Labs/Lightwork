@@ -375,6 +375,12 @@ def _guided_creation(identifier, before_write, *, store=STORE):
     from maverick.file_lock import cross_process_lock
 
     backend = store._backend()
+    if backend.kind == "postgres" and backend.shared:
+        # The native transaction supplies the callback after SQL writer waits
+        # and immediately before its effect and commit. This installation’s
+        # authority fence remains distinct from multi-replica control planes.
+        yield
+        return
     native_store = getattr(backend, "_store", None)
     if native_store is None:
         raise ValueError("Reviewed pilot creation is unavailable with this storage service. No plan was created.")
@@ -396,10 +402,6 @@ def create(body, *, context, actor, resolve, resolve_release=None, before_write=
             raise ValueError("Record the prior-exposure checks and any remaining limitations before freezing this pilot.")
     request = digest(body)
     identifier = "OPL-" + digest([context, body["operation_id"]])[:48]
-    if before_write is not None:
-        # Establish supported writer composition before the work-item claim.
-        if getattr(STORE._backend(), "_store", None) is None:
-            raise ValueError("Reviewed pilot creation is unavailable with this storage service. No plan was created.")
     existing = STORE.get(identifier)
     if existing:
         _owned(existing, context)

@@ -4268,11 +4268,11 @@ class PrivacyRightsOrchestrationStore:
         """Purge expired packages, exports, and eligible closed case state."""
 
         tenant = _tenant(tenant_id)
-        moment = _timestamp(cutoff, "cutoff")
+        requested_cutoff = _timestamp(cutoff, "cutoff")
         actor = self._actor()
         request = {
             "action": "purge_expired",
-            "cutoff": moment,
+            "cutoff": requested_cutoff,
             "actor_ref": actor,
         }
         with self._connect() as connection:
@@ -4289,6 +4289,8 @@ class PrivacyRightsOrchestrationStore:
                     "exports": int(raw[1]),
                     "cases": int(raw[2]),
                 }
+            now = _timestamp(self._clock(), "current time")
+            moment = min(requested_cutoff, now)
             package_count = connection.execute(
                 "DELETE FROM rights_packages WHERE tenant_id=? AND expires_at<=?",
                 (tenant, moment),
@@ -4334,7 +4336,7 @@ class PrivacyRightsOrchestrationStore:
                     "exports": export_count,
                     "cases": len(purge_cases),
                 },
-                moment,
+                now,
             )
             return {
                 "packages": package_count,

@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 # the intended endpoint into a different API resource (httpx doesn't encode
 # f-string path segments). Mirrors spotify_tool's `_safe_id` guard.
 _SF_ID_RE = re.compile(r"[A-Za-z0-9_]+")
+_SF_VERSION_RE = re.compile(r"v[0-9]{1,3}\.[0-9]{1,2}", re.ASCII)
 
 
 def _safe_sf(value: str) -> bool:
@@ -84,8 +85,11 @@ def _headers() -> dict[str, str]:
 
 
 def _base(version: str) -> str:
+    version = version or _DEFAULT_VERSION
+    if not isinstance(version, str) or not _SF_VERSION_RE.fullmatch(version):
+        raise ValueError("the Salesforce API version must look like v60.0")
     url, _t = _config()
-    return f"{url}/services/data/{version or _DEFAULT_VERSION}"
+    return f"{url}/services/data/{version}"
 
 
 def _get(path: str, version: str, params: dict | None = None) -> tuple[int, Any]:
@@ -204,7 +208,10 @@ def _run(args: dict[str, Any]) -> str:
         import httpx  # noqa: F401
     except ImportError:
         return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[issue-trackers]'"
-    version = (args.get("version") or "").strip()
+    raw_version = args.get("version") or _DEFAULT_VERSION
+    if not isinstance(raw_version, str) or not _SF_VERSION_RE.fullmatch(raw_version.strip()):
+        return "ERROR: the Salesforce API version must look like v60.0"
+    version = raw_version.strip()
     fields = args.get("fields") if isinstance(args.get("fields"), dict) else {}
     try:
         if op == "soql":

@@ -264,6 +264,7 @@ def _adapter_modules():
         product_operations_work_restructuring,
         product_operations_workflow_explanation,
         product_operations_workflows,
+        product_operations_workspace_erasure,
         product_operations_workspace_people,
     )
     return (
@@ -292,6 +293,7 @@ def _adapter_modules():
         product_operations_connections,
         product_operations_channel_people,
         product_operations_chat_messages,
+        product_operations_workspace_erasure,
         product_operations_consent_jobs,
         product_operations_notifications,
         product_operations_department_boards,

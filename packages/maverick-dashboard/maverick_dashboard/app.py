@@ -150,6 +150,7 @@ from .settings_runtime_status import router as settings_runtime_router
 from .static_asset_versioning import AssetVersionExtension, cache_response
 from .task_diagnostics import router as task_diagnostics_router
 from .task_handoffs_api import router as task_handoffs_router
+from .workspace_erasure_api import router as workspace_erasure_router
 
 _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
 _USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
@@ -1531,6 +1532,7 @@ templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
 app.include_router(conversation_inbox_router)
 app.include_router(chat_message_actions_router, prefix="/api/v1")
+app.include_router(workspace_erasure_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
@@ -5807,9 +5809,10 @@ async def _ai_incident_page_data(module: Any) -> dict[str, Any]:
                         "status": record.get("status"),
                         "deadline_citation": record.get("deadline_citation"),
                         "clock_label": (
-                            "OVERDUE"
-                            if is_overdue
-                            else f"{remaining / 86_400:.1f}d left"
+                            {"initial_reported": "First report filed; full report to follow",
+                             "complete_reported": "Full report filed", "withdrawn": "Withdrawn"}
+                            .get(record.get("status"))
+                            or ("OVERDUE" if is_overdue else f"{remaining / 86_400:.1f}d left")
                         ),
                         "overdue": is_overdue,
                         "revision": record.get("revision"),

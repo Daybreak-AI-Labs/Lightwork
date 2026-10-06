@@ -11,8 +11,8 @@ Chat alternatives independently admit retry, edit/resend and earlier-answer
 branches with default answer-only execution and retained current source access.
 These are implemented product functions with native UI/Copilot journey evidence;
 they do not change the distinct research dispositions or claim causal customer
-lift. Pilot-plan creation and guarded decision records currently require local
-governed storage. The [operation coverage](../post-install-operation-coverage.md)
+lift. Pilot records now support local and PostgreSQL governed storage; guarded
+decision records currently require local storage. The [operation coverage](../post-install-operation-coverage.md)
 records these functional boundaries separately from the research status counts.
 
 Initial static source review on October 1, 2026 at `1c27445dda93e21e2eb38ef2dde5193646832da8`;

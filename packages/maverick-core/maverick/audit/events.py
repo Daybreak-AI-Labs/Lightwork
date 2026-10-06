@@ -30,6 +30,8 @@ Payload shapes (kind -> required fields, all events also carry
   secret_redacted:   tool_name:str, pattern:str, count:int
   erase:             channel:str, erasure_id:str (random token, never subject-derived)
   halt:              source:str (file|signal|manual), detail:str|None
+  content_update:    content:str, version:int, year:int, publisher:str
+                     (signed publisher content metadata; no tax table bodies)
   federation_delegate: peer_node:str (absent when the caller was unauthenticated),
                      correlation_id:str, direction:str (sent|received),
                      accepted:bool, reason:str ("" when accepted) — one half of a
@@ -323,6 +325,8 @@ class EventKind:
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.
     LEARNING_UPDATE = "learning_update"
+    # Signed publisher content was applied, distinct from learned-state writes.
+    CONTENT_UPDATE = "content_update"
     # A validated, shared-source provider skill was authorized for an atomic
     # write. Contains source goal ID and exact output-byte digest, but makes
     # no claim that the subsequent filesystem publication succeeded.

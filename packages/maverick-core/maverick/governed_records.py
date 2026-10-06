@@ -160,12 +160,12 @@ class _GovernedRecordValidationError(ValueError):
 
 
 def _local_effect_guard(backend, effect_guard):
-    """Keep optional physical callbacks local and legacy backend calls unchanged."""
+    """Forward callbacks only to supported native writers; preserve legacy calls."""
     if effect_guard is None:
         return {}
-    if not isinstance(backend, LocalGovernedRecordBackend):
+    if not isinstance(backend, (LocalGovernedRecordBackend, PostgresGovernedRecordBackend)):
         raise GovernedRecordBackendError(
-            "physical effect callbacks require the local record backend"
+            "physical effect callbacks require a supported native record backend"
         )
     return {"effect_guard": effect_guard}
 
@@ -1197,6 +1197,7 @@ class PostgresGovernedRecordBackend:
         expected_revision: int | None = None,
         fence: GovernedMutationFence | None = None,
         max_records: int | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         record_id = _valid_record_id(record.get("id"), self.prefix)
         expected = _expected_revision(expected_revision)
@@ -1257,6 +1258,8 @@ class PostgresGovernedRecordBackend:
                         raise GovernedRecordCapacityError(
                             "governed record namespace capacity has been reached"
                         )
+                if effect_guard is not None:
+                    effect_guard()
                 current_revision = _RecordStore._revision(previous)
                 if expected is not None and current_revision != expected:
                     raise RecordConflict(
@@ -1268,6 +1271,8 @@ class PostgresGovernedRecordBackend:
                     saved,
                     require_encryption=self._require_encryption,
                 )
+                if effect_guard is not None:
+                    effect_guard()
                 if previous is None:
                     cur.execute(
                         "INSERT INTO governed_records "
@@ -1306,6 +1311,8 @@ class PostgresGovernedRecordBackend:
                         raise RecordConflict("governed record changed during save")
                 if self._lookup is not None:
                     self._lookup.replace(cur, tenant, record_id, saved)
+                if effect_guard is not None:
+                    effect_guard()
                 return saved
 
     def load(self, record_id: str) -> dict[str, Any] | None:
@@ -1389,6 +1396,7 @@ class PostgresGovernedRecordBackend:
         expected_revision: int | None = None,
         metadata_only: bool = False,
         fence: GovernedMutationFence | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any] | None:
         try:
             validated = _valid_record_id(record_id, self.prefix)
@@ -1414,6 +1422,8 @@ class PostgresGovernedRecordBackend:
                         "governed record changed "
                         f"(expected revision {expected}, found {current_revision})"
                     )
+                if effect_guard is not None:
+                    effect_guard()
                 updated = dict(current)
                 mutate(updated)
                 if updated.get("id") != validated:
@@ -1431,6 +1441,8 @@ class PostgresGovernedRecordBackend:
                     saved,
                     require_encryption=self._require_encryption,
                 )
+                if effect_guard is not None:
+                    effect_guard()
                 cur.execute(
                     "UPDATE governed_records SET revision=%s, record_json=%s, "
                     "created_at=%s, updated_at=%s WHERE tenant_id=%s "
@@ -1450,6 +1462,8 @@ class PostgresGovernedRecordBackend:
                     raise RecordConflict("governed record changed during update")
                 if self._lookup is not None:
                     self._lookup.replace(cur, tenant, validated, saved)
+                if effect_guard is not None:
+                    effect_guard()
                 return saved
 
     def delete(self, record_id: str, *, expected_revision: int) -> bool:

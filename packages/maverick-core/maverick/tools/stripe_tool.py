@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 from . import Tool
@@ -52,6 +53,7 @@ _STRIPE_SCHEMA: dict[str, Any] = {
 
 
 _API = "https://api.stripe.com/v1"
+_CUSTOMER_ID_RE = re.compile(r"cus_[A-Za-z0-9]{1,128}", re.ASCII)
 
 
 def _key() -> str:
@@ -138,6 +140,8 @@ def _money(cents: int | str | None, currency: str = "usd") -> str:
 
 
 def _op_customer_get(cid: str) -> str:
+    if not isinstance(cid, str) or not _CUSTOMER_ID_RE.fullmatch(cid):
+        return "ERROR: customer_get needs a Stripe customer ID beginning with cus_"
     code, data = _get(f"customers/{cid}")
     if code == 404:
         return f"customer {cid!r} not found"
@@ -152,7 +156,12 @@ def _op_customer_get(cid: str) -> str:
 
 
 def _op_customer_search(email: str) -> str:
-    code, data = _get("customers/search", {"query": f"email:'{email}'"})
+    if not isinstance(email, str) or not email or len(email) > 320 or any(ord(ch) < 32 or ord(ch) == 127 for ch in email):
+        return "ERROR: customer_search needs one email address without control characters"
+    # URL parameter encoding does not escape Stripe's search expression grammar.
+    # Backslashes must be escaped first, so a quote remains data in one literal.
+    literal = email.replace("\\", "\\\\").replace('"', '\\"')
+    code, data = _get("customers/search", {"query": f'email:"{literal}"'})
     if code >= 400:
         return f"ERROR: customer_search ({code}): {data.get('error', {})}"
     rows = data.get("data") or []

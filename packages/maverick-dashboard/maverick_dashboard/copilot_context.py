@@ -358,9 +358,9 @@ _OPERATIONAL_GUIDES = (
      "Whichever applicable limit is reached first stops new spending; a limit is not an invoice.",
      "Which spending limit applies first?", "How do I set a personal limit?"),
     ("/tenants", "Workspaces", "Create and manage separate workspaces, their daily limits and feature choices.",
-     "Create a workspace, review its features, or pause and resume one when authorized.",
+     "Create a workspace, review its features, pause or resume one, or review erasure of a removed workspace when authorized.",
      "Use Create a workspace for a new team; open Your workspaces before changing an existing one.",
-     "Pause or removal affects that workspace's access and work; review its people and history first.",
+     "Pause or removal affects access and work. Erasure permanently removes reviewed local records; backups and external copies need separate care.",
      "How do I create a workspace?", "Where do I set its daily limit?"),
     # Common pages reached from those workspaces
     ("/help", "Help and diagnostics", "Prepare a support report or a reviewed draft about a task that stopped.",

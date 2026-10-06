@@ -3209,6 +3209,7 @@ class Agent:
         # must refuse the action. Otherwise a classifier/profile bug would turn
         # the authority dial into an execution bypass.
         _autonomy_levels_enabled = False
+        _human_executes = False
         try:
             from . import agent_autonomy as _aa
             from .governance import Decision as _GD
@@ -3226,6 +3227,7 @@ class Agent:
                 _al = _aa.decide(getattr(self, "_autonomy_name", self.role),
                                  getattr(self, "_autonomy", None),
                                  action=name, risk=_risk)
+                _human_executes = _al.execute_by == "human"
                 _amap = {"allow": _GD.ALLOW, "require_human": _GD.REQUIRE_HUMAN,
                          "deny": _GD.DENY}
                 _adec = _amap.get(_al.decision, _GD.REQUIRE_HUMAN)
@@ -3302,6 +3304,16 @@ class Agent:
                 "The tool was not executed.",
                 _gov.compliance_profiles,
             )
+        if _human_executes:
+            from .human_action_drafts import stage
+
+            try:
+                return stage(self, name, args), _gov.compliance_profiles
+            except Exception:
+                log.warning("human action suggestion could not be retained", exc_info=True)
+                return ("The complete suggested action could not be saved for review. "
+                        "No action was performed. Ask the person to review the task before trying another suggestion.",
+                        _gov.compliance_profiles)
         # REQUIRE_HUMAN: the action runs only with a real human's approval
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.

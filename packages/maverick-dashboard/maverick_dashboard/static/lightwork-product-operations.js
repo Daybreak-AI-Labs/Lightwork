@@ -1205,6 +1205,9 @@
               : ['learning.pilot_prepare_task', 'learning.pilot_freeze_plan', 'learning.pilot_observe', 'learning.pilot_independent_review'].includes(item.id)
                 ? !!(window.LightworkOutcomePilots && window.LightworkOutcomePilots.renderReview &&
                      window.LightworkOutcomePilots.renderReview(formHost, review.changes) === true)
+              : item.id === 'workspaces.erase'
+                ? !!(window.LWWorkspaceErasure && window.LWWorkspaceErasure.renderReview &&
+                     window.LWWorkspaceErasure.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)

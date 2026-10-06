@@ -5,13 +5,41 @@
 | Customer operation | Complete controls | Result and boundary |
 | --- | --- | --- |
 | Retry, edit or branch a Chat answer (UX-376) | Message buttons and protected Copilot form; answer-only default, complete copied-context review and separate connected-action choice | A new independently admitted conversation preserves the original. Exact original admission reads resolve a lost response without dispatching twice. Current source access continues to govern copied content. |
-| Operate a workflow pilot (F04) | Prepare an unstarted task, freeze the full plan, record observations and complete costs, independently review, inspect value/history; ordinary forms and four reviewed Copilot writes | Native SQLite/pooled-PostgreSQL prepared-task admission is atomic. Plan records currently require local governed storage. Operator evidence is attributed; release exposure and causal benefit are not inferred. |
+| Operate a workflow pilot (F04) | Prepare an unstarted task, freeze the full plan, record observations and complete costs, independently review, inspect value/history; ordinary forms and four reviewed Copilot writes | Native SQLite/pooled-PostgreSQL prepared-task admission is atomic. Pilot records support local and PostgreSQL governed storage with current-authority callbacks at transaction completion. Operator evidence is attributed; release exposure and causal benefit are not inferred. |
 | Choose useful information for a decision (P14/N05) | Complete named decision authoring, robust choice check, checked joint observation reservation, unknown-check acknowledgement and original requests | Exact decimal losses/costs and all declared joint answers are checked within bounded question, effort, time and cost limits. Unknown work cannot silently repeat or refund spent allowance. No supplier, financial or other business action executes. |
 
 Authenticated native browser journeys exercised these direct and Copilot paths,
 interrupted replies and 320px layouts. Prepared-task admission additionally ran
 against the real pooled PostgreSQL backend. These are operating qualifications
 for the named paths, without hosted CI or paid-provider calls.
+
+The next completed batch adds irreversible erasure of an already removed
+workspace through a complete native review and the same protected Copilot
+review. Erasure retains the original operation before touching files. An
+interrupted deletion stays unconfirmed; reading or retrying that original
+does not continue deletion. A separately acknowledged cleanup has its own
+review and original. Backups and external copies are explicitly separate.
+The older HTTP Remove action cannot bypass this review with a purge parameter.
+
+Suggest mode saves a complete, encrypted, readable proposal in the task's
+results and returns a non-executed result to learning. It asks for no approval
+to execute the proposed action. Request mode still requires a person’s approval;
+Observe refuses the action. The native checks used a declared local effect
+transport and inspected the actual saved artifact and signed intent.
+
+Original backlog fixes in this batch cover UX-116/146/151, UX-135/161/162,
+UX-182/183/185/213 and the inactive Settings control in UX-215. Retained tax
+content is checked against current signing anchors; update retrieval and
+connector addresses are confined. Unknown tools remain visibly unclassified
+and receive a conservative high risk floor. Future retention cutoffs are
+refused. Incident alerts and the insurance pack read both complete bounded
+registers, distinguish an unavailable inventory from no incidents, and close
+the first-report clock after filing. Diagnostics read the same effective
+saved settings as the dashboard; finance status includes operating-profile
+gates and active custom specialists. The SSH client retains local agent
+authentication without retaining provider secrets. The developer container
+uses a virtual environment. The ineffective answer-reuse setting is removed;
+its standalone internal cache is not presented as a working customer feature.
 
 Source review: October 1, 2026; selected journeys updated October 6. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
