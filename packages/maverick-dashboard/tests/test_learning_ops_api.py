@@ -9,6 +9,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,11 +83,22 @@ def _as(monkeypatch, role: str, who: str = "user:someone"):
 def _wait(client, started, timeout: float = 15.0) -> dict:
     job = started.json()["job"] if hasattr(started, "json") else started
     deadline = time.time() + timeout
-    while job["state"] in ("running", "stopping"):
+    while job["state"] in ("admitted", "running", "stopping"):  # an admitted job has not started yet
         assert time.time() < deadline, job
         time.sleep(0.05)
         job = client.get(f"{LO}/jobs/{job['id']}").json()["job"]
     return job
+
+
+def _original_job(client, path: str, timeout: float = 15.0) -> dict:
+    """Read a reviewed request's original until its admitted job is named."""
+    deadline = time.time() + timeout
+    result = client.get(path).json()
+    while "job_id" not in result:
+        assert time.time() < deadline, result
+        time.sleep(0.05)
+        result = client.get(path).json()
+    return result
 
 
 def _visible(page: str, marker: str) -> str:
@@ -285,14 +297,23 @@ def test_clash_check_asks_the_checker_model_within_a_spending_limit(client, monk
         return lambda a, b: True
     monkeypatch.setattr(self_harness, "llm_conflict_classifier", classifier)
     from maverick_dashboard import learning_jobs
-    started = client.post(f"{LO}/self-harness/clash-check", json={"model_id": "claude-x"})
-    assert learning_jobs.get(started.json()["job"]["id"]).cancellable is True
-    done = _wait(client, started)
+    context = client.get(f"{LO}/self-harness/clash-check").json()["context"]
+    review = client.post(f"{LO}/self-harness/clash-check/review", json={"model_id": "claude-x", "context": context})
+    assert review.status_code == 200, review.text
+    started = client.post(f"{LO}/self-harness/clash-check", json={
+        "context": context, "token": review.json()["token"], "confirmed": True})
+    assert started.status_code == 200, started.text
+    original = f"{LO}/self-harness/clash-check/requests/{review.json()['operation']}"
+    result = _original_job(client, original)
+    assert learning_jobs.get(result["job_id"]).cancellable is True
+    done = _wait(client, client.get(f"{LO}/jobs/{result['job_id']}").json()["job"])
     assert done["state"] == "done", done
     assert "verifier" in roles and budgets and budgets[0] is not None
-    assert done["result"]["pairs"][0]["first"] == "always cite the source"
-    assert [r["action"] for r in audit_rows] == ["self_harness_semantic_conflicts"]
-    assert client.post(f"{LO}/self-harness/clash-check", json={"model_id": "made-up"}).status_code == 422
+    result = client.get(original).json()
+    assert result["pairs"][0]["first"] == "always cite the source"
+    assert [r.get("action") for r in audit_rows].count("self_harness_semantic_conflicts") == 1
+    assert client.post(f"{LO}/self-harness/clash-check/review",
+                       json={"model_id": "made-up", "context": context}).status_code == 422
 
 
 def test_transfer_needs_the_switch_and_test_cases(client, monkeypatch, tmp_path, audit_rows):
@@ -352,18 +373,35 @@ def test_test_cases_find_download_preview_and_add(client, monkeypatch, tmp_path,
         "self_harness_corpus_harvest", "self_harness_corpus_export", "self_harness_corpus_import"]
 
 
+HOLD_OUT = "/api/v1/learning-holdout-setup"
+
+
+def _hold_out(client, action: str = "initialize", *, step: str = "save"):
+    """Review and save one hold-out setup step the way the Learned page does."""
+    current = client.get(HOLD_OUT).json()
+    review = client.post(f"{HOLD_OUT}/review", json={
+        "action": action, "context": current["context"], "revision": current["revision"]})
+    if review.status_code != 200 or step == "review":
+        return review
+    return client.post(f"{HOLD_OUT}/save", json={"token": review.json()["token"], "confirmed": True})
+
+
 def test_hold_out_record_is_set_up_once_and_never_replaced(client, monkeypatch, tmp_path, audit_rows):
-    r = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert r.status_code == 409 and "Choose where" in r.json()["detail"]
-    ledger = (tmp_path / "ledger.db").as_posix()
+    r = _hold_out(client)
+    assert r.status_code == 409 and "Choose the managed location first" in r.json()["detail"]
+    # The record must sit inside Lightwork's managed data, as its setting requires.
+    ledger = Path(_data_file("ledger.db")).as_posix()
     _harness(monkeypatch, tmp_path, ledger=ledger)
-    assert client.post(f"{LO}/self-harness/hold-out/set-up", json={}).status_code == 422
-    made = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert made.status_code == 200 and made.json()["record_number"]
+    review = _hold_out(client, step="review")
+    assert review.status_code == 200, review.text
+    assert client.post(f"{HOLD_OUT}/save", json={"token": review.json()["token"]}).status_code == 422
+    made = client.post(f"{HOLD_OUT}/save", json={"token": review.json()["token"], "confirmed": True})
+    assert made.status_code == 200 and made.json()["confirmed"] is True and made.json()["ready"] is True
     assert Path(ledger).exists()
-    again = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert again.status_code == 409 and "never replaced" in again.json()["detail"]
-    assert [r["action"] for r in audit_rows] == ["self_harness_holdout_provision"]
+    again = _hold_out(client)
+    assert again.status_code == 409 and "never initialized again" in again.json()["detail"]
+    assert [r["action"] for r in audit_rows if "action" in r and r["action"].startswith("self_harness")] == [
+        "self_harness_holdout_initialize"]
     plan = client.get(f"{LO}/self-harness/plan").json()
     assert plan["hold_out"] == {"set_up": True, "exists": True}
 
@@ -473,8 +511,18 @@ def test_stopping_self_modify_tightens_its_own_budget(client, monkeypatch):
     monkeypatch.setattr(self_modify_runner, "run", run)
     started = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "confirm": True})
     job = started.json()["job"]
+    deadline = time.time() + 15
+    while job["state"] == "admitted":  # the stop button appears once it runs
+        assert time.time() < deadline, job
+        time.sleep(0.05)
+        job = client.get(f"{LO}/jobs/{job['id']}").json()["job"]
     assert job["can_stop"] is True
-    client.post(f"{LO}/jobs/{job['id']}/stop", json={})
+    # A learning task is stopped through its reviewed stop on the Learned page.
+    current = client.get(f"{LO}/job-history/{job['id']}").json()
+    stop = client.post(f"{LO}/job-history/{job['id']}/stop", json={
+        "context": current["context"], "revision": current["revision"],
+        "operation": uuid.uuid4().hex, "confirm": True})
+    assert stop.status_code == 200 and stop.json()["receipt"]["confirmed"] is True, stop.text
     done = _wait(client, started)
     assert done["state"] == "stopped" and done["result"]["ran"] is True
 
@@ -577,7 +625,7 @@ def test_learning_page_has_a_control_next_to_each_system(client):
         assert f'id="{control}"' in page, control
     assert "/static/lightwork-learning-ops.js" in page and "/static/lightwork-ops-jobs.js" in page
     visible = _visible(page, 'id="lo-root"').split("Run learning now", 1)[0]
-    assert "Improvement flywheel" in visible and "Reward model" in visible
+    assert "Improvement flywheel" in visible and "Learn how to rank work" in visible
     assert not _BANNED.search(visible), _BANNED.search(visible)
 
 
@@ -589,7 +637,7 @@ def test_learning_page_stays_closed_to_non_admins(client, monkeypatch):
 def test_learned_page_has_the_extra_self_coaching_tools(client, monkeypatch):
     page = client.get("/learned").text
     for control in ("lpo-clash-run", "lpo-transfer-run", "lpo-harvest", "lpo-export", "lpo-import-check",
-                    "llp-trial", "llp-instructions", "llp-quality-remove"):
+                    "lp-trial", "lp-instructions", "llp-quality-remove"):
         assert f'id="{control}"' in page, control
     visible = _visible(page, 'id="lpo-root"')
     assert "Check lessons for clashes by meaning" in visible
@@ -665,12 +713,12 @@ def test_test_case_location_is_checked_on_the_server_and_then_used(client):
 
 
 def test_hold_out_location_saved_in_all_settings_is_where_the_record_is_set_up(client):
-    refused = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert "“Record of unseen-case checks”" in refused.json()["detail"]
+    refused = _hold_out(client)
+    assert refused.status_code == 409 and "Choose the managed location first" in refused.json()["detail"]
     target = _data_file("hold-out.db")
     assert _save_setting(client, [{"id": "self_harness.holdout_ledger", "value": target}]).status_code == 200
-    made = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert made.status_code == 200 and Path(target).is_file()
+    made = _hold_out(client)
+    assert made.status_code == 200 and made.json()["confirmed"] is True and Path(target).is_file()
     again = _save_setting(client, [{"id": "self_harness.holdout_ledger", "value": target}])
     assert again.status_code == 200  # an existing record is a valid location too
     verified = client.get("/api/v1/learning-loop/holdout").json()

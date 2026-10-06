@@ -277,7 +277,7 @@ def _finished(client, started, timeout: float = 15.0) -> dict:
     import time
     job = started.json()["job"]
     deadline = time.time() + timeout
-    while job["state"] in ("running", "stopping"):
+    while job["state"] in ("admitted", "running", "stopping"):  # an admitted job has not started yet
         assert time.time() < deadline, job
         time.sleep(0.05)
         job = client.get(f"/api/v1/learning-ops/jobs/{job['id']}").json()["job"]
