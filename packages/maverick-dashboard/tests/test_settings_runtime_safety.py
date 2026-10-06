@@ -512,7 +512,10 @@ def test_router_consults_the_bandit_and_learns_from_calls(monkeypatch, audit_row
     cheapest = router.pick(router.signal_for_role("researcher"))
     assert cheapest
 
-    bandit = router_v3.ContextualBandit(epsilon=0.0)
+    # Credit is kept only by the installation's stored bandit, so use one.
+    stored = router_v3._storage_binding()[1]
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    bandit = router_v3.ContextualBandit(epsilon=0.0, path=stored)
     monkeypatch.setattr(router_v3, "shared", lambda: bandit)
     router_v3.reset_shared()
     seen: dict = {}
@@ -536,7 +539,8 @@ def test_router_consults_the_bandit_and_learns_from_calls(monkeypatch, audit_row
 
     provider, model = chosen.split(":", 1)
     before = bandit.stats(context)[chosen]["pulls"]
-    llm._note_bandit(provider, model, False, 0.02)  # a finished call is credited
+    # A finished call is credited to the exact routed choice it was made with.
+    llm._note_bandit(provider, model, False, 0.02, router_v3.capture_call(chosen))
     assert bandit.stats(context)[chosen]["pulls"] == before + 1
 
     monkeypatch.setenv("MAVERICK_ROUTING_BANDIT", "0")  # the environment wins

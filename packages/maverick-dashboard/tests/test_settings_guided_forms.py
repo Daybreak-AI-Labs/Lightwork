@@ -315,8 +315,8 @@ def test_allow_lists_round_trip_and_widening_needs_confirmation(audit_rows):
     assert r.status_code == 200, r.text
     cfg = _loaded()["channels"]["telegram"]
     assert cfg == {"allowed_user_ids": ["12345"]}  # on/off is not touched
-    # Narrowing needs no confirmation; emptying hands back to the server's
-    # list, which may be broader, so it is confirmed.
+    # Narrowing needs no confirmation; emptying is still confirmed. A blank
+    # list saved here denies everyone; it does not hand back to the server's list.
     assert _save([{"id": "channels.telegram.allowed_user_ids",
                    "value": ["12345", "678"]}], confirm=True).status_code == 200
     assert _save([{"id": "channels.telegram.allowed_user_ids",
@@ -324,7 +324,7 @@ def test_allow_lists_round_trip_and_widening_needs_confirmation(audit_rows):
     assert _save([{"id": "channels.telegram.allowed_user_ids", "value": []}]).status_code == 409
     assert _save([{"id": "channels.telegram.allowed_user_ids", "value": []}],
                  confirm=True).status_code == 200
-    assert "channels" not in _loaded()
+    assert _loaded()["channels"]["telegram"] == {"allowed_user_ids": []}
     bad = _save([{"id": "channels.sms.allowed_user_ids", "value": ["4155551234"]}], confirm=True)
     assert bad.status_code == 400
     assert "a phone number starting with +" in bad.json()["message"]
