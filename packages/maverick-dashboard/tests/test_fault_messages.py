@@ -58,3 +58,77 @@ def test_with_a_healthy_backup_the_banner_says_new_work_carries_on(client, monke
     _timeouts(monkeypatch, ["anthropic"], in_use={"anthropic", "openai"})
     text = _banner(client.get("/").text)
     assert "still working with OpenAI" in text and "start new work as usual: it uses OpenAI" in text
+
+
+def _notice(page: str, kind: str) -> str:
+    found = re.search(rf'id="service-status-banner-{kind}".*?</div>', page, re.DOTALL)
+    assert found, f"no {kind} banner"
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", found.group(0))).split())
+
+
+def _no_raw_code(text):
+    assert not re.search(r"\b([45]\d\d|Traceback|Exception|OperationalError|sqlite3?)\b", text), text
+
+
+@pytest.mark.parametrize("path", ["/", "/chat", "/approvals"])
+def test_an_expired_connection_says_what_broke_what_is_safe_when_and_another_way(client, monkeypatch, tmp_path, path):
+    from maverick import config, connections
+
+    (tmp_path / "config.toml").write_text("[connections]\nenable = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    connections.set_connection("team-slack", connector="slack", token="xoxb-test-token")  # pragma: allowlist secret
+    connections.record_test_result("team-slack", reachable=True, authenticated=False, status=401,
+                                   outcome="sign_in_refused")
+    text = _notice(client.get(path).text, "connector")
+    assert "team-slack can't be used right now" in text                    # what broke
+    assert "everything else keeps working" in text                         # what is safe
+    assert "as soon as it is reconnected in Connections" in text           # when it returns
+    assert "do that step by hand or use another connection" in text        # another way
+    _no_raw_code(text)
+
+
+def test_a_read_only_database_says_what_broke_what_is_safe_when_and_another_way(client, monkeypatch):
+    from maverick import service_status
+
+    monkeypatch.setattr(service_status, "_world_writable", lambda: False)
+    text = _notice(client.get("/").text, "database")
+    assert "can't save changes right now" in text                          # what broke
+    assert "Everything already saved is safe" in text                      # what is safe
+    assert "as soon as an administrator makes the database writable" in text  # when it returns
+    assert "you can still read and export" in text                         # another way
+    _no_raw_code(text)
+
+
+def test_a_write_refused_by_a_read_only_database_answers_in_plain_words(client, monkeypatch):
+    import sqlite3
+
+    from maverick.world_model import WorldModel
+
+    def refuse(*args, **kwargs):
+        raise sqlite3.OperationalError("attempt to write a readonly database")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    monkeypatch.setattr(WorldModel, "create_goal", refuse)
+    from maverick_dashboard.app import app
+
+    client = TestClient(app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False)
+    answer = client.post("/api/v1/goals", json={"title": "Pay the March invoices"})
+    assert answer.status_code == 503, answer.text
+    detail = answer.json()["detail"]
+    assert detail.startswith("Lightwork can't save changes right now because its database is read-only.")
+    assert "Nothing was changed" in detail
+    _no_raw_code(detail)
+    import asyncio
+
+    from maverick_dashboard.app import unhandled_exception_handler
+    from starlette.requests import Request
+
+    browser = Request({"type": "http", "method": "POST", "path": "/chat/send", "query_string": b"",
+                       "headers": [(b"accept", b"text/html")], "app": app, "state": {}})
+    page = asyncio.run(unhandled_exception_handler(browser, sqlite3.OperationalError(
+        "attempt to write a readonly database")))
+    main = re.search(r"<main.*?</main>", page.body.decode(), re.DOTALL).group(0)
+    text = " ".join(unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>", "", main, flags=re.DOTALL))).split())
+    assert page.status_code == 503 and "Lightwork can't save changes right now" in text
+    assert "nothing was changed" in text and "Everything already saved is safe" in text
+    _no_raw_code(text.split("Support reference")[0])

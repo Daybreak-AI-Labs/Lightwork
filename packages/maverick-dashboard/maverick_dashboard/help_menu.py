@@ -5,7 +5,8 @@ The Help menu (``_help_menu.html``, both shells) offers Help and diagnostics,
 person" (a request prepared on the Help page, never sent automatically) and,
 when ``[support] status_page_url`` is set, the public service-status page. The
 service banner (``_service_status_banner.html``) appears while an AI service
-is paused (:mod:`maverick.service_status`).
+is paused, a connection can't be used or the database is read-only
+(:mod:`maverick.service_status`).
 """
 from __future__ import annotations
 
@@ -37,7 +38,23 @@ def context(request) -> dict:
         path = ""
     support = support_settings()
     return {"help_topic": topic_for(path), "support_status_page_url": support["status_page_url"],
-            "service_status": safe_current()}
+            "service_status": safe_current(), "service_notices": service_notices(request)}
+
+
+def service_notices(request) -> list[dict]:
+    """CTL-5 banners beside the AI one: connections this person's work can't
+    use right now, and a read-only database. Never breaks a page."""
+    from maverick.service_status import connector_notice, database_notice
+
+    notices = []
+    try:
+        from .connection_dependencies import connection_attention
+
+        notices.append(connector_notice(connection_attention(request).get("items") or []))
+    except Exception:  # noqa: BLE001 -- the banner is advisory
+        log.debug("connection status unavailable", exc_info=True)
+    notices.append(database_notice())
+    return [notice for notice in notices if notice]
 
 
 _PAGE = re.compile(r"/[A-Za-z0-9/_.~-]{0,300}")

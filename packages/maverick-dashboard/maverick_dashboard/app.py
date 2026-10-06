@@ -778,6 +778,7 @@ templates.env.globals.setdefault("help_topic", None)
 templates.env.globals.setdefault("support_status_page_url", "")
 templates.env.globals.setdefault("help_menu_text", False)
 templates.env.globals.setdefault("service_status", None)
+templates.env.globals.setdefault("service_notices", [])
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
@@ -3363,12 +3364,19 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
               reference, occurred_at, request.method, route,
               exc_info=(type(exc), exc, exc.__traceback__))
     headers = {"Cache-Control": "private, no-store", "X-Lightwork-Failure-Reference": reference}
+    from maverick.service_status import READ_ONLY_REFUSAL, is_read_only_error
+
+    # CTL-5: a write refused by a read-only database says what broke, that
+    # saved work is safe and what to do, never the database error itself.
+    read_only = is_read_only_error(exc)
+    status = 503 if read_only else 500
     if _wants_html(request):
         try:
             return templates.TemplateResponse(
                 request, "500.html", {"failure_reference": reference, "failure_time": occurred_at,
-                                      "uncertain_mutation": request.method not in {"GET", "HEAD"}},
-                status_code=500, headers=headers,
+                                      "uncertain_mutation": request.method not in {"GET", "HEAD"},
+                                      "read_only_error": read_only},
+                status_code=status, headers=headers,
             )
         except Exception:
             # Deliberately independent of the normal layout and its data reads.
@@ -3379,8 +3387,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
                 f'<a href="/help?failure={reference}">Open Help</a></html>',
                 status_code=500, headers=headers,
             )
-    return JSONResponse({"detail": "The request could not be completed. Check its current state before retrying a change.",
-                         "failure_reference": reference, "occurred_at": occurred_at}, status_code=500, headers=headers)
+    detail = READ_ONLY_REFUSAL if read_only else (
+        "The request could not be completed. Check its current state before retrying a change.")
+    return JSONResponse({"detail": detail, "failure_reference": reference, "occurred_at": occurred_at},
+                        status_code=status, headers=headers)
 
 
 @app.middleware("http")

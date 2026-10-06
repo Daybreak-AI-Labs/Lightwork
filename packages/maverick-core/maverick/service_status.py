@@ -1,4 +1,5 @@
-"""What the in-product service banner says when an AI service is paused (HLP-4).
+"""What the in-product service banner says when an AI service is paused (HLP-4),
+a connection can't be used, or the database is read-only (CTL-5).
 
 The circuit breaker (:mod:`maverick.circuit_breaker`) pauses an AI provider
 after repeated errors (``llm:<provider>`` keys) and lets one test request
@@ -113,6 +114,71 @@ def current(*, breakers: list[dict] | None = None, in_use: set[str] | None = Non
             "tasks": TASKS_DOWN, "alternative": ALTERNATIVE_DOWN, "checks": checks, "healthy": []}
 
 
+#: CTL-5 for the other two shared dependencies: a connection people's tasks
+#: use (expired sign-in, failing check) and the world database itself.
+CONNECTOR_TASKS = "Steps that need it stop and say why; everything else keeps working."
+CONNECTOR_WHEN = "It works again as soon as it is reconnected in Connections."
+CONNECTOR_ALTERNATIVE = "Meanwhile, do that step by hand or use another connection for it."
+READ_ONLY_TITLE = "Lightwork can't save changes right now because its database is read-only."
+READ_ONLY_TASKS = ("Everything already saved is safe. New changes and running tasks can't be saved, so check "
+                   "a task's result before running it again.")
+READ_ONLY_WHEN = ("It works again as soon as an administrator makes the database writable; Help and "
+                  "diagnostics shows where it is.")
+READ_ONLY_ALTERNATIVE = "Meanwhile, you can still read and export what you need."
+READ_ONLY_REFUSAL = (READ_ONLY_TITLE + " Nothing was changed. Everything already saved is safe and can still be "
+                     "read; try again once an administrator makes the database writable.")
+
+
+def connector_notice(items: list[dict]) -> dict[str, Any] | None:
+    """The banner for connections that can't be used (from the Connections
+    attention list: expired sign-in, failed check), or ``None``."""
+    names = [str(item.get("title") or item.get("name") or "") for item in items or ()]
+    names = [name for name in names if name]
+    if not names:
+        return None
+    affected = " and ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+    return {"level": "connector", "kind": "connector", "affected": affected,
+            "title": f"{affected} can't be used right now.", "tasks": CONNECTOR_TASKS,
+            "when": CONNECTOR_WHEN, "alternative": CONNECTOR_ALTERNATIVE,
+            "link": {"href": "/connections", "label": "Review in Connections"}}
+
+
+def _world_writable() -> bool:
+    """Whether the built-in world database (and its folder) can be written."""
+    import os
+
+    from .world_model import default_db_path
+    from .world_model_backends import is_postgres_configured
+
+    if is_postgres_configured():
+        return True  # the database server reports its own state
+    path = default_db_path()
+    folder = path.parent
+    if path.exists():
+        return os.access(path, os.W_OK) and os.access(folder, os.W_OK)
+    return not folder.exists() or os.access(folder, os.W_OK)
+
+
+def database_notice() -> dict[str, Any] | None:
+    """The banner while the world database is read-only, or ``None``."""
+    try:
+        if _world_writable():
+            return None
+    except Exception:  # noqa: BLE001 -- an unknown state shows no banner
+        log.debug("database status unavailable", exc_info=True)
+        return None
+    return {"level": "down", "kind": "database", "title": READ_ONLY_TITLE, "tasks": READ_ONLY_TASKS,
+            "when": READ_ONLY_WHEN, "alternative": READ_ONLY_ALTERNATIVE,
+            "link": {"href": "/help", "label": "Open Help and diagnostics"}}
+
+
+def is_read_only_error(exc: BaseException) -> bool:
+    """A write refused because the database or its disk is read-only."""
+    text = str(exc).lower()
+    return type(exc).__name__ == "OperationalError" and (
+        "readonly database" in text or "read-only file system" in text or "read-only database" in text)
+
+
 def safe_current() -> dict[str, Any] | None:
     """:func:`current` for page rendering: a fault never breaks a page."""
     try:
@@ -122,4 +188,7 @@ def safe_current() -> dict[str, Any] | None:
         return None
 
 
-__all__ = ["ALTERNATIVE_DOWN", "ALTERNATIVE_REDUCED", "TASKS_DOWN", "TASKS_REDUCED", "current", "provider_name", "providers_in_use", "safe_current"]
+__all__ = ["ALTERNATIVE_DOWN", "ALTERNATIVE_REDUCED", "CONNECTOR_ALTERNATIVE", "CONNECTOR_TASKS", "CONNECTOR_WHEN",
+           "READ_ONLY_ALTERNATIVE", "READ_ONLY_REFUSAL", "READ_ONLY_TASKS", "READ_ONLY_TITLE", "READ_ONLY_WHEN",
+           "TASKS_DOWN", "TASKS_REDUCED", "connector_notice", "current", "database_notice", "is_read_only_error",
+           "provider_name", "providers_in_use", "safe_current"]
