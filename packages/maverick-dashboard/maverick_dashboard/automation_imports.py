@@ -282,7 +282,16 @@ def _translated(request, choices, raws):
         if choices["as_flows"]:
             if not flows_enabled():
                 raise HTTPException(409, "Visual workflows are off. Enable them in Settings or save instruction drafts only.")
-            graph, fidelity = to_flow_with_report(automation)
+            try:
+                graph, fidelity = to_flow_with_report(automation)
+            except ValueError as exc:
+                # A condition the visual flow cannot run as written: say which
+                # repair is needed (the message never echoes the expression)
+                # and refuse the whole batch before anything is saved.
+                if not str(exc).startswith("Imported condition requires repair before execution"):
+                    raise
+                raise HTTPException(422, str(exc) + ". Repair it in the other platform or import "
+                                    "instruction drafts only; nothing was saved.") from exc
             graph.owner = actor
             if flows.load_flow(graph.id) is not None:
                 raise HTTPException(409, "An imported visual workflow already exists. Review and edit it in Designer; this import never replaces a visual workflow.")
@@ -299,10 +308,11 @@ def prepare(request, choices, *, checked_raws=None, checked_pin=None):
     choices = Choices.model_validate(choices).model_dump()
     tenant, actor, context = authority(request, choices["context"], write=True)
     source_policy = policy()
+    # A platform without an account reader needs its export, whatever account is chosen.
+    if choices["mode"] == "live" and (choices["source"] not in LIVE or choices["file_text"]):
+        raise HTTPException(422, "This platform requires an exported file, or an account import must have no file selected.")
     pin = _connection(request, choices) if choices["mode"] == "live" else None
     if choices["mode"] == "live":
-        if choices["source"] not in LIVE or choices["file_text"]:
-            raise HTTPException(422, "This platform requires an exported file, or an account import must have no file selected.")
         if checked_raws is not None and pin != checked_pin:
             raise HTTPException(409, "The account changed after the export was read. Check the current account again.")
         raws = checked_raws if checked_raws is not None else fetch(request, choices, pin)
@@ -503,6 +513,9 @@ def activation_material(request, body, *, require_unadmitted=False):
     body = Activation.model_validate(body).model_dump()
     tenant, actor, context = authority(request, body["context"], write=True)
     source_policy = policy()
+    if not config.get_automation_import().get("create_schedules"):
+        raise HTTPException(409, "Recreate imported schedules is off. An administrator can turn it on in All settings; "
+                                 "the imported draft stays saved and can be scheduled in Automations.")
     if not config.get_features().get("scheduling") or not workflow_versions.enabled():
         raise HTTPException(409, "Scheduling and workflow version review must be on before activation. Publish the imported draft in Workflow builder first.")
     row = owned(request, body["original"])

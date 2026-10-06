@@ -1696,8 +1696,8 @@ def pick_automation_import() -> dict[str, Any]:
     if not enable:
         return {"enable": False}
     create_schedules = _q_confirm(
-        "  Auto-create Lightwork schedules for imported cron triggers? "
-        "(off = import the template, you activate the schedule yourself)",
+        "  Offer to recreate imported schedules (each reviewed after its draft is published)? "
+        "(off = import the draft, then schedule it yourself in Automations)",
         default=False,
     )
     return {"enable": True, "create_schedules": create_schedules}

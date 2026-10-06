@@ -986,7 +986,8 @@ SETTINGS: tuple[Setting, ...] = (
       "Bring in existing automations from tools such as n8n, Make, Workato, Power Automate or UiPath.",
       "toggle", "Integrations", False, "maverick.config", env=("MAVERICK_AUTOMATION_IMPORT",)),
     S("automation_import", "create_schedules", "Recreate imported schedules",
-      "When an imported automation ran on a schedule, create the matching schedule here.",
+      "When an imported automation ran on a schedule, offer to recreate that schedule here, "
+      "reviewed once its draft is published.",
       "toggle", "Integrations", False, "maverick.config"),
     S("event_triggers", "enable", "Start workflows from events",
       "Watch connected services and start the chosen workflow when something new arrives.",
