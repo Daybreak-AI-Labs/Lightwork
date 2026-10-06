@@ -33,6 +33,26 @@
           {% if answer_agent.updated_text %}{{ ui('Last recorded change: {date}', date=answer_agent.updated_text) }}{% else %}{{ ui('no recorded changes') }}{% endif %}
         </p>
         {% if answer_agent.history_note %}<p class="muted">{{ ui(answer_agent.history_note) }}</p>{% endif %}
+        {% if answer_agent.since_last_use %}
+        {# AI-12: the first answer after a change says so, once; hiding it is remembered in this browser. #}
+        <div class="answer-agent__notice" id="answer-agent-notice" role="note" data-notice-key="agent-change:{{ answer_agent.agent }}:{{ answer_agent.since_last_use[0].ts }}">
+          <p>{% if answer_agent.kind == 'specialist' %}{{ ui('This specialist changed since you last used it:') }}{% else %}{{ ui('This agent changed since you last used it:') }}{% endif %}
+            {% for row in answer_agent.since_last_use %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+          <button type="button" class="btn btn--ghost" data-hide-notice>{{ ui('Hide this notice') }}</button>
+        </div>
+        <script>
+        (function () {
+          var notice = document.getElementById('answer-agent-notice');
+          if (!notice) return;
+          var key = 'lightwork-hidden-notice:' + notice.getAttribute('data-notice-key');
+          try { if (window.localStorage.getItem(key)) notice.hidden = true; } catch (_) { /* no storage: the notice stays */ }
+          notice.querySelector('[data-hide-notice]').addEventListener('click', function () {
+            notice.hidden = true;
+            try { window.localStorage.setItem(key, '1'); } catch (_) { /* hidden for this view only */ }
+          });
+        })();
+        </script>
+        {% endif %}
         {% if answer_agent.changed_since %}
         <p class="answer-agent__since" id="answer-agent-since">{% if answer_agent.kind == 'specialist' %}{{ ui('This specialist has changed since this answer:') }}{% else %}{{ ui('This agent has changed since this answer:') }}{% endif %}
           {% for row in answer_agent.changed_since %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>

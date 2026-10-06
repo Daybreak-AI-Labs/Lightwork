@@ -152,6 +152,37 @@ def test_a_pack_answer_names_its_specialist_and_the_last_change(world):
     assert "alice" not in body.split('id="answer-facts"', 1)[1].split("</div>", 1)[0]
 
 
+def _finish(world, title, result, domain="proc_po_chaser"):
+    gid = world.create_goal(title, "", domain=domain)
+    episode = world.start_episode(gid)
+    world.append_event(gid, domain + "-0-a1b2c3", "verify", "verifier accepted (conf=0.93)")
+    world.end_episode(episode, result, "success")
+    world.set_goal_status(gid, "done", result=result)
+    return gid
+
+
+def test_the_first_answer_after_a_change_tells_the_person_what_changed(world):
+    """AI-12: an in-context notice on the next answer from a changed agent, once,
+    with a way to hide it; answers before the change, or with no earlier use,
+    carry no notice."""
+    from maverick_dashboard import agent_changelog
+
+    first = _finish(world, "Which POs are overdue?", "Three are overdue.")
+    assert 'id="answer-agent-notice"' not in client.get(f"/chat/goal/{first}").text
+    time.sleep(0.01)
+    agent_changelog.record("proc_po_chaser", ["Changed its instructions"], by="user:alice")
+    time.sleep(0.01)
+    second = _finish(world, "Which POs are overdue now?", "Two are overdue.")
+    body = client.get(f"/chat/goal/{second}").text
+    notice = _text(body.split('id="answer-agent-notice"', 1)[1].split("</div>", 1)[0])
+    assert "This specialist changed since you last used it:" in notice and "Changed its instructions" in notice
+    assert "Hide this notice" in notice and "alice" not in notice
+    time.sleep(0.01)
+    third = _finish(world, "Any overdue POs today?", "One is overdue.")
+    assert 'id="answer-agent-notice"' not in client.get(f"/chat/goal/{third}").text
+    assert 'id="answer-agent-notice"' not in client.get(f"/chat/goal/{first}").text
+
+
 def test_edited_or_missing_native_run_never_inherits_previous_check(world):
     gid = world.create_goal("Synthetic exact saved answer", "")
     episode = world.start_episode(gid)
