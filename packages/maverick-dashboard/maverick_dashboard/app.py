@@ -2776,6 +2776,9 @@ async def bearer_auth(request: Request, call_next):
         # DSAR response links are addressed by their unguessable token,
         # exactly like /form/ — the requester has no dashboard bearer.
         or path.startswith("/dsar/response/")
+        # One-action mute links in notification messages: the signed link is
+        # the credential and only quiets that one person's own notifications.
+        or path.startswith("/unsubscribe/")
         or path.startswith("/saml/")
         or path.startswith("/auth/invite/")
         # External integrations authenticate inside their route family

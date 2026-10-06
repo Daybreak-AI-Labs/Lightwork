@@ -58,6 +58,9 @@ ACTION_APPROVE = "lightwork_approve"
 ACTION_REJECT = "lightwork_reject"
 ACTION_QUESTION = "lightwork_question"
 ACTION_UNDO = "lightwork_undo"
+#: "Mute this task" / "Stop this summary" in a notification (NOT-2): the value
+#: is a signed maverick.notification_unsubscribe link token.
+ACTION_MUTE = "lightwork_mute"
 CONFIRM_VIEW_CALLBACK = "lightwork_confirm_critical"
 CONFIRM_BLOCK = "lightwork_typed"
 CONFIRM_INPUT = "typed_confirmation"
@@ -343,6 +346,9 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
                         for k in keys[:10]))})
     if not (approvals or questions or results or keys):
         blocks.append({"type": "section", "text": _mrkdwn("Nothing is waiting for you today.")})
+    quiet = _quiet_buttons(digest, results)
+    if quiet:
+        blocks.append({"type": "actions", "elements": quiet})
     limit = spend.get("limit_dollars") or 0
     spent = f"${float(spend.get('dollars') or 0):.2f}"
     against = f" of your ${float(limit):.2f} monthly limit" if limit else ""
@@ -353,6 +359,65 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
         + (f" <{dashboard_url.rstrip('/')}/me#daily-summary|Change or stop this summary>"
            if dashboard_url else ""))]})
     return blocks
+
+
+def _quiet_buttons(digest: dict[str, Any], results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One-action "Mute" per result and "Stop this summary" (NOT-2)."""
+    principal = str(digest.get("principal") or "")
+    if not principal.startswith("user:"):
+        return []
+    try:
+        from .notification_unsubscribe import sign
+
+        buttons = [mute_button(sign(principal, "task", str(r["id"])), f"Mute: {str(r['title'])[:60]}")
+                   for r in results[:3] if r.get("id")]
+        buttons.append(mute_button(sign(principal, "summary"), "Stop this summary"))
+        return buttons
+    except Exception:  # noqa: BLE001 -- the summary still goes out without them
+        log.debug("digest mute buttons unavailable", exc_info=True)
+        return []
+
+
+def mute_button(token: str, label: str) -> dict[str, Any]:
+    """A notification's one-action mute button (Slack sends the press back signed)."""
+    return {"type": "button", "action_id": ACTION_MUTE, "value": token, "text": _plain(label, 75)}
+
+
+def handle_mute_action(payload: dict[str, Any], *, principal_for: PrincipalResolver) -> dict[str, Any]:
+    """Mute what the pressed button names, for the person who pressed it only."""
+    from .notification_unsubscribe import LinkRefused, apply, sign, verify
+    from .paths import reset_tenant, set_tenant
+
+    action = next((a for a in (payload.get("actions") or [])
+                   if isinstance(a, dict) and a.get("action_id") == ACTION_MUTE), {})
+    user_id = str((payload.get("user") or {}).get("id") or "")
+    principal = principal_for(user_id) if user_id else None
+    if not principal:
+        return _unlinked_note(user_id)
+    try:
+        link = verify(str(action.get("value") or ""))
+    except LinkRefused as exc:
+        return _ephemeral(str(exc))
+    if link["principal"] != principal:
+        return _ephemeral("This button belongs to someone else's message, so nothing was changed.")
+    token = set_tenant(link["tenant"])
+    try:
+        apply(principal, link["scope"], link["key"], undo=link["undo"])
+        back = sign(principal, link["scope"], link["key"], tenant=link["tenant"], undo=not link["undo"])
+    except (LinkRefused, ValueError) as exc:
+        return _ephemeral(str(exc))
+    finally:
+        reset_tenant(token)
+    what = {"task": "alerts about this task", "agent": "alerts from this agent",
+            "summary": "your daily summary"}[link["scope"]]
+    if link["undo"]:
+        text = f"Turned {what} back on." if link["scope"] == "summary" else f"Unmuted {what}."
+        return {"response_type": "ephemeral", "replace_original": False, "text": text}
+    text = ("Stopped your daily summary. Turn it back on any time in My work."
+            if link["scope"] == "summary" else f"Muted {what} for 7 days.")
+    return {"response_type": "ephemeral", "replace_original": False, "text": text,
+            "blocks": [{"type": "section", "text": _mrkdwn(text)},
+                       {"type": "actions", "elements": [mute_button(back, "Undo")]}]}
 
 
 def confirm_view(content: dict[str, Any], *, binding: str | None, response_url: str) -> dict[str, Any]:
@@ -464,6 +529,8 @@ def handle_block_action(payload: dict[str, Any], *, world, principal_for: Princi
     if payload.get("type") != "block_actions":
         return None
     actions = [a for a in (payload.get("actions") or []) if isinstance(a, dict)]
+    if any(a.get("action_id") == ACTION_MUTE for a in actions):
+        return handle_mute_action(payload, principal_for=principal_for)
     action = next((a for a in actions if a.get("action_id") in
                    (ACTION_APPROVE, ACTION_REJECT, ACTION_QUESTION, ACTION_UNDO)), None)
     if action is None:
@@ -727,6 +794,7 @@ def send_dm(bot_token: str, user_id: str, text: str,
 
 __all__ = [
     "ACTION_APPROVE",
+    "ACTION_MUTE",
     "ACTION_QUESTION",
     "ACTION_REJECT",
     "ACTION_UNDO",
@@ -743,8 +811,10 @@ __all__ = [
     "digest_blocks",
     "encode_button_value",
     "handle_block_action",
+    "handle_mute_action",
     "handle_slash_command",
     "open_dm",
+    "mute_button",
     "parse_form",
     "parse_interaction_body",
     "parse_slash_text",

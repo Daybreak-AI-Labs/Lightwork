@@ -395,3 +395,67 @@ def unmute(request: Request, response: Response, body: UnmuteIn):
     unmuted = _change_mutes(request, body.context, change)
     response.headers["Cache-Control"] = "private, no-store"
     return {**_state(request), "unmuted": unmuted}
+
+
+# One-action mute and unsubscribe from inside an email, Slack or Telegram
+# message (NOT-2). The signed link is the credential, like /share/ and
+# /form/: it can only quiet that one person's own notifications, and every
+# mute can be undone here. Mail apps press the List-Unsubscribe header with
+# one POST (RFC 8058); a person who opens the link presses one button.
+_QUIET_WORDS = {
+    "task": ("Mute alerts about this task?", "Mute this task",
+             "You won't get alerts about this task for 7 days. Everything else stays as it is.",
+             "Alerts about this task are muted for 7 days", "Unmuted. Alerts about this task are back on."),
+    "agent": ("Mute alerts from this agent?", "Mute this agent",
+              "You won't get alerts from this agent for 7 days. Everything else stays as it is.",
+              "Alerts from this agent are muted for 7 days", "Unmuted. Alerts from this agent are back on."),
+    "summary": ("Stop your daily summary?", "Stop the summary",
+                "You won't get the daily summary by email or chat. Turn it back on any time in My work.",
+                "Your daily summary is stopped", "Your daily summary is back on."),
+}
+
+
+def _quiet_page(request, status=200, **context):
+    return _app().templates.TemplateResponse(
+        request, "unsubscribe.html", context, status_code=status,
+        headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"})
+
+
+@router.get("/unsubscribe/{token}")
+def unsubscribe_page(request: Request, token: str):
+    from maverick.notification_unsubscribe import LinkRefused, verify
+
+    try:
+        link = verify(token)
+    except LinkRefused as exc:
+        return _quiet_page(request, 404, problem=str(exc))
+    question, button, detail, _done, _undone = _QUIET_WORDS[link["scope"]]
+    if link["undo"]:
+        return _quiet_page(request, question="Turn these notifications back on?", button="Turn back on",
+                           detail="Lightwork will send them to you again.", token=token)
+    return _quiet_page(request, question=question, button=button, detail=detail, token=token)
+
+
+@router.post("/unsubscribe/{token}")
+def unsubscribe(request: Request, token: str):
+    from maverick.notification_unsubscribe import LinkRefused, apply, sign, verify
+    from maverick.paths import reset_tenant, set_tenant
+
+    try:
+        link = verify(token)
+    except LinkRefused as exc:
+        return _quiet_page(request, 404, problem=str(exc))
+    pin = set_tenant(link["tenant"])
+    try:
+        apply(link["principal"], link["scope"], link["key"], undo=link["undo"])
+        undo_token = None if link["undo"] else sign(link["principal"], link["scope"], link["key"],
+                                                     tenant=link["tenant"], undo=True)
+    except (LinkRefused, ValueError) as exc:
+        return _quiet_page(request, 409, problem=str(exc))
+    finally:
+        reset_tenant(pin)
+    _question, _button, detail, done, undone = _QUIET_WORDS[link["scope"]]
+    if link["undo"]:
+        return _quiet_page(request, done=undone, detail="You can change this any time in your notification settings.")
+    return _quiet_page(request, done=done + ".", detail=detail, undo_token=undo_token)
+
