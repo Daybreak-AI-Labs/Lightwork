@@ -142,7 +142,7 @@ def test_exposed_governance_pages_use_shared_shell_and_mounted_assets(
         'id="mv-copilot-egress"',
     ):
         assert shell_marker in response.text
-    assert "may be sent to that provider" in response.text
+    assert "may be sent to it. Do not include document text" in response.text  # the Copilot egress notice
 
     parser = _AssetParser()
     parser.feed(response.text)
@@ -166,6 +166,8 @@ def test_exposed_governance_pages_use_shared_shell_and_mounted_assets(
             assert content_type == "image/jpeg", asset
         elif asset.endswith(".png"):
             assert content_type == "image/png", asset
+        elif asset.endswith(".woff2"):  # the shell's preloaded font
+            assert content_type == "font/woff2", asset
         else:  # pragma: no cover - update this contract when adding an asset kind
             pytest.fail(f"unasserted static asset type: {asset}")
 
