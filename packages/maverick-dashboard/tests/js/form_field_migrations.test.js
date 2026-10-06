@@ -190,3 +190,38 @@ test("Automations: what was typed comes back after a reload and is forgotten onc
   assert.equal(w.sessionStorage.getItem("mv-keep:automation-schedule"), null);
   w.close();
 });
+
+test("Agent Factory: saving without a name or instructions points to each field and sends nothing", async () => {
+  const body = `<div id="agent-msg" role="status"></div>
+    <form id="agent-form" data-name="acme_helper" data-generation="new" data-creating="1" data-kind="agent" data-mv-validate>
+      <div class="mv-error-summary" id="agent-form-errors" data-mv-error-summary tabindex="-1" hidden></div>
+      <input id="f-new-id" type="text" value="acme helper">
+      <label for="f-description">Name</label>
+      <input id="f-description" name="description" type="text" value="" required data-error-required="Give the agent a name, for example Onboarding assistant.">
+      <label for="f-persona">What should it do?</label>
+      <textarea id="f-persona" name="persona" required data-error-required="Describe what the agent should do, in a sentence or two."></textarea>
+      <input id="f-allow" type="hidden" value=""><input id="f-deny" type="hidden" value=""><select id="f-risk" hidden><option value="low" selected>low</option></select>
+      <p id="agent-actions-error" hidden></p><p id="agent-risk-error" hidden></p><div id="wf-steps"></div>
+      <button type="button" id="btn-save">Create custom agent</button><button type="button" id="btn-validate">Check settings</button>
+    </form>`;
+  const calls = [];
+  const w = page("https://lightwork.example/agents?new=1", body, [], (win) => {
+    win.mountToolPicks = () => {}; win.humanName = (x) => x; win.plainError = () => "Could not save.";
+    win.fetch = async (url) => { calls.push(url); return new Response("{}", {status: 200, headers: {"Content-Type": "application/json"}}); };
+  });
+  w.eval(inlineScript("agents.html", "save / validate / reset (real agent-override endpoints)"));
+  const doc = w.document;
+  doc.getElementById("btn-save").click();
+  await tick();
+  assert.deepEqual(summaryLinks(doc), [
+    ["#f-description", "Give the agent a name, for example Onboarding assistant."],
+    ["#f-persona", "Describe what the agent should do, in a sentence or two."]]);
+  assert.equal(doc.activeElement, doc.querySelector("[data-mv-error-summary]"));
+  assert.equal(doc.getElementById("f-description").getAttribute("aria-invalid"), "true");
+  assert.equal(doc.getElementById("f-new-id").value, "acme helper", "nothing typed is cleared");
+  assert.deepEqual(calls, []);
+  doc.getElementById("btn-validate").click();
+  await tick();
+  assert.deepEqual(calls, [], "Check settings also waits for the missing answers");
+  w.close();
+});

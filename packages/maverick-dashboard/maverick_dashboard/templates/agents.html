@@ -385,7 +385,9 @@
       {% endif %}
       {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
-      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}">
+      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}" data-mv-validate>
+        {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
+        {% from "_form_field.html" import error_summary %}{{ error_summary('agent-form-errors') }}
         {% if creating %}
         <div class="fld">
           <label for="f-new-id">Short name <span class="sub">— filled in from the name below; change it if you like</span></label>
@@ -394,11 +396,13 @@
         {% endif %}
         <div class="fld">
           <label for="f-description">Name <span class="sub">— a short summary of the role</span></label>
-          <input id="f-description" name="description" type="text" value="{{ selected.description if selected else '' }}">
+          <input id="f-description" name="description" type="text" value="{{ selected.description if selected else '' }}" required
+                 data-error-required="Give the {{ kind_word }} a name, for example Onboarding assistant.">
         </div>
         <div class="fld">
           <label for="f-persona">What should it do? <span class="sub">— plain English</span></label>
-          <textarea id="f-persona" name="persona" rows="6" placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
+          <textarea id="f-persona" name="persona" rows="6" required data-error-required="Describe what the {{ kind_word }} should do, in a sentence or two."
+                    placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
           <p class="sub" style="margin: var(--space-1) 0 0; font-size: var(--text-sm);">The clearer the brief, the better the {{ kind_word }} — say what it handles, and what a finished result looks like.</p>
         </div>
 
@@ -1257,7 +1261,10 @@
         }
         return { status: 200, data };
       }
+      // The shared pattern finds missing answers first (CTL-3); nothing typed is cleared.
+      function formReady() { return !window.mvFieldErrors || window.mvFieldErrors.validate(form); }
       document.getElementById('btn-validate').addEventListener('click', async () => {
+        if (!formReady()) return;
         try {
           fieldMessage('', '');
           const name = targetName();
@@ -1341,6 +1348,7 @@
       }
       const saveBtn = document.getElementById('btn-save');
       saveBtn.addEventListener('click', async () => {
+        if (!formReady()) return;
         const name = targetName();
         if (!name) { show('Give your ' + kindWord() + ' a name first.', false); return; }
         if (!beginMutation(saveBtn)) return;
