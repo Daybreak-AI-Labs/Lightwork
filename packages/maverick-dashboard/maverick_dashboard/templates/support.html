@@ -16,6 +16,7 @@
     <details id="installation-health-details" hidden><summary>Check details for your installation administrator</summary><ul class="maintenance-list" id="installation-health-results"></ul></details>
     {% else %}<p>An installation administrator can run this check. Ask the person who looks after your Lightwork installation.</p>{% endif %}
   </section>
+  {% if can_check_installation %}{% include "_runtime_policy_recovery.html" %}{% endif %}
   <section class="panel support-scope" aria-labelledby="support-scope-title">
     <h2 id="support-scope-title">What the report includes</h2>
     <ul>
@@ -98,5 +99,6 @@
   </section>
 </section>
 <script src="/static/lightwork-support-ops.js" defer></script>
+{% if can_check_installation %}<script src="/static/lightwork-runtime-policy-recovery.js" defer></script>{% endif %}
 {% if can_prepare_support %}<script src="/static/lightwork-support.js" defer></script>{% endif %}
 {% endblock %}

@@ -16,7 +16,8 @@ class Empty(BaseModel):
 def snapshot(request, _selection):
     state, _rows = native.current(request)
     return Snapshot(state["revision"], "Current eligible local task outlines", native.NOTICE,
-                    fields=state["choices"], blocked="No eligible task outlines are available to compare yet." if state["outlines"] < 2 else "")
+                    native.evidence_counts(state["evidence"]), fields=state["choices"],
+                    blocked="There are no usable comparisons with recorded, distinguishable steps on both attempts. Missing steps cannot establish which attempt is better." if not state["can_review"] else "")
 
 
 def prepare(request, _selection, arguments):
@@ -45,7 +46,8 @@ def _outcome(row):
     if isinstance(details["Saved result"], dict):
         result = details["Saved result"]
         details["Saved result"] = {"Comparisons": result["pairs"], "Outlines": result["outlines"],
-                                  "Agreement on training comparisons": str(round(result["accuracy"] * 100)) + "%"}
+                                  "Agreement on training comparisons": str(round(result["accuracy"] * 100)) + "%",
+                                  **native.evidence_counts(result.get("evidence"))}
     return Outcome(state, row["message"], details=details)
 
 

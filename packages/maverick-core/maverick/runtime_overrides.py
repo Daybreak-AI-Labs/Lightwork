@@ -776,10 +776,13 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     # Parse and validate before replacement. A renderer/schema bug must never
     # atomically replace the last valid operator policy with corrupt TOML.
     state = _validate_loaded_state(_tomllib().loads(body))
+    from .runtime_policy_recovery import retain_current, retain_written
+    retain_current()
     audit = _setting_audit.get()
     if audit is not None:
         audit("prepared", _load(), state)
     atomic_write_text(path, body)
+    retain_written(body)
     if audit is not None:
         audit("completed", {}, state)
     # Keep the fallback synchronized with writes from this process.

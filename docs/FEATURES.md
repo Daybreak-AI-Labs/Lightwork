@@ -6175,3 +6175,32 @@ that decision; ordinary explicit model strings do not invent one. Failed calls
 remain failures, and refused pre-send work contributes no routing outcome.
 API-reference authorization and request protections also honor a real deployment
 mount prefix without trusting forwarding headers or matching arbitrary suffixes.
+
+### Saved installation safety settings recovery
+
+Help can separately restore an exact retained installation safety-settings copy.
+A global administrator chooses a saved copy, reviews its complete supported
+settings and explicitly confirms. Current source, authority and review lifetime
+are checked at native replacement. Original requests remain readable after an
+interrupted reply; an unknown outcome is never repeated automatically.
+
+This uses the existing Backup and recovery opt-in and requires it enabled before
+damage, a verified retained copy and the original deployment encryption key.
+The last 32 distinct policy copies are retained. Protected connection credentials
+can roll back with the selected copy; their bytes stay hidden. Unsupported or
+unsafe inline-credential reviews refuse without changing settings. This does not
+restore workspaces, sign-in configuration or external services.
+
+The rehearsal evaluation bridge now reads the native current workspace queue
+under the configured installation location, retaining explicit-path support and
+local-source filtering. Explicit deployment-isolation off values now agree with
+the native work-area builder; independent container requirements and invalid-mode
+refusal remain enforced. Signed workflow callbacks distinguish unavailable
+workspaces from an unreadable workspace inventory before admitting continuation.
+
+Local ranking training now requires actual comparable saved work details.
+Missing details, zero-confidence comparisons and structurally indistinguishable
+examples cannot become invented training evidence. The ordinary form and
+Copilot show usable, skipped and unresolved counts before admission. Cross-checks
+abstain from missing or tied structural evidence; original answer-preference
+pairs remain available for their separate purpose.

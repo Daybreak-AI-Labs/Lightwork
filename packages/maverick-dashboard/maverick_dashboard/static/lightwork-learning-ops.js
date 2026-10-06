@@ -242,9 +242,10 @@
       '&epochs=' + $('lo-rm-epochs').value + '&lr=' + $('lo-rm-lr').value;
     return { url: TO + '/reward-models/train' + q, init: src.init };
   }, ui('lo-rm', 'learn a scoring guide', function (d) {
-    if (!d.trained) return el('p', null, d.why);
-    return el('p', null, 'Trained on ' + plural(d.pairs, 'comparison') + ' from ' + plural(d.outlines, 'task outline') + '. It agrees with the answer checker ' +
-      Math.round(d.accuracy * 100) + '% of the time.');
+    var evidence=d.evidence?el('p',null,d.evidence.eligible+' usable comparisons; '+d.evidence.skipped+' skipped; '+d.evidence.unresolved+' unresolved. Missing steps and identical patterns cannot establish an order.'):null;
+    if (!d.trained) return [el('p', null, d.why),evidence].filter(Boolean);
+    return [el('p', null, 'Trained on ' + plural(d.pairs, 'comparison') + ' from ' + plural(d.outlines, 'task outline') + '. It agrees with the answer checker ' +
+      Math.round(d.accuracy * 100) + '% of the time. These training comparisons do not establish answer quality on new work.'),evidence].filter(Boolean);
   }, loadRewardModels));
   document.addEventListener('lightwork:reward-model-saved', loadRewardModels);
   J.wire($('lo-rm-score'), async function () {
@@ -254,8 +255,8 @@
     if (!src) return null;
     return { url: TO + '/reward-models/' + encodeURIComponent(model) + '/score?source=' + src.source, init: src.init };
   }, ui('lo-rm', 'score the task outlines', function (d) {
-    if (!d.scored) return el('p', 'muted', 'There are no task outlines to score.');
-    return [el('p', null, 'Scored ' + plural(d.scored, 'task outline') + '. Highest first:'),
+    if (!d.scored) return el('p', 'muted', 'No attempts have recorded steps to score. '+(d.skipped||0)+' attempts were skipped; missing steps are not a low score.');
+    return [el('p', null, 'Scored ' + plural(d.scored, 'task outline') + '. '+(d.skipped||0)+' attempts without steps skipped. Highest first:'),el('p','muted',d.notice||'These scores describe step patterns, not answer quality.'),
       J.table(['Rank', 'Result', 'Steps', 'Score'], d.top.map(function (r, i) {
         return [String(i + 1), r.outcome ? (window.mvHuman ? window.mvHuman(r.outcome) : r.outcome) : '—', String(r.steps), r.score.toFixed(3)];
       })), J.technical(d.top.map(function (r, i) { return (i + 1) + ': ' + r.reference; }))];

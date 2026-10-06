@@ -5104,9 +5104,11 @@ def pick_advanced() -> dict[str, Any]:
             default=True,
         ),
         "allow_workspace_recovery": _q_confirm(
-            "Enable administrator workspace snapshots and isolated local restore? "
-            "Requires a separately kept recovery key. External stores and shared "
-            "administration need their own recovery procedures.",
+            "Enable administrator recovery of local work and retained installation "
+            "safety settings? Workspace snapshots need a separately kept recovery key. "
+            "Settings restoration uses verified saved copies and never resets an "
+            "unreadable policy. External stores and other shared administration "
+            "are excluded.",
             default=False,
         ),
         "allow_action_center": _q_confirm(

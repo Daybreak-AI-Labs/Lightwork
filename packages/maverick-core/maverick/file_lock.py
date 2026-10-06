@@ -1532,7 +1532,7 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
 
 
 def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
-                      encoding: str = "utf-8",
+                      encoding: str = "utf-8", newline: str | None = None,
                       effect_guard: Callable[[], None] | None = None) -> None:
     """Write ``text`` to ``path`` atomically: a *unique* temp file in the same
     directory, then ``os.replace`` into position.
@@ -1554,7 +1554,7 @@ def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
         mode=mode,
     )
     try:
-        with os.fdopen(fd, "w", encoding=encoding) as f:
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
             fd = -1  # ownership transferred to the file object
             f.write(text)
             f.flush()

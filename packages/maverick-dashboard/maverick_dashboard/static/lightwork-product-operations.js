@@ -237,6 +237,27 @@
           else { var visibilityLink = node('a', 'Open complete local practice controls', visibilityDestination); visibilityLink.href = '/learning/recovery-visibility'; visibilityLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'runtime_policy_recovery') {
+          var policyForm = entry[1], policyStarted = generation, policySelection = JSON.stringify(context());
+          if (!policyForm || Array.isArray(policyForm) || Object.keys(policyForm).sort().join(',') !== 'context,original' ||
+              typeof policyForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(policyForm.context) || typeof policyForm.original !== 'boolean') return;
+          var policyDestination = node('dd', undefined, list), policyControl = window.LightworkRuntimePolicyRecovery;
+          var policyLabel = policyForm.original ? 'Read my original safety settings restoration' : 'Open complete saved safety settings';
+          if (policyControl && typeof policyControl.open === 'function') button(policyLabel, policyDestination, async function (event) {
+            var isCurrent = function () { return active(policyStarted) && JSON.stringify(context()) === policySelection; };
+            if (!isCurrent() || busy) return;
+            var policyButton = event.currentTarget; policyButton.disabled = true;
+            try {
+              var opened = await policyControl.open(policyForm.context, policyForm.original, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected safety settings controls are open.' : 'Your current choices are kept. Reload Help to review current access and saved copies.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The safety settings controls could not be opened. Your current choices are kept.'; }
+            finally { if (isCurrent() && policyButton.isConnected) policyButton.disabled = false; }
+          });
+          else { var policyLink = node('a', policyLabel, policyDestination); policyLink.href = '/help#runtime-policy-recovery'; policyLink.className = 'btn btn--ghost'; }
+          return;
+        }
         if (entry[0] === 'installation_health') {
           var healthForm = entry[1], healthStarted = generation, healthSelection = JSON.stringify(context());
           if (!healthForm || Array.isArray(healthForm) || Object.keys(healthForm).join(',') !== 'context' ||

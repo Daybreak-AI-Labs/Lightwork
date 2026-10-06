@@ -244,11 +244,12 @@ requires nontechnical setup, capture, review, teaching, use, result, withdrawal,
 and recovery through the product. The [post-install coverage register](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/post-install-operation-coverage.md#L40-L51)
 lists the known learning-family gaps and [Copilot’s narrow present catalog](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/post-install-operation-coverage.md#L86-L87).
 `copilot_context.py` describes its page guide as read-only; bounded operation
-sidecars do not give Copilot whole-platform operating authority. Until the
-proposed algorithms, strong comparators, native authority, direct UI, Copilot
-operations, and authenticated installed-product journeys are independently
-qualified, none of these 28 IDs should be claimed as a complete breakthrough or
-customer-ready capability.
+sidecars do not give Copilot whole-platform operating authority. Use the dated
+coverage below and the current operating register for specific supported
+product journeys. A bounded implemented journey is not evidence that its broad
+research proposal is a complete breakthrough. Proposed general algorithms,
+strong comparator advantages and customer outcomes require separate evidence;
+the register does not declare those claims proven by ordinary operating checks.
 
 October 6 runtime follow-through narrows F04/F05: ordinary task-limit repair
 reaches an actual reviewed Settings save, and current typed task review refuses
@@ -259,3 +260,21 @@ refusal paths were checked with actual loopback provider HTTP. These are
 correctness repairs to existing learning, not a new research algorithm or proof
 of answer accuracy, causal value or independent audit custody. Counts remain
 6 partial product foundations, 18 bounded pilots and 4 parked/rejected results.
+
+October 6 recovery follow-through narrows F03/F04/F06: an administrator can
+completely review and separately restore verified historical deployment safety
+settings through Help and protected Copilot, including original unknown-outcome
+readback without replay. Custody requires the existing recovery opt-in before
+damage and the original local key; protected credentials can roll back. Exact
+native policy bytes, current authority/source and finite custody were checked.
+The rehearsal bridge also reads the current native tenant queue rather than
+another installation's legacy path. These are product correctness and recovery
+improvements; the 28-item research status counts remain unchanged.
+
+October 6 ranking follow-through narrows F04/F05: training requires actual
+comparable saved work details and reviews usable/skipped/unresolved counts;
+structurally missing or tied comparisons abstain instead of supplying fictitious
+failure evidence. Original answer-preference data stays intact. Native
+UI/Copilot admission, original recovery and scoring were checked with retained
+local examples. This fixes attribution and readiness, not a new reward-learning
+algorithm or independently measured quality lift.

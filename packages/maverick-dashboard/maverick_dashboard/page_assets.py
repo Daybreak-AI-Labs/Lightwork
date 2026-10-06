@@ -15,6 +15,7 @@ _STATIC = Path(__file__).parent / "static"
 ASSETS = (
     "cytoscape-3.30.2.min.js",
     "lightwork-settings-catalog-requests.js",
+    "lightwork-runtime-policy-recovery.js",
     "lightwork-today.js",
     "lightwork-department-board.js",
     "lightwork-department-team-updates.js",

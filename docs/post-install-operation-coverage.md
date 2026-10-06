@@ -1794,3 +1794,61 @@ Native protected reads, body limits and error protections use the canonical ASGI
 route only. Forwarded headers, near prefixes and public-looking suffixes do not
 grant access. This qualifies the mounted API reference and the stated native
 boundaries; it does not certify every ordinary page beneath a deployment prefix.
+
+## October 6 retained installation-policy restoration
+
+Ordinary Help and protected Copilot open the same complete saved safety-settings
+review. Current global administration, configured step-up, exact installation
+source, copy revision and review expiry are rechecked at physical native
+replacement. The optional native writer retains actual valid before/after disk
+bytes in encrypted deployment custody; this preserves Windows newline bytes
+instead of creating false copies or rewriting an exact restoration.
+
+The existing Backup and recovery opt-in must be enabled before policy damage.
+The original deployment key and a verified retained copy are required; a missing
+copy does not enable a default reset. The last 32 distinct valid/damaged copies
+share the stated bounded custody. Protected credential fields are restored from
+the selected historical copy and may roll back; they are not displayed.
+Credential-shaped consequential startup arguments or addresses refuse the
+complete review rather than silently hide changes. Other settings, workspaces,
+sign-in configuration and external stores are outside this operation.
+
+Native writer copies survived a fresh process. The ordinary 320px journey
+exercised full review, Cancel, exact restore, interrupted reply followed by
+original read, and a true effect with missing completion. The latter remained
+unknown without replay; a separate new complete review restored the exact copy.
+Source drift, post-retained-read drift/expiry, unsafe inline credentials and real
+administrator revocation refused. Disabling recovery still allowed the current
+administrator to read owned original metadata. This qualifies native cooperative
+writer locking and local encrypted custody, not arbitrary privileged file
+tampering, external custody or an independent guarantee of human approval.
+
+Native rehearsal evaluation reads the same current workspace queue as the
+actual dream-time writer, including a nondefault installation location and
+separate tenant namespaces. It preserves local-source filtering and explicit
+operator-supplied queue paths. No evolution run or quality improvement is claimed.
+
+Native work-area construction respects explicit deployment-isolation off
+spellings while preserving separate container requirements and pinned Kubernetes
+refusal. Unrecognized nonempty modes remain invalid. Actual signed workflow
+resume requests now return unavailable-workspace or unverified-access responses
+before continuation instead of an internal failure; signature checks and native
+workspace admission remain unchanged.
+
+## October 6 structural reward evidence
+
+The native local ranker and its ordinary/Copilot review use one shared structural
+comparison assessment. Trace-less, zero-confidence and indistinguishable
+comparisons do not become invented all-zero rejected attempts. Cross-checks
+abstain on missing evidence or tied model scores without silently penalizing
+the original answer-preference pair. All original answer pairs are retained.
+
+The native 320px journey refused insufficient work details through both admission
+routes, then reviewed eight candidate comparisons as one usable, six skipped and
+one unresolved. Actual training retained a zero length coefficient in that
+fixture, left all eight original answer pairs available and abstained unchanged
+on seven unsupported comparisons. Lost reply followed by original read and
+duplicate admission performed one training, while a separately reviewed Copilot
+decision admitted a second. Missing-detail scoring remained visibly unscored;
+stale sources and revoked authority refused. These checks establish truthful
+evidence handling, not improved answer quality or customer learning lift.

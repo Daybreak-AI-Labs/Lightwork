@@ -60,12 +60,21 @@ def _validate_identity(user, cluster):
         raise ValueError("Executor kubeconfig must embed its cluster CA")
 
 
-def deployment_kubernetes_config() -> dict | None:
+def deployment_isolation_mode() -> str | None:
+    """Read the deployment pin, preserving explicit off and invalid modes."""
+    from ..config import env_flag
+
     mode = os.environ.get("MAVERICK_DEPLOYMENT_ISOLATION", "")
-    if not mode:
+    if not mode or env_flag("MAVERICK_DEPLOYMENT_ISOLATION") is False:
         return None
     if mode != "kubernetes":
         raise ValueError("MAVERICK_DEPLOYMENT_ISOLATION must be kubernetes; no local fallback is allowed")
+    return mode
+
+
+def deployment_kubernetes_config() -> dict | None:
+    if deployment_isolation_mode() is None:
+        return None
     namespace = os.environ.get("MAVERICK_EXECUTOR_NAMESPACE", "lightwork-execution")
     image = os.environ.get("MAVERICK_EXECUTOR_IMAGE", "")
     if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", namespace) or namespace in {"default", "kube-system"}:

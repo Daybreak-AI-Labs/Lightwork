@@ -59,6 +59,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth_metrics as _auth_metrics
 from . import health_routes as _health_routes
+from . import runtime_policy_recovery_api
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -1492,6 +1493,7 @@ install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(api_documentation_router)
+app.include_router(runtime_policy_recovery_api.router, prefix="/api/v1")
 app.include_router(draft_router)
 
 app.include_router(preferences_router)
@@ -11192,7 +11194,7 @@ def _stored_trigger_tenant(trigger: dict):
 
         try:
             assert_tenant_active(tenant)
-        except TenantSuspended as exc:
+        except (TenantSuspended, KeyError, ValueError) as exc:
             raise HTTPException(status_code=404, detail="trigger unavailable") from exc
         except TenantRegistryError as exc:
             raise HTTPException(
@@ -11419,12 +11421,14 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
         resume_tenant = str(payload.get("tenant") or "").strip()
         tenant_token = None
         if resume_tenant:
-            from maverick.tenant.registry import assert_tenant_active
+            from maverick.tenant.registry import TenantRegistryError, assert_tenant_active
 
             try:
                 assert_tenant_active(resume_tenant)
-            except (KeyError, PermissionError) as exc:
-                raise HTTPException(status_code=404, detail="tenant unavailable") from exc
+            except (KeyError, PermissionError, ValueError) as exc:
+                raise HTTPException(status_code=404, detail="Workspace unavailable. No workflow continuation was started.") from exc
+            except TenantRegistryError as exc:
+                raise HTTPException(status_code=503, detail="Workspace access could not be verified. No workflow continuation was started.") from exc
             from maverick.paths import set_tenant
 
             tenant_token = set_tenant(resume_tenant)

@@ -231,7 +231,7 @@ FEATURE_INFO = {
     "action_center": "Collect approvals, results waiting for approval, assessment reviews, and uncertain external actions in one personal list, with private read and snooze preferences. Overdue items remain visible.",
     "draft_recovery": "Keep encrypted recovery copies of unfinished editor work, private to each account and workspace. Credentials and attachments are excluded; restoring never runs or publishes work.",
     "record_search": "Find accessible vendors, evidence, assessments, decisions, tasks, and reports by name or reference. Searches use current metadata and disclose unavailable or partial sources.",
-    "workspace_recovery": "Let global administrators export signed local workspace snapshots, verify and test them, and restore only in isolated local recovery mode. External stores and shared administration are excluded.",
+    "workspace_recovery": "Let global administrators recover local work and separately restore retained installation safety settings. Workspace snapshots restore only in isolated local recovery mode with a separately kept recovery key. Settings restoration on Help requires a verified saved copy and explicit review; it never resets an unreadable policy. External stores and other shared administration are excluded.",
     "signing_identity_transition": "Permit global administrators to explicitly review a dual-signed, exact-release publisher or update-key transition in isolated recovery mode. This changes installation trust for every local workspace. It never accepts an unrelated signer or bypasses Windows signature checks.",
     "skills": "Agents can use saved procedures from the Skills library "
               "while working on a task.",

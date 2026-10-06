@@ -267,9 +267,12 @@ async def reward_models(request: Request) -> dict:
 
 
 @router.get("/reward-models/current-outlines")
-async def current_reward_outlines(request: Request) -> Response:
+async def current_reward_outlines(request: Request, min_margin: Literal["0.25", "0.5", "1.0"] = "0.5",
+                                 max_pairs: int = 64, epochs: int = 200,
+                                 lr: Literal["0.05", "0.1", "0.2"] = "0.1") -> Response:
     from . import reward_model_training as reward
-    state, _rows = await run_in_threadpool(reward.current, request)
+    state, _rows = await run_in_threadpool(reward.current, request,
+        {"min_margin": min_margin, "max_pairs": max_pairs, "epochs": epochs, "lr": lr})
     public = {key: value for key, value in state.items() if key not in {"source", "storage", "sources"}}
     return Response(json.dumps(public), media_type="application/json", headers={"Cache-Control": "private, no-store"})
 
@@ -342,14 +345,18 @@ async def train_reward_model(request: Request, source: Literal["outbox", "file"]
         model, report = train(rows, min_margin=float(min_margin), max_pairs_per_group=max_pairs,
                               epochs=epochs, lr=float(lr))
         if report["pairs"] == 0:
-            return {"trained": False, "why": ("No task was tried more than once with a clear difference in "
-                                              "results, so there is nothing to compare yet.")}
+            return {"trained": False, "why": ("There are no usable comparisons with recorded, distinguishable "
+                                              "steps on both attempts. No ranking model was saved."),
+                    "evidence": {key: report[key] for key in ("candidates", "eligible", "skipped", "unresolved",
+                                                              "missing_steps", "indistinguishable", "no_confidence")}}
         name = time.strftime("rm-%Y%m%d-%H%M%S", time.gmtime())
         store = _store()
         store.mkdir(parents=True, exist_ok=True)
         atomic_write_text(store / f"{name}.json", json.dumps(model.to_dict(), indent=2, sort_keys=True))
         entry = {"name": name, "created_at": time.time(), "pairs": int(report["pairs"]),
-                 "accuracy": round(float(report["accuracy"]), 4), "outlines": len(rows), "source": source}
+                 "accuracy": round(float(report["accuracy"]), 4), "outlines": len(rows), "source": source,
+                 "evidence": {key: report[key] for key in ("candidates", "eligible", "skipped", "unresolved",
+                                                           "missing_steps", "indistinguishable", "no_confidence")}}
         atomic_write_text(store / "index.json", json.dumps((_index() + [entry])[-200:], indent=2))
         return {"trained": True, **entry}
     return start_job(request, "reward_model_train", "Training the reward model", _run)
@@ -365,7 +372,7 @@ def _model_path(name: str) -> Path:
 async def score_with_reward_model(request: Request, name: str,
                                   source: Literal["outbox", "file"] = "outbox") -> dict:
     require_global_permission(request, "admin")
-    from maverick.training.reward_model import PreferenceRewardModel
+    from maverick.training.reward_model import PreferenceRewardModel, has_recorded_steps
 
     from .reward_model_training import model_bytes
     guided = await run_in_threadpool(model_bytes, request, name)
@@ -379,9 +386,10 @@ async def score_with_reward_model(request: Request, name: str,
         rows = _file_rows(raw) if source == "file" else _outbox_rows()
         scored = sorted(({"outcome": str(r.get("outcome") or "").replace("_", " "),
                           "steps": len(r.get("messages") or []), "score": round(model.score(r), 4),
-                          "reference": str(r.get("id") or "")[:80]} for r in rows),
+                          "reference": str(r.get("id") or "")[:80]} for r in rows if has_recorded_steps(r)),
                         key=lambda x: x["score"], reverse=True)
-        return {"scored": len(scored), "top": scored[:50]}
+        return {"scored": len(scored), "top": scored[:50], "skipped": len(rows) - len(scored),
+                "notice": "Attempts without recorded steps were not scored. These scores describe step patterns, not answer quality."}
     return start_job(request, "reward_model_score", "Scoring task outlines with the reward model", _run)
 
 

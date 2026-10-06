@@ -17,8 +17,12 @@ from maverick.memory_ownership import source_allowed
 from maverick.paths import data_dir
 from maverick.training import ingest
 from maverick.training.identity import record_trajectory_id
-from maverick.training.reward_model import FEATURES, PreferenceRewardModel, train_reward_model
-from maverick.training.rlaif import build_preference_pairs
+from maverick.training.reward_model import (
+    FEATURES,
+    PreferenceRewardModel,
+    train_reward_model,
+    training_comparisons,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import learning_jobs, learning_ops_api
@@ -27,8 +31,10 @@ from .draft_api import context_for
 
 PAGE = "/learning#lo-rm-h"
 MAX_OUTLINES = 200
-NOTICE = ("This learns a small ranking model from the first 200 eligible task outlines kept here. "
-          "It uses their recorded ratings and structural steps, without sending work to an AI service. "
+NOTICE = ("This learns a small ranking model from the first 200 permitted task outlines kept here. "
+          "Both attempts need recorded steps and a distinguishable pattern to be used. "
+          "Answer drafts without recorded steps stay available for answer training, but are skipped here. "
+          "It uses recorded ratings and step patterns, without sending work to an AI service. "
           "Agreement on those training comparisons does not prove better results on new work. "
           "Private employee work and tasks excluded from learning are not admitted. Nothing is shared or enabled.")
 
@@ -143,11 +149,12 @@ def current(request, values=None):
     context = authority(request)
     body = _options(values or {})
     rows, sources, shown, source, storage = _source()
-    pairs = build_preference_pairs(rows, min_margin=float(body.min_margin), max_pairs_per_group=body.max_pairs)
+    pairs, evidence = training_comparisons(rows, min_margin=float(body.min_margin), max_pairs_per_group=body.max_pairs)
+    available, _counts = training_comparisons(rows, min_margin=0.25, max_pairs_per_group=128)
     authority(request, context)
     return {"context": context, "revision": digest([context, source]), "source": source, "storage": storage,
-            "outlines": len(rows), "comparisons": len(pairs), "tasks": shown, "sources": sources,
-            "notice": NOTICE, "choices": fields(), "ready": bool(pairs)}, rows
+            "outlines": len(rows), "comparisons": len(pairs), "evidence": evidence, "tasks": shown, "sources": sources,
+            "notice": NOTICE, "choices": fields(), "ready": bool(pairs), "can_review": bool(available)}, rows
 
 
 def prepare(request, values):
@@ -158,9 +165,20 @@ def prepare(request, values):
     if body.context != state["context"] or body.revision != state["revision"]:
         raise HTTPException(409, "The reviewed task outlines changed. Refresh the source and review again; nothing was started.")
     if not state["ready"]:
-        raise HTTPException(409, "There are no comparable eligible attempts with the selected difference yet. Nothing was trained or shared.")
+        raise HTTPException(409, "There are no usable comparisons with recorded, distinguishable steps on both attempts. Missing steps and indistinguishable patterns cannot train this ranking model. Nothing was trained or shared.")
     return {"body": body.model_dump(), "source": state["source"], "storage": state["storage"],
-            "outlines": state["outlines"], "comparisons": state["comparisons"], "tasks": state["tasks"], "sources": state["sources"]}
+            "outlines": state["outlines"], "comparisons": state["comparisons"], "evidence": state["evidence"],
+            "tasks": state["tasks"], "sources": state["sources"]}
+
+
+def evidence_counts(evidence):
+    """Readable counts for reviewed training and compatible older receipts."""
+    if not evidence:
+        return {}
+    return {"Candidate comparisons": evidence["candidates"], "Usable comparisons": evidence["eligible"],
+            "Skipped because steps are missing": evidence["missing_steps"],
+            "Skipped because confidence is unavailable": evidence["no_confidence"],
+            "Unresolved because step patterns are identical": evidence["unresolved"]}
 
 
 def review_rows(prepared):
@@ -168,6 +186,7 @@ def review_rows(prepared):
     rows = [{"label": "Learning source", "after": "Eligible task outlines currently kept in this workspace"},
             {"label": "Work included", "after": str(prepared["outlines"]) + " attempts; " + str(prepared["comparisons"]) + " comparisons"},
             {"label": "Effect", "after": "Save a separate local ranking model. No current model is replaced; no AI is contacted or sharing enabled."}]
+    rows.extend({"label": label, "after": str(count)} for label, count in evidence_counts(prepared.get("evidence")).items())
     for field in fields():
         shown = next(c["label"] for c in field["choices"] if c["value"] == body[field["name"]])
         rows.append({"label": field["label"], "after": shown})
@@ -267,7 +286,8 @@ def start(request, prepared, operation, *, expires):
             if report["pairs"] < 1 or any(not math.isfinite(float(w)) for w in model.weights.values()):
                 raise HTTPException(409, "Training did not produce a usable ranking model. No model was saved.")
             result = {"name": "rm-reviewed-" + operation, "created_at": time.time(), "pairs": int(report["pairs"]),
-                      "accuracy": round(float(report["accuracy"]), 4), "outlines": len(rows), "source": "reviewed_outbox"}
+                      "accuracy": round(float(report["accuracy"]), 4), "outlines": len(rows), "source": "reviewed_outbox",
+                      "evidence": {key: report[key] for key in prepared["evidence"]}}
             with authority_effect_fence():
                 authority(request, context, write=True)
                 if prepare(request, body) != prepared:
