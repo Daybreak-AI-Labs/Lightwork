@@ -338,6 +338,7 @@
   // Where to search: a readable checklist.
   on('dsar-worksheet', function () {
     var out = $('dsar-worksheet-result');
+    out.textContent = 'Checking where to search…';
     call('GET', base + encodeURIComponent(requestId) + '/estate-worksheet').then(function (w) {
       out.textContent = '';
       var h = doc.createElement('h3'); h.textContent = 'Where to search'; out.appendChild(h);
@@ -345,26 +346,38 @@
       function item(text) { var li = doc.createElement('li'); li.textContent = text; ul.appendChild(li); }
       var holdings = w.platform_holdings || {};
       var held = holdings.sections || {};
-      var total = Object.keys(held).reduce(function (n, k) { return n + (held[k] || 0); }, 0);
-      item(holdings.resolved === false
-        ? 'Lightwork itself: could not match this person to one account, so its own records are not counted here.'
-        : 'Lightwork itself: ' + total + ' record(s) found.');
+      var counts = held && typeof held === 'object' && !Array.isArray(held) ? Object.values(held) : [];
+      var total = counts.reduce(function (n, count) { return n + count; }, 0);
+      if (holdings.error || holdings.enabled !== true) item('Lightwork itself: its records could not be checked. The count is unknown; try this checklist again before completing the search.');
+      else if (holdings.resolved === false) item('Lightwork itself: could not match this person to one account, so its own records are not counted here.');
+      else if (holdings.resolved !== true || !counts.length || !counts.every(function (count) { return Number.isSafeInteger(count) && count >= 0; }) || !Number.isSafeInteger(total)) item('Lightwork itself: the record count could not be confirmed. Try this checklist again.');
+      else item('Lightwork itself: ' + total + ' record(s) found.');
       var dm = w.data_map || {};
-      if (dm.enabled) {
+      if (dm.error) item('Your data map could not be checked. Other systems remain unconfirmed; try again before completing the search.');
+      else if (dm.enabled) {
         (dm.assets || []).forEach(function (a) {
           var cats = (a.categories || []).map(function (c) { return human(c).toLowerCase(); });
           item(human(a.system || 'System') + ' – ' + (a.name || 'data store') +
             (cats.length ? ' (holds ' + cats.join(', ') + ')' : ''));
         });
         if (!(dm.assets || []).length) item('Your data map lists no systems that hold personal details.');
+        if ((dm.assets || []).length === 100) item('This checklist shows up to 100 data-map locations. Review your complete data map for any others.');
       } else {
         item('Your data map is not set up, so other systems are not listed.');
       }
-      var vendors = (w.processors || {}).vendors || [];
+      var processors = w.processors || {};
+      var vendors = processors.vendors || [];
       vendors.forEach(function (v) { item('Ask vendor ' + v.name + ' for their records.'); });
-      var docs = (w.documents || {}).hits || [];
+      if (processors.error) item('Your vendor register could not be checked. Vendor coverage remains unconfirmed; try again before completing the search.');
+      else if (!processors.enabled) item('Your vendor register is off, so vendors are not listed.');
+      else if (vendors.length === 100) item('This checklist shows up to 100 vendors. Review your complete vendor register for any others.');
+      var documents = w.documents || {};
+      var docs = documents.hits || [];
       docs.forEach(function (d) { item('Document: ' + (d.title || d.name || 'untitled')); });
+      if (documents.error) item('Connected documents could not be searched. Document coverage remains unconfirmed; try again before completing the search.');
+      else if (!documents.enabled) item('Document search is off, so connected documents are not checked.');
+      else item('The connected-source search shows up to eight matching documents; it is not a complete inventory.');
       out.appendChild(ul);
-    }).catch(function (f) { fail(f, 'load the search checklist'); });
+    }).catch(function (f) { out.textContent = 'The search checklist is unavailable. Its coverage is unknown; try again.'; fail(f, 'load the search checklist'); });
   });
 })();

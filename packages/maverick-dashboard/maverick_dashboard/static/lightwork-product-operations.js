@@ -110,6 +110,54 @@
       var entries = Object.entries(item);
       if (entries.length > maximumEntries) omitted(target);
       entries.slice(0, maximumEntries).forEach(function (entry) {
+        if (entry[0] === 'distinction_cells') {
+          var cells = entry[1], cellsStarted = generation, cellsSelection = JSON.stringify(context());
+          if (!cells || Array.isArray(cells) || Object.keys(cells).sort().join(',') !== 'comparisons,context,flow' ||
+              typeof cells.context !== 'string' || !/^[a-f0-9]{64}$/.test(cells.context) ||
+              typeof cells.flow !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(cells.flow) ||
+              !Array.isArray(cells.comparisons) || !cells.comparisons.length || cells.comparisons.length > 20 ||
+              new Set(cells.comparisons).size !== cells.comparisons.length ||
+              !cells.comparisons.every(function (id) { return typeof id === 'string' && /^FCP-[a-f0-9]{32}$/.test(id); })) return;
+          var cellsDestination = node('dd', undefined, list), cellsForm = window.LightworkLearningDistinctions;
+          if (cellsForm && typeof cellsForm.openCells === 'function') button('Open exact observed cells', cellsDestination, async function (event) {
+            var isCurrent = function () { return active(cellsStarted) && JSON.stringify(context()) === cellsSelection; };
+            if (!isCurrent() || busy) return;
+            var cellsButton = event.currentTarget; cellsButton.disabled = true;
+            try {
+              var opened = await cellsForm.openCells(cells, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete recorded comparison evidence is open.' : 'The selected evidence or current form changed. Review the full controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'This evidence could not be opened. Read its current full controls before continuing.'; }
+            finally { if (isCurrent() && cellsButton.isConnected) cellsButton.disabled = false; }
+          });
+          else {
+            var cellsLink = node('a', 'Open exact observed cells', cellsDestination);
+            cellsLink.href = '/learning/distinctions?flow=' + encodeURIComponent(cells.flow) + '&comparisons=' + encodeURIComponent(cells.comparisons.join(',')) + '#ld-cells';
+            cellsLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
+        if (entry[0] === 'rule_requalification') {
+          var rules = entry[1], rulesStarted = generation, rulesSelection = JSON.stringify(context());
+          if (!rules || Array.isArray(rules) || Object.keys(rules).sort().join(',') !== 'context,workflow' ||
+              !/^[a-f0-9]{64}$/.test(rules.context || '') || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(rules.workflow || '')) return;
+          var rulesDestination = node('dd', undefined, list), ruleForm = window.LightworkRuleRequalification;
+          if (ruleForm && typeof ruleForm.open === 'function') button('Review component evidence and changed rules', rulesDestination, async function (event) {
+            var isCurrent = function () { return active(rulesStarted) && JSON.stringify(context()) === rulesSelection; };
+            if (!isCurrent() || busy) return;
+            var rulesButton = event.currentTarget; rulesButton.disabled = true;
+            try {
+              var opened = await ruleForm.open(rules.context, rules.workflow, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected rule-check form is open.' : 'The selected workflow or current form changed. Review the native controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'This form could not be opened. Read its current native controls before continuing.'; }
+            finally { if (isCurrent() && rulesButton.isConnected) rulesButton.disabled = false; }
+          });
+          else { var rulesLink = node('a', 'Review component evidence and changed rules', rulesDestination); rulesLink.href = '/learning/recheck-rules?workflow=' + encodeURIComponent(rules.workflow); }
+          return;
+        }
         if (entry[0] === 'learning_saved_point') {
           var saved = entry[1], savedStarted = generation;
           if (!saved || Array.isArray(saved) || Object.keys(saved).sort().join(',') !== 'name,revision' ||
@@ -610,6 +658,9 @@
               : ['learning.example_accept', 'learning.example_reject', 'learning.example_grant'].includes(item.id)
                 ? !!(window.LightworkLearningCapture && window.LightworkLearningCapture.renderReview &&
                      window.LightworkLearningCapture.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('decisions.')
+                ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
+                     window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)
               : renderData(formHost, review.changes, {complete: review.read_only !== true});
           }
           if (review.read_only) { renderData(formHost, review.details); status.textContent = 'Current information checked. Nothing was changed.'; }

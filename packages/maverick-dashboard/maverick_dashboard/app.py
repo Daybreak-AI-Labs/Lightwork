@@ -1830,6 +1830,16 @@ from .learning_example_decisions_api import (  # noqa: E402
 )
 
 app.include_router(learning_example_decisions_router, prefix="/api/v1")
+
+from . import (  # noqa: E402
+    flow_requalification_api,
+    learning_distinctions_api,
+    shared_decision_evidence_api,
+)
+
+app.include_router(shared_decision_evidence_api.router)
+app.include_router(flow_requalification_api.router)
+app.include_router(learning_distinctions_api.router)
 from .plugin_practice_forms_api import router as plugin_practice_forms_router  # noqa: E402
 
 app.include_router(plugin_practice_forms_router)

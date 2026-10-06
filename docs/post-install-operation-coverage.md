@@ -1,6 +1,6 @@
 # Post-install operation coverage
 
-Source review: October 1, 2026; selected journeys updated October 5. This is a working gap register against the
+Source review: October 1, 2026; selected journeys updated October 6. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,
 command or settings file does not complete a customer operation.
@@ -921,3 +921,116 @@ Existing browser-owner admission and throttled key-use recording remained
 intact. The local ranking trainer rechecks its deadline after native job
 identity and source loading; a delayed admission created no model or trainer
 run, and repeat submission read the original request.
+
+## October 6 shared decision information
+
+Shared decision reviews has ordinary authoring for up to eight facts, sixteen
+cases, four choices per case and 128 explicit possible joint situations.
+Oversized enumeration refuses the model rather than dropping situations. An
+installation administrator enables it in Settings or the advanced installer;
+only a literal explicit `true` enables the default-off feature. Copilot shares
+the same seven native writes and two readers. Every change displays its complete
+protected review, binds the current owner/workspace and retains its exact original.
+
+The actual disposable native browser journey authored two correlated facts and
+two cases. One reported capacity observation resolved both; automatic minimum
+observed subsets contained only capacity. Each check additionally bound its
+own required current source meaning, permission and expiry. Withdrawing the
+first case's permission invalidated that case while retaining the second case's
+exact check. Expired sources became unknown. Ordinary and Copilot lost replies
+recovered original create/acquire/answer effects without another question charge.
+An actual governed-record writer wait crossed the review deadline: the reserved
+admission remained unknown, its exact retry made no second effect, and a fresh
+separately reviewed creation remained available. Generated certificates passed;
+a recomputed-hash forgery with omitted dependencies was refused semantically.
+Foreign originals were refused, while own history remained available after
+removal and feature disable. The 320px page fit without JavaScript errors.
+
+These are reported premises within entered situations. The page neither
+independently verifies business facts nor carries out a choice. Separate cases
+do not establish joint resource feasibility; Promise reviews supplies that
+separate bounded model. The independent exhaustive acquisition comparator
+matched the selected synthetic observation, not a novelty or benefit claim.
+
+## October 6 rechecking changed rules
+
+Recheck affected rules is available from Learning and real-case comparisons.
+Its ordinary form binds the complete original inputs, published/current root
+and included sources, policy and explicit case reuse permission. Typed Copilot
+opens the same protected form without replacing newer user choices. Only finite
+linear local pure taught-rule/set-value workflows and owned included rules are
+supported; connected actions, AI, retries, waits and cycles remain outside it.
+
+The actual native phone journey retained a complete component check and
+recovered a discarded accepted response from its original record. A changed
+subtotal reran itself and the dependent invoice while two independent results
+were reused. Changing an included child invalidated a stale review; a fresh
+review reran three components and reused one. Both matched separately executed
+complete native workflows. Withdrawing reuse permission blocked further reuse,
+source changes withheld old result bodies, and foreign actor/permission loss
+refused or cleared private controls. A fault after both calculations but before
+the final receipt retained an unconfirmed original; reading and exactly retrying
+that original never repeated either calculation. The 320px layout fit.
+
+Both selective and complete calculations count toward displayed work and time;
+saving receipts and browser overhead are excluded from the calculation figure.
+No workflow publishes automatically and no future accuracy or latency saving is
+established by agreement on an original case.
+
+## October 6 safe restored learning authority
+
+Workspace restore now classifies 24 recent audit, learning, score and release
+record namespaces as authority-bearing. Restoring their bytes cannot silently
+revive the earlier grants, training admissions, retained decisions or release
+attempts. The existing native bootstrap recovery holds start pending current
+reconciliation and external readback, while preserving original record bytes.
+A disposable native restore exercised all 24 namespaces and case-insensitive
+classification with no customer-file changes. The source inventory contract
+also covered every literal local governed-record store. This narrows a concrete
+restore gap; it is not acceptance of every installed recovery or shared-host path.
+
+## October 6 privacy search uncertainty
+
+Both Privacy's request checklist and an individual request's Where to search
+now distinguish unreadable records, unmatched people and confirmed zero counts.
+Failures in the data map, vendor register or connected document search remain
+unconfirmed rather than becoming a switched-off module or an empty result.
+Only nonempty platform areas contribute to the area count. The bounded 100-
+location/vendor and eight-document views disclose their limits. Refreshing a
+request clears the earlier checklist and retains an explicit unknown state on
+failure. Actual page-handler checks exercised seven response conditions in both
+surfaces, preserving genuine zero counts and refusing failed/malformed counts;
+these focused rendering checks do not qualify an entire customer data search.
+
+## October 6 missing distinctions and observed comparison cells
+
+Find missing distinctions uses four to thirty-two currently accepted, permitted
+examples and at most six available observations. It enumerates every smallest
+observation addition that separates demonstrated action disagreements. Conflicts
+that survive all observations remain unresolved. A supported addition passes
+the existing signed two-action learner; only the choice observations narrow,
+while full argument and source contracts remain bound. Ordinary controls and
+typed Copilot prepare an unpublished package and retain its exact original.
+
+The disposable native journey completed accepted signed capture, package
+creation, ordinary Teach admission, Designer publication, labelled Run inputs,
+two actual human approvals and the selected fictional connector action. The
+Designer now recognizes these runtime-bound learned actions without inserting
+ordinary fixed parameters that invalidate their reviewed argument binding.
+Legacy unprojected artifacts remained byte-identical, and the projected package
+passed signed round-trip and complete argument checks. Lost replies and exact
+retries created no second package. An actual final-writer wait crossed expiry
+and refused saving after the retained claim. Withdrawal preserved historical
+saved custody while withholding source/package contents; stale preparation and
+later published execution stopped before any additional action.
+
+Observed cells consumes actual immutable native paired comparisons with current
+source and exact arm receipts. It keeps complete input, expected answer and both
+results separately for each immutable version pair. Conflicting recorded
+expectations produced an ambiguous cell, and unavailable included sources denied
+its read. Copilot opens that complete protected evidence without replacing newer
+selections. The native 320px views fit without JavaScript errors.
+
+These results cover the supported known examples and exact comparison cells.
+They establish neither unobserved applicability regions nor future accuracy,
+causal customer lift, automatic publication or research superiority.

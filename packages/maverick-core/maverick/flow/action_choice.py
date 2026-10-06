@@ -76,15 +76,22 @@ def _episodes(raw, allowed_tools):
 
 
 def _domain(raw, groups):
-    if type(raw) is not dict or set(raw) != {"inputs", "prefix", "branches"}:
+    if type(raw) is not dict or set(raw) not in ({"inputs", "prefix", "branches"}, {"inputs", "prefix", "branches", "guard_fields"}):
         raise ValueError("choice domain requires exact inputs, prefix and branches")
+    if "guard_fields" in raw and (type(raw["guard_fields"]) is not list or not 1 <= len(raw["guard_fields"]) <= 6
+            or any(type(name) is not str for name in raw["guard_fields"])
+            or len(set(raw["guard_fields"])) != len(raw["guard_fields"])):
+        raise ValueError("choice guard fields must be one to six distinct observable fields")
     if type(raw["branches"]) is not dict or set(raw["branches"]) != set(groups):
         raise ValueError("choice domain must describe exactly the observed continuations")
     branches = {}
     for tool, episodes in groups.items():
         normalized = transforms._domain({"inputs": raw["inputs"], "steps": [raw["prefix"], raw["branches"][tool]]}, episodes)
         branches[tool] = normalized["steps"][1]
-    return {"inputs": normalized["inputs"], "prefix": normalized["steps"][0], "branches": branches}
+    result = {"inputs": normalized["inputs"], "prefix": normalized["steps"][0], "branches": branches}
+    if "guard_fields" in raw:
+        result["guard_fields"] = sorted(raw["guard_fields"])
+    return result
 
 
 def _grammar(max_operations, operators, constants, seed_ids):
@@ -100,6 +107,13 @@ def _build(episodes, tools, groups, domain, grammar):
     if sum(len(recipe._leaves(step["arguments"])) for step in all_steps) > transforms.MAX_ARGUMENT_LEAVES:
         raise ValueError("choice exceeds eight total argument leaves across prefix and both continuations")
     catalog, definitions, columns = transforms._catalog(episodes, 1, prefix_domain)
+    if "guard_fields" in normalized:
+        chosen = set(normalized["guard_fields"])
+        if not chosen <= columns.keys():
+            raise ValueError("choice guard fields must name available supported observations")
+        catalog = [source for source in catalog if source["name"] in chosen]
+        definitions = {name: decl for name, decl in definitions.items() if name in chosen}
+        columns = {name: values for name, values in columns.items() if name in chosen}
     rows = [{"inputs": {name: values[index] for name, values in columns.items()},
              "output": episode["steps"][1]["tool"] == list(groups)[1]} for index, episode in enumerate(episodes)]
     for tool in groups:

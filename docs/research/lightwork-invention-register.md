@@ -170,6 +170,20 @@ Customer experience: “These additional offers could become feasible if this co
 
 ## Priority and the next evidence required
 
+October 6 implementation checkpoint: N05 now has a bounded authored correlated-
+situation solver, automatic minimum observed subsets, case-specific shared
+source dependencies and one-observation acquisition under a shared allowance.
+Its ordinary page and typed Copilot retain native encrypted original effects,
+explicit permission withdrawal and expired/unknown states. The strengthened
+certificate verifier checks actual semantic entailment and current obligations,
+not just its fingerprint. A separately implemented exhaustive acquisition
+comparator with the same cache, permissions, outcomes and objective matched the
+executed synthetic selection. This is a usable bounded model mechanism, not a
+new algorithm or independently verified customer decision. P14 remains rejected.
+P01 and P05 also have bounded native distinction-search and dependency recheck
+paths; P04 exposes exact retained observed comparison cells. Their exact scope
+and remaining research boundaries are in the [implementation inventory](lightwork-invention-implementation-status-2026-10-01.md).
+
 N02 is the strongest provisional candidate for reusable learning across installations. N01 is the strongest candidate for a materially different operational capability. N03 is a related portability track with substantial overlap. N04 through N06 remain in the register as secondary leads.
 
 Before implementation, N02 needs an explicit source-model language, release contract, witness semantics, target mapping contract, and comparator specification. Before claiming N01's proposed novel mechanism, the bounded pilot needs a precise state and observation model, commitment constraints, uncertainty assumptions, feasible-continuation representation, and a strong robust-controller baseline. The required next artifact is a discriminating experiment specification, not a favorable demonstration.

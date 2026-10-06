@@ -1,6 +1,7 @@
 # Invention register: implementation status
 
-Static source review on October 1, 2026 at `1c27445dda93e21e2eb38ef2dde5193646832da8`.
+Initial static source review on October 1, 2026 at `1c27445dda93e21e2eb38ef2dde5193646832da8`;
+dated follow-through below updates the selected implementations through October 6.
 This maps the 28 stable IDs in the [invention register](lightwork-invention-register.md)
 to code that actually exists. It is an implementation inventory, not a runtime,
 installed-product, customer-outcome, novelty, or acquisition-value test. “Adjacent”
@@ -44,9 +45,9 @@ self-improvement lifecycle, installed acceptance, or externally anchored audit.
 | Status | Meaning | Count |
 | --- | --- | ---: |
 | Partial product support | Working code for part of a broad product foundation; integrated customer acceptance still open | 6 |
-| Bounded pilot; mechanism unproven | An in-product pilot exists, but neither complete customer operation nor a distinct invention is qualified | 2 |
-| Adjacent component | Code related to the direction, without its proposed general advance | 5 |
-| Research only | Mechanism remains a proposal or a research question | 11 |
+| Bounded pilot; mechanism unproven | An in-product pilot exists, but neither complete customer operation nor a distinct invention is qualified | 5 |
+| Adjacent component | Code related to the direction, without its proposed general advance | 6 |
+| Research only | Mechanism remains a proposal or a research question | 7 |
 | Rejected or parked | Retained to preserve an unfavorable or insufficient result | 4 |
 
 ## Product foundations
@@ -115,6 +116,23 @@ are scoped product results; the 28-item status counts remain unchanged.
 
 ## Earlier research directions
 
+October 6 adds three bounded native mechanisms and one observed-evidence
+component. P01 searches complete current teaching observations for every
+smallest distinction set and admits a supported set through the unchanged
+signed two-action learner. P05 keeps exact component dependency evidence and
+reruns affected rules, including changed dependencies and included sources,
+against a separate complete native rerun. N05 shares a reported observation
+across explicitly consented cases, extracts minimum sufficient observed subsets
+over authored correlated situations, and invalidates only dependent checks when
+source meaning, permission or expiry changes. All three have ordinary protected
+forms, typed Copilot operations and retained originals. The strong N05 exhaustive
+same-information acquisition comparator selected the same information in the
+executed synthetic case; no superiority is claimed. P04 projects exact actual
+paired-comparison observations separately for each immutable version pair,
+preserving contradictory and unfinished cells. It does not infer unobserved
+applicability regions. The counts distinguish these implementations from the
+broader unqualified research proposals and retain every rejected result.
+
 The October 5 bounded F01/F02 native path now joins actual retained published
 runs, owner-labeled expected answers, complete frozen baseline/candidate
 executions, verified source and replay receipts, and the installed independent
@@ -162,11 +180,11 @@ do not undo text already sent to a model or qualify an entire learning family.
 
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
-| P01 | Research only | A [feature-prefix transition model](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/generative_world_model.py#L1-L25) generalizes within a fixed representation. It does not discover missing state distinctions and revise representation and procedure together. |
+| P01 | Bounded pilot; mechanism unproven | [Operational distinctions](../../packages/maverick-core/maverick/flow/operational_distinctions.py) identify action disagreements hidden by a selected projection, enumerate every smallest additional available distinction set and preserve conflicts even with all information. A supported set filters only the choice observations while preserving full argument/source contracts in the native signed learner. [Protected custody](../../packages/maverick-dashboard/maverick_dashboard/learning_distinctions.py), the ordinary page and Copilot prepare an unpublished package for the existing Teach/admission path. Bounds remain 4–32 matching accepted examples, six observations and two demonstrated actions with the original distinct-input/grammar qualification. This does not learn new sensors, discover arbitrary latent business state or establish unseen-case superiority. |
 | P02 | Research only | [Composed operator synthesis](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/composed_operator.py#L1-L12) concerns bounded expression trees, not learned cross-procedure resource, approval, freshness, and duplicate-effect interactions. |
 | P03 | Adjacent component | [Bounded operator questions](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/operator_queries.py#L1-L10) seek disagreement among candidate expressions. There is no demonstrated meta-learning policy that reduces qualification effort on unfamiliar operations. |
-| P04 | Research only | [Stratified effect estimation](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/promotion_effect.py#L1-L24) and [conditional counterfactual rollout](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/counterfactual_rollout.py#L1-L31) are adjacent estimators. They do not discover and qualify changing regions where a customer improvement helps, harms, or remains unknown. |
-| P05 | Research only | [Recipe refinement](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/action_recipe_transforms.py#L1-L14) filters the same bounded grammar against new evidence. It is not dependency-aware selective requalification after a policy or connector change. |
+| P04 | Adjacent component | [Observed cells](../../packages/maverick-core/maverick/flow/operational_distinctions.py) consume actual immutable native paired comparisons after current source and exact arm-receipt checks. They retain full input/expected/both-result evidence, separate version pairs and classify conflicting or incomplete observations as ambiguous/unknown. The page and protected Copilot handoff show the complete retained evidence. This is empirical evidence on selected known inputs, not discovery or qualification of wider changing applicability regions, causal lift or unseen generalization. |
+| P05 | Bounded pilot; mechanism unproven | [Selective qualification](../../packages/maverick-core/maverick/flow/selective_qualification.py) executes exact pure native rule components on a retained real case, with source/input/included-rule/policy/permission dependency checks. Changed outputs propagate to dependent components; unchanged successful components can be reused. [Native custody](../../packages/maverick-dashboard/maverick_dashboard/flow_requalification.py), the ordinary page and Copilot independently rerun the complete changed workflow, record both calculations, retain unknown completion and permit separate reuse withdrawal. Current bounds cover finite linear local taught-rule/set-value workflows with owned included rules; AI, connectors, retries, waits and cycles are excluded. Both calculations count toward work; no speed saving, general policy/connector repair or unseen accuracy is established. |
 | P06 | Rejected or parked | The [register preserves a negative, bounded native-effect experiment](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L39): 26/72 correct observable-state claims versus 51/72 for a manually configured policy, with a wrong unanimous prediction. Existing recovery code is not this learned-contract algorithm. |
 | P07 | Rejected or parked | The [register records the broad proposal’s rejection](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L40). Finite black-box observations cannot supply a missing remote guarantee. No production protocol-discovery claim is supported. |
 | P08 | Research only | The [register retains a narrow paired-history testing hypothesis](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L41), without a qualified advantage over a stateful fault harness. No customer operation exposes the proposed generator. |
@@ -192,7 +210,7 @@ components below should not be marketed as completed inventions.
 | N02 | Bounded model-only pilot; novel mechanism unproven | [Approval challenge compiler and fixed native receiver](../../packages/maverick-core/maverick/approval_challenges.py), [ordinary protected controls](../../packages/maverick-dashboard/maverick_dashboard/approval_challenges_api.py) and [Copilot](../../packages/maverick-dashboard/maverick_dashboard/product_operations_approval_challenges.py) generate, check, consent to sharing, receive and remove closed fictional approval-race programs. Actual local native guards are checked against the selected weakened variant, with source-version binding and retained receipts. No private-incident witness synthesis, joint permitted-release noninterference algorithm, automatic target semantic mapping or superiority comparison is implemented. [Definition](lightwork-invention-register.md#n02-transfer-executable-lessons-from-private-failures). |
 | N03 | Research only | [Signed recipe lineage](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/recipe_lineage.py#L1-L8) is local evidence; no joint abstract-procedure/adapter discovery and target qualification across organizations. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L95-L107). |
 | N04 | Research only | [Flow rewrites](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/evolve.py#L1-L20) propose node-type swaps; they do not learn obligation-preserving split/merge/batch/reorder transformations across jobs. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L109-L121). |
-| N05 | Research only | [Operator questions](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/operator_queries.py#L1-L10) address one bounded operator. No shared decision-sufficiency certificate and freshness/permission dependency update across simultaneous business cases. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L123-L133). |
+| N05 | Bounded pilot; mechanism unproven | [Shared decision evidence](../../packages/maverick-core/maverick/shared_decision_evidence.py) supports explicit correlated situations, exact minimum observed subsets, shared observation acquisition and per-case meaning/consent/freshness dependencies. Its closed verifier checks actual entailment and source obligations rather than trusting a matching hash. [Native custody](../../packages/maverick-dashboard/maverick_dashboard/shared_decision_evidence_store.py), ordinary authoring and Copilot retain exact effects/originals, shared budget and uncertain admission. Bounds are eight facts, sixteen cases, four choices per case and 128 explicit joint situations. Entered reports are not independently verified; separate case checks do not prove joint resource feasibility or execute a business choice. The strong exhaustive same-information comparator matched the synthetic selection; novelty, superiority and customer benefit remain unproven. P14's rejection is unchanged. |
 | N06 | Adjacent component | [Promise review resource-gap explanations](../../packages/maverick-core/maverick/commitment_viability.py) identify a confirmed or possible shortage against manually entered order, stock, and capacity figures; the owner can explore a separate fresh choice in the UI and Copilot can read the gap. [Self-learning capability search](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/self_learning.py#L1-L26) finds/acquires existing catalog items or a constrained generated tool. Neither component infers and tests minimal capability expansions that unlock feasible additional customer work without displacing commitments. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L135-L147). |
 
 ## Customer release and claim boundary

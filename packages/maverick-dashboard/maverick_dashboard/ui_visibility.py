@@ -53,6 +53,13 @@ from . import rbac
 # not in the Settings visibility matrix. Flip it back to ready when the page
 # speaks to a non-technical user.
 PAGES: tuple[dict, ...] = (
+    {"path": "/decision-evidence", "label": "Shared decision reviews", "group": "Operate",
+     "aliases": "shared facts questions freshness decisions", "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/learning/recheck-rules", "label": "Recheck affected rules", "group": "Observe",
+     "icon": "learned", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/learning/distinctions", "label": "Find missing distinctions", "group": "Observe",
+     "aliases": "teaching observations conflicting examples compared cases",
+     "icon": "learned", "floor": "operate", "default": "operate", "in_nav": False},
     {"path": "/settings/local-ai", "scope": "global", "label": "AI on this computer", "group": "Admin",
      "icon": "settings", "floor": "admin", "default": "admin", "in_nav": False},
     {"path": "/settings/security-installation", "scope": "global", "label": "Sign-in and work protection", "group": "Admin",
@@ -1426,6 +1433,9 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/me": ("Home", "Home"),
     "/outcome-pilots": ("Work", "Workflows"),
     "/commitment-reviews": ("Work", "Promise reviews"),
+    "/decision-evidence": ("Work", "Shared decision reviews"),
+    "/learning/recheck-rules": ("Agents", "Learning"),
+    "/learning/distinctions": ("Agents", "Learning"),
     "/research": ("Agents", "Learning"),
     "/project-reviews": ("Work", "Projects"),
     "/deliverable-bundles": ("Work", "Results"),

@@ -1505,29 +1505,40 @@
               var list = document.createElement('ul');
               function item(text) { var li = document.createElement('li'); li.textContent = text; list.appendChild(li); }
               var holdings = d.platform_holdings || {};
-              if (holdings.resolved === false) {
+              var sections = holdings.sections;
+              var counts = sections && typeof sections === 'object' && !Array.isArray(sections) ? Object.values(sections) : [];
+              var total = counts.reduce(function (sum, count) { return sum + count; }, 0);
+              if (holdings.error || holdings.enabled !== true) {
+                item('Inside Lightwork: its records could not be checked. The count is unknown; try this checklist again before completing the search.');
+              } else if (holdings.resolved === false) {
                 item('Inside Lightwork: could not match this person to one account, so its own records are not counted here.');
-              } else if (holdings.sections) {
-                var total = 0;
-                Object.keys(holdings.sections).forEach(function (k) { total += holdings.sections[k]; });
-                item('Inside Lightwork: ' + total + ' record(s) in ' + Object.keys(holdings.sections).length + ' area(s).');
+              } else if (holdings.resolved !== true || !counts.length || !counts.every(function (count) { return Number.isSafeInteger(count) && count >= 0; }) || !Number.isSafeInteger(total)) {
+                item('Inside Lightwork: the record count could not be confirmed. Try this checklist again.');
+              } else {
+                item('Inside Lightwork: ' + total + ' record(s) in ' + counts.filter(function (count) { return count > 0; }).length + ' area(s).');
               }
               var dmap = d.data_map || {};
-              if (dmap.enabled && dmap.assets && dmap.assets.length) {
+              if (dmap.error) {
+                item('Data map: could not be checked. Other systems remain unconfirmed; try again before completing the search.');
+              } else if (dmap.enabled && dmap.assets && dmap.assets.length) {
                 dmap.assets.forEach(function (a) {
                   item(a.system + ': ' + a.name + (a.categories && a.categories.length ? ' (' + a.categories.join(', ').replace(/_/g, ' ') + ')' : ''));
                 });
+                if (dmap.assets.length === 100) item('This checklist shows up to 100 data-map locations. Review your complete data map for any others.');
               } else if (dmap.enabled) {
                 item('Data map: no places flagged as holding personal data.');
               } else { item('Data map: turned off, so other systems are not listed.'); }
               var proc = d.processors || {};
-              if (proc.enabled && proc.vendors && proc.vendors.length) {
+              if (proc.error) {
+                item('Vendor register: could not be checked. Vendor coverage remains unconfirmed; try again before completing the search.');
+              } else if (proc.enabled && proc.vendors && proc.vendors.length) {
                 item('Ask these vendors: ' + proc.vendors.map(function (v) { return v.name; }).join(', ') + '.');
+                if (proc.vendors.length === 100) item('This checklist shows up to 100 vendors. Review your complete vendor register for any others.');
               } else if (!proc.enabled) { item('Vendor register: turned off, so vendors are not listed.'); }
               var docs = d.documents || {};
-              item(docs.hits && docs.hits.length
-                ? docs.hits.length + ' document(s) in connected sources mention this person.'
-                : 'No documents found in connected sources (or none are connected).');
+              if (docs.error) item('Connected documents: could not be searched. Document coverage remains unconfirmed; try again before completing the search.');
+              else if (!docs.enabled) item('Connected documents: search is off, so documents are not checked.');
+              else item((docs.hits && docs.hits.length ? docs.hits.length + ' matching document(s) shown.' : 'No matching documents returned.') + ' This search shows up to eight matches; it is not a complete inventory.');
               panel.appendChild(list);
               box.appendChild(panel);
             })

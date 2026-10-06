@@ -41,6 +41,7 @@
     const readyRecipe = Boolean(state.recipe) && !state.busy;
     const readyPackage = Boolean(state.pkg) && !state.busy;
     const signedReady = root.dataset.lineage === '1';
+    ['sg-files', 'sg-trust', 'sg-package'].forEach(id => { if ($(id)) $(id).disabled = state.busy; });
     if ($('rc-more')) $('rc-more').disabled = !readyRecipe;
     if ($('rc-draft')) $('rc-draft').disabled = !readyRecipe;
     $('sg-refine').disabled = !readyPackage || !signedReady;

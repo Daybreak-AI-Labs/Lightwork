@@ -12,6 +12,7 @@
   {% endcall %}
   <p>{{ back_link('/flows/designer/' ~ (flow.id | urlencode), 'Flow designer') }}
     <a class="btn btn--ghost" href="/learning/examples">Review learning examples</a>
+    {% if can_open_page('/learning/distinctions') %}<a class="btn btn--ghost" href="/learning/distinctions?flow={{ flow.id|urlencode }}">Find missing distinctions</a>{% endif %}
     <a class="btn btn--ghost" href="/research?release_flow={{ flow.id|urlencode }}#local-flow-release">Review this workflow's release</a>
     <button type="button" class="btn btn--ghost" id="ft-refresh">Refresh flow and examples</button></p>
   <p id="ft-status" role="status" aria-live="polite" tabindex="-1"></p>

@@ -135,7 +135,23 @@ var FDActionFields = (function () {
       finally{clearTimeout(deadline);pending.delete(tool);}
     })();pending.set(tool,task);return task;
   }
-  function each(flow, fn) { (Array.isArray(flow.nodes)?flow.nodes:Object.values(flow.nodes||{})).forEach(function(n){if(n.kind==='action'&&n.tool)fn(n);if(n.body)each(n.body,fn);(n.branches||[]).forEach(function(b){each(b,fn);});}); }
+  function boundRecipeAction(flow,n) {
+    // Recognize supplied arguments only for this enclosing recipe's generated
+    // action. Native persistence still validates the complete exact graph,
+    // evidence and current authority; a browser marker grants no permission.
+    var recipe=flow.learned_recipe,index=n.recipe_step;
+    if(!obj(recipe)||n.kind!=='action'||!Number.isSafeInteger(index)||index<0||
+       n.params!==undefined&&(!obj(n.params)||Object.keys(n.params).length)||n._paramsRaw!==undefined||
+       n.output!=='_recipe_step_'+index)return false;
+    if(['lightwork.workflow-transducer.v1','lightwork.workflow-memory.v1'].includes(recipe.schema)) {
+      var ordinal=Array.isArray(recipe.allowed_tools)?recipe.allowed_tools.indexOf(n.tool):-1;
+      return Number.isSafeInteger(recipe.max_steps)&&index<recipe.max_steps&&ordinal>=0&&n.id==='action_'+index+'_'+ordinal;
+    }
+    if(!['lightwork.action-recipe.v1','lightwork.action-recipe.v2','lightwork.action-choice.v1'].includes(recipe.schema)||!Array.isArray(recipe.steps))return false;
+    if(recipe.schema==='lightwork.action-choice.v1'&&index===1)return Array.isArray(recipe.branches)&&recipe.branches.some(function(branch){return obj(branch)&&branch.tool===n.tool&&n.id==='action_1_'+branch.route;});
+    return obj(recipe.steps[index])&&recipe.steps[index].tool===n.tool&&n.id==='action_'+index;
+  }
+  function each(flow, fn) { (Array.isArray(flow.nodes)?flow.nodes:Object.values(flow.nodes||{})).forEach(function(n){if(n.kind==='action'&&n.tool&&!boundRecipeAction(flow,n))fn(n);if(n.body)each(n.body,fn);(n.branches||[]).forEach(function(b){each(b,fn);});}); }
   async function ready(flow,refresh) { var tools=new Set();each(flow,function(n){tools.add(n.tool);});await Promise.all(Array.from(tools,function(t){return load(t,refresh);})); }
   function valueCount(v){var stack=[v],count=0;while(stack.length){var item=stack.pop();if(++count>2048)return count;if(obj(item)||Array.isArray(item))Object.values(item).forEach(function(child){stack.push(child);});}return count;}
   function check(flow) { var errors=[];each(flow,function(n){var stored=cache.get(n.tool),size;try{size=JSON.stringify(n.params||{}).length;}catch(_error){size=Infinity;}var error=!stored?'Wait for this action’s details, then try again.':size>65536||valueCount(n.params||{})>2048?'These details are too large for this form. Remove unnecessary items before saving.':Object.values(n._actionErrors||{})[0]||issue(stored.plan,n.params||{},'Action details');if(error)errors.push((n.label||human(n.tool))+': '+error);});return errors; }
@@ -217,5 +233,5 @@ var FDActionFields = (function () {
     if(n._actionTool!==n.tool){n._actionRaw=Object.create(null);n._actionErrors=Object.create(null);n._actionKinds=Object.create(null);n._actionTool=n.tool;}
     repaint();
   }
-  return {load:load,ready:ready,check:check,mount:mount,compile:compile,issue:issue,validDetails:validDetails};
+  return {load:load,ready:ready,check:check,mount:mount,compile:compile,issue:issue,validDetails:validDetails,boundRecipeAction:boundRecipeAction};
 }());

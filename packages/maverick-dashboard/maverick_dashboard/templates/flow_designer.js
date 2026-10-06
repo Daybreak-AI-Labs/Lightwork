@@ -941,6 +941,14 @@
         props.appendChild(removeLearned);
       }
     }
+    if (n.kind === 'action' && FDActionFields.boundRecipeAction(flow, n)) {
+      props.appendChild(field('Reviewed action', hint(human(n.tool))));
+      props.appendChild(hint('The reviewed examples supply this action’s details when the workflow runs. Each proposed action still requires its own approval. Use Teach to change the learned rules.'));
+      var teachLink = document.createElement('a'); teachLink.className = 'btn btn--ghost';
+      teachLink.href = '/flows/' + encodeURIComponent(rootFlow.id) + '/teach'; teachLink.textContent = 'Review or improve in Teach';
+      props.appendChild(teachLink);
+      return;
+    }
     if (n.kind === 'action') {
       if (toolCategories.length) {
         var catOpts = [{ v: '', t: 'All kinds of actions' }].concat(
