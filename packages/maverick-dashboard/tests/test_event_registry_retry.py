@@ -139,7 +139,8 @@ def test_registry_error_after_an_actual_start_is_reclaimed(runtime):
     assert runner._goal_run_exception_status(
         world, goal_id, EventRegistryUnavailable("synthetic later failure"),
     ) == "error"
-    assert world.get_goal(goal_id).status == "blocked"
+    # The started goal is reclaimed as failed with its stop reason, never left active.
+    assert world.get_goal(goal_id).status == "failed"
 
 
 def test_flow_worker_retries_after_cursor_advanced(runtime, monkeypatch):
