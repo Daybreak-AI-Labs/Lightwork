@@ -73,7 +73,38 @@ def test_created_skill_shows_with_a_plain_name_and_remove_button(monkeypatch):
     assert "Weekly status summary" in html
     assert 'data-skill-remove="weekly-status-summary"' in html
     assert "Read file" in visible_text(html)
-    assert c.delete("/api/v1/skills/weekly-status-summary").status_code == 204
+    # The remove button opens a review of the exact saved version first.
+    assert c.delete("/api/v1/skills/weekly-status-summary").status_code == 409
+    removed = _remove_skill(c, "weekly-status-summary")
+    assert removed.status_code == 200 and removed.json()["confirmed"] is True, removed.text
+    assert 'data-skill-remove="weekly-status-summary"' not in c.get("/skills").text
+
+
+def _remove_skill(c, name):
+    catalog = c.get("/api/v1/manual-skill-removals").json()
+    review = c.post("/api/v1/manual-skill-removals/review", json={"name": name, "context": catalog["context"]})
+    assert review.status_code == 200, review.text
+    return c.request("DELETE", f"/api/v1/skills/{name}", json={"token": review.json()["token"], "confirmed": True})
+
+
+def test_a_removal_whose_completion_record_is_pending_stays_unconfirmed(monkeypatch):
+    from maverick import audit
+
+    monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
+    c = _client()
+    assert c.post("/api/v1/skills/create", json={
+        "name": "weekly-status-summary", "instructions": "1. Gather updates.",
+        "triggers": ["weekly status"]}).status_code == 201
+    original_record = audit.record
+
+    def lose_completion(kind, **payload):
+        if payload.get("action") == "skills.manual_remove.completed":
+            return False
+        return original_record(kind, **payload)
+
+    monkeypatch.setattr(audit, "record", lose_completion)
+    removed = _remove_skill(c, "weekly-status-summary")
+    assert removed.status_code == 200 and removed.json()["confirmed"] is False
 
 
 def test_tools_page_is_plain_with_a_page_size_selector():

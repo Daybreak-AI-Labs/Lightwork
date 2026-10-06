@@ -88,7 +88,9 @@ def original(request, operation, *, prepared=None):
     result = {"operation": operation, "context": context, "confirmed": False, "notice": NOTICE,
               "message": "The original removal is unconfirmed. A missing skill does not confirm who removed it. Nothing was repeated."}
     if row:
-        result.update(name=row["name"], recorded_at=row["updated_at"], confirmed=row["state"] == "confirmed")
+        # A completion whose activity record is still pending is not confirmed.
+        result.update(name=row["name"], recorded_at=row["updated_at"],
+                      confirmed=row["state"] == "confirmed" and not row.get("_audit_pending"))
         if result["confirmed"]:
             result["message"] = "Your original reviewed skill version was removed. Nothing was repeated."
         try:
