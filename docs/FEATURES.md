@@ -6373,3 +6373,34 @@ visible when paging or another lookup fails. A new read clears confirmation;
 manual changes are identified, and invalid manual fields reveal their remedy.
 The ordinary form and its Copilot host retain the same exact checkpoint binding.
 Choosing a collection checkpoint does not confirm an earlier message's delivery.
+
+### Named access requests and interrupted decisions
+
+Access requests offer named dashboard and tool actions, search and ordinary
+paging instead of requiring an internal action name. The complete review shows
+the selected action, current policies, responsible administrator and business
+reason. Copilot uses the same choices and native review. Supported built-in
+actions and authorized personally created actions are discoverable without
+loading add-on code; the interface explains that add-on choices are unavailable
+through this listing. A listed action is not evidence that its connection works.
+
+A request or review whose reply was lost offers a read-only check of the exact
+saved operation in Copilot. It rechecks the current account and workspace and
+does not submit another request, decision or activity write. Incomplete history
+or a pending activity receipt remains explicitly unconfirmed. Recording a review
+does not grant access; only the actual current policy can confirm permission.
+
+Privacy-notice release approval, approval withdrawal and update-proposal review
+require current administrator authority. Access keys also need approval
+permission in addition to administrator scope. Those decisions recheck the
+account, workspace, session and current key permissions after a writer wait and
+before the native transaction finishes. Independent reviewers, exact versions,
+original operation keys and native activity records keep their existing meaning.
+An unconfirmed decision asks the person to read the current notice before
+deciding again; ordinary failure messages distinguish missing key permission
+from author or approval-ownership restrictions.
+
+Copilot's standard change review shows named business headings and complete
+values. When both an existing and proposed value are supplied, their comparison
+is explicit. Other review shapes keep all their details, and an incomplete
+review still cannot be applied from the compact panel.

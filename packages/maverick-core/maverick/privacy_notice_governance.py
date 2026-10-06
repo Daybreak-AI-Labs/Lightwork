@@ -1383,6 +1383,7 @@ class PrivacyNoticeGovernanceStore:
         expected_release_sha256: str,
         expected_revision: int,
         idempotency_key: str,
+        effect_guard: Callable[[], None] | None = None,
     ) -> NoticeRelease:
         """Approve one exact release digest under one role and one human identity."""
 
@@ -1406,6 +1407,8 @@ class PrivacyNoticeGovernanceStore:
         }
         with self._connect() as connection:
             self._begin(connection)
+            if effect_guard is not None:
+                effect_guard()
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
@@ -1449,6 +1452,8 @@ class PrivacyNoticeGovernanceStore:
                 "revoked_at": None,
                 "revision": 1,
             }
+            if effect_guard is not None:
+                effect_guard()
             self._insert(
                 connection,
                 "notice_approvals",
@@ -1502,7 +1507,10 @@ class PrivacyNoticeGovernanceStore:
                 {"role": role, "ready": self._ready(current, approvals)},
                 now,
             )
-            return self._get_release(connection, tenant, notice, release_version)
+            result = self._get_release(connection, tenant, notice, release_version)
+            if effect_guard is not None:
+                effect_guard()
+            return result
 
     def revoke_approval(
         self,
@@ -1513,6 +1521,7 @@ class PrivacyNoticeGovernanceStore:
         role: str,
         expected_approval_revision: int,
         idempotency_key: str,
+        effect_guard: Callable[[], None] | None = None,
     ) -> NoticeRelease:
         tenant = _tenant(tenant_id)
         notice = _id(notice_id, "notice_id")
@@ -1534,6 +1543,8 @@ class PrivacyNoticeGovernanceStore:
         }
         with self._connect() as connection:
             self._begin(connection)
+            if effect_guard is not None:
+                effect_guard()
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
@@ -1556,6 +1567,8 @@ class PrivacyNoticeGovernanceStore:
                 raise PrivacyNoticeConflict("approval revision or state is invalid")
             approval_payload = dict(approval_raw)
             approval_payload.update({"revoked_at": now, "revision": expected + 1})
+            if effect_guard is not None:
+                effect_guard()
             approval_update = connection.execute(
                 "UPDATE notice_approvals SET payload_json=?,integrity_sha256=? "
                 "WHERE tenant_id=? AND notice_id=? AND release_version=? AND role=?",
@@ -1618,7 +1631,10 @@ class PrivacyNoticeGovernanceStore:
                 {"role": role},
                 now,
             )
-            return self._get_release(connection, tenant, notice, release_version)
+            result = self._get_release(connection, tenant, notice, release_version)
+            if effect_guard is not None:
+                effect_guard()
+            return result
 
     def _insert_intent(
         self,
@@ -2610,6 +2626,7 @@ class PrivacyNoticeGovernanceStore:
         decision: str,
         expected_revision: int,
         idempotency_key: str,
+        effect_guard: Callable[[], None] | None = None,
     ) -> NoticeUpdateProposal:
         tenant = _tenant(tenant_id)
         proposal_key = _id(proposal_id, "proposal_id")
@@ -2627,6 +2644,8 @@ class PrivacyNoticeGovernanceStore:
         }
         with self._connect() as connection:
             self._begin(connection)
+            if effect_guard is not None:
+                effect_guard()
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
@@ -2656,6 +2675,8 @@ class PrivacyNoticeGovernanceStore:
                     "reviewed_at": now,
                 }
             )
+            if effect_guard is not None:
+                effect_guard()
             digest_value = self._write(
                 connection,
                 "notice_update_proposals",
@@ -2682,7 +2703,10 @@ class PrivacyNoticeGovernanceStore:
                 {"decision": decision, "auto_published": False},
                 now,
             )
-            return self._proposal(payload, digest_value)
+            result = self._proposal(payload, digest_value)
+            if effect_guard is not None:
+                effect_guard()
+            return result
 
     def get_update_proposal(
         self, tenant_id: str, proposal_id: str

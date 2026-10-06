@@ -903,6 +903,7 @@ def base_registry(
     budget: Any = None,
     _include_generated_tools: bool = True,
     _skip_tool_acl: bool = False,
+    _include_plugins: bool = True,
 ) -> ToolRegistry:
     """Build the base tool set (no spawn tools).
 
@@ -1627,9 +1628,10 @@ def base_registry(
     # share the most-abused namespace, mcp_*) are covered; plugins
     # register below and pick up their own limits via a second pass.
     _apply_rate_limits(reg)
-    _apply_python_plugins(reg)
-    _apply_ts_plugins(reg)
-    _apply_grpc_plugins(reg)
+    if _include_plugins:
+        _apply_python_plugins(reg)
+        _apply_ts_plugins(reg)
+        _apply_grpc_plugins(reg)
     if _include_generated_tools:
         _apply_generated_tools(reg, sandbox)
     # Second rate-limit pass to cover plugin-registered tools. Earlier
@@ -1671,17 +1673,20 @@ def base_registry(
     return reg
 
 
-def base_tool_names(*, configured_optional: bool = False) -> set[str] | None:
+def base_tool_names(*, configured_optional: bool = False, include_plugins: bool = True) -> set[str] | None:
     """Best-effort set of the built-in tool names, for callers that need to
     diff a pack's declared tools against what actually exists (the agent
     factory's capability-provisioning step).
 
-    Builds the base registry against an in-memory world and a local sandbox --
-    no provider keys or network. The default omits optional high-impact tools;
+    Builds the base registry against an in-memory world and a local sandbox.
+    Legacy add-on assembly may run configured factories or contact add-on hosts;
+    this helper does not invoke an action tool. The default omits optional high-impact tools;
     ``configured_optional=True`` includes only those enabled in this
     deployment, so a roster can show honest workflow-action availability.
     Returns the registered names, or ``None`` if assembly fails (a caller
     then skips tool-existence checks rather than guessing). Never raises.
+    ``include_plugins=False`` omits Python/TS/gRPC add-on loading and generated
+    tool probing; callers can read consented generated names separately.
     """
     world = None
     try:
@@ -1703,8 +1708,9 @@ def base_tool_names(*, configured_optional: bool = False) -> set[str] | None:
             enable_web_search=bool(caps.get("web_search", False)),
             enable_mobile_tools=bool(caps.get("mobile_tools", False)),
             enable_ros=bool(caps.get("ros", False)),
-            _include_generated_tools=configured_optional,
+            _include_generated_tools=configured_optional and include_plugins,
             _skip_tool_acl=True,
+            _include_plugins=include_plugins,
         )
         return {t.name for t in reg.all()}
     except Exception as e:  # pragma: no cover -- best-effort introspection
