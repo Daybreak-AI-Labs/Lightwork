@@ -85,22 +85,29 @@ test('explicit consent publication resolves through an enrolled public client, r
   expect(resolved.policy_id).toBe('browser-publish-policy');
   await propertyRow.getByRole('button',{name:'History: Browser publish web'}).click();
   await expect(page.locator('#cpp-history').getByRole('row')).toHaveCount(2);
-  // Someone else publishes after this page loaded: the row's revision is now stale.
+  // Withdrawing opens a complete review of the exact banner first; nothing is withdrawn yet.
+  await propertyRow.getByRole('button',{name:'Withdraw: Browser publish web'}).click();
+  const review=page.locator('#cpp-withdrawal-review');await expect(review).toBeVisible();
+  await expect(review).toContainText('Current banner');await expect(review).toContainText('Published version 1');
+  // Someone else publishes after the review: the reviewed withdrawal is now stale and must be refused.
   await ok(await request.post(API+'/properties/'+property+'/publish',{data:{rule_group_id:'browser-publish-rules',rule_group_version:1,
     expected_property_revision:1,expected_publication_revision:1,idempotency_key:'browser-publish-elsewhere'}}));
-  const rejected=page.waitForResponse(response=>response.url().endsWith('/withdraw'));
-  await propertyRow.getByRole('button',{name:'Withdraw: Browser publish web'}).click();
-  await expect(page.locator('#mv-confirm-msg')).toContainText('Stop showing the banner on Browser publish web?');await page.locator('#mv-confirm-ok').click();
+  const rejected=page.waitForResponse(response=>response.url().endsWith('/withdrawal-requests/apply'));
+  await review.getByRole('button',{name:'Withdraw reviewed banner',exact:true}).click();
   expect((await rejected).status()).toBe(409);
-  await expect(page.locator('#cpp-status')).toContainText('changed since you opened it');
-  await expect(page.locator('#cpp-status')).not.toContainText('revision');
+  await expect(page.locator('#cpp-withdrawal-status')).toContainText('This reviewed change was refused');
+  await expect(page.locator('#cpp-withdrawal-status')).not.toContainText('revision');
   expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(2);
   await page.reload();
-  await page.locator('#cpp-property-table').getByRole('button',{name:'Withdraw: Browser publish web'}).click();await page.locator('#mv-confirm-ok').click();
-  await expect(page.locator('#cpp-status')).toHaveText('The banner no longer shows on Browser publish web.');
+  await page.locator('#cpp-property-table').getByRole('button',{name:'Withdraw: Browser publish web'}).click();
+  const fresh=page.locator('#cpp-withdrawal-review');await expect(fresh).toContainText('Published version 2');
+  const applied=page.waitForResponse(response=>response.url().endsWith('/withdrawal-requests/apply'));
+  await fresh.getByRole('button',{name:'Withdraw reviewed banner',exact:true}).click();
+  expect((await applied).status()).toBe(200);
+  await expect(page.locator('#cpp-withdrawal-status')).toHaveText('Your exact original request withdrew the reviewed banner. Nothing was repeated.');
   expect((await request.get('/api/v1/public/consent/configuration',{headers:publicHeaders})).status()).toBe(409);
   const history=await ok(await request.get(API+'/properties/'+property+'/history'));expect(history.items.map(item=>item.action)).toEqual(['withdraw','publish','publish']);
-  await page.locator('#cpp-status').scrollIntoViewIfNeeded();await info.attach('consent-published-and-withdrawn',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
+  await page.locator('#cpp-withdrawal-status').scrollIntoViewIfNeeded();await info.attach('consent-published-and-withdrawn',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
 });
 
 test('a failed recovery save retries the exact operation and survives a page reload',async({page})=>{
