@@ -773,6 +773,14 @@
     <details class="settings-details" data-maintenance-details="health" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-out="health"></ul></details>
   </div>
 
+  {% if can_open_page('/settings/page-speed') %}
+  <div class="section-head" data-settings-group="maintenance"><h2>Page speed for real visitors</h2></div>
+  <div class="panel" data-settings-group="maintenance">
+    <p class="muted settings-lead">How fast pages load and respond for the people using Lightwork, on phones and computers, over the last 28 days. Measuring is optional and off until you turn it on.</p>
+    <p class="settings-row-form"><a class="btn" href="/settings/page-speed">Open page speed</a></p>
+  </div>
+  {% endif %}
+
   <div class="section-head" data-settings-group="maintenance"><h2>Installation settings check</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="settings">
     <p class="muted settings-lead">Looks for mistakes in the settings chosen when Lightwork was installed.</p>
@@ -1007,7 +1015,9 @@
     // starts keyboard focus there instead of at the skip link.
     function selectGroup(group, focus, remember) {
       active = groups.indexOf(group) === -1 ? 'general' : group;
-      if (search) search.value = '';
+      // Writing a text field's value makes the browser lay the page out at
+      // once (about 40 ms on a phone), so an empty search is left alone.
+      if (search && search.value) search.value = '';
       grouped.forEach(function (node) { node.hidden = node.dataset.settingsGroup !== active; });
       if (sectionsRoot) sectionsRoot.setAttribute('aria-labelledby', 'settings-tab-' + active);
       tabs.forEach(function (tab) {

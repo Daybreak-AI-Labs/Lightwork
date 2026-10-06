@@ -19,6 +19,11 @@
   <title>{% block title %}Lightwork{% endblock %}</title>
   {#- One shell stylesheet; the Copilot scripts deferred first (see base.html). -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  {#- The two parser-blocking scripts at the end of the page are requested
+      next, so a slow phone link carries them before the font and the
+      deferred scripts (test_shell_first_paint). -#}
+  <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
+  {% include "_journey_i18n.html" %}
   <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
   <script src="{{ asset('lightwork-product-operations.js') }}" defer></script>
   <script src="{{ asset('lightwork-copilot.js') }}" defer></script>
@@ -229,8 +234,6 @@
   </style>
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
-<link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
-{% include "_journey_i18n.html" %}
 </head>
 <body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
 {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut("Translation coverage") }}" lang="{{ ul("Translation coverage") }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
@@ -383,6 +386,7 @@
   <script src="{{ asset('lightwork-pins.js') }}" defer></script>
   <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
+  {% if web_vitals_on %}<script src="{{ asset('lightwork-web-vitals.js') }}" data-sample-rate="{{ web_vitals_sample_rate }}" defer></script>{% endif %}
   <script>
     // Small screens: the Menu button opens the sidebar as a drawer. Esc, the
     // Close button or a tap outside closes it and returns focus to Menu.

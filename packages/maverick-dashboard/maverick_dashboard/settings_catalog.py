@@ -827,6 +827,12 @@ SETTINGS: tuple[Setting, ...] = (
       "server, are reported by the role people choose, never by name, and are never sent anywhere. "
       "Results are on People > Ease-of-use results.",
       "toggle", "Privacy", False, "maverick.usability_survey"),
+    S("analytics", "web_vitals", "Measure page speed for real visitors",
+      "Time how fast pages load, respond and stay steady (LCP, INP and CLS) in a sample of real visits, "
+      "and show the 75th percentile for each page on phones and computers over the last 28 days. "
+      "Only counts per page are kept: no names, addresses or browsing history. Nothing is sent anywhere. "
+      "Results are on Settings > Page speed.",
+      "toggle", "Privacy", False, "maverick.web_vitals"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,

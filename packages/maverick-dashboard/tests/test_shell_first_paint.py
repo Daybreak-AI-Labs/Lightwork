@@ -84,3 +84,28 @@ def test_copilot_scripts_are_deferred_ahead_of_page_scripts(path):
     for name in ("lightwork-ui.js", "lightwork-i18n.js"):
         tag = re.search(rf"<script\b[^>]*{re.escape(name)}[^>]*>", page).group(0)
         assert " defer" not in tag and " async" not in tag, tag
+
+
+@pytest.mark.parametrize("path", ["/overview", "/chat"])
+def test_the_scripts_the_first_paint_waits_for_are_requested_first(path):
+    # On a slow phone link the responses share one connection's bandwidth in
+    # the order they were asked for. lightwork-ui.js and lightwork-i18n.js are
+    # parser-blocking at the end of the page, so their requests go out right
+    # after the stylesheet: before the font and the deferred Copilot scripts.
+    head = _head(_page(path))
+    stylesheet = head.index('<link rel="stylesheet" href="/static/lightwork.css')
+    ui = head.index('<link rel="preload" as="script" href="/static/lightwork-ui.js')
+    i18n = head.index('<link rel="preload" as="script" href="/static/lightwork-i18n.js')
+    font = head.index('<link rel="preload" href="/static/fonts/manrope-var.woff2"')
+    copilot = head.index('/static/lightwork-product-operations.js')
+    assert stylesheet < ui < font and i18n < font and ui < copilot and i18n < copilot
+
+
+def test_a_task_conversation_is_visible_from_its_first_paint():
+    # The conversation faded in from opacity 0 over 0.4 s, so the task page's
+    # largest text (the request) counted as painted 0.4 s late on phones.
+    # It still slides in, but is never invisible.
+    source = (TEMPLATES / "chat_goal.html").read_text(encoding="utf-8")
+    keyframes = re.search(r"@keyframes convoIn \{(.*?)\}\s*\}", source, re.DOTALL)
+    assert keyframes is not None
+    assert "opacity" not in keyframes.group(1)

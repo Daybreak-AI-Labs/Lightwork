@@ -6824,6 +6824,27 @@ def pick_usability_survey() -> dict[str, Any]:
     return {"usability_survey": True}
 
 
+def pick_web_vitals() -> dict[str, Any]:
+    """Optional page speed for real visitors (field Core Web Vitals). OFF by default.
+
+    When on, the dashboard times a sample of real page loads in the browser
+    (LCP, INP and CLS) and keeps only counts per page and device class, so
+    Settings > Page speed shows the 75th percentile over the last 28 days.
+    No names, addresses or browsing history are kept, and nothing is sent
+    anywhere. Written under ``[analytics]`` as ``web_vitals``.
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: measure how fast pages load and respond for the people "
+        "using Lightwork, on phones and computers. Only counts per page are "
+        "kept on this server; no names or browsing history, and nothing is "
+        "sent anywhere. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Measure page speed for real visitors?", default=False):
+        return {}
+    return {"web_vitals": True}
+
+
 def pick_persona() -> dict[str, str]:
     """Agent identity: name + voice."""
     if not _q_confirm(
@@ -11339,7 +11360,7 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     _announce()
     analytics = state.get("analytics")
     if analytics is None:
-        analytics = {**pick_analytics(), **pick_usability_survey()}
+        analytics = {**pick_analytics(), **pick_usability_survey(), **pick_web_vitals()}
         state["analytics"] = analytics
         _save_partial(state)
 
