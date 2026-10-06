@@ -12811,7 +12811,7 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "requires": (),
     },
     "tech_risk_compliance.grc_studio": {
-        "label": "No-code GRC studio",
+        "label": "Compliance studio",
         "requires": ("tech_risk_compliance",),
     },
     "third_party_management.contracts": {
@@ -14034,7 +14034,7 @@ def _record_agent_reset_intent(request: Request, name: str, fields: list[str]) -
 
 
 @router.post("/agents/{name}/validate")
-async def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
+def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Lint the merged result of a proposed override without persisting it."""
     # Same gate as save/delete override: pack editing is admin-only, so the
     # lint helper that previews a pack edit must not be reachable unauthenticated.
@@ -14042,7 +14042,7 @@ async def validate_agent_override(request: Request, name: str, payload: AgentOve
     from maverick.domain_edit import validate_override
 
     errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True, exclude_none=True))
-    errors.extend(await run_in_threadpool(_agent_autonomy_errors, name, payload))
+    errors.extend(_agent_autonomy_errors(name, payload))
     try:
         errors.extend(_agent_action_errors(name, payload))
     except Exception as exc:
@@ -14051,14 +14051,14 @@ async def validate_agent_override(request: Request, name: str, payload: AgentOve
 
 
 @router.post("/agents/{name}/override")
-async def save_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
+def save_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Persist a tenant override for ``name``. 403 if pack editing is disabled,
     422 if the merged pack fails lint (the override is rejected, not written)."""
     _require_pack_editing(request)
     from maverick.domain_edit import OverrideConflict, read_override, resolved_view, write_override
 
     try:
-        errors = await run_in_threadpool(_agent_autonomy_errors, name, payload)
+        errors = _agent_autonomy_errors(name, payload)
         errors += _agent_action_errors(name, payload)
         if errors:
             raise ValueError("; ".join(errors))
@@ -14072,8 +14072,7 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
             before = (before_view or {}).get("autonomy", {}).get("pack", {})
             after = payload.autonomy.model_dump()
             if before != after:
-                await run_in_threadpool(
-                    _record_agent_autonomy_intent, request, name, before, after)
+                _record_agent_autonomy_intent(request, name, before, after)
         view = write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
                                                        exclude={"expected_generation"}),
                               expected_generation=payload.expected_generation, return_view=True)
@@ -14140,7 +14139,7 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
 
 
 @router.delete("/agents/{name}/override")
-async def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$")) -> dict:
+def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$")) -> dict:
     """Drop a tenant override, reverting the agent to its built-in pack."""
     _require_pack_editing(request)
     from maverick.domain_edit import (
@@ -14159,9 +14158,8 @@ async def delete_agent_override(request: Request, name: str, expected_generation
         if view_before and view_before["generation"] != expected_generation:
             raise OverrideConflict(_this_one(name) + " changed. Reload its latest version before resetting it.")
         if current or (view_before and "is_builtin" in view_before):
-            await run_in_threadpool(
-                _record_agent_reset_intent, request, name,
-                sorted(current) if current else ["unavailable_override"])
+            _record_agent_reset_intent(request, name,
+                                       sorted(current) if current else ["unavailable_override"])
         removed = remove_override(name, expected_generation=expected_generation)
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e

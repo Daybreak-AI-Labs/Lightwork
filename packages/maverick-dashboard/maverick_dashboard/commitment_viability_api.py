@@ -184,7 +184,9 @@ async def page(request: Request):
                and config.get_features().get("commitment_viability") is True)
     return templates.TemplateResponse(request, "commitment_viability.html",
         {"review_context": context_for(request) if enabled else "",
-         "review_enabled": enabled, "review_admin": has_global_permission(request, "admin")},
+         "review_enabled": enabled,
+         "capability_enabled": enabled and config.get_features().get("commitment_capability_learning") is True,
+         "review_admin": has_global_permission(request, "admin")},
         headers={"Cache-Control": "private, no-store"})
 
 

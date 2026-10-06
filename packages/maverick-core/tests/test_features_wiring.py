@@ -35,6 +35,7 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
         "workflow_readiness": True, "project_reviews": False, "outcome_measurement": False,
         "signing_identity_transition": False, "copilot_operations": False,
         "commitment_viability": False, "shared_decision_evidence": False,
+        "commitment_capability_learning": False,
     }
 
 
@@ -65,6 +66,7 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "workflow_readiness": False, "project_reviews": True, "outcome_measurement": True,
         "signing_identity_transition": False, "copilot_operations": True,
         "commitment_viability": False, "shared_decision_evidence": False,
+        "commitment_capability_learning": False,
     }
 
 

@@ -103,6 +103,8 @@
             <thead><tr>{% for h in a.table.headers %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
             <tbody>{% for row in a.table.rows %}<tr>{% for c in row %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}</tbody>
           </table>
+        {% elif a.kind in ('code', 'json', 'csv') %}
+          <pre tabindex="0" lang="und" dir="auto"><code>{{ a.prose }}</code></pre>
         {% else %}
           <div class="prose" data-markdown>{{ a.prose }}</div>
         {% endif %}

@@ -348,6 +348,8 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
     async def call(ops, function, *args, **kwargs):
         try:
             return await run_in_threadpool(function, *args, **kwargs)
+        except HTTPException:
+            raise
         except ops.GRCStudioNotFound as exc:
             raise HTTPException(
                 status_code=404, detail="GRC studio resource was not found"
@@ -508,9 +510,11 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
         request: Request, response: Response, studio_id: ObjectPath, body: CreateVersionIn
     ) -> dict[str, object]:
         require_permission(request, "operate")
+        from . import grc_draft_changes as guarded
+        expected_context = guarded.context(request)
         ops, tenant, store = await composition(request)
         result = await call(
-            ops, store.create_version, tenant, studio_id, **body.model_dump(mode="python")
+            ops, guarded.legacy_save, request, store, "create", tenant, studio_id, body.model_dump(mode="python"), expected_context
         )
         _secure(response)
         return _jsonable(result)  # type: ignore[return-value]
@@ -524,9 +528,11 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
         body: ReplaceDraftIn,
     ) -> dict[str, object]:
         require_permission(request, "operate")
+        from . import grc_draft_changes as guarded
+        expected_context = guarded.context(request)
         ops, tenant, store = await composition(request)
         result = await call(
-            ops, store.replace_draft, tenant, studio_id, version, **body.model_dump(mode="python")
+            ops, guarded.legacy_save, request, store, "replace", tenant, studio_id, body.model_dump(mode="python"), expected_context, version=version
         )
         _secure(response)
         return _jsonable(result)  # type: ignore[return-value]

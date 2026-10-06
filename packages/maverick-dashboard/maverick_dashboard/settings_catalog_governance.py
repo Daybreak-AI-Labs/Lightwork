@@ -644,7 +644,7 @@ def _tech_risk(S) -> tuple:
     stock = "maverick_dashboard.trc_stock_evidence_composition"
     rg = "maverick_dashboard.no_code_grc_studio_composition"
     ev = {"subgroup": "Continuous evidence"}
-    gs = {"subgroup": "No-code GRC studio"}
+    gs = {"subgroup": "Compliance studio"}
     return (
         S(feature, "enabled_collectors", "Where evidence is collected from",
           "The checks and systems continuous evidence may collect from. Choose at least one "

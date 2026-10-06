@@ -60,6 +60,7 @@ ASSETS = (
     "lightwork-learning-passes.js",
     "lightwork-audit-actions.js",
     "lightwork-decision-evidence.js",
+    "lightwork-commitment-capability.js",
     "lightwork-flow-requalification.js",
     "lightwork-learning-distinctions.js",
     "lightwork-learning-pending-cases.js",

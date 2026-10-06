@@ -414,14 +414,12 @@
     return Promise.resolve(out);
   }
   async function request(path, options) {
-    var settings = Object.assign({ credentials: "same-origin", headers: { Accept: "application/json" } }, options || {});
-    if (settings.body !== undefined && typeof settings.body !== "string") {
-      settings.body = JSON.stringify(settings.body);
-      settings.headers["Content-Type"] = "application/json";
-    }
-    var response;
-    try { response = await fetch(apiBase + path, settings); } catch (error) { throw error; }
-    return readBoundedJson(response);
+    var current = draftGeneration, controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 20000);
+    draftCalls.add(controller);
+    var settings = Object.assign({ credentials: "same-origin", signal: controller.signal, headers: { Accept: "application/json" } }, options || {});
+    if (settings.body !== undefined && typeof settings.body !== "string") { settings.body = JSON.stringify(settings.body); settings.headers["Content-Type"] = "application/json"; }
+    try { var response = await fetch(apiBase + path, settings); var result = await readBoundedJson(response); if (current !== draftGeneration) { throw problem("The account or workspace changed before the reply. Private details were cleared."); } return result; }
+    finally { clearTimeout(timeout); draftCalls.delete(controller); }
   }
   function button(label, handler, cls, aria) {
     var node = el("button", cls || "btn btn--ghost", label);
@@ -501,6 +499,7 @@
       if (ready) {
         await loadVersions();
         if (permissions.admin) { loadBackups(); }
+        if (permissions.operate) { await currentDraftContext(); }
       } else {
         settleLoaders("Nothing to show until the studio is ready.");
       }
@@ -791,6 +790,7 @@
 
   // ---------- builder ----------
   function openBuilder(options) {
+    ++draftEditRevision; clearReview();
     var row = options && options.row;
     composerState = emptyComposerState();
     editing = { mode: "create", studioId: null, row: null };
@@ -808,6 +808,7 @@
     $("grcs-builder-mode").textContent = editing.mode === "replace" ? "Saving updates this draft." :
       editing.studioId ? "Saving creates version " + (latestVersion(editing.studioId) + 1) + " as a draft." : "Saving creates the first draft.";
     builderPanel.hidden = false;
+    $("grcs-save-baseline").hidden = editing.mode !== "replace";
     renderComposer();
     $("grcs-builder-title").focus();
   }
@@ -1113,17 +1114,128 @@
     return buildBlueprintFromComposer({ studio_id: studioId, name: name, description: $("grcs-description").value }, composerState);
   }
 
-  async function saveDraft(event) {
-    event.preventDefault();
-    try {
-      var blueprint = currentBlueprint();
-      var built = buildSavePayload(editing.mode === "replace" ? { mode: "replace", row: editing.row } : { mode: "create", latestVersion: latestVersion(blueprint.studio_id) }, blueprint, operationId());
-      var result = await request(built.path, { method: built.method, body: built.body });
-      report("Saved “" + human(blueprint.name_ref) + "” as draft version " + (result.version || "") + ". Send it for review when it's ready.", result);
-      builderPanel.hidden = true;
-      await loadVersions();
-    } catch (error) { fail(error, "save the draft"); }
+  // One retained original identity per browser; a lost reply never starts another save.
+  var draftContext = "", draftGeneration = 0, draftEditRevision = 0, draftBusy = false, draftReview = null, draftOriginal = null;
+  var draftCalls = new Set(), draftStorage = "lightwork-grc-original-save", originalRead = false;
+  var saveReview = $("grcs-save-review"), saveOriginal = $("grcs-save-original");
+  function clearReview() { draftReview = null; saveReview.hidden = true; $("grcs-save-review-body").replaceChildren(); $("grcs-save-confirm").checked = false; $("grcs-save-apply").disabled = true; }
+  function privateBoundary() {
+    ++draftGeneration; draftCalls.forEach(function (call) { call.abort(); }); draftContext = ""; draftOriginal = null; originalRead = false;
+    clearReview(); saveOriginal.hidden = true; $("grcs-save-original-status").textContent = ""; $("grcs-save-original-current").textContent = "";
+    composerState = emptyComposerState(); editing = { mode: "create", studioId: null, row: null }; builderForm.reset(); renderComposer(); builderPanel.hidden = true;
+    allRows = []; versionList.replaceChildren(); $("grcs-list-count").textContent = "0 versions"; fillStudioFilter(); sources = { collectors: [], destinations: [], listed: false, loaded: false }; fillCollectorChoices(); fillProjection(); fillTargetChoices(); $("grcs-view-body").replaceChildren(); $("grcs-view-panel").hidden = true;
+    $("grcs-history-list").replaceChildren(); $("grcs-history-panel").hidden = true; $("grcs-backup-list").replaceChildren(); $("grcs-retention-list").replaceChildren(); $("grcs-projection-form").reset(); operationOutput.textContent = "";
+    operations.disabled = true; draftBusy = false; report("Private studio details were cleared because your account, workspace or access changed. Refresh in the current account to continue.");
   }
+  async function draftRequest(path, body, expected) {
+    var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 20000), current = draftGeneration;
+    draftCalls.add(controller);
+    try {
+      var response = await fetch("/api/v1/compliance/grc-draft-changes" + path, { method: body ? "POST" : "GET", credentials: "same-origin", cache: "no-store", signal: controller.signal,
+        headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      if (response.redirected || response.status === 401 || response.status === 403) { privateBoundary(); throw problem("Private details were cleared. Sign in with current studio permission before continuing."); }
+      var value = await readBoundedJson(response);
+      if (current !== draftGeneration) { throw problem("The account or workspace changed before the reply. Private details were cleared."); }
+      if (expected && value.context !== expected) { privateBoundary(); throw problem("Your account, workspace or access changed. Private details were cleared."); }
+      return value;
+    } catch (error) {
+      if (error && error.technical) { error.message = error.technical; error.plain = true; }
+      if (error && error.status === 409 && String(error.message).indexOf("account, workspace or access changed") >= 0) { privateBoundary(); }
+      if (error.name === "AbortError" || error instanceof TypeError || error instanceof SyntaxError) { throw problem("The reply is unconfirmed. Check the original save; nothing will be repeated automatically."); }
+      throw error;
+    } finally { clearTimeout(timeout); draftCalls.delete(controller); }
+  }
+  function draftLock(value) { draftBusy = value; $("grcs-save").disabled = value; $("grcs-save-read").disabled = value; $("grcs-save-restore").disabled = value; $("grcs-save-new").disabled = value; $("grcs-save-cancel").disabled = value; $("grcs-save-apply").disabled = value || !draftReview || !$("grcs-save-confirm").checked; }
+  async function currentDraftContext(expected, mayPublish) {
+    var value = await draftRequest("", undefined, expected || draftContext || undefined);
+    if (mayPublish && !mayPublish()) { return value; }
+    if (draftContext && draftContext !== value.context) { privateBoundary(); throw problem("Your account or workspace changed. Private details were cleared."); }
+    if (!draftContext) { draftContext = value.context; }
+    if (!draftOriginal) { try { var retained = JSON.parse(sessionStorage.getItem(draftStorage) || "null"); if (retained && retained.context === draftContext && typeof retained.token === "string" && retained.token.length <= 240000) { draftOriginal = retained; originalStatus("A previous reviewed save is retained. Check its original outcome before another save."); } } catch (_) {} }
+    return value;
+  }
+  function originalStatus(message, value) {
+    saveOriginal.hidden = !draftOriginal; $("grcs-save-original-status").textContent = message;
+    $("grcs-save-original-current").textContent = value && value.confirmed ? value.name + " · version " + value.version + " · recorded change " + value.revision + ". " + (value.current || "") : "Current matching content is not an original receipt.";
+    $("grcs-save-new").hidden = !originalRead;
+  }
+  function renderDraftReview(value) {
+    if (!Array.isArray(value.changes) || !value.changes.length || value.changes.length > 512 || JSON.stringify(value.changes).length > 131072) { throw problem("The complete draft could not be displayed. No partial review can be confirmed."); }
+    var body = $("grcs-save-review-body"); body.replaceChildren();
+    value.changes.forEach(function (row) {
+      if (!row || typeof row.label !== "string" || typeof row.before !== "string" || typeof row.after !== "string") { throw problem("The full review is unavailable. Keep editing; nothing was saved."); }
+      var holder = body;
+      if (row.technical) { holder = el("details"); holder.appendChild(el("summary", null, row.label)); body.appendChild(holder); }
+      holder.appendChild(el("dt", null, row.label)); holder.appendChild(el("dd", null, "Current: " + row.before + "\nAfter save: " + row.after));
+    });
+    draftReview = value; saveReview.hidden = false; $("grcs-save-review-title").focus();
+  }
+  async function saveDraft(event) {
+    event.preventDefault(); if (draftBusy) { return; } var current = draftGeneration; draftLock(true); clearReview();
+    try {
+      await currentDraftContext(); if (current !== draftGeneration) { return; }
+      if (draftOriginal) { originalStatus("Check the retained original save first. A new review must be chosen explicitly after that lookup."); $("grcs-save-read").focus(); return; }
+      var blueprint = currentBlueprint(), built = buildSavePayload(editing.mode === "replace" ? { mode: "replace", row: editing.row } : { mode: "create", latestVersion: latestVersion(blueprint.studio_id) }, blueprint, "review-only");
+      var edited = draftEditRevision; delete built.body.operation_id; if (editing.mode === "replace") { built.body.version = editing.row.version; }
+      var value = await draftRequest("/review", { context: draftContext, kind: editing.mode === "replace" ? "replace" : "create", studio: blueprint.studio_id, body: built.body }, draftContext);
+      if (current !== draftGeneration) { return; } if (edited !== draftEditRevision) { report("Your entered work changed while this review was loading. Review your current choices again; nothing was saved."); return; } renderDraftReview(value); report("Review the complete current and proposed choices before saving.");
+    } catch (error) { if (current === draftGeneration) { clearReview(); fail(error, "review the draft"); } }
+    finally { if (current === draftGeneration) { draftLock(false); } }
+  }
+  $("grcs-save-baseline").addEventListener("click", async function () {
+    if (draftBusy || editing.mode !== "replace") { return; } var current = draftGeneration, selected = editing.row; draftLock(true); clearReview();
+    try { await currentDraftContext(); var row = await request("/studios/" + encodeURIComponent(selected.studio_id) + "/versions/" + selected.version); await currentDraftContext();
+      if (current !== draftGeneration || editing.row !== selected) { return; } if (row.state !== "draft") { throw problem("This version is no longer editable. Choose “New version from this” in the register; your entered work is kept here."); }
+      editing.row = row; report("Your entered choices are kept. The next complete review will compare them against the current saved draft, including other changes.");
+    } catch (error) { if (current === draftGeneration) { fail(error, "update the saved comparison"); } } finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  $("grcs-save-confirm").addEventListener("change", function () { draftLock(draftBusy); });
+  $("grcs-save-cancel").addEventListener("click", function () { clearReview(); $("grcs-save").focus(); });
+  function editedDraft() { ++draftEditRevision; clearReview(); }
+  builderForm.addEventListener("input", editedDraft); builderForm.addEventListener("change", editedDraft); builderForm.addEventListener("click", function (event) { if (event.target.closest("button") && event.target.id !== "grcs-save") { editedDraft(); } });
+  $("grcs-save-apply").addEventListener("click", async function () {
+    if (draftBusy || !draftReview || !$("grcs-save-confirm").checked) { return; } var current = draftGeneration, selected = draftReview;
+    draftLock(true);
+    try {
+      await currentDraftContext(selected.context); if (current !== draftGeneration || draftReview !== selected) { return; }
+      draftOriginal = { context: selected.context, token: selected.token }; originalRead = false;
+      try { sessionStorage.setItem(draftStorage, JSON.stringify(draftOriginal)); } catch (_) { draftOriginal = null; throw problem("This browser cannot retain your original review. Free browser storage before saving; nothing was submitted."); }
+      clearReview(); originalStatus("Saving the reviewed draft. If the reply is interrupted, check this original request without saving again.");
+      var value = await draftRequest("/save", { token: selected.token, confirmed: true }, selected.context);
+      if (current !== draftGeneration) { return; } originalRead = true; originalStatus(value.message, value); report(value.message);
+      // Never replace the person's composer with an earlier result.
+      await loadVersions();
+    } catch (error) { if (current === draftGeneration) { originalStatus(draftOriginal ? "The original save is unconfirmed. Check its result without repeating it." : "Nothing was submitted."); fail(error, "confirm the original save"); } }
+    finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  $("grcs-save-read").addEventListener("click", async function () {
+    if (draftBusy || !draftOriginal) { return; } var current = draftGeneration, selected = draftOriginal; draftLock(true);
+    try { var value = await draftRequest("/original", { token: selected.token }, selected.context); if (current !== draftGeneration) { return; } originalRead = true; originalStatus(value.message, value); report(value.message); }
+    catch (error) { if (current === draftGeneration) { fail(error, "read the original save"); } }
+    finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  $("grcs-save-new").addEventListener("click", function () { if (!draftBusy && originalRead) { draftOriginal = null; originalRead = false; sessionStorage.removeItem(draftStorage); saveOriginal.hidden = true; clearReview(); report("Your entered work is kept. Choose the current saved version before reviewing another save; the earlier original request remains historical."); $("grcs-save").focus(); } });
+  $("grcs-save-restore").addEventListener("click", async function () {
+    if (draftBusy || !draftOriginal || !await confirmed("Replace the entered editor choices with the retained original reviewed choices? This does not save anything.", "Restore choices")) { return; }
+    if (!draftOriginal) { return; } var current = draftGeneration, selected = draftOriginal; draftLock(true);
+    try { var value = await draftRequest("/choices", { token: selected.token }, selected.context); if (current !== draftGeneration) { return; }
+      var input = value.inputs; openBuilder({ mode: value.kind === "replace" ? "replace" : "create", row: { studio_id: value.studio, blueprint: input.blueprint, version: input.version, revision: input.expected_revision, integrity_sha256: input.expected_integrity_sha256 } }); report("Original choices restored to the editor. Current-source review is required before any new save.");
+    } catch (error) { if (current === draftGeneration) { fail(error, "restore reviewed choices"); } } finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  document.addEventListener("lightwork:copilot-context-changed", async function (event) {
+    if (event.detail && event.detail.reason === "selection") { var selected = draftReview, current = draftGeneration; try { if (selected) { await draftRequest("/review-status", { token: selected.token }, selected.context); } else { await currentDraftContext(); } } catch (error) { if (current === draftGeneration) { if (draftReview === selected) { clearReview(); } fail(error, "verify current access"); } } }
+    else { privateBoundary(); }
+  });
+  global.addEventListener("lightwork:copilot-context-changed", privateBoundary);
+  document.addEventListener("lightwork:account-context-changed", privateBoundary);
+  global.LightworkGRCDraft = { open: async function (expected, original, isActive) {
+    var active = typeof isActive === "function" ? isActive : function () { return true; }; if (draftBusy || !active()) { return false; } var current = draftGeneration;
+    await currentDraftContext(expected, function () { return current === draftGeneration && active(); }); if (current !== draftGeneration || !active() || draftContext !== expected) { return false; }
+    if (draftReview) { await draftRequest("/review-status", { token: draftReview.token }, expected); if (current !== draftGeneration || !active()) { return false; } }
+    if (original) { if (!draftOriginal) { report("No original save is retained in this browser for the current account. Open its saved draft from the register; matching content cannot establish an earlier request."); return false; } saveOriginal.hidden = false; saveOriginal.scrollIntoView({ block: "start" }); $("grcs-save-read").focus(); }
+    else { if (builderPanel.hidden) { openBuilder(null); } builderPanel.scrollIntoView({ block: "start" }); $("grcs-name").focus(); }
+    return true;
+  } };
 
   // ---------- projection ----------
   function fillProjection() {

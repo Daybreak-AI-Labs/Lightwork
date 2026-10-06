@@ -1034,3 +1034,86 @@ selections. The native 320px views fit without JavaScript errors.
 These results cover the supported known examples and exact comparison cells.
 They establish neither unobserved applicability regions nor future accuracy,
 causal customer lift, automatic publication or research superiority.
+
+## October 6 specialist editing and literal file display
+
+Specialist validation, saving and resetting now run as synchronous native
+FastAPI handlers in its worker pool. Cold action-registry construction,
+complete pack validation and local file writes therefore leave the dashboard
+event loop available. Existing permissions, validation, version conflicts,
+pre-change activity recording and saved-result shapes are preserved. Six
+focused existing HTTP checks passed, including stale save and reset refusal;
+this establishes operating behavior, not a production latency benchmark.
+
+Chat and shared task results now show code, JSON and CSV artifacts as escaped
+literal preformatted content. Markdown interpretation cannot remove code
+indentation, turn data into headings or reinterpret embedded markup in those
+file types. Ordinary documents keep their formatted reading view.
+
+## October 6 additional-work capability qualification
+
+Promise reviews now has ordinary additional-offer authoring and local
+qualification behind its explicit default-off setting. Four offers due
+together, twenty-seven competing entered material/capacity/shared-setup
+explanations, six possible additions and thirty-two observations are supported.
+Every joint offer/addition check uses the native accepted-work feasibility
+engine for every surviving explanation. Conditional quotes are excluded from
+available stock. Complete current/proposed sources and business choices appear
+before the native write; recorded identities remain available in collapsed
+source details. Copilot uses the same eight writes and two readers, and opens
+the complete native authoring form for the wider four-offer/six-addition scope
+without resetting entered choices. A superseded handoff cannot adopt or focus
+the form; exact current accepted-work binding is rechecked before opening.
+
+Actual native qualification narrowed eight explanations to one with three
+separately reviewed Yes/No local-rule executions. The joint inclusion-minimal
+addition frontier changed while two accepted orders remained protected. Exact
+native rules, their included sources, published revisions, model meaning and
+permission are retained with each observation. Completed local trial reports
+are separately attributed operator assertions. Changed model, source, parent
+review or permission withholds old evidence from current calculations.
+
+Native and Copilot interrupted replies recovered exact originals without
+another test. An interruption after admission stayed unknown, and exact retry
+did not execute again. Separate acknowledged release ends waiting without
+confirming the unknown outcome or refunding the used test/effort allowance.
+Final writer expiry refused the effect. Full-review overflow refused unseen
+choices. Own ordinary history remained readable after disable and archive;
+foreign ownership refused access. The native page fit 320px without JavaScript
+errors. Installer emission requires literal `true`; no setting is inferred from
+a truthy string or number. Workspace restore classifies the new qualification
+namespace as authority-bearing, so copied bytes cannot silently revive grants.
+
+The bounded computation is finite version-space learning and exhaustive
+abduction. A same-information exhaustive acquisition reference matches the
+chosen synthetic qualification. Hypothetical additions and entered premises
+do not establish physical stock, capacity, customer willingness, profit,
+fulfilment or research superiority. Qualification runs only saved local rules;
+AI, connectors, purchases, reservations and business commitments are excluded.
+
+## October 6 complete compliance draft saves
+
+Compliance studio now shows every supported current/proposed draft choice
+before Save through the existing native create/replace writer. A full review
+supports 512 rows and 128 KiB of rendered material; larger material is refused
+with the entered draft preserved. Literal condition/action strings and evidence
+value locations keep their exact punctuation rather than being humanized into
+indistinguishable choices. Ordinary labels describe fixed rule types.
+
+An exact sealed request is retained before Save, and the existing actor-bound
+native GRC receipt records one-time metadata admission. Actual browser journeys
+discarded accepted create and replace replies, reloaded and recovered both
+originals without another write. An interruption between admission and write
+remained unknown; exact retry did not dispatch. An actual SQLite writer wait
+crossed review expiry and refused the effect. Accepted expired originals stayed
+readable, foreign originals were refused, and switching away from and back to a
+workspace invalidated the earlier review. Current operating permission clears
+private controls on loss. Native current-source checks run after the writer wait.
+
+Copilot opens the protected native review or original reader with exact current
+context and selection checks; a superseded handoff cannot replace or focus newer
+choices. The complete native review fit 320px, and existing draft formats stayed
+editable. Save creates an editable draft only. Independent review, approval,
+publication and applying to connected destinations remain separate native
+actions; these checks do not qualify customer evidence acquisition or destination
+delivery.

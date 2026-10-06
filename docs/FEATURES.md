@@ -45,15 +45,38 @@ here.
   whole-platform Copilot coverage remain incomplete. See
   [review boundaries](recovery-connected-services.md).
 
-- **First global Copilot action** — on a workflow run, Copilot can check the
-  current learning example and open the same protected stop-use form as the
-  page. The signed-in person enters a reason and confirms; the native service
-  rechecks current authority and example revision and reports confirmed or
-  audit-pending results. The closed catalog is default-off under
-  `[features] copilot_operations` and appears in Settings and the installer.
-  Direct page withdrawal does not depend on this flag. This covers one
-  operation, not all post-install work; see
-  [operation coverage](post-install-operation-coverage.md).
+- **Copilot product controls** — the default-off
+  `[features] copilot_operations` catalog shares selected native product
+  writers, complete consequence reviews and original-outcome recovery with
+  ordinary pages. Named choices replace technical request editing; protected
+  handoffs retain entered work where the complete native form is required.
+  Native authority, source/version, permission and deadline checks remain at
+  the effect. Settings and the installer expose the catalog and its permitted
+  operation families. Ordinary controls retain their own feature requirements
+  independently of Copilot. Exact operating scope and dated journey evidence,
+  including remaining coverage gaps, are in the
+  [operation coverage register](post-install-operation-coverage.md).
+
+- **Additional-work capability qualification** — the optional
+  `[features] commitment_capability_learning` setting adds guided Promise
+  review forms for competing material/capacity/shared-setup explanations,
+  jointly offered work and inclusion-minimal hypothetical additions. Completed
+  attributed trials or exact owned published local-rule tests narrow those
+  explanations within one shared test/effort allowance. Every surviving model
+  must protect all accepted commitments. Native UI and Copilot retain current
+  sources, consent, exact originals and unknown attempts without replay or
+  allowance refund. Own history remains readable after disable or archive.
+  This supports conditional planning under entered premises; it does not verify
+  physical capacity, make purchases, establish revenue or claim a new algorithm.
+
+- **Compliance studio protected draft saves** — guided risk, control, vendor
+  and evidence record design now reviews the complete supported current and
+  proposed draft before the existing native Save. Interrupted create/replace
+  replies recover the exact original request; uncertain admission never repeats
+  a write. Current source, actor/workspace and expiry are rechecked after native
+  writer waits. Copilot opens the protected form without replacing newer
+  choices. Independent review, approval, publication and connected-destination
+  delivery remain separate operations.
 
 - **Run a learned workflow from Copilot** — on a saved workflow's designer page,
   the closed catalog checks the published release and opens the same labelled

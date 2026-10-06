@@ -55,6 +55,7 @@
   function clearOpenReview(discardObservation=false) {
     if (discardObservation) resetObservation();
     current = null; openGeneration++; publish('');
+    document.dispatchEvent(new CustomEvent('lightwork:commitment-review', {detail:{review:null}}));
     $('cmv-report').hidden = true;
   }
   function activeReview() {
@@ -184,6 +185,7 @@
     else select.add(new Option(displayTitle, data.id));
     select.value = data.id;
     current = data;
+    document.dispatchEvent(new CustomEvent('lightwork:commitment-review', {detail:{review:data}}));
     publish(data.id);
     $('cmv-report').hidden = false;
     $('cmv-report-title').textContent = data.title;
@@ -391,5 +393,8 @@
   $('cmv-reassess').addEventListener('click',()=>{const review=activeReview(); if(review) open(review.id).catch(error=>say(error.message));});
   $('cmv-refresh').addEventListener('click',()=>list().then(()=>say('Saved reviews refreshed.')).catch(error=>say(error.message)));
   $('cmv-more').addEventListener('click',()=>list(false).catch(error=>say(error.message)));
-  list().catch(error=>say(error.message));
+  list().then(() => {
+    const selected = new URLSearchParams(window.location.search).get('review');
+    if (selected && /^CMV-[a-f0-9]{48}$/.test(selected)) return open(selected);
+  }).catch(error=>say(error.message));
 }());

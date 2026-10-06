@@ -393,15 +393,19 @@ _CONTEXTS = tuple(
                 "Compare the reported capacity, materials, deadlines, and conditional options for two orders.",
                 "See which source needs review before its decision window closes.",
                 "Review and confirm a possible shared-resource link before it changes the assessment.",
+                "When additional-work qualification is enabled, compare further offers and reported additions, record a scoped trial result or check one owned published local rule.",
+                "Read an exact original result without repeating its qualification or changing its allowance.",
             ),
             boundaries=(
                 "This is a bounded planning model based on information entered by your team; it does not verify supplier stock or reserve anything externally.",
                 "Possible, uncertain, and infeasible are model assessments, not customer delivery guarantees.",
                 "A source or decision that changed needs a fresh review before another action.",
+                "Entered possibilities and operator trial reports are not independently verified. Local rules establish only the selected recorded calculation; they do not predict revenue.",
             ),
             next_steps=(
                 "Open a review, enter the source and time limits, and check the two orders together.",
                 "Confirm any suggested resource link only after checking it against the actual work.",
+                "An administrator enables additional-work qualification in Settings. Choose the current review before using its ordinary controls or Copilot.",
             ),
             suggested_questions=(
                 "Which order needs attention first?",

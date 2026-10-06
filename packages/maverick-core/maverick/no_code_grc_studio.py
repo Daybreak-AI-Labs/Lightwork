@@ -1439,6 +1439,7 @@ class GRCStudioStore:
         blueprint: Mapping[str, object],
         expected_latest_version: int,
         operation_id: str,
+        before_write: Callable[[], None] | None = None,
     ) -> StudioVersion:
         """Append a new editable draft under exact latest-version CAS."""
 
@@ -1459,6 +1460,9 @@ class GRCStudioStore:
         }
         with self._thread_lock, cross_process_lock(self._lock_path), self._connect() as connection:
             self._begin(connection)
+            self._gate()
+            if not hmac.compare_digest(self._actor(), actor):
+                raise GRCStudioPermissionDenied("draft author changed during admission")
             replay = self._operation(connection, operation_id, request)
             if replay is not None:
                 connection.rollback()
@@ -1480,6 +1484,9 @@ class GRCStudioStore:
                 ).fetchone()["count"]
                 if int(count) >= self._max_studios:
                     raise GRCStudioConflict("tenant studio capacity is exhausted")
+            if before_write is not None:
+                before_write()
+            now = self._now()
             version = StudioVersion(
                 schema=VERSION_SCHEMA,
                 tenant_id=self.tenant_id,
@@ -1526,6 +1533,7 @@ class GRCStudioStore:
         expected_revision: int,
         expected_integrity_sha256: str,
         operation_id: str,
+        before_write: Callable[[], None] | None = None,
     ) -> StudioVersion:
         """Replace the complete draft DSL; submitted versions are immutable."""
 
@@ -1550,6 +1558,9 @@ class GRCStudioStore:
         }
         with self._thread_lock, cross_process_lock(self._lock_path), self._connect() as connection:
             self._begin(connection)
+            self._gate()
+            if not hmac.compare_digest(self._actor(), actor):
+                raise GRCStudioPermissionDenied("draft author changed during admission")
             replay = self._operation(connection, operation_id, request)
             if replay is not None:
                 connection.rollback()
@@ -1563,6 +1574,9 @@ class GRCStudioStore:
                 raise GRCStudioConflict("only a draft can be replaced")
             if not hmac.compare_digest(current.created_by_ref, actor):
                 raise GRCStudioPermissionDenied("only the draft author can replace it")
+            if before_write is not None:
+                before_write()
+            now = self._now()
             stored = self._update_version(
                 connection,
                 current,
@@ -1587,6 +1601,71 @@ class GRCStudioStore:
             self._record_operation(connection, operation_id, request, result, now)
             connection.commit()
             return stored
+
+    def admit_draft_save(
+        self, tenant_id: str, operation_id: str, request: Mapping[str, object],
+        *, before_write: Callable[[], None],
+    ) -> bool:
+        """Reserve one reviewed attempt; uncertain attempts never redispatch."""
+        self._gate()
+        if _tenant(tenant_id) != self.tenant_id:
+            raise GRCStudioNotFound("original draft admission not found")
+        actor = self._actor()
+        if request.get("actor_ref") != actor:
+            raise GRCStudioPermissionDenied("original draft belongs to another author")
+        admission = "draft-admission:" + _id(operation_id, "operation_id", operation=True)
+        material = {"action": "reviewed_draft_admission", "draft_request_sha256": _sha256(dict(request)), "actor_ref": actor}
+        with self._thread_lock, cross_process_lock(self._lock_path), self._connect() as connection:
+            self._begin(connection)
+            self._gate()
+            if self._actor() != actor:
+                raise GRCStudioPermissionDenied("draft author changed during admission")
+            if self._operation(connection, admission, material) is not None:
+                connection.rollback()
+                return False
+            count = connection.execute("SELECT COUNT(*) FROM grc_operations WHERE tenant_id=? AND operation_id LIKE 'draft-admission:%'", (self.tenant_id,)).fetchone()[0]
+            if count >= 10_000:
+                raise GRCStudioConflict("retained draft admission capacity is exhausted")
+            before_write()
+            target = request.get("version", int(request.get("expected_latest_version", 0)) + 1)
+            self._record_operation(connection, admission, material, {"state": "reserved", "actor_ref": actor,
+                "studio_id": request.get("studio_id"), "version": target}, self._now())
+            connection.commit()
+            return True
+
+    def draft_result(
+        self, tenant_id: str, operation_id: str, request: Mapping[str, object]
+    ) -> StudioVersion | None:
+        """Read an exact original draft receipt without writing or replaying work."""
+        self._gate()
+        if _tenant(tenant_id) != self.tenant_id:
+            raise GRCStudioNotFound("original draft result not found")
+        material = dict(request)
+        action = material.get("action")
+        expected_keys = {"action", "studio_id", "blueprint", "actor_ref"}
+        if action == "create_version":
+            expected_keys.add("expected_latest_version")
+            _integer(material.get("expected_latest_version"), "expected_latest_version", 0, 2_147_483_646)
+        elif action == "replace_draft":
+            expected_keys.update({"version", "expected_revision", "expected_integrity_sha256"})
+            _integer(material.get("version"), "version", 1, 2_147_483_647)
+            _integer(material.get("expected_revision"), "expected_revision", 1, 2_147_483_647)
+            _digest(material.get("expected_integrity_sha256"), "expected_integrity_sha256")
+        else:
+            raise GRCStudioValidationError("choose an original draft operation")
+        if set(material) != expected_keys:
+            raise GRCStudioValidationError("original draft request fields changed")
+        studio = _id(material["studio_id"], "studio_id")
+        material["blueprint"] = validate_blueprint(material["blueprint"], expected_studio_id=studio)
+        actor = self._actor()
+        if material["actor_ref"] != actor:
+            raise GRCStudioPermissionDenied("original draft belongs to another author")
+        with self._thread_lock, cross_process_lock(self._lock_path), self._connect() as connection:
+            self._gate()
+            if self._actor() != actor:
+                raise GRCStudioPermissionDenied("original draft author changed")
+            result = self._operation(connection, operation_id, material)
+            return None if result is None else self._result_version(result)
 
     def _transition(
         self,

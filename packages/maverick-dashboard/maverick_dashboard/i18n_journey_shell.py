@@ -201,7 +201,7 @@ ROWS = [
     ("Safety", "Sûreté", "Sicherheit", "安全性", "安全性"),
     ("Assessments", "Évaluations", "Bewertungen", "評価", "评估"),
     ("Compliance", "Conformité", "Compliance", "コンプライアンス", "合规"),
-    ("No-code GRC studio", "Atelier GRC sans code", "GRC-Studio ohne Programmierung", "ノーコードGRCスタジオ", "无代码GRC工作室"),
+    ("Compliance studio", "Atelier de conformité", "Compliance-Studio", "コンプライアンススタジオ", "合规工作室"),
     ("Policy links", "Liens vers les politiques", "Richtlinien-Links", "ポリシーのリンク", "政策链接"),
     ("Find which controls apply", "Trouver les contrôles applicables", "Geltende Kontrollen ermitteln", "適用されるコントロールを確認", "查找适用的控制措施"),
     ("Turn scope into tasks", "Transformer le périmètre en tâches", "Umfang in Aufgaben umwandeln", "範囲をタスクに変換", "将范围转为任务"),

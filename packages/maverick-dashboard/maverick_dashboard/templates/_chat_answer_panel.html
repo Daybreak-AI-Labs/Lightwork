@@ -156,6 +156,8 @@
                 </tbody>
               </table>
             </div>
+          {% elif a.kind in ('code', 'json', 'csv') %}
+            <pre class="artifact__body" tabindex="0" lang="und" dir="auto" data-user-content><code>{{ a.prose }}</code></pre>
           {% else %}
             <div class="artifact__body prose" tabindex="0" data-markdown lang="und" dir="auto" data-user-content>{{ a.prose }}</div>
           {% endif %}

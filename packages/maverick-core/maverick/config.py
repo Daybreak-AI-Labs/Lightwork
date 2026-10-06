@@ -1133,6 +1133,7 @@ def get_features() -> dict:
         "task_handoffs": cfg.get("task_handoffs", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
         "commitment_viability": cfg.get("commitment_viability", False) is True,
+        "commitment_capability_learning": cfg.get("commitment_capability_learning", False) is True,
         "shared_decision_evidence": cfg.get("shared_decision_evidence", False) is True,
         "employee_companions": (
             not config_source_errors() and cfg.get("employee_companions", False) is True

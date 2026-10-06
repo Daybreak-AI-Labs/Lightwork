@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}No-code GRC studio · Lightwork{% endblock %}
+{% block title %}Compliance studio · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
+  .grcs-review-list { margin:0; display:grid; gap:var(--space-3); }
+  .grcs-review-list dt { font-weight:600; overflow-wrap:anywhere; }
+  .grcs-review-list dd { margin:0 0 var(--space-2); white-space:pre-wrap; overflow-wrap:anywhere; }
   .grcs-shell { display:grid; gap:var(--space-5); }
   .grcs-shell .panel h2, .grcs-shell .panel h3 { margin:0; }
   .grcs-fieldset { border:0; margin:0; padding:0; min-width:0; display:grid; gap:var(--space-5); }
@@ -25,9 +28,9 @@
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
 <div class="grcs-shell" id="grc-studio-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-module-enabled="{{ 'true' if studio_module_enabled else 'false' }}" data-can-operate="{{ 'true' if studio_can_operate else 'false' }}" data-can-audit="{{ 'true' if studio_can_audit else 'false' }}" data-can-admin="{{ 'true' if studio_can_admin else 'false' }}">
-  {{ hero('Technology risk and compliance', 'No-code GRC studio', lede='Build your own risk, control, vendor and evidence records, with forms, rules and reports, without writing code. Each version is reviewed and approved by different people before it becomes active in this studio, and you can restore an earlier version at any time.') }}
+  {{ hero('Technology risk and compliance', 'Compliance studio', lede='Build your risk, control, vendor and evidence records with guided forms, rules and reports. Each version is reviewed and approved by different people before it becomes active in this studio, and you can restore an earlier version at any time.') }}
   {% if not studio_module_enabled %}
-  {{ module_gate('tech_risk_compliance.grc_studio', 'No-code GRC studio',
+  {{ module_gate('tech_risk_compliance.grc_studio', 'Compliance studio',
                  detail='Turns on Tech Risk & Compliance and the studio together.',
                  can_activate=studio_can_activate) }}
   {% endif %}
@@ -189,13 +192,30 @@
         </div></details>
 
         <div class="grcs-actions">
-          <button class="btn btn--primary" type="submit" id="grcs-save">Save draft</button>
+          <button class="btn btn--primary" type="submit" id="grcs-save">Review draft before saving</button>
+          <button class="btn" id="grcs-save-baseline" type="button" hidden>Update saved comparison</button>
           <button class="btn" id="grcs-import-blueprint" type="button">Load from a file</button>
           <input class="sr-only" id="grcs-import-blueprint-file" type="file" accept=".json,application/json" tabindex="-1" aria-label="Blueprint file to load">
           <button class="btn" id="grcs-download-blueprint" type="button">Save to a file</button>
           <button class="btn btn--ghost" id="grcs-reset-composer" type="button">Clear</button>
         </div>
       </form>
+    </section>
+
+    <section class="panel" id="grcs-save-review" aria-labelledby="grcs-save-review-title" hidden>
+      <h2 id="grcs-save-review-title" tabindex="-1">Review every saved choice</h2>
+      <p class="muted">Compare the complete current blueprint with your entered choices. This saves a draft; review, approval and publication remain separate.</p>
+      <dl class="grcs-review-list" id="grcs-save-review-body"></dl>
+      <label class="grcs-actions"><input type="checkbox" id="grcs-save-confirm">I reviewed the complete draft and want to save it.</label>
+      <div class="grcs-actions"><button class="btn btn--primary" id="grcs-save-apply" type="button" disabled>Save reviewed draft</button><button class="btn btn--ghost" id="grcs-save-cancel" type="button">Keep editing</button></div>
+    </section>
+
+    <section class="panel" id="grcs-save-original" aria-labelledby="grcs-save-original-title" hidden>
+      <h2 id="grcs-save-original-title" tabindex="-1">Original draft save</h2>
+      <p id="grcs-save-original-status" role="status" aria-live="polite"></p>
+      <p class="muted" id="grcs-save-original-current"></p>
+      <div class="grcs-actions"><button class="btn" id="grcs-save-read" type="button">Check original save</button><button class="btn btn--ghost" id="grcs-save-restore" type="button">Restore reviewed choices to the editor</button><button class="btn btn--ghost" id="grcs-save-new" type="button" hidden>Start a fresh review</button></div>
+      <p class="muted">The original lookup never saves again. Reading a result keeps your newer entered work. This browser retains the latest original review for this account and workspace; native accepted receipts can later expire under the studio's retention rules.</p>
     </section>
 
     <section class="panel" id="grcs-history-panel" aria-labelledby="grcs-history-title" hidden>

@@ -997,7 +997,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/compliance/grc-studio",
-        "label": "No-code GRC studio",
+        "label": "Compliance studio",
         "aliases": "workflow builder governance risk compliance studio",
         "group": "Govern",
         "icon": "compliance",

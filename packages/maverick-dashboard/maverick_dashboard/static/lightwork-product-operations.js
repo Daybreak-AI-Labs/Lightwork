@@ -110,6 +110,56 @@
       var entries = Object.entries(item);
       if (entries.length > maximumEntries) omitted(target);
       entries.slice(0, maximumEntries).forEach(function (entry) {
+        if (entry[0] === 'commitment_capability_author') {
+          var capabilityAuthor = entry[1], capabilityStarted = generation, capabilitySelection = JSON.stringify(context());
+          if (!capabilityAuthor || Array.isArray(capabilityAuthor) || Object.keys(capabilityAuthor).sort().join(',') !== 'context,parent,parent_binding' ||
+              !/^[a-f0-9]{64}$/.test(capabilityAuthor.context || '') || !/^[a-f0-9]{64}$/.test(capabilityAuthor.parent_binding || '') ||
+              !/^CMV-[a-f0-9]{48}$/.test(capabilityAuthor.parent || '')) return;
+          var capabilityDestination = node('dd', undefined, list), capabilityForm = window.LWCommitmentCapability;
+          if (capabilityForm && typeof capabilityForm.openAuthor === 'function') button('Open the complete additional-work form', capabilityDestination, async function (event) {
+            var isCurrent = function () { return active(capabilityStarted) && JSON.stringify(context()) === capabilitySelection; };
+            if (!isCurrent() || busy) return;
+            var capabilityButton = event.currentTarget; capabilityButton.disabled = true;
+            try {
+              var opened = await capabilityForm.openAuthor(capabilityAuthor, {isCurrent:isCurrent});
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete additional-work form is open; your entered choices were kept.' : 'The selected work or current form changed. Review Promise reviews before continuing.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The additional-work form could not be opened. Check current Promise reviews.'; }
+            finally { if (isCurrent() && capabilityButton.isConnected) capabilityButton.disabled = false; }
+          });
+          else {
+            var capabilityLink = node('a', 'Open the complete additional-work form', capabilityDestination);
+            capabilityLink.href = '/commitment-reviews?review=' + encodeURIComponent(capabilityAuthor.parent) + '#ccl-author';
+            capabilityLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
+        if (entry[0] === 'grc_draft_form') {
+          var draft = entry[1], draftStarted = generation, draftSelection = JSON.stringify(context());
+          if (!draft || Array.isArray(draft) || Object.keys(draft).sort().join(',') !== 'context,original' ||
+              typeof draft.context !== 'string' || !/^[a-f0-9]{64}$/.test(draft.context) || typeof draft.original !== 'boolean') return;
+          var draftDestination = node('dd', undefined, list), draftForm = window.LightworkGRCDraft;
+          var draftLabel = draft.original ? 'Read the original draft save' : 'Review and save a blueprint draft';
+          if (draftForm && typeof draftForm.open === 'function') button(draftLabel, draftDestination, async function (event) {
+            var isCurrent = function () { return active(draftStarted) && JSON.stringify(context()) === draftSelection; };
+            if (!isCurrent() || busy) return;
+            var draftButton = event.currentTarget; draftButton.disabled = true;
+            try {
+              var opened = await draftForm.open(draft.context, draft.original, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected blueprint controls are open.' : 'The current draft or access changed. Review the full controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The blueprint controls could not be opened. Check the current full controls.'; }
+            finally { if (isCurrent() && draftButton.isConnected) draftButton.disabled = false; }
+          });
+          else {
+            var draftLink = node('a', draftLabel, draftDestination);
+            draftLink.href = '/compliance/grc-studio' + (draft.original ? '#grcs-save-original' : '#grcs-builder-panel');
+            draftLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
         if (entry[0] === 'distinction_cells') {
           var cells = entry[1], cellsStarted = generation, cellsSelection = JSON.stringify(context());
           if (!cells || Array.isArray(cells) || Object.keys(cells).sort().join(',') !== 'comparisons,context,flow' ||
@@ -658,6 +708,9 @@
               : ['learning.example_accept', 'learning.example_reject', 'learning.example_grant'].includes(item.id)
                 ? !!(window.LightworkLearningCapture && window.LightworkLearningCapture.renderReview &&
                      window.LightworkLearningCapture.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('commitments.capability.')
+                ? !!(window.LWCommitmentCapability && window.LWCommitmentCapability.renderReview &&
+                     window.LWCommitmentCapability.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)

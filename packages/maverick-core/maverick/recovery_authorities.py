@@ -105,6 +105,7 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "learning-distinction-requests": "learning_distinction_admission_authority",
     "reward-training-requests": "ranking_training_admission_authority",
     "shared-decision-evidence": "decision_evidence_permission_authority",
+    "commitment-capability": "commitment_capability_source_authority",
     "local-rule-requalification": "rule_requalification_authority",
     "learning-case-requests": "learning_case_write_authority",
     "learning-case-setup-requests": "learning_case_setup_authority",

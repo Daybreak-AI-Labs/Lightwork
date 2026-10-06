@@ -5183,6 +5183,11 @@ def pick_advanced() -> dict[str, Any]:
             "trust decision for all local workspaces; ordinary updates do not need it.",
             default=False,
         ),
+        "allow_commitment_capability_learning": _q_confirm(
+            "Enable local additional-work qualification from reported capacity, possible additions and scoped trial results? "
+            "Accepted commitments stay protected. This does not verify supplier stock or reserve resources.",
+            default=False,
+        ),
         "allow_shared_decision_evidence": _q_confirm(
             "Enable shared decision reviews using the facts and possible situations your team enters? "
             "Each case needs explicit sharing permission. Reported facts are not independently verified and no business action runs.",
@@ -9059,6 +9064,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("outcome_measurement = true")
     if advanced.get("allow_commitment_viability") is True:
         _feature_locks.append("commitment_viability = true")
+    if advanced.get("allow_commitment_capability_learning") is True:
+        _feature_locks.append("commitment_capability_learning = true")
     if advanced.get("allow_shared_decision_evidence") is True:
         _feature_locks.append("shared_decision_evidence = true")
     if advanced.get("allow_workspace_recovery") is True:

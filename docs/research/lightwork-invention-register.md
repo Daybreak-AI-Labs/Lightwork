@@ -184,6 +184,19 @@ P01 and P05 also have bounded native distinction-search and dependency recheck
 paths; P04 exposes exact retained observed comparison cells. Their exact scope
 and remaining research boundaries are in the [implementation inventory](lightwork-invention-implementation-status-2026-10-01.md).
 
+The next October 6 implementation checkpoint adds N06's bounded entered-model
+capability learner to Promise reviews. Completed attributed trial reports or
+exact owned published local-rule executions eliminate inconsistent requirement
+explanations. The native feasibility engine protects every accepted commitment
+while joint additional offers and inclusion-minimal hypothetical additions are
+checked against all surviving explanations. One shared allowance governs the
+selected distinguishing tests. The ordinary page and typed Copilot preserve
+complete reviewed sources, unknown attempts, explicit withdrawal and exact
+original outcomes. This is finite version-space learning and exhaustive
+abduction; matching a same-information exhaustive comparator establishes no
+algorithmic advantage. Reported resource premises and hypothetical additions
+do not prove physical availability, customer willingness, profit or revenue.
+
 N02 is the strongest provisional candidate for reusable learning across installations. N01 is the strongest candidate for a materially different operational capability. N03 is a related portability track with substantial overlap. N04 through N06 remain in the register as secondary leads.
 
 Before implementation, N02 needs an explicit source-model language, release contract, witness semantics, target mapping contract, and comparator specification. Before claiming N01's proposed novel mechanism, the bounded pilot needs a precise state and observation model, commitment constraints, uncertainty assumptions, feasible-continuation representation, and a strong robust-controller baseline. The required next artifact is a discriminating experiment specification, not a favorable demonstration.
