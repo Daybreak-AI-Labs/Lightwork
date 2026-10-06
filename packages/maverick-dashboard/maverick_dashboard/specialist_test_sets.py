@@ -21,7 +21,9 @@ from maverick.file_lock import (
 from maverick.paths import data_dir
 
 MAX_CASES_PER_SPECIALIST = 20
+# A Copilot-reviewed run picks at most this many; a person can run the whole set.
 MAX_CASES_PER_RUN = 5
+MAX_CASES_PER_FULL_RUN = MAX_CASES_PER_SPECIALIST
 _MAX_ALL_CASES = 1000
 _MAX_RUNS = 500
 
@@ -130,19 +132,20 @@ def snapshot(specialist: str, selected_ids: list[str] | None = None) -> list[dic
     if not rows:
         raise ValueError("Add at least one test before running the checks.")
     if selected_ids:
-        if len(selected_ids) > MAX_CASES_PER_RUN or len(set(selected_ids)) != len(selected_ids):
-            raise ValueError(f"Choose between 1 and {MAX_CASES_PER_RUN} different checks.")
+        if len(selected_ids) > MAX_CASES_PER_FULL_RUN or len(set(selected_ids)) != len(selected_ids):
+            raise ValueError(f"Choose between 1 and {MAX_CASES_PER_FULL_RUN} different checks.")
         selected = set(selected_ids)
         rows = [row for row in rows if row["id"] in selected]
         if len(rows) != len(selected):
             raise ValueError("One selected check changed or was removed. Refresh the list.")
-    elif len(rows) > MAX_CASES_PER_RUN:
-        raise ValueError(f"Choose at most {MAX_CASES_PER_RUN} checks for one run.")
+    elif len(rows) > MAX_CASES_PER_FULL_RUN:
+        raise ValueError(f"Choose at most {MAX_CASES_PER_FULL_RUN} checks for one run.")
     return rows
 
 
 def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[dict],
-                actor: str, identity: str, *, comparison: dict | None = None) -> dict:
+                actor: str, identity: str, *, comparison: dict | None = None,
+                instructions_key: str | None = None, instructions: str | None = None) -> dict:
     """Persist a reviewed operation before starting a background worker."""
     def mutate(db):
         prior = db["runs"].get(identity)
@@ -167,6 +170,9 @@ def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[
                "finished_at": None, "state": "prepared", "results": [], "total": len(cases),
                "passed": 0, "spent_dollars": 0.0, "case_revisions": revisions,
                "case_snapshots": [dict(c) for c in cases]}
+        if instructions_key:
+            # The exact words tested, so each answer can point back to them.
+            row.update(instructions_key=instructions_key, instructions=(instructions or "")[:6000])
         if comparison:
             row.update(comparison=dict(comparison), total=len(cases) * 2)
         db["runs"][identity] = row
@@ -175,7 +181,8 @@ def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[
 
 
 def begin_run(specialist: str, model: str, instruction_hash: str, cases: list[dict], actor: str,
-              identity: str | None = None) -> tuple[dict, bool]:
+              identity: str | None = None, *, instructions_key: str | None = None,
+              instructions: str | None = None) -> tuple[dict, bool]:
     def mutate(db):
         if identity and identity in db["runs"]:
             prior = db["runs"][identity]
@@ -199,6 +206,9 @@ def begin_run(specialist: str, model: str, instruction_hash: str, cases: list[di
                "total": len(cases), "passed": 0, "spent_dollars": 0.0,
                "case_revisions": [{"id": c["id"], "revision": c["revision"]} for c in cases],
                "case_snapshots": [dict(c) for c in cases]}
+        if instructions_key:
+            # The exact words tested, so each answer can point back to them.
+            row.update(instructions_key=instructions_key, instructions=(instructions or "")[:6000])
         db["runs"][row["id"]] = row
         return (dict(row), True), True
     return _with_store(mutate)
@@ -244,9 +254,14 @@ def runs_for(specialist: str) -> list[dict]:
     return [public_run(row) for row in rows]
 
 
+def _stale_after(row: dict) -> float:
+    """A whole set takes longer than a few checks; allow 30 s per answer."""
+    return max(180.0, 30.0 * float(row.get("total") or 0))
+
+
 def public_run(row: dict) -> dict:
     result = dict(row)
-    if result["state"] == "running" and time.time() - result["started_at"] > 180:
+    if result["state"] == "running" and time.time() - result["started_at"] > _stale_after(result):
         result["state"] = "unknown"
         result["message"] = "No final result arrived. A provider call may still have been billed. Nothing was retried."
     if result["state"] == "prepared" and time.time() - result["started_at"] > 180:

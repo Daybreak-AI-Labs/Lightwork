@@ -40,10 +40,11 @@ function defaults(admin) {
   };
 }
 
-async function fixture(markup, { admin = true, inventory = {}, responses = {} } = {}) {
-  const dom = new JSDOM(markup, { url: "https://lightwork.example/workforce", runScripts: "outside-only" });
+async function fixture(markup, { admin = true, inventory = {}, responses = {}, url = "https://lightwork.example/workforce", storage = {} } = {}) {
+  const dom = new JSDOM(markup, { url, runScripts: "outside-only" });
   const { window } = dom;
   shell(window);
+  Object.entries(storage).forEach(([key, value]) => window.sessionStorage.setItem(key, value));
   const calls = [];
   const table = defaults(admin);
   Object.assign(table["/api/v1/workforce-ops/inventory"], inventory);
@@ -135,7 +136,7 @@ test("customer can edit and run a saved specialist answer check from Workforce",
   assert.match(ui.doc.getElementById("wo-test-run-out").textContent, /1 of 1 answers passed/);
 });
 
-test("a larger saved set lets a person choose a bounded subset", async (t) => {
+test("a larger saved set runs whole by default and a person can leave checks out", async (t) => {
   const cases = Array.from({length: 6}, (_, i) => ({id: String(i).repeat(32), specialist: "finance_ap",
     revision: 1, task: "Check invoice example " + i, includes: ["duplicate"], excludes: [],
     refusal: false, citation: false}));
@@ -148,7 +149,12 @@ test("a larger saved set lets a person choose a bounded subset", async (t) => {
   select.dispatchEvent(new ui.window.Event("change"));
   await ui.settle();
   const boxes = ui.doc.querySelectorAll(".wo-test-choice");
+  // AI-14: the whole saved set (up to 20) is chosen, so it runs before publishing.
+  assert.ok(Array.from(boxes).every((box) => box.checked));
+  assert.equal(ui.doc.getElementById("wo-test-run").disabled, false);
+  Array.from(boxes).forEach((box) => box.click());
   assert.equal(ui.doc.getElementById("wo-test-run").disabled, true);
+  assert.match(ui.doc.getElementById("wo-test-status").textContent, /Choose at least one check/);
   boxes[1].click(); boxes[3].click();
   assert.equal(ui.doc.getElementById("wo-test-run").disabled, false);
   ui.doc.getElementById("wo-test-run").click();
@@ -156,6 +162,59 @@ test("a larger saved set lets a person choose a bounded subset", async (t) => {
   const run = ui.calls.find((c) => c.url === "/api/v1/workforce-ops/test-suite/customer/run" && c.method === "POST");
   assert.deepEqual(JSON.parse(run.body).case_ids, [cases[1].id, cases[3].id]);
   assert.deepEqual(JSON.parse(run.body).case_revisions, {[cases[1].id]: 1, [cases[3].id]: 1});
+  assert.ok(ui.calls.some((c) => c.confirm && /\$0\.10 spending limit/.test(c.confirm)));
+});
+
+test("all twenty saved checks run together with a per-question spending limit", async (t) => {
+  const cases = Array.from({length: 20}, (_, i) => ({id: (i < 10 ? "0" : "") + String(i).padEnd(31, "a"), specialist: "finance_ap",
+    revision: 1, task: "Check invoice example " + i, includes: ["duplicate"], excludes: [],
+    refusal: false, citation: false}));
+  const ui = await fixture(partial("_workforce_ops.html"), {responses: {
+    "/api/v1/workforce-ops/test-suite/customer": {live_enabled: true, cases, runs: []}
+  }});
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  ui.doc.getElementById("wo-test-run").click();
+  await ui.settle();
+  const run = ui.calls.find((c) => c.url === "/api/v1/workforce-ops/test-suite/customer/run" && c.method === "POST");
+  assert.equal(JSON.parse(run.body).case_ids.length, 20);
+  assert.ok(ui.calls.some((c) => c.confirm && /\$1\.00 spending limit/.test(c.confirm)));
+});
+
+test("each answer goes back to the instructions that produced it", async (t) => {
+  const markup = partial("_workforce_ops.html").replace(/data-can-open-agents="[^"]*"/, 'data-can-open-agents="true"');
+  const ui = await fixture(markup, {responses: {
+    "/api/v1/workforce-ops/test-suite/customer": {live_enabled: true, cases: [], runs: [{
+      id: "f".repeat(32), specialist: "finance_ap", state: "done", passed: 1, total: 1, model: "test-model",
+      spent_dollars: 0.001, started_at: 1700000000, instructions: "Check every invoice for duplicates.",
+      results: [{case_id: "a".repeat(32), task: "Two invoices match?", answer: "This is a duplicate.", passed: true}]}]}
+  }});
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  const history = ui.doc.getElementById("wo-test-history");
+  const source = Array.from(history.querySelectorAll("a")).find((a) => a.textContent === "See the instructions used");
+  assert.ok(source, history.innerHTML);
+  const target = ui.doc.getElementById(source.getAttribute("href").slice(1));
+  assert.ok(target, "the link lands on the tested instructions");
+  assert.match(target.nextElementSibling.textContent, /Check every invoice for duplicates/);
+  const edit = Array.from(history.querySelectorAll("a")).find((a) => a.textContent === "Edit in Agent Factory");
+  assert.equal(edit.getAttribute("href"), "/agents?name=finance_ap#f-persona");
+});
+
+test("instructions handed over from Agent Factory open the comparison ready to run", async (t) => {
+  const dom = partial("_workforce_ops.html");
+  const ui = await fixture(dom, {url: "https://lightwork.example/workforce?specialist=finance_ap&compare=1",
+    storage: {"lightwork-proposed-instructions:finance_ap": "Always name the duplicate invoice first."}});
+  t.after(() => ui.window.close());
+  assert.equal(ui.doc.getElementById("wo-test-specialist").value, "finance_ap");
+  assert.equal(ui.doc.getElementById("wo-compare").open, true);
+  assert.equal(ui.doc.getElementById("wo-compare-instructions").value, "Always name the duplicate invoice first.");
 });
 
 test("an uncertain paid check reads its original result without posting another request", async (t) => {

@@ -59,7 +59,8 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("candidate_promotion", "Candidate promotion", "How proposed improvements are reviewed before use.",
      ("candidate_promotion",), ""),
     ("knowledge_access", "Governed knowledge", "Which knowledge agents may use.", ("knowledge_access",), ""),
-    ("capabilities", "Capabilities", "Browser, computer and code tools agents may use.", ("capabilities",),
+    ("capabilities", "Capabilities", "Browser, computer and code tools agents may use, and the tests "
+     "changed agent instructions must pass before they are published.", ("capabilities", "agent_factory"),
      "/settings#settings-controls"),
     ("self_learning", "Self-learning", "Whether agents learn from past work.", ("self_learning",), ""),
     ("ekko", "Work discovery", "Finding work that could be automated.", ("ekko",), ""),

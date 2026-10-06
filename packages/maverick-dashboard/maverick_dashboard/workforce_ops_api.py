@@ -74,12 +74,13 @@ class SpecialistCaseDelete(BaseModel):
 class SpecialistRunIn(BaseModel):
     specialist: str = Field(min_length=1, max_length=100)
     operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
-    case_ids: list[str] = Field(default_factory=list, max_length=5)
-    case_revisions: dict[str, int] = Field(min_length=1, max_length=5)
+    # A whole saved test set (up to 20) can run at once before publishing.
+    case_ids: list[str] = Field(default_factory=list, max_length=20)
+    case_revisions: dict[str, int] = Field(min_length=1, max_length=20)
 
 
 class SpecialistCompareIn(SpecialistRunIn):
-    case_ids: list[str] = Field(min_length=1, max_length=5)
+    case_ids: list[str] = Field(min_length=1, max_length=20)
     proposed_instructions: str = Field(min_length=8, max_length=6000)
     baseline_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     expected_context: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -298,11 +299,13 @@ def _comparison_systems(profile, model, system, proposed, baseline):
 
 
 def _perform_answer_tests(job, *, specialist, model, instruction_hash, cases, actor,
-                          operation_id, systems, comparison, budget, guard):
+                          operation_id, systems, comparison, budget, guard, instructions_key=None,
+                          tested_instructions=None):
     from maverick.llm import LLM
 
     from . import specialist_test_sets as saved
-    run, created = saved.begin_run(specialist, model, instruction_hash, cases, actor, identity=operation_id)
+    run, created = saved.begin_run(specialist, model, instruction_hash, cases, actor, identity=operation_id,
+                                   instructions_key=instructions_key, instructions=tested_instructions)
     if not created:
         return {"run": run}
     llm = LLM(model)
@@ -436,10 +439,15 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
     system = saved.answer_system(profile)
     instruction_hash = saved.instruction_digest(system, model)
     systems, comparison = _comparison_systems(profile, model, system, proposed_instructions, baseline_revision)
+    from .agent_publish_gate import instructions_key as _instructions_key
     from .learning_ops_api import _budget
+    tested_key = None if comparison else _instructions_key(model, profile.persona)
     budget = _budget("specialist_eval")
-    for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000),
-                         ("max_output_tokens", 640), ("max_wall_seconds", 120),
+    # Ceilings grow with the questions asked (5 questions keep the original
+    # $0.25 / 640-token run), and still never exceed the configured caps.
+    questions = len(cases)
+    for key, ceiling in (("max_dollars", round(.05 * questions, 2)), ("max_input_tokens", 2000 * questions),
+                         ("max_output_tokens", 128 * questions), ("max_wall_seconds", max(120, 24 * questions)),
                          ("max_tool_calls", 0)):
         current = getattr(budget, key)
         setattr(budget, key, ceiling if current is None else min(current, ceiling))
@@ -466,13 +474,15 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
     def _run(job) -> dict:
         return _perform_answer_tests(job, specialist=specialist, model=model,
             instruction_hash=instruction_hash, cases=cases, actor=actor, operation_id=operation_id,
-            systems=systems, comparison=comparison, budget=budget, guard=_guard)
+            systems=systems, comparison=comparison, budget=budget, guard=_guard,
+            instructions_key=tested_key, tested_instructions=None if comparison else profile.persona)
 
     _audit(request, "specialist_test_run", specialist=specialist,
            cases=len(cases), model=model, max_dollars=budget.max_dollars, comparison=comparison is not None)
     if operation_id:
         saved.reserve_run(specialist, model, instruction_hash, cases,
-                          actor, operation_id, comparison=comparison)
+                          actor, operation_id, comparison=comparison, instructions_key=tested_key,
+                          instructions=None if comparison else profile.persona)
     return start_job(request, "specialist_answer_test", "Checking specialist answers", _run,
                      needs_global=False, cancellable=True, on_cancel=learning_jobs.stop_budget(budget))
 

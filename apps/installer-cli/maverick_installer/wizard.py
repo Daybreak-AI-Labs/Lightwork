@@ -1471,6 +1471,7 @@ def pick_capabilities() -> dict[str, Any]:
         "human approval to save).",
         default=True,
     )
+    require_passing_tests = pick_agent_publish_gate()
     return {
         "computer_use": use_computer,
         "browser": use_browser,
@@ -1480,7 +1481,24 @@ def pick_capabilities() -> dict[str, Any]:
         "deferred_tools": deferred_tools,
         "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
+        "require_passing_tests": require_passing_tests,
     }
+
+
+def pick_agent_publish_gate() -> bool:
+    """Agent Factory publish gate. ON by default.
+
+    Changed instructions for an agent or specialist are published only after
+    every saved test passes on exactly those instructions; publishing anyway
+    needs a reason that goes to the activity record. Written under
+    ``[agent_factory]`` as ``require_passing_tests`` only when turned off.
+    """
+    return _q_confirm(
+        "Require passing tests before changed agent or specialist instructions "
+        "are published? (Someone can still publish without them by giving a "
+        "reason, which is recorded.)",
+        default=True,
+    )
 
 
 def pick_self_learning() -> dict[str, Any]:
@@ -8531,13 +8549,17 @@ def _cfg_capabilities(
     return lines
 
 
-def _cfg_agent_factory(jd_hiring: bool) -> list[str]:
-    # JD hiring is default-on in the kernel (maverick.jd_hiring); only write
+def _cfg_agent_factory(jd_hiring: bool, require_passing_tests: bool = True) -> list[str]:
+    # JD hiring (maverick.jd_hiring) and the publish gate
+    # (maverick.agent_publish_policy) are default-on in the kernel; only write
     # the table when the operator opted OUT, matching the
     # write-only-on-divergence convention.
-    if jd_hiring:
-        return []
-    return ["", "[agent_factory]", "jd_hiring = false"]
+    lines = []
+    if not jd_hiring:
+        lines.append("jd_hiring = false")
+    if not require_passing_tests:
+        lines.append("require_passing_tests = false")
+    return ["", "[agent_factory]", *lines] if lines else []
 
 
 def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
@@ -10172,6 +10194,7 @@ def write_config(
     embedded_flash = bool(capability_config.pop("embedded_flash", False))
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
+    require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
     # Tool exposure lives under [tools] (kernel: maverick.agent via
     # config.get_tool_exposure); "core" is the default, so only "full" is
     # written (write-only-on-divergence, like the other [tools] keys).
@@ -10179,7 +10202,7 @@ def write_config(
         advanced["tool_exposure"] = "full"
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
-    lines += _cfg_agent_factory(jd_hiring)
+    lines += _cfg_agent_factory(jd_hiring, require_passing_tests)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers)
