@@ -328,82 +328,104 @@ def test_copilot_activates_and_restores_exact_instructions_without_replaying(cli
     assert restored.status_code == 200, restored.text
     assert harness_refine.refinements() == []
     assert client.post(base + "/execute", json={"token": undo_review["token"], "confirmed": True}).json()["status"] == "replayed"
-    assert client.post(base + "/execute", json={"token": apply_review["token"], "confirmed": True}).status_code == 409
+    # The old apply review reads its original receipt; it is never applied again.
+    stale = client.post(base + "/execute", json={"token": apply_review["token"], "confirmed": True})
+    assert stale.status_code == 200 and stale.json()["status"] == "replayed"
+    assert harness_refine.refinements() == []
+
+
+def _pass(client, **choices):
+    """Review and start a learning pass the way the Learned page does.
+
+    Returns the refusal, or the pass's finished task once its admitted job ends.
+    """
+    import time
+    current = client.get(API + "/passes/current")
+    if current.status_code != 200:
+        return current
+    review = client.post(API + "/passes/review", json={
+        "context": current.json()["context"], "revision": current.json()["revision"], **choices})
+    if review.status_code != 200:
+        return review
+    started = client.post(API + "/passes/start", json={"token": review.json()["token"], "confirm": True})
+    assert started.status_code == 200, started.text
+    original = API + "/passes/requests/" + review.json()["operation"]
+    deadline = time.time() + 15
+    body = started.json()
+    while not body.get("job") or body["job"]["state"] in ("admitted", "running", "stopping"):
+        assert time.time() < deadline, body
+        time.sleep(0.05)
+        body = client.get(original).json()
+    return body
+
+
+def _main_model():
+    from maverick.llm import model_for_role
+    return model_for_role("orchestrator")
 
 
 def test_run_now_respects_the_switch_and_the_learning_stop(client, monkeypatch):
     from maverick import learning_guard, self_harness
     from maverick import self_improvement_runner as runner
     _configure("[self_harness]\nenable = false")
-    r = client.post(API + "/run", json={"scope": "main"})
+    r = _pass(client, scope="main")
     assert r.status_code == 409 and "Self-coaching is off" in r.json()["detail"]
 
-    monkeypatch.setattr(self_harness, "enabled", lambda: True)
+    _configure("[self_harness]\nenable = true")
     report = self_harness.SelfHarnessReport(model_id="claude-x", mined=2, proposed=1, validated=1,
                                             promoted=1, applied_lines=["check totals"])
     seen: list[dict] = []
-    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda **kw: seen.append(kw) or (report, 3))
+    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda *a, **kw: seen.append(kw) or (report, 3))
     from maverick_dashboard import learning_jobs
-    started = client.post(API + "/run", json={"scope": "main"})
-    assert learning_jobs.get(started.json()["job"]["id"]).cancellable is False
-    out = _finished(client, started)["result"]
-    assert out["reports"][0]["adopted"] == 1 and out["reports"][0]["retired"] == 3
-    assert out["reports"][0]["new_lessons"] == ["check totals"]
-    assert seen[-1] == {"retire": True, "canary": None, "evaluation_system": None}
+    done = _pass(client, scope="main")
+    assert done["job"]["state"] == "done", done
+    job = next(job for job in learning_jobs._jobs.values() if job.kind == "self_harness_run")
+    assert job.cancellable is True  # a reviewed pass can be stopped between models
+    out = done["result"]
+    assert out["reports"][0]["Adopted"] == 1 and out["reports"][0]["Retired"] == 3
+    assert (seen[-1]["model_id"], seen[-1]["retire"], seen[-1]["canary"], seen[-1]["evaluation_system"]) == (
+        _main_model(), True, None, None)
 
     def halted(job, phase):
         raise learning_guard.Halted("stop", "operator")
     monkeypatch.setattr(learning_guard, "check_learning_halt", halted)
-    stopped = client.post(API + "/run", json={"scope": "main"})
+    stopped = _pass(client, scope="main")
     assert stopped.status_code == 409 and "stopped" in stopped.json()["detail"]
 
 
 def test_run_now_passes_trial_retire_and_the_deployed_instructions(client, monkeypatch):
     from maverick import self_harness
     from maverick import self_improvement_runner as runner
-    monkeypatch.setattr(self_harness, "enabled", lambda: True)
+    _configure("[self_harness]\nenable = true")
     report = self_harness.SelfHarnessReport(model_id="claude-x")
     seen: list[dict] = []
-    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda **kw: seen.append(kw) or (report, 0))
+    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda *a, **kw: seen.append(kw) or (report, 0))
     body = {"scope": "main", "trial": True, "retire": False, "instructions": "You are a careful agent."}
-    _finished(client, client.post(API + "/run", json=body))
-    assert seen[-1] == {"retire": False, "canary": True, "evaluation_system": "You are a careful agent."}
+    _pass(client, **body)
+    assert (seen[-1]["retire"], seen[-1]["canary"], seen[-1]["evaluation_system"]) == (
+        False, True, "You are a careful agent.")
     for bad in ("   ", "a\x00b", "x" * (1024 * 1024 + 1)):
-        r = client.post(API + "/run", json=dict(body, instructions=bad))
-        assert r.status_code == 422, bad[:5]
+        r = _pass(client, **dict(body, instructions=bad))
+        assert r.status_code in (413, 422), bad[:5]
 
-    fleet_calls: list[dict] = []
-
-    def all_models(**kw):
-        fleet_calls.append(kw)
-        assert kw["should_stop"]() is False
-        return {"claude-x": (report, 0)}
-    monkeypatch.setattr(runner, "run_self_harness_all_models", all_models)
-    from maverick_dashboard import learning_jobs
-    started = client.post(API + "/run", json={"scope": "all"})
-    assert learning_jobs.get(started.json()["job"]["id"]).cancellable is True
-    assert len(_finished(client, started)["result"]["reports"]) == 1
-    assert fleet_calls[0]["canary"] is None and fleet_calls[0]["retire"] is True
+    seen.clear()
+    done = _pass(client, scope="all")
+    assert len(done["result"]["reports"]) == len(runner.harness_fleet_models()) == len(seen)
+    assert all(call["canary"] is None and call["retire"] is True for call in seen)
 
 
 def test_run_for_the_chosen_model_and_preview_threshold(client, monkeypatch):
     from maverick import self_harness
     from maverick import self_improvement_runner as runner
-    store = os.path.join(os.environ["HOME"], "addenda.json")
-    from pathlib import Path
-    monkeypatch.setattr(self_harness, "_store_path", lambda: Path(store))
-    self_harness._write_addenda({"claude-x": "Operating guidance learned for this model:\n- cite"}, Path(store))
-    meta = {}
-    self_harness._upsert_line_meta(meta, "claude-x", "cite", {"source_goal_ids": [0]}, now=1)
-    self_harness._write_line_meta(meta, Path(store))
-    monkeypatch.setattr(self_harness, "enabled", lambda: True)
+    _configure("[self_harness]\nenable = true")
     seen: list[dict] = []
     monkeypatch.setattr(runner, "run_self_harness_cycle",
-                        lambda **kw: seen.append(kw) or (self_harness.SelfHarnessReport(model_id="claude-x"), 0))
-    assert client.post(API + "/run", json={"scope": "chosen"}).status_code == 422
-    assert client.post(API + "/run", json={"scope": "chosen", "model_id": "made-up"}).status_code == 422
-    _finished(client, client.post(API + "/run", json={"scope": "chosen", "model_id": "claude-x"}))
-    assert seen[-1]["model_id"] == "claude-x"
+                        lambda *a, **kw: seen.append(kw) or (self_harness.SelfHarnessReport(model_id="claude-x"), 0))
+    assert _pass(client, scope="chosen").status_code == 409
+    assert _pass(client, scope="chosen", model_id="made-up").status_code == 409
+    chosen = runner.harness_fleet_models()[-1]
+    _pass(client, scope="chosen", model_id=chosen)
+    assert seen[-1]["model_id"] == chosen
     assert client.get(API + "/preview", params={"min_support": 5}).status_code == 200
     assert client.get(API + "/preview", params={"min_support": 4}).status_code == 422
 
@@ -427,7 +449,7 @@ def test_test_case_check_runs_in_the_background_and_removal_needs_confirmation(c
 def test_learned_page_shows_the_new_sections_in_plain_words(client):
     page = client.get("/learned").text
     assert 'id="llp-root"' in page and 'data-admin="1"' in page
-    assert 'id="llp-propose"' in page and 'id="llp-run"' in page
+    assert 'id="llp-propose"' in page and 'id="lp-review"' in page
     assert "/static/lightwork-learning-loop.js" in page
     own = page.split('id="llp-root"', 1)[1].split(">", 1)[1].split("<style>", 1)[0]
     visible = re.sub(r"<script[\s\S]*?</script>|<[^>]+>", " ", own)
