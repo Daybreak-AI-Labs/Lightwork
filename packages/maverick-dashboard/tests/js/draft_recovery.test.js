@@ -166,3 +166,30 @@ test('request failures show plain sentences, never server text or browser errors
   assert.doesNotMatch(other.recovery.panel.textContent,/sqlite|OperationalError/);
   other.dom.window.close();
 });
+
+// Chat's compact row said "Checking draft recovery…" for 18-109 ms on every
+// load. A check that answers within 300 ms now never shows the loading words;
+// a slow one still says so.
+async function compactRow(delayMs){
+  const dom=new JSDOM('<meta name="lightwork-draft-context" content="account-workspace"><form id="editor"><textarea id="brief"></textarea></form>',{url:'https://lightwork.test/chat',runScripts:'outside-only'});
+  const w=dom.window,d=w.document;Object.defineProperty(w,'crypto',{value:webcrypto});w.TextEncoder=TextEncoder;
+  const labels=[];
+  w.fetch=async url=>{await new Promise(resolve=>setTimeout(resolve,delayMs));return {ok:true,json:async()=>({context:'account-workspace',revision:0,payload:null,slot:url.split('/').pop()})};};
+  w.eval(source);
+  const recovery=w.mvDraftRecovery.create({key:'chat',compact:true,host:d.getElementById('editor'),read:()=>({brief:''}),restore:()=>{}});
+  const summary=recovery.panel.querySelector('.draft-recovery__compact > summary');
+  new w.MutationObserver(()=>labels.push(summary.textContent)).observe(summary,{childList:true,characterData:true,subtree:true});
+  labels.push(summary.textContent);
+  await recovery.ready;await tick();
+  return {dom,labels,summary};
+}
+test('a quick recovery check never shows the loading words in the compact row',async()=>{
+  const ui=await compactRow(20);
+  assert.ok(!ui.labels.includes('Checking draft recovery…'),JSON.stringify(ui.labels));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});
+test('a slow recovery check says it is checking',async()=>{
+  const ui=await compactRow(450);
+  assert.ok(ui.labels.includes('Checking draft recovery…'),JSON.stringify(ui.labels));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});

@@ -23,7 +23,23 @@ async function chooseInterface(page,language){
   await expect(picker).toBeEnabled();
 }
 
-for(const language of Object.keys(labels))test(`shipped ${language} catalog initializes chat and shared-shell controls with honest language regions`,async({page,context,baseURL},info)=>{
+// English is the source language: its catalog is identity, so English pages
+// load none and the runtime's English fallback supplies the same copy.
+test('English pages load no catalog and keep English product copy',async({page,context,baseURL})=>{
+  await localOnly(context,baseURL);await syntheticBudget(page);
+  await context.setExtraHTTPHeaders({Origin:baseURL,'Accept-Language':'en'});
+  const requested=[];page.on('request',request=>{if(catalogPath.test(new URL(request.url()).pathname))requested.push(request.url());});
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await chooseInterface(page,'en');await page.reload();
+  await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveText(labels.en);
+  await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveAttribute('lang','en');
+  await expect(page.locator('script[src*="/static/lightwork-i18n-catalog/"]')).toHaveCount(0);
+  await expect(page.locator('link[href*="/static/lightwork-i18n-catalog/"]')).toHaveCount(0);
+  expect(await page.evaluate(()=>window.LightworkI18n.text('Add details'))).toBe(labels.en);
+  expect(requested).toEqual([]);expect(errors).toEqual([]);
+});
+
+for(const language of Object.keys(labels).filter(language=>language!=='en'))test(`shipped ${language} catalog initializes chat and shared-shell controls with honest language regions`,async({page,context,baseURL},info)=>{
   await localOnly(context,baseURL);await syntheticBudget(page);
   await context.setExtraHTTPHeaders({Origin:baseURL,'Accept-Language':language});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));

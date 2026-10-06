@@ -112,6 +112,26 @@ async function submitGoal(w) {
   return w.document.getElementById("goal-error").textContent;
 }
 
+// The send disables the form while it is on its way, and the browser moves
+// focus from the disabled field to the page body. A refused send puts focus
+// back in the field the person was typing in (WCAG 2.4.3).
+test("a refused send returns focus to the composer, not the page body", async () => {
+  for (const reply of [
+    () => ({ ok: false, status: 500, headers: { get: () => null }, json: async () => ({}) }),
+    () => { throw new TypeError("Failed to fetch"); },
+  ]) {
+    // The browser's focus fixup: a field that becomes disabled loses focus.
+    const fixup = () => { const field = w.document.activeElement; if (field && field.disabled) { field.disabled = false; field.blur(); field.disabled = true; } };
+    const w = goalForm(() => { fixup(); assert.equal(w.document.activeElement, w.document.body); return reply(); });
+    const title = w.document.querySelector('[name="title"]');
+    title.focus();
+    assert.equal(w.document.activeElement, title);
+    await submitGoal(w);
+    assert.equal(w.document.activeElement, title, "focus is back in the composer");
+    w.close();
+  }
+});
+
 test("starting a task explains failures in plain sentences", async () => {
   const cases = [
     [() => ({ ok: false, status: 500, headers: { get: () => null }, json: async () => ({ detail: "Traceback (most recent call last)" }) }),

@@ -50,6 +50,7 @@
           </label>
           <fieldset class="sk-tools">
             <legend>Tools it needs (optional)</legend>
+            {% if can_author %}
             <label class="sk-field">
               <span class="sr-only">Find a tool</span>
               <input class="input" type="search" id="sc-tool-filter" placeholder="Find a tool…"
@@ -57,9 +58,11 @@
             </label>
             {# A scroll box a keyboard can reach. Not a live region: reading every
                tool aloud when the list loads was noise. #}
-            <div id="sc-tool-list" class="sk-tool-list" role="region" tabindex="0" aria-label="Tools to choose from">
-              <p class="muted sk-small">Loading tools…</p>
-            </div>
+            <div id="sc-tool-list" class="sk-tool-list" role="region" tabindex="0" aria-label="Tools to choose from"></div>
+            {% else %}
+            {# A form that cannot be used has no tool list to scroll through. #}
+            <p class="muted sk-small">The tools a skill may use are chosen here when adding skills is allowed.</p>
+            {% endif %}
           </fieldset>
           <div class="sk-actions">
             <button type="submit" class="btn btn--primary">Create skill</button>
@@ -313,17 +316,23 @@
         label.appendChild(box); label.appendChild(text); toolList.appendChild(label);
       });
     }
-    if (toolList) {
+    function loadTools() {
+      // The shared loading state (lightwork-ui.js, loaded at the end of the page).
+      var toolWait = window.mvLoading(toolList, {text: 'Loading tools…'});
       fetch('/api/v1/tools', {credentials: 'same-origin'}).then(function (r) {
         if (!r.ok) throw r;
         return r.json();
-      }).then(function (data) { renderTools((data && data.tools) || []); }).catch(function (e) {
+      }).then(async function (data) { await toolWait.done(); renderTools((data && data.tools) || []); }).catch(async function (e) {
+        await toolWait.done();
         toolList.textContent = '';
         var p = document.createElement('p');
         p.className = 'muted sk-small';
         p.textContent = window.mvErrorText(e, 'load the list of tools') + ' You can still create the skill without choosing tools.';
         toolList.appendChild(p);
       });
+    }
+    if (toolList) {
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadTools); else loadTools();
       toolFilter.addEventListener('input', function () {
         var q = toolFilter.value.trim().toLowerCase();
         toolList.querySelectorAll('label[data-search]').forEach(function (l) {

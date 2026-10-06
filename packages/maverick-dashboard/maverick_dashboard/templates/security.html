@@ -164,9 +164,7 @@
   {% if security_can_manage_hunters %}
   <p class="muted">Two checks look for attacks: one in Lightwork’s own activity, one in the systems you connect. Each only
     reads, and any containment goes to the approvals queue. Turn each one on or off here; it takes effect right away.</p>
-  <div class="sec-hunters" id="sec-hunters" aria-label="Threat hunting switches">
-    <p class="sec-empty">Loading…</p>
-  </div>
+  <div class="sec-hunters" id="sec-hunters" role="group" aria-label="Threat hunting switches"></div>
   <p class="muted" id="sec-hunters-status" role="status" aria-live="polite"></p>
   {% else %}
   <p class="muted">An administrator turns threat hunting on or off. You can keep working on the security records below.</p>
@@ -712,26 +710,31 @@
       });
       return card;
     };
-    fetch('/api/v1/features/switches')
-      .then(function (response) { if (!response.ok) throw response; return response.json(); })
-      .then(function (body) {
-        var rows = (body.switches || []).filter(function (row) {
-          return Object.prototype.hasOwnProperty.call(hunterConsoles, row.section);
-        });
-        huntersHost.textContent = '';
-        if (!rows.length) {
-          var none = document.createElement('p');
-          none.className = 'sec-empty';
-          none.textContent = 'Threat hunting is not available on this installation. Ask your administrator if you need it.';
-          huntersHost.appendChild(none);
-          return;
-        }
-        rows.forEach(function (row) { huntersHost.appendChild(renderHunter(row)); });
-      })
-      .catch(function (error) {
-        huntersHost.textContent = '';
-        huntersStatus.textContent = window.mvErrorText(error, 'load the threat hunting switches');
-      });
+    var loadHunters = function () {
+      // mvLoading shows its words only if the switches take over 300 ms.
+      var wait = window.mvLoading(huntersHost, {text: 'Loading threat hunting switches…', action: 'load the threat hunting switches', retry: loadHunters});
+      huntersStatus.textContent = '';
+      fetch('/api/v1/features/switches')
+        .then(function (response) { if (!response.ok) throw response; return response.json(); })
+        .then(async function (body) {
+          await wait.done();
+          var rows = (body.switches || []).filter(function (row) {
+            return Object.prototype.hasOwnProperty.call(hunterConsoles, row.section);
+          });
+          huntersHost.textContent = '';
+          if (!rows.length) {
+            var none = document.createElement('p');
+            none.className = 'sec-empty';
+            none.textContent = 'Threat hunting is not available on this installation. Ask your administrator if you need it.';
+            huntersHost.appendChild(none);
+            return;
+          }
+          rows.forEach(function (row) { huntersHost.appendChild(renderHunter(row)); });
+        })
+        .catch(function (error) { wait.fail(error); });
+    };
+    // lightwork-ui.js (mvLoading) loads at the end of the page.
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadHunters); else loadHunters();
   }
   var recordsOn = document.getElementById('sec-records-on');
   if (recordsOn) {

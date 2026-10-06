@@ -225,8 +225,11 @@
   var suitesLoaded = false;
   function loadInventory() {
     var suite = $('wo-inv-suite').value;
-    fill('wo-inv', el('p', 'muted', 'Loading…'));
-    J.request(API + '/inventory' + (suite ? '?suite=' + encodeURIComponent(suite) : '')).then(function (d) {
+    // The shared loading state: words only after 300 ms, Try again on a stall.
+    var wait = window.mvLoading ? window.mvLoading($('wo-inv'), {text: 'Loading what each agent and specialist can do…',
+      action: 'load the list of agents and specialists', retry: loadInventory}) : null;
+    J.request(API + '/inventory' + (suite ? '?suite=' + encodeURIComponent(suite) : '')).then(async function (d) {
+      if (wait) await wait.done();
       if (!suitesLoaded) {
         d.suites.forEach(function (s) { var o = el('option', null, s.label); o.value = s.value; $('wo-inv-suite').appendChild(o); });
         suitesLoaded = true;
@@ -255,6 +258,7 @@
       }
       fill('wo-inv', nodes);
     }).catch(async function (failure) {
+      if (wait) await wait.done();
       fill('wo-inv', el('p', null, await J.problem(failure, 'load the list of agents and specialists')));
     });
   }

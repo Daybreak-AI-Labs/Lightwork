@@ -26,16 +26,16 @@
   <div class="section-head"><h2>Waiting for your decision</h2></div>
   <div class="panel">
     {% if d.approvals %}
-    <table>
+    <table class="table--stacked">
       <thead><tr><th scope="col">Request</th><th scope="col">Risk</th><th scope="col">Spending</th><th scope="col">Decide by</th><th scope="col">Waiting on</th></tr></thead>
       <tbody>
       {% for a in d.approvals %}
         <tr>
-          <td><a href="/approvals#approval-{{ a.id }}">#{{ a.id }} {{ a.action }}</a>{% if a.irreversible %} <span class="badge blocked">Can't be undone</span>{% endif %}</td>
-          <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk_label }}</span></td>
-          <td>{{ a.spending }}</td>
-          <td>{% if a.decide_by %}{{ a.decide_by | datetime }}{% else %}No deadline{% endif %}{% if a.status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</td>
-          <td>{{ {'you': 'You', 'you_own': 'You (your own request)', 'you_chat': 'You (decide in Slack or Teams)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
+          <td data-label="Request"><a href="/approvals#approval-{{ a.id }}">#{{ a.id }} {{ a.action }}</a>{% if a.irreversible %} <span class="badge blocked">Can't be undone</span>{% endif %}</td>
+          <td data-label="Risk"><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk_label }}</span></td>
+          <td data-label="Spending">{{ a.spending }}</td>
+          <td data-label="Decide by">{% if a.decide_by %}{{ a.decide_by | datetime }}{% else %}No deadline{% endif %}{% if a.status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</td>
+          <td data-label="Waiting on">{{ {'you': 'You', 'you_own': 'You (your own request)', 'you_chat': 'You (decide in Slack or Teams)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
         </tr>
       {% endfor %}
       </tbody>

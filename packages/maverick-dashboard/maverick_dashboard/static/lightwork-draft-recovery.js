@@ -83,10 +83,10 @@
     storage.append(storageTitle, storageStatus, storageRefresh, storageRetire); panel.append(storage);
     // Chat's dock needs one quiet readiness row. The same native controls stay
     // available in its disclosure; unresolved recovery always opens in full.
-    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false;
+    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false, slowCheck = false;
     if (compact) {
       disclosure = doc.createElement('details'); disclosureTitle = doc.createElement('summary');
-      disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Checking draft recovery…';
+      disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Draft recovery';
       disclosureTitle.style.cssText = 'cursor:pointer;color:var(--muted);font-size:var(--text-xs);line-height:1.5';
       var disclosureBody = doc.createElement('div');
       disclosureBody.style.cssText = 'margin-top:var(--space-2);max-height:min(44vh,24rem);overflow:auto;overflow-wrap:anywhere';
@@ -94,6 +94,9 @@
       if (options.information) disclosureBody.appendChild(options.information);
       disclosure.append(disclosureTitle, disclosureBody); panel.append(disclosure);
       panel.style.cssText = 'padding:var(--space-2);margin-block:var(--space-2);min-width:0';
+      // The loading words appear only when the check takes longer than
+      // 300 ms (the mvLoading rule), so a quick check never flashes them.
+      root.setTimeout(function () { slowCheck = true; if (!initialized) compactControls(); }, 300);
       disclosureTitle.addEventListener('click', function (event) {
         if (blocked || failed || pendingOperation) { event.preventDefault(); disclosure.open = true; }
         else automaticallyOpened = false;
@@ -150,7 +153,7 @@
       if (!compact) return;
       var attention = blocked || failed || pendingOperation;
       disclosureTitle.textContent = failed ? 'Draft recovery needs attention' : blocked ? 'Recovery copy needs review' :
-        pendingOperation ? 'Recovery save needs confirmation' : !initialized ? 'Checking draft recovery…' :
+        pendingOperation ? 'Recovery save needs confirmation' : !initialized ? (slowCheck ? 'Checking draft recovery…' : 'Draft recovery') :
         running || changed ? 'Keeping unsent text…' : remote ? 'Unsent text protected' : 'Draft recovery ready';
       if (attention && !disclosure.open) { automaticallyOpened = true; disclosure.open = true; }
       else if (!attention && automaticallyOpened) { automaticallyOpened = false; disclosure.open = false; }

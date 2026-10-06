@@ -725,6 +725,62 @@
         }
         return element;
       };
+      // The one loading state for a region that is being filled. The region
+      // is marked aria-busy at once, but the words appear only after `delay`
+      // (300 ms), so a quick answer never flashes a loader; once shown they
+      // stay at least `minVisible` (500 ms) so they can be read. A wait that
+      // passes `timeout` (20 s) becomes the plain error, with Try again when
+      // the caller passes `retry`. The page's own content is left in place.
+      //   var wait = mvLoading(list, {text: 'Loading tasks…', action: 'load the tasks', retry: load});
+      //   try { var rows = await mvFetchJSON(url); await wait.done(); render(rows); }
+      //   catch (error) { wait.fail(error); }
+      window.mvLoading = function (element, opts) {
+        var o = opts || {}, shownAt = 0, settled = false, node = null;
+        var delay = o.delay >= 0 ? o.delay : 300, minVisible = o.minVisible >= 0 ? o.minVisible : 500;
+        if (element._mvLoading) element._mvLoading.cancel();
+        var old = element.querySelector(':scope > [data-mv-loading-error]');
+        if (old) old.remove();
+        element.setAttribute('aria-busy', 'true');
+        var showTimer = setTimeout(function () {
+          node = window.mvEl('p', 'mv-loading', o.text || 'Loading…');
+          node.setAttribute('data-mv-loading', '');
+          element.appendChild(node); shownAt = Date.now();
+        }, delay);
+        var limit = setTimeout(function () {
+          var late = new Error('The operation timed out.'); late.name = 'AbortError'; handle.fail(late);
+        }, o.timeout > 0 ? o.timeout : 20000);
+        function settle() {
+          if (settled) return Promise.resolve(false);
+          settled = true; clearTimeout(showTimer); clearTimeout(limit);
+          if (element._mvLoading === handle) element._mvLoading = null;
+          var left = node ? minVisible - (Date.now() - shownAt) : 0;
+          function clear() { if (node) node.remove(); element.removeAttribute('aria-busy'); return true; }
+          if (left <= 0) return Promise.resolve(clear());
+          return new Promise(function (resolve) { setTimeout(function () { resolve(clear()); }, left); });
+        }
+        var handle = {
+          active: function () { return !settled; },
+          cancel: function () { settled = true; clearTimeout(showTimer); clearTimeout(limit); if (node) node.remove(); },
+          done: function () { return settle().then(function () {}); },
+          fail: function (failure) {
+            return settle().then(function (mine) {
+              if (!mine) return;
+              var box = window.mvEl('p', 'mv-loading mv-loading--error');
+              box.setAttribute('data-mv-loading-error', ''); box.setAttribute('role', 'alert');
+              box.appendChild(document.createTextNode(window.mvErrorText(failure, o.action)));
+              if (typeof o.retry === 'function') {
+                var again = window.mvEl('button', 'btn btn--ghost', window.LightworkI18n ? window.LightworkI18n.text('Try again') : 'Try again');
+                again.type = 'button';
+                again.addEventListener('click', function () { box.remove(); o.retry(); });
+                box.appendChild(document.createTextNode(' ')); box.appendChild(again);
+              }
+              element.appendChild(box);
+            });
+          },
+        };
+        element._mvLoading = handle;
+        return handle;
+      };
       // A stored value (status, kind, slug) as a readable label:
       // "pending_review" -> "Pending review", "ai_act" -> "AI Act".
       var WORDS = { ai: 'AI', api: 'API', id: 'ID', ids: 'IDs', url: 'URL', sso: 'SSO',
@@ -1255,6 +1311,9 @@
             return;
           }
         }
+        // Disabling the form below moves focus to the page body. A refused
+        // send puts it back where the person was typing (WCAG 2.4.3).
+        const typing = form.contains(document.activeElement) ? document.activeElement : form.querySelector('[name="title"]');
         if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
         const submittedForm = new FormData(form);
         const submittedControls = Array.from(form.querySelectorAll('input,textarea,select')).map(function (control) {
@@ -1302,6 +1361,8 @@
         } finally {
           submittedControls.forEach(function (item) { item[0].disabled = item[1]; });
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+          const lost = !document.activeElement || document.activeElement === document.body;
+          if (lost && typing && typing.isConnected && !typing.disabled && typeof typing.focus === 'function') typing.focus();
         }
       });
     })();
