@@ -28,7 +28,7 @@ def _summary(card: object) -> str:
     # One sentence, read as a name: no closing full stop.
     if text.count(". ") or "\n" in text:
         return ""
-    return text[:-1] if text.endswith(".") else text
+    return text.removesuffix(".")
 
 
 def _step_words(action: str) -> str:
