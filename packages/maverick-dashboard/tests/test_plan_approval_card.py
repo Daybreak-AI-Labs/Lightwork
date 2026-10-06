@@ -34,6 +34,6 @@ def test_plan_approval_card_lists_steps_and_outside_actions(monkeypatch, tmp_pat
     assert "Plan to check before the task acts" in html
     for line in ("Step 1: Match invoices to purchase orders", "Step 2: Email the supplier about the missing receipt",
                  "First outside action: send an email to supplier@example.com",
-                 "Later in this task it can also: open a web page.", "If you reject, nothing runs"):
+                 "Later in this task it can also: open web pages or call outside services.", "If you reject, nothing runs"):
         assert line in html, line
     assert "compatibility caller" not in html and 'data-action="approve" disabled' not in html

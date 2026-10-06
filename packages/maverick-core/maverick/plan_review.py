@@ -43,18 +43,49 @@ def plain_action(name: str, args: Mapping | None = None) -> str:
     return with_arg if not key else plain
 
 
+# Everything else the agent can do, grouped in plain words by the words in
+# each tool's name (first match wins); the rest are counted and named.
+_GROUPS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("send messages or email", frozenset({"email", "mail", "slack", "teams", "message", "notify", "sms", "post",
+                                          "tweet", "discord", "send"})),
+    ("make payments or refunds", frozenset({"pay", "payment", "refund", "transfer", "charge", "payout"})),
+    ("change files in the workspace", frozenset({"file", "files", "patch", "editor", "edit"})),
+    ("run commands or programs", frozenset({"shell", "exec", "bash", "terminal", "command", "python", "code"})),
+    ("open web pages or call outside services", frozenset({"http", "fetch", "browser", "web", "url", "scrape",
+                                                           "request"})),
+    ("save notes to its memory", frozenset({"memory", "remember", "kv", "note", "notes"})),
+    ("change records in connected systems", frozenset({"create", "update", "delete", "upsert", "crm", "ticket"})),
+)
+_NAMED_OTHERS = 4
+
+
+def _words(name: str) -> list[str]:
+    return [w for w in re.split(r"[_\-.\s]+", str(name).lower()) if w]
+
+
 def outside_actions(tool_names: Iterable[str], first: str) -> list[str]:
-    """Plain words for every other tool that would leave Lightwork."""
+    """Plain words for every other tool that would leave Lightwork or change
+    something, grouped; tools no group fits are counted and named."""
     from .practice import tool_allowed
 
-    seen: list[str] = []
-    for name in tool_names:
+    groups: list[str] = []
+    others: list[str] = []
+    for name in dict.fromkeys(tool_names):
         if name == first or tool_allowed(name):
             continue
-        phrase = plain_action(name)
-        if phrase not in seen and phrase != plain_action(first):
-            seen.append(phrase)
-    return seen
+        words = set(_words(name))
+        group = next((label for label, keys in _GROUPS if words & keys), None)
+        if group is None:
+            others.append(" ".join(_words(name)))
+        elif group not in groups:
+            groups.append(group)
+    groups.sort(key=[label for label, _keys in _GROUPS].index)
+    if others:
+        named = ", ".join(others[:_NAMED_OTHERS])
+        more = len(others) - _NAMED_OTHERS
+        tail = f"{named} and {more} more" if more > 0 else named
+        groups.append(f"use {len(others)} other tool{'s' if len(others) != 1 else ''}: {tail}")
+    return groups
 
 
 def summary_text(steps: list[str], name: str, args: Mapping, cap: float | None) -> str:

@@ -86,8 +86,8 @@ def test_the_card_lists_the_plan_steps_and_the_outside_actions_in_plain_words(pl
     effects = card["consequences"]["known_effects"]
     # Every other outside action the agent can take, in plain words; reading
     # inside Lightwork is not listed.
-    assert ("Later in this task it can also: open a web page, change a file in the workspace, "
-            "use crm update contact.") in effects
+    assert ("Later in this task it can also: change files in the workspace, open web pages or call outside "
+            "services, change records in connected systems.") in effects
     assert any("If you reject, nothing runs" in e for e in effects)
     assert any("$2.50" in e and "a cap, not an estimate" in e for e in effects)
     assert card["target"]["label"] == "Task 11"
@@ -107,6 +107,27 @@ def test_a_task_without_a_written_plan_says_so_on_the_card(plan_on, monkeypatch)
     card = validate_approval_card(asked[0][1]["approval_card"])
     assert card["parameters"]["summary"] == ["First outside action: run a command"]
     assert card["consequences"]["unresolved_assumptions"] == ["The task wrote no plan before this first action."]
+
+
+def test_other_actions_are_grouped_in_plain_words_and_the_rest_counted():
+    from maverick.plan_review import outside_actions
+
+    tools = ["read_file", "shell", "python_exec", "kv_memory", "slack_post", "find_controls", "view_video",
+             "clipboard", "arxiv", "semantic_scholar", "str_replace_editor"]
+    assert outside_actions(tools, "send_email") == [
+        "send messages or email", "change files in the workspace", "run commands or programs",
+        "save notes to its memory", "use 5 other tools: find controls, view video, clipboard, arxiv and 1 more"]
+
+
+def test_a_step_says_the_goal_once():
+    from maverick.agent import _plan_facts
+    from maverick.blackboard import Blackboard
+
+    board = Blackboard()
+    board.post("orchestrator", "plan", "role=orchestrator depth=0 brief=Top-level goal: Archive the drafts "
+               "Description: Archive the drafts")
+    fake = SimpleNamespace(tools=None, ctx=SimpleNamespace(blackboard=board, budget=None))
+    assert _plan_facts(fake)[0] == ["Archive the drafts"]
 
 
 def test_a_rejected_plan_runs_nothing_and_is_not_asked_again(plan_on, monkeypatch):
