@@ -22,7 +22,7 @@
       data.items.forEach(function (item) {
         var section = add('section', '', list); add('h3', item.label, section);
         add('p', item.timing + '. ' + item.message, section);
-        add('p', 'Affected area: ' + item.module + '. ' + item.scope, section);
+        add('p', 'Affected area: ' + item.area + '. ' + item.scope, section);
         (item.processes || []).forEach(function (process) {
           add('p', process.consumer + ': startup revision ' + process.startup_revision.slice(0,12) +
             ', observed ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(process.checked_at) : new Date(process.checked_at * 1000).toLocaleString()) +
