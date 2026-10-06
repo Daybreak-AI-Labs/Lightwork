@@ -208,8 +208,8 @@
     <div style="display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; padding:var(--space-2) 0; border-top:1px solid var(--hairline);">
       <strong>{{ item.name | humanize }}</strong>
       {% if item.generation %}
-      <button type="button" class="btn btn--ghost af-recover" data-name="{{ item.name }}" data-generation="{{ item.generation }}" data-builtin="{{ '1' if item.is_builtin else '0' }}">
-        {{ 'Restore original setup' if item.is_builtin else 'Remove unavailable agent' }}
+      <button type="button" class="btn btn--ghost" data-agent-change="{{ item.name }}" data-agent-change-action="{{ 'reset_builtin' if item.is_builtin else 'remove_custom' }}">
+        {{ 'Review discard and built-in reset' if item.is_builtin else 'Review discard of damaged setup' }}
       </button>
       {% else %}
       <span class="muted">Installation support must repair this setup.</span>
@@ -218,34 +218,6 @@
     </div>
     {% endfor %}
   </section>
-  <script>
-    document.querySelectorAll('.af-recover').forEach(function (button) {
-      button.addEventListener('click', async function () {
-        const name = button.dataset.name;
-        const builtIn = button.dataset.builtin === '1';
-        const status = button.parentElement.querySelector('.af-recover-status');
-        const question = builtIn
-          ? 'Restore “' + name + '” to its original setup? Its custom limits will be removed. The built-in policy may allow more; review it after restoring.'
-          : 'Remove “' + name + '”? Its saved custom setup will be removed.';
-        if (!(await mvConfirm(question, { okText: builtIn ? 'Restore specialist' : 'Remove agent' }))) return;
-        button.disabled = true;
-        button.setAttribute('aria-busy', 'true');
-        try {
-          const path = '/api/v1/agents/' + encodeURIComponent(name)
-            + '/override?expected_generation=' + encodeURIComponent(button.dataset.generation);
-          const response = await fetch(path, { method: 'DELETE' });
-          if (!response.ok) throw new Error(builtIn ? 'This specialist changed or could not be restored. Refresh and try again.' : 'This agent changed or could not be removed. Refresh and try again.');
-          const result = await response.json();
-          if (!result.removed) throw new Error('No saved setup was removed. Refresh to check its status.');
-          window.location.href = builtIn ? '/agents?name=' + encodeURIComponent(name) : '/agents';
-        } catch (error) {
-          status.textContent = error.message || (builtIn ? 'Could not restore this specialist. Refresh the page and try again.' : 'Could not remove this agent. Refresh the page and try again.');
-          button.disabled = false;
-          button.removeAttribute('aria-busy');
-        }
-      });
-    });
-  </script>
   {% endif %}
 
   <details class="af-card" id="jd-card" style="margin-bottom: var(--space-4);">
@@ -302,6 +274,14 @@
   </details>
   {% endif %}
 
+  <details class="panel" id="agent-override-change" style="margin-block:var(--space-3);overflow-wrap:anywhere">
+    <summary>Original agent changes and recovery</summary>
+    <p id="aoc-status" role="status" aria-live="polite">Loading your original requests…</p>
+    <label for="aoc-original">Original removal or reset</label>
+    <select class="input" id="aoc-original" style="max-width:100%"><option value="">Choose an original change</option></select>
+    <div class="af-actions"><button type="button" class="btn" id="aoc-read">Read original outcome</button><button type="button" class="btn btn--ghost" id="aoc-refresh">Refresh original requests</button></div>
+    <section id="aoc-review"></section><section id="aoc-result" aria-live="polite"></section>
+  </details>
   <div class="af-grid">
     <!-- ============ LEFT: build an agent or tailor a specialist ============ -->
     <div class="af-card">
@@ -522,7 +502,8 @@
         <div class="af-actions">
           <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else ('Save specialist' if selected_kind == 'specialist' else 'Save agent') }}</button>
           <button type="button" class="btn" id="btn-validate">Check settings</button>
-          {% if not creating %}<button type="button" class="btn btn--ghost" id="btn-reset">Reset to built-in</button>{% endif %}
+          {% if not creating and selected %}<button type="button" class="btn {{ 'btn--ghost' if selected.is_builtin else 'btn--danger' }}" id="btn-reset"
+            data-agent-change="{{ selected.name }}" data-agent-change-action="{{ 'reset_builtin' if selected.is_builtin else 'remove_custom' }}">{{ 'Reset to built-in' if selected.is_builtin else 'Remove custom agent' }}</button>{% endif %}
         </div>
         {% else %}
         <p class="muted">Editing is disabled in this deployment.</p>
@@ -1296,24 +1277,6 @@
           finishMutation(saveBtn);
         }
       });
-      const resetBtn = document.getElementById('btn-reset');
-      if (resetBtn) resetBtn.addEventListener('click', async () => {
-        const name = targetName();
-        if (!name || !beginMutation(resetBtn)) return;
-        try {
-          if (!(await mvConfirm(
-            'Reset “' + name + '” to how it came? This removes your limits on allowed actions, risk, blocked actions and independence. The built-in policy may allow more. Review its policy after resetting.',
-            { okText: kindWord() === 'specialist' ? 'Reset specialist' : 'Reset agent' }
-          ))) return;
-          await call('DELETE', `/api/v1/agents/${name}/override?expected_generation=${encodeURIComponent(form.dataset.generation)}`);
-          show('Reset to how it came.', true);
-          window.location.search = '?name=' + encodeURIComponent(name);
-        } catch (error) {
-          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
-        } finally {
-          finishMutation(resetBtn);
-        }
-      });
     })();
   </script>
   {% endif %}
@@ -1501,4 +1464,5 @@
   </script>
   {% endif %}
 <script src="/static/lightwork-business-agent.js" defer></script>
+<script src="/static/lightwork-agent-override-changes.js" defer></script>
 {% endblock %}

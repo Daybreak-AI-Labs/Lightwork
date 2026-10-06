@@ -57,6 +57,41 @@ here.
   including remaining coverage gaps, are in the
   [operation coverage register](post-install-operation-coverage.md).
 
+- **Checked answer regions** — optional `[features] applicability_regions`
+  adds ordinary Learning controls for two exact versions of an owned taught
+  rule. It executes both over the complete declared finite input grid, retains
+  current permitted comparison evidence and separately reviewed hypothetical
+  answers, and shows where the original, proposed, both or neither answer is
+  supported. Unknown and conflicting answers stay unresolved. A minimal
+  axis-split routing tree is checked against an independent full-grid lookup;
+  trying a checked route runs the chosen native rule without publishing it.
+  Copilot shares full review, private authoring, withdrawal and exact originals.
+
+- **Rewrite and check local rules** — optional
+  `[features] governed_rule_evolution` adds ordinary controls for constructing
+  native decision routes from one owned published taught rule and improving
+  the order of complete checks against declared wrong-answer examples. A
+  separate unchanged complete-domain gate remains outside both artifacts.
+  Full comparison, separate owner acceptance, separately authorized publication,
+  active-release checking and exact retained-release restoration use the native
+  workflow store. Copilot uses those same reviewed controls and original
+  outcomes. This changes supported local rule graphs; it does not modify host
+  source, plugins, provider models or arbitrary code.
+
+- **Complete task search** — Tasks and `tasks.find` continue through protected
+  parts of the current owned task range instead of treating the latest 1,000
+  records as the whole history. Search progress and unfinished reads stay
+  visible; interrupted parts can be retried without replacing newer search
+  words. Ordinary task-list continuation also preserves distinct older rows.
+
+- **Reviewed agent removal and reset** — Agent Factory distinguishes deleting
+  a custom agent from restoring a built-in agent. Full current and resulting
+  definitions, exact source versions and the original request are retained
+  through review, native removal and interrupted replies. A damaged saved
+  definition has an explicit discard review with its true resulting behavior;
+  it is not presented as an editable working agent. Copilot shares current
+  authority, complete review and original-outcome recovery.
+
 - **Additional-work capability qualification** — the optional
   `[features] commitment_capability_learning` setting adds guided Promise
   review forms for competing material/capacity/shared-setup explanations,
@@ -6015,3 +6050,14 @@ All settings, Chat's specialist questions and consent-banner withdrawal now
 have ordinary complete review and exact native original readback. Their
 Copilot paths share the same protected services or hand off to their complete
 ordinary forms. Copilot does not repeat uncertain original work.
+
+### Reviewed access-key changes and exact original recovery
+
+Account > Access keys collects named owners, permitted work, expiry and current
+workspace choices. Create, rotate and revoke use a complete consequence review
+and a native original request. A lost reply never issues another key. The secret
+is shown once only to the current authorized account; original history retains
+metadata without recovering or exposing the secret. A separately reviewed
+revocation and replacement handles a lost one-time key. Copilot opens the same
+protected ordinary controls and original reader. Existing API-key settings and
+installation choices govern the feature.

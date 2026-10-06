@@ -37,7 +37,7 @@ import stat
 import tempfile
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -1060,9 +1060,12 @@ def private_path_is_restricted(path: str | Path, mode: int = 0o600) -> bool:
         return False
 
 
-def _replace_with_retry(source: str | Path, target: str | Path) -> None:
+def _replace_with_retry(source: str | Path, target: str | Path, *,
+                        effect_guard: Callable[[], None] | None = None) -> None:
     """Replace atomically, tolerating brief Windows sharing violations."""
     if os.name != "nt":
+        if effect_guard is not None:
+            effect_guard()
         os.replace(source, target)
         # The file contents were fsync'd before rename; persist the directory
         # entry too so replay/policy state survives an abrupt power loss.
@@ -1087,6 +1090,8 @@ def _replace_with_retry(source: str | Path, target: str | Path) -> None:
     move_file.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
     move_file.restype = wintypes.BOOL
     while True:
+        if effect_guard is not None:
+            effect_guard()
         if move_file(
             _windows_extended_path(source),
             _windows_extended_path(target),
@@ -1105,6 +1110,7 @@ def _windows_replace_open_fd(
     target: str | Path,
     *,
     replace: bool = True,
+    effect_guard: Callable[[], None] | None = None,
 ) -> None:
     """Rename the still-open source object, binding publication to its handle.
 
@@ -1154,7 +1160,11 @@ def _windows_replace_open_fd(
     handle = msvcrt.get_osfhandle(fd)
     deadline = time.monotonic() + 5.0
     delay = 0.002
-    while not set_info(handle, 3, ctypes.byref(info), ctypes.sizeof(info)):
+    while True:
+        if effect_guard is not None:
+            effect_guard()
+        if set_info(handle, 3, ctypes.byref(info), ctypes.sizeof(info)):
+            break
         error = ctypes.get_last_error()
         if (
             not replace
@@ -1522,7 +1532,8 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
 
 
 def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
-                      encoding: str = "utf-8") -> None:
+                      encoding: str = "utf-8",
+                      effect_guard: Callable[[], None] | None = None) -> None:
     """Write ``text`` to ``path`` atomically: a *unique* temp file in the same
     directory, then ``os.replace`` into position.
 
@@ -1530,7 +1541,9 @@ def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
     whole file — never a truncated one. The temp name is unique (``mkstemp``) so
     two concurrent writers don't collide on a shared ``.tmp`` (one ``os.replace``
     would otherwise move the temp out from under the other). The temp is cleaned
-    up on any failure so a crashed write leaves no stray files.
+    up on any failure so a crashed write leaves no stray files. An optional
+    caller guard runs after the temp is flushed, immediately before every
+    physical replacement attempt, including Windows sharing retries.
     """
     path = Path(path)
     _prepare_parent_directory(path.parent)
@@ -1547,9 +1560,15 @@ def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
             f.flush()
             os.fsync(f.fileno())
             if os.name == "nt":
-                _windows_replace_open_fd(f.fileno(), path)
+                if effect_guard is None:
+                    _windows_replace_open_fd(f.fileno(), path)
+                else:
+                    _windows_replace_open_fd(f.fileno(), path, effect_guard=effect_guard)
             else:
-                _replace_with_retry(tmp, path)
+                if effect_guard is None:
+                    _replace_with_retry(tmp, path)
+                else:
+                    _replace_with_retry(tmp, path, effect_guard=effect_guard)
     except BaseException:
         if fd >= 0:
             try:

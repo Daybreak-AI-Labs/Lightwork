@@ -163,8 +163,11 @@ def _adapter_modules():
     # Explicit lazy imports keep circular type references safe while making
     # every advertised native capability statically reachable and mandatory.
     from . import (
+        product_operations_access_keys,
         product_operations_activation,
+        product_operations_agent_overrides,
         product_operations_answer_feedback,
+        product_operations_applicability_regions,
         product_operations_approval_challenges,
         product_operations_approvals,
         product_operations_audit_actions,
@@ -198,6 +201,7 @@ def _adapter_modules():
         product_operations_flow_releases,
         product_operations_flow_requalification,
         product_operations_form_recovery,
+        product_operations_governed_rule_evolution,
         product_operations_grc_drafts,
         product_operations_identity,
         product_operations_installation_security,
@@ -309,6 +313,7 @@ def _adapter_modules():
         product_operations_learning_program,
         product_operations_local_runtime,
         product_operations_today,
+        product_operations_access_keys,
         product_operations_activation,
         product_operations_devices,
         product_operations_plugin_environment,
@@ -320,6 +325,9 @@ def _adapter_modules():
         product_operations_record_history,
         product_operations_procedure_interactions,
         product_operations_request_program,
+        product_operations_agent_overrides,
+        product_operations_applicability_regions,
+        product_operations_governed_rule_evolution,
         product_operations_operator_acquisition,
         product_operations_recovery_visibility,
         product_operations_consent_publication,

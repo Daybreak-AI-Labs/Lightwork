@@ -1832,11 +1832,15 @@ from .learning_example_decisions_api import (  # noqa: E402
 app.include_router(learning_example_decisions_router, prefix="/api/v1")
 
 from . import (  # noqa: E402
+    access_key_requests_api,
+    agent_override_changes_api,
+    applicability_regions_api,
     commitment_capability_api,
     commitment_economic_alternatives_api,
     competence_transport_api,
     consent_publication_withdrawal_api,
     flow_requalification_api,
+    governed_rule_evolution_api,
     grc_draft_changes_api,
     learning_distinctions_api,
     operator_acquisition_api,
@@ -1863,6 +1867,10 @@ app.include_router(recovery_visibility_api.router)
 app.include_router(procedure_interactions_api.router)
 app.include_router(request_program_api.router)
 app.include_router(operator_acquisition_api.router)
+app.include_router(governed_rule_evolution_api.router)
+app.include_router(applicability_regions_api.router)
+app.include_router(agent_override_changes_api.router, prefix="/api/v1")
+app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
 app.include_router(workflow_step_checks.router)
 app.include_router(settings_catalog_requests_api.router, prefix="/api/v1")
@@ -4039,15 +4047,15 @@ def goals_page(request: Request, owner: str = "", include: str = "") -> HTMLResp
     ``&include=background`` adds My background work (schedules, workflow runs
     and connections) under the same check as its old page, /my-work."""
     from .draft_api import context_for
+    from .task_search import initial as initial_tasks
 
     background = include == "background"
     if background:
         require_page_visible(request, "/my-work")
         require_permission(request, "view")
-    goals = _world().list_goals(
-        owner=goal_owner_filter(request), limit=GOALS_PAGE_SIZE + 1, order="desc",
-    )
-    has_more = len(goals) > GOALS_PAGE_SIZE
+    task_page = initial_tasks(request, limit=GOALS_PAGE_SIZE)
+    goals = task_page["goals"]
+    has_more = not task_page["complete"]
     from .preferences_api import _principal
     try:
         _principal(request)
@@ -4056,6 +4064,8 @@ def goals_page(request: Request, owner: str = "", include: str = "") -> HTMLResp
         task_views_available = False
     return templates.TemplateResponse(request, "goals.html", {
         "goals": goals[:GOALS_PAGE_SIZE],
+        "task_search_context": task_page["context"],
+        "task_search_continuation": task_page["continuation"],
         "task_views_available": task_views_available,
         "page_size": GOALS_PAGE_SIZE,
         "has_more": has_more,

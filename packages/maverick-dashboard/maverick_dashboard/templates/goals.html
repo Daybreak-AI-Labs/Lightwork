@@ -36,7 +36,7 @@
     <a class="btn btn--ghost" href="/graph-editor">Visual task map</a>
   {% endset %}
   {% call hero('Your AI workforce', 'Tasks',
-               subtitle='Your tasks' if goals_owner == 'me' else 'Every task on record',
+               subtitle='Your currently readable tasks',
                lede='Find your work, read its result, and open a task to review or continue it.',
                actions=goals_actions if can_create_goal else '') %}
     {{ state('Current state',
@@ -47,18 +47,15 @@
                    and any problems. Available actions depend on your workspace role.') }}
   {% endcall %}
 
-  {% if goals %}
   <div class="g-bar">
     <input id="run-search-q" type="search" placeholder="Search tasks…"
-           aria-label="Search tasks by title or description" autocomplete="off"
-           class="input g-bar__search">
+           aria-label="Search tasks by title, request or saved result" autocomplete="off" maxlength="256"
+           class="input g-bar__search" data-context="{{ task_search_context }}">
   </div>
-  {% endif %}
 
   {% if task_views_available %}{% include "_task_saved_views.html" %}{% endif %}
   {% include "_upcoming_tasks.html" %}
 
-  {% if goals %}
   {% from "_tabs.html" import panel_tabs %}
   {# The filter in the address (?status=failed) is selected from the first
      paint; the page script then shows only its rows. #}
@@ -88,21 +85,17 @@
       </span>
     </div>
     {% endfor %}
+    {% if not goals %}
+      {{ empty_state('No recent tasks to show',
+                     'Search your readable work, or continue to older tasks when available.') }}
+    {% endif %}
   </div>
   <p id="run-search-status" role="status" aria-live="polite"></p>
   <button id="run-search-retry" type="button" class="btn" hidden>Retry search</button>
-  {% if has_more %}
+  <button id="run-search-older" type="button" class="btn" aria-controls="run-list" hidden>Search older work</button>
   <button id="run-more" type="button" class="btn" data-next-offset="{{ next_offset }}"
-          data-page-size="{{ page_size }}" aria-controls="run-list">Show more tasks</button>
-  {% endif %}
-  {% elif can_create_goal %}
-    {{ empty_state('No tasks yet',
-                   'Tasks you start appear here with their plans and results. Describe what you need in plain English to start the first one.',
-                   action_label='Start a task', action_href='/chat') }}
-  {% else %}
-    {{ empty_state('No tasks yet',
-                   'Tasks you can view appear here when someone in your workspace starts work you are allowed to see.') }}
-  {% endif %}
+          data-page-size="{{ page_size }}" data-continuation="{{ task_search_continuation }}"
+          aria-controls="run-list" {% if not has_more %}hidden{% endif %}>Show more tasks</button>
 
   {# ?owner=me&include=background (My background work's address in the
      job-named navigation): schedules, workflow runs and connections too. #}
@@ -121,19 +114,22 @@
     var listEl = document.getElementById('run-list');
     if (!input || !listEl) return;
     var original = listEl.innerHTML;
-    var timer = null, generation = 0, controller = null, expired = false;
+    var timer = null, generation = 0, controller = null, expired = false, loading = false;
+    var context = input.dataset.context, nextSearch = '', failedSearch = null, matches = [];
     var status = document.getElementById('run-search-status'), retry = document.getElementById('run-search-retry');
+    var older = document.getElementById('run-search-older'), more = document.getElementById('run-more');
+    var nextList = more.dataset.continuation || '';
     function esc(s) {
       return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
         return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
       });
     }
-    function render(goals) {
+    function render(goals, complete) {
       if (!goals.length) {
         if (window.mvEmpty) {
-          listEl.replaceChildren(mvEmpty('No matching tasks',
-            'Tasks whose title or description match your search appear here. Try other words, or clear the search to see every task.'));
-        } else listEl.textContent = 'No matching tasks.';
+          listEl.replaceChildren(mvEmpty(complete ? 'No matching tasks' : 'No matches in this part',
+            complete ? 'No currently readable tasks matched. Try other words, or clear the search.' : 'Search older work to keep looking. Older tasks have not all been checked yet.'));
+        } else listEl.textContent = complete ? 'No matching tasks.' : 'No matches in this part. Search older work to continue.';
         return;
       }
       listEl.innerHTML = goals.map(rowHtml).join('');
@@ -155,66 +151,87 @@
           '<a href="/goals/' + gid + '/plan">Plan<span class="sr-only">: ' + esc(g.title) + '</span></a>' +
           (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems<span class="sr-only">: ' + esc(g.title) + '</span></a>' : '') + '</span></div>';
     }
-    // "Show more": the next page from the API, appended to the rows on
-    // screen (the server rendered only the first page).
-    var more = document.getElementById('run-more');
-    if (more) {
-      more.addEventListener('click', function () {
-        var offset = parseInt(more.getAttribute('data-next-offset'), 10) || 0;
-        var size = parseInt(more.getAttribute('data-page-size'), 10) || 50;
-        more.disabled = true; more.setAttribute('aria-busy', 'true');
-        fetch('/api/v1/goals?limit=' + size + '&offset=' + offset,
-              {headers: {'Accept': 'application/json'}, cache: 'no-store'})
-          .then(function (r) {
-            if (!r.ok) throw new Error('More tasks could not be loaded. Try again.');
-            var next = r.headers.get('Pagination-Next-Offset');
-            var hasMore = r.headers.get('Pagination-Has-More') === 'true' && next;
-            return r.json().then(function (rows) { return {rows: rows, hasMore: hasMore, next: next}; });
-          })
-          .then(function (page) {
-            if (!Array.isArray(page.rows)) throw new Error('More tasks could not be loaded. Try again.');
-            if (input.value.trim()) { original += page.rows.map(rowHtml).join(''); }
-            else { listEl.insertAdjacentHTML('beforeend', page.rows.map(rowHtml).join('')); original = listEl.innerHTML; applyFilter(); }
-            status.textContent = page.rows.length ? page.rows.length + ' more task' + (page.rows.length === 1 ? '' : 's') + ' shown.' : 'No more tasks.';
-            if (page.hasMore) { more.setAttribute('data-next-offset', page.next); more.disabled = false; }
-            else { more.hidden = true; }
-          })
-          .catch(function (error) { status.textContent = error.message; more.disabled = false; })
-          .finally(function () { more.removeAttribute('aria-busy'); });
-      });
+    function clearPrivate(message) {
+      expired = true; ++generation; clearTimeout(timer); if (controller) controller.abort();
+      original = ''; matches = []; nextList = ''; nextSearch = ''; failedSearch = null;
+      listEl.replaceChildren(); input.value = ''; input.disabled = true;
+      older.hidden = true; more.hidden = true; retry.hidden = true;
+      listEl.removeAttribute('aria-busy'); status.textContent = message;
+      selection();
     }
-    function search(immediate) {
+    async function read(path, signal) {
+      var response = await fetch(path, {headers:{'Accept':'application/json', 'X-Lightwork-Task-Search-Context':context},
+        cache:'no-store', signal:signal});
+      if (response.redirected || response.status === 401 || response.status === 403) {
+        clearPrivate('Your sign-in or access changed. Sign in again, then reload Tasks.'); throw new Error('access');
+      }
+      if (!response.ok) { var error = new Error('request'); error.status = response.status; throw error; }
+      var reader = response.body && response.body.getReader(), size = 0, chunks = [];
+      if (!reader) throw new Error('reply');
+      try {
+        for (;;) { var part = await reader.read(); if (part.done) break; size += part.value.length;
+          if (size > 2097152) { await reader.cancel(); throw new Error('reply'); } chunks.push(part.value); }
+      } finally { reader.releaseLock(); }
+      var bytes = new Uint8Array(size), offset = 0;
+      chunks.forEach(function (part) { bytes.set(part, offset); offset += part.length; });
+      return JSON.parse(new TextDecoder().decode(bytes));
+    }
+    function valid(page) {
+      if (!page || page.context !== context) {
+        clearPrivate('Your account, workspace or access changed. Reload Tasks to read private results.'); throw new Error('access');
+      }
+      if (!Array.isArray(page.items) || page.items.length > 100 || typeof page.complete !== 'boolean' ||
+          typeof page.continuation !== 'string' || page.continuation.length > 1536 || page.complete !== !page.continuation)
+        throw new Error('reply');
+    }
+    function run(q, cursor, append, attempt) {
+      controller = new AbortController(); var current = controller, deadline = setTimeout(function () { current.abort(); }, 15000);
+      loading = true; older.disabled = true; more.disabled = true; retry.hidden = true;
+      listEl.setAttribute('aria-busy', 'true');
+      status.textContent = q ? 'Searching this part… Previous results remain below.' : 'Loading older tasks…';
+      read('/api/v1/goals/search-page?' + new URLSearchParams({q:q, cursor:cursor, limit:q ? '100' : '50'}), current.signal)
+        .then(function (page) {
+          if (attempt !== generation || expired) return;
+          valid(page); failedSearch = null;
+          if (q) {
+            matches = append ? matches.concat(page.items) : page.items;
+            nextSearch = page.continuation; render(matches, page.complete); older.hidden = !nextSearch;
+            status.textContent = matches.length + (matches.length === 1 ? ' matching task found in checked parts. ' : ' matching tasks found in checked parts. ') +
+              (page.complete ? 'Reached the end of the retained task list. Later changes need a fresh search.' : 'Older work remains unchecked. Search older work to continue.');
+          } else {
+            if (!append) listEl.replaceChildren();
+            if (page.items.length) { listEl.querySelectorAll('.empty-state').forEach(function (node) { node.remove(); });
+              listEl.insertAdjacentHTML('beforeend', page.items.map(rowHtml).join('')); }
+            original = listEl.innerHTML; nextList = page.continuation; more.hidden = !nextList;
+            status.textContent = page.complete ? 'Reached the end of your readable task list.' : 'More older work is available.';
+          }
+          applyFilter(); selection();
+        })
+        .catch(async function (error) {
+          if (attempt !== generation || expired) return;
+          if (error.status === 409) { await verifyScope(); if (attempt !== generation || expired) return; }
+          failedSearch = {q:q, cursor:error.status === 409 ? '' : cursor, append:error.status === 409 ? false : append}; retry.hidden = false;
+          retry.textContent = error.status === 409 ? 'Search newest work' : 'Retry search';
+          status.textContent = error.status === 409 ? 'The older search or current access changed. Your words are kept; search from the newest work again.' :
+            'This part could not be read. Previous results and your words are kept. Retry reads it again without changing any task.';
+        })
+        .finally(function () {
+          clearTimeout(deadline);
+          if (attempt === generation) { loading = false; older.disabled = false; more.disabled = false; listEl.removeAttribute('aria-busy'); }
+        });
+    }
+    more.addEventListener('click', function () { if (!loading && nextList && !input.value.trim()) run('', nextList, true, ++generation); });
+    older.addEventListener('click', function () { if (!loading && nextSearch) run(input.value.trim(), nextSearch, true, ++generation); });
+    function search(immediate, startCursor) {
       if (expired) return;
       var q = input.value.trim();
       clearTimeout(timer); var attempt = ++generation;
       if (controller) controller.abort();
-      retry.hidden = true; listEl.setAttribute('aria-busy', 'false');
+      loading = false; nextSearch = ''; matches = []; retry.hidden = true; older.hidden = true;
+      more.hidden = !!q || !nextList; listEl.setAttribute('aria-busy', 'false');
       if (!q) { listEl.innerHTML = original; applyFilter(); status.textContent = ''; return; }
       timer = setTimeout(function () {
-        controller = new AbortController(); listEl.setAttribute('aria-busy', 'true');
-        status.textContent = 'Searching… Previous results remain below until the search completes.';
-        fetch('/api/v1/goals/search?q=' + encodeURIComponent(q) + '&limit=100',
-              {headers: {'Accept': 'application/json'}, cache: 'no-store', signal: controller.signal})
-          .then(function (r) {
-            if (attempt !== generation) return null;
-            if (r.status === 401 || r.status === 403) {
-              expired = true; original = ''; listEl.replaceChildren(); input.disabled = true;
-              throw new Error('Your sign-in or access changed. Sign in again, then reload your tasks.');
-            }
-            if (!r.ok) throw new Error('Search could not be loaded. Previous results remain below. Retry when the service is available.');
-            return r.json();
-          })
-          .then(function (rows) {
-            if (attempt !== generation || rows === null) return;
-            if (!Array.isArray(rows)) throw new Error('The search response could not be read. Previous results remain below. Try again.');
-            render(rows); applyFilter(); status.textContent = rows.length ? rows.length + (rows.length === 1 ? ' matching task.' : ' matching tasks.') : 'No matching tasks.';
-          })
-          .catch(function (error) {
-            if (attempt !== generation || error.name === 'AbortError') return;
-            status.textContent = expired ? error.message : 'Search could not be completed. Previous results remain below. Your search is kept; try again.';
-            retry.hidden = expired;
-          })
-          .finally(function () { if (attempt === generation) listEl.setAttribute('aria-busy', 'false'); });
+        run(q, startCursor || '', false, attempt);
       }, immediate ? 0 : 200);
     }
     input.addEventListener('input', function () { search(false); });
@@ -242,13 +259,16 @@
     var addressTimer = null;
     function writeAddress() {
       var params = new URLSearchParams(window.location.search), current = window.LightworkTaskFilters.current();
+      params.delete('search_after');
       ['status', 'q'].forEach(function (key) { if (current[key]) params.set(key, current[key]); else params.delete(key); });
       var query = params.toString();
       window.history.replaceState(window.history.state, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
     }
     input.addEventListener('input', function () { clearTimeout(addressTimer); addressTimer = setTimeout(writeAddress, 400); });
     function selection() {
-      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{kind:'task_filter', filters:window.LightworkTaskFilters.current()}}}));
+      var selected = {kind:'task_filter', filters:window.LightworkTaskFilters.current()};
+      if (nextSearch) selected.task_search = {query:input.value.trim(), continuation:nextSearch};
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:selected}}));
     }
     input.addEventListener('input',selection);
     filterBtns.forEach(function (button) { button.addEventListener('click',selection); });
@@ -256,9 +276,24 @@
     if (Object.prototype.hasOwnProperty.call(savedStatuses,initialStatus)) {
       filterBtns.forEach(function (button) { if (button.getAttribute('data-g-filter') === savedStatuses[initialStatus]) button.click(); });
     }
-    if (initial.has('q')) { input.value=initial.get('q').slice(0,256); search(true); }
+    if (initial.has('q')) { input.value=initial.get('q').slice(0,256); search(true, initial.get('search_after') || ''); }
     selection();
-    retry.addEventListener('click', function () { search(true); });
+    retry.addEventListener('click', function () {
+      if (expired || loading) return;
+      if (failedSearch) run(failedSearch.q, failedSearch.cursor, failedSearch.append, ++generation);
+      else search(true);
+    });
+    async function verifyScope() {
+      if (expired) return;
+      var checking = new AbortController(), deadline = setTimeout(function () { checking.abort(); }, 10000);
+      try {
+        var value = await read('/api/v1/goals/search-context', checking.signal);
+        if (!expired && value.context !== context) clearPrivate('Your account, workspace or access changed. Reload Tasks to read private results.');
+      } catch (_error) { /* An offline read preserves entered words; all result reads still check current authority. */ }
+      finally { clearTimeout(deadline); }
+    }
+    document.addEventListener('lightwork:copilot-context-changed', verifyScope);
+    window.addEventListener('lightwork:context-changed', function () { clearPrivate('Your account or workspace changed. Reload Tasks.'); });
     window.addEventListener('pagehide', function () { ++generation; clearTimeout(timer); if (controller) controller.abort(); });
   })();
   </script>

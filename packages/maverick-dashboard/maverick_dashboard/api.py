@@ -1951,25 +1951,50 @@ def list_goals(
     return [_to_goal_out(g) for g in goals]
 
 
-@router.get("/goals/search", response_model=list[GoalOut])
-def search_goals(request: Request, q: str, limit: int = 50) -> list[GoalOut]:
-    """Search across runs (goals) by text in title / description / result.
+@router.get("/goals/search-context")
+def task_search_context(request: Request, response: Response) -> dict:
+    from . import task_search
 
-    Owner-scoped: a non-admin authenticated caller searches only their own
-    goals; auth-off and admin callers search all. Declared before
-    ``/goals/{goal_id}`` so the literal ``search`` path wins over the int param.
-    """
+    response.headers["Cache-Control"] = "private, no-store"
+    return {"context": task_search.context(request)}
+
+
+@router.get("/goals/search-page")
+def task_search_page(request: Request, response: Response, q: str = "", cursor: str = "", limit: int = 100) -> dict:
+    from . import task_search
+
+    response.headers["Cache-Control"] = "private, no-store"
+    value = task_search.page(request, q, cursor=cursor, limit=limit, allow_empty=True,
+                             expected=request.headers.get("X-Lightwork-Task-Search-Context", ""))
+    goals = value.pop("goals")
+    return {**value, "items": [task_search.present(goal) for goal in goals]}
+
+
+@router.get("/goals/search", response_model=list[GoalOut])
+def search_goals(request: Request, q: str, limit: int = 50, response: Response = None) -> list[GoalOut]:
+    """Compatibility list, with explicit continuation beyond its bounded window."""
+    from . import task_search
+
     query = (q or "").strip()
     if not query:
         return []
     limit = max(1, min(int(limit or 50), 200))
-    world = _world()
-    goals = world.search_goals(query, owner=goal_owner_filter(request), limit=200)
-    # The search projection omits the domain used by suite authorization.
-    # Resolve the current full goal before exposing task text in search.
-    current = [world.get_goal(goal.id) for goal in goals]
-    visible = [goal for goal in current if goal is not None and can_access_goal(request, goal)]
-    return [_to_goal_out(goal) for goal in visible[:limit]]
+    current, cursor, goals, complete = task_search.context(request), "", [], False
+    for _ in range(4):
+        value = task_search.page(request, query, cursor=cursor, limit=limit - len(goals), expected=current)
+        goals.extend(value["goals"])
+        cursor, complete = value["continuation"], value["complete"]
+        if complete or len(goals) >= limit:
+            break
+    projected = [_to_goal_out(goal) for goal in goals]
+    task_search.check(request, goals, current)
+    if response is not None:
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Search-Complete"] = str(complete).lower()
+        if cursor:
+            response.headers["Pagination-Continuation"] = cursor
+            response.headers["Link"] = '<' + task_search.link(query, cursor) + '>; rel="next"'
+    return projected
 
 
 @router.get("/goals/{goal_id}", response_model=GoalOut)
@@ -14145,43 +14170,19 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
 
 
 @router.delete("/agents/{name}/override")
-def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$")) -> dict:
-    """Drop a tenant override, reverting the agent to its built-in pack."""
+def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$"),
+                          payload: dict | None = None) -> Response:
+    """The ordinary complete review is required before removal or reset."""
     _require_pack_editing(request)
-    from maverick.domain_edit import (
-        OverrideConflict,
-        read_override,
-        rejected_override_view,
-        remove_override,
-        resolved_view,
-    )
+    from .agent_override_changes_api import ApplyIn, apply_sealed
 
+    if payload is None:
+        raise HTTPException(409, "Open Agent Factory and review Remove custom agent or Reset to built-in before confirming. Nothing was changed.")
     try:
-        current = read_override(name)
-        if expected_generation is None:
-            raise OverrideConflict("Reload the " + _kind_word(name) + " before resetting its settings.")
-        view_before = resolved_view(name) or rejected_override_view(name)
-        if view_before and view_before["generation"] != expected_generation:
-            raise OverrideConflict(_this_one(name) + " changed. Reload its latest version before resetting it.")
-        if current or (view_before and "is_builtin" in view_before):
-            _record_agent_reset_intent(request, name,
-                                       sorted(current) if current else ["unavailable_override"])
-        removed = remove_override(name, expected_generation=expected_generation)
-    except OverrideConflict as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    view = resolved_view(name)
-    if removed:
-        from . import agent_changelog
-
-        agent_changelog.record(name, ["Reset to the built-in version" if view else "Removed this agent"],
-                               by=caller_principal(request) or "")
-    if view is None:
-        if removed:
-            return {"removed": True, "agent": None}
-        raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
-    return {"removed": removed, "agent": view}
+        reviewed = ApplyIn.model_validate(payload)
+    except ValueError as exc:
+        raise HTTPException(422, "Confirm the complete current review in Agent Factory. Nothing was changed.") from exc
+    return apply_sealed(request, reviewed, expected_name=name, expected_generation=expected_generation)
 
 
 def _record_agent_change(request: Request, name: str, before: dict | None, after: dict | None) -> None:

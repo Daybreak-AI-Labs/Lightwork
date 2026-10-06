@@ -62,7 +62,7 @@ native task-search API now applies the same full-row check.
 
 | Customer job | Direct UI and Copilot operation | Observable result and recovery | Remaining boundary |
 | --- | --- | --- | --- |
-| Find a task | Tasks search; `tasks.find` on Chat, Tasks, Today and task pages | Read-only owner-scoped match list with current status and a link to task progress | Search examines the latest 1,000 tasks; older work needs the paginated task history. |
+| Find a task (UX-330) | Tasks search and normal-list continuation; `tasks.find` on Chat, Tasks, Today and task pages | Protected current owner/department-scoped parts, readable progress, exact continuation and current result access | Search continues beyond the former 1,000-record window. A failed part retains current words/results and remains unfinished; later edits/new records require a fresh search. Native 1,111-record and 320px ordinary/Copilot journeys qualify local SQLite behavior; live shared storage and customer data remain separate. |
 | Start a task | Chat composer or task API; `tasks.start` on Chat, Tasks and Today | Sealed preview of task text and effective limits, separate confirmation, native admission receipt and task-progress link; exact-key replay | Accepted admission is not completed work. Source attachments, specialist/template starts and connected-account choices remain in native controls. |
 | Stop or restart | Native task progress; existing `tasks.stop` and `tasks.resume` | Current-owner checks, separate reviewed Stop/restart, exact receipts and progress readback | Stop is cooperative; prior external effects remain. A restart is a new attempt. |
 | Review work | Project reviews; existing `reviews.respond` | Fixed-version response with current reviewer authority and receipt recovery | Task deliverable sign-off still needs its separate typed decision and original-receipt adapter. |
@@ -1411,3 +1411,161 @@ metadata-only withdrawal/removal stayed reachable after source removal and when
 the capability was off; it did not expose private source bodies or revive grants.
 All paths used native local services and 320px ordinary controls, without an
 outside provider or hosted CI.
+
+## October 6 complete checked answer regions
+
+Learning > Checked answer regions uses two exact owned taught rule versions,
+current separate permission to reuse their native cases, and complete immutable
+paired comparisons. The ordinary form executes both rules on every declared
+finite input, then combines actual permitted observations with separately
+reviewed hypothetical expected answers. Original-only, proposed-only,
+both-correct, neither-correct, unknown and conflicting cells stay distinct.
+Both-correct keeps the original. A minimum axis-split tree is independently
+checked against the complete indexed grid; trying a route runs only its checked
+native arm. Unresolved or conflicting routing runs neither arm and asks for
+review. Nothing is published by this operation.
+
+The actual mounted 320px journey and typed Copilot exercised complete
+qualification, a hypothetical answer, checked routing, explicit answer
+withdrawal and original readback. Empty text has an explicit ordinary choice
+and passed both interfaces. Lost replies and reload read the same original
+without another calculation. Current source permission, policy, account,
+workspace and final native-writer expiry remain mandatory; an expired prepared
+admission started zero calculations. Source withdrawal withholds private old
+routing while retaining authorized original metadata. Disabled history and
+withdrawal remain usable. The actual mounted maximum completed sixty-four
+real labels and 256 guarded native executions in 55.06 seconds under the
+explicit reviewed 120-second allowance, matching the independently checked
+complete grid. Both interfaces expose 30/60/120-second choices. An earlier
+30-second attempt stopped after 151 native runs; its original remains
+unconfirmed and cannot restart or silently receive another allowance.
+
+Bounds are three Yes/No or finite whole-number fields, sixty-four complete
+situations and one isolated pure taught step. The local namespace admits up to
+500 ordinary requests including unfinished attempts, reserves room for one
+separate withdrawal of each reviewed expected answer, and refuses duplicate
+withdrawals. Actual boundary admission refused request 501, permitted a reserved
+withdrawal and retained its exact replay. This is local finite routing under
+entered answers, not independently verified business truth, unseen-case
+accuracy, causal lift or a new learning algorithm. Whole shared-storage and
+customer workload qualification remain separate.
+
+## October 6 exact agent removal, reset and damaged-setup recovery
+
+Agent Factory now distinguishes removing a custom agent from resetting a
+supplied built-in agent. Review displays the complete current instructions,
+saved changes, action/knowledge/AI/workflow limits, effective independence and
+resulting built-in definition where one exists. A custom agent has no built-in
+fallback; its removal says so. Cancellation preserves newer entered editor
+work. A changed same-name definition invalidates the reviewed file generation
+before any native unlink.
+
+An unscoped installation administrator can also review an existing native
+rejected saved setup. Its unreadable instructions are explicitly unavailable;
+the administrator acknowledges discarding the exact damaged file and reviews
+its actual fallback or removal. This neither approves nor guesses its contents.
+The same native source/file lock, physical unlink guard, audit admission and
+actor/workspace-bound original apply. The old unreviewed Delete route cannot
+bypass this review. Typed Copilot uses the complete structured review and exact
+original reader without reducing authority.
+
+Actual matching-source ordinary and Copilot journeys exercised valid removal,
+full built-in reset, damaged-file discard, cancellation, stale source refusal,
+lost replies, exact original recovery and same-name replacement separation.
+An interruption after unlink stayed historically unknown; exact retry never
+performed another unlink. An audit/writer wait crossing the review deadline
+left the definition in place. Current permission loss cleared private editor
+and review state. Original metadata remains readable with editing disabled.
+Full nested definitions fit the actual 320px native page without clipped values
+or JavaScript errors. No provider call was made.
+
+This changes future saved agent selection. Existing task history, current
+workers, rosters, schedules and saved workflow references are separate records;
+removal does not rewrite them or undo their business effects. An original
+receipt confirms its own native change, not whatever later occupies the name.
+Installed package composition is checked separately below.
+
+## October 6 governed native rule and checking-order evolution
+
+Learning > Rewrite and check local rules, also linked from a saved workflow's
+Designer, constructs supported native decision routes from the complete
+behavior of one owned published taught rule. The strict typed input guard is
+real counted work and does not compute the incumbent answer before a candidate.
+One-input sources also receive a complete native direct-choice alternative.
+Every candidate receives every declared situation. Declared wrong-answer
+variants receive actual native runs; a minimum first-failure ordering is checked
+against an independent ordering calculation, and every remaining situation is
+still required for a passing rule. The fixed complete-domain comparison remains
+outside both evolving artifacts.
+
+The owner separately accepts a complete checked rule or checking order. This
+is not approval by a second person. Publication uses the actual workflow Save
+and Publish controls under exact current draft/release checks. Active checking
+reads the real current publication. Restore creates a fresh activation of the
+exact retained release and keeps the current draft. All physical current-file
+and publication-pointer replacements recheck reviewed authority after temp-file
+flush and on Windows sharing retries.
+
+Actual ordinary 320px and typed Copilot journeys completed Build, full rule
+review, separate acceptance, Save/Publish, complete active Check, checking-order
+acceptance and retained-release Restore. Exact `10^24` answers remained intact.
+Lost replies read the original without extra calculations; process-restart
+unknown replay ran zero calculations. Source transfer cleared private current
+work while preserving the original owner's authorized metadata withdrawal and
+removal. Operating permission loss cleared current data and denied original
+reads. Disabled feature history remained readable. Expiry after physical flush
+prevented late Save, Publish and Restore pointer effects. If a draft had already
+saved before publication stopped, the original stayed unknown; an explicit
+current-state review did not rewrite that history or refund its admission.
+
+The largest native envelope completed once: thirty-two situations across the
+incumbent, two compiled alternatives and eight wrong-answer variants, totaling
+352 actual guarded executions in 82.286 seconds under the explicit reviewed
+120-second shared allowance. The ordinary and Copilot controls expose
+15/60/120-second choices; both wait for the reviewed local work rather than
+aborting at the generic short request timeout. Earlier failed work stays
+unknown and its admission remains spent. Candidate guard/route steps were
+slower than the incumbent in the executed synthetic case and are reported as
+such. Agreement is not business truth, customer savings, research novelty or
+competitive superiority. No provider, connected action, arbitrary Python,
+plugin or host-source replacement occurs.
+
+Installed follow-through found a real text-answer construction defect: the
+private text-leaf holder omitted the native workflow's required name. The
+constructor now supplies that name. Boolean/integer routes are unchanged;
+complete text, empty-text and Unicode constructions retain valid native graphs.
+The earlier installed Build remains unconfirmed with its twenty-run admission
+spent and no publication effect. A replacement installed artifact and a separate
+reviewed current intent qualify the repair; that original is never rewritten as
+successful or automatically rerun.
+
+## October 6 exact access-key issuance and one-time delivery
+
+Account > Access keys now shares a current-source full review and exact original
+request across Create, Rotate and Revoke. The original admission and key change
+use the native key-file lock; all existing writers preserve the bounded request
+ledger. Current permission, actor, workspace, reviewed source and deadline are
+rechecked at physical replacement after flush and on sharing retries. There is
+no automatic second issuance after an interrupted reply. The unreviewed legacy
+HTTP routes require the protected review instead of bypassing it. Native library
+callers retain their existing defaults.
+
+Native original metadata contains operation, actor, context, binding, action,
+state, key reference and time, never the secret or its prefix. The one-time
+secret is delivered only with the confirmed new result to the still-current
+account. A lost secret cannot be recovered; the customer can separately review
+revocation of the affected key and issuance of its replacement. Removing a
+workspace refuses new credentials for it but leaves exact owned revocation
+available. Disabled issuance retains authorized original history. Current
+account or permission changes clear secrets, private option text and local state.
+
+The actual 320px native and protected Copilot journeys completed full review,
+cancellation preserving work, issuance, rotation, original read, revocation and
+replacement. Lost replies and a write/completion interruption never repeated
+issuance or returned a recovered secret. A held Windows replacement whose
+review expired left the key count unchanged. Source changes, actor changes,
+current permission loss and an audit wait refused effects. Two typed catalog
+controls open the native management and original forms; they do not return a
+secret through generic Copilot output. No provider or external delivery occurred.
+The native ledger refuses new changes at its 10,000-request capacity. Installed
+wheel composition is checked separately.

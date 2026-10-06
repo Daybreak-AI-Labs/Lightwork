@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Access keys · Lightwork{% endblock %}
+{% block title %}Access keys · Lightwork<script src="{{ static_url('lightwork-access-key-requests.js') }}" defer></script>
+{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero %}
   {{ hero('Your account', 'Access keys',
           subtitle='Keys for scripts and integrations',
           lede='A key lets a program act as you without your password. Each key does only
-                what its scopes allow and never more than your role, stops on its expiry
-                date, and can be rotated or revoked here at any time.') }}
+                what its chosen permissions allow and never more than your role, stops on its expiry
+                date, and can be replaced or revoked here at any time.') }}
 
   <div id="ak-status" class="panel" role="status" aria-live="polite">Loading your keys…</div>
 
@@ -32,8 +33,8 @@
       </p>
       <fieldset id="ak-scopes">
         <legend>What the key may do</legend>
-        <p class="muted">Only the scopes your role allows are offered. A key can never do more than you can. Task keys cannot decide approvals in the shared queue or paused workflows; approval keys cannot run task actions. The admin scope includes operator and audit actions. No key can create, rotate or revoke access keys.</p>
-        <div id="ak-scope-boxes" role="group" aria-label="Scopes"></div>
+        <p class="muted">Only the permissions your role allows are offered. A key can never do more than you can. Task keys cannot decide approvals in the shared queue or paused workflows; approval keys cannot run task actions. Full administrator access includes work and activity-record actions. No key can create, rotate or revoke access keys.</p>
+        <div id="ak-scope-boxes" role="group" aria-label="Permissions"></div>
       </fieldset>
       <p>
         <label for="ak-days">Stops working after (days)</label>
@@ -41,14 +42,14 @@
         <span class="muted" id="ak-days-help"></span>
       </p>
       <p>
-        <label for="ak-workspace">Workspace (optional)</label>
-        <input id="ak-workspace" name="workspace" type="text" maxlength="128" placeholder="Leave empty to use your current workspace" />
+        <label for="ak-workspace">Where the key may work</label>
+        <select class="input" id="ak-workspace" name="workspace"><option value="">All workspaces this account can access</option></select>
       </p>
       <p id="ak-owner-row" hidden>
         <label for="ak-owner">Create this key for</label>
         <select id="ak-owner" name="owner"></select>
       </p>
-      <p><button type="submit" class="btn btn--primary">Create key</button>
+      <p><button type="submit" class="btn btn--primary">Review new key</button>
         <span class="muted" id="ak-form-msg" role="status" aria-live="polite"></span></p>
     </form>
   </div>
@@ -79,6 +80,14 @@
     </div>
   </section>
 
+  <details class="panel" id="ak-requests" style="overflow-wrap:anywhere">
+    <summary>Review and original key requests</summary>
+    <p id="akr-status" role="status" aria-live="polite">Loading your protected controls…</p>
+    <label for="akr-original">Original request</label>
+    <select class="input" id="akr-original" style="max-width:100%"><option value="">Choose an original request</option></select>
+    <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-block:var(--space-2)"><button class="btn" id="akr-read" type="button">Read original record</button><button class="btn btn--ghost" id="akr-refresh" type="button">Refresh current keys and requests</button></div>
+    <section id="akr-review"></section><section id="akr-result" aria-live="polite"></section>
+  </details>
   <style>
     .ak-secret { display: inline-block; padding: var(--space-2) var(--space-3); word-break: break-all; user-select: all; }
     #ak-scope-boxes label { display: block; margin: var(--space-1) 0; }
@@ -115,9 +124,10 @@
         replaced: 'Replaced', expired: 'Expired', revoked: 'Revoked'}[k.status] || k.status;
     }
     var state = null;
+    var scopeLabels = {'tasks:read':'Read work','tasks:write':'Run work','approvals:decide':'Decide approvals','audit:read':'Read activity records','settings:write':'Change settings','admin':'Full administrator access'};
 
     function showSecret(result) {
-      $('ak-secret-value').textContent = result.secret;
+      $('ak-secret-value').textContent = result.secret; $('ak-copy').textContent = 'Copy key';
       $('ak-secret-note').textContent = result.notice + ' Key "' + result.key.label + '" (' + result.key.prefix + '…).';
       $('ak-secret').hidden = false;
       $('ak-secret').scrollIntoView({behavior: 'smooth'});
@@ -135,7 +145,7 @@
       if (!keys.length) return el('p', 'muted', 'No keys yet.');
       var table = el('table');
       var head = el('thead'); var tr = el('tr');
-      ['Name', 'Starts with'].concat(showOwner ? ['Owner'] : []).concat(['Scopes', 'Stops', 'Last used', 'State', 'Actions']).forEach(function (h) {
+      ['Name', 'Starts with'].concat(showOwner ? ['Owner'] : []).concat(['Permissions', 'Stops', 'Last used', 'State', 'Actions']).forEach(function (h) {
         var th = el('th', null, h); th.setAttribute('scope', 'col'); tr.appendChild(th);
       });
       head.appendChild(tr); table.appendChild(head);
@@ -144,15 +154,15 @@
         var row = el('tr');
         row.appendChild(el('td', null, k.label));
         row.appendChild(el('td', null, k.prefix + '…'));
-        if (showOwner) row.appendChild(el('td', null, k.owner + (k.service_account ? ' (service account)' : '')));
-        row.appendChild(el('td', null, k.scopes.join(', ') + (k.workspace ? ' · workspace ' + k.workspace : '')));
+        if (showOwner) row.appendChild(el('td', null, k.owner === state.you ? 'Your account' : k.service_account ? 'Service account' : 'Another signed-in account'));
+        row.appendChild(el('td', null, k.scopes.map(function (scope) { return scopeLabels[scope] || 'Unavailable permission'; }).join(', ') + (k.workspace ? ' · ' + ((state.workspaces || []).find(function (workspace) { return workspace.value === k.workspace; }) || {label:'Workspace no longer available'}).label : '')));
         var stops = el('td', null, when(k.expires_at));
         if (state.expiring_soon.indexOf(k.id) !== -1) { stops.appendChild(el('span', 'badge warn', 'soon')); }
         row.appendChild(stops);
         row.appendChild(el('td', null, k.last_used_at ? when(k.last_used_at) + (k.last_used_ip ? ' from ' + k.last_used_ip : '') : 'never'));
         row.appendChild(el('td', null, statusText(k) + (k.status === 'rotating' ? ' until ' + when(k.grace_until) : '')));
         var actions = el('td', 'ak-actions');
-        if (['active', 'expiring'].indexOf(k.status) !== -1) {
+        if (state.enabled && ['active', 'expiring'].indexOf(k.status) !== -1) {
           var rotate = el('button', 'btn btn--ghost', 'Rotate'); rotate.type = 'button';
           rotate.setAttribute('aria-label', 'Rotate key ' + k.label);
           rotate.addEventListener('click', function () { act(k, 'rotate'); });
@@ -162,7 +172,7 @@
           var revoke = el('button', 'btn btn--ghost', 'Revoke'); revoke.type = 'button';
           revoke.setAttribute('aria-label', 'Revoke key ' + k.label);
           revoke.addEventListener('click', async function () {
-            if (await window.mvConfirm('Revoke the key "' + k.label + '"? Anything using it stops working now, and a revoked key can\'t be turned back on.', {okText: 'Revoke key'})) act(k, 'revoke');
+            act(k, 'revoke');
           });
           actions.appendChild(revoke);
         }
@@ -174,11 +184,7 @@
     }
 
     async function act(key, what) {
-      try {
-        var result = await request('/api/v1/api-keys/' + encodeURIComponent(key.id) + '/' + what, {method: 'POST', json: {}});
-        if (result.secret) showSecret(result);
-        await load();
-      } catch (e) { $('ak-status').textContent = e.message; }
+      if (window.LightworkAccessKeys) await window.LightworkAccessKeys.review(what, key.id);
     }
 
     function render() {
@@ -205,11 +211,13 @@
         if (state.scopes_available.indexOf(s.scope) === -1) return;
         var label = el('label'); var box = el('input'); box.type = 'checkbox'; box.name = 'scopes'; box.value = s.scope;
         if (s.scope === 'tasks:read') box.checked = true;
-        label.appendChild(box); label.appendChild(document.createTextNode(' ' + s.scope + ' — ' + s.help));
+        label.appendChild(box); label.appendChild(document.createTextNode(' ' + (scopeLabels[s.scope] || 'Unavailable permission') + ' — ' + s.help));
         boxes.appendChild(label);
       });
+      var workspaces = $('ak-workspace'); workspaces.replaceChildren(); var any = el('option', null, 'All workspaces this account can access'); any.value = ''; workspaces.append(any); (state.workspaces || []).forEach(function (workspace) { var option = el('option', null, workspace.label); option.value = workspace.value; workspaces.append(option); });
       $('ak-days').value = state.defaults.default_days; $('ak-days').max = state.defaults.max_days;
       $('ak-days-help').textContent = 'At most ' + state.defaults.max_days + ' days on this installation.';
+      if (!state.admin) { $('ak-admin').hidden = true; $('ak-sa-list').replaceChildren(); $('ak-owner').replaceChildren(); $('ak-owner-row').hidden = true; }
       if (state.admin) {
         $('ak-admin').hidden = false;
         var owner = $('ak-owner'); owner.textContent = '';
@@ -246,23 +254,37 @@
     }
 
     async function load() {
-      var all = new URLSearchParams(window.location.search).get('all') ? '?all=1' : '';
-      try { state = await request('/api/v1/api-keys' + all); render(); }
-      catch (e) { $('ak-status').textContent = e.message; }
+      if (window.LightworkAccessKeys) await window.LightworkAccessKeys.reload();
     }
 
-    $('ak-form').addEventListener('submit', async function (ev) {
-      ev.preventDefault();
-      var scopes = Array.prototype.map.call(document.querySelectorAll('#ak-scope-boxes input:checked'), function (b) { return b.value; });
-      var body = {label: $('ak-label').value, scopes: scopes, expires_in_days: Number($('ak-days').value) || undefined,
-        workspace: $('ak-workspace').value};
-      if (!$('ak-owner-row').hidden && $('ak-owner').value) body.owner = $('ak-owner').value;
-      $('ak-form-msg').textContent = '';
-      try {
-        var result = await request('/api/v1/api-keys', {method: 'POST', json: body});
-        showSecret(result); $('ak-label').value = ''; await load();
-      } catch (e) { $('ak-form-msg').textContent = e.message; }
-    });
+    window.LightworkAccessKeysPage = {
+      accept: function (next) {
+        var keep = state !== null, draft = {}, scopes = Array.from(document.querySelectorAll('#ak-scope-boxes input:checked')).map(function (field) { return field.value; });
+        ['ak-label','ak-days','ak-owner','ak-workspace','ak-sa-name','ak-sa-desc','ak-sa-role'].forEach(function (id) { draft[id] = $(id).value; });
+        state = next; render();
+        if (keep) {
+          Object.keys(draft).forEach(function (id) {
+            var field = $(id); if (field.tagName === 'SELECT' && draft[id] && !Array.from(field.options).some(function (option) { return option.value === draft[id]; })) {
+              var previous = el('option', null, 'Previous choice is no longer available'); previous.value = draft[id]; field.append(previous);
+            }
+            field.value = draft[id];
+          });
+          document.querySelectorAll('#ak-scope-boxes input').forEach(function (field) { field.checked = scopes.includes(field.value); });
+          scopes.forEach(function (scope) { if (Array.from(document.querySelectorAll('#ak-scope-boxes input')).some(function (field) { return field.value === scope; })) return;
+            var label = el('label'), field = el('input'); field.type = 'checkbox'; field.value = scope; field.checked = true; field.addEventListener('change', function () { if (!field.checked) field.disabled = true; });
+            label.append(field, document.createTextNode(' Previous permission unavailable — remove before reviewing')); $('ak-scope-boxes').append(label);
+          });
+        }
+        $('ak-form').querySelectorAll('button').forEach(function (button) { button.disabled = !next.enabled; });
+      },
+      showSecret: showSecret,
+      clearSecret: function () { $('ak-secret-value').textContent = ''; $('ak-secret-note').textContent = ''; $('ak-secret').hidden = true; },
+      clear: function () {
+        this.clearSecret(); state = null; $('ak-status').textContent = 'Your account or access changed. Reload Access keys before continuing.'; $('ak-keys').replaceChildren(); $('ak-sa-list').replaceChildren(); $('ak-scope-boxes').replaceChildren(); $('ak-admin').hidden = true;
+        ['ak-owner','ak-workspace','ak-sa-role','ak-sa-note'].forEach(function (id) { $(id).replaceChildren(); });
+        ['ak-form','ak-sa-form'].forEach(function (id) { $(id).querySelectorAll('input,select').forEach(function (field) { field.value = ''; field.checked = false; }); $(id).hidden = true; });
+      }
+    };
     $('ak-sa-form').addEventListener('submit', async function (ev) {
       ev.preventDefault();
       $('ak-sa-msg').textContent = '';
@@ -272,7 +294,8 @@
       } catch (e) { $('ak-sa-msg').textContent = e.message; }
     });
     // The shell's helpers (lightwork-ui.js) load after the page content.
-    if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', load);
+
   })();
   </script>
+<script src="{{ static_url('lightwork-access-key-requests.js') }}" defer></script>
 {% endblock %}

@@ -9,7 +9,7 @@ change. This module is the editing surface over that mechanism:
   * :func:`resolved_view` -- the merged pack plus *provenance* (which fields are
     overridden vs inherited) and lint findings, for the editor UI.
   * :func:`write_override` -- validate then persist an override patch.
-  * :func:`remove_override` -- drop the override, reverting to the built-in.
+  * :func:`remove_override` -- remove the exact tenant override.
   * :func:`list_agents` -- the roster, flagged by override/workflow status.
 
 Overrides serialize with the same ``json.dumps`` idiom the intake factory uses
@@ -24,6 +24,7 @@ import json
 import os
 import re
 import stat
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -332,16 +333,19 @@ def read_override(name: str, directory: str | Path | None = None) -> dict:
     return _load_raw_domains(d).get(name, {})
 
 
-def remove_override(name: str, directory: str | Path | None = None, *, expected_generation: str | None = None) -> bool:
-    """Delete a tenant override, reverting to the built-in pack. Returns whether
-    a file was removed."""
+def remove_override(name: str, directory: str | Path | None = None, *, expected_generation: str | None = None,
+                    effect_guard: Callable[[], None] | None = None) -> bool:
+    """Remove a tenant override. Built-in agents resume their built-in definition;
+    custom-only agents disappear. Returns whether a file was removed."""
     name = _validated_override_name(name)
     d = Path(directory) if directory else user_dir()
     path = d / f"{name}.toml"
     with authority_effect_fence(), cross_process_lock(path, strict=True):
         if expected_generation is not None and not hmac.compare_digest(expected_generation, _override_generation(name, path)):
-            raise OverrideConflict("This agent changed after you opened it. Reload its latest version before resetting it.")
+            raise OverrideConflict("This agent changed after you opened it. Reload its latest version before changing it.")
         if path.is_file():
+            if effect_guard is not None:
+                effect_guard()
             path.unlink()
             return True
     return False
@@ -392,6 +396,7 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
     return {
         "name": name,
         "generation": _override_generation(name, (Path(directory) if directory else user_dir()) / f"{name}.toml"),
+        "is_builtin": name in builtin_domains(),
         "suite": suite_for(prof.name) or suite_for(name),
         "suites": sorted(suites_for_domain(name, prof)),
         "description": prof.description,

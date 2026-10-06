@@ -36,6 +36,7 @@ import re
 import secrets
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -368,7 +369,7 @@ def _load() -> dict:
     ensure_private_directory(maverick_home())
     ensure_private_directory(p.parent)
     if not p.exists():
-        return {"keys": {}, "service_accounts": {}}
+        return {"keys": {}, "service_accounts": {}, "issuance_requests": {}}
     try:
         ensure_private_file(p)
         data = _decode_json(atomic_read_text(p))
@@ -385,13 +386,15 @@ def _load() -> dict:
     return {
         "keys": {k: _validate_key(k, v) for k, v in keys.items()},
         "service_accounts": {k: _validate_account(k, v) for k, v in accounts.items()},
+        "issuance_requests": _issuance_records(data.get("issuance_requests", {})),
     }
 
 
-def _write(data: dict) -> None:
+def _write(data: dict, *, effect_guard: Callable[[], None] | None = None) -> None:
     from maverick.file_lock import atomic_write_text
 
-    atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))
+    kwargs = {"effect_guard": effect_guard} if effect_guard is not None else {}
+    atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True), **kwargs)
 
 
 def _to_key(rec: dict) -> ApiKey:
@@ -406,18 +409,18 @@ def _to_key(rec: dict) -> ApiKey:
     )
 
 
-def _audit(kind, **payload) -> None:
+def _audit(kind, **payload) -> bool:
     from maverick.audit import audit_event
 
     actor = payload.get("actor") or "local"
-    audit_event(kind, agent=actor, **payload)
+    return audit_event(kind, agent=actor, **payload)
 
 
-def _audit_with_rollback(kind, rollback, **payload) -> None:
+def _audit_with_rollback(kind, rollback, **payload) -> bool:
     from maverick.audit import AuditRefused
 
     try:
-        _audit(kind, **payload)
+        return _audit(kind, **payload)
     except AuditRefused:
         try:
             rollback()
@@ -474,8 +477,66 @@ def _mint(prefix: str) -> tuple[str, str]:
     return secret, secret[: len(prefix) + 8]
 
 
+def _issuance_records(rows):
+    if not isinstance(rows, dict) or len(rows) > 10000:
+        raise ApiKeyStoreError("Access-key request history is unavailable or exceeds its limit")
+    fields = {"operation", "actor", "context", "binding", "action", "state", "key_id", "recorded_at"}
+    for operation, row in rows.items():
+        if (not isinstance(operation, str) or not re.fullmatch(r"[a-f0-9]{32}", operation) or not isinstance(row, dict)
+                or set(row) != fields or row["operation"] != operation or row["action"] not in {"create", "rotate", "revoke"}
+                or row["state"] not in {"started", "written", "confirmed"} or (row["state"] != "started" and not row["key_id"])
+                or (row["state"] == "started" and row["key_id"])):
+            raise ApiKeyStoreError("Access-key request history contains an invalid record")
+        for key, pattern in (("context", r"[a-f0-9]{64}"), ("binding", r"[a-f0-9]{64}"), ("key_id", r"(?:[a-f0-9]{16})?")):
+            if not isinstance(row[key], str) or not re.fullmatch(pattern, row[key]):
+                raise ApiKeyStoreError("Access-key request history contains invalid verification material")
+        _text(row, "actor", operation, allow_empty=False)
+        _number(row, "recorded_at", operation)
+    return rows
+
+
+def issuance_original(operation: str) -> dict | None:
+    with _locked(store_path()):
+        row = _load()["issuance_requests"].get(operation)
+        return dict(row) if row else None
+
+
+def _issuance_begin(data, reviewed, guard):
+    if reviewed is None:
+        if guard is not None:
+            guard(data)
+        return
+    operation = reviewed["operation"]
+    if operation in data["issuance_requests"]:
+        raise ApiKeyError("This original request is already retained. Read its outcome; nothing will be issued again.")
+    if len(data["issuance_requests"]) >= 10000:
+        raise ApiKeyError("The retained access-key request history is full. Nothing was changed.")
+    if guard is None:
+        raise ApiKeyError("A complete current review is required for this request")
+    guard(data)
+    row = {**reviewed, "state": "started", "key_id": "", "recorded_at": time.time()}
+    _issuance_records({operation: row})
+    data["issuance_requests"][operation] = row
+    _write(data)
+    if not _audit(_kind("API_KEY_CHANGED"), action="request_reviewed", request=operation, actor=row["actor"], change=row["action"]):
+        raise ApiKeyStoreError("The reviewed activity could not be confirmed. No access key was changed.")
+    guard(data)
+
+
+def _issuance_written(data, reviewed, key_id):
+    if reviewed is not None:
+        data["issuance_requests"][reviewed["operation"]].update(state="written", key_id=key_id, recorded_at=time.time())
+
+
+def _issuance_confirm(data, reviewed, audited):
+    if reviewed is not None and audited:
+        data["issuance_requests"][reviewed["operation"]]["state"] = "confirmed"
+        _write(data)
+
+
 def create_key(*, label, scopes, owner: str, created_by: str,
-               expires_in_days=None, workspace="") -> tuple[ApiKey, str]:
+               expires_in_days=None, workspace="", reviewed_request: dict | None = None,
+               effect_guard: Callable[[dict], None] | None = None) -> tuple[ApiKey, str]:
     """Mint a key for ``owner``. Returns ``(key, secret)``; the secret is shown
     once and never stored."""
     if not enabled():
@@ -488,10 +549,9 @@ def create_key(*, label, scopes, owner: str, created_by: str,
     scope_set = _validate_scopes(scopes, owner)
     expires_at = _expiry(expires_in_days, now)
     ws = _validate_workspace(workspace, owner)
-    secret, prefix = _mint(key_prefix())
     rec = {
         "id": secrets.token_hex(8), "label": label_text, "owner": owner,
-        "prefix": prefix, "secret_sha256": _hash(secret), "scopes": list(scope_set),
+        "scopes": list(scope_set),
         "workspace": ws, "created_at": now, "expires_at": expires_at,
         "created_by": created_by or "", "last_used_at": None, "last_used_ip": "",
         "revoked_at": None, "grace_until": None, "replaced_by": "", "rotated_from": "",
@@ -503,14 +563,21 @@ def create_key(*, label, scopes, owner: str, created_by: str,
             account = data["service_accounts"].get(slug)
             if account is None or account["disabled_at"] is not None:
                 raise ApiKeyError("that service account does not exist or is disabled")
+        _issuance_begin(data, reviewed_request, effect_guard)
+        secret, prefix = _mint(key_prefix())
+        rec.update(prefix=prefix, secret_sha256=_hash(secret))
         prior = json.loads(json.dumps(data))
         data["keys"][rec["id"]] = rec
-        _write(data)
-        _audit_with_rollback(
+        _issuance_written(data, reviewed_request, rec["id"])
+        if effect_guard is not None:
+            effect_guard(prior)
+        _write(data, effect_guard=(lambda: effect_guard(prior)) if effect_guard is not None else None)
+        audited = _audit_with_rollback(
             _kind("API_KEY_CHANGED"), lambda: _write(prior), action="created",
             key_id=rec["id"], prefix=prefix, owner=owner, scopes=list(scope_set),
             workspace=ws, expires_at=expires_at, actor=created_by or "",
         )
+        _issuance_confirm(data, reviewed_request, audited)
     return _to_key(rec), secret
 
 
@@ -533,7 +600,8 @@ def list_keys(*, owner: str | None = None) -> list[ApiKey]:
     return sorted(keys, key=lambda k: k.created_at, reverse=True)
 
 
-def rotate_key(key_id: str, *, actor: str) -> tuple[ApiKey, str]:
+def rotate_key(key_id: str, *, actor: str, reviewed_request: dict | None = None,
+               effect_guard: Callable[[dict], None] | None = None) -> tuple[ApiKey, str]:
     """Mint a replacement with the same name, scopes, owner and workspace. The
     old secret keeps working for the configured grace period, then stops."""
     if not enabled():
@@ -554,6 +622,7 @@ def rotate_key(key_id: str, *, actor: str) -> tuple[ApiKey, str]:
             raise ApiKeyError("the key's owner no longer holds any of its scopes")
         lifetime_days = max(1, int(round((old["expires_at"] - old["created_at"]) / 86400)))
         expires_at = _expiry(min(lifetime_days, settings()["max_days"]), now)
+        _issuance_begin(data, reviewed_request, effect_guard)
         secret, prefix = _mint(key_prefix())
         new = dict(old)
         new.update({
@@ -567,17 +636,22 @@ def rotate_key(key_id: str, *, actor: str) -> tuple[ApiKey, str]:
         old["grace_until"] = min(now + grace_hours * 3600.0, old["expires_at"])
         old["replaced_by"] = new["id"]
         data["keys"][new["id"]] = new
-        _write(data)
-        _audit_with_rollback(
+        _issuance_written(data, reviewed_request, new["id"])
+        if effect_guard is not None:
+            effect_guard(prior)
+        _write(data, effect_guard=(lambda: effect_guard(prior)) if effect_guard is not None else None)
+        audited = _audit_with_rollback(
             _kind("API_KEY_CHANGED"), lambda: _write(prior), action="rotated",
             key_id=new["id"], prefix=prefix, owner=new["owner"], scopes=list(scopes),
             workspace=new["workspace"], expires_at=expires_at, actor=actor or "",
             rotated_from=old["id"], grace_until=old["grace_until"],
         )
+        _issuance_confirm(data, reviewed_request, audited)
     return _to_key(new), secret
 
 
-def revoke_key(key_id: str, *, actor: str) -> ApiKey:
+def revoke_key(key_id: str, *, actor: str, reviewed_request: dict | None = None,
+               effect_guard: Callable[[dict], None] | None = None) -> ApiKey:
     with _locked(store_path()):
         data = _load()
         rec = data["keys"].get(str(key_id or ""))
@@ -585,15 +659,20 @@ def revoke_key(key_id: str, *, actor: str) -> ApiKey:
             raise ApiKeyError("that key does not exist")
         if rec["revoked_at"] is not None:
             return _to_key(rec)
+        _issuance_begin(data, reviewed_request, effect_guard)
         prior = json.loads(json.dumps(data))
         rec["revoked_at"] = time.time()
-        _write(data)
-        _audit_with_rollback(
+        _issuance_written(data, reviewed_request, rec["id"])
+        if effect_guard is not None:
+            effect_guard(prior)
+        _write(data, effect_guard=(lambda: effect_guard(prior)) if effect_guard is not None else None)
+        audited = _audit_with_rollback(
             _kind("API_KEY_CHANGED"), lambda: _write(prior), action="revoked",
             key_id=rec["id"], prefix=rec["prefix"], owner=rec["owner"],
             scopes=list(rec["scopes"]), workspace=rec["workspace"],
             expires_at=rec["expires_at"], actor=actor or "",
         )
+        _issuance_confirm(data, reviewed_request, audited)
     return _to_key(rec)
 
 

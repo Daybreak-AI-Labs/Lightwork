@@ -66,9 +66,9 @@
     if (detail && typeof detail.message === 'string') return detail.message;
     return fallback;
   }
-  async function request(route, body) {
+  async function request(route, body, fullLocalCheck) {
     var controller = new AbortController(); pendingRequests.add(controller);
-    var timeout = setTimeout(function () { controller.abort(); }, route === '/propose' ? 45000 : 30000);
+    var timeout = setTimeout(function () { controller.abort(); }, fullLocalCheck === true && route === '/execute' ? 150000 : fullLocalCheck === true && route === '/prepare' ? 90000 : route === '/propose' ? 45000 : 30000);
     try {
       var response = await fetch(root + route, {method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
         headers: {'Content-Type': 'application/json', Accept: 'application/json'}, body: JSON.stringify(body)});
@@ -256,6 +256,70 @@
             finally { if (isCurrent() && catalogButton.isConnected) catalogButton.disabled = false; }
           });
           else { var catalogLink = node('a', catalogLabel, catalogDestination); catalogLink.href = catalogForm.original ? '/settings/all#settings-original-requests' : '/settings/all'; catalogLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'applicability_form') {
+          var regionForm = entry[1], regionStarted = generation, regionSelection = JSON.stringify(context());
+          if (!regionForm || Array.isArray(regionForm) || Object.keys(regionForm).sort().join(',') !== 'context,flow,original' ||
+              typeof regionForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(regionForm.context) ||
+              typeof regionForm.flow !== 'string' || regionForm.flow.length < 1 || regionForm.flow.length > 128 ||
+              typeof regionForm.original !== 'string' || regionForm.original && !/^APR-[a-f0-9]{32}$/.test(regionForm.original)) return;
+          var regionDestination = node('dd', undefined, list), regionControl = window.LightworkApplicabilityRegions;
+          if (regionControl && typeof regionControl.open === 'function') button('Open complete checked answer regions', regionDestination, async function (event) {
+            var isCurrent = function () { return active(regionStarted) && JSON.stringify(context()) === regionSelection; };
+            if (!isCurrent() || busy) return;
+            var regionButton = event.currentTarget; regionButton.disabled = true;
+            try {
+              var opened = await regionControl.open(regionForm, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete checked answer form is open.' : 'Your entered work is kept. Review the current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The checked answer form could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && regionButton.isConnected) regionButton.disabled = false; }
+          });
+          else { var regionLink = node('a', 'Open complete checked answer regions', regionDestination); regionLink.href = '/learning/applicability?' + new URLSearchParams({flow: regionForm.flow, original: regionForm.original}).toString() + '#apr-author-h'; regionLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'access_key_form') {
+          var keyForm = entry[1], keyStarted = generation, keySelection = JSON.stringify(context());
+          if (!keyForm || Array.isArray(keyForm) || Object.keys(keyForm).sort().join(',') !== 'context,original' ||
+              typeof keyForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(keyForm.context) || typeof keyForm.original !== 'boolean') return;
+          var keyDestination = node('dd', undefined, list), keyControls = window.LightworkAccessKeys;
+          if (keyControls && typeof keyControls.open === 'function') button(keyForm.original ? 'Read an original access-key request' : 'Open protected access-key controls', keyDestination, async function (event) {
+            var isCurrent = function () { return active(keyStarted) && JSON.stringify(context()) === keySelection; };
+            if (!isCurrent() || busy) return;
+            var keyButton = event.currentTarget; keyButton.disabled = true;
+            try {
+              var opened = await keyControls.open(keyForm.context, keyForm.original, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected access-key controls are open.' : 'Your entered key work is kept. Read current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The protected controls could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && keyButton.isConnected) keyButton.disabled = false; }
+          });
+          else { var keyLink = node('a', keyForm.original ? 'Read an original access-key request' : 'Open protected access-key controls', keyDestination); keyLink.href = '/account/api-keys#ak-requests'; keyLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'governed_rule_evolution_author') {
+          var evolutionAuthor = entry[1], evolutionStarted = generation, evolutionSelection = JSON.stringify(context());
+          if (!evolutionAuthor || Array.isArray(evolutionAuthor) || Object.keys(evolutionAuthor).sort().join(',') !== 'binding,context,flow' ||
+              typeof evolutionAuthor.context !== 'string' || !/^[a-f0-9]{64}$/.test(evolutionAuthor.context) ||
+              typeof evolutionAuthor.binding !== 'string' || !/^[a-f0-9]{64}$/.test(evolutionAuthor.binding) ||
+              typeof evolutionAuthor.flow !== 'string' || evolutionAuthor.flow.length < 1 || evolutionAuthor.flow.length > 256) return;
+          var evolutionDestination = node('dd', undefined, list), evolutionControl = window.LWGovernedRuleEvolution;
+          if (evolutionControl && typeof evolutionControl.openAuthor === 'function') button('Open all rule evolution controls', evolutionDestination, async function (event) {
+            var isCurrent = function () { return active(evolutionStarted) && JSON.stringify(context()) === evolutionSelection; };
+            if (!isCurrent() || busy) return;
+            var evolutionButton = event.currentTarget; evolutionButton.disabled = true;
+            try {
+              var opened = await evolutionControl.openAuthor(evolutionAuthor, {isCurrent: isCurrent});
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete protected rule form is open.' : 'Your entered rule work is kept. Review current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The rule form could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && evolutionButton.isConnected) evolutionButton.disabled = false; }
+          });
+          else { var evolutionLink = node('a', 'Open all rule evolution controls', evolutionDestination); evolutionLink.href = '/learning/rule-evolution?flow=' + encodeURIComponent(evolutionAuthor.flow) + '#gre-author'; evolutionLink.className = 'btn btn--ghost'; }
           return;
         }
         if (entry[0] === 'operator_acquisition_author') {
@@ -916,7 +980,8 @@
         var requested = Object.assign(payload(), {operation: item.id, context: fresh.context, revision: item.revision, arguments: args});
         lock(true);
         try {
-          var review = await request('/prepare', requested);
+          var review = await request('/prepare', requested,
+            ['learning.qualify_answer_regions', 'learning.answer_region_question'].includes(item.id));
           if (!active(started)) return;
           clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
           node('p', 'Source: ' + review.source + '. Checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(review.checked_at) : new Date(review.checked_at * 1000).toLocaleString()) + '.', formHost);
@@ -934,6 +999,12 @@
               : item.id.startsWith('commitments.economics.')
                 ? !!(window.LWCommitmentEconomics && window.LWCommitmentEconomics.renderReview &&
                      window.LWCommitmentEconomics.renderReview(formHost, review.changes) === true)
+              : ['learning.qualify_answer_regions', 'learning.answer_region_question', 'learning.withdraw_region_answer', 'learning.run_answer_regions'].includes(item.id)
+                ? !!(window.LightworkApplicabilityRegions && window.LightworkApplicabilityRegions.renderReview &&
+                     window.LightworkApplicabilityRegions.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('learning.rule_evolution.')
+                ? !!(window.LWGovernedRuleEvolution && window.LWGovernedRuleEvolution.renderReview &&
+                     window.LWGovernedRuleEvolution.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('learning.acquisition.')
                 ? !!(window.LWOperatorAcquisition && window.LWOperatorAcquisition.renderReview &&
                      window.LWOperatorAcquisition.renderReview(formHost, review.changes) === true)
@@ -1008,7 +1079,9 @@
           if (!active(started)) return;
         }
         submitted = true;
-        var result = await request('/execute', {token: review.token, confirmed: true});
+        var result = await request('/execute', {token: review.token, confirmed: true},
+          ['learning.rule_evolution.build', 'learning.rule_evolution.check',
+           'learning.qualify_answer_regions', 'learning.answer_region_question'].includes(item.id));
         if (!active(started)) return;
         clear(formHost); node('h3', item.label, formHost); node('p', result.message, formHost);
         uncertainty = result.status === 'confirmed' || result.status === 'replayed' ? '' : 'This outcome still needs confirmation. Check native status; do not submit it again automatically.';

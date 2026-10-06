@@ -5210,6 +5210,12 @@ def pick_advanced() -> dict[str, Any]:
         "allow_workflow_step_checks": _q_confirm(
             "Enable try one workflow step? Check one owned taught step against ordinary entered values without running the whole workflow or any connected action.", default=False,
         ),
+        "allow_applicability_regions": _q_confirm(
+            "Enable checked answer regions? Check both local rule versions across every supported starting situation. Only current separately permitted expected answers can choose a version; unclear situations remain for review.", default=False,
+        ),
+        "allow_governed_rule_evolution": _q_confirm(
+            "Enable rewriting and checking local rules? Build alternative local rules and a complete checking order from one owned published rule. Independently review every change before publication, and retain the exact previous release for restoration.", default=False,
+        ),
         "allow_recovery_visibility": _q_confirm(
             "Enable missing-reply practice? Practice with fictional sign-offs to see when identical visible status hides different original outcomes. No live approval or connected service is used.", default=False,
         ),
@@ -9113,6 +9119,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("commitment_economic_alternatives = true")
     if advanced.get("allow_workflow_step_checks") is True:
         _feature_locks.append("workflow_step_checks = true")
+    if advanced.get("allow_applicability_regions") is True:
+        _feature_locks.append("applicability_regions = true")
+    if advanced.get("allow_governed_rule_evolution") is True:
+        _feature_locks.append("governed_rule_evolution = true")
     if advanced.get("allow_recovery_visibility") is True:
         _feature_locks.append("recovery_visibility = true")
     if advanced.get("allow_semantic_rule_reuse") is True:

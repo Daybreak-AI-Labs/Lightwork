@@ -474,6 +474,8 @@
 
 {% if flow_id %}{% include "_workflow_explanation.html" %}{% endif %}
 {% if flow_id %}<a class="btn btn--ghost" href="/learning/flow-checks?workflow={{ flow_id|urlencode }}">Compare saved rules on real cases</a>{% endif %}
+{% if flow_id and can_open_page('/learning/applicability') %}<a class="btn btn--ghost" href="/learning/applicability?flow={{ flow_id|urlencode }}">Check where each answer works</a>{% endif %}
+{% if flow_id and can_open_page('/learning/rule-evolution') %}<a class="btn btn--ghost" href="/learning/rule-evolution?flow={{ flow_id|urlencode }}">Review another way to run this rule</a>{% endif %}
 
 <!-- Outside all view-specific containers: the same conversation is available
      from the default Steps view and the advanced Canvas. -->

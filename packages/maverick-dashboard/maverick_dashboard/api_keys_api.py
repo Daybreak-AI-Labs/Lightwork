@@ -142,28 +142,19 @@ async def create_api_key(request: Request) -> dict:
     auth.require_permission(request, "view")
     _require_non_key_caller(request)
     body = await _body(request)
-    caller = _caller(request)
-    owner = str(body.get("owner") or "").strip() or caller
-    if owner != caller:
-        # Only an administrator may mint for someone else, and only for a
-        # service account: a person's own keys are theirs to create.
-        if not _is_admin(request) or not api_keys.is_service_account_principal(owner):
-            raise HTTPException(
-                status_code=403,
-                detail="You can only create keys for yourself. Administrators can also "
-                       "create keys for service accounts.",
-            )
+    return await run_in_threadpool(_reviewed_key_change, request, body, "create")
 
-    def _create():
-        key, secret = api_keys.create_key(
-            label=body.get("label"), scopes=body.get("scopes"), owner=owner,
-            created_by=caller, expires_in_days=body.get("expires_in_days"),
-            workspace=body.get("workspace") or "",
-        )
-        return {"key": key.to_public(), "secret": secret,
-                "notice": "Copy this now. You won't see it again."}
 
-    return await run_in_threadpool(lambda: _run(_create))
+def _reviewed_key_change(request, body, action, key_id=None):
+    from .access_key_requests_api import ApplyIn, apply_sealed
+
+    if set(body) != {"token", "confirmed"}:
+        raise HTTPException(409, "Open Access keys and review this complete change before confirming. No key was changed.")
+    try:
+        reviewed = ApplyIn.model_validate(body)
+    except ValueError as exc:
+        raise HTTPException(422, "Confirm the complete current review in Access keys. No key was changed.") from exc
+    return apply_sealed(request, reviewed, action=action, key_id=key_id)
 
 
 @router.post("/api/v1/api-keys/{key_id}/rotate")
@@ -172,16 +163,8 @@ async def rotate_api_key(request: Request, key_id: str) -> dict:
     _require_enabled()
     auth.require_permission(request, "view")
     _require_non_key_caller(request)
-    caller = _caller(request)
-
-    def _rotate():
-        _visible_key(request, key_id)
-        key, secret = api_keys.rotate_key(key_id, actor=caller)
-        return {"key": key.to_public(), "secret": secret,
-                "notice": "Copy this now. You won't see it again. The old key keeps working "
-                          f"for {api_keys.settings()['rotation_grace_hours']} hours."}
-
-    return await run_in_threadpool(lambda: _run(_rotate))
+    body = await _body(request)
+    return await run_in_threadpool(_reviewed_key_change, request, body, "rotate", key_id)
 
 
 @router.post("/api/v1/api-keys/{key_id}/revoke")
@@ -189,13 +172,8 @@ async def revoke_api_key(request: Request, key_id: str) -> dict:
     _require_enabled()
     auth.require_permission(request, "view")
     _require_non_key_caller(request)
-    caller = _caller(request)
-
-    def _revoke():
-        _visible_key(request, key_id)
-        return {"key": api_keys.revoke_key(key_id, actor=caller).to_public()}
-
-    return await run_in_threadpool(lambda: _run(_revoke))
+    body = await _body(request)
+    return await run_in_threadpool(_reviewed_key_change, request, body, "revoke", key_id)
 
 
 @router.get("/api/v1/service-accounts")
@@ -245,7 +223,6 @@ async def disable_service_account(request: Request, slug: str) -> dict:
 
 @router.get("/account/api-keys", response_class=HTMLResponse)
 def api_keys_page(request: Request) -> HTMLResponse:
-    _require_enabled()
     auth.require_permission(request, "view")
     _require_non_key_caller(request)
     from .app import templates

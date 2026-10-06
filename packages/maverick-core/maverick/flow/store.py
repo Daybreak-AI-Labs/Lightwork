@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -105,9 +106,13 @@ def record_flow_schema(
         pass
 
 
-def _write_json(path, obj: dict) -> None:
+def _write_json(path, obj: dict, *, effect_guard: Callable[[], None] | None = None) -> None:
     from ..file_lock import atomic_write_text
-    atomic_write_text(path, json.dumps(obj, sort_keys=True))
+    text = json.dumps(obj, sort_keys=True)
+    if effect_guard is None:
+        atomic_write_text(path, text)
+    else:
+        atomic_write_text(path, text, effect_guard=effect_guard)
 
 
 def _read_json(path) -> dict | None:
@@ -188,6 +193,7 @@ def save_flow(
     *,
     expected_version: int | None = None,
     expected_revision: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> Flow:
     """Persist ``flow`` as the current definition, snapshotting the prior current
     into version history first so any earlier version can be rolled back to.
@@ -231,8 +237,9 @@ def save_flow(
             _write_json(
                 _history_dir(flow.id) / f"v{int(prior.version)}.json",
                 prior.to_dict(),
+                effect_guard=effect_guard,
             )
-        _write_json(_flows_dir() / f"{_safe_id(flow.id)}.json", payload)
+        _write_json(_flows_dir() / f"{_safe_id(flow.id)}.json", payload, effect_guard=effect_guard)
     return flow
 
 
@@ -644,6 +651,7 @@ def publish_flow(
     expected_release_id: str | None = None,
     activation_id: str | None = None,
     expected_bundle_digest: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> dict:
     """Activate a coherent immutable release under the dispatch lock."""
     with _activation_lock(flow_id):
@@ -657,6 +665,7 @@ def publish_flow(
             expected_revision=expected_revision,
             activation_id=activation_id,
             expected_bundle_digest=expected_bundle_digest,
+            effect_guard=effect_guard,
         )
 
 
@@ -664,6 +673,7 @@ def restore_published_flow(
     flow_id: str, retained_release: dict, *, expected_release_id: str,
     expected_version: int, expected_revision: str,
     activation_id: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> dict:
     """Restore retained content with a fresh activation, without editing the draft.
 
@@ -699,7 +709,7 @@ def restore_published_flow(
             raise FlowSnapshotError("The new activation identity is invalid.")
         restored = {**retained_release, "release_digest": digest,
                     "release_id": activation_id or secrets.token_hex(32), "published_at": time.time()}
-        _write_json(_published_pointer_path(flow_id), restored)
+        _write_json(_published_pointer_path(flow_id), restored, effect_guard=effect_guard)
         return restored
 
 
@@ -767,6 +777,7 @@ def _publish_flow_under_activation(
     expected_revision: str,
     activation_id: str | None = None,
     expected_bundle_digest: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> dict:
     """Atomically activate the exact current draft as an immutable release.
 
@@ -819,7 +830,7 @@ def _publish_flow_under_activation(
         # The definition lock makes the snapshot coherent; the activation lock
         # makes pointer replacement linearizable with final worker dispatch.
         with _activation_lock(flow.id):
-            _write_json(_published_pointer_path(flow.id), release)
+            _write_json(_published_pointer_path(flow.id), release, effect_guard=effect_guard)
         return release
 
 

@@ -1140,6 +1140,8 @@ def get_features() -> dict:
         "request_program": cfg.get("request_program", False) is True,
         "commitment_economic_alternatives": cfg.get("commitment_economic_alternatives", False) is True,
         "workflow_step_checks": cfg.get("workflow_step_checks", False) is True,
+        "applicability_regions": cfg.get("applicability_regions", False) is True,
+        "governed_rule_evolution": cfg.get("governed_rule_evolution", False) is True,
         "recovery_visibility": cfg.get("recovery_visibility", False) is True,
         "private_task_computation": cfg.get("private_task_computation", False) is True,
         "portable_competence": cfg.get("portable_competence", False) is True,

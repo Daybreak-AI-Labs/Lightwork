@@ -9,7 +9,7 @@ from maverick.runner import (
 )
 from pydantic import Field
 
-from . import api, auth
+from . import api, auth, task_search
 from .api_schemas import GoalIn
 from .draft_api import context_for
 from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
@@ -17,6 +17,7 @@ from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
 
 class FindInput(StrictInput):
     query: str = Field(min_length=1, max_length=256)
+    where: str = Field(default="newest", max_length=1536)
 
 
 class StartInput(StrictInput):
@@ -27,13 +28,25 @@ class StartInput(StrictInput):
 
 
 def find_snapshot(request, selection):
-    auth.require_permission(request, "view")
-    owner = auth.goal_owner_filter(request)
-    return Snapshot(digest({"context": context_for(request), "owner": owner}),
+    current = task_search.context(request)
+    filters = selection.get("filters", {})
+    query = filters.get("q", "") if selection.get("kind") == "task_filter" and isinstance(filters, dict) else ""
+    choices = [{"value": "newest", "label": "Newest work"}]
+    selected = selection.get("task_search", {})
+    if (isinstance(selected, dict) and set(selected) == {"query", "continuation"}
+            and isinstance(selected["query"], str) and isinstance(selected["continuation"], str)):
+        try:
+            task_search.validate_cursor(request, selected["query"], selected["continuation"])
+            choices.append({"value": selected["continuation"], "label": "Older than this search part"})
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+    return Snapshot(digest({"context": current, "choices": choices}),
         "Current task search for this account and workspace",
-        "Find saved tasks by words in their title, request, or result. Open a result to review its current controls.",
+        task_search.NOTICE,
         fields=[{"name": "query", "label": "Task search", "kind": "text", "required": True,
-                 "max_length": 256}])
+                 "max_length": 256, "value": query if isinstance(query, str) else ""},
+                {"name": "where", "label": "Where to look", "kind": "select", "value": "newest", "choices": choices}])
 
 
 def find_prepare(request, selection, arguments):
@@ -41,27 +54,23 @@ def find_prepare(request, selection, arguments):
     query = arguments["query"].strip()
     if not query:
         raise HTTPException(422, "Enter words to search your tasks.")
-    # Use the same indexed native search and owner scope as /api/v1/goals/search.
-    # Recheck each result's current suite/content authority before publishing it.
-    world = api._world()
-    goals = world.search_goals(query, owner=auth.goal_owner_filter(request), limit=200)
-    # The search projection omits the domain column. Resolve each full row so
-    # current department grants remain effective for discoverability as well.
-    current = [world.get_goal(goal.id) for goal in goals]
-    visible = [goal for goal in current if goal is not None and auth.can_access_goal(request, goal)]
+    where = arguments.get("where", "newest")
+    if where != "newest":
+        selected = selection.get("task_search", {})
+        if not isinstance(selected, dict) or selected.get("continuation") != where:
+            raise HTTPException(409, "Choose older work from the current task search, or search the newest work.")
+    value = task_search.page(request, query, cursor="" if where == "newest" else where, limit=20)
     rows = [{"task": {"label": goal.title, "href": f"/chat/goal/{goal.id}"},
              "status": goal.status}
-            for goal in visible[:20]]
-    auth.require_permission(request, "view")
-    summary = (f"Showing the first {len(rows)} matching tasks. Open a task to review its current controls."
-               if len(visible) > 20 else
-               f"Found {len(rows)} matching task{'s' if len(rows) != 1 else ''} in the first search window."
-               if rows else "No accessible tasks matched these words in the first search window.")
-    return Preview(summary,
-                   native={"query": query, "tasks": rows,
-                           "more_in_window": len(visible) > 20,
-                           "window_limited": len(goals) == 200,
-                           "search_href": "/goals"})
+            for goal in value["goals"]]
+    summary = f"Found {len(rows)} matching task{'s' if len(rows) != 1 else ''} in this part. " + (
+        "Reached the end of the retained list; later edits need a fresh search." if value["complete"] else
+        "Older work remains unchecked. Continue on Tasks to keep looking.")
+    details = {"query": query, "tasks": rows, "search_complete": value["complete"],
+               "search": {"label": "Open Tasks search", "href": task_search.link(query)}}
+    if value["continuation"]:
+        details["next_part"] = {"label": "Search older work", "href": task_search.link(query, value["continuation"])}
+    return Preview(summary, native=details)
 
 
 def _policy():
