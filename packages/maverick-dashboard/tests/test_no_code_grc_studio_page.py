@@ -35,7 +35,7 @@ def test_page_is_list_driven_plain_and_permission_aware(monkeypatch) -> None:
     response = TestClient(app).get(page.PAGE_PATH)
     assert response.status_code == 200
     body = response.text
-    assert "No-code GRC studio" in body
+    assert "Compliance studio" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert page.ASSET_PATH in body
     assert 'data-can-operate="true"' in body
