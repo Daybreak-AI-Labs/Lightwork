@@ -76,3 +76,25 @@ def test_a_stopped_task_message_is_not_labelled_as_an_agent_answer(monkeypatch, 
     finally:
         world.close()
     assert "Written by an agent" not in reply
+
+
+@pytest.mark.parametrize("channel", ["voice", "glasses", "discord-stage"])
+def test_a_spoken_answer_says_it_was_written_by_an_agent_without_reading_a_link(monkeypatch, tmp_path, channel):
+    monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", "https://lightwork.example.test/")
+    srv, world = _server(monkeypatch, tmp_path, ("done", "The report is ready."))
+    try:
+        reply = asyncio.run(srv._handle_message(ChannelMessage(channel, "U1", "U1", "Prepare a report")))
+    finally:
+        world.close()
+    assert reply == "The report is ready.\n\nWritten by an agent in Lightwork."
+
+
+@pytest.mark.parametrize("channel", ["sms", "rcs", "bluesky", "mastodon", "threads", "irc"])
+def test_a_short_message_channel_gets_a_short_mark(monkeypatch, tmp_path, channel):
+    monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", "https://lightwork.example.test/")
+    srv, world = _server(monkeypatch, tmp_path, ("done", "Done."))
+    try:
+        reply = asyncio.run(srv._handle_message(ChannelMessage(channel, "U1", "U1", "Do it")))
+    finally:
+        world.close()
+    assert reply == "Done.\n\n-- Written by an agent in Lightwork. Task #1."

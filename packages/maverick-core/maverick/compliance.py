@@ -44,8 +44,18 @@ def ai_answer_label(goal_id: int, base_url: str = "") -> str:
     return f"-- {AI_ANSWER_LABEL} {where}"
 
 
-def label_ai_answer(text: str, goal_id: int, base_url: str | None = None) -> str:
-    """``text`` with :func:`ai_answer_label` under it."""
+# Channels that speak the reply: a read-out link is noise, so the mark is one
+# plain sentence. Channels with a short message limit get a one-line mark.
+SPOKEN_CHANNELS = frozenset({"voice", "glasses", "discord-stage", "streaming_voice"})
+SHORT_CHANNELS = frozenset({"sms", "rcs", "bluesky", "mastodon", "threads", "irc"})
+
+
+def label_ai_answer(text: str, goal_id: int, base_url: str | None = None, channel: str = "") -> str:
+    """``text`` with the AI mark under it, in the form ``channel`` can carry."""
+    if channel in SPOKEN_CHANNELS:
+        return f"{text}\n\nWritten by an agent in Lightwork."
+    if channel in SHORT_CHANNELS:
+        return f"{text}\n\n-- Written by an agent in Lightwork. Task #{int(goal_id)}."
     if base_url is None:
         try:
             from .daily_digest import dashboard_url

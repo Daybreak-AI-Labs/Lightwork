@@ -185,13 +185,13 @@ def _reclaim_tenant_orphans() -> int:
     return total
 
 
-def _completed_reply(completed, goal_id: int) -> str:
+def _completed_reply(completed, goal_id: int, channel: str = "") -> str:
     """A finished task's reply: an agent-written answer carries the AI mark
     (AI-2); a stop or failure message is the product's own words."""
     if completed.status != "done":
         return completed.result
     from .compliance import label_ai_answer
-    return label_ai_answer(completed.result, goal_id)
+    return label_ai_answer(completed.result, goal_id, channel=channel or "")
 
 
 class Server:
@@ -558,7 +558,7 @@ class Server:
                     result = _question_reply(goal_id, questions,
                                              require_id=_question_id_required(msg))
                 elif completed is not None and completed.result is not None:
-                    result = _completed_reply(completed, goal_id)
+                    result = _completed_reply(completed, goal_id, getattr(msg, "channel", ""))
                 else:
                     known_status = (
                         dispatch_status
