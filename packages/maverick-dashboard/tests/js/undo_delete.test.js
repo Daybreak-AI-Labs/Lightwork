@@ -131,9 +131,17 @@ test("the most common deletes use the undo window instead of a question", () => 
     assert.match(body, /deleteWithUndo\(/, fn);
   }
   assert.match(automations, /mvUndo\(message, \{[\s\S]*?keepalive: keepalive/);
+  // Skills: the Remove button opens the reviewed removal (exact saved
+  // version, retained receipt; lightwork-manual-skill-removal.js). Its last
+  // step hides the card and offers Undo; the reviewed removal is sent when
+  // that time is up, and an undone removal sends nothing.
   const skills = fs.readFileSync(path.join(root, "templates/skills.html"), "utf8");
-  assert.match(skills, /window\.mvUndo\('Skill “' \+ label \+ '” removed\./);
+  assert.match(skills, /LightworkManualSkillRemoval\.review\(name\)/);
   assert.doesNotMatch(skills, /mvConfirm\('Remove the skill/);
+  const removal = fs.readFileSync(path.join(root, "static/lightwork-manual-skill-removal.js"), "utf8");
+  assert.match(removal, /window\.mvUndo\('Skill “\{name\}” removed\. Agents stop using it from the next task\.'/);
+  assert.match(removal, /run: async function \(keepalive\)[\s\S]*?\/remove'[\s\S]*?keepalive: keepalive[\s\S]*?token: checked\.token/);
+  assert.match(removal, /undo: function \(\)[\s\S]*?card\.hidden = false/);
 });
 
 test("the toast's words go through the translator, and the name stays as written", async () => {
