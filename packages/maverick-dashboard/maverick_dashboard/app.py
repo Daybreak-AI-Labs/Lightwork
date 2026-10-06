@@ -4238,6 +4238,7 @@ def _deliverable_specs() -> list[dict]:
 @app.get("/deliverables", response_class=HTMLResponse)
 def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     """Show the caller's completed work; explicit role links browse pack output."""
+    from . import auth as _auth
     from .auth import caller_suites
     from .deliverables import PAGE_SIZE, build_inbox, persona_roles_for, recent_runs_by_domain
 
@@ -4268,6 +4269,8 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
             "browse": False, "recent_results": shown, "awaiting": awaiting,
             "result_labels": {domain: spec["deliverable"] for domain, spec in gates.items()},
             "results_page": page, "results_more": len(rows) > PAGE_SIZE,
+            # Only the task owner may rate a result (answer_feedback_operations).
+            "feedback_owner": _auth.caller_principal(request) or "", "can_rate": has_permission(request, "operate"),
         })
 
     # Job-function scoping: a scoped caller's inbox lists only their

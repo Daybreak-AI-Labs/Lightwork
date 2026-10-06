@@ -35,13 +35,22 @@
   {% if recent_results %}
     <div class="card-grid">
       {% for g in recent_results %}
-        <a class="card dlv-finished" href="/chat/goal/{{ g.id }}">
+        <div class="card dlv-finished">
           <span class="badge done">Done</span>
           <strong>{{ g.title }}</strong>
           {% if result_labels.get(g.domain) %}<span class="muted">{{ result_labels[g.domain] }}</span>{% endif %}
           <span class="muted" data-when="{{ g.updated_at }}"></span>
-          <span class="dlv-finished__open">Open result →</span>
-        </a>
+          <a class="dlv-finished__open" href="/chat/goal/{{ g.id }}">Open result →</a>
+          {# AI-written, and rated in one tap where the viewer owns the task (AI-2, AI-10). #}
+          <div class="dlv-feedback" data-result-feedback data-goal="{{ g.id }}" role="group" aria-label="Rate this result">
+            <span class="muted">Written by an agent.{% if can_rate and (g.owner or '') == feedback_owner %} Was it useful?{% endif %}</span>
+            {% if can_rate and (g.owner or '') == feedback_owner %}
+            <button class="btn btn--ghost dlv-feedback__btn" type="button" data-rating="up" aria-pressed="false" aria-label="Yes, useful">👍</button>
+            <button class="btn btn--ghost dlv-feedback__btn" type="button" data-rating="down" aria-pressed="false" aria-label="No, not useful">👎</button>
+            {% endif %}
+            <span class="muted dlv-feedback__msg" data-feedback-msg role="status" aria-live="polite"></span>
+          </div>
+        </div>
       {% endfor %}
     </div>
     {% if results_page > 1 or results_more %}
@@ -226,13 +235,17 @@
     .dlv-run:hover { border-color: var(--brand-border); }
     .dlv-run__title { flex: 1 1 auto; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dlv-finished { display: flex; flex-direction: column; gap: var(--space-2); color: var(--text); }
-    .dlv-finished:hover { border-color: var(--brand-border); }
-    .dlv-finished__open { color: var(--brand-fg); font-weight: var(--font-semibold); margin-top: auto; }
+        .dlv-finished__open { color: var(--brand-fg); font-weight: var(--font-semibold); margin-top: auto; }
+    .dlv-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+    .dlv-feedback__btn { min-width: 44px; min-height: 44px; }
+    .dlv-feedback__btn[aria-pressed="true"] { border-color: var(--brand-border); }
+    .dlv-feedback__msg { flex-basis: 100%; }
     .dlv-pager { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-3); }
   </style>
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-typeahead.js" defer></script>
+  <script src="/static/lightwork-result-feedback.js" defer></script>
   <script>
     // Format every server-rendered timestamp via the shared relative-time helper.
     (function () {
