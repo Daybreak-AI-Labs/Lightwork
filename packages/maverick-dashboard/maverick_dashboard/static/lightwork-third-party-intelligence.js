@@ -205,6 +205,7 @@
       { label: "Access to our data", value: function (v) { return label(ACCESS, v.data_access_level); } },
       { label: "Latest decision", value: function (v) { var d = latestDecision(v.vendor_id); return d ? badge2(DECISION, d.status) : "None yet"; } },
     ], S.vendors, [
+      { label: "Open registered vendor", when: function (v) { return !!v.register_vendor_id; }, run: function (v) { window.location.href = '/privacy/vendors/' + encodeURIComponent(v.register_vendor_id) + '#vendor-profile'; } },
       { label: "Screen", kind: "primary", run: screen },
       { label: "Decide risk", run: evaluate },
       { label: "Watch for changes", run: watch },
@@ -218,18 +219,20 @@
     return S.decisions.filter(function (d) { return d.vendor_id === vendorId; }).sort(function (a, b) { return b.decided_at - a.decided_at; })[0];
   }
   function addVendor() {
-    var register = S.register.map(function (v) { return { value: v.name, label: v.name }; });
+    var register = S.register.filter(function (v) { return !S.vendors.some(function (profile) { return profile.register_vendor_id === v.id; }); }).map(function (v) { return { value: v.id, label: v.name }; });
+    if (!register.length) { say('Register the vendor in Privacy first, or open its already linked Intelligence identity. Existing separate identities can be linked from the vendor profile.'); return; }
+    var selectedVendor = new URLSearchParams(window.location.search).get('registered_vendor');
     R.form("Add a vendor", [
-      { key: "pick", label: "Vendor", type: "select", default: register.length ? register[0].value : "", options: register.concat([{ value: "", label: "Another vendor (type the name below)" }]) },
-      { key: "typed", label: "Vendor name (if not in the list)" },
+      { key: "pick", label: "Registered vendor", type: "select", default: register.some(function (row) { return row.value === selectedVendor; }) ? selectedVendor : register[0].value, options: register },
       { key: "category", label: "What they do for us", type: "select", default: "software", options: opts(CATEGORIES) },
       { key: "inherent", label: "Inherent risk", type: "select", default: "3", options: opts(LEVELS) },
       { key: "critical", label: "How critical they are to us", type: "select", default: "3", options: opts(LEVELS) },
       { key: "access", label: "Access to our data", type: "select", default: "limited", options: opts(ACCESS) },
     ].concat(regionFields("r")), "Add vendor").then(function (v) {
       if (!v) { return; }
-      var name = String(v.pick || v.typed || "").trim();
-      if (!name) { throw plain("Choose a vendor or type its name."); }
+      var registered = S.register.find(function (row) { return row.id === v.pick; });
+      if (!registered) { throw plain("Choose a current registered vendor."); }
+      var name = registered.name;
       var regions = chosenRegions(v, "r");
       if (!regions.length) { throw plain("Choose at least one region."); }
       var slugName = ref(name, "").toLowerCase();
@@ -239,6 +242,7 @@
           display_label: name, entity_identity_sha256: identity, encrypted_profile_ref: ("profile." + slugName).slice(0, 128), profile_key_ref: "profile-key.default",
           territories: regions, service_categories: [v.category], inherent_risk_level: Number(v.inherent), criticality: Number(v.critical),
           data_access_level: v.access, expected_revision: 0, idempotency_key: R.newKey(),
+          register_vendor_id: registered.id,
         });
       }).then(function () { say("Vendor added."); loadAll(); });
     }).catch(fail("add the vendor"));
@@ -504,7 +508,7 @@
     ], c.tasks || [], [
       { label: "Mark complete", when: function (t) { return !c.decision && t.status === "open"; }, run: function (t) { caseTask(c, t, "complete"); } },
       { label: "Not needed", when: function (t) { return !c.decision && t.status === "open"; }, run: function (t) { caseTask(c, t, "waived"); } },
-    ], { text: "No tasks yet." });
+    ], { text: "No tasks yet. Tasks appear here when a review asks for follow-up." });
     host.appendChild(R.el("p", "muted", (c.evidence || []).length + " piece(s) of evidence recorded."));
     window.mvReveal(host);
   }
@@ -571,7 +575,7 @@
       { label: "Vendor", value: function (a) { return vendorName(a.vendor_id); } },
       { label: "Found", value: function (a) { return R.when(a.created_at); } },
       { label: "Source", value: function (a) { return (a.citations || []).map(function (c) { return c.title; }).join(", ") || "—"; } },
-    ], S.alerts.slice().sort(function (a, b) { return b.created_at - a.created_at; }), [], { text: "No changes found yet." });
+    ], S.alerts.slice().sort(function (a, b) { return b.created_at - a.created_at; }), [], { text: "No changes found yet. Changes appear here when a watched source reports one." });
   }
   function watch(v) {
     var kinds = availableKinds("monitoring");

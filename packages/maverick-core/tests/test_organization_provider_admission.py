@@ -382,10 +382,10 @@ def test_physical_retry_tracker_holds_each_attempt(monkeypatch):
     from maverick import llm
     budget, settlement = start_budget()
     monkeypatch.setattr(llm, '_response_call_accounting',
-                        lambda model, response, cache: (None, None, None) if response is None
+                        lambda model, response, cache, **kwargs: (None, None, None) if response is None
                         else (1, 'estimated', None))
     sequence = llm._new_provider_attempt_sequence(default_category='other', operation_prefix='fixture')
-    tracker = llm._ProviderAttemptTracker('openai', 'fixture:model', budget, 1, 3,
+    tracker = llm._ProviderAttemptTracker('anthropic', llm.MODEL_SONNET, budget, 1, 3,
                                           sequence=sequence, service='fixture')
     first = tracker.before_attempt()
     tracker.after_attempt(first, None, TimeoutError('uncertain provider response'))

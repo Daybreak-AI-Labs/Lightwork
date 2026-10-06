@@ -63,6 +63,22 @@ DOCUMENTED_STATUS_GATES: dict[str, set[int]] = {
     "/devices": {403},
     # Employee activation is also switched off by default.
     "/get-started/employee": {403},
+    # Owned-rule and learning-review pages show only the signed-in person's
+    # own work, so the auth-off smoke gets their sign-in page.
+    "/learning/recheck-rules": {403},
+    "/learning/distinctions": {403},
+    "/learning/rules-together": {403},
+    "/learning/request-program": {403},
+    "/learning/applicability": {403},
+    "/learning/recovery-visibility": {403},
+    "/learning/portable-rules": {403},
+    "/learning/work-restructuring": {403},
+    "/learning/approval-challenges": {403},
+    "/learning/instructions": {403},
+    "/learning/rule-evolution": {401},
+    "/learning/acquisition": {401},
+    # Task mapping is switched off by default.
+    "/compliance/scope-actions/mapping": {403},
 }
 
 created = client.post(

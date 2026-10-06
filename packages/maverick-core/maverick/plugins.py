@@ -304,19 +304,15 @@ def _allowed(ep_name: str, dist_name: str | None, allowlist: set[str] | None) ->
     return bool(dist_name) and f"{ep_name}@{dist_name}" in allowlist
 
 
-def _find_manifest(ep):
-    """Locate + parse the plugin's ``maverick-plugin.toml`` via its distribution.
-
-    Returns a ``PluginManifest`` or None (no distribution, no manifest file, or
-    a parse failure). Never raises -- manifest problems must not break loading.
-    """
+def _manifest_details(ep):
+    """Return the parsed manifest and whether a file declares that contract."""
     dist = getattr(ep, "dist", None)
     if dist is None:
-        return None
+        return None, False
     try:
         files = list(dist.files or [])
     except Exception:
-        return None
+        return None, False
     for f in files:
         if getattr(f, "name", "") != "maverick-plugin.toml":
             continue
@@ -329,10 +325,19 @@ def _find_manifest(ep):
             except Exception:
                 text = None
         if text is None:
-            return None
+            return None, True
         from .plugin_manifest import parse_text
-        return parse_text(text, source=_ep_dist_name(ep) or "<plugin>")
-    return None
+        try:
+            return parse_text(text, source=_ep_dist_name(ep) or "<plugin>"), True
+        except Exception as exc:
+            log.warning("plugin manifest could not be parsed (%s)", type(exc).__name__)
+            return None, True
+    return None, False
+
+
+def _find_manifest(ep):
+    """Return the parsed manifest, preserving legacy metadata-reader callers."""
+    return _manifest_details(ep)[0]
 
 
 def _requested_permissions(manifest) -> list[str]:
@@ -639,9 +644,25 @@ def _plugin_signature_ok(ep, root_pub: str | None, revoked: set[str]) -> bool:
     return bool(getattr(res, "ok", False))
 
 
+def _compatibility_error(manifest, *, declared: bool = False) -> str:
+    """Explain a declared unsupported contract without importing its add-on."""
+    if (manifest is None and not declared) or (manifest is not None and manifest.is_compatible()):
+        return ""
+    return (
+        "This add-on does not work with this version of Lightwork, or its "
+        "compatibility details are invalid. Ask its publisher for a compatible release."
+    )
+
+
+def _entry_compatibility_error(ep) -> str:
+    """Read a compatibility refusal without importing the add-on."""
+    manifest, declared = _manifest_details(ep)
+    return _compatibility_error(manifest, declared=declared)
+
+
 def _gate(ep, group: str, allow, name_dists, granted, enforce) -> bool:
-    """Decide whether ``ep`` may load: allowlist + name-squat + permission +
-    signature gate.
+    """Decide whether ``ep`` may load: allowlist, name-squat, compatibility,
+    permission and signature gates.
 
     Returns True to load. Never invokes the entry point, so a rejected plugin's
     code never executes.
@@ -666,8 +687,13 @@ def _gate(ep, group: str, allow, name_dists, granted, enforce) -> bool:
                 name, sorted(providers), name,
             )
             return False
-    # Manifest-declared permissions vs the user's grant.
-    manifest = _find_manifest(ep)
+    # A declared contract must be usable before importing any add-on code.
+    manifest, declared = _manifest_details(ep)
+    compatibility_error = _compatibility_error(manifest, declared=declared)
+    if compatibility_error:
+        log.warning("plugin %s.%s (%s): %s", group, name,
+                    dist or "unknown-dist", compatibility_error)
+        return False
     violations = _permission_violations(manifest, granted)
     if violations:
         if enforce:
@@ -902,6 +928,12 @@ def _target_contract_error(group: str, target: Any) -> str:
     return ""
 
 
+def _plugin_denial_status(row, ep) -> None:
+    compatibility_error = _entry_compatibility_error(ep)
+    row["state"] = "invalid_contract" if compatibility_error else "policy_denied"
+    row["load_error"] = compatibility_error or "Blocked by the effective plugin trust policy."
+
+
 def plugin_status_snapshot() -> dict[str, Any]:
     """Truthful discovery, policy, configuration, and import state.
 
@@ -970,8 +1002,7 @@ def plugin_status_snapshot() -> dict[str, Any]:
                 row["load_error"] = _status_error(exc)
                 continue
             if not row["allowed"]:
-                row["state"] = "policy_denied"
-                row["load_error"] = "Blocked by the effective plugin trust policy."
+                _plugin_denial_status(row, ep)
                 continue
             try:
                 target = _load_current_entry(ep)

@@ -497,6 +497,7 @@ class _RecordStore:
         previous: dict | None,
         *,
         bump_revision: bool = True,
+        effect_guard=None,
     ) -> dict:
         from .file_lock import atomic_write_text
 
@@ -549,14 +550,20 @@ class _RecordStore:
                 sealed = reseal(previous.original_envelope, rendered.encode("utf-8"))
             except EncryptionUnavailable as exc:
                 raise PrivacyStateError("privacy record encryption did not authenticate") from exc
-            atomic_write_bytes(path, sealed, mode=0o600)
+            if effect_guard is None:
+                atomic_write_bytes(path, sealed, mode=0o600)
+            else:
+                atomic_write_bytes(path, sealed, mode=0o600, effect_guard=effect_guard)
         else:
             # Existing local JSON policy remains unchanged: this is encrypted
             # record compatibility, not a migration of all legacy plaintext.
-            atomic_write_text(path, rendered, mode=0o600)
+            if effect_guard is None:
+                atomic_write_text(path, rendered, mode=0o600)
+            else:
+                atomic_write_text(path, rendered, mode=0o600, effect_guard=effect_guard)
         return saved
 
-    def save(self, record: dict, *, expected_revision: int | None = None) -> dict:
+    def save(self, record: dict, *, expected_revision: int | None = None, effect_guard=None) -> dict:
         """Atomically create/replace a record, optionally with CAS."""
         from .file_lock import cross_process_lock, ensure_private_directory
 
@@ -574,7 +581,7 @@ class _RecordStore:
                     f"privacy record changed (expected revision "
                     f"{expected_revision}, found {current_revision})"
                 )
-            return self._write_path(path, record, current)
+            return self._write_path(path, record, current, effect_guard=effect_guard)
 
     def load(self, record_id: str) -> dict | None:
         from .file_lock import cross_process_lock
@@ -748,6 +755,7 @@ class _RecordStore:
         *,
         expected_revision: int | None = None,
         metadata_only: bool = False,
+        effect_guard=None,
     ) -> dict | None:
         """Run ``mutate`` under the per-record lock and publish if changed.
 
@@ -782,6 +790,7 @@ class _RecordStore:
                 updated,
                 record,
                 bump_revision=not metadata_only,
+                effect_guard=effect_guard,
             )
 
 
@@ -3118,6 +3127,28 @@ def acknowledge_dsar(request_id: str, *, acknowledged_by: str = "") -> dict | No
 
     return _dsar_mutation(request_id, _ack, action="acknowledge", actor=acknowledged_by,
                           event="dsar.acknowledged")
+
+
+def assign_dsar(request_id: str, assignee: str, *, assigned_by: str = "") -> dict | None:
+    """Name the person who works a request (``""`` leaves it unassigned).
+
+    The caller checks that the assignee may work privacy requests; this
+    records the change and keeps the previous assignee on the record so the
+    change can be undone exactly."""
+    who = str(assignee or "").strip()[:200]
+    if who and not who.startswith("user:"):
+        raise ValueError("Choose a person to assign the request to.")
+
+    def _assign(record: dict) -> bool:
+        if (record.get("assignee") or "") == who:
+            return False
+        record["previous_assignee"] = record.get("assignee") or ""
+        record["assignee"] = who
+        record["assigned_at"] = time.time()
+        record["assigned_by"] = _actor_label(assigned_by)
+        return True
+
+    return _dsar_mutation(request_id, _assign, action="assign", actor=assigned_by)
 
 
 def extend_dsar(

@@ -70,8 +70,8 @@ def test_destructive_clients_confirm_exact_targets_and_recover_single_flight():
     assert "Another operation is already running" in bulk
     assert "operationInFlight = false" in bulk
     assert "delete shell.dataset.operationInFlight" in bulk
-    assert "Run the next part of this bulk change now?" in bulk
-    assert "Allow \" + answers.amount + \" more bulk changes" in bulk
+    assert "Run the next bulk change that is due now? It may change or delete people’s consent records." in bulk
+    assert "Allow \" + answers.amount + \" more consent records to be processed in this workspace?" in bulk
     assert "Permanently delete \" + count + \" finished bulk changes" in bulk
 
     assert "var destructiveInFlight = false" in reports
@@ -86,7 +86,7 @@ def test_destructive_clients_confirm_exact_targets_and_recover_single_flight():
     assert "function handle(button, work)" in bulk
     assert "return work(disableControls)" in bulk
     # Every destructive handler confirms before it disables its opener.
-    assert bulk.count("disableControls();") == 7
+    assert bulk.count("disableControls();") == 10
     for confirm_then_disable in bulk.split("await CW.confirm(")[1:]:
         head = confirm_then_disable.split("\n", 2)
         assert "disableControls();" in "\n".join(head[:2]) or "return;" not in head[0]

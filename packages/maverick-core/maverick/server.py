@@ -185,6 +185,15 @@ def _reclaim_tenant_orphans() -> int:
     return total
 
 
+def _completed_reply(completed, goal_id: int, channel: str = "") -> str:
+    """A finished task's reply: an agent-written answer carries the AI mark
+    (AI-2); a stop or failure message is the product's own words."""
+    if completed.status != "done":
+        return completed.result
+    from .compliance import label_ai_answer
+    return label_ai_answer(completed.result, goal_id, channel=channel or "")
+
+
 class Server:
     def __init__(
         self,
@@ -406,7 +415,8 @@ class Server:
             return identity_refusal
         try:
             proof_reply = prove_channel_command(msg.text, channel=msg.channel or "unknown", user_id=memory_user_id,
-                                                sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256)
+                                                sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256,
+                                                private_destination=getattr(msg, "_verified_private_destination", None))
         except Exception:
             log.warning("Personal identity proof unavailable")
             if msg.text.startswith("LIGHTWORK LINK"):
@@ -549,7 +559,7 @@ class Server:
                     result = _question_reply(goal_id, questions,
                                              require_id=_question_id_required(msg))
                 elif completed is not None and completed.result is not None:
-                    result = completed.result
+                    result = _completed_reply(completed, goal_id, getattr(msg, "channel", ""))
                 else:
                     known_status = (
                         dispatch_status
@@ -565,7 +575,8 @@ class Server:
                 result = (f"I saved your answer to Question #{answered_question.id} "
                           f"and continued task #{goal_id}.\n\n{result}")
 
-            return self._channel_output(result, disclosure)
+            return self._saved_channel_output(world, msg, goal_id, result, disclosure,
+                owner=owner, execution_principal=execution_principal, principal=principal_id)
         finally:
             # Always free the tenant's concurrency slot, on every exit path.
             tenant_concurrency.release(tenant)
@@ -638,6 +649,20 @@ class Server:
                 return f"⚠ Output blocked: {'; '.join(verdict.reasons)}"
         return f"{disclosure}\n\n{result}" if disclosure is not None else result
 
+    def _saved_channel_output(self, world, msg, goal_id, result, disclosure, **identity):
+        from .channel_reply_results import prepare_reply
+
+        text = self._channel_output(result, disclosure)
+        if not text or text.startswith("⚠ Output blocked:"):
+            return text
+        try:
+            return prepare_reply(world, msg, goal_id, text, **identity)
+        except PermissionError:
+            return "This task's saved output is no longer available to this chat account. Open Lightwork to review current access."
+        except (ValueError, OSError):
+            log.warning("Saved channel output files could not be prepared", exc_info=True)
+            return text + "\n\nSaved files could not be prepared for this chat. Open the task in Lightwork to review its output."
+
     @staticmethod
     def _store_inbound_attachments(world, goal_id: int, items) -> int:
         """Persist channel-delivered files as goal attachments.
@@ -679,15 +704,8 @@ class Server:
         return stored
 
     def add_channel(self, channel) -> None:
-        # Opt-in rich rendering ([channels] rich_render): wrap so replies with
-        # math/Mermaid also ship a rendered HTML artifact. A pure passthrough
-        # decorator that is a no-op for plain text and returns the channel
-        # unchanged when the knob is off (default), so wiring it here is safe.
-        try:
-            from maverick_channels.rich_render import maybe_wrap
-            channel = maybe_wrap(channel)
-        except Exception:  # pragma: no cover -- rendering must never block wiring
-            log.exception("rich_render wrap failed; using channel as-is")
+        # The durable native handler prepares rich/file replies before custody;
+        # decorating send() cannot intercept an adapter's saved-reply transport.
         self._channels.append(channel)
 
     async def run(self) -> None:

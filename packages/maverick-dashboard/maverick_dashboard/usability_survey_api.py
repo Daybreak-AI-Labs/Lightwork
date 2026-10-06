@@ -112,8 +112,13 @@ def survey_results(request: Request, quarter: str = "") -> HTMLResponse:
     auth.require_global_permission(request, "admin")
     period = quarter if len(quarter) == 7 and quarter[4:6] == "-Q" and quarter[6] in "1234" \
         and quarter[:4].isdigit() else survey.quarter()
+    from maverick import usage_measures
+
     return _app().templates.TemplateResponse(request, "usability_survey.html", {
         "enabled": survey.enabled(), "report": survey.results(period),
+        "measures_on": usage_measures.enabled(), "first_session": usage_measures.first_session_report(),
+        "suggestions": usage_measures.suggestion_report(),
+        "first_session_hours": usage_measures.FIRST_SESSION_SECONDS // 3600,
     })
 
 

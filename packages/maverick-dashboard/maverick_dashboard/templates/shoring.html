@@ -127,7 +127,7 @@
       <div class="sh-actions">
         {% if can_manage %}
         <button type="button" class="btn btn--ghost" data-edit="{{ f.key }}">Edit</button>
-        <button type="button" class="btn btn--danger" data-remove="{{ f.key }}" data-name="{{ f.name }}">Remove</button>
+        <button type="button" class="btn btn--danger" data-remove="{{ f.key }}" data-name="{{ f.name }}">Remove team</button>
         {% endif %}
         {% if f.exception_count %}<a class="btn btn--ghost" href="#sh-desk-{{ loop.index }}">See {{ f.exception_count }} waiting</a>{% endif %}
       </div>
@@ -189,7 +189,7 @@
     <p><button type="button" class="btn btn--ghost" id="sh-add-sla">Add a target</button></p>
 
     <div class="sh-actions">
-      <button type="submit" class="btn btn--primary" id="sh-save">Save</button>
+      <button type="submit" class="btn btn--primary" id="sh-save">Save team</button>
       <button type="button" class="btn btn--ghost" id="sh-cancel" hidden>Cancel editing</button>
     </div>
     <p class="sh-note" id="sh-status-msg" role="status" aria-live="polite"></p>
@@ -241,7 +241,7 @@
     {% endif %}
   {% endfor %}
   {% if not ns.any %}
-    <p class="muted">Nothing is waiting for a person in any business area.</p>
+    <p class="muted">Nothing is waiting for a person in any business area. Work that needs a person appears here.</p>
   {% endif %}
 </div>
 
@@ -410,15 +410,17 @@
   });
 
   document.querySelectorAll('[data-remove]').forEach(function (btn) {
-    btn.addEventListener('click', async function () {
+    btn.addEventListener('click', function () {
       var key = btn.getAttribute('data-remove');
-      var ok = await window.mvConfirm('Remove "' + btn.getAttribute('data-name') + '" from the book of work? Its targets are deleted. Finished work and approvals are not affected.', { okText: 'Remove from book of work' });
-      if (!ok) return;
-      fetch(api + '/function/' + encodeURIComponent(key), { method: 'DELETE', headers: { Accept: 'application/json' } })
-        .then(function (r) {
-          if (!r.ok) throw r;
-          window.location.reload();
-        }).catch(function (failure) { window.mvFail(failure, 'remove this business area'); });
+      // One action with a way back (CTL-1): removed when the Undo time is up.
+      var row = btn.closest('.sh-fn');
+      if (row) row.hidden = true;
+      window.mvUndo('“{name}” removed from the book of work. Finished work and approvals are not affected.', { values: {name: btn.getAttribute('data-name')},
+        action: 'remove this business area',
+        run: function (keepalive) { return fetch(api + '/function/' + encodeURIComponent(key), { method: 'DELETE', keepalive: keepalive, headers: { Accept: 'application/json' } }); },
+        undo: function () { if (row) row.hidden = false; btn.focus(); },
+        done: function () { window.location.reload(); }
+      });
     });
   });
 })();

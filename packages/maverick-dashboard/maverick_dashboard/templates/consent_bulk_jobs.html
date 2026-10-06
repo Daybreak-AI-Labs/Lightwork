@@ -2,11 +2,7 @@
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
 {% block title %}Bulk consent changes · Lightwork{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">
-<style>
-  #cbj-people label, #cbj-selected-people label, #cbj-receipts label, #cbj-selected-receipts label { max-width:100%; overflow-wrap:anywhere; align-items:flex-start; }
-  #cbj-people input, #cbj-selected-people input, #cbj-receipts input, #cbj-selected-receipts input { flex-shrink:0; }
-</style>{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 <div class="governance-workbench" id="consent-bulk-jobs-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"

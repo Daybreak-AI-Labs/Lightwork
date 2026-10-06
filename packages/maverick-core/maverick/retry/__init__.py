@@ -257,12 +257,12 @@ def _is_terminal(exc: Exception) -> bool:
     return False
 
 
-def sync_retry(fn: Callable[[], T]) -> T:
-    """Run a sync callable, retrying transient provider errors."""
+def sync_retry(fn: Callable[[], T], *, observe_attempts: bool = True) -> T:
+    """Retry transient errors; explicit SDK boundaries can own observation."""
     retryable = _retryable_exception_classes()
     last: Exception | None = None
     for attempt in range(MAX_ATTEMPTS):
-        observer, ticket = _before_physical_attempt()
+        observer, ticket = _before_physical_attempt() if observe_attempts else (None, None)
         try:
             result = fn()
         except retryable as e:
@@ -290,12 +290,12 @@ def sync_retry(fn: Callable[[], T]) -> T:
     raise last
 
 
-async def async_retry(fn: Callable[[], Awaitable[T]]) -> T:
-    """Run an async callable, retrying transient provider errors."""
+async def async_retry(fn: Callable[[], Awaitable[T]], *, observe_attempts: bool = True) -> T:
+    """Async retry with the same optional explicit SDK observation boundary."""
     retryable = _retryable_exception_classes()
     last: Exception | None = None
     for attempt in range(MAX_ATTEMPTS):
-        observer, ticket = _before_physical_attempt()
+        observer, ticket = _before_physical_attempt() if observe_attempts else (None, None)
         try:
             result = await fn()
         except retryable as e:

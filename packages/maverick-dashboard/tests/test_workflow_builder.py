@@ -633,20 +633,24 @@ def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
     """The playbook form persists through the existing /agents/<name>/override
     path: a new pack, discoverable, with its gated workflow intact."""
     _isolate(monkeypatch, tmp_path)
+    # Saving accepts only actions this installation can run.
     r = _client().post("/api/v1/agents/ap-bot/override", json={
         "description": "AP clerk", "persona": "You are a careful AP clerk.",
-        "allow_tools": ["ocr_read", "send_payment"], "deny_tools": ["shell"],
+        "allow_tools": ["ocr", "global_payments"], "deny_tools": ["shell"],
         "max_risk": "high",
         "workflow": [
-            {"name": "Read", "instruction": "ocr", "tools": ["ocr_read"], "gate": None},
-            {"name": "Pay", "instruction": "pay", "tools": ["send_payment"], "gate": "approval"},
+            {"name": "Read", "instruction": "ocr", "tools": ["ocr"], "gate": None},
+            {"name": "Pay", "instruction": "pay", "tools": ["global_payments"], "gate": "approval"},
         ],
     })
     assert r.status_code == 200, r.text
     from maverick.domain import available_domains
     prof = available_domains()["ap-bot"]
     assert [(s.name, s.gate) for s in prof.workflow] == [("Read", None), ("Pay", "approval")]
-    assert prof.allow_tools == ["ocr_read", "send_payment"]
+    assert prof.allow_tools == ["ocr", "global_payments"]
+    unknown = _client().post("/api/v1/agents/ap-bot-2/override", json={
+        "description": "AP clerk", "allow_tools": ["send_payment"], "max_risk": "low"})
+    assert unknown.status_code == 422 and "not available in this installation" in unknown.text
 
 
 def test_save_playbook_rejects_lint_failure(monkeypatch, tmp_path):
@@ -984,7 +988,10 @@ def test_the_two_delete_buttons_say_what_they_delete_in_every_language():
     assert "productText(rm,'Delete');" not in page and "okText: 'Delete'," not in page
     assert page.count("productText(rm,'Delete schedule');") == 1
     assert page.count("productText(rm,'Delete start');") == 1
-    assert "okText: 'Delete schedule'" in page and "okText: 'Delete start'" in page
+    # A schedule due within a minute is confirmed and deleted at once; otherwise
+    # both deletes leave the list with an Undo toast (CTL-1).
+    assert "okText: 'Delete schedule'" in page
+    assert page.count("mvUndo(") == 2 and "Other apps can no longer start this workflow." in page
     for label in ("Delete schedule", "Delete start"):
         for lang in i18n_journeys.TRANSLATION_LANGS:
             assert i18n_journeys.entry(label, lang)[1] == lang, (label, lang)

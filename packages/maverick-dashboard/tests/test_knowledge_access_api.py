@@ -869,7 +869,8 @@ def test_feedback_catalog_requires_exact_selection_and_correction_information(en
     selected = {"kind": "knowledge_source", "reference": _ref(source), "purpose": PURPOSE}
     assert feedback_review(client, selected, arguments={"request_type": "correction", "reason": "Changed", "correction": ""}).status_code == 422
     from maverick_dashboard.product_operations_knowledge_feedback import feedback_entries
-    assert len(feedback_entries()) == 3
+    assert [entry.id for entry in feedback_entries()] == [
+        "knowledge.feedback", "knowledge.my_feedback", "knowledge.browse_requests", "knowledge.archive_request"]
 
 
 def test_copilot_archives_only_reviewed_finished_request_with_current_workspace(enabled):

@@ -15,7 +15,7 @@
   }
   function say(text) { window.mvStatus($('status'), text); }
   function failText(failure, what) {
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
   }
   function label(name) { return typeof window.mvHuman === 'function' ? window.mvHuman(name) : name.replace(/[-_]+/g, ' '); }
   async function add(row, button) {

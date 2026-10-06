@@ -17,6 +17,7 @@ Home
 Work
 	Tasks
 		Tasks
+		Private task calculations
 		Task handoffs
 		Task map
 		3D plan view
@@ -41,6 +42,7 @@ Work
 	Code changes
 		Code
 	Promise reviews
+	Shared decision reviews
 	Hand over a team's work
 		Autonomous shoring
 Agents
@@ -63,6 +65,16 @@ Agents
 		Facts
 	Learning
 		Learning
+		Recheck affected rules
+		Find missing distinctions
+		Check local rules together
+		Prepare an answer for this request
+		Checked answer regions
+		Rewrite and check local rules
+		Plan teaching questions
+		Understand a missing reply
+		Share and qualify local rule structures
+		Share preparation safely
 		Approval challenges
 		Instructions used in real work
 		Learned
@@ -122,7 +134,7 @@ Risk & compliance
 	Compliance
 		Compliance
 		Autonomous compliance
-		No-code GRC studio
+		Compliance studio
 		Continuous evidence
 		Policy links
 		Find which controls apply

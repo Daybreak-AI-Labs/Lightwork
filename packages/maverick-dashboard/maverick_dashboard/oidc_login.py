@@ -536,6 +536,10 @@ async def auth_callback(request: Request):
       5. set the signed session cookie and redirect to the (sanitized)
          ``return_to``.
     """
+    from .company_signin_tests import COOKIE as test_cookie
+    from .company_signin_tests import finish as finish_test
+    if request.cookies.get(test_cookie):
+        return await finish_test(request)
     if not login_enabled():
         raise HTTPException(status_code=404)
 

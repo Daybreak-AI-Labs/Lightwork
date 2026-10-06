@@ -114,6 +114,10 @@ def _dedup_hits(hits: list[Hit], *, max_overlap: int) -> list[Hit]:
     return [h for h in kept if h.text]
 
 
+def _publication_guards(effect_guard, publication_scope):
+    return {key: value for key, value in (("effect_guard", effect_guard), ("publication_scope", publication_scope)) if value is not None}
+
+
 class KnowledgeBase:
     """A per-domain document store.
 
@@ -188,7 +192,8 @@ class KnowledgeBase:
     def ingest_text(self, collection: str, text: str, source: str = "", *,
                     subject: str = "", trust_tier: int = 2,
                     sensitivity: str = "internal", ingested_by: str = "",
-                    extra_meta: dict | None = None, replace_source: bool = False) -> int:
+                    extra_meta: dict | None = None, replace_source: bool = False,
+                    effect_guard=None, publication_scope=None) -> int:
         """Chunk, shield-scan, embed and store one document's text. Returns the
         number of chunks stored (poisoned chunks are dropped).
 
@@ -211,6 +216,8 @@ class KnowledgeBase:
         the replacement. Matching retries retain the admitted rows unchanged.
         """
         document_text = str(text or "")
+        if effect_guard is not None:
+            effect_guard()
         if not document_text.strip():
             return 0
         size = max(1, int(self.chunk_size))
@@ -358,10 +365,11 @@ class KnowledgeBase:
             service=f"vector-store:{type(self.store).__name__}",
             operation="knowledge-document-storage",
         ):
+            publication_guards = _publication_guards(effect_guard, publication_scope)
             if replace_source:
-                guarded_add(collection, items, fingerprint, source=source, snapshot=source_snapshot)
+                guarded_add(collection, items, fingerprint, source=source, snapshot=source_snapshot, **publication_guards)
             else:
-                guarded_add(collection, items, fingerprint)
+                guarded_add(collection, items, fingerprint, **publication_guards)
         self._require_embedding_identity(collection, fingerprint)
         if callable(exact_reader):
             stored = self.exact_document(collection, document_sha256)

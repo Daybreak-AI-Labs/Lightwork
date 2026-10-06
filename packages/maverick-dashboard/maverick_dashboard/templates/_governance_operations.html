@@ -252,6 +252,7 @@
         <thead><tr><th scope="col">Rules</th><th scope="col">Status</th><th scope="col">Version in use</th><th scope="col">Actions</th></tr></thead>
         <tbody id="ai-policy-management-policies"><tr><td colspan="4">Loading rules…</td></tr></tbody>
       </table></div>
+      {% if suggestions_enabled is defined and suggestions_enabled() %}{% from "_policy_suggestions.html" import policy_suggestions, policy_suggestions_script %}{{ policy_suggestions() }}{{ policy_suggestions_script() }}{% endif %}
       <div class="assurance-table"><table>
         <caption>Exceptions to the rules</caption>
         <thead><tr><th scope="col">Exception</th><th scope="col">Rules</th><th scope="col">Status</th><th scope="col">Ends</th><th scope="col">Actions</th></tr></thead>
@@ -558,14 +559,12 @@
     <h3 id="ai-conformity-title">EU AI Act launch readiness</h3>
       <p>Collect what the EU AI Act asks for before a system goes to market.</p>
       <details class="assurance-muted"><summary>What this does and doesn't prove</summary><p>You record the evidence the EU AI Act asks for before a
-      launch, and a second person approves it. This is an internal checklist: it
-      does not decide what the law says, sign a declaration, add a CE mark or
+      launch, and a second person approves it. This is an internal checklist. It does not decide what the law says, sign a declaration, add a CE mark or
       show that a regulator accepted anything.</p>
       <details><summary>Technical details</summary><p>Manage human-declared FRIA, Annex IV,
       Article 43, post-market, draft-declaration, and CE-readiness evidence
       against the official consolidated Regulation. This internal workflow
-      does not classify a system as law, perform conformity assessment, sign
-      a declaration, create or affix a CE mark, certify, or record regulator
+      does not classify a system as law, perform conformity assessment or sign a declaration. It does not create or affix a CE mark, certify, or record regulator
       or notified-body acceptance.</p></details></details>
     <form id="ai-conformity-list" class="assurance-form">
       <input type="hidden" name="limit" value="100">
@@ -734,8 +733,7 @@
       comparison or that the comparison kept everyone anonymous.</p>
       <details><summary>Technical details</summary><p>Prepare and inspect voluntary, aggregate-only
       benchmark contributions backed by exact evidence. An operator may pin
-      versioned Ed25519 report trust roots and an HTTPS coordinator, but every
-      transmission remains a separate human action with literal consent and an
+      versioned Ed25519 report trust roots and an HTTPS coordinator. Every transmission remains a separate human action with literal consent and an
       idempotency key. Pseudonymous export, transport, and signatures do not
       establish cohort inclusion, anonymity, representative methodology, or
       independently verified differential privacy.</p></details></details>
@@ -828,10 +826,7 @@
       for you, and the list does not prove every AI tool was found. Web traffic,
       people, prompts and answers are never accepted.</p>
       <details><summary>Technical details</summary><p>Register, approve, bind, and revoke sensor
-      identities, and admit privacy-safe normalized observations. This is a
-      control plane only: it deploys no live browser, network, OAuth, SaaS,
-      identity-directory, or data-catalog sensors and makes no completeness
-      claim about enterprise AI discovery. Raw traffic, people, prompts, and
+      identities, and admit privacy-safe normalized observations. This is a control plane only. It deploys no live browser, network, OAuth, SaaS, identity-directory, or data-catalog sensors. It makes no completeness claim about enterprise AI discovery. Raw traffic, people, prompts, and
       model outputs are not accepted.</p></details></details>
     <form id="ai-discovery-sensor-list" class="assurance-form">
       <input type="hidden" name="limit" value="100">
@@ -1005,7 +1000,7 @@
       <p class="assurance-muted">Only an administrator who is signed in can use the agent identity controls.</p>
       {% endif %}
     </details>
-    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session.</p>
+    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session. Choose a connected service and select Read now.</p>
     <details open>
       <summary>Identities</summary>
       <div class="assurance-table"><table>
@@ -1153,7 +1148,8 @@
       {% if gateway_admin %}
       <div class="assurance-form">
         <p class="assurance-form__wide assurance-muted">Sending changes the other system. It sends the record and destination chosen in the preview form, using the connection an administrator set up.</p>
-        <div class="assurance-form__wide assurance-actions"><button id="grc-outbound-sync" class="btn" type="button">Send now</button><span id="grc-outbound-sync-status" role="status" aria-live="polite"></span></div>
+        <label class="assurance-form__wide"><input id="grc-outbound-confirm" type="checkbox" disabled> I reviewed the complete current record and destination below.</label>
+        <div class="assurance-form__wide assurance-actions"><button id="grc-outbound-sync" class="btn" type="button" disabled>Send reviewed record</button><span id="grc-outbound-sync-status" role="status" aria-live="polite"></span></div>
       </div>
       {% endif %}
       <form id="grc-outbound-state" data-autoview="event" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="event">Choose an event in the table below.</p>
@@ -1164,10 +1160,11 @@
       </form>
     </div>
     <div id="grc-outbound-result" class="assurance-table" role="region" aria-label="Details" hidden></div>
+    <div class="assurance-actions"><button id="grc-outbound-original" class="btn btn--ghost" type="button" hidden>Check original delivery result</button><span id="grc-outbound-original-status" role="status" aria-live="polite"></span></div>
     <div class="assurance-table"><table>
-      <caption>Recent sends, failures and conflicts</caption>
+      <caption>Recent delivery problems</caption>
       <thead><tr><th scope="col">What happened</th><th scope="col">Sent to</th><th scope="col">Record</th><th scope="col">Why</th><th scope="col">Actions</th></tr></thead>
-      <tbody id="grc-outbound-events"><tr><td colspan="5">Loading recent sends…</td></tr></tbody>
+      <tbody id="grc-outbound-events"><tr><td colspan="5">Loading delivery problem records…</td></tr></tbody>
     </table></div>
     <p id="grc-outbound-events-status" class="assurance-muted" role="status" aria-live="polite"></p>
   </section>
@@ -1247,7 +1244,7 @@
     if (response.status === 409) return "This was changed since you opened it. Choose it again in the table and retry.";
     if (response.status === 400 || response.status === 422) return "Some of the details need fixing. Check them and try again.";
     if (response.status === 503) return "This feature is not available right now. It may need to be turned on or set up first.";
-    return `Could not ${fallback}. Please try again.`;
+    return `Could not ${fallback}. Try again.`;
   };
   // One JSON request through the shell's mvFetchJSON: one plain sentence per
   // failure, never a status code or server wording.
@@ -1564,7 +1561,7 @@
       await fillFingerprints(form);
       return await action();
     }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally {
       delete form.dataset.inFlight;
       if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
@@ -2117,7 +2114,7 @@
         displayTime(item.expires_at)
       ], {kind: "signal", key: item.signal_id || item.id, label: words(item.signal_code || item.category),
           fields: {signal_id: item.signal_id || item.id, expected_revision: item.revision}}));
-      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet.");
+      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet. Signals appear here as monitoring reports on it.");
       document.querySelectorAll("select[data-signal-options]").forEach(select => {
         select.replaceChildren(new Option("Choose the newer signal", ""));
         signals.forEach(item => select.appendChild(new Option(`${words(item.signal_code || item.category)} (${displayTime(item.observed_at)})`, item.signal_id || item.id)));
@@ -3077,7 +3074,7 @@
         displayTime(item.observed_at), item.current === true ? "Yes" : "No"
       ], {kind: "observation", key: item.observation_id, label: words(item.normalized?.ai_product_code || "observation"),
           fields: {observation_id: item.observation_id}}));
-      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. No discovery-completeness conclusion is shown.");
+      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. Observations appear here after a discovery run. No discovery-completeness conclusion is shown.");
       setStatus("ai-discovery-observation-list-status", `${rows.length} observation(s) shown.`);
     } catch (error) {
       clear(target); emptyRow(target, 5, "Observations could not be loaded. No live collection or completeness conclusion is shown. Refresh the page and try again.");
@@ -3377,7 +3374,7 @@
       renderIdentityChoices();
       setStatus("ai-identity-choices-status", result.available === true
         ? `${identityChoices.federation_bindings.length} agent identit${identityChoices.federation_bindings.length === 1 ? "y" : "ies"} and ${identityChoices.purview_intents.length} prepared change(s) available.`
-        : "No agent identities are enrolled for this workspace yet. Whoever runs Lightwork enrolls them on the server.");
+        : "No agent identities are enrolled for this workspace yet. Ask whoever runs Lightwork to enroll them on the server.");
     } catch (error) {
       purviewLabels.loaded = true;
       renderPurviewLabels();
@@ -3391,7 +3388,7 @@
     if (!button) return;
     button.disabled = true; button.setAttribute("aria-busy", "true"); setStatus(statusId, message);
     try { return await action(); }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally { button.disabled = false; button.removeAttribute("aria-busy"); }
   };
   const identityFederationInput = form => {
@@ -3734,66 +3731,120 @@
   {% endif %}
 
   const grcPreview = byId("grc-outbound-preview");
-  // Records to send are chosen from findings, accepted risks and incidents
-  // already on this page; the server supplies each one's exact details.
-  let grcSources = [];
+  const grcSync = byId("grc-outbound-sync"), grcConfirm = byId("grc-outbound-confirm");
+  const grcOriginalButton = byId("grc-outbound-original");
+  let grcSources = [], grcReview = null, grcBusy = false, grcOriginal = null, grcOriginalChecked = false;
+  try { grcOriginal = JSON.parse(sessionStorage.getItem("lightwork-grc-original") || "null"); } catch (_) {}
+  if (grcOriginalButton) grcOriginalButton.hidden = !grcOriginal;
+  const clearGrcReview = () => {
+    grcReview = null;
+    if (grcConfirm) { grcConfirm.checked = false; grcConfirm.disabled = true; }
+    if (grcSync) grcSync.disabled = true;
+    const result = byId("grc-outbound-result"); if (result) { clear(result); result.hidden = true; }
+  };
+  const showGrcReview = value => {
+    const holder = byId("grc-outbound-result"); clear(holder); holder.hidden = false;
+    const title = document.createElement("h4"); title.textContent = "Review the complete record to send";
+    const dl = document.createElement("dl");
+    (value.details || []).forEach(row => {
+      const dt = document.createElement("dt"); dt.textContent = row.label;
+      const dd = document.createElement("dd"); dd.textContent = row.value; dd.style.whiteSpace = "pre-wrap"; dd.style.overflowWrap = "anywhere";
+      dl.append(dt, dd);
+    });
+    const technical = document.createElement("details"), summary = document.createElement("summary"), pre = document.createElement("pre");
+    summary.textContent = "Exact record version, fingerprint and outbound details"; pre.tabIndex = 0;
+    pre.textContent = JSON.stringify(value.technical, null, 2); technical.append(summary, pre);
+    holder.append(title, dl, technical);
+  };
+  const showGrcResult = value => {
+    const holder = byId("grc-outbound-result"); clear(holder); holder.hidden = false;
+    const message = document.createElement("p"); message.textContent = value.message;
+    const state = value.state || {}, receipt = state.receipt || {};
+    holder.append(message, readable({delivery_status: value.status === "delivered" ? "Confirmed by the destination" : "Destination confirmation missing",
+      confirmed_at: receipt.delivered_at || null, send_attempts: state.attempts || null}));
+    const technical = document.createElement("details"), summary = document.createElement("summary"), pre = document.createElement("pre");
+    summary.textContent = "Exact original delivery record"; pre.tabIndex = 0; pre.textContent = JSON.stringify(value, null, 2);
+    technical.append(summary, pre); holder.append(technical);
+  };
   const loadGrcSources = async () => {
     if (!grcPreview) return;
+    clearGrcReview();
     const select = grcPreview.elements.source_choice;
     const kind = String(grcPreview.elements.source_kind.value || "finding");
     select.replaceChildren(new Option("Loading records…", ""));
     try {
       const result = await request(`/pickers/grc-sources?source_kind=${encodeURIComponent(kind)}`, {}, "load the records");
+      if (String(grcPreview.elements.source_kind.value) !== kind) return;
       grcSources = Array.isArray(result.sources) ? result.sources : [];
       select.replaceChildren(new Option(grcSources.length ? "Choose a record" : "No records of this kind yet", ""));
       grcSources.forEach((row, index) => select.appendChild(new Option(
-        `${ASSET_NAMES[row.asset_id] || "AI system"}: ${asText(row.label).slice(0, 120)} (${words(row.source?.severity)})`, String(index))));
+        `${ASSET_NAMES[row.asset_id] || "AI system"}: ${asText(row.label)} (${words(row.severity)})`, String(index))));
     } catch (error) {
-      grcSources = [];
-      select.replaceChildren(new Option("Records could not be loaded", ""));
+      grcSources = []; select.replaceChildren(new Option("Records could not be loaded", ""));
       setStatus("grc-outbound-preview-status", plainMessage(error, "Records could not be loaded. Refresh the page and try again."));
     }
   };
-  if (grcPreview) grcPreview.elements.source_kind.addEventListener("change", () => { void loadGrcSources(); });
+  if (grcPreview) {
+    grcPreview.elements.source_kind.addEventListener("change", () => { void loadGrcSources(); });
+    grcPreview.elements.source_choice.addEventListener("change", clearGrcReview);
+    grcPreview.elements.target.addEventListener("change", clearGrcReview);
+  }
   const chosenGrcSource = () => {
     const index = String(grcPreview.elements.source_choice.value || "");
     const row = index === "" ? null : grcSources[Number(index)];
     if (!row || !row.source) throw new Error("Choose a record to send first.");
-    return {...row.source};
+    return {source_kind: row.source.source_kind, source_id: row.source.source_id};
   };
   if (grcPreview) grcPreview.addEventListener("submit", event => {
     event.preventDefault();
-    withButton(grcPreview, "grc-outbound-preview-status", "Preparing the preview…", async () => {
-      const fields = formBody(grcPreview); const source = chosenGrcSource();
-      const result = await sendJson(`/grc-outbound/${encodeURIComponent(String(fields.get("target")))}/preview`, "POST", source, "preview the send");
-      showProjection("grc-outbound-result", result); setStatus("grc-outbound-preview-status", "Preview ready. Nothing was sent.");
+    withButton(grcPreview, "grc-outbound-preview-status", "Preparing the exact record review…", async () => {
+      clearGrcReview();
+      const source = chosenGrcSource(), target = String(grcPreview.elements.target.value);
+      const result = await sendJson(`/grc-outbound/${encodeURIComponent(target)}/preview`, "POST", source, "review the send");
+      if (JSON.stringify(chosenGrcSource()) !== JSON.stringify(source) || String(grcPreview.elements.target.value) !== target) return;
+      grcReview = {target, token: result.review_token}; showGrcReview(result);
+      if (grcConfirm) grcConfirm.disabled = false;
+      setStatus("grc-outbound-preview-status", result.message);
     });
   });
-  {% if gateway_admin %}
-  const grcSync = byId("grc-outbound-sync");
+  if (grcConfirm) grcConfirm.addEventListener("change", () => { grcSync.disabled = grcBusy || !grcReview || !grcConfirm.checked; });
   if (grcSync && grcPreview) grcSync.addEventListener("click", async () => {
-    if (grcSync.disabled) return;
-    let source;
-    try { source = chosenGrcSource(); } catch (error) { setStatus("grc-outbound-sync-status", plainMessage(error, "Choose a record to send first.")); return; }
-    const fields = formBody(grcPreview);
-    const destination = String(fields.get("target")) === "archer" ? "Archer" : "ServiceNow";
-    if (!(await mvConfirm(`Send this record to ${destination} now? This changes records in ${destination}.`, {okText: "Send"}))) return;
-    grcSync.disabled = true; grcSync.setAttribute("aria-busy", "true");
-    setStatus("grc-outbound-sync-status", `Sending to ${destination}…`);
+    if (grcBusy || !grcReview || !grcConfirm.checked) return;
+    if (grcOriginal && !grcOriginalChecked) {
+      setStatus("grc-outbound-sync-status", "Check the earlier original delivery result before deciding on another send. This prevents an uncertain result from being mistaken for a failed send."); return;
+    }
+    const original = {...grcReview}, destination = original.target === "archer" ? "Archer" : "ServiceNow";
+    if (!(await mvConfirm(`Send the complete reviewed record to ${destination}? This may create or update its record. An earlier uncertain effect may already exist; this exact source uses the native original request reference.`, {okText: "Send reviewed record"}))) return;
+    if (!grcReview || grcReview.token !== original.token) return;
+    grcBusy = true; grcSync.disabled = true; grcConfirm.disabled = true; grcSync.setAttribute("aria-busy", "true");
+    grcOriginal = original; grcOriginalChecked = false;
+    try { sessionStorage.setItem("lightwork-grc-original", JSON.stringify(original)); } catch (_) {}
+    if (grcOriginalButton) grcOriginalButton.hidden = false;
+    setStatus("grc-outbound-sync-status", `Sending the reviewed record to ${destination}…`);
     try {
-      const result = await sendJson(`/grc-outbound/${encodeURIComponent(String(fields.get("target")))}/sync`, "POST", source, "send the record");
-      showProjection("grc-outbound-result", result);
-      setStatus("grc-outbound-sync-status", result.status === "delivered"
-        ? `Delivered. ${destination} confirmed it received the record.`
-        : `Send attempted. It counts as delivered only once ${destination} confirms it received the record.`);
+      const result = await sendJson(`/grc-outbound/${encodeURIComponent(original.target)}/sync`, "POST", {review_token: original.token, confirmed: true}, "send the reviewed record");
+      showGrcResult(result); setStatus("grc-outbound-sync-status", result.message);
+      setStatus("grc-outbound-preview-status", "The reviewed request was submitted. Its original result is shown below.");
+      grcOriginalChecked = result.status === "delivered";
       await loadGrcEvents();
     } catch (error) {
-      setStatus("grc-outbound-sync-status", plainMessage(error, "The record could not be sent. Try again."));
+      setStatus("grc-outbound-sync-status", plainMessage(error, "The original delivery is unconfirmed. Check its saved result; nothing will be sent again automatically."));
+      setStatus("grc-outbound-preview-status", "The reviewed request was attempted. Check its original result before deciding whether another send is needed.");
     } finally {
-      grcSync.disabled = false; grcSync.removeAttribute("aria-busy");
+      grcBusy = false; grcReview = null; grcConfirm.checked = false; grcSync.removeAttribute("aria-busy");
     }
   });
-  {% endif %}
+  if (grcOriginalButton) grcOriginalButton.addEventListener("click", async () => {
+    if (!grcOriginal || grcBusy) return;
+    grcOriginalButton.disabled = true;
+    try {
+      const result = await sendJson(`/grc-outbound/${encodeURIComponent(grcOriginal.target)}/original`, "POST", {review_token: grcOriginal.token}, "read the exact original result");
+      grcOriginalChecked = true; showGrcResult(result);
+      setStatus("grc-outbound-original-status", result.message);
+    } catch (error) {
+      setStatus("grc-outbound-original-status", plainMessage(error, "The original result cannot be read from this account or workspace. Return to the original account and check the destination. Reading sends nothing."));
+    } finally { grcOriginalButton.disabled = false; }
+  });
   const grcState = byId("grc-outbound-state");
   if (grcState) grcState.addEventListener("submit", event => {
     event.preventDefault();
@@ -3810,8 +3861,8 @@
       rows.forEach(item => tableRow(target, [words(item.event_kind), item.target === "archer" ? "Archer" : "ServiceNow", words(item.source?.kind), words(item.reason)],
         {kind: "event", key: item.id, label: `${words(item.event_kind)} (${words(item.source?.kind)})`,
          fields: {target: item.target, source_kind: item.source?.kind, source_id: item.source?.id}}));
-      if (!rows.length) emptyRow(target, 5, "Nothing has been sent yet. Choose a record above and select Preview. This does not show whether ServiceNow or Archer is connected.");
-      setStatus("grc-outbound-events-status", `${rows.length} recent send(s) shown.`);
+      if (!rows.length) emptyRow(target, 5, "No recent delivery failures or conflicts were recorded. Read the original delivery result to check a send. This list does not prove a connection is available.");
+      setStatus("grc-outbound-events-status", `${rows.length} recent delivery problem(s) shown.`);
     } catch (error) {
       clear(target); emptyRow(target, 5, "Recent sends could not be loaded. No delivery conclusion is shown. Refresh the page and try again.");
       setStatus("grc-outbound-events-status", plainMessage(error, "Sending to ServiceNow or Archer is not available right now. Try again in a minute."));

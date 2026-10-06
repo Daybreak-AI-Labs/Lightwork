@@ -43,6 +43,7 @@
   </div>
   <h1 class="sr-only">{{ ui('Chat') }}</h1>
   <p class="cs-greet">{{ ui('What should Lightwork take on?') }}</p>
+  {% if chat_capability %}<p class="cs-limits" id="chat-capability">{{ ui(chat_capability) }}</p>{% endif %}
   {% if nav_mode == 'areas' and compose_form_available and can_create_goal %}<p><a href="/chat?compose=form">{{ ui('Use a step-by-step form instead') }}</a></p>{% endif %}
   {% if can_create_goal and model_route_ready and chat_examples and chat_examples.examples %}
   <section class="cs-examples" id="chat-examples" aria-labelledby="chat-examples-title">
@@ -121,7 +122,10 @@
 {% block dock %}
 {% from "_composer_recovery.html" import composer_recovery with context %}
 {% call composer_recovery(can_create_goal and draft_recovery_context) %}
-<form method="post" action="/chat/send" data-product-validation class="composer cs-anim" enctype="multipart/form-data">
+{% from "_form_field.html" import error_summary %}
+<form method="post" action="/chat/send" data-product-validation data-mv-validate class="composer cs-anim" enctype="multipart/form-data">
+  {# CTL-3: the shared form-field pattern -- the problem next to its field and in a summary that takes focus. #}
+  {{ error_summary('composer-errors') }}
   <input type="hidden" name="composer_mode" value="message">
   <input type="hidden" name="connection_references" value="[]">
   <input type="hidden" name="submission_key" value="{{ submission_key }}" />
@@ -133,7 +137,7 @@
     rows="2"
     placeholder="{{ ut('Message Lightwork…') }}"
     aria-label="{{ ut('Describe a task for Lightwork to do') }}"
-    required
+    required data-error-required="{{ ut('Describe the task first, for example: Summarise this week’s open invoices.') }}"
     {% if not compose_form %}autofocus{% endif %}
   >{{ prefill_title or '' }}</textarea>
   <details{% if prefill_description %} open{% endif %}>
@@ -175,12 +179,15 @@
       {% endif %}
       <option value="agent" lang="{{ ul('Draft an agent') }}">{{ ut('Draft an agent') }}</option>
     </select>
-    <button type="submit" id="send-btn" class="composer__send" aria-label="{{ ut('Start task') }}" lang="{{ ul('Start task') }}">
+    <button type="submit" id="send-btn" class="composer__send" aria-label="{{ ut('Start task') }}" lang="{{ ul('Start task') }}"{% if typical_cost %} aria-describedby="composer-typical-cost"{% endif %}>
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <path d="M9 14.5V4M9 4l-4.5 4.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     </button>
   </div>
+  {% if typical_cost %}{% from "_typical_cost.html" import own_typical_cost_text %}
+  {# What this person's tasks usually cost, beside Start on every launch (ADM-4). #}
+  <p class="composer__cost muted" id="composer-typical-cost">{{ own_typical_cost_text(typical_cost) }}{% if can_open_page('/budget') %} <a href="/budget">See your budget</a>{% endif %}</p>{% endif %}
   </fieldset>
 </form>
 {% endcall %}
@@ -274,10 +281,19 @@
     var field = document.querySelector('form.composer [name="title"]');
     var hint = document.getElementById('composer-hint');
     if (!field) return;
-    var lastExample = '';
+    var lastExample = '', used = '';
+    var measure = function (item, event) { if (typeof window.mvSuggestion === 'function') window.mvSuggestion('chat-example', item, event); };
+    var examples = Array.prototype.map.call(document.querySelectorAll('.cs-example'), function (b) { return (b.textContent || '').trim(); });
+    var showAll = function () { examples.forEach(function (text) { measure(text, 'shown'); }); };
+    // The measuring script loads after this page script.
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showAll); else showAll();
+    if (field.form) field.form.addEventListener('submit', function () {
+      examples.forEach(function (text) { if (text !== used) measure(text, 'dismissed'); });
+    });
     document.querySelectorAll('.cs-example').forEach(function (button) {
       button.addEventListener('click', function () {
         var text = (button.textContent || '').trim();
+        if (!used) { used = text; measure(text, 'accepted'); }
         if (field.value.trim() && field.value.trim() !== lastExample) {
           if (hint) chatCopy(hint, 'Your message is kept. Clear it first to use an example.');
           field.focus();

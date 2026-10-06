@@ -1087,8 +1087,6 @@ def _screen_messages(body: Mapping[str, Any]):
     still blocks). Returns the verdict, or None when there is no text.
     """
 
-    from .shield_ensemble import ShieldEnsemble
-
     parts: list[str] = []
     total = 0
     for chunk in _collect_prompt_text(body):
@@ -1102,10 +1100,13 @@ def _screen_messages(body: Mapping[str, Any]):
     if not parts:
         return None
     try:
+        from .shield_ensemble import ShieldEnsemble
+
         return ShieldEnsemble().evaluate("\n".join(parts))
-    except Exception:  # pragma: no cover -- screen must never break the path
-        log.warning("llm_gateway: content screen errored; failing open")
-        return None
+    except Exception as exc:
+        error_type = re.sub(r"[^A-Za-z0-9_.-]", "_", type(exc).__name__)[:64]
+        log.warning("llm_gateway: content screen unavailable; blocking (%s)", error_type)
+        raise LLMGatewayError("The gateway's content screen is unavailable.") from exc
 
 
 def _otel_attr(attributes: list, key: str) -> str:
@@ -1315,7 +1316,19 @@ def _handle_completion(  # noqa: C901 - the request boundary is deliberately lin
         )
     prompt_sha = hashlib.sha256(outbound_encoded).hexdigest()
     if settings["screen_prompts"]:
-        verdict = _screen_messages(outbound_body)
+        try:
+            verdict = _screen_messages(outbound_body)
+        except LLMGatewayError:
+            _record_call(
+                caller=caller, team=team, model=model, status="screen_unavailable",
+                prompt_sha256=prompt_sha, usage=None, now=current,
+                redaction_count=prompt_redactions,
+            )
+            return _provider_error(
+                provider, 503,
+                "The gateway's request safety check is unavailable. Nothing was sent "
+                "to the AI service. Try again later or ask your administrator to check it.",
+            )
         if verdict is not None and not verdict.allowed:
             _record_call(
                 caller=caller, team=team, model=model, status="screened_blocked",

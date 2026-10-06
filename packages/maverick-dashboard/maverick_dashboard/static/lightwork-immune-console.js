@@ -136,7 +136,7 @@
     }
     scoreRows("ic-over-rows", over.canary, over.available ? "No reviewer tests have been decided yet." :
       "Reviewer results are not available right now. Try again in a minute.", "Yes", "Not yet");
-    scoreRows("ic-drill-rows", over.drill, "No drill results yet.", "Yes", "Not yet");
+    scoreRows("ic-drill-rows", over.drill, "No drill results yet. Record one above after a drill.", "Yes", "Not yet");
     rows("ic-twin-rows", twin.replays, [
       function (r) { return task(r.production_goal); },
       function (r) { return task(r.twin_goal); },
@@ -232,11 +232,17 @@
     if (out) { say("Re-run started. Its result appears under Past re-runs when it finishes."); }
   }
 
-  async function forget(g) {
-    var ok = await window.mvConfirm("Delete the recording for “" + g.title + "”? It can no longer be re-run. Past re-run results are kept.", { okText: "Delete recording" });
-    if (!ok) { return; }
-    var out = await call("DELETE", "/api/v1/immune/twin/" + encodeURIComponent(g.id), undefined, "delete the recording");
-    if (out) { say("Recording deleted."); await loadAll(true); }
+  function forget(g) {
+    // One action with a way back (CTL-1): deleted when the Undo time is up.
+    var pick = document.querySelector('.ic-pick[value="' + String(Number(g.id)) + '"]');
+    var row = pick ? pick.closest("tr") : null;
+    if (row) { row.hidden = true; }
+    window.mvUndo("Recording for “{title}” deleted. Past re-run results are kept.", { values: {title: g.title},
+      action: "delete the recording",
+      run: function (keepalive) { return fetch("/api/v1/immune/twin/" + encodeURIComponent(g.id), { method: "DELETE", keepalive: keepalive, headers: { Accept: "application/json" } }); },
+      undo: function () { if (row) { row.hidden = false; } },
+      done: function () { say("Recording deleted."); return loadAll(true); }
+    });
   }
 
   async function awareness() {
@@ -249,14 +255,25 @@
     if (out) { say("Check started. Results appear under Past re-runs when it finishes."); }
   }
 
+  // A table whose data never arrived says so instead of "Loading." forever.
+  function settleLoading(message) {
+    Array.prototype.forEach.call(root.querySelectorAll("tbody"), function (body) {
+      if (body.textContent.trim() !== "Loading.") { return; }
+      var cell = body.querySelector("td");
+      if (cell) { cell.textContent = message; }
+    });
+  }
+
   async function loadAll(keepStatus) {
     try {
       renderSummary(await window.mvFetchJSON(root.dataset.apiUrl, {}, "load the safety summary"));
       try { choices = await window.mvFetchJSON("/api/v1/immune/choices"); renderChoices(); } catch (e) { /* choices stay as they were */ }
+      settleLoading((window.LightworkI18n ? window.LightworkI18n.text("Not available right now. Reload the page to try again.") : "Not available right now. Reload the page to try again."));
       if (!keepStatus) { say("Up to date."); }
     } catch (error) {
       say("");
       fail(error.message);
+      settleLoading((window.LightworkI18n ? window.LightworkI18n.text("Could not be loaded. Reload the page to try again.") : "Could not be loaded. Reload the page to try again."));
     }
   }
 

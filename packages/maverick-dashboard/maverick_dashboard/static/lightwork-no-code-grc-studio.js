@@ -390,7 +390,7 @@
   function plainError(error, action) {
     if (error && error.plain) { return error.message; }
     if (typeof global.mvErrorText === "function") { return global.mvErrorText(error, action); }
-    return "Could not " + action + ". Please try again.";
+    return "Could not " + action + ". Try again.";
   }
   function report(message, technical) {
     operationStatus.textContent = message;
@@ -765,7 +765,7 @@
           tr.appendChild(el("td", null, STATE_LABEL[snapshot.state] || human(snapshot.state)));
           list.appendChild(tr);
         });
-        if (!list.children.length) { var tr = el("tr"); var td = el("td", null, "Nothing recorded yet."); td.colSpan = 3; tr.appendChild(td); list.appendChild(tr); }
+        if (!list.children.length) { var tr = el("tr"); var td = el("td", null, "Nothing recorded yet. Entries appear here once the form is used."); td.colSpan = 3; tr.appendChild(td); list.appendChild(tr); }
         $("grcs-history-title").textContent = "History of " + nameOf(row) + " version " + row.version;
         $("grcs-history-panel").hidden = false;
         $("grcs-history-title").focus();
@@ -909,21 +909,21 @@
           "Remove field " + human(field.label_ref), function () { object.fields.splice(index, 1); }));
       });
     });
-    renderList("grcs-field-list", fieldItems, "No fields yet.");
+    renderList("grcs-field-list", fieldItems, "No fields yet. Add the first field above.");
     renderList("grcs-form-list", composerState.forms.map(function (item, index) {
       return listItem(human(item.title_ref) + " — " + item.sections.map(function (section) { return human(section.label_ref); }).join(", "),
         "Remove form " + human(item.title_ref), function () { composerState.forms.splice(index, 1); });
-    }), "No forms yet.");
+    }), "No forms yet. Add a form above to collect answers.");
     renderList("grcs-rule-list", composerState.rules.map(function (item, index) {
       return listItem(describeRule(item), "Remove rule " + human(item.rule_id), function () { composerState.rules.splice(index, 1); });
-    }), "No rules yet.");
+    }), "No rules yet. Add a rule above to check answers.");
     renderList("grcs-view-list", composerState.report_views.map(function (item, index) {
       return listItem(human(item.title_ref) + " — " + item.columns.length + " columns", "Remove report " + human(item.title_ref), function () { composerState.report_views.splice(index, 1); });
-    }), "No reports yet.");
+    }), "No reports yet. Add a report above to show results.");
     renderList("grcs-binding-list", composerState.collector_bindings.map(function (item, index) {
       return listItem(human(item.binding_id) + " — fills " + item.field_mappings.map(function (mapping) { return human(mapping.target_field_id); }).join(", "),
         "Remove evidence link " + human(item.binding_id), function () { composerState.collector_bindings.splice(index, 1); });
-    }), "No evidence links yet.");
+    }), "No evidence links yet. Link a collector above to gather evidence.");
     refreshSelectors();
     toggleFieldType();
     toggleActionType();
@@ -1325,7 +1325,7 @@
       var result = await request("/operations/recovery/backups");
       var items = result.items || [];
       list.replaceChildren();
-      statusLine.textContent = items.length ? "" : "No backups yet.";
+      statusLine.textContent = items.length ? "" : "No backups yet. Save a backup above before you change a blueprint.";
       items.forEach(function (item) {
         var tr = el("tr");
         tr.appendChild(el("td", null, when(item.created_at)));

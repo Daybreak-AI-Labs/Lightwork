@@ -30,7 +30,15 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .budget import Budget, BudgetExceeded, _cache_write_mult_from_ttl, _lookup_price_quote
+from .budget import (
+    Budget,
+    BudgetExceeded,
+    UnpricedModelError,
+    UsageAccountingError,
+    _attempt_price_scope,
+    _cache_write_mult_from_ttl,
+    _lookup_price_quote,
+)
 from .pricing import (
     ModelPrice,
     PriceUse,
@@ -935,13 +943,13 @@ def _enforce_circuit(provider: str) -> bool:
 
 
 def _safe_cap_projection(model_id, system, messages, tools, max_tokens,
-                         thinking_budget=None) -> float:
+                         thinking_budget=None, *, quote=None) -> float:
     """Estimated cost of the pending call for the provider-cap projection.
     Never raises -- a bad estimate must not block a legitimate call (fails to 0,
     i.e. spend-only enforcement, the prior behaviour)."""
     try:
         return _estimate_call_cost(model_id, system, messages, tools, max_tokens,
-                                   thinking_budget)
+                                   thinking_budget, quote=quote)
     except Exception:  # pragma: no cover -- estimate never blocks a call
         return 0.0
 
@@ -1077,9 +1085,10 @@ def _finish_provider_call(
     cache_mult,
     *,
     error: BaseException | None = None,
+    quote: ModelPrice | None = None,
 ):
     if hold is None:
-        _record_provider_spend(provider, _call_spend(model, response, budget, baseline, cache_mult))
+        _record_provider_spend(provider, _call_spend(model, response, budget, baseline, cache_mult, quote=quote))
         return True
     # Only response-local usage can settle this physical attempt. A concurrent
     # Budget delta or an absent/cancelled response is not evidence of zero cost.
@@ -1088,6 +1097,7 @@ def _finish_provider_call(
             model,
             response,
             cache_mult,
+            quote=quote,
         )
     except Exception:
         actual = cost_basis = pricing_evidence = None
@@ -1142,8 +1152,28 @@ def _finish_provider_call(
 class _ProviderAttemptTicket:
     hold: object
     baseline: float
+    quote: ModelPrice
     raw_response: object | None = None
     finished: bool = False
+
+
+def _price_scope():
+    from .paths import current_tenant_id_strict, data_dir
+
+    return current_tenant_id_strict(), os.path.normcase(str(data_dir().resolve()))
+
+
+def _admit_model_price(model: str) -> ModelPrice:
+    try:
+        return _lookup_price_quote(model)
+    except UnpricedModelError:
+        provider, model_id = _parse_spec(model)
+        if provider != "openrouter":
+            raise
+        from .model_discovery import refresh_for_price
+
+        refresh_for_price(provider=provider, model=model_id)
+        return _lookup_price_quote(model)
 
 
 class _ProviderAttemptTracker:
@@ -1160,6 +1190,9 @@ class _ProviderAttemptTracker:
         sequence: _ProviderAttemptSequence,
         service: str,
         dispatch_guard: Callable[[], None] | None = None,
+        metered_model: str | None = None,
+        material_guard: Callable[[], None] | None = None,
+        admitted_quote: ModelPrice | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -1169,7 +1202,13 @@ class _ProviderAttemptTracker:
         self.sequence = sequence
         self.service = service
         self.dispatch_guard = dispatch_guard
+        self.metered_model = metered_model or model
+        self.material_guard = material_guard
+        self.admitted_quote = admitted_quote
+        self.scope = _price_scope()
+        self.current_ticket: _ProviderAttemptTicket | None = None
         self.initial_ticket = self._new_ticket()
+        self.current_ticket = self.initial_ticket
         self.initial_used = False
         self.attempt_started = False
         self.pending: _ProviderAttemptTicket | None = None
@@ -1179,16 +1218,51 @@ class _ProviderAttemptTracker:
         # Also protects adapters without retry instrumentation: the initial
         # ticket is allocated immediately before entering the provider adapter.
         _check_dispatch_guard(self.dispatch_guard)
-        return _ProviderAttemptTicket(
-            hold=_reserve_provider_call(
-                self.provider,
-                self.projected,
-                sequence=self.sequence,
-                service=self.service,
-                budget=self.budget,
-            ),
-            baseline=self.budget.dollars if self.budget is not None else 0.0,
+        quote = self._fresh_quote()
+        hold = _reserve_provider_call(
+            self.provider,
+            self.projected,
+            sequence=self.sequence,
+            service=self.service,
+            budget=self.budget,
         )
+        try:
+            # Admission can wait on the spending writer. Its earlier quote and
+            # authority cannot authorize the physical send after that wait.
+            _check_dispatch_guard(self.dispatch_guard)
+            quote = self._fresh_quote()
+        except BaseException:
+            if hold is not None:
+                from .provider_cost_cap import settle
+
+                settle(hold, 0.0, attempt_state="failed")
+            raise
+        return _ProviderAttemptTicket(
+            hold=hold,
+            baseline=self.budget.dollars if self.budget is not None else 0.0,
+            quote=quote,
+        )
+
+    def _fresh_quote(self):
+        if _price_scope() != self.scope:
+            raise UsageAccountingError("The AI request workspace changed before dispatch.")
+        _check_dispatch_guard(self.material_guard)
+        quote = _lookup_price_quote(self.model)
+        _check_dispatch_guard(self.material_guard)
+        if self.admitted_quote is not None and quote != self.admitted_quote:
+            raise UnpricedModelError("The model price changed. Review a new request before sending it.")
+        return quote
+
+    def metering_quote(self, budget, model):
+        ticket = self.current_ticket
+        if (self.finalized or ticket is None or ticket.finished or budget is not self.budget
+                or model not in {self.model, self.metered_model} or _price_scope() != self.scope):
+            raise UsageAccountingError("Token usage does not match its admitted AI request.")
+        return ticket.quote
+
+    def response_quote(self):
+        ticket = self.pending or self.current_ticket
+        return ticket.quote if ticket is not None else self.initial_ticket.quote
 
     def before_attempt(self):
         if not self.initial_used:
@@ -1198,6 +1272,7 @@ class _ProviderAttemptTracker:
                 # The adapter may have built its request since the envelope
                 # was admitted. Revalidate at its physical send boundary.
                 _check_dispatch_guard(self.dispatch_guard)
+                ticket.quote = self._fresh_quote()
             except BaseException:
                 ticket.finished = True
                 if ticket.hold is not None:
@@ -1209,6 +1284,7 @@ class _ProviderAttemptTracker:
                 raise
         else:
             ticket = self._new_ticket()
+        self.current_ticket = ticket
         self.attempt_started = True
         return ticket
 
@@ -1222,6 +1298,7 @@ class _ProviderAttemptTracker:
             self.pending = ticket
             return
         ticket.finished = True
+        self.current_ticket = None
         if not _finish_provider_call(
             ticket.hold,
             self.provider,
@@ -1231,6 +1308,7 @@ class _ProviderAttemptTracker:
             ticket.baseline,
             self.cache_mult,
             error=error,
+            quote=ticket.quote,
         ) and ticket.hold is not None:
             # A failed physical request is eligible for retry only after its
             # durable unknown receipt is retained. Otherwise another call could
@@ -1262,6 +1340,7 @@ class _ProviderAttemptTracker:
             ticket.baseline,
             self.cache_mult,
             error=error,
+            quote=ticket.quote,
         )
         if not published and ticket.hold is not None and error is not None:
             # The provider error is otherwise eligible for failover. Replace it
@@ -1577,7 +1656,7 @@ def _release_budget_hold(budget: Budget | None, held: float) -> None:
 
 
 def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
-                        thinking_budget=None) -> float:
+                        thinking_budget=None, *, quote=None) -> float:
     """Rough $ for one call BEFORE dispatch: estimated input tokens at the
     model's input rate + max_tokens at the output rate (chars/4 heuristic,
     matching the token preflight). Input dominates -- a 200k-token context is
@@ -1599,7 +1678,7 @@ def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
                                           thinking_budget)
     except Exception:  # pragma: no cover -- estimate must never block a call
         pass
-    in_rate, out_rate = _lookup_price(model_id, estimate_only=True)
+    in_rate, out_rate = quote.rates if quote is not None else _lookup_price(model_id, estimate_only=True)
     chars = len(system or "")
     for m in messages or []:
         c = m.get("content") if isinstance(m, dict) else m
@@ -1630,7 +1709,8 @@ def _openai_cached_tokens(usage) -> int:
         return 0
 
 
-def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) -> float | None:
+def _response_call_cost(model_id, resp, cache_read_mult: float | None = None,
+                        *, quote: ModelPrice | None = None) -> float | None:
     """Per-call $ derived from THIS response's own token usage, or ``None`` when
     the response carries no usage to price from.
 
@@ -1711,7 +1791,7 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     if not cache_read:
         openai_cached = min(_openai_cached_tokens(usage), in_tok)
         in_tok -= openai_cached
-    quote = _lookup_price_quote(model_id, estimate_only=True)
+    quote = quote if quote is not None else _lookup_price_quote(model_id, estimate_only=True)
     in_rate, out_rate = quote.rates
     operator_ceiling = quote.rate_card_version == "operator-ceiling-v1"
     # ``cache_write`` (cache_creation_tokens) is only ever surfaced by the
@@ -1759,16 +1839,16 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     return cost
 
 
-def _response_call_accounting(model_id, resp, cache_read_mult=None):
+def _response_call_accounting(model_id, resp, cache_read_mult=None, *, quote=None):
     """Return response-local cost plus its rate assurance classification."""
 
-    cost = _response_call_cost(model_id, resp, cache_read_mult)
+    cost = _response_call_cost(model_id, resp, cache_read_mult, quote=quote)
     if cost is None:
         return None, None, None
     try:
         from .budget import _lookup_price_quote
 
-        evidence = _lookup_price_quote(model_id, estimate_only=True).metadata()
+        evidence = (quote if quote is not None else _lookup_price_quote(model_id, estimate_only=True)).metadata()
     except Exception:
         # The amount remains a bounded local estimate, but absent provenance can
         # never be promoted to observed or invoice-settled evidence.
@@ -1776,7 +1856,7 @@ def _response_call_accounting(model_id, resp, cache_read_mult=None):
     return cost, "observed" if evidence["verified"] else "estimated", evidence
 
 
-def _call_spend(model_id, resp, budget, dollars_baseline, cache_read_mult=None) -> float:
+def _call_spend(model_id, resp, budget, dollars_baseline, cache_read_mult=None, *, quote=None) -> float:
     """Dollars to attribute to one LLM call for provider-health/metrics.
 
     Prefers the response's own usage (call-local, race-free under a shared
@@ -1786,7 +1866,7 @@ def _call_spend(model_id, resp, budget, dollars_baseline, cache_read_mult=None) 
     """
     if not budget:
         return 0.0
-    call_cost = _response_call_cost(model_id, resp, cache_read_mult)
+    call_cost = _response_call_cost(model_id, resp, cache_read_mult, quote=quote)
     return call_cost if call_cost is not None else (budget.dollars - dollars_baseline)
 
 
@@ -2006,6 +2086,21 @@ class LLM:
         fingerprint = hashlib.sha256(json.dumps(scope, separators=(",", ":")).encode()).hexdigest()
         return client, f"{provider}:route:{fingerprint}"
 
+    def _price_material_guard(self, provider: str, route: str):
+        if not route.startswith(f"{provider}:route:"):
+            return None  # Legacy injected clients have no native material binding.
+
+        def guard():
+            from .paths import current_tenant_id_strict
+
+            config = self._provider_client_config(provider)
+            scope = (provider, current_tenant_id_strict(), config.fingerprint)
+            fingerprint = hashlib.sha256(json.dumps(scope, separators=(",", ":")).encode()).hexdigest()
+            if route != f"{provider}:route:{fingerprint}":
+                raise ProviderDispatchDenied("The AI connection changed. Review a new request before sending it.")
+
+        return guard
+
     def complete(
         self,
         system: str,
@@ -2088,7 +2183,7 @@ class LLM:
         assert_provider_allowed(provider)
         # A planning estimate cannot justify a paid call that record_tokens()
         # will refuse after dispatch under strict pricing.
-        _lookup_price_quote(_price_spec)
+        _admitted_quote = _admit_model_price(_price_spec)
         # Outbound data-minimization (opt-in, default off): strip detectable
         # PII/secrets from the prompt before it leaves the box to a cloud
         # provider. No-op unless [privacy] redact_egress is on; skipped for
@@ -2100,7 +2195,7 @@ class LLM:
         # large call (or concurrent calls seeing the same under-cap spend) can't
         # blow past it.
         _enforce_provider_cap(provider, _safe_cap_projection(
-            _price_spec, system, messages, tools, max_tokens, thinking_budget))
+            _price_spec, system, messages, tools, max_tokens, thinking_budget, quote=_admitted_quote))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client, _circuit_scope = self._dispatch_client(provider)
         # Circuit-breaker enforcement (the breaker was observe-only): if this
@@ -2154,7 +2249,7 @@ class LLM:
         # path uses. reserve() raises BudgetExceeded if the call won't fit;
         # released in `finally` once the actual spend lands.
         _est_cost = _estimate_call_cost(_price_spec, system, messages, tools,
-                                        max_tokens, thinking_budget=thinking_budget)
+                                        max_tokens, thinking_budget=thinking_budget, quote=_admitted_quote)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
         _provider_tracker = None
         _provider_started = False
@@ -2178,11 +2273,14 @@ class LLM:
                     sequence=_provider_sequence,
                     service=_price_spec,
                     dispatch_guard=dispatch_guard,
+                    metered_model=getattr(client, "PRICE_MODEL_PREFIX", "") + model_id,
+                    material_guard=self._price_material_guard(provider, _circuit_scope),
+                    admitted_quote=_admitted_quote,
                 )
                 _provider_started = True
                 from .retry import observe_physical_attempts
 
-                with observe_physical_attempts(_provider_tracker):
+                with _attempt_price_scope(_provider_tracker.metering_quote), observe_physical_attempts(_provider_tracker):
                     _resp = client.complete(**kwargs)
                 from .instruction_capture import record_dispatch
                 record_dispatch(_price_spec, system)
@@ -2200,7 +2298,7 @@ class LLM:
             # The dispatching client's CACHE_READ_MULT keeps the OpenAI-family
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
-                                 getattr(client, "CACHE_READ_MULT", None))
+                                 getattr(client, "CACHE_READ_MULT", None), quote=_admitted_quote)
             try:
                 if _provider_started and _provider_tracker is not None:
                     _provider_tracker.finalize(_resp, _provider_error)
@@ -2284,7 +2382,9 @@ class LLM:
         # Egress lock (no-op unless enterprise mode is on): see complete().
         from .enterprise import assert_provider_allowed
         assert_provider_allowed(provider)
-        _lookup_price_quote(_price_spec)
+        import asyncio
+
+        _admitted_quote = await asyncio.to_thread(_admit_model_price, _price_spec)
         # Outbound data-minimization (opt-in, default off): strip detectable
         # PII/secrets from the prompt before it leaves the box to a cloud
         # provider. No-op unless [privacy] redact_egress is on; skipped for
@@ -2296,7 +2396,7 @@ class LLM:
         # large call (or concurrent calls seeing the same under-cap spend) can't
         # blow past it.
         _enforce_provider_cap(provider, _safe_cap_projection(
-            _price_spec, system, messages, tools, max_tokens, thinking_budget))
+            _price_spec, system, messages, tools, max_tokens, thinking_budget, quote=_admitted_quote))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client, _circuit_scope = self._dispatch_client(provider)
         # Circuit-breaker enforcement -- see complete(). OPEN fast-fails with a
@@ -2339,7 +2439,7 @@ class LLM:
         # wide parallel fan-out). reserve() raises BudgetExceeded here if the
         # call won't fit; released in `finally` once the actual spend lands.
         _est_cost = _estimate_call_cost(_price_spec, system, messages, tools,
-                                        max_tokens, thinking_budget=thinking_budget)
+                                        max_tokens, thinking_budget=thinking_budget, quote=_admitted_quote)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
         _provider_probe = False
         _provider_attempted = False
@@ -2374,11 +2474,14 @@ class LLM:
                         sequence=_provider_sequence,
                         service=_price_spec,
                         dispatch_guard=dispatch_guard,
+                        metered_model=getattr(client, "PRICE_MODEL_PREFIX", "") + model_id,
+                        material_guard=self._price_material_guard(provider, _circuit_scope),
+                        admitted_quote=_admitted_quote,
                     )
                     try:
                         from .retry import observe_physical_attempts
 
-                        with observe_physical_attempts(tracker):
+                        with _attempt_price_scope(tracker.metering_quote), observe_physical_attempts(tracker):
                             response = await client.complete_async(
                                 system=system, messages=messages, tools=tools, budget=budget,
                                 max_tokens=max_tokens, thinking_budget=thinking_budget,
@@ -2454,7 +2557,7 @@ class LLM:
             # The dispatching client's CACHE_READ_MULT keeps the OpenAI-family
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
-                                 getattr(client, "CACHE_READ_MULT", None))
+                                 getattr(client, "CACHE_READ_MULT", None), quote=_admitted_quote)
             _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error, _circuit_scope, _provider_probe,
                                      _provider_sequence.routing_credit if _provider_attempted else None)
             try:
@@ -2496,11 +2599,12 @@ class LLM:
         try:
             from .enterprise import assert_provider_allowed
             assert_provider_allowed(provider)
-            client = self._get_client(provider)
+            client, route = self._dispatch_client(provider)
             warm = getattr(client, "prewarm", None)
             if not callable(warm):
                 return False
             messages = [{"role": "user", "content": "warmup"}]
+            admitted_quote = _admit_model_price(f"{provider}:{model_id}")
             # A prewarm can bill prompt-cache creation/read tokens even though
             # max_tokens=0. Reserve the worst-case Anthropic cache-write input
             # multiplier before dispatch so zero/low dollar caps cannot be
@@ -2509,6 +2613,7 @@ class LLM:
             estimate = (
                 _estimate_call_cost(
                     f"{provider}:{model_id}", system, messages, tools, 0,
+                    quote=admitted_quote,
                 )
                 * _cache_write_mult_from_ttl("1h")
             )
@@ -2525,11 +2630,14 @@ class LLM:
                 estimate,
                 sequence=provider_sequence,
                 service=f"{provider}:{model_id}:prompt-cache",
+                metered_model=model_id,
+                material_guard=self._price_material_guard(provider, route),
+                admitted_quote=admitted_quote,
             )
             try:
                 from .retry import observe_physical_attempts
 
-                with observe_physical_attempts(tracker):
+                with _attempt_price_scope(tracker.metering_quote), observe_physical_attempts(tracker):
                     if budget is not None:
                         return bool(warm(system, tools, model_id, budget=budget))
                     return bool(warm(system, tools, model_id))

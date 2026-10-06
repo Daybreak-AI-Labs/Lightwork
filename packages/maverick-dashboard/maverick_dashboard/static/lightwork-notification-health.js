@@ -13,7 +13,7 @@
     const last = state.last_success_at ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(state.last_success_at) : new Date(state.last_success_at * 1000).toLocaleString()) : 'No confirmed delivery in recent history';
     summary.textContent = state.enabled ? 'Current channel: ' + state.backend + '. Last accepted delivery: ' + last + '. Seen by a person: unknown.' : 'Delivery history is turned off. Enable it in All settings before sending a test.';
     list.replaceChildren();
-    if (!state.receipts.length) list.textContent = 'No delivery receipts yet. A saved configuration does not confirm delivery.';
+    if (!state.receipts.length) list.textContent = 'No delivery receipts yet. Send a test message to confirm delivery; a saved configuration alone does not.';
     state.receipts.forEach(function (row) {
       const article = document.createElement('article');
       const title = document.createElement('h3');

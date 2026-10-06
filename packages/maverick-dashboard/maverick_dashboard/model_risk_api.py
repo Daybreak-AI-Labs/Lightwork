@@ -25,6 +25,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import governance_schemas
@@ -5493,92 +5494,313 @@ async def get_eu_ai_incident_report_payload(
 # Semantic GRC writeback -----------------------------------------------------
 
 
-def _grc_source(grc, body: schemas.GRCOutboundSourceIn):
-    data = body.model_dump()
-    common = {
-        "asset_id": data["asset_id"],
-        "severity": data["severity"],
-        "source_revision": data["source_revision"],
-        "source_digest": data["source_digest"],
-    }
-    if body.source_kind == "finding":
-        return grc.FindingSource(
-            finding_id=data["source_id"],
-            finding_type=data["finding_type"],
-            summary=data["summary"],
-            **common,
-        )
-    if body.source_kind == "risk_acceptance":
-        return grc.RiskAcceptanceSource(
-            acceptance_id=data["source_id"],
-            finding_id=data["finding_id"],
-            rationale=data["rationale"],
-            reviewer=data["reviewer"],
-            decided_at=data["decided_at"],
-            expires_at=data["expires_at"],
-            status=data["acceptance_status"],
-            **common,
-        )
-    return grc.AIIncidentSource(
-        incident_id=data["source_id"],
-        incident_source_id=data["incident_source_id"],
-        summary=data["summary"],
-        status=data["incident_status"],
-        occurred_at=data["occurred_at"],
-        resolution=data["resolution"],
-        **common,
-    )
+_GRC_REVIEW_PURPOSE = "lightwork.actual-record-grc-review.v1"
+_GRC_REVIEW_TTL = 600
+_GRC_STORE_METADATA = frozenset({"revision", "created_at", "updated_at", "_audit_pending"})
+
+
+class GRCOutboundSelectionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_kind: Literal["finding", "risk_acceptance", "ai_incident"]
+    source_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]*$")
+
+
+class GRCOutboundReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    review_token: str = Field(min_length=1, max_length=131072)
+    confirmed: bool = False
+
+
+def _grc_content_digest(record):
+    content = {key: value for key, value in record.items() if key not in _GRC_STORE_METADATA}
+    return hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True, default=str, allow_nan=False).encode("ascii")).hexdigest()
+
+
+def _grc_record(officer, kind, source_id):
+    if kind == "ai_incident":
+        record = next((row for row in officer.list_incidents() if row["id"] == source_id), None)
+    else:
+        findings = officer.findings()
+        if kind == "finding":
+            record = next((row for row in findings if row["id"] == source_id), None)
+        else:
+            record = None
+            for finding in findings:
+                accepted = officer.current_risk_acceptance(finding)
+                if accepted and accepted["id"] == source_id:
+                    record = accepted
+                    break
+    if record is None:
+        raise HTTPException(409, "This record is no longer current in this workspace. Refresh the records and review again. Nothing was sent.")
+    return record
+
+
+def _grc_source(grc, kind, source_id, *, target=None):
+    """Resolve every semantic value from current tenant-owned native records."""
+    officer = _module("model_risk_assurance", "model_risk_assurance")
+    record = _grc_record(officer, kind, source_id)
+    revision = 1 if kind == "finding" else record.get("revision")
+    if kind == "finding" and target is not None:
+        # Findings are derived from cited native records, without a stored
+        # ordinal. Advance their export version from the existing native writer
+        # only when the actual current evidence fingerprint changes.
+        state = grc.configured_sync().get_state(target=target,
+            source_kind=grc.SourceKind.FINDING, source_id=record["id"])
+        if state is not None:
+            prior = state.get("source") or {}
+            version = prior.get("revision")
+            if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+                raise HTTPException(503, "This finding's earlier export version could not be verified.")
+            revision = version + (prior.get("digest") != record["finding_sha256"])
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise HTTPException(503, "This assurance record's saved version could not be verified.")
+    common = {"asset_id": record["asset_id"], "severity": record["severity"],
+              "source_revision": revision, "source_digest": record["finding_sha256"]
+              if kind == "finding" else _grc_content_digest(record)}
+    if kind == "finding":
+        source = grc.FindingSource(finding_id=record["id"], finding_type=record["finding_type"],
+                                   summary=record["summary"], **common)
+    elif kind == "risk_acceptance":
+        source = grc.RiskAcceptanceSource(acceptance_id=record["id"], finding_id=record["finding_id"],
+            rationale=record["rationale"], reviewer=record["reviewer"], decided_at=record["decided_at"],
+            expires_at=record["expires_at"], status=record["status"], **common)
+    else:
+        source = grc.AIIncidentSource(incident_id=record["id"], incident_source_id=record["source_id"],
+            summary=record["summary"], status=record["status"], occurred_at=record["occurred_at"],
+            resolution=record.get("resolution", ""), **common)
+    return source, record
+
+
+def _grc_context(request, *, write=False):
+    from maverick.governed_operations import digest
+
+    from . import auth
+    from .api_flow_operator_review import _workspace_authority
+    from .draft_api import context_for
+    require_permission(request, "operate")
+    tenant = _require_active_tenant()
+    actor = auth.caller_principal(request) or _actor(request)
+    if write:
+        require_global_permission(request, "admin")
+        actor = _human_principal(request)
+    suites, scopes = auth.caller_suites(request), auth.api_key_scopes(request)
+    return digest([context_for(request), _workspace_authority(request, actor, tenant),
+        auth.caller_role(request), sorted(suites) if suites is not None else None,
+        sorted(scopes) if scopes is not None else None])
+
+
+def _grc_destination(grc, system):
+    from maverick import config, grc_vendor_transports
+    from maverick.governed_operations import digest
+    if config.config_source_errors():
+        raise HTTPException(503, "The governance connection settings could not be verified. Nothing was sent.")
+    configured = config.load_config()
+    transport = grc_vendor_transports.transport_from_config(system, config=configured)
+    # Construction validates fixed endpoints/limits without resolving credentials
+    # or sending. Bind the effective destination and sealed config as well as policy.
+    binding = digest([configured.get("grc_outbound_sync", {}), transport._base_url,
+        transport._credential_secret_ref, asdict(transport._limits),
+        sorted(target.value for target in grc.policy_from_config().allowed_targets)])
+    return transport, binding, transport._base_url
+
+
+def _grc_review_details(system, destination, source, record):
+    fields = [("Destination", ("ServiceNow IRM" if system.value == "servicenow_irm" else "Archer") + " · " + destination),
+        ("Kind of record", {"finding": "Finding", "risk_acceptance": "Accepted risk", "ai_incident": "AI incident"}[source.kind.value]),
+        ("Severity", source.severity.title()), ("Export version" if source.kind.value == "finding" else "Saved record version", str(source.source_revision))]
+    for key, label in (("summary", "Complete summary"), ("finding_type", "Finding type"),
+        ("rationale", "Acceptance rationale"), ("reviewer", "Accountable reviewer"),
+        ("status", "Current status"), ("decided_at", "Decision date"),
+        ("expires_at", "Acceptance expires"), ("occurred_at", "Incident occurred"),
+        ("resolution", "Complete resolution")):
+        value = record.get(key)
+        if value is not None and value != "":
+            if key.endswith("_at"):
+                value = datetime.fromtimestamp(float(value), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            fields.append((label, str(value)))
+    fields.append(("Consequence", "Send this exact current Lightwork record to the reviewed connection. This can create or update a record there. A saved local delivery row does not prove delivery; the destination must confirm the exact record."))
+    return [{"label": label, "value": value} for label, value in fields]
+
+
+def prepare_grc_record_review(request, target, selection):
+    from maverick import crypto_at_rest
+    from maverick.governed_operations import digest
+    context = _grc_context(request)
+    grc = _module("grc_outbound_sync", "grc_outbound_sync")
+    system = grc.GRCSystem(target)
+    source, record = _grc_source(grc, selection.source_kind, selection.source_id, target=system)
+    service = grc.configured_sync()
+    projection = service.preview(source, target=system)
+    _transport, destination_binding, destination = _grc_destination(grc, system)
+    material = {"purpose": _GRC_REVIEW_PURPOSE, "context": context, "target": system.value,
+        "source_kind": source.kind.value, "source_id": source.source_id,
+        "source": asdict(source), "record_digest": digest(record), "destination": destination_binding,
+        "projection_digest": digest(projection), "idempotency_key": projection["idempotency_key"],
+        "expires": time.time() + _GRC_REVIEW_TTL}
+    token = crypto_at_rest.seal_to_str(json.dumps(material, sort_keys=True, allow_nan=False))
+    if not crypto_at_rest.is_sealed_str(token):
+        raise HTTPException(503, "The exact review could not be protected. Nothing was sent.")
+    if _grc_context(request) != context:
+        raise HTTPException(409, "Your account, workspace or access changed. Refresh before reviewing private records.")
+    return {"context": context, "review_token": token, "details": _grc_review_details(system, destination, source, record),
+        "technical": projection, "message": "Review the complete current record and destination. Nothing has been sent."}
+
+
+def _open_grc_review(request, target, token, *, current=True):
+    from maverick import crypto_at_rest
+    try:
+        if not crypto_at_rest.is_sealed_str(token):
+            raise ValueError("unprotected review")
+        value = json.loads(crypto_at_rest.unseal_from_str(token))
+        expires = value["expires"]
+        if (value["purpose"] != _GRC_REVIEW_PURPOSE or value["target"] != target
+            or value["context"] != _grc_context(request) or isinstance(expires, bool)
+            or not isinstance(expires, (int, float)) or expires > time.time() + _GRC_REVIEW_TTL
+            or current and expires <= time.time()):
+            raise ValueError("review no longer current")
+        return value
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(409, "This review expired or your account, workspace or access changed. Check the original result in the original account; review current records before any new send.") from exc
+
+
+def read_grc_record_review(request, target, token):
+    value = _open_grc_review(request, target, token, current=False)
+    context = _grc_context(request)
+    grc = _module("grc_outbound_sync", "grc_outbound_sync")
+    state = grc.configured_sync().get_state(target=grc.GRCSystem(target),
+        source_kind=grc.SourceKind(value["source_kind"]), source_id=value["source_id"])
+    if _grc_context(request) != context:
+        raise HTTPException(409, "Your account, workspace or access changed while reading the result. Refresh the page.")
+    original = None
+    if state is not None:
+        history = state.get("history") or []
+        if not isinstance(history, list) or len(history) > 32:
+            raise HTTPException(503, "The original delivery history could not be verified. Nothing was repeated.")
+        original = next((row for row in [state, *history] if isinstance(row, Mapping)
+            and row.get("idempotency_key") == value["idempotency_key"]), None)
+    if original is None:
+        return {"status": "unconfirmed", "original_found": False, "message": "No exact original delivery result is available. This read sent nothing. Check the destination before deciding whether another send is needed."}
+    receipt = original.get("receipt") or {}
+    source = original.get("source") or {}
+    confirmed = (original.get("status") == "delivered"
+        and source.get("kind") == value["source_kind"] and source.get("id") == value["source_id"]
+        and source.get("revision") == value["source"]["source_revision"]
+        and source.get("digest") == value["source"]["source_digest"]
+        and receipt.get("idempotency_key") == value["idempotency_key"]
+        and receipt.get("source_revision") == source.get("revision")
+        and receipt.get("source_digest") == source.get("digest"))
+    return {"status": "delivered" if confirmed else "unconfirmed", "original_found": True, "state": original,
+        "message": "The destination confirmed the exact original record. Reading did not send it again." if confirmed else
+        "The exact local delivery record exists, but destination confirmation is missing. Reading did not repeat a send; reconcile the original effect before deciding again."}
+
+
+def execute_grc_record_review(request, target, token, *, confirmed):
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.governed_operations import digest
+    if confirmed is not True:
+        raise HTTPException(409, "Review the complete record and destination and confirm this send first.")
+    context = _grc_context(request, write=True)
+    value = _open_grc_review(request, target, token)
+    grc = _module("grc_outbound_sync", "grc_outbound_sync")
+    system = grc.GRCSystem(target)
+
+    def current():
+        _open_grc_review(request, target, token)
+        if _grc_context(request, write=True) != context:
+            raise HTTPException(409, "Your account, workspace or access changed. Nothing further was sent.")
+        _module("grc_outbound_sync", "grc_outbound_sync")
+        source, record = _grc_source(grc, value["source_kind"], value["source_id"], target=system)
+        service = grc.configured_sync()
+        projection = service.preview(source, target=system)
+        transport, destination, _display = _grc_destination(grc, system)
+        if (asdict(source) != value["source"] or digest(record) != value["record_digest"]
+            or destination != value["destination"]):
+            raise HTTPException(409, "The record, its evidence or destination changed since review. Check the original result, then review current records. Nothing further was sent.")
+        if digest(projection) != value["projection_digest"]:
+            # Native delivery may have populated an external reference since
+            # review. An exact accepted original is readable, never rewritten.
+            original = read_grc_record_review(request, target, token)
+            if original["status"] == "delivered":
+                return source, service, transport, original
+            raise HTTPException(409, "The record, its evidence or destination changed since review. Check the original result, then review current records. Nothing further was sent.")
+        return source, service, transport, None
+
+    source, service, transport, original = current()
+    if original is not None:
+        return original
+
+    physical_http = transport._http
+
+    class CheckedHTTP:
+        def request(self, method, url, **kwargs):
+            # Vendor transports may wait for lookup/preflight requests before
+            # POST/PATCH. Revalidate the native source at each physical request,
+            # especially the write following that wait, without a new writer.
+            with authority_effect_fence():
+                try:
+                    current()
+                except HTTPException as exc:
+                    raise grc.GRCTransportFailure("review_no_longer_current", retryable=False) from exc
+                return physical_http.request(method, url, **kwargs)
+
+    transport._http = CheckedHTTP()
+
+    class CheckedTransport:
+        def send(self, outbound):
+            # The native writer can wait for its state lock. Recheck authority,
+            # source bytes and endpoint after that wait at the effect boundary.
+            with authority_effect_fence():
+                _source, _service, _transport, prior = current()
+                if prior is not None:
+                    raise grc.GRCTransportFailure("original_already_delivered", retryable=False)
+                if (outbound.idempotency_key != value["idempotency_key"]
+                    or outbound.source_digest != source.source_digest):
+                    raise grc.GRCTransportFailure("review_binding_changed", retryable=False)
+                return transport.send(outbound)
+
+    service.sync(source, target=system, transport=CheckedTransport(), actor=_human_principal(request))
+    _grc_context(request, write=True)
+    result = read_grc_record_review(request, target, token)
+    if result["status"] == "delivered":
+        result["message"] = "The destination confirmed this exact reviewed record."
+    return result
+
+
+async def _grc_call(function, *args, **kwargs):
+    try:
+        return await run_in_threadpool(function, *args, **kwargs)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        from maverick.grc_outbound_sync import GRCOutboundConfigError, GRCOutboundSyncError
+        from maverick.grc_vendor_transports import GRCVendorConfigError
+        if isinstance(exc, GRCOutboundConfigError):
+            raise HTTPException(403, "This governance destination is not enabled for this workspace.") from exc
+        if isinstance(exc, GRCVendorConfigError):
+            raise HTTPException(503, "Finish the governance connection setup in Settings before reviewing a send.") from exc
+        if isinstance(exc, GRCOutboundSyncError):
+            raise HTTPException(409, "Delivery could not be confirmed. Check the exact original result and destination; a local delivery row alone does not prove a send succeeded.") from exc
+        if isinstance(exc, ValueError):
+            raise HTTPException(422, "This governance record or destination is unsupported.") from exc
+        raise HTTPException(503, "The original delivery could not be verified. Check its saved result before deciding whether another send is needed.") from exc
 
 
 @router.post("/grc-outbound/{target}/preview")
-async def preview_grc_outbound_sync(
-    request: Request,
-    target: str,
-    body: schemas.GRCOutboundSourceIn,
-) -> dict[str, Any]:
-    require_permission(request, "operate")
-    _require_active_tenant()
-    grc = _module("grc_outbound_sync", "grc_outbound_sync")
-    try:
-        system = grc.GRCSystem(target)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="unsupported GRC target") from exc
-    service = grc.configured_sync()
-    return await _call(service.preview, _grc_source(grc, body), target=system)
+async def preview_grc_outbound_sync(request: Request, target: str, body: GRCOutboundSelectionIn) -> dict[str, Any]:
+    return await _grc_call(prepare_grc_record_review, request, target, body)
 
 
 @router.post("/grc-outbound/{target}/sync")
-async def execute_grc_outbound_sync(
-    request: Request,
-    target: str,
-    body: schemas.GRCOutboundSourceIn,
-) -> dict[str, Any]:
-    require_global_permission(request, "admin")
-    _require_active_tenant()
-    human = _human_principal(request)
-    grc = _module("grc_outbound_sync", "grc_outbound_sync")
-    try:
-        system = grc.GRCSystem(target)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="unsupported GRC target") from exc
-    service = grc.configured_sync()
-    source = _grc_source(grc, body)
-    # Refuse an unadmitted target before attempting endpoint or credential
-    # resolution. The preview path applies the same strict semantic policy.
-    await _call(service.preview, source, target=system)
-    from maverick import grc_vendor_transports
+async def execute_grc_outbound_sync(request: Request, target: str, body: GRCOutboundReviewIn) -> dict[str, Any]:
+    return await _grc_call(execute_grc_record_review, request, target, body.review_token, confirmed=body.confirmed)
 
-    transport = await _call(
-        grc_vendor_transports.transport_from_config,
-        system,
-    )
-    return await _call(
-        service.sync,
-        source,
-        target=system,
-        transport=transport,
-        actor=human,
-    )
+
+@router.post("/grc-outbound/{target}/original")
+async def original_grc_outbound_sync(request: Request, target: str, body: GRCOutboundReviewIn) -> dict[str, Any]:
+    return await _grc_call(read_grc_record_review, request, target, body.review_token)
 
 
 @router.get("/grc-outbound/{target}/{source_kind}/{source_id}")

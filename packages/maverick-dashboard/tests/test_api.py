@@ -551,8 +551,11 @@ class TestSkills:
         assert "MAVERICK_ALLOW_SKILL_INSTALL" in resp.json()["detail"]
 
     def test_remove_unknown_404(self):
-        resp = client.delete("/api/v1/skills/does-not-exist")
-        assert resp.status_code == 404
+        # Removal is reviewed first; an unknown skill has nothing to review.
+        context = client.get("/api/v1/manual-skill-removals").json()["context"]
+        resp = client.post("/api/v1/manual-skill-removals/review",
+                           json={"name": "does-not-exist", "context": context})
+        assert resp.status_code == 409 and "no longer installed" in resp.json()["detail"]
 
 
 class TestSpend:

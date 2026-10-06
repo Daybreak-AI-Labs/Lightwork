@@ -646,6 +646,10 @@ class TeamsChannel(Channel):
                               provider_sender_id=parsed.sender_aad)
         account = self.app_id
         route = {"service_url": parsed.service_url, "reply_to": parsed.activity_id}
+        if (parsed.conversation_type == "personal"
+                and (parsed.raw.get("conversation") or {}).get("conversationType") == "personal"):
+            route["private_destination"] = {"service_url": parsed.service_url, "conversation_id": parsed.conversation_id,
+                                            "tenant_id": parsed.tenant_id, "sender_id": parsed.principal_key, "app_id": self.app_id}
         external_id = parsed.conversation_id + ":" + parsed.activity_id
         try:
             receipt = await self.admit_message(msg, external_id=external_id, account=account,
@@ -666,7 +670,7 @@ class TeamsChannel(Channel):
 
     async def _send_saved(self, msg, reply, route):
         if reply.text:
-            return await self.send_threaded(msg.user_id, reply.text, reply_to=route.get("reply_to"),
+            return await self.send_threaded(msg.user_id, reply.text, reply_to=reply.thread_ref or route.get("reply_to"),
                                             service_url=route.get("service_url"))
 
     # -- outbound ------------------------------------------------------------
@@ -681,8 +685,8 @@ class TeamsChannel(Channel):
                             service_url: str | None = None) -> None:
         """Reply in the conversation; long replies go as several messages.
 
-        Replies carrying rich blocks are left to :mod:`rich_render` (applied by
-        ``server.add_channel``); plain text uses Teams' markdown rendering.
+        Native saved replies carry explicit file-availability wording when this
+        connector cannot upload files. Text uses Teams' markdown rendering.
         """
         from .teams_cards import attachment, result_card
 

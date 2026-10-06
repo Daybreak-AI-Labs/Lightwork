@@ -100,7 +100,9 @@
     var key = hash.slice(prefix.length + 1);
     var tab = tabsOf(list).filter(function (t) { return t.getAttribute("data-mv-tab") === key; })[0];
     if (!tab) return;
-    select(tab);
+    // An address naming another tab opens it as a click would, so a page
+    // that loads data for the chosen tab (a board's time range) loads it.
+    if (tab.getAttribute("aria-selected") !== "true") tab.click(); else select(tab);
     if (typeof list.scrollIntoView === "function") list.scrollIntoView({ block: "start" });
   }
 

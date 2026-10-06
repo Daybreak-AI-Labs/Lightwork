@@ -97,7 +97,7 @@
     else node('p', 'No current accepted review is visible to you for this project. A completed task alone does not count as accepted.', id('accepted'));
     if (!id('view').dataset.chosen) id('view').value = new URLSearchParams(location.search).get('view') || w.default_view;
     if (!['list','board','timeline'].includes(id('view').value)) id('view').value = 'list'; renderMilestones();
-    id('context').replaceChildren(); if (!w.context.length) node('li', 'No reviewed context sources yet.', id('context'));
+    id('context').replaceChildren(); if (!w.context.length) node('li', 'No reviewed context sources yet. Add a source above and review it.', id('context'));
     w.context.forEach(function (item) { var li = node('li', item.title + ' · ' + item.state, id('context'));
       if (item.fresh) button('Open reviewed source', li, function () { openSource('/' + project + '/context/' + item.reference, false); });
       if (w.can_edit && item.reference) button('Review removing source', li, function () { review('remove_context', {reference:item.reference}); }); });

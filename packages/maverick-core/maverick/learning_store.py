@@ -90,8 +90,10 @@ def _sqlite_path() -> Path:
     (``data_dir`` scopes to the active tenant) -- computed at CALL time, so
     env/tenant changes and per-test isolation apply, unlike the import-frozen
     ``world_model.DEFAULT_DB`` constant."""
+    from . import practice
     from .paths import data_dir
-    return data_dir("world.db")
+    # Practice runs learn nothing into the real world model.
+    return practice.world_path() if practice.active() else data_dir("world.db")
 
 
 def _pg_dsn() -> str:
@@ -426,7 +428,7 @@ def load_addenda_db() -> dict[str, str]:
         return {}
 
 
-def write_addenda_db(data: dict[str, str]) -> None:
+def write_addenda_db(data: dict[str, str], *, effect_guard=None) -> None:
     """Whole-map replace, mirroring the file store's atomic rewrite.
 
     The DELETE is scoped to the active tenant so replacing one tenant's map never
@@ -435,11 +437,15 @@ def write_addenda_db(data: dict[str, str]) -> None:
     pred, params = _tenant_predicate()
     tcol, tph, tparam = _tenant_column()
     with _conn() as c:
+        if effect_guard is not None:
+            effect_guard()
         _exec(c, f"DELETE FROM harness_addenda{_where(pred)}", params)
         for k, block in (data or {}).items():
             _exec(c, f"INSERT INTO harness_addenda (key, block, updated_at{tcol}) "
                      f"VALUES ({_ph(3)}{tph})", (str(k), str(block), now, *tparam))
 
+        if effect_guard is not None:
+            effect_guard()
 
 def load_line_meta_db() -> dict[str, dict]:
     """``{line_id: record}`` provenance sidecar ({} on any error)."""
@@ -463,20 +469,24 @@ def load_line_meta_db() -> dict[str, dict]:
     return out
 
 
-def write_line_meta_db(meta: dict[str, dict]) -> None:
+def write_line_meta_db(meta: dict[str, dict], *, effect_guard=None) -> None:
     now = time.time()
     pred, params = _tenant_predicate()
     tcol, tph, tparam = _tenant_column()
     with _conn() as c:
+        if effect_guard is not None:
+            effect_guard()
         _exec(c, f"DELETE FROM harness_line_meta{_where(pred)}", params)
         for lid, rec in (meta or {}).items():
             _exec(c, f"INSERT INTO harness_line_meta (line_id, record, "
                      f"updated_at{tcol}) VALUES ({_ph(3)}{tph})",
                   (str(lid), json.dumps(rec, sort_keys=True), now, *tparam))
 
+        if effect_guard is not None:
+            effect_guard()
 
-def load_transfer_tried_db() -> dict[str, float]:
-    """``{line_id: ts}`` transfer tried-memory ({} on any error)."""
+def load_transfer_tried_db(*, strict: bool = False) -> dict[str, float]:
+    """Transfer attempt memory; strict callers retain read failures."""
     pred, params = _tenant_predicate()
     try:
         with _conn() as c:
@@ -487,18 +497,24 @@ def load_transfer_tried_db() -> dict[str, float]:
     except LearningSchemaError:
         raise
     except Exception:
+        if strict:
+            raise
         log.debug("learning_store: tried read failed", exc_info=True)
         return {}
 
 
-def write_transfer_tried_db(tried: dict[str, float]) -> None:
+def write_transfer_tried_db(tried: dict[str, float], *, effect_guard=None) -> None:
     pred, params = _tenant_predicate()
     tcol, tph, tparam = _tenant_column()
     with _conn() as c:
+        if effect_guard is not None:
+            effect_guard()
         _exec(c, f"DELETE FROM harness_transfer_tried{_where(pred)}", params)
         for lid, ts in (tried or {}).items():
             _exec(c, f"INSERT INTO harness_transfer_tried (line_id, ts{tcol}) "
                      f"VALUES ({_ph(2)}{tph})", (str(lid), float(ts), *tparam))
+        if effect_guard is not None:
+            effect_guard()
 
 
 def _corpus_row_sensitive(kind: str) -> bool:

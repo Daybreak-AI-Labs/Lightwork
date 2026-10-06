@@ -39,7 +39,7 @@ def test_first_run_recovery_is_explicit_and_keeps_other_blocks(client):
     status = client.get("/api/v1/sandbox/status").json()
     assert status["backend"] == "local"
     assert set(status["file_work"]["blocked_tools"]) == {
-        "shell", "write_file", "apply_patch", "str_replace_editor",
+        "shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit",
     }
     assert client.post("/api/v1/sandbox/file-work/enable", json={"confirm": True}).status_code == 409
     assert client.post("/api/v1/sandbox/backend", json={"backend": "docker"}).status_code == 200

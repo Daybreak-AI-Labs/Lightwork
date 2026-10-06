@@ -27,12 +27,20 @@ def test_workspace_admin_never_loads_installation_roster(monkeypatch, isolated):
     def forbidden():
         raise AssertionError("installation roster must not be read")
     monkeypatch.setattr(rbac, "list_users", forbidden)
-    monkeypatch.setattr(invites, "list_invites", forbidden)
-    request = Request({"type": "http", "method": "GET", "path": "/users", "headers": []})
+    # The shared invitation store is filtered to the administered workspace
+    # before anything reaches the page.
+    import time
+    later = time.time() + 3600
+    mine = invites.Invite("i-a", "new@a.example", "viewer", "user:workspace-admin", 0.0, later, tenant="a")
+    other = invites.Invite("i-b", "private@b.example", "admin", "user:root", 0.0, later, tenant="b")
+    monkeypatch.setattr(invites, "list_invites", lambda: [mine, other])
+    request = Request({"type": "http", "method": "GET", "path": "/users", "headers": [], "query_string": b""})
     context = admin_pages._users_context(request)
     assert context["global_admin"] is False
     assert [p["principal"] for p in context["people"]] == ["user:colleague"]
     assert context["users"] == []
+    assert context["workspace_pending_invites"] == [mine]
+    assert "private@b.example" not in repr(context)
 
 
 def test_login_failure_has_safe_fresh_restart(isolated):

@@ -352,6 +352,24 @@ def test_consent_mode_saved_here_gates_actions(monkeypatch, audit_rows):
     assert consent._resolve_mode("low") == "dashboard"  # the environment still wins
 
 
+def test_autonomy_changes_are_logged_and_apply_to_the_next_decision(audit_rows):
+    """AI-11: a change to how agents may act is written to the activity record,
+    with its before and after values, and the very next decision uses it: no
+    restart and no wait."""
+    from maverick.audit import EventKind
+    from maverick.safety import consent
+
+    assert _save([{"id": "safety.consent_mode", "value": "auto-deny"}]).status_code == 200
+    logged = [row for row in audit_rows if row.get("key") == "consent_mode"]
+    assert logged and logged[-1]["kind"] == EventKind.SETTING_CHANGED
+    assert logged[-1]["section"] == "safety" and logged[-1]["new"] == "auto-deny"
+    assert consent.require_consent("send_payment", risk="high", consult_ledger=False).granted is False
+    r = _save([{"id": "safety.consent_mode", "value": "auto-approve"}], confirm=True)
+    assert r.status_code == 200
+    assert [row["new"] for row in audit_rows if row.get("key") == "consent_mode"][-1] == "auto-approve"
+    assert consent.require_consent("send_payment", risk="high", consult_ledger=False).granted is True
+
+
 def test_unknown_consent_mode_in_config_fails_closed(tmp_path):
     from maverick import config
     from maverick.safety import consent

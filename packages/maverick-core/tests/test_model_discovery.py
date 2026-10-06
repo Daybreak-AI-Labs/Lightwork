@@ -251,6 +251,11 @@ def test_snapshot_survives_a_corrupt_or_missing_cache(monkeypatch, tmp_path):
         "bogus provider": {"status": "live", "models": ["a"], "fetched_at": 1},
     }}), encoding="utf-8")
     loaded = discovery.snapshot()
+    assert loaded == {}  # Unbound records cannot attest this connection's models.
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored["providers"]["openai"]["material_binding"] = discovery._material_binding("openai")
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    loaded = discovery.snapshot()
     assert set(loaded) == {"openai"}
     assert loaded["openai"]["models"] == ["ok-model"]
     assert len(loaded["openai"]["detail"]) <= 200
@@ -263,6 +268,9 @@ def test_parse_free_models_keeps_only_rows_priced_at_zero_for_prompt_and_complet
         {"id": "vendor/no-pricing"},
         {"id": "vendor/numeric-zero", "pricing": {"prompt": 0, "completion": 0.0}},
         {"id": "vendor/bool-zero", "pricing": {"prompt": False, "completion": False}},
+        {"id": "vendor/request-fee", "pricing": {"prompt": "0", "completion": "0", "request": "0.01"}},
+        {"id": "vendor/reasoning-fee", "pricing": {"prompt": "0", "completion": "0", "internal_reasoning": "0.01"}},
+        {"id": "vendor/tiny-fee", "pricing": {"prompt": "1e-9999", "completion": "0"}},
         {"id": "bad id!", "pricing": {"prompt": "0", "completion": "0"}},
         "not-a-row",
     ]}

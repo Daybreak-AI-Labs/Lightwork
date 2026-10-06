@@ -59,7 +59,9 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("candidate_promotion", "Candidate promotion", "How proposed improvements are reviewed before use.",
      ("candidate_promotion",), ""),
     ("knowledge_access", "Governed knowledge", "Which knowledge agents may use.", ("knowledge_access",), ""),
-    ("capabilities", "Capabilities", "Browser, computer and code tools agents may use.", ("capabilities",),
+    ("capabilities", "Capabilities", "Browser, computer and code tools agents may use, the tests "
+     "changed agent instructions must pass before they are published, and practice mode.",
+     ("capabilities", "agent_factory", "practice"),
      "/settings#settings-controls"),
     ("self_learning", "Self-learning", "Whether agents learn from past work.", ("self_learning",), ""),
     ("ekko", "Work discovery", "Finding work that could be automated.", ("ekko",), ""),
@@ -81,8 +83,8 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("assessments", "Assessments", "Help with assessments and reviews.", ("assessments",), ""),
     ("security_suite", "Security and compliance", "The security and compliance modules.",
      ("governance_agents", "threat_hunt", "env_hunt"), ""),
-    ("advanced", "Advanced reasoning", "Planning, checking and other advanced options.",
-     ("reflexion", "planning", "verification"), ""),
+    ("advanced", "Advanced reasoning", "Planning, checking, showing the plan before acting and other advanced options.",
+     ("reflexion", "planning", "verification", "autonomy"), ""),
     ("api_keys", "API access", "Personal and service-account keys for scripts and integrations.",
      ("dashboard",), "/settings#api-keys"),
     ("web_search", "Web search", "Whether agents may search the web.", ("search",), ""),
@@ -97,8 +99,9 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("deadline_alerts", "Deadline alerts", "Warnings before a data request, incident clock, renewal or approval is due.",
      ("deadline_alerts",), ""),
     ("daily_summary", "Daily summary and chat approvals",
-     "Each person's daily summary, approval cards in Slack, and the Help menu's status page and support contact.",
-     ("my_work", "notifications", "support"), "/me"),
+     "Each person's daily summary, approval cards in Slack, the Help menu's status page and support contact, "
+     "and comments with mentions.",
+     ("my_work", "notifications", "support", "collaboration"), "/me"),
     ("webhooks", "Webhooks", "Sending events to other apps.", ("webhooks",), "/settings#settings-integrations"),
     ("a2a", "Outside agents", "Letting agents from other systems send work.", ("a2a",), ""),
 )

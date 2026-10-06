@@ -534,6 +534,7 @@ def _data_use_choices(tenant: str) -> dict:
     try:
         from maverick import config
         from maverick.data_use_governance import DataUseGovernanceStore
+        from maverick.data_use_policy_compiler import DataUseCompilationStale
         from maverick.governed_records import configured_governed_records_backend
         from maverick.paths import data_dir
 
@@ -568,7 +569,7 @@ def _data_use_choices(tenant: str) -> dict:
                     decision_id,
                     decision_sha256,
                 )
-            except ResearchRegistryDenied:
+            except (ResearchRegistryDenied, DataUseCompilationStale):
                 # Stale, expired, withdrawn, or source-drifted decisions remain
                 # in their forensic ledger but are not offered for a new asset.
                 continue

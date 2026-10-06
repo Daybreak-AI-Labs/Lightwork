@@ -366,7 +366,9 @@ GITLAB_TOKEN = "gitlab-shared-token"
 GITLAB_BOT = "maverick-bot"
 
 
-def _gitlab_payload(assignee=GITLAB_BOT, action="update"):
+def _gitlab_payload(assignee=GITLAB_BOT, action="open"):
+    # Opening an issue assigned to the bot is its first assignment; an update
+    # starts work only with evidence that the bot was newly assigned.
     return {
         "object_kind": "issue",
         "event_type": "issue",

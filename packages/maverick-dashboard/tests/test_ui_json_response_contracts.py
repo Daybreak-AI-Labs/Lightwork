@@ -78,7 +78,7 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
         # Every client fails closed on an unreadable response; the plain
         # wordings keep code words off the page.
         assert (PLAIN_INVALID_JSON.get(
-            name, "Request failed: the server returned an invalid JSON response."
+            name, "The reply from the server could not be read. Try again."
         ) in source
                 or "could not be confirmed" in source
                 or "Could not read the result." in source
@@ -101,6 +101,8 @@ def test_automation_run_queue_requires_a_json_response_before_success() -> None:
 def test_agent_department_deploy_does_not_turn_invalid_json_into_success() -> None:
     source = (TEMPLATES / "agents.html").read_text(encoding="utf-8")
     assert ".json().catch(function () { return {}; })" not in source
-    assert source.count(
-        ".json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); })"
-    ) == 2
+    # Both team buttons save through the shared reviewed-team client.
+    assert source.count("await window.LWDepartmentTeamUpdates.open(") == 2
+    client = (STATIC / "lightwork-department-team-updates.js").read_text(encoding="utf-8")
+    assert "response.json().catch(function(){var unreadable=new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.');" in client
+    assert "return {}" not in client

@@ -41,15 +41,24 @@ KNOWN_SECTIONS = frozenset({
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
+    # [collaboration] comments: comment threads and @mentions (maverick.comments).
+    "collaboration",
     # [first_outcome] department / sample_workspace_created: the department
     # first task picked at setup (maverick.sample_outcomes).
     "first_outcome",
+    # [practice] enable: offer practice mode (maverick.practice), written by
+    # the installer's capabilities step and changeable on All settings.
+    "practice",
     # [third_party_portal] routing_keyring: the vendor portal link keyring
     # rotated on the Third-Party Collaboration page (sealed).
     "third_party_portal",
     # [consent_publication_signing] keyring: the consent publication signing
     # key made on the Banner and Preference Center page (sealed).
     "consent_publication_signing",
+    # [approval_challenges] enable / [instruction_capture] enable: fictional
+    # approval practices and per-task instruction records (Settings > All
+    # settings, Memory & learning).
+    "approval_challenges", "instruction_capture",
     "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment", "device_pairing", "personalization", "copilot", "settings", "_dashboard_resets", "mobile_offline", "workflows",

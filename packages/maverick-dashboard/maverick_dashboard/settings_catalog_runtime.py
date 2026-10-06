@@ -101,6 +101,13 @@ def _models(S, C) -> tuple:
         S("agent_factory", "jd_hiring", "Hire agents from a job description",
           "Offer the page that turns a written job description into a new agent.", "toggle",
           "AI models", True, "maverick.jd_hiring", subgroup="Effort and planning"),
+        S("agent_factory", "require_passing_tests", "Require passing tests before publishing instructions",
+          "Changed instructions for an agent or specialist are published only after every saved test "
+          "passes on exactly those instructions. Someone can still publish without a passing run by "
+          "giving a reason, which is written to the activity record.", "toggle",
+          "AI models", True, "maverick.agent_publish_policy", subgroup="Effort and planning", weaker=False,
+          warning="Changed instructions could be published without any test run.",
+          aliases="publish gate test set test cases agent tests answer checks"),
 
         # ------------------------------------------------ conversation length
         S("context", "max_output_tokens", "Longest reply per step",
@@ -951,7 +958,8 @@ def _switches(S) -> tuple:
         S("agent", "max_steps", "Most steps an agent may take",
           "Stop an agent after this many steps on one task. Leave empty for no step limit; "
           "the spending and time limits still apply.", "number", "AI models", None,
-          "maverick.agent", subgroup="How agents work", minimum=1, maximum=10000,
+          # Read by maverick.config.get_agent_max_steps, which every agent calls.
+          "maverick.config", subgroup="How agents work", minimum=1, maximum=10000,
           integer=True, unit="steps", none_text="No step limit", env=("MAVERICK_MAX_STEPS",),
           weaker="higher", warning="Agents will be able to take more steps on one task."),
         S("agent", "parallel_tools", "Run independent actions at the same time",
@@ -1074,10 +1082,6 @@ def _switches(S) -> tuple:
           warning="Skills from any web address, which may not have been reviewed, can be "
                   "installed."),
         # ------------------------------------------------------------ caching
-        S("cache", "llm_responses", "Reuse identical AI answers",
-          "Keep AI answers on this server and reuse one when exactly the same request is "
-          "made again.", "toggle", "Performance", False, "maverick.cache.llm",
-          subgroup="Caching", env=("MAVERICK_LLM_CACHE",)),
         S("cache", "messages", "Cache conversation history with Claude",
           "Ask Claude's service to keep the stable part of long conversations, which makes "
           "follow-up turns cheaper.", "toggle", "Performance", True,

@@ -177,7 +177,7 @@ def test_step_up_only_knows_the_documented_operations():
         step_up.require_recent_mfa(_request(None), "make_coffee")
     assert set(step_up.SENSITIVE_OPERATIONS) == {
         "change_role", "remove_spending_limit", "clear_emergency_stop", "rotate_keys",
-        "change_auth_settings", "delete_workspace", "revoke_sessions",
+        "change_auth_settings", "delete_workspace", "restore_workspace", "revoke_sessions",
     }
 
 
@@ -186,6 +186,10 @@ def test_reauthenticate_url_prefers_the_browser_login(monkeypatch):
     monkeypatch.setenv("MAVERICK_OIDC_ISSUER", "https://idp.example.com")
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_ID", "c")
     monkeypatch.setenv("MAVERICK_OIDC_SESSION_SECRET", "s")
+    # Browser login is on only when fully configured (maverick.oidc.login_enabled).
+    monkeypatch.setenv("MAVERICK_OIDC_CLIENT_SECRET", "x")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_OIDC_REDIRECT_URI", "http://testserver/auth/callback")
+    monkeypatch.setenv("MAVERICK_OIDC_AUDIENCE", "c")
     url = step_up.reauthenticate_url(
         SimpleNamespace(url=SimpleNamespace(path="/users", query="a=1"), method="GET"))
     assert url == "/auth/login?fresh=1&return_to=%2Fusers%3Fa%3D1"

@@ -3,7 +3,7 @@
 {% block content %}
 {% from "_hero.html" import hero %}
 {{ hero('Governance', 'Content access', compact=true) }}
-<section class="panel"><p>Employee tasks and chats are private to their owner. Administrators govern policy and audit metadata. A specific task read, subject export or approval-card read needs a stated purpose, approval by a different administrator or the content owner, and an expiry of at most one hour. This never grants changing or publishing the employee's task or opening another task in its conversation.</p>
+<section class="panel"><p>Employee tasks and chats are private to their owner. Administrators govern policy and audit metadata. A specific task read, subject export or approval-card read needs a stated purpose and an expiry of at most one hour. It also needs approval by a different administrator or the content owner. This never grants changing or publishing the employee's task or opening another task in its conversation.</p>
 <p>A person with permission to operate can request an exact approval-card read. The grant only reveals that reviewed card. Voting still independently requires the current review role, claim and separation-of-duties checks; changing the card invalidates the content grant.</p>
 <p>Shared result packets keep their assigned reviewer access. Existing employee-owned work uses its recorded owner. Unowned legacy tasks require a separate review; no employee ownership is guessed.</p>
 <p id="ca-status" role="status" aria-live="polite">Loading current access…</p><button type="button" class="btn" id="ca-refresh">Refresh</button></section>
@@ -35,7 +35,7 @@
     const select = byId('ca-resource'); select.replaceChildren(new Option('Choose a record', ''));
     model.resources.forEach((row, index) => select.appendChild(new Option(row.label, String(index)))); byId('ca-window').textContent = model.resource_window;
     const rows = byId('ca-records'); rows.replaceChildren();
-    if (!model.records.length) paragraph(rows, 'No content-access requests in this workspace.');
+    if (!model.records.length) paragraph(rows, 'No content-access requests in this workspace. Requests appear here when someone asks to read private task content.');
     model.records.forEach(row => {
       const card = document.createElement('article'); card.className = 'panel';
       paragraph(card, row.label + ' — ' + row.status + (row.expired ? ' (expired)' : '') + (row.audit_pending ? ' · activity record pending' : ''));

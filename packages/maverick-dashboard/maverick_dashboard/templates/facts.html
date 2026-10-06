@@ -39,7 +39,7 @@
         <td><input type="checkbox" data-select-fact aria-label="Select {{ item.key }}"></td>
         <td class="fact-key">{{ item.key | humanize }}</td><td class="fact-value" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ item.value }}</td>
         <td>{{ item.updated_at | datetime }}</td>
-        <td class="mv-row__actions"><button class="btn btn--ghost" type="button" data-view-fact>Details and history</button>{% if can_create_goal %}<button class="btn btn--ghost" type="button" data-edit-fact>Edit</button><button class="btn btn--ghost btn--danger" type="button" data-remove-fact>Remove</button>{% endif %}</td>
+        <td class="mv-row__actions"><button class="btn btn--ghost" type="button" data-view-fact>Details and history</button>{% if can_create_goal %}<button class="btn btn--ghost" type="button" data-edit-fact>Edit</button><button class="btn btn--ghost btn--danger" type="button" data-remove-fact>Remove fact</button>{% endif %}</td>
       </tr>{% endfor %}</tbody>
     </table>
     <div class="mv-row__actions"><button type="button" class="btn" id="fact-prev" disabled>Previous facts</button><button type="button" class="btn" id="fact-next"{% if fact_records|length <= 50 %} disabled{% endif %}>Next facts</button></div>

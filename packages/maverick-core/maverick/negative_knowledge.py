@@ -82,14 +82,21 @@ class GuardrailRegistry:
         if self.path is not None:
             self._load()
 
-    def update(self, guardrails) -> None:
+    def update(self, guardrails, *, strict: bool = False, before_write=None) -> None:
         """Replace the learned set with a freshly-mined one (re-triage drops the
         rules whose harm is gone -- guardrails don't accumulate forever)."""
         from .learning_store import derived_guidance_fence
 
         with derived_guidance_fence(), self._lock:
+            if before_write is not None:
+                before_write()
+            previous = self._rails
             self._rails = {g.action: g for g in guardrails}
-            self._save()
+            try:
+                self._save(strict=strict, before_write=before_write)
+            except Exception:
+                self._rails = previous
+                raise
 
     def consult(self, action: str) -> Guardrail | None:
         """The guardrail flagging ``action``, or None. The read side for an agent
@@ -127,7 +134,7 @@ class GuardrailRegistry:
             except (KeyError, TypeError, ValueError):
                 continue
 
-    def _save(self) -> None:
+    def _save(self, *, strict: bool = False, before_write=None) -> None:
         if self.path is None:
             return
         try:
@@ -136,8 +143,11 @@ class GuardrailRegistry:
                 json.dumps(
                     [g.to_dict() for g in self._rails.values()], sort_keys=True,
                 ),
+                **({"effect_guard": before_write} if before_write is not None else {}),
             )
         except Exception:  # pragma: no cover -- persistence is best-effort
+            if strict:
+                raise
             log.debug("guardrail registry save failed", exc_info=True)
 
 

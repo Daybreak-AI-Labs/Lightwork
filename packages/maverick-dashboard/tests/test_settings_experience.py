@@ -71,3 +71,26 @@ def test_one_letter_searches_skip_all_settings_but_keep_dedicated_controls(clien
     one = _items(client, "t")
     assert one and not any(item["href"].startswith("/settings/all") for item in one)
     assert any(item["href"].startswith("/settings/all") for item in _items(client, "th"))
+
+
+def test_the_change_review_names_the_plain_settings_area_not_a_code_module(client):
+    from maverick_dashboard import settings_catalog
+
+    revision = client.get("/api/v1/settings/catalog").json()["revision"]
+    response = client.post("/api/v1/settings/catalog/review", json={
+        "changes": [{"id": "safety.consent_mode", "value": "dashboard"}], "expected_revision": revision})
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["items"]
+    # The reader module (maverick.safety.consent) is plumbing; people see the group.
+    assert item["area"] == item["module"] == "Safety"
+    assert item["area"] in settings_catalog.GROUPS
+
+
+def test_the_review_and_runtime_scripts_show_the_plain_area():
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static"
+    for name in ("lightwork-settings-review.js", "lightwork-settings-runtime.js"):
+        text = (static / name).read_text(encoding="utf-8")
+        assert "item.module" not in text, name
+        assert "item.area" in text, name

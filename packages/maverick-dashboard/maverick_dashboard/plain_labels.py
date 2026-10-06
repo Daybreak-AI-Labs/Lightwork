@@ -119,6 +119,7 @@ FEATURE_LABELS = {
     "deliverable_bundles": "Selected deliverable bundles",
     "project_workspaces": "Project workspaces",
     "task_handoffs": "Accepted task handoffs",
+    "human_conversation_handoffs": "Human help in Chat",
     "outcome_measurement": "Outcome measurement",
     "commitment_viability": "Keep promises in view",
     "work_restructuring": "Share preparation safely",

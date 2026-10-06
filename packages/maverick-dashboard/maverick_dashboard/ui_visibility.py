@@ -1378,6 +1378,8 @@ PAGES: tuple[dict, ...] = (
      "icon": "target", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/conversations", "label": "My conversations", "group": "Operate",
      "icon": "chat", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/human-conversations", "label": "Human conversations", "group": "Operate",
+     "icon": "chat", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/get-started/employee", "label": "Your first useful result", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/project-workspaces", "label": "Project workspaces", "group": "Operate",
@@ -1600,6 +1602,7 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/notifications": ("Account", "Notifications"),
     "/my-work": ("Work", "Tasks"),
     "/conversations": ("Ask", "Conversations"),
+    "/human-conversations": ("Ask", "Conversations"),
     "/get-started/employee": ("Home", "Home"),
     "/project-workspaces": ("Work", "Projects"),
     "/devices": ("Account", "Devices"),
@@ -1705,7 +1708,8 @@ AREAS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("Ask", "/chat", ("Ask", "Conversations", "Start from a template", "My companion")),
     ("Home", "/today", ("Home",)),
     ("Work", "/goals", ("Tasks", "Approvals", "Results", "Projects", "Workflows", "Automations",
-                        "Code changes", "Promise reviews", "Hand over a team's work")),
+                        "Code changes", "Promise reviews", "Shared decision reviews",
+                        "Hand over a team's work")),
     ("Agents", "/workforce", ("Workforce", "Build an agent", "Skills", "Tools", "Knowledge", "Learning",
                               "Discover work to automate", "Response styles")),
     ("Rules & safety", "/oversight", ("Overview", "Agent controls", "What Lightwork can do", "Screening",
@@ -1846,6 +1850,55 @@ def place(path: str) -> tuple[str, str] | None:
     """The (area, section) of the registry page governing ``path``."""
     page = page_for(path)
     return PAGE_AREAS.get(page["path"]) if page else None
+
+
+# Areas reached from the top bar's menus rather than the sidebar.
+_TOP_BAR_AREAS = frozenset({"Account", "Help"})
+
+
+def parent_candidates(path: str) -> tuple[str, ...]:
+    """Sidebar pages a page kept out of the sidebar (``in_nav: False``) sits
+    under, best first: sidebar pages of its own area section, its area's hub,
+    other sidebar pages of its area, then of its sidebar group. Empty for a
+    page that is itself in the sidebar or unregistered."""
+    page = _PAGES_BY_PATH.get(path)
+    if page is None or page.get("in_nav", True):
+        return ()
+    shown = [p for p in PAGES if p.get("in_nav", True) and p["path"] != path]
+    spot = PAGE_AREAS.get(path)
+    found: list[str] = []
+    if spot is not None:
+        found += [p["path"] for p in shown if PAGE_AREAS.get(p["path"]) == spot]
+        hub = _AREA_BY_TITLE.get(spot[0], ("",))[0]
+        found += [hub] if any(p["path"] == hub for p in shown) else []
+        found += [p["path"] for p in shown if PAGE_AREAS.get(p["path"], ("",))[0] == spot[0]]
+    found += [p["path"] for p in shown if p["group"] == page["group"]]
+    return tuple(dict.fromkeys(found))
+
+
+def where(path: str, groups: list[dict], finder: list[dict]) -> dict | None:
+    """Where a page kept out of the sidebar sits, for the sidebar highlight and
+    the breadcrumb: its first parent this person's sidebar shows, and the page
+    itself, each as ``{href, label}``. None for a sidebar page."""
+    page = page_for(path)
+    if page is None:
+        return None
+    visible = {link["href"]: link for group in groups for link in group["links"]}
+    pages = {link["href"]: link for group in finder for link in group["links"]}
+    here = pages.get(page["path"])
+    spot = PAGE_AREAS.get(page["path"])
+    if spot is not None and spot[0] in _TOP_BAR_AREAS:
+        # Account and Help pages sit under their menu in the top bar, not the
+        # sidebar: the breadcrumb leads to the area's own first page.
+        hub = _AREA_BY_TITLE[spot[0]][0]
+        parent, in_sidebar = (pages.get(hub) if hub != page["path"] else None), False
+    else:
+        parent = next((visible[href] for href in parent_candidates(page["path"]) if href in visible), None)
+        in_sidebar = True
+    if parent is None or here is None:
+        return None
+    return {"parent": {"href": parent["href"], "label": parent["label"]}, "sidebar": in_sidebar,
+            "page": {"href": here["href"], "label": here["label"]}, "exact": path == page["path"]}
 
 
 # Lockout guard: the pages an admin needs to *undo* a bad matrix save. Always
@@ -2115,6 +2168,9 @@ def _grouped_links(
 ) -> list[dict]:
     ov = overrides() if role is not None or scope_roles else {}
     groups: list[dict] = []
+    # Groups follow the sidebar's order; a group reached only through folded
+    # pages follows them, so the finder never reorders the sidebar's groups.
+    sidebar_order: dict[str, int] = {}
     for page in PAGES:
         if not customer_ready(page):
             continue
@@ -2132,6 +2188,8 @@ def _grouped_links(
         # Merge by group label (first-seen order), not adjacency: a page whose
         # group differs from its list neighbours (e.g. an entry re-homed to
         # Admin) must join its group, not split it into a duplicate section.
+        if page.get("in_nav", True):
+            sidebar_order.setdefault(page["group"], len(sidebar_order))
         for g in groups:
             if g["label"] == page["group"]:
                 break
@@ -2149,7 +2207,8 @@ def _grouped_links(
             }
         )
     # Technical setup and diagnostics stay discoverable after everyday work.
-    return sorted(groups, key=lambda group: group["label"] == "Advanced tools")
+    return sorted(groups, key=lambda group: (group["label"] == "Advanced tools",
+                                             sidebar_order.get(group["label"], len(sidebar_order))))
 
 
 def matrix() -> list[dict]:

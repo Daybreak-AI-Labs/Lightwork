@@ -1471,6 +1471,9 @@ def pick_capabilities() -> dict[str, Any]:
         "human approval to save).",
         default=True,
     )
+    require_passing_tests = pick_agent_publish_gate()
+    practice_mode = pick_practice_mode()
+    practice_cap = pick_practice_spend_cap() if practice_mode else 1.0
     return {
         "computer_use": use_computer,
         "browser": use_browser,
@@ -1480,7 +1483,56 @@ def pick_capabilities() -> dict[str, Any]:
         "deferred_tools": deferred_tools,
         "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
+        "require_passing_tests": require_passing_tests,
+        "practice_mode": practice_mode,
+        "practice_daily_spend_cap": practice_cap,
     }
+
+
+def pick_practice_mode() -> bool:
+    """Offer practice mode. ON by default.
+
+    People can switch to a separate practice workspace to try tasks,
+    specialists and approvals; anything that would leave Lightwork is
+    recorded instead of sent, and a marker shows on every screen. Written
+    under ``[practice]`` as ``enable`` only when turned off.
+    """
+    return _q_confirm(
+        "Offer practice mode? People can try tasks, specialists and approvals in "
+        "a separate practice workspace where nothing is sent, paid or changed.",
+        default=True,
+    )
+
+
+def pick_practice_spend_cap() -> float:
+    """Daily practice spending cap per person, in dollars. 1.00 by default.
+
+    AI answers in practice are real provider calls that cost real money; they
+    are counted apart from real spending limits and capped by this amount
+    (never more than a real limit that applies). Written under ``[practice]``
+    as ``daily_spend_cap`` only when changed.
+    """
+    return _prompt_positive_dollars(
+        "  Practice spending cap per person per day, in dollars (AI answers in practice "
+        "still cost real money, counted apart from real spending limits)",
+        default="1.00",
+    )
+
+
+def pick_agent_publish_gate() -> bool:
+    """Agent Factory publish gate. ON by default.
+
+    Changed instructions for an agent or specialist are published only after
+    every saved test passes on exactly those instructions; publishing anyway
+    needs a reason that goes to the activity record. Written under
+    ``[agent_factory]`` as ``require_passing_tests`` only when turned off.
+    """
+    return _q_confirm(
+        "Require passing tests before changed agent or specialist instructions "
+        "are published? (Someone can still publish without them by giving a "
+        "reason, which is recorded.)",
+        default=True,
+    )
 
 
 def pick_self_learning() -> dict[str, Any]:
@@ -1696,8 +1748,8 @@ def pick_automation_import() -> dict[str, Any]:
     if not enable:
         return {"enable": False}
     create_schedules = _q_confirm(
-        "  Auto-create Lightwork schedules for imported cron triggers? "
-        "(off = import the template, you activate the schedule yourself)",
+        "  Offer to recreate imported schedules (each reviewed after its draft is published)? "
+        "(off = import the draft, then schedule it yourself in Automations)",
         default=False,
     )
     return {"enable": True, "create_schedules": create_schedules}
@@ -5081,6 +5133,16 @@ def pick_advanced() -> dict[str, Any]:
             "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
             default=True,
         ),
+        "allow_human_conversation_handoffs": _q_confirm(
+            "Allow reviewed human help inside Chat? People select an on-duty helper "
+            "and review the brief they share. AI pauses before the helper takes over; "
+            "returning to AI is a separate choice. Off by default.", default=False,
+        ),
+        "allow_chat_message_actions": _q_confirm(
+            "Let people try another answer, edit and resend a message, or branch from an earlier answer? "
+            "The original conversation is kept. Alternatives use current access and spending limits; "
+            "connected actions require a separate review.", default=True,
+        ),
         "allow_personal_preferences": _q_confirm(
             "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
             "Personal choices never grant tools or change security or retention policy.",
@@ -5272,6 +5334,11 @@ def pick_advanced() -> dict[str, Any]:
             "Autonomy gate? When sub-agents disagree, cross-check the answer with a "
             "model panel AND hold irreversible (high-risk) actions until the "
             "disagreement is resolved or a human approves.",
+            default=False,
+        ),
+        "confirm_plan": _q_confirm(
+            "Show the plan before acting? Before a task's first action that could reach "
+            "outside Lightwork, show its plan in Approvals and wait for a person.",
             default=False,
         ),
         "headless_assume": _q_confirm(
@@ -5678,11 +5745,12 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
         "saml": _q_confirm(
-            "Enable SAML 2.0 SSO (alongside or instead of OIDC)? For enterprises "
+            "Prepare company single sign-on (SAML)? For enterprises "
             "whose IdP (Okta, Entra/Azure AD, ADFS) mandates SAML over OIDC. "
-            "Writes a [auth.saml] template you fill in with your SP/IdP details, "
-            "then hand /saml/metadata to the IdP. Needs the [saml] extra (pysaml2) "
-            "and the browser-login session secret. Off by default.",
+            "Keeps it inactive so current access stays available. After installation, "
+            "use Settings > All settings > Single sign-on to upload provider files, "
+            "try a real sign-in and review activation. Included in the standard "
+            "release runtime; off by default.",
             default=False,
         ),
         "security_autofix": _q_confirm(
@@ -6852,6 +6920,26 @@ def pick_web_vitals() -> dict[str, Any]:
         console.print("[yellow]Enter a number from 0 to 1, for example 0.5.[/yellow]")
 
 
+def pick_usage_measures() -> dict[str, Any]:
+    """Optional, name-free usage measures. OFF by default.
+
+    When on, Lightwork counts whether new people see a finished result of
+    their own task in their first session, and how often AI suggestions are
+    shown, used or dismissed. People and suggestions are kept only as one-way
+    codes and nothing is sent anywhere. Written under ``[analytics]`` as
+    ``usage_measures``.
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: count, without names, whether new people get a first result "
+        "in their first session and how often AI suggestions are used or dismissed. "
+        "Counts stay on this server. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Count first results and AI suggestions, without names?", default=False):
+        return {}
+    return {"usage_measures": True}
+
+
 def pick_persona() -> dict[str, str]:
     """Agent identity: name + voice."""
     if not _q_confirm(
@@ -6887,7 +6975,7 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass,
                        "personal_background": personal_background}
     if personal_background and _q_confirm(
-        "Allow people to opt into alerts in their verified Slack/Telegram private conversations? Requires My Data identity verification and configured bot channel allowlists.", default=False,
+        "Allow people to opt into alerts in their verified Slack, Telegram or Teams private conversations? Requires My data identity verification and configured channel access.", default=False,
     ):
         personal_config["personal_external"] = True
         personal_config["personal_dashboard_url"] = _q_text("HTTPS dashboard origin for authenticated notification links (no path):", default="")
@@ -7126,6 +7214,45 @@ def pick_support() -> dict[str, Any]:
     elif email:
         console.print("[yellow]Skipped: that is not an email address.[/yellow]")
     return support
+
+
+def pick_collaboration() -> dict[str, Any]:
+    """Comments and @mentions on tasks, runs, approvals and policies. ON by default.
+
+    People discuss a piece of work where it lives and mention a colleague, who
+    gets it in their own notifications. Only people who can open the item can
+    read its comments or be mentioned. Written as ``[collaboration] comments``
+    (``maverick.comments``); declining writes ``comments = false``.
+    """
+    if _q_confirm(
+        "Let people comment on tasks, runs, approval requests and policies, and mention a colleague "
+        "to notify them? Only people who can open the item see its comments.",
+        default=True,
+    ):
+        return {}
+    return {"comments": False}
+
+
+def pick_suggestions() -> dict[str, Any]:
+    """Suggested edits to AI use rules, data use rules and privacy notices. ON by default.
+
+    Agents and colleagues suggest new wording; each suggestion changes nothing
+    until a person accepts it. Written as ``[collaboration] suggestions`` and
+    ``ai_suggestions`` (``maverick.policy_suggestions``); declining writes false.
+    """
+    if not _q_confirm(
+        "Let agents and colleagues suggest edits to your AI use rules, data use rules and privacy notices? "
+        "Each suggestion shows what it changes and why. Accepting one creates a draft that still needs its usual approval.",
+        default=True,
+    ):
+        return {"suggestions": False}
+    if _q_confirm(
+        "Let the AI assistant draft a suggested edit when someone asks? Each draft uses the AI service "
+        "within the spending cap for one task.",
+        default=True,
+    ):
+        return {}
+    return {"ai_suggestions": False}
 
 
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
@@ -8559,13 +8686,25 @@ def _cfg_capabilities(
     return lines
 
 
-def _cfg_agent_factory(jd_hiring: bool) -> list[str]:
-    # JD hiring is default-on in the kernel (maverick.jd_hiring); only write
+def _cfg_practice(offered: bool, daily_spend_cap: float) -> list[str]:
+    """``[practice]``: written only where it differs from the defaults (on, $1.00 a day)."""
+    body = [] if offered else ["enable = false"]
+    if offered and daily_spend_cap != 1.0:
+        body.append(f"daily_spend_cap = {round(daily_spend_cap, 2)}")
+    return ["", "[practice]", *body] if body else []
+
+
+def _cfg_agent_factory(jd_hiring: bool, require_passing_tests: bool = True) -> list[str]:
+    # JD hiring (maverick.jd_hiring) and the publish gate
+    # (maverick.agent_publish_policy) are default-on in the kernel; only write
     # the table when the operator opted OUT, matching the
     # write-only-on-divergence convention.
-    if jd_hiring:
-        return []
-    return ["", "[agent_factory]", "jd_hiring = false"]
+    lines = []
+    if not jd_hiring:
+        lines.append("jd_hiring = false")
+    if not require_passing_tests:
+        lines.append("require_passing_tests = false")
+    return ["", "[agent_factory]", *lines] if lines else []
 
 
 def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
@@ -8657,11 +8796,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[connector_limits]")
         lines.append(f"max_attempts = {int(advanced['connector_max_attempts'])}")
-    if advanced.get("autonomy_gate") or advanced.get("headless_assume"):
+    if advanced.get("autonomy_gate") or advanced.get("headless_assume") or advanced.get("confirm_plan"):
         lines.append("")
         lines.append("[autonomy]")
         if advanced.get("autonomy_gate"):
             lines.append("enable = true")
+        # AI-3: a person confirms the plan before the first outside action.
+        if advanced.get("confirm_plan"):
+            lines.append("confirm_plan = true")
         # Independent axis: assume-and-proceed instead of blocking on ask_user.
         if advanced.get("headless_assume"):
             lines.append("headless_assume = true")
@@ -9182,6 +9324,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("pack_editing = false")
     if advanced.get("allow_role_editing") is False:
         _feature_locks.append("role_editing = false")
+    if type(advanced.get("allow_human_conversation_handoffs")) is bool:
+        _feature_locks.append("human_conversation_handoffs = " + str(advanced["allow_human_conversation_handoffs"]).lower())
     if _feature_locks:
         lines.append("")
         lines.append("[features]")
@@ -9191,6 +9335,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     elif advanced.get("allow_conversation_inbox") is False:
         # On by default, so only a deliberate "no" is written (and stays off).
         lines.extend(["", "[conversation_inbox]", "enabled = false"])
+    if type(advanced.get("allow_chat_message_actions")) is bool:
+        lines.extend(["", "[chat_message_actions]",
+                      "enabled = " + str(advanced["allow_chat_message_actions"]).lower()])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")
@@ -9718,10 +9865,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 lines.append(f"{_toml_str(group)} = [{rendered}]")
     if advanced.get("saml"):
         lines.append("")
-        # SAML 2.0 SP browser SSO (alongside OIDC). Fill in the SP/IdP details
-        # then hand /saml/metadata to the IdP. Needs the [saml] extra (pysaml2)
-        # and the [auth.oidc] session_secret above. See docs/security-hardening.md.
+        # The ordinary guided setup supplies real values and separately reviews
+        # activation. An installer template must never disable owner sign-in.
         lines.append("[auth.saml]")
+        lines.append("enabled = false")
         lines.append('sp_entity_id = "https://YOUR-HOST/saml/metadata"')
         lines.append('acs_url = "https://YOUR-HOST/saml/acs"')
         lines.append('idp_metadata_url = "https://IDP/app/metadata"   # or idp_metadata_file')
@@ -10032,6 +10179,7 @@ def write_config(
     my_work: dict[str, Any] | None = None,
     notifications_email: dict[str, Any] | None = None,
     support: dict[str, Any] | None = None,
+    collaboration: dict[str, Any] | None = None,
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
@@ -10200,6 +10348,10 @@ def write_config(
     embedded_flash = bool(capability_config.pop("embedded_flash", False))
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
+    require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
+    # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
+    practice_mode = bool(capability_config.pop("practice_mode", True))
+    practice_cap = _safe_float(capability_config.pop("practice_daily_spend_cap", 1.0), default=1.0)
     # Tool exposure lives under [tools] (kernel: maverick.agent via
     # config.get_tool_exposure); "core" is the default, so only "full" is
     # written (write-only-on-divergence, like the other [tools] keys).
@@ -10207,7 +10359,8 @@ def write_config(
         advanced["tool_exposure"] = "full"
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
-    lines += _cfg_agent_factory(jd_hiring)
+    lines += _cfg_agent_factory(jd_hiring, require_passing_tests)
+    lines += _cfg_practice(practice_mode, practice_cap)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers)
@@ -10231,6 +10384,7 @@ def write_config(
     lines += _cfg_table("notifications.email", notifications_email)
     lines += _cfg_table("my_work", my_work)
     lines += _cfg_table("support", support)
+    lines += _cfg_table("collaboration", collaboration)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
@@ -11367,7 +11521,7 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     _announce()
     analytics = state.get("analytics")
     if analytics is None:
-        analytics = {**pick_analytics(), **pick_usability_survey(), **pick_web_vitals()}
+        analytics = {**pick_analytics(), **pick_usability_survey(), **pick_web_vitals(), **pick_usage_measures()}
         state["analytics"] = analytics
         _save_partial(state)
 
@@ -11561,6 +11715,9 @@ def run(fast: bool = False, resume: bool = False) -> int:
     my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
     support_cfg = state.get("_support") if isinstance(state.get("_support"), dict) else pick_support()
     state["_support"] = support_cfg
+    collaboration_cfg = (state.get("_collaboration") if isinstance(state.get("_collaboration"), dict)
+                         else {**pick_collaboration(), **pick_suggestions()})
+    state["_collaboration"] = collaboration_cfg
     _save_partial(state)
 
     _announce()
@@ -11647,6 +11804,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         my_work=my_work_cfg,
         notifications_email=notifications_email,
         support=support_cfg,
+        collaboration=collaboration_cfg,
         web_search_enabled=web_search_enabled,
         skills=signed_skills
         if (

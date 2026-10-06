@@ -177,7 +177,7 @@
 
     {% if c.configured and c.name in sendable %}
     <form method="post" action="/channels/send-test" class="ch-send" data-ch-check="{{ c.name }}"
-          data-channels-confirm="Send a test message through {{ c.label }}? It goes to the {{ {'email': 'email address', 'sms': 'phone number', 'slack': 'Slack channel'}[c.name] }} you entered.">
+          data-channels-ok="Send test message" data-channels-confirm="Send a test message through {{ c.label }}? It goes to the {{ {'email': 'email address', 'sms': 'phone number', 'slack': 'Slack channel'}[c.name] }} you entered.">
       <input type="hidden" name="channel" value="{{ c.name }}" />
       <label class="ch-field">
         {% if c.name == 'email' %}Send a test email to
@@ -215,7 +215,7 @@
           <td>{{ link.principal | identity }}</td>
           <td>{% if link.approver %}<span class="badge active">Yes</span>{% else %}<span class="badge">No</span>{% endif %}</td>
           <td>{% if link.can_be_reached %}<span class="badge active">Has chatted with the bot</span>{% else %}<span class="muted">Not yet</span>{% endif %}</td>
-          <td><form method="post" action="/channels/teams/unlink" data-channels-confirm="Remove this Teams link? The person can no longer decide approvals from Teams.">
+          <td><form method="post" action="/channels/teams/unlink" data-channels-ok="Remove Teams link" data-channels-confirm="Remove this Teams link? The person can no longer decide approvals from Teams.">
             <input type="hidden" name="teams_id" value="{{ link.teams_id }}" />
             <button type="submit" class="btn btn--ghost">Remove</button></form></td>
         </tr>
@@ -223,7 +223,7 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted">Nobody is linked yet.</p>
+    <p class="muted">Nobody is linked yet. Create a link code below and send it to the person.</p>
     {% endif %}
     <form method="post" action="/channels/teams/link" class="ch-form">
       <label class="ch-field"><span>Teams account (Microsoft Entra object ID or sign-in address)</span>
@@ -254,13 +254,13 @@
         <td>{{ link.principal | identity }}</td><td>{{ link.channel | capitalize }}</td>
         <td>{{ link.sender_id }}</td><td>{{ link.provider_tenant }}</td>
         <td>{% if link.status == 'active' %}Connected{% elif link.status == 'revoked' %}Disconnected{% else %}Pending audit{% endif %}</td><td>
-          <form method="post" action="/channels/oidc/revoke" data-channels-confirm="Disconnect this chat account from Lightwork tasks?">
+          <form method="post" action="/channels/oidc/revoke" data-channels-ok="Disconnect chat account" data-channels-confirm="Disconnect this chat account from Lightwork tasks?">
             <input type="hidden" name="link_id" value="{{ link.id }}" />
-            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect{% else %}Finish removal{% endif %}</button>
+            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect account{% else %}Finish removal{% endif %}</button>
           </form>
         </td></tr>{% endfor %}</tbody>
     </table>
-    {% else %}<p class="muted">No chat accounts are connected for tasks.</p>{% endif %}
+    {% else %}<p class="muted">No chat accounts are connected for tasks. Connect a chat app above, then test it.</p>{% endif %}
   </div>
 
   <div class="section-head"><h2 id="email-alerts">Email alerts and the daily summary</h2></div>
@@ -269,7 +269,7 @@
     <p class="muted">Lightwork can send alerts and each person's daily summary by email. Send a test
       to check the mail settings (Settings &rsaquo; All settings &rsaquo; Integrations &rsaquo; Email alerts).</p>
     <form method="post" action="/channels/test-email" class="ch-send"
-          data-channels-confirm="Send a test email? It goes to the address you enter.">
+          data-channels-ok="Send test email" data-channels-confirm="Send a test email? It goes to the address you enter.">
       <label class="ch-field">Send a test email to
         <input class="input" type="email" name="to" required placeholder="you@company.com" autocomplete="email" />
       </label>
@@ -346,7 +346,7 @@
       });
     }
     function say(form, text, failed) {
-      var result = form.querySelector('[data-ch-save-result]'); result.textContent = text;
+      var result = form.querySelector('[data-ch-save-result]'); window.mvStatus ? window.mvStatus(result, text) : (result.textContent = text);
       result.className = 'ch-result ' + (failed ? 'ch-result--failed' : 'ch-result--ok');
     }
     function pending(form, value) {
@@ -486,7 +486,7 @@
         if (form.dataset.confirmed === 'true') { form.dataset.confirmed = 'done'; return; }
         event.preventDefault();
         if (!form.reportValidity()) return;
-        window.mvConfirm(form.dataset.channelsConfirm, {okText: 'Continue'}).then(function (ok) {
+        window.mvConfirm(form.dataset.channelsConfirm, {okText: form.dataset.channelsOk}).then(function (ok) {
           if (!ok) return;
           form.dataset.confirmed = 'true';
           if (form.requestSubmit) form.requestSubmit(); else form.submit();

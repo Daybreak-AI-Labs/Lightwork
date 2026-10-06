@@ -11,8 +11,9 @@
   const muteStatus = document.getElementById('personal-notification-mute-status');
   let snapshot = null, editSnapshot = null, dirty = false, busy = false, mutes = {}, agentMutes = {}, timer = null, controller = null;
   const scalar = ['mode','timezone','digest_time','quiet_start','quiet_end'];
-  const checks = ['quiet_enabled','critical_exceptions','watch_all_projects'];
+  const checks = ['quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   function clearPrivate() {
+    document.dispatchEvent(new CustomEvent('lightwork:personal-notifications-cleared'));
     items.replaceChildren(); form.reset(); form.hidden = true;
     ['notification-project-watches','notification-mutes','personal-external-links','personal-delivery-receipts'].forEach(function (id) { document.getElementById(id).replaceChildren(); });
     taskSelect.replaceChildren(); snapshot = null; editSnapshot = null; mutes = {}; agentMutes = {}; dirty = false;
@@ -56,6 +57,25 @@
     button.addEventListener('click', function () { request('/api/v1/notifications/personal/mute', {context:snapshot.context, item_id:item.id, scope:scope}); });
     return button;
   }
+  // A task waiting on your answer can be stopped from its alert in one action (AI-8).
+  function stopButton(item) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn--danger';
+    button.textContent = 'Stop task'; button.dataset.alertId = item.id + '-stop';
+    button.addEventListener('click', async function () {
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/v1/goals/' + Number(item.goal_id) + '/cancel', {method:'POST', credentials:'same-origin'});
+        if (!response.ok) throw response;
+        if (muteStatus) muteStatus.textContent = 'Task stopped. Open it to see what was done and to resume or try again.';
+        request('/api/v1/notifications/personal');
+      } catch (failure) {
+        button.disabled = false;
+        error.textContent = window.mvErrorText ? window.mvErrorText(failure, 'stop the task') : 'Could not stop the task. Try again.';
+        error.hidden = false;
+      }
+    });
+    return button;
+  }
   function showMuted(muted) {
     if (!muteStatus) return;
     muteStatus.replaceChildren();
@@ -74,6 +94,7 @@
       throw new Error('Your account or workspace changed. Reload this page before continuing.');
     }
     snapshot = state;
+    document.dispatchEvent(new CustomEvent('lightwork:personal-notifications-state', {detail: state}));
     form.hidden = false;
     const delivery = state.private_delivery || {note:'Private delivery is unavailable. Refresh the page and try again.', channels:[]};
     document.getElementById('personal-external-status').textContent = delivery.note + ' Service acceptance does not mean a message was seen.';
@@ -100,7 +121,7 @@
     const active = document.activeElement;
     const restoreId = active && active.dataset ? active.dataset.alertId : null;
     items.replaceChildren();
-    if (!state.items.length) { const empty = document.createElement('p'); empty.textContent = 'No current personal alerts. Action Center remains available for decisions.'; items.append(empty); }
+    if (!state.items.length) { const empty = document.createElement('p'); empty.textContent = 'No current personal alerts. Alerts appear here when a task you started needs you or finishes; decisions stay in Action Center.'; items.append(empty); }
     state.items.forEach(function (item) {
       const row = document.createElement('article');
       const heading = document.createElement('h3'); const link = document.createElement('a');
@@ -116,6 +137,7 @@
         const seen = document.createElement('button'); seen.className = 'btn btn--ghost'; seen.textContent = 'Mark seen'; seen.dataset.alertId = item.id;
         seen.addEventListener('click', function () { request('/api/v1/notifications/personal/seen', {context:snapshot.context, item_id:item.id}); }); row.append(seen);
       }
+      if (item.goal_id && item.category === 'needs-decision') row.append(stopButton(item));
       if (item.goal_id) row.append(muteButton(item, 'task', 'Mute this task'));
       if (item.agent) row.append(muteButton(item, 'agent', 'Mute alerts from this agent'));
       items.append(row);

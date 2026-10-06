@@ -16,6 +16,8 @@
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
+  {% set _session = page_session(request) if request is defined and page_session is defined else none %}
+  {% include "_session_meta.html" %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   {#- One shell stylesheet; the Copilot scripts load after the page (see base.html). -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
@@ -33,11 +35,11 @@
   <style>
     /* ---- shell ---- */
     body.chat-shell {
-      display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: 100dvh;
+      display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
       height: 100dvh; overflow: hidden;
     }
     body.chat-shell main {
-      grid-column: 2; grid-row: 1; display: flex; flex-direction: column;
+      grid-column: 2; grid-row: 2; display: flex; flex-direction: column;
       min-height: 0; min-width: 0; max-width: none; width: auto; margin: 0; padding: 0; overflow: hidden;
     }
     .cs-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-6) var(--space-5) var(--space-3); }
@@ -48,7 +50,7 @@
 
     /* ---- sidebar ---- */
     .cs-side {
-      grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-height: 0;
+      grid-column: 1; grid-row: 1 / span 2; display: flex; flex-direction: column; min-height: 0;
       padding: var(--space-3); gap: var(--space-1);
       border-inline-end: 1px solid var(--border);
       background: color-mix(in srgb, var(--panel) 55%, var(--bg));
@@ -101,12 +103,8 @@
     .cs-product a:focus-visible, .cs-product .navgrp__toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
     .cs-account { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-2) var(--space-1); border-top: 1px solid var(--hairline); margin-top: var(--space-2); }
     .cs-workspace { margin: var(--space-2) var(--space-2) 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
-    .cs-avatar { flex: none; width: 28px; height: 28px; border-radius: var(--radius-round); display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--text); }
-    .cs-avatar svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
     .cs-account a { color: var(--muted); font-size: var(--text-sm); }
-    a.cs-avatar:hover { color: var(--text); text-decoration: none; }
     .cs-account a:hover { color: var(--text); }
-    .cs-account .cs-spacer { flex: 1; }
     .cs-halt { padding: var(--space-2) var(--space-2) 0; }
     .chat-shell > #mv-copilot-fab { display: none; }
     .chat-shell > .mv-copilot {
@@ -158,6 +156,7 @@
     #director-profile-help { display: block; font-size: var(--text-xs); margin: var(--space-1) 0 var(--space-2); }
     .composer__bar { display: flex; align-items: center; gap: var(--space-2); }
     .composer__hint { flex: 1; min-width: 0; color: var(--muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .composer__cost { margin: var(--space-1) 0 0; font-size: var(--text-xs); }
     .composer__icon, .ask__icon {
       flex: none; display: inline-flex; align-items: center; justify-content: center;
       width: 34px; height: 34px; border: 1px solid var(--border); border-radius: var(--radius-round);
@@ -190,16 +189,26 @@
     .draft-note > span { grid-area: 1 / 1; }
     .draft-note > [aria-hidden="true"] { visibility: hidden; }
 
+    /* ---- the top bar: on wide screens only the help and account cluster, at
+       the same height and right edge as the product shell's top bar (HLP-1);
+       on small screens also the Menu, Copilot and New chat buttons ---- */
+    .cs-topbar {
+      grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2);
+      min-height: var(--topbar-h); padding: var(--space-2) var(--space-5); border-bottom: 1px solid var(--border);
+    }
+    .cs-topbar .topbar-utilities { display: flex; align-items: center; gap: var(--space-2); margin-inline-start: auto; }
+    @media (min-width: 861px) {
+      .cs-topbar > #cs-menu, .cs-topbar__title, .cs-topbar__copilot, .cs-topbar > .personal-notification-link, .cs-topbar__new { display: none; }
+    }
     /* ---- small screens: the sidebar becomes a drawer behind a Menu button ---- */
-    .cs-topbar { display: none; }
     .cs-backdrop { display: none; }
     .cs-side__close { display: none; margin-inline-start: auto; }
     @media (max-width: 860px) {
       body.chat-shell { grid-template-columns: 1fr; }
-      body.chat-shell main { grid-column: 1; }
+      body.chat-shell main, .cs-topbar { grid-column: 1; }
       .cs-topbar {
-        display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); flex: none;
-        padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--hairline);
+        flex-wrap: wrap; justify-content: flex-start; min-height: 0;
+        padding: var(--space-2) var(--space-3); border-bottom-color: var(--hairline);
       }
       .cs-topbar > .btn, .cs-topbar > .iconbtn { flex: none; min-width: 44px; min-height: 44px; }
       .cs-topbar__title { flex: 1; min-width: 0; font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -233,7 +242,7 @@
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
-<body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+<body class="chat-shell {% if practice_mode %}is-practice {% endif %}theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
 {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut("Translation coverage") }}" lang="{{ ul("Translation coverage") }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
   <a class="skip-link" href="#content">{{ ui("Skip to content") }}</a>
   {% include "_icon_sprite.html" %}
@@ -297,23 +306,34 @@
       {% endif %}
     </div>
     <p class="muted cs-workspace">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
-    <div class="cs-account">
-      <a class="cs-avatar" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></a>
-      {% if show_settings_link %}<a href="/settings">{{ ui("Settings") }}</a>{% endif %}
-      {% with help_menu_text=true, help_menu_class='' %}{% include "_help_menu.html" %}{% endwith %}
-      <a href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
-         aria-label="Docs (opens in a new tab)" title="Docs (opens in a new tab)">Docs</a>
-      {% include "_display_preferences.html" %}
-      <span class="cs-spacer"></span>
-      {% if show_logout %}<a href="/auth/logout">{{ ui("Sign out") }}</a>{% endif %}
-    </div>
+    {# Help, Docs, Display, Account and Sign out sit in the top bar, as in the
+       product shell (_topbar_utilities.html), so Help never moves. #}
+    {% if show_settings_link %}<div class="cs-account"><a href="/settings">{{ ui("Settings") }}</a></div>{% endif %}
   </aside>
   <div class="cs-backdrop" id="cs-backdrop" aria-hidden="true"></div>
   {% include "_navfinder.html" %}
   {% include "_shortcuts.html" %}
+  <header class="cs-topbar">
+    <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
+    <span class="cs-topbar__title">Lightwork</span>
+    <button type="button" class="btn btn--ghost cs-topbar__copilot" data-copilot-toggle
+            aria-controls="mv-copilot" aria-expanded="false" aria-label="{{ ut('Open Copilot') }}" title="{{ ut('Copilot') }}">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v7H8l-3.5 2v-2H3z"/></svg>
+      <span>{{ ui('Copilot') }}</span>
+    </button>
+    {% if show_personal_notifications %}<a class="iconbtn iconbtn--notifications personal-notification-link" href="/notifications"
+       data-enabled="{{ 'true' if personal_notifications_enabled else 'false' }}"
+       aria-label="Your notifications" title="Your notifications">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 10.7H3.5c.8-.9 1.1-1.8 1.1-3V6.5a3.4 3.4 0 0 1 6.8 0v1.2c0 1.2.3 2.1 1.1 3Z"/><path d="M6.7 12.5a1.3 1.3 0 0 0 2.6 0"/></svg>
+      <span class="notification-count" aria-hidden="true" hidden></span>
+    </a>{% endif %}
+    {% if can_create_goal %}<a class="btn btn--ghost cs-topbar__new" href="/chat">{{ ui("New chat") }}</a>{% endif %}
+    {% include "_topbar_utilities.html" %}
+  </header>
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
-    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% endif %}
+    {% include "_practice_banner.html" %}
+    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% else %}{% include "_where_crumbs.html" %}{% endif %}
     {# In the job-named navigation, chat pages can be pinned like any other
        page (the base shell's "Pin to sidebar"; lightwork-pins.js binds it). #}
     {% set _page_personal = nav_personal() if nav_mode == 'areas' and nav_personal is defined and nav_personal else none %}
@@ -323,22 +343,6 @@
             aria-pressed="{{ 'true' if _page_personal.current_pinned else 'false' }}"><svg class="page-pin__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M9.6 2.4 13.6 6.4 11.4 7.2 8.8 9.8l.4 3.2-6.2-6.2 3.2.4 2.6-2.6z"/><path d="M5.6 10.4 2.6 13.4" stroke-linecap="round"/></svg>{{ ui('Pin to sidebar') }}</button>
     </div>
     {% endif %}
-    <div class="cs-topbar">
-      <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
-      <span class="cs-topbar__title">Lightwork</span>
-      <button type="button" class="btn btn--ghost cs-topbar__copilot" data-copilot-toggle
-              aria-controls="mv-copilot" aria-expanded="false" aria-label="{{ ut('Open Copilot') }}" title="{{ ut('Copilot') }}">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v7H8l-3.5 2v-2H3z"/></svg>
-        <span>{{ ui('Copilot') }}</span>
-      </button>
-      {% if show_personal_notifications %}<a class="iconbtn iconbtn--notifications personal-notification-link" href="/notifications"
-         data-enabled="{{ 'true' if personal_notifications_enabled else 'false' }}"
-         aria-label="Your notifications" title="Your notifications">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 10.7H3.5c.8-.9 1.1-1.8 1.1-3V6.5a3.4 3.4 0 0 1 6.8 0v1.2c0 1.2.3 2.1 1.1 3Z"/><path d="M6.7 12.5a1.3 1.3 0 0 0 2.6 0"/></svg>
-        <span class="notification-count" aria-hidden="true" hidden></span>
-      </a>{% endif %}
-      {% if can_create_goal %}<a class="btn btn--ghost" href="/chat">{{ ui("New chat") }}</a>{% endif %}
-    </div>
     <div class="cs-scroll" id="cs-scroll">
       <div class="cs-column">
         {% block chat %}{% endblock %}
@@ -379,6 +383,9 @@
   <script src="{{ asset('lightwork-ui.js') }}"></script>
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
+  <script src="{{ asset('lightwork-practice.js') }}" defer></script>
+  {% if usage_measures_on %}<script src="{{ asset('lightwork-usage-measures.js') }}"></script>{% endif %}
+  {% if _session %}<script src="{{ asset('lightwork-session.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
   <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
   <script src="{{ asset('lightwork-pins.js') }}" defer></script>

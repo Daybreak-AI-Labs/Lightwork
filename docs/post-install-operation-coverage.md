@@ -1,5 +1,46 @@
 # Post-install operation coverage
 
+## October 6 product completion batch
+
+| Customer operation | Complete controls | Result and boundary |
+| --- | --- | --- |
+| Retry, edit or branch a Chat answer (UX-376) | Message buttons and protected Copilot form; answer-only default, complete copied-context review and separate connected-action choice | A new independently admitted conversation preserves the original. Exact original admission reads resolve a lost response without dispatching twice. Current source access continues to govern copied content. |
+| Operate a workflow pilot (F04) | Prepare an unstarted task, freeze the full plan, record observations and complete costs, independently review, inspect value/history; ordinary forms and four reviewed Copilot writes | Native SQLite/pooled-PostgreSQL prepared-task admission is atomic. Pilot records support local and PostgreSQL governed storage with current-authority callbacks at transaction completion. Operator evidence is attributed; release exposure and causal benefit are not inferred. |
+| Choose useful information for a decision (P14/N05) | Complete named decision authoring, robust choice check, checked joint observation reservation, unknown-check acknowledgement and original requests | Exact decimal losses/costs and all declared joint answers are checked within bounded question, effort, time and cost limits. Unknown work cannot silently repeat or refund spent allowance. No supplier, financial or other business action executes. |
+
+Authenticated native browser journeys exercised these direct and Copilot paths,
+interrupted replies and 320px layouts. Prepared-task admission additionally ran
+against the real pooled PostgreSQL backend. These are operating qualifications
+for the named paths, without hosted CI or paid-provider calls.
+
+The next completed batch adds irreversible erasure of an already removed
+workspace through a complete native review and the same protected Copilot
+review. Erasure retains the original operation before touching files. An
+interrupted deletion stays unconfirmed; reading or retrying that original
+does not continue deletion. A separately acknowledged cleanup has its own
+review and original. Backups and external copies are explicitly separate.
+The older HTTP Remove action cannot bypass this review with a purge parameter.
+
+Suggest mode saves a complete, encrypted, readable proposal in the task's
+results and returns a non-executed result to learning. It asks for no approval
+to execute the proposed action. Request mode still requires a person’s approval;
+Observe refuses the action. The native checks used a declared local effect
+transport and inspected the actual saved artifact and signed intent.
+
+Original backlog fixes in this batch cover UX-116/146/151, UX-135/161/162,
+UX-182/183/185/213 and the inactive Settings control in UX-215. Retained tax
+content is checked against current signing anchors; update retrieval and
+connector addresses are confined. Unknown tools remain visibly unclassified
+and receive a conservative high risk floor. Future retention cutoffs are
+refused. Incident alerts and the insurance pack read both complete bounded
+registers, distinguish an unavailable inventory from no incidents, and close
+the first-report clock after filing. Diagnostics read the same effective
+saved settings as the dashboard; finance status includes operating-profile
+gates and active custom specialists. The SSH client retains local agent
+authentication without retaining provider secrets. The developer container
+uses a virtual environment. The ineffective answer-reuse setting is removed;
+its standalone internal cache is not presented as a working customer feature.
+
 Source review: October 1, 2026; selected journeys updated October 6. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,
@@ -25,11 +66,12 @@ real provider effects and customer acceptance remain to be qualified.
 
 | Customer job | Current in-product path | Remaining boundary |
 | --- | --- | --- |
+| Request an action and recover an interrupted review | Access requests and typed Copilot offer named choices, ordinary search/paging and a complete current-policy review. The inventory includes supported built-ins and authorized personally created actions without executing add-on factories or generated-action probes. Copilot can read the exact retained request or decision after a lost reply, under current actor/workspace and case visibility, without another submission or activity write. Native-browser and installed-package journeys reached actions beyond the first 500, preserved one case after interrupted replies, refused stale/foreign context and rendered at 320px. | Add-on names are explicitly unavailable through this pure inventory. Listing an action does not qualify its connection or successful execution. Reviews do not grant access; a pending activity receipt or unreadable complete retained history stays unconfirmed. Live connections and customer acceptance remain separate. |
 | Read a task's activity (UX-268) | Chat polling, both event streams and WebSocket use one readable projection. Internal role/brief prompts, prior-failure memory, model scratch text, raw tool envelopes and diagnostic errors are replaced with plain activity; useful findings remain visible. The exact durable event records are retained. | Action activity describes a request, not proof that an external effect completed. Actual action receipts and final results remain the evidence for completion. |
 | Recover a stopped task (UX-294, UX-313) | Provider stops open the AI setup route for an installation administrator and offer a review of a retry without unrelated spending controls. Stopped-task event results and outbound failure callbacks use plain explanations without terminal commands. A prepared pilot retains its separate start review and allowance review. Live updates preserve a pending restart confirmation. | A retry still needs current admission and explicit confirmation; changing an AI key or service does not establish that the next run will succeed. |
 | Edit workflow run controls through Copilot (UX-672) | Designer Copilot can change typed run questions, the time zone and simultaneous-run limit. Removing a step heals approval-expiry and switch-case routes. All changes use the existing draft patch validation and normal save/publish path. | Generated proposals still require customer review; this does not publish or start work automatically. |
 | Collect and close a personal-data request ([UX-020](../USER_EXPERIENCE_AUDIT.md#ux-020--p1--trust--dsar-export-files-are-kept-forever-in-plaintext-after-the-request-is-closed)) | For access and portability, Privacy says **Data collected** after fulfillment. An officer can download the verified package for review and record a completed handoff statement against that exact package, with a secure-channel choice, date, evidence reference and separate review/recipient attestations. The same officer authority, exact package binding and recovery apply in Copilot. Statements stay readable after closure and original-package removal. Collection keeps the response deadline and work queue active until an actual answer. An authenticated disposable native-dashboard journey covers collection, review, statement recording, exact replay, operator refusal and closure. | A handoff statement is an operator attestation, not independent delivery or requester-receipt proof. Semantic redaction, controlled remote delivery, retention sweeps and installed customer acceptance remain open. |
-| Manage API credentials ([UX-087](../USER_EXPERIENCE_AUDIT.md#ux-087--p1--feature--only-one-all-powerful-shared-bearer-token-for-the-whole-rest-api-no-per-userper-app-api-keys-scopes-expiry-or-overlap-rotation)) | Named API keys have owner, expiry, rotation and revocation. An API-key bearer can list permitted keys but cannot create, rotate or revoke keys, create service accounts or disable them. The shared approval queue, paused workflow decisions and selected security, consent, content-access, finance, governance and vendor review decisions require `approvals:decide`. An approval-only key cannot use unrelated operator routes. | `tasks:write` still reaches other operator actions; `settings:write` still reaches all administrator-gated controls, including many domain approvals. Some decisions also require task or admin scope. Remaining domain reviews and installed integration behavior need qualification. |
+| Manage API credentials ([UX-087](../USER_EXPERIENCE_AUDIT.md#ux-087--p1--feature--only-one-all-powerful-shared-bearer-token-for-the-whole-rest-api-no-per-userper-app-api-keys-scopes-expiry-or-overlap-rotation)) | Named API keys have owner, expiry, rotation and revocation. An API-key bearer can list permitted keys but cannot create, rotate or revoke keys, create service accounts or disable them. The shared approval queue, paused workflow decisions and selected security, consent, content-access, finance, governance and vendor review decisions require `approvals:decide`. Privacy-notice release approval, withdrawal and proposal review also require that scope and retain the administrator floor, current-session/workspace checks and post-writer-wait admission. An approval-only key cannot use unrelated operator routes. | `tasks:write` still reaches other operator actions; `settings:write` still reaches other administrator controls, including domain approvals outside the decisions explicitly listed here. Some decisions also require task or admin scope. Remaining domain reviews and installed integration behavior need qualification. |
 | Check provider spending ([UX-088](../USER_EXPERIENCE_AUDIT.md#ux-088--p1--perf--provider-spend-ledger-grows-by-one-never-pruned-row-per-model-call-and-is-rewritten-whole-twice-per-call-accounting-cost-grows-linearly-then-all-ai-calls-are-blocked-at-16-mb)) | An indexed local SQLite ledger replaces healthy JSON accounting after migration. The hot status read now seeks live holds and unknown receipts instead of scanning settled history; Provider Spending exposes health and recovery guidance. | Each active call still hashes the full database to check its seal, so cost grows with history. Larger-scale, damaged-ledger and installed-workspace recovery acceptance remain open. |
 | Keep a local spending refusal separate from an AI outage (UX-249) | Both native AI-call paths exclude provider-cap and accounting-store refusals from health and routing observations. Native circuit admission and outcomes bind the exact tenant and admitted connection configuration, including its address and credential revision, through an opaque digest. A failed connection cannot pause a replacement connection or another tenant; an in-flight result stays attributed to its original connection. After cooldown, one actual probe owns admission. A local refusal releases that probe without inventing success or extending the outage. | Custom injected clients without native configuration metadata retain provider-wide circuit behavior. Live outage and installed-provider qualification remain separate. No spending limit is bypassed. |
 | Check an outside agent's uncertain request (UX-240) | Outside-agent detail and selected-agent Copilot read the latest 20 retained execution records with current page authority. A failure after an effect started, a connector's uncertain result and an interrupted execution say the result is unknown. A service's asynchronous acceptance says completion is unconfirmed. Neither outcome automatically retries; the original private request fingerprint remains available to the authorized agent for reconciliation. Successful request readback distinguishes a service response from its business result. | This metadata-only view contacts no connected service and never repairs or repeats an approval. Execution retention is 24 hours and is not a complete activity archive. Confirm the business result in the connected service; automated service reconciliation and customer integration qualification remain separate. |
@@ -300,7 +342,7 @@ specific gaps closed.
 | Archived Knowledge request lookup | Both employees and administrators browse protected forward batches beyond the old archive prefix. Employees see only their own ordinary request receipts in Active and Finished views; review-only material, other owners and Ready to archive are withheld. Administrators also receive current source and hold checks. Opaque positions bind account, workspace, view, authority and expiry. Next batch, Start over and typed Copilot use the same native read; Open these requests returns to the exact current batch. Native full-archive journeys covered 2,055 archive entries, duplicate hot/archive copies, changed roles and positions, current restrictions and holds, and 320px controls. Employee reads stayed bounded to 25 archive bodies per batch. | Archive retirement, shared-storage transactional moves, installed customer acceptance and independently retained audit custody remain separate. The exact owner-only reference receipt remains available. |
 | Chat history completeness | Print loads every authorized saved history page and answered clarification before opening the print view; an incomplete load stops with a retry path. Print preparation stops after 20 history pages, 1,000 older turns, or a 30-second preparation budget (plus the current page request), offers the full-history download path, and never opens a knowingly partial print view. Copy provides a selectable text fallback when the clipboard is unavailable. Copilot checks that a requested control actually opened before claiming success. Local JavaScript, API and synthetic browser cases cover the path, including two earlier pages and a final access check. | Qualify installed-app behavior and real customer history. These fixes do not complete all Chat or whole-platform Copilot operations. |
 | Pending work after service interruption | Startup recovery reclaims stale pending work, but the periodic orphan sweep handles active work only. A pending goal that misses the startup window can remain pending without a later owner check. Pending also covers legitimate queued and concurrency-waiting work, so age alone cannot safely prove abandonment. | Add a durable, tenant-scoped dispatch ownership receipt and an atomic recovery transition after ownership ends; then exercise local queue, Redis, gRPC and restart races before enabling periodic pending recovery. |
-| Restored connected-channel work | Recovery now uses outcome choices, local date controls and evidence fields. A local Recovery Copilot hosts the same form and operation. Interrupted recording can be finished using the exact retained review. | Qualify the authenticated installed-app journey. Replace manual position numbers with in-product source lookup/selection, particularly for iMessage. Complete the other recovery operations in Copilot and the remaining technical wording on the wider page. |
+| Restored connected-channel work | Recovery uses outcome choices, local date controls and evidence fields. iMessage and Mastodon offer a native read-only dated checkpoint lookup, selection and older-page controls; manual source positions remain optional. The selected checkpoint stays visible across paging and lookup failures. A local Recovery Copilot hosts the same form and operation. Interrupted recording can be finished using the exact retained review. | Qualify the authenticated installed-app journey and complete the other recovery operations in Copilot and remaining technical wording on the wider page. Native source metadata does not confirm message delivery or an outside effect. |
 | Settings controlled by deployment | Some settings correctly refuse local writes when an environment or deployment source controls them. Refusal alone leaves no post-install migration journey. | Explain the current owner and provide an authorized in-product transfer or administrator path with effective-value readback. |
 | Connected-automation signing secret | The former false-success path was reproduced with environment and mounted-file secrets. The settings service now checks effective ownership, binds the change to the current administrator and setting, and verifies both incoming and outgoing signing results. The guided form clears another account's draft and distinguishes uncertain results. | Qualify installed-app use and shared Copilot operation. Deployment-source transfer, outbound-only rotation when a separate incoming secret is controlled elsewhere, and durable audit history remain separate gaps. |
 | Chat accounts with single sign-on | My work issues a one-use connection code in an uncached POST response, observes it through durable Slack or Microsoft Teams intake, and asks the signed-in owner to confirm the exact chat account. Current workspace role, account and session revocation are checked again for each task. Administrators can see and disconnect links; a failed link store is shown as unavailable. Teams intake requires the Teams channel and endorsed Connector signing key. Legacy account links do not authorize OIDC chat work. | Qualify real provider installations, account changes, revocation and recovery in the installed app. Slack slash-command tasks and HTTP interaction decisions remain unavailable under single sign-on until they can carry the same durable identity proof. A pre-upgrade channel receipt without the provider tuple remains deferred if OIDC is enabled and needs an in-product review path. Email and other channels have no equivalent OIDC bridge. |
@@ -1852,3 +1894,263 @@ duplicate admission performed one training, while a separately reviewed Copilot
 decision admitted a second. Missing-detail scoring remained visibly unscored;
 stale sources and revoked authority refused. These checks establish truthful
 evidence handling, not improved answer quality or customer learning lift.
+
+## October 6 current signed-skill preparation
+
+Ordinary Learning and typed Copilot show current signed-acquisition readiness and
+the exact existing Trusted skill publishers Settings remedy. The status reads
+current administration and account/workspace context without returning public
+key bytes or contacting a catalog/provider. Missing or withdrawn publisher trust
+stops native preflight before catalog search and optional AI analysis, with a
+plain task observation. Signature verification remains mandatory for acquisition.
+
+The native 320px journey uploaded an actual synthetic publisher public key,
+completed the governed Settings review/save and installed an actually signed
+skill from a declared local catalog boundary. Fresh cryptographic verification
+of the retained bytes succeeded; unsigned sources and withdrawn anchors refused.
+This qualifies native setup and signature handling, not a live catalog inventory,
+unseen skill suitability or independently measured learning improvement.
+
+Native local model choices also resolve actual canonical providers and aliases.
+Ordinary complete review, Cancel, Save with interrupted reply, exact original
+readback and protected Copilot form preservation passed. Unsupported local
+adapter names are excluded; valid aliases keep their selected strings and actual
+native client/probe identities. Explicit role choices win, opt-in stays off until
+chosen, and unavailable local inference preserves configured fallback. Arbitrary
+remote compatible endpoints are not declared local by this repair.
+
+The combined nightly command also distinguishes a native learning stop or
+unreadable configuration from an explicitly disabled review. Refusal and review
+failure produce a nonzero exit, stop continuation and disclose that earlier
+learning changes may already be saved. A declared controlled exception boundary
+verified payload-safe reporting; this does not establish live provider behavior.
+
+## October 6 page asset upgrade continuity
+
+Trusted literal script and stylesheet tags receive current content-versioned
+URLs, including inherited page controllers. Existing explicit query, fragment
+and dynamic references retain their template behavior. Public unchanged script
+and stylesheet requests support conditional bodyless revalidation after native
+route admission; private, refused and missing assets retain native behavior.
+Matching current public versions can be cached as immutable. Ordinary stale or
+unversioned controller URLs revalidate. Hash caches refresh against current file
+identity, size and modification metadata; missing files are checked again.
+
+The cached 320px browser ran changed controller bytes and completed an ordinary
+reviewed Settings save both in a live worker without resetting its hash cache and
+after a separately stopped and restarted native process. Unchanged bundled graph
+library bytes retained their upstream digest and returned a bodyless 304. This
+qualifies package asset continuity, not arbitrary privileged same-metadata file
+tampering or avoidance of every underlying local file read.
+
+## October 6 configured screen refusal and finite fetch admission
+
+Configured built-in gateway checker failures return the native client protocol
+service refusal before upstream resolution or native team spending admission.
+The existing privacy ledger records safe digest/count metadata. Actual detector
+refusal, screen-off and text-free behavior retain their original meaning. Six
+native HTTP cases used declared failing-checker and local-only transport
+boundaries; three allowed requests reached the loopback upstream, with zero
+paid/external calls. This does not requalify every production network transport.
+
+The native web-content tool enforces a finite 10MiB ceiling while keeping the
+64KB ordinary default. Its retained decoded accumulator is bounded to the chosen
+limit plus one byte, so exact-limit EOF is complete and omitted bytes are shown
+as truncation. Invalid bounds/types refuse before network preflight. The native
+Designer refused zero without changing its saved draft, then saved/published a
+valid limit and executed the fetch after separate human approval and resume.
+Authorized Workflow Copilot changed the same draft field with Undo/Redo and
+explicit Save. These bounds apply to retained fetch content; they do not certify
+a hard process-memory ceiling for HTTP decompression internals.
+
+## October 6 reviewed improvement-cycle controls
+
+Ordinary Learning and typed Copilot share the same current native cycle review,
+including every proposed safeguard and habit before/after value. Removed guidance
+and reduced habit strength are shown explicitly. Oversized or unreadable complete
+reviews refuse instead of hiding part of the change. Admission and physical
+replacement check the current source, authority, settings and approved guidance;
+empty eligible work preserves both stores.
+
+The existing retained learning task records the actual result. Strict persistence
+and activity confirmation distinguish saved, incomplete and uncertain effects;
+an interrupted reply can read the original without another learning dispatch.
+The original reader does not flush pending audit writes. The cycle uses no AI
+provider calls and has a 60-second local ceiling or tighter current organization
+limit. Native causal evidence gates remain unchanged. These controls establish
+reviewable operation and truthful recovery, not measured customer learning lift.
+
+## October 6 product-switch and queued-task follow-through
+
+The current native feature catalog supplies all 45 product switches to the same
+reviewed Settings writer, current-source check and original receipt. The Features
+overview links to these actual controls; its legacy unreviewed whole-form save
+refuses without writes. Human comparisons use On/Off while native audit values
+stay booleans. Physical replacement rechecks configured recent administrator
+verification and forwards the existing guard into atomic replacement retries.
+
+The queue worker opts into a detailed native unavailable result while other
+runner callers retain their prior contract. Only confirmed semaphore refusal
+causes concurrency deferral. Missing or unconfirmed work becomes a terminal
+owned-attempt failure without automatic replay. Scheduled creation saves an
+occurrence-only uncertainty marker before creating its task; a successor lease
+cannot create another task from an unconfirmed first creation. Existing actual
+task failure retries and clean future schedule inputs are preserved.
+
+## October 6 held AI checks and assessment names
+
+The existing learning pass separates missing AI qualification from explicitly
+enabled local stale-lesson retirement for its selected model. New guidance and
+trial graduation, demotion and relapse checks stay held. The ordinary result
+shows that distinction, and the nightly summary remains inspection-only when
+every model's qualification is held. Native stop and policy checks remain in
+force; unavailable model selection does not become whole-store retirement.
+
+Governed retirement uses strict persistence and activity confirmation. Physical
+file replacement and native database transactions receive the current guard;
+the approved intermediate and final guidance generations stay inside the held
+writer fence. Failed or unconfirmed work remains incomplete, including any
+earlier saved effect. Original-task reads do not dispatch another pass.
+
+Assessment register, due list, detail and confirmation copy use the current
+authorized specialist/workflow name, with an explicit unavailable-name fallback
+and optional recorded reference. Stored identity and native review version checks
+are preserved. This naming repair does not supply selected-assessment Copilot
+review coverage. The separate scoped trial-lifecycle issue remains tracked.
+
+## October 6 scoped trials and selected capability assessments
+
+The native trial lifecycle now carries the exact checked scope into demotion,
+graduation and relapse. Governed callers acquire the existing authority and
+guidance fences, read current complete state, and check exact planned generations,
+source permission, stop and budget at physical writes. Each confirmed change
+advances the existing current-state guard before the next decision. Failed
+metadata, transfer-history or activity confirmation propagates an incomplete
+outcome rather than an empty success. The ordinary result reports the three
+lifecycle counts. Default deliberate all-scope marking/removal and bare-model
+transfer-attempt memory semantics remain unchanged.
+
+The plural specialist/workflow assessment register has two protected Copilot
+read/handoff controls. They bind the selected native identity, current version,
+content digest and account/workspace; full findings stay in the authorized native
+view, and decisions use the existing lens-review writer. The page guide describes
+its actual privacy, security and AI-risk reviews. Auditor controls remain readable
+without offering administrator writes. Genuine account changes clear private
+findings and assessment-owned dialog contents; late reads cannot refill them.
+
+The existing review writer rechecks current permission after its register-lock
+wait, before signed review phases and at native replacement retries. Its durable
+prepare/authorize/publish protocol and record-version check are preserved. A late
+refusal after publication reports an unconfirmed saved decision; current native
+recovery reads that decision without recording another review.
+
+## October 6 complete assessment mutation guards
+
+Refresh, evidence addition and removal carry the current authority callback
+through the native register lock and physical replacement retries. A guarded
+manual sweep reads the register without flushing legacy audit recovery writes,
+stops on changed authority or context, and exposes requested, confirmed, changed
+and unavailable-or-unconfirmed counts. Prior changes are retained and disclosed.
+Default scheduler best-effort behavior and the existing review publication
+protocol remain separate.
+
+Review requests made with an access key require both the existing administrator
+floor and the explicit decision scope; broad Settings write permission alone
+does not grant that decision. The same checks run again before physical effects.
+
+The page offers read-only current-state checks after uncertain mutations and
+bulk refresh. Reading current state is not recovery of an original operation
+receipt. It does not repeat the action or prove which interrupted operation
+caused the current state. Same-account transient errors preserve unsaved
+frequency and evidence drafts; access loss clears private content and disables
+writes. These repairs do not supply an all-action audit archive or independent
+custody.
+
+## October 6 current model evidence and add-on compatibility
+
+Discovery uses the native tenant cache and an opaque binding to the effective
+connection. Refresh reserves an unrepeatable token under the existing cache
+lock, performs bounded I/O outside that lock and publishes only its still-current
+reservation. Failure retains previous choices without current zero-price
+authority. Settings and the model-capability read distinguish previous evidence,
+last successful checks and failed attempts; ordinary refresh preserves unsaved
+form state and offers a deliberate reload for a changed list.
+
+Missing or expired OpenRouter pricing evidence can trigger a bounded check
+before initial admission, with per-provider single flight and a finite failure
+cooldown. Official-list origin and every advertised price are checked. Native
+attempt custody retains the admitted price for matching Budget, model and tenant
+accounting. New retry, hedge and compatibility SDK sends take distinct current
+admissions; a refusal after a reservation releases an unsent hold at zero.
+Async initial discovery runs off the event loop. Response accounting performs
+no discovery request. These checks use fictional transports; they do not qualify
+live provider access, invoices or model quality.
+
+Python add-on compatibility reads native distribution metadata without loading
+entry points. Present malformed contracts and unsupported API majors are refused
+before import. Native page reasons and the read-only Copilot status use that same
+compatibility result. Copilot first gives complete aggregate counts, then offers
+an exact current add-on selection with complete reasons; it does not silently
+truncate a full inventory into the generic result renderer. Existing permissions,
+practice operations and supported or absent-manifest behavior are preserved.
+
+## October 6 read-only connection diagnostics
+
+The existing connections.review operation is a read, with no Apply phase or
+receipt-producing mutation. It remains visible with Copilot writes disabled.
+Native ownership, current credential revision, account context and dependency
+impact are checked before its bounded result. The result gives credential
+presence, dated authentication readiness, related-work counts and permitted
+coverage; full named controls stay in Connections. Changed credentials identify
+earlier checks, and future or invalid check times stay unconfirmed. No service
+test, credential change, private work body or complete dependency claim is
+implied. Ordinary controls and Copilot read the same current native records.
+
+The existing channel-recovery lookup already provides dated iMessage/Mastodon
+choices. Its form now retains a separate selected-checkpoint summary across
+paging and failed reads, while clearing prior confirmation on each read. Manual
+edits cannot retain a misleading source-selection label, and invalid manual
+position errors open their disclosure before focus. The same form is hosted in
+local Recovery Copilot. Current context, exact source/review bindings and native
+recording/recovery writers are unchanged; collection choices do not verify
+delivery or unknown outside effects.
+
+## Visual workflow questions (UX385)
+
+Decision and repeat-while steps expose ordinary question groups. Users choose
+the information, comparison and Text, Number or Yes/No value, add or remove
+questions, and select all questions or any matching group. Every question inside
+a group must match. Existing combined conditions and quoted text containing
+“and” or “or” retain the native engine's meaning. Incomplete edits block saving
+with a readable explanation; unsupported existing expressions remain unchanged.
+Saved flows use the existing versioned flow writer and publication controls.
+This adds no separate execution engine or condition format.
+### Connected work and retained results (UX117, UX134, UX168/373, UX389)
+
+The governance screens and Copilot now review canonical saved source records before connector writeback, read the original matching receipt after later exports and retain uncertain outcomes without automatically repeating a send. Privacy request evidence distinguishes operator attestations from actual connector observations; an absent active record does not prove that retained copies were erased.
+
+Slack and Telegram can receive bounded exports and rendered HTML from the actual owned task result through the encrypted delivery journal. Original text and file chunks remain separate; a missing file receipt stays uncertain and is not automatically sent again. Teams currently shows named result availability and an available private task link because its existing channel transport cannot upload those files. Arbitrary model-supplied filesystem paths and binary document conversion are not supported by this path.
+
+Connected automations have ordinary saved-account and container choices for SharePoint files, Salesforce records, ServiceNow tickets and Teams messages. A dated source preview establishes the starting point before explicit creation. Current account grants and source revisions are checked at native reads and at the guarded registry write. Matching original creation requests preserve the existing position; changed requests cannot overwrite the same name.
+
+### Company sign-in and owner recovery (UX075)
+
+Settings has provider presets and a real provider sign-in check using the saved company account details before activation, with native authorization-code exchange, PKCE, signature and nonce verification. It retains dated, account-bound results while keeping current administrator access, roles and sign-in settings. Changed settings, expired checks, invalid replies and repeated callbacks cannot claim a new verified result. A connection-only check remains separately labelled. After a separately granted administrator role, the original local owner reviews activation with the original passphrase. Restricted local recovery reads the original activation and separately reviews restoring only the previous sign-in choice. An interrupted activation or restoration is read without repeating the write. Stronger externally managed access policies are excluded from that recovery path.
+
+### Connected Knowledge sources (UX086)
+
+Knowledge uses existing named connections and current content-use permissions to select SharePoint or OneDrive folders, Google Drive folders and Confluence spaces. Scheduled and manual refreshes use the same bounded native preparation, retained exact source editions, file outcomes and original-result reads. Unchanged content is not prepared again. No longer listed files are identified in a dated snapshot; this does not prove permanent provider deletion. The imported edition remains unavailable to retrieval until a different authorized person approves it in Research. A complete specialist attachment draft preserves existing instructions, capabilities, work separation and governance; the ordinary Publish review changes new work. The native scheduler, separate approval, actual selector retrieval and ordinary UI publication were exercised locally with offline remote adapters. Direct files and pages are supported; recursive website crawling and live-provider qualification are separate.
+
+### Private personal alerts (UX398, Teams)
+
+Notifications offers verified private account choices and one fixed test message with full recipient/content review. My data verifies a Teams account through the native signed channel command and retains its exact personal conversation. Current account, channel settings and source are checked again before every physical delivery. Accepted, refused and unknown originals stay readable without sending another message. Minimal no-repeat receipts remain separate from ordinary alert-history erasure. Signed native inbound proof, original delivery, uncertain delivery, retired-account refusal and the ordinary UI were exercised locally with an offline Teams adapter. No real message was sent and no email transport is claimed.
+
+### Human help in the same conversation (UX078)
+
+The separately enabled Human help in Chat feature lets an authorized person declare on-duty availability. A customer selects that exact person and reviews the shared task brief, saved reply, purpose and deadline. The native conversation reserves an AI hold and waits for actual execution to settle before the helper takes over. The helper and customer exchange messages in the same thread without model calls. Returning to AI is separate and does not automatically run old messages or share the human exchange with a model. Uncertain stopping or reply custody remains visible through its original; new confirmation does not silently replay it. My data includes this content and refuses erasure while an active shared conversation or AI hold would be orphaned. Ordinary customer/helper, lost-reply, Copilot and native authority/retention journeys were exercised locally without external providers. This does not connect an external helpdesk or guarantee reversal of an outside action already started.
+
+### Uploaded company single sign-on and joined vendor profiles
+
+Settings provides protected provider-file upload, inactive staging, a real signed sign-in check, separate administrator assignment, reviewed activation and constrained original-owner restoration. Copilot opens the same complete setup without handling private keys. The installer runtime includes the standard signed-assertion backend; encrypted assertions need a supported encryption backend. Local native HTTPS proof exercised signed SHA256, replay refusal, authentic signed SHA1 refusal, activation and restoration. A live customer identity provider was not contacted.
+
+The registered vendor detail page provides one current view of the native lifecycle, evaluated assessments and open tasks, linked Intelligence profiles and screening decisions, and existing Contracts. Explicit reviewed identity linking preserves existing references. Register and lifecycle activation share the native latest-assessment gate, so CLI, API and ordinary UI calls cannot bypass evaluation. The ordinary profile and existing Contracts control use the same vendor identity; saved original decisions are read without repeating a link or activation.

@@ -7,6 +7,8 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.channel_review import channel_review_token
+
 
 class _Resp:
     def __init__(self, status=200, body=None):
@@ -42,6 +44,7 @@ def client(tmp_path, monkeypatch):
 
 def _slack(client):
     r = client.post("/channels/save", data={"channel": "slack", "enabled": "on",
+                                              "review_token": channel_review_token(client), "confirm_people": "yes",
                                               "app_token": "xapp-1", "bot_token": "xoxb-1",
                                               "allowed_user_ids": "U01ABCDEF"},  # pragma: allowlist secret
                     follow_redirects=False)

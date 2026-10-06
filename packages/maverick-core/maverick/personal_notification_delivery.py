@@ -56,9 +56,39 @@ def _base_url(settings: dict) -> str:
     return base
 
 
-def _transport(link: dict) -> tuple[str, str]:
+def teams_destination(reference, account_sha256, sender):
+    """A private destination comes only from the signed native Teams receipt."""
+    keys = {"service_url", "conversation_id", "tenant_id", "sender_id", "app_id"}
+    if (not isinstance(reference, dict) or set(reference) != keys
+            or any(not isinstance(value, str) or not value or len(value) > 2048 for value in reference.values())
+            or reference["sender_id"] != sender or _digest(reference["app_id"]) != account_sha256):
+        raise ValueError("Relink Teams from a private chat with the current Lightwork bot.")
+    url = urlsplit(reference["service_url"])
+    if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
+        raise ValueError("The verified private Teams destination is unavailable.")
+    return dict(reference)
+
+
+def _teams_transport(link):
+    from maverick_channels.teams import channel_config, is_allowed
+
+    from .config import load_global_config
+
+    cfg = channel_config((load_global_config().get("channels") or {}).get("teams") or {})
+    ref = teams_destination(link.get("private_destination"), link.get("account_sha256"), link.get("sender_id"))
+    tenants = {value.lower() for value in cfg["allowed_tenants"]} or {cfg["tenant_id"]}
+    if (not cfg["enabled"] or not cfg["app_id"] or not cfg["app_password"]
+            or cfg["app_id"] != ref["app_id"] or ref["tenant_id"].lower() not in tenants
+            or not is_allowed(ref["sender_id"].lower(), {value.lower() for value in cfg["allowed_users"]})):
+        raise ValueError("Review the current Teams bot, organization and permitted person in Channels.")
+    return cfg, ref
+
+
+def _transport(link: dict) -> tuple[str, object]:
     from .config import load_global_config
     channel, sender = link["channel"], link.get("sender_id", "")
+    if channel == "teams":
+        return channel, _teams_transport(link)
     if channel not in {"slack", "telegram"}:
         raise ValueError("This linked channel does not support private personal alerts.")
     if not isinstance(sender, str) or not re.fullmatch(r"[UW][A-Z0-9]{7,30}" if channel == "slack" else r"[1-9][0-9]{0,15}", sender):
@@ -133,33 +163,80 @@ def _post(url, token, payload) -> dict:
     return value
 
 
-def send_private(link: dict, text: str) -> None:
-    """Current bot identity must match the account that proved the link."""
+def send_private(link: dict, text: str, buttons: list[dict] | None = None, *, effect_guard=None) -> str:
+    """Current bot identity must match the account that proved the link.
+
+    ``buttons`` are Slack button elements (the one-action mute); Telegram
+    messages carry the same choice as a link in ``text``."""
     channel, token = _transport(link)
+    def current_destination():
+        from .personal_identity import linked_channels
+
+        _settings()
+        principal = link.get("principal", "")
+        if (not isinstance(principal, str) or not principal.startswith("user:")
+                or next((row for row in linked_channels(principal) if row["id"] == link.get("id")), None) != link
+                or _transport(link) != (channel, token)):
+            raise Refused
+        if effect_guard is not None:
+            effect_guard()
+
+    def post(url, credential, payload):
+        current_destination()
+        return _post(url, credential, payload)
+
+    current_destination()
     sender = link["sender_id"]
-    if channel == "telegram":
+    if channel == "teams":
+        import asyncio
+
+        from maverick_channels.delivery import DeliveryNotSent, DeliveryUnknown
+        from maverick_channels.teams import TeamsAuthError, TeamsConnector, default_transport
+
+        cfg, ref = token
+        async def transport(*args, **kwargs):
+            current_destination()
+            kwargs["timeout"] = min(float(kwargs.get("timeout", 5)), 5)
+            return await default_transport(*args, **kwargs)
+        connector = TeamsConnector(cfg["app_id"], cfg["app_password"], cfg["tenant_id"] or None, transport=transport)
+        try:
+            ident = asyncio.run(connector.send_activity(ref["service_url"], ref["conversation_id"],
+                                                       {"text": text, "textFormat": "plain"}))
+        except (DeliveryNotSent, TeamsAuthError) as exc:
+            raise Refused from exc
+        except DeliveryUnknown as exc:
+            raise Unconfirmed from exc
+        if not ident:
+            raise Unconfirmed
+        return ident
+    elif channel == "telegram":
         account = token.split(":", 1)[0]
         if not account.isdigit() or not hmac.compare_digest(_digest(account), link.get("account_sha256", "")):
             raise Refused
-        value = _post("https://api.telegram.org/bot" + token + "/sendMessage", "",
+        value = post("https://api.telegram.org/bot" + token + "/sendMessage", "",
                       {"chat_id": int(sender), "text": text, "link_preview_options": {"is_disabled": True}})
         result = value.get("result")
         if not isinstance(result, dict) or type(result.get("message_id")) is not int:
             raise Unconfirmed
+        return str(result["message_id"])
     else:
-        identity = _post("https://slack.com/api/auth.test", token, {})
+        identity = post("https://slack.com/api/auth.test", token, {})
         account = str(identity.get("team_id") or "") + ":" + str(identity.get("user_id") or "")
         if not identity.get("team_id") or not identity.get("user_id") or not hmac.compare_digest(_digest(account), link.get("account_sha256", "")):
             raise Refused
-        opened = _post("https://slack.com/api/conversations.open", token, {"users": sender, "return_im": True})
+        opened = post("https://slack.com/api/conversations.open", token, {"users": sender, "return_im": True})
         target = opened.get("channel")
         if (not isinstance(target, dict) or target.get("is_im") is not True or target.get("user") != sender
                 or not re.fullmatch(r"D[A-Z0-9]{7,30}", str(target.get("id") or ""))):
             raise Refused
-        posted = _post("https://slack.com/api/chat.postMessage", token,
-                       {"channel": target["id"], "text": text, "mrkdwn": False, "unfurl_links": False, "unfurl_media": False})
+        message = {"channel": target["id"], "text": text, "mrkdwn": False, "unfurl_links": False, "unfurl_media": False}
+        if buttons:
+            message["blocks"] = [{"type": "section", "text": {"type": "plain_text", "text": text[:2900], "emoji": False}},
+                                 {"type": "actions", "elements": buttons[:5]}]
+        posted = post("https://slack.com/api/chat.postMessage", token, message)
         if not isinstance(posted.get("ts"), str):
             raise Unconfirmed
+        return posted["ts"]
 
 
 class DeliveryStore:
@@ -208,12 +285,14 @@ class DeliveryStore:
             self._write(state)
             return ident, fresh
 
-    def finish(self, ident, result, message):
+    def finish(self, ident, result, message, *, provider_reference=""):
         with cross_process_lock(self.path):
             state = self._read()
             for row in state["receipts"]:
                 if row["id"] == ident:
                     row.update(state=result, message=message)
+                    if isinstance(provider_reference, str) and provider_reference:
+                        row["provider_reference"] = provider_reference[:512]
             self._write(state)
 
     def recent(self):
@@ -227,7 +306,27 @@ class DeliveryStore:
         return [item for item in items if item["id"] not in consumed]
 
 
+def _mute_choice(principal: str, base: str, item: dict) -> tuple[str, str, dict] | None:
+    """The one-action mute for one alert (NOT-2): its words, link and Slack button."""
+    try:
+        from .notification_unsubscribe import for_item, sign
+        from .slack_interactive import mute_button
+
+        target = for_item(item)
+        if target is None:
+            return None
+        token = sign(principal, *target)
+    except Exception:  # noqa: BLE001 -- the alert still goes out without it
+        return None
+    words = "Mute alerts about this task" if target[0] == "task" else "Mute alerts from this agent"
+    return words, base + "/unsubscribe/" + token, mute_button(token, words)
+
+
 def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
+    from . import practice
+    if practice.active():  # practice mode: personal messages are recorded, never sent
+        practice.record("personal message", "Private chat message", {"items": len(inbox.get("items") or [])})
+        return
     from .personal_identity import linked_channels, principal_current
     settings = _settings()
     if preferences["mode"] == "off" or not principal_current(principal):
@@ -259,13 +358,19 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
             if claimed is None:
                 continue
             ident, fresh = claimed
-            links = []
+            links, buttons = [], []
             for item in fresh[:5]:
                 href = item.get("href", "")
                 if (isinstance(href, str) and href.startswith("/") and not href.startswith("//")
                         and not any(char in href for char in "\r\n\\")):
                     # Why, what and by when, never task text; then the exact link.
-                    links.append(alert_brief(item, time_zone=preferences["timezone"]) + "\n" + base + href)
+                    line = alert_brief(item, time_zone=preferences["timezone"]) + "\n" + base + href
+                    quiet = _mute_choice(principal, base, item)
+                    if quiet:
+                        line += "\n" + quiet[0] + ": " + quiet[1]
+                        if len(buttons) < 4:
+                            buttons.append(quiet[2])
+                    links.append(line)
             text = "Lightwork has " + str(len(fresh)) + " update(s) for you. Sign in to review.\n" + "\n".join(links)
             if len(fresh) > 5 or not links:
                 text += "\n" + base + "/notifications"
@@ -276,13 +381,17 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
                 current = next((value for value in linked_channels(principal) if value["id"] == link["id"]), None)
                 if current != link:
                     raise Refused
-                send_private(link, text)
+                if buttons and link["channel"] == "slack":
+                    reference = send_private(link, text, buttons)
+                else:
+                    reference = send_private(link, text)
             except (Refused, ValueError):
                 store.finish(ident, "failed", "Not accepted. Review the linked identity, channel access and bot configuration. No automatic retry.")
             except Exception:
                 store.finish(ident, "unknown", "Acceptance is unknown. Check the private conversation before another send; no automatic retry.")
             else:
-                store.finish(ident, "accepted", "The service accepted this message. This does not mean you saw it.")
+                store.finish(ident, "accepted", "The service accepted this message. This does not mean you saw it.",
+                             provider_reference=reference)
             return  # One bounded provider dispatch per recipient observation.
 
 

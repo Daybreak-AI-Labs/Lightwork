@@ -110,11 +110,11 @@
     if (!payload || payload.format !== 1 || !payload.editor || !payload.editor.flow || !Array.isArray(payload.editor.flow.nodes) || !payload.base) throw new Error('This recovery copy is not a supported flow draft.');
     var state = payload.editor, source = payload.base;
     if (!Number.isInteger(source.version) || source.version < 0 || typeof source.id !== 'string' || typeof source.revision !== 'string' ||
-        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This flow recovery copy has invalid editor fields. Current work was kept.');
+        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This saved copy of the flow is missing some of its fields, so it was not restored. Current work was kept.');
     var pending = [state.flow];
     while (pending.length) {
       var graph = pending.pop();
-      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This flow recovery copy has invalid steps. Current work was kept.');
+      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This saved copy of the flow has steps that could not be read, so it was not restored. Current work was kept.');
       graph.nodes.forEach(function (node) { if (node.body) pending.push(node.body); });
     }
     var before = JSON.stringify(recoveryPayload());
@@ -734,7 +734,7 @@
     say('Copied ' + stepName(n) + ' — press Ctrl+V to paste it.');
   }
   function pasteNode() {
-    if (!clipboard) { say('Nothing copied yet.'); return; }
+    if (!clipboard) { say('Nothing copied yet. Select a step and choose Copy first.'); return; }
     pushHistory();
     var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
     flow.nodes.push(copy); selectNode(copy.id); render();
@@ -1348,50 +1348,99 @@
   }
   function jsonOr(v) { try { return v && (typeof v === 'object') ? JSON.stringify(v, null, 2) : (v || ''); } catch (e) { return ''; } }
 
-  // ---- structured condition builder (key / op / value) with a raw fallback ----
-  // Grammar lives in FDCore (the unit-tested shared module) -- no copy here.
+  // Ordinary grouped questions use the exact native condition grammar.
   var COND_OPS = FDCore.COND_OPS;
-  var COND_RE = FDCore.COND_RE;
   var OP_WORDS = { '==': 'is', '!=': 'is not', '>': 'is more than', '<': 'is less than',
     '>=': 'is at least', '<=': 'is at most', 'contains': 'contains' };
   function conditionText(c) {
-    var m = COND_RE.exec(c || '');
-    if (!m || / (and|or) /.test(c)) return String(c || '');
-    return human(m[1]) + ' ' + (OP_WORDS[m[2]] || m[2]) + ' ' + m[3];
+    if (!c) return '';
+    try {
+      return FDCore.parseCondition(c).map(function (group) {
+        return group.map(function (question) {
+          return human(question.key) + ' ' + (question.op === 'truthy' ? 'is yes or non-empty' :
+            (OP_WORDS[question.op] || question.op) + ' ' + (question.kind === 'boolean' ? (question.value === 'true' ? 'Yes' : 'No') : question.value));
+        }).join(' and ');
+      }).join(' — or — ');
+    } catch (_) { return 'Saved question — open its settings to review editing options'; }
   }
   function conditionField(n, label) {
     var wrap = document.createElement('div'); wrap.className = 'field';
     var l = document.createElement('div'); l.className = 'fd__label'; l.textContent = label;
     var conditionLabelId = 'fd-condition-label-' + (++fieldSeq);
     l.id = conditionLabelId; wrap.appendChild(l);
-    var complex = / (and|or) /.test(n.condition || '') || (!COND_RE.test(n.condition || '') && !!(n.condition || '').trim());
-    if (complex) {
-      // A combined question written earlier (several parts): keep it, shown in
-      // words, with a way to start over using the builder.
-      var shownText = document.createElement('p'); shownText.className = 'fd__empty'; shownText.textContent = n.condition;
-      wrap.appendChild(shownText);
-      wrap.appendChild(addButton('Replace with a simple question', function () { n.condition = ''; renderProps(); render(); }));
+    var groups;
+    try { groups = n._conditionQuestions || FDCore.parseCondition(n.condition); }
+    catch (error) {
+      wrap.appendChild(hint(error.message));
+      wrap.appendChild(addButton('Replace with new questions', function () {
+        n.condition = ''; delete n._conditionQuestions; delete n._conditionProblem; renderProps(); render();
+      }));
       return wrap;
     }
-    var m = COND_RE.exec(n.condition || '');
-    var cur = { key: m ? m[1] : '', op: m ? m[2] : '==', value: m ? m[3] : '' };
-    function commit() { n.condition = cur.key ? (cur.key + ' ' + cur.op + ' ' + (cur.value || '')).trim() : ''; render(); }
-    var row = document.createElement('div'); row.className = 'fd__pair';
-    var keySel = select(cur.key, keyChoices(n, cur.key, 'Choose information…'), function (v) { cur.key = v; commit(); });
-    keySel.setAttribute('aria-label', label + ': information to check');
-    var opSel = select(cur.op, COND_OPS.map(function (o) { return { v: o, t: OP_WORDS[o] || o }; }), function (v) { cur.op = v; commit(); });
-    opSel.setAttribute('aria-label', label + ': comparison');
-    var valIn = input(cur.value, function (v) { cur.value = v; commit(); }, 'Value');
-    valIn.setAttribute('aria-label', label + ': value');
-    row.appendChild(keySel); row.appendChild(opSel); row.appendChild(valIn);
-    wrap.appendChild(row);
+    var mode = groups.length > 1 ? 'any' : 'all';
+    var editor = document.createElement('div'); editor.className = 'fd__condition-groups'; wrap.appendChild(editor);
+    var notice = document.createElement('p'); notice.className = 'muted'; notice.setAttribute('role', 'status'); wrap.appendChild(notice);
+    function blank() { return {key: '', op: '==', kind: 'text', value: ''}; }
+    function commit() {
+      n._conditionQuestions = groups;
+      try { n.condition = FDCore.conditionQuestions(groups); delete n._conditionProblem; notice.textContent = ''; }
+      catch (error) { n._conditionProblem = error.message; notice.textContent = error.message + ' Finish these questions before saving.'; }
+      render();
+    }
+    function draw() {
+      editor.replaceChildren();
+      var match = select(mode, [{v: 'all', t: 'Match all of these questions'}, {v: 'any', t: 'Match any of these groups'}], function (value) {
+        mode = value;
+        if (mode === 'all') groups = [groups.flat()];
+        else if (groups.length === 1) groups = groups[0].map(function (question) { return [question]; });
+        commit(); draw();
+      });
+      match.setAttribute('aria-label', label + ': which questions must match'); editor.appendChild(match);
+      groups.forEach(function (group, groupIndex) {
+        var section = document.createElement('fieldset'); section.className = 'fd__condition-group'; section.style.minWidth = '0';
+        var legend = document.createElement('legend'); legend.textContent = mode === 'all' ? 'Every question must match' : 'Group ' + (groupIndex + 1) + ' — every question must match';
+        section.appendChild(legend); editor.appendChild(section);
+        group.forEach(function (question, questionIndex) {
+          var row = document.createElement('div'); row.className = 'fd__pair'; row.style.flexWrap = 'wrap';
+          row.dataset.conditionQuestion = String(groupIndex + 1) + '-' + String(questionIndex + 1);
+          var name = label + ', group ' + (groupIndex + 1) + ', question ' + (questionIndex + 1);
+          var keySel = select(question.key, keyChoices(n, question.key, 'Choose information…'), function (value) { question.key = value; commit(); });
+          keySel.setAttribute('aria-label', name + ': information to check'); row.appendChild(keySel);
+          var opSel = select(question.op, COND_OPS.map(function (operator) { return {v: operator, t: OP_WORDS[operator] || operator}; }).concat([{v: 'truthy', t: 'is yes or non-empty'}]), function (value) { question.op = value; commit(); draw(); });
+          opSel.setAttribute('aria-label', name + ': comparison'); row.appendChild(opSel);
+          if (question.op !== 'truthy') {
+            var kindSel = select(question.kind, [{v: 'text', t: 'Text'}, {v: 'number', t: 'Number'}, {v: 'boolean', t: 'Yes or No'}], function (value) {
+              question.kind = value; delete question.literal; if (value === 'boolean') question.value = 'true'; commit(); draw();
+            });
+            kindSel.setAttribute('aria-label', name + ': value type'); row.appendChild(kindSel);
+            var valueInput = question.kind === 'boolean'
+              ? select(question.value, [{v: 'true', t: 'Yes'}, {v: 'false', t: 'No'}], function (value) { question.value = value; delete question.literal; commit(); })
+              : input(question.value, function (value) { question.value = value; delete question.literal; commit(); }, question.kind === 'number' ? 'Number to compare' : 'Text to compare');
+            valueInput.setAttribute('aria-label', name + ': value'); row.appendChild(valueInput);
+          }
+          var remove = addButton('Remove question', function () {
+            group.splice(questionIndex, 1); if (!group.length) groups.splice(groupIndex, 1); if (!groups.length) groups = [[blank()]]; commit(); draw();
+          });
+          remove.setAttribute('aria-label', name + ': remove question'); row.appendChild(remove); section.appendChild(row);
+        });
+        var add = addButton('Add question to this group', function () { group.push(blank()); commit(); draw(); });
+        add.disabled = groups.reduce(function (count, item) { return count + item.length; }, 0) >= 64; section.appendChild(add);
+      });
+      if (mode === 'any') {
+        var addGroup = addButton('Add another matching group', function () { groups.push([blank()]); commit(); draw(); });
+        addGroup.disabled = groups.length >= 32 || groups.reduce(function (count, item) { return count + item.length; }, 0) >= 64; editor.appendChild(addGroup);
+      }
+    }
+    draw();
+    if (n._conditionProblem) notice.textContent = n._conditionProblem + ' Finish these questions before saving.';
+    wrap.appendChild(hint('Groups give you alternative paths. Within a group, every question must match. Zero, No and empty text do not match “is yes or non-empty”.'));
     if (!availableKeys(n.id).length) wrap.appendChild(hint('Name an earlier step’s result, or add a question asked at start, to choose it here.'));
     return wrap;
   }
 
   // ---- serialize / api ----
   function commitRawFields() {
-    return FDCore.commitRawParams(rootFlow).concat(FDActionFields.check(rootFlow));
+    return FDCore.commitRawParams(rootFlow).concat(FDActionFields.check(rootFlow), FDCore.conditionProblems(rootFlow));
   }
   var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
@@ -1620,7 +1669,7 @@
     if (window.mvErrorText) return window.mvErrorText(response, what);
     var status = response && response.status;
     if (status === 409) return 'Could not ' + what + '. This flow was changed since you opened it. Reload it and try again.';
-    return 'Could not ' + what + '. Please try again.';
+    return 'Could not ' + what + '. Try again.';
   }
   // Problems in words, naming the step ("The step “Send to Slack” needs an action chosen.").
   function problemText(f) {
@@ -2043,7 +2092,7 @@
       if (retry) retry.hidden = !draftNotes.length;
     } catch (e) {
       if (generation === draftGeneration) {
-        say(e.message || 'Could not draft the flow. Please try again.', true);
+        say(e.message || 'Could not draft the flow. Try again.', true);
         if (retry) retry.hidden = false;
       }
     } finally {
@@ -2291,16 +2340,20 @@
           copy.addEventListener('click', function () { if (window.mvCopy) window.mvCopy(address); });
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
-          rm.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove start' }))) return;
-            apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
-              .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
-              .catch(function (e) { say(failText(e, 'remove it'), true); });
+          rm.addEventListener('click', function () {
+            // One action with a way back (CTL-1): removed when Undo ends.
+            row.hidden = true;
+            window.mvUndo('“{name}” removed. The other app can no longer start this flow.', { values: {name: t.name},
+              action: 'remove it',
+              run: function (keepalive) { return apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE', keepalive: keepalive }); },
+              undo: function () { row.hidden = false; rm.focus(); },
+              done: function () { showTriggers(); }
+            });
           });
           row.appendChild(nm); row.appendChild(copy); row.appendChild(rm); wl.appendChild(row);
         });
         if (mine.length) wl.appendChild(hint('In the other app, send a web request to the copied address and include the start’s name.'));
-        else wl.appendChild(hint('None yet.'));
+        else wl.appendChild(hint('None yet. Use “Let another app start this flow” below.'));
         wl.appendChild(addButton('Let another app start this flow', function () {
           apiFetch('/api/v1/triggers', { method: 'POST', body: JSON.stringify({ flow: rootFlow.id }) })
             .then(function (r) { return r.json().catch(function () { return {}; }).then(function (jj) { return { ok: r.ok, r: r, j: jj }; }); })
@@ -2708,7 +2761,7 @@
     if (!handoff || handoff.kind !== 'flow' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
         Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
         !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
-      say('This prepared draft is invalid or expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
+      say('This prepared draft cannot be used or has expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
     }
     var brief = document.getElementById('fd-nl');
     function hasDraft() { return brief.value.trim() || draftIsDirty() || rootFlow.id || rootFlow.name || rootFlow.nodes.length; }
@@ -2856,7 +2909,8 @@
     move: moveStep,
     add: addStepAtEnd,
     selected: function () { return selected; },
-    kindLabel: kindLabel
+    kindLabel: kindLabel,
+    conditionText: conditionText
   };
   var _render = render;
   render = function () { _render(); if (window.__fdStepsRefresh) window.__fdStepsRefresh(); };

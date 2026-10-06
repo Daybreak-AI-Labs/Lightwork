@@ -45,7 +45,7 @@
     } catch (failure) {
       status.textContent = window.mvErrorText
         ? window.mvErrorText(failure, 'check separation of duties')
-        : 'Could not check separation of duties. Please try again.';
+        : 'Could not check separation of duties. Try again.';
     } finally {
       button.disabled = false;
     }

@@ -332,7 +332,8 @@ def test_connector_outage_after_effect_stays_indeterminate_and_is_not_retried(
     assert report["summary"]["indeterminate"] == 1
     change = next(item for item in report["events"] if item["name"] == "change_commit")
     assert change["verdict"] == "indeterminate"
-    assert change["observed"]["status"] == "failed"
+    # The gateway records an outage after the effect as indeterminate, not failed.
+    assert change["observed"]["status"] == "indeterminate"
     assert not any(item["name"].startswith("compensation") for item in report["events"])
 
 

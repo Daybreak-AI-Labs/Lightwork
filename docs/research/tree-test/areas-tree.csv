@@ -10,6 +10,7 @@ Home,Home,Overview,/overview
 Home,Home,Get started,/start
 Home,Home,Your first useful result,/get-started/employee
 Work,Tasks,Tasks,/goals
+Work,Tasks,Private task calculations,/private-task-computation
 Work,Tasks,Task handoffs,/task-handoffs
 Work,Tasks,Task map,/graph-editor
 Work,Tasks,3D plan view,/plan-tree-3d
@@ -29,6 +30,7 @@ Work,Workflows,Flow results,/flows/analytics
 Work,Automations,,/automations
 Work,Code changes,Code,/code
 Work,Promise reviews,,/commitment-reviews
+Work,Shared decision reviews,,/decision-evidence
 Work,Hand over a team's work,Autonomous shoring,/shoring
 Agents,Workforce,Workforce,/workforce
 Agents,Workforce,Teams,/fleets
@@ -43,6 +45,16 @@ Agents,Knowledge,Knowledge,/knowledge-access
 Agents,Knowledge,Cortex memory diagnostics,/cortex
 Agents,Knowledge,Facts,/facts
 Agents,Learning,Learning,/learning
+Agents,Learning,Recheck affected rules,/learning/recheck-rules
+Agents,Learning,Find missing distinctions,/learning/distinctions
+Agents,Learning,Check local rules together,/learning/rules-together
+Agents,Learning,Prepare an answer for this request,/learning/request-program
+Agents,Learning,Checked answer regions,/learning/applicability
+Agents,Learning,Rewrite and check local rules,/learning/rule-evolution
+Agents,Learning,Plan teaching questions,/learning/acquisition
+Agents,Learning,Understand a missing reply,/learning/recovery-visibility
+Agents,Learning,Share and qualify local rule structures,/learning/portable-rules
+Agents,Learning,Share preparation safely,/learning/work-restructuring
 Agents,Learning,Approval challenges,/learning/approval-challenges
 Agents,Learning,Instructions used in real work,/learning/instructions
 Agents,Learning,Learned,/learned
@@ -86,7 +98,7 @@ Privacy,Data use rules,Snowflake and Databricks,/data-use/providers
 Privacy,Law research,Privacy law research,/privacy/regulatory-intelligence
 Risk & compliance,Compliance,Compliance,/compliance
 Risk & compliance,Compliance,Autonomous compliance,/autonomous-compliance
-Risk & compliance,Compliance,No-code GRC studio,/compliance/grc-studio
+Risk & compliance,Compliance,Compliance studio,/compliance/grc-studio
 Risk & compliance,Compliance,Continuous evidence,/compliance/continuous-evidence
 Risk & compliance,Compliance,Policy links,/compliance/policy-links
 Risk & compliance,Compliance,Find which controls apply,/compliance/scoping

@@ -65,6 +65,21 @@ _OIDC_EXEMPT_PATHS = frozenset(
     }
 )
 
+# Restricted recovery authenticates each POST with the original owner's
+# passphrase and fresh local policy. Exact paths; no general login bypass.
+SELF_AUTH_SIGNIN_RECOVERY_PATHS = frozenset({
+    "/auth/company-signin-recovery",
+    "/auth/company-signin-recovery/lookup",
+    "/auth/company-signin-recovery/original",
+    "/auth/company-signin-recovery/review",
+    "/auth/company-signin-recovery/apply",
+    "/auth/company-saml-recovery",
+    "/auth/company-saml-recovery/lookup",
+    "/auth/company-saml-recovery/original",
+    "/auth/company-saml-recovery/review",
+    "/auth/company-saml-recovery/apply",
+})
+
 SELF_AUTH_WEBHOOK_PATHS = frozenset(
     {
         "/webhook/start",
@@ -102,6 +117,8 @@ PUBLIC_STATIC_PATHS = frozenset(
         # The public share page formats its answer with this dependency-free
         # renderer, which builds DOM from text and carries no data.
         "/static/lightwork-markdown.js",
+        "/static/lightwork-company-signin-migration.js",
+        "/static/lightwork-company-saml-setup.js",
     }
 )
 
@@ -118,7 +135,7 @@ _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | PUBLIC_STATIC_PATHS | frozenset(
         # credential. Keep in step with app._AUTH_EXEMPT.
         "/consent/webhook",
     }
-) | SELF_AUTH_WEBHOOK_PATHS
+) | SELF_AUTH_WEBHOOK_PATHS | SELF_AUTH_SIGNIN_RECOVERY_PATHS
 
 
 def route_path(connection) -> str:
@@ -161,7 +178,7 @@ def _self_authenticated_path(path: str) -> bool:
     The trailing slashes matter: the ADMIN surfaces stay under normal dashboard
     authentication."""
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
-        ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
+        ("/share/", "/scim/", "/form/", "/dsar/response/", "/unsubscribe/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
          "/api/v1/public/consent/", "/api/v1/public/policies/",
          "/api/v1/devices/pairing/", "/rights/", "/api/v1/public/rights/")
@@ -215,8 +232,9 @@ def _saml_policy_configured() -> bool:
     ``saml_enabled`` intentionally reports only a *complete* SP setup so its
     routes can remain inert while an operator fills in the template.  That is
     the wrong predicate for the local-admin compatibility exception: once a
-    non-empty ``[auth.saml]`` table exists, incomplete or invalid policy must
-    lock anonymous access down instead of silently behaving as auth-off.
+    non-empty legacy ``[auth.saml]`` table exists, incomplete or invalid policy
+    must lock anonymous access down. Explicit ``enabled = false`` is a staged
+    configuration; it does not replace the installation's current sign-in.
     """
     try:
         from maverick.config import config_source_errors, load_config
@@ -236,6 +254,8 @@ def _saml_policy_configured() -> bool:
     if "saml" not in auth:
         return False
     saml = auth["saml"]
+    if isinstance(saml, dict) and saml.get("enabled") is False:
+        return False
     return bool(saml) if isinstance(saml, dict) else True
 
 
@@ -890,7 +910,7 @@ def can_access_goal_principal(principal: str | None, goal) -> bool:
     return getattr(goal, "owner", "") == principal
 
 
-def can_access_goal(request: Request, goal) -> bool:
+def _goal_read_policy(request: Request, goal) -> bool:
     """Whether the caller may read/mutate ``goal``.
 
     Ownership grants normal access. A named administrator needs an independent
@@ -913,6 +933,27 @@ def can_access_goal(request: Request, goal) -> bool:
 
     return may_read_employee_content(request, getattr(goal, "owner", ""),
                                      resource_kind="goal", resource_id=str(goal.id))
+
+
+def can_access_goal(request: Request, goal) -> bool:
+    """A copied conversation keeps every original source's current access rules."""
+    if not _goal_read_policy(request, goal):
+        return False
+    from maverick.attachments import AttachmentRejected
+    from maverick.chat_message_actions import require_copy_sources
+    from maverick.knowledge_task_context import SourceContextUnavailable
+
+    from ._shared import _world
+
+    def authorize(source):
+        if not _goal_read_policy(request, source):
+            raise PermissionError("A copied source is unavailable to this account.")
+
+    try:
+        require_copy_sources(_world(), goal.id, authorize=authorize)
+    except (PermissionError, SourceContextUnavailable, AttachmentRejected):
+        return False
+    return True
 
 
 def assert_goal_access(request: Request, goal) -> None:

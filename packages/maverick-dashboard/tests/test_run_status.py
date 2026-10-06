@@ -75,7 +75,7 @@ def test_recents_and_badge_agree_on_a_run_that_stopped_on_the_ai_connection(chat
     row = _recents(client)[str(goal_id)]
     assert ">Stopped</span>" in row
     page = client.get(f"/chat/goal/{goal_id}").text
-    assert _badge(page) == "stopped"
+    assert _badge(page) == "Stopped"  # the same word as the recents row
 
 
 def test_badge_never_shows_the_raw_active_status(chat):
@@ -83,7 +83,7 @@ def test_badge_never_shows_the_raw_active_status(chat):
     goal_id = _send(client)
     world.set_goal_status(goal_id, "active")
     page = client.get(f"/chat/goal/{goal_id}").text
-    assert _badge(page) == "working"
+    assert _badge(page) == "Working"
     # The page loads the shared vocabulary before its own script uses it.
     assert "lightwork-run-status.js" in page
     assert page.index("lightwork-run-status.js") < page.index("window.LightworkRunStatus")

@@ -244,11 +244,11 @@ ROWS = [('Interface language', 'Langue de l’interface', 'Sprache der Oberfläc
   'Ihre neuesten Einstiegsentwürfe',
   '最近の開始用下書き',
   '最近的入门草稿'),
- ('No saved drafts in this workspace.',
-  'Aucun brouillon enregistré dans cet espace.',
-  'Keine gespeicherten Entwürfe in diesem Arbeitsbereich.',
-  'このワークスペースに保存された下書きはありません。',
-  '此工作区中没有已保存的草稿。'),
+ ('No saved drafts in this workspace. Use Save private draft above to keep your first one.',
+  'Aucun brouillon enregistré dans cet espace. Utilisez Enregistrer le brouillon privé ci-dessus pour conserver le premier.',
+  'Keine gespeicherten Entwürfe in diesem Arbeitsbereich. Mit „Privaten Entwurf speichern“ oben behalten Sie Ihren ersten.',
+  'このワークスペースに保存された下書きはありません。上の「非公開の下書きを保存」で最初の下書きを保存できます。',
+  '此工作区中没有已保存的草稿。使用上方的“保存私人草稿”保留第一份草稿。'),
  ('Search uses your current document-source permissions. Selecting a result does not fetch its contents '
   'until you explicitly start the reviewed task.',
   'La recherche respecte vos autorisations actuelles sur les sources. Le contenu du résultat sélectionné '

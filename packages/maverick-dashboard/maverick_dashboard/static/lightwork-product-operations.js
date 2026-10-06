@@ -24,6 +24,22 @@
   }
   if (search) search.addEventListener('input', filterControls);
   function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.disabled = busy; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
+  function protectedControls(parent, label, href, open) {
+    var started = generation, selection = JSON.stringify(context());
+    if (typeof open !== 'function') { var link = node('a', label, parent); link.href = href; link.className = 'btn btn--ghost'; return; }
+    button(label, parent, async function (event) {
+      var isCurrent = function () { return active(started) && JSON.stringify(context()) === selection; };
+      if (!isCurrent() || busy) return;
+      lock(true);
+      try {
+        var opened = await open(isCurrent);
+        if (!isCurrent()) return;
+        status.textContent = opened ? 'The complete controls are open; your entered choices were kept.' : 'The selection or your access changed. Review the current controls.';
+        if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+      } catch (_) { if (isCurrent()) status.textContent = 'The controls could not be opened. Your current work is kept.'; }
+      finally { lock(false); }
+    });
+  }
   function context() {
     if (overrideSelection) return overrideSelection;
     var approval = window.location.hash.match(/^#approval-([1-9]\d*)$/);
@@ -43,6 +59,8 @@
       try { return {kind: 'flow', id: decodeURIComponent(flow[1])}; } catch (_) { return {}; }
     }
     var query = new URLSearchParams(window.location.search);
+    var specialist = query.get('name');
+    if (window.location.pathname === '/agents' && specialist && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(specialist)) return {name: specialist};
     var learningPass = query.get('learning_pass');
     if (window.location.pathname === '/learned' && learningPass && /^[a-f0-9]{32}$/.test(learningPass))
       return {kind: 'learning_pass', operation: learningPass};
@@ -93,6 +111,11 @@
     var complete = true, fullReview = !!(options && options.complete), remaining = fullReview ? 8192 : 160;
     var maximumEntries = fullReview ? 2048 : 35, maximumDepth = fullReview ? 12 : 6;
     function omitted(target) { complete = false; node('p', 'The complete details are available in the full controls.', target); }
+    function changeRow(item) {
+      return fullReview && item && typeof item === 'object' && !Array.isArray(item) && typeof item.label === 'string' &&
+        Object.keys(item).every(function (key) { return ['label', 'before', 'after'].includes(key); }) &&
+        (Object.prototype.hasOwnProperty.call(item, 'before') || Object.prototype.hasOwnProperty.call(item, 'after'));
+    }
     function append(target, item, depth) {
       if (--remaining < 0 || depth > maximumDepth) { omitted(target); return; }
       if (item === null || item === undefined) { node('span', 'Not specified', target); return; }
@@ -100,19 +123,86 @@
         var text = node('span', typeof item === 'boolean' ? (item ? 'Yes' : 'No') : item, target);
         text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere'; return;
       }
-      if (typeof item.href === 'string' && typeof item.label === 'string' && safeLocalHref(item.href)) {
+      if (typeof item.href === 'string' && typeof item.label === 'string' && safeLocalHref(item.href) &&
+          (!fullReview || Object.keys(item).sort().join(',') === 'href,label')) {
         var local = node('a', item.label, target); local.href = item.href; local.className = 'btn btn--ghost'; return;
       }
       if (Array.isArray(item)) {
-        var ordered = node('ol', undefined, target);
-        item.slice(0, maximumEntries).forEach(function (entry) { append(node('li', undefined, ordered), entry, depth + 1); });
+        var named = item.every(changeRow), ordered = node(named ? 'div' : 'ol', undefined, target);
+        item.slice(0, maximumEntries).forEach(function (entry) { append(node(named ? 'section' : 'li', undefined, ordered), entry, depth + 1); });
         if (item.length > maximumEntries) omitted(target);
+        return;
+      }
+      if (changeRow(item)) {
+        var heading = node('h4', undefined, target);
+        append(heading, item.label, depth + 1);
+        heading.style.whiteSpace = 'pre-wrap'; heading.style.overflowWrap = 'anywhere';
+        if (Object.prototype.hasOwnProperty.call(item, 'before') && Object.prototype.hasOwnProperty.call(item, 'after')) {
+          var values = node('dl', undefined, target);
+          ['before', 'after'].forEach(function (key) {
+            node('dt', key === 'before' ? 'Current' : 'Proposed', values);
+            append(node('dd', undefined, values), item[key], depth + 1);
+          });
+        } else append(node('div', undefined, target), Object.prototype.hasOwnProperty.call(item, 'after') ? item.after : item.before, depth + 1);
         return;
       }
       var list = node('dl', undefined, target);
       var entries = Object.entries(item);
       if (entries.length > maximumEntries) omitted(target);
       entries.slice(0, maximumEntries).forEach(function (entry) {
+        if (entry[0] === 'specialist_draft_author') {
+          var specialistAuthor = entry[1];
+          if (!specialistAuthor || Array.isArray(specialistAuthor) || Object.keys(specialistAuthor).sort().join(',') !== 'binding,context,name' ||
+              !/^[a-f0-9]{64}$/.test(specialistAuthor.context || '') || !/^[a-f0-9]{64}$/.test(specialistAuthor.binding || '') ||
+              !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(specialistAuthor.name || '')) return;
+          var specialistControl = window.LWSpecialistDrafts;
+          protectedControls(node('dd', undefined, list), 'Open complete specialist draft controls',
+            '/agents?name=' + encodeURIComponent(specialistAuthor.name) + '#specialist-drafts',
+            specialistControl && typeof specialistControl.openAuthor === 'function'
+              ? function (isCurrent) { return specialistControl.openAuthor(specialistAuthor, {isCurrent: isCurrent}); } : null);
+          return;
+        }
+        if (entry[0] === 'outcome_pilot_form') {
+          var pilotForm = entry[1];
+          if (!pilotForm || Array.isArray(pilotForm) || Object.keys(pilotForm).sort().join(',') !== 'action,case,context,pilot' ||
+              typeof pilotForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(pilotForm.context) ||
+              !['plan','prepare','observe','review','costs','value','history'].includes(pilotForm.action) ||
+              typeof pilotForm.pilot !== 'string' || !/^(?:OPL-[a-f0-9]{48})?$/.test(pilotForm.pilot) ||
+              typeof pilotForm.case !== 'string' || !/^(?:[1-9]\d?|100)?$/.test(pilotForm.case)) return;
+          var pilotControl = window.LightworkOutcomePilots;
+          protectedControls(node('dd', undefined, list), 'Open complete pilot controls',
+            '/outcome-pilots' + (pilotForm.pilot ? '?pilot=' + encodeURIComponent(pilotForm.pilot) : ''),
+            pilotControl && typeof pilotControl.open === 'function' ? function (isCurrent) { return pilotControl.open(pilotForm, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'chat_message_action') {
+          var chatForm = entry[1];
+          if (!chatForm || Array.isArray(chatForm) || Object.keys(chatForm).sort().join(',') !== 'action,context,goal,source' ||
+              typeof chatForm.context !== 'string' || typeof chatForm.source !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(chatForm.context || '') || !/^[a-f0-9]{64}$/.test(chatForm.source || '') ||
+              !Number.isSafeInteger(chatForm.goal) || chatForm.goal < 1 || !['retry','edit','branch'].includes(chatForm.action)) return;
+          var chatControl = window.LightworkChatMessageActions;
+          var chatLabel = {retry:'Try another answer', edit:'Edit and resend your message', branch:'Branch from a saved answer'}[chatForm.action];
+          protectedControls(node('dd', undefined, list), chatLabel, '/chat/goal/' + chatForm.goal,
+            chatControl && typeof chatControl.open === 'function' ? function (isCurrent) {
+              return chatControl.open(chatForm.context, chatForm.goal, chatForm.action, chatForm.source, isCurrent);
+            } : null);
+          return;
+        }
+        if (entry[0] === 'decision_evidence_author') {
+          var decisionForm = entry[1];
+          if (!decisionForm || Array.isArray(decisionForm) || Object.keys(decisionForm).sort().join(',') !== 'binding,context,review' ||
+              typeof decisionForm.context !== 'string' || typeof decisionForm.binding !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(decisionForm.context || '') || !/^[a-f0-9]{64}$/.test(decisionForm.binding || '') ||
+              typeof decisionForm.review !== 'string' || !/^(?:SDE-[a-f0-9]{32})?$/.test(decisionForm.review)) return;
+          var decisionControl = window.LWDecisionEvidence;
+          protectedControls(node('dd', undefined, list), 'Open the complete decision form',
+            '/decision-evidence' + (decisionForm.review ? '?review=' + encodeURIComponent(decisionForm.review) : '') + '#sde-editor',
+            decisionControl && typeof decisionControl.openAuthor === 'function' ? function (isCurrent) {
+              return decisionControl.openAuthor(decisionForm, {isCurrent:isCurrent});
+            } : null);
+          return;
+        }
         if (entry[0] === 'channels_people') {
           var channelPeople = entry[1], channelStarted = generation, channelSelection = JSON.stringify(context());
           if (!channelPeople || Array.isArray(channelPeople) || Object.keys(channelPeople).sort().join(',') !== 'channel,context' ||
@@ -281,6 +371,24 @@
           else { var healthLink = node('a', 'Open installation health checks', healthDestination); healthLink.href = '/help#installation-health'; healthLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'company_saml_setup') {
+          var samlForm = entry[1], samlControl = window.LightworkCompanySamlSetup;
+          if (!samlForm || Array.isArray(samlForm) || Object.keys(samlForm).sort().join(',') !== 'context,original' ||
+              typeof samlForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(samlForm.context) || typeof samlForm.original !== 'boolean') return;
+          protectedControls(node('dd', undefined, list), 'Open complete single sign-on setup',
+            '/settings/all#company-saml-setup', samlControl && typeof samlControl.open === 'function'
+              ? function (isCurrent) { return samlControl.open(samlForm.context, samlForm.original, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'company_signin_migration') {
+          var signinForm = entry[1], signinControl = window.LightworkCompanySigninMigration;
+          if (!signinForm || Array.isArray(signinForm) || Object.keys(signinForm).sort().join(',') !== 'context,original' ||
+              typeof signinForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(signinForm.context) || typeof signinForm.original !== 'boolean') return;
+          protectedControls(node('dd', undefined, list), 'Open reviewed company sign-in controls',
+            '/settings/all#company-signin-migration', signinControl && typeof signinControl.open === 'function'
+              ? function (isCurrent) { return signinControl.open(signinForm.context, signinForm.original, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'settings_catalog_form') {
           var catalogForm = entry[1], catalogStarted = generation, catalogSelection = JSON.stringify(context());
           if (!catalogForm || Array.isArray(catalogForm) || Object.keys(catalogForm).sort().join(',') !== 'context,original' ||
@@ -322,6 +430,31 @@
             finally { if (isCurrent() && regionButton.isConnected) regionButton.disabled = false; }
           });
           else { var regionLink = node('a', 'Open complete checked answer regions', regionDestination); regionLink.href = '/learning/applicability?' + new URLSearchParams({flow: regionForm.flow, original: regionForm.original}).toString() + '#apr-author-h'; regionLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'capability_assessment') {
+          var assessmentForm = entry[1], assessmentStarted = generation, assessmentSelection = JSON.stringify(context());
+          if (!assessmentForm || Array.isArray(assessmentForm) || Object.keys(assessmentForm).sort().join(',') !== 'context,kind,review,revision,source,subject' ||
+              !/^[a-f0-9]{64}$/.test(assessmentForm.context || '') || !/^[a-f0-9]{64}$/.test(assessmentForm.source || '') ||
+              !['agent', 'flow'].includes(assessmentForm.kind) || typeof assessmentForm.subject !== 'string' ||
+              !assessmentForm.subject || assessmentForm.subject.length > 256 || !Number.isSafeInteger(assessmentForm.revision) ||
+              assessmentForm.revision < 0 || typeof assessmentForm.review !== 'boolean') return;
+          var assessmentDestination = node('dd', undefined, list), assessmentControls = window.LightworkCapabilityAssessments;
+          var assessmentLabel = assessmentForm.review ? 'Open the complete assessment review' : 'Read the complete assessment findings';
+          if (window.location.pathname === '/assessments' && assessmentControls && typeof assessmentControls.open === 'function') button(assessmentLabel, assessmentDestination, async function (event) {
+            var isCurrent = function () { return active(assessmentStarted) && JSON.stringify(context()) === assessmentSelection; };
+            if (!isCurrent() || busy) return;
+            var assessmentButton = event.currentTarget; assessmentButton.disabled = true;
+            try {
+              var opened = await assessmentControls.open(assessmentForm.context, assessmentForm.kind, assessmentForm.subject,
+                assessmentForm.revision, assessmentForm.source, assessmentForm.review, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete current assessment is open. Review any decision there.' : 'Your current work is kept. Check the selected assessment and access again.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The assessment could not be opened. Your current review is kept.'; }
+            finally { if (isCurrent() && assessmentButton.isConnected) assessmentButton.disabled = false; }
+          });
+          else { var assessmentLink = node('a', assessmentLabel, assessmentDestination); assessmentLink.href = '/assessments'; assessmentLink.className = 'btn btn--ghost'; }
           return;
         }
         if (entry[0] === 'report_download') {
@@ -1061,6 +1194,23 @@
       (item.fields || []).forEach(function (spec) { var setup = createField(spec, form, controls); if (setup) dependents.push(setup); });
       dependents.forEach(function (setup) { setup(); });
       var submit = node('button', item.confirmation_required ? 'Review change' : 'Check current status', form); submit.type = 'submit'; submit.className = 'btn btn--primary';
+      if (item.id === 'specialists.drafts.save' && controls.name) {
+        var initialSpecialist = controls.name(), specialistChoice = form.elements.namedItem('name');
+        var selectionNote = node('p', undefined, form), reloadSpecialist = button('Load selected specialist’s current fields', form, async function () {
+          if (busy || controls.name() === initialSpecialist) return;
+          overrideSelection = Object.assign({}, context(), {name: controls.name()});
+          generation += 1; cancelRequests(); catalog = null; selected = null; clear(buttons);
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {detail: {reason: 'selection'}}));
+          await openOperation(item.id);
+        });
+        reloadSpecialist.hidden = true;
+        specialistChoice.addEventListener('change', function () {
+          var changed = controls.name() !== initialSpecialist;
+          specialistChoice.setCustomValidity(changed ? 'Load the selected specialist’s current fields before reviewing this draft.' : '');
+          selectionNote.textContent = changed ? 'Your entered work is kept below. Loading this specialist replaces these fields with its current settings; returning to the previous choice keeps your edits.' : '';
+          reloadSpecialist.hidden = !changed; submit.disabled = busy || changed;
+        });
+      }
       form.addEventListener('submit', async function (event) {
         event.preventDefault(); if (busy || !form.reportValidity()) return;
         var args = {}; Object.keys(controls).forEach(function (key) { args[key] = controls[key](); });
@@ -1104,6 +1254,18 @@
               : item.id === 'learning.run_joint_rules'
                 ? !!(window.LightworkJointRules && window.LightworkJointRules.renderReview &&
                      window.LightworkJointRules.renderReview(formHost, review.changes) === true)
+              : ['learning.pilot_prepare_task', 'learning.pilot_freeze_plan', 'learning.pilot_observe', 'learning.pilot_independent_review'].includes(item.id)
+                ? !!(window.LightworkOutcomePilots && window.LightworkOutcomePilots.renderReview &&
+                     window.LightworkOutcomePilots.renderReview(formHost, review.changes) === true)
+              : item.id === 'workspaces.erase'
+                ? !!(window.LWWorkspaceErasure && window.LWWorkspaceErasure.renderReview &&
+                     window.LWWorkspaceErasure.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('specialists.drafts.')
+                ? !!(window.LWSpecialistDrafts && window.LWSpecialistDrafts.renderReview &&
+                     window.LWSpecialistDrafts.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('conversations.human.')
+                ? !!(window.LWHumanConversations && window.LWHumanConversations.renderReview &&
+                     window.LWHumanConversations.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)

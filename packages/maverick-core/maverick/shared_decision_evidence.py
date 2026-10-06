@@ -82,7 +82,8 @@ def _definitions(facts, cases):
 
 def validate(model):
     """Reject incomplete/oversized models; never retain a truncated model."""
-    if set(model) != {"title", "facts", "cases", "states", "question_budget", "effort_budget"}:
+    required = {"title", "facts", "cases", "states", "question_budget", "effort_budget"}
+    if set(model) not in (required, required | {"robust"}):
         raise ValueError("choose a complete finite decision model")
     _text(model["title"], "Review name", 200)
     facts, cases, states = model["facts"], model["cases"], model["states"]
@@ -101,6 +102,9 @@ def validate(model):
             raise ValueError("each joint state must give exactly one declared value for every fact")
     if len({digest(state) for state in states}) != len(states):
         raise ValueError("joint states must be unique")
+    if "robust" in model:
+        from .robust_decisions import validate_section
+        validate_section(model, model["robust"])
     return model
 
 

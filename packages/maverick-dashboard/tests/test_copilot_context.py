@@ -75,7 +75,7 @@ CANONICAL_CONTEXTS = {
     "/data-use": "Data use rules",
     "/data-use/providers": "Snowflake and Databricks",
     "/compliance": "Compliance",
-    "/compliance/grc-studio": "No-code GRC studio",
+    "/compliance/grc-studio": "Compliance studio",
     "/compliance/policy-links": "Policy links",
     "/compliance/scoping": "Find which controls apply",
     "/compliance/scope-actions": "Turn scope into tasks",
@@ -95,6 +95,20 @@ CANONICAL_CONTEXTS = {
     "/security/governance": "AI governance",
     "/security/assurance": "AI assurance",
     "/assessments": "Assessments",
+    "/decision-evidence": "Shared decision reviews",
+    "/private-task-computation": "Private task calculations",
+    "/learning/approval-challenges": "Approval challenges",
+    "/learning/distinctions": "Find missing distinctions",
+    "/learning/applicability": "Checked answer regions",
+    "/learning/rule-evolution": "Rewrite and check local rules",
+    "/learning/acquisition": "Plan teaching questions",
+    "/learning/rules-together": "Check local rules together",
+    "/learning/request-program": "Prepare an answer for this request",
+    "/learning/recovery-visibility": "Understand a missing reply",
+    "/learning/portable-rules": "Share and qualify local rule structures",
+    "/learning/work-restructuring": "Share preparation safely",
+    "/learning/recheck-rules": "Recheck affected rules",
+    "/learning/instructions": "Instructions used in real work",
 }
 
 
@@ -201,7 +215,10 @@ def test_hand_written_guides_use_the_registry_page_name() -> None:
 def test_every_registered_dashboard_page_gets_page_specific_copilot_help() -> None:
     from maverick_dashboard.ui_visibility import PAGES
 
-    explicit = {context.path for context in copilot_context._CONTEXTS}
+    # Registered contexts, plus the pages context_for_page writes by hand.
+    explicit = {context.path for context in copilot_context._CONTEXTS} | {
+        "/compliance/scope-actions/mapping", "/settings/local-ai",
+        "/settings/security-installation", "/settings/all"}
     for page in PAGES:
         context = copilot_context.context_for_page(page["path"])
         assert context.path == page["path"]

@@ -79,9 +79,9 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
     return (
         # ------------------------------------------------ company sign-in
         S("auth.oidc", "enabled", "Sign in with your company account",
-          "People sign in with your company's sign-in provider instead of using Lightwork on "
-          "this computer without signing in. Fill in the provider's details below and use "
-          "Test connection before turning this on.",
+          "People use your company's sign-in provider. Save its details, try a real company "
+          "sign-in and separately grant the intended administrator access before reviewing "
+          "activation. A provider connection check alone is insufficient.",
           "toggle", grp, False, "maverick.oidc", subgroup=oidc, test="oidc",
           env=("MAVERICK_OIDC_ENABLED",), weaker=False,
           warning="People will no longer need your company sign-in to use Lightwork.",
@@ -146,6 +146,13 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "text", grp, "", "maverick_dashboard.oidc_login", subgroup=oidc, pattern=_HTTPS,
           max_length=300, env=("MAVERICK_OIDC_END_SESSION_ENDPOINT",), aliases="logout"),
         # --------------------------------------------------- single sign-on
+        S("auth.saml", "enabled", "Allow configured single sign-on",
+          "Use single sign-on only when the provider details and sign-in components are ready. "
+          "Guided setup saves details with this off; verify a real account and review activation separately. "
+          "Older complete configurations without this choice keep their existing behavior.",
+          "toggle", grp, True, "maverick_dashboard.saml", subgroup=saml, weaker=False,
+          warning="People will no longer need this single sign-on provider to use Lightwork.",
+          aliases="saml single sign-on activate stage"),
         S("auth.saml", "idp_metadata_url", "Address of your provider's details",
           "The web address where your single sign-on provider publishes its details for "
           "Lightwork. Use Test connection to check it.",
@@ -154,7 +161,7 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Lightwork will trust sign-ins from a different provider.",
           aliases="saml metadata identity provider"),
         S("auth.saml", "idp_metadata_file", "File with your provider's details",
-          "Instead of an address: a file on the server with your provider's details.",
+          "Guided single sign-on setup stores an uploaded provider file privately. Existing server-file locations remain supported.",
           "path", grp, "", "maverick_dashboard.saml", subgroup=saml, path_kind="file",
           max_length=400, weaker="change",
           warning="Lightwork will trust sign-ins from a different provider.",

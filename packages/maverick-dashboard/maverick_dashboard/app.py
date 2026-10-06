@@ -58,8 +58,12 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth_metrics as _auth_metrics
+from . import (
+    capability_assessment_controls_api,
+    learning_acquisition_api,
+    runtime_policy_recovery_api,
+)
 from . import health_routes as _health_routes
-from . import runtime_policy_recovery_api
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -75,6 +79,7 @@ from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
     BOARD_SCOPE_DETAIL,
     PUBLIC_STATIC_PATHS,
+    SELF_AUTH_SIGNIN_RECOVERY_PATHS,
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
@@ -101,6 +106,7 @@ from .auth import (
     websocket_caller_principal,
 )
 from .budget_guidance_api import router as budget_guidance_router
+from .chat_message_actions_api import router as chat_message_actions_router
 from .commitment_viability_api import router as commitment_viability_router
 from .conversation_inbox_api import router as conversation_inbox_router
 from .conversation_organization import present_title as _conversation_title
@@ -142,8 +148,11 @@ from .route_identity import (
 )
 from .settings_experience import router as settings_experience_router
 from .settings_runtime_status import router as settings_runtime_router
+from .specialist_drafts_api import router as specialist_drafts_router
+from .static_asset_versioning import AssetVersionExtension, cache_response
 from .task_diagnostics import router as task_diagnostics_router
 from .task_handoffs_api import router as task_handoffs_router
+from .workspace_erasure_api import router as workspace_erasure_router
 
 _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
 _USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
@@ -278,6 +287,9 @@ templates.env.filters["identity"] = _idfmt.humanize_principal
 templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
+from .approval_labels import action_label as _approval_action_label  # noqa: E402
+
+templates.env.globals["approval_action_label"] = _approval_action_label
 # One run-status vocabulary for the chat badge, composer and recents.
 from maverick.channel_approvals import spending_text as _approval_spending  # noqa: E402
 
@@ -307,32 +319,44 @@ templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
 templates.env.globals.setdefault("dir", "ltr")
 
-# Fingerprinted static URLs (W3-77). The shell CSS/JS links in base.html carry
-# a content hash (``/static/x.js?v=<sha256[:8]>``) computed once per process
-# from the file bytes, so a versioned request can be cached for a year while
-# an upgrade changes the URL and takes effect on the next page load -- no more
-# five minutes of mismatched CSS/JS against new HTML. Unversioned requests
-# (older pages, direct links) keep the short cache.
+# Content-versioned static URLs refresh when bundled file metadata changes.
+# Matching public versions may be cached for a year; canonical/stale script
+# and stylesheet URLs revalidate. Missing files are checked again next time.
 _SHELL_STATIC_DIR = Path(__file__).parent / "static"
-_STATIC_VERSIONS: dict[str, str] = {}
+_STATIC_VERSIONS: dict[str, tuple[tuple, str]] = {}
 STATIC_IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 STATIC_SHORT_CACHE = "public, max-age=300"
 
 
 def static_version(name: str) -> str:
-    """Short content hash of a bundled static asset ("" when unreadable, so
-    the link stays unversioned and short-cached rather than breaking)."""
-    cached = _STATIC_VERSIONS.get(name)
-    if cached is not None:
-        return cached
-    version = ""
-    if name and "/" not in name and not name.startswith("."):
-        try:
-            version = hashlib.sha256((_SHELL_STATIC_DIR / name).read_bytes()).hexdigest()[:8]
-        except OSError:
-            version = ""
-    _STATIC_VERSIONS[name] = version
-    return version
+    """Content hash cached against file identity, size and modification times.
+
+    An unreadable/changing file stays unversioned and is retried next time.
+    Public page controllers then use native revalidation rather than immutable
+    caching; other static routes retain their existing native cache policy.
+    """
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return ""
+    path = _SHELL_STATIC_DIR / name
+    try:
+        before = path.stat()
+        identity = (str(path), before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns)
+        cached = _STATIC_VERSIONS.get(name)
+        if cached is not None and cached[0] == identity:
+            return cached[1]
+        contents = path.read_bytes()
+        after = path.stat()
+        if identity != (str(path), after.st_dev, after.st_ino, after.st_size,
+                        after.st_mtime_ns, after.st_ctime_ns) or len(contents) != after.st_size:
+            _STATIC_VERSIONS.pop(name, None)
+            return ""
+        version = hashlib.sha256(contents).hexdigest()[:8]
+        _STATIC_VERSIONS[name] = identity, version
+        return version
+    except OSError:
+        _STATIC_VERSIONS.pop(name, None)
+        return ""
 
 
 def static_url(name: str) -> str:
@@ -342,13 +366,41 @@ def static_url(name: str) -> str:
 
 
 templates.env.globals["static_url"] = static_url
+templates.env.add_extension(AssetVersionExtension)
+
+
+def _comments_enabled() -> bool:
+    """Whether comment threads show on tasks, runs, approvals and policies."""
+    try:
+        from maverick.comments import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no thread
+        return False
+
+
+templates.env.globals["comments_enabled"] = _comments_enabled
+
+
+def _suggestions_enabled() -> bool:
+    """Whether suggested edits show on AI use rules."""
+    try:
+        from maverick.policy_suggestions import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no suggestions
+        return False
+
+
+templates.env.globals["suggestions_enabled"] = _suggestions_enabled
 
 
 class StaticCacheMiddleware:
-    """Long-cache a ``/static/`` response only when its ``?v=`` matches the
-    asset's current content hash; every other static request keeps the route's
-    own short ``Cache-Control``. Pure ASGI so the 60+ static routes stay as
-    they are."""
+    """Cache matching public asset versions; revalidate public page controllers.
+
+    Public fixed script/style routes are admitted normally before conditional
+    responses; all private, denied and unknown assets keep native behavior.
+    """
 
     def __init__(self, app) -> None:
         self.app = app
@@ -359,25 +411,23 @@ class StaticCacheMiddleware:
             return
         name = scope["path"].rsplit("/", 1)[-1]
         query = scope.get("query_string", b"").decode("latin-1")
-        wanted = static_version(name)
-        immutable = bool(wanted) and any(
-            part == f"v={wanted}" for part in query.split("&")
-        )
-        if not immutable:
-            await self.app(scope, receive, send)
-            return
-
-        async def send_immutable(message) -> None:
-            if message.get("type") == "http.response.start" and message.get("status") == 200:
-                headers = [
-                    (k, v) for k, v in message.get("headers", [])
-                    if k.lower() != b"cache-control"
-                ]
-                headers.append((b"cache-control", STATIC_IMMUTABLE_CACHE.encode("ascii")))
-                message = {**message, "headers": headers}
+        unchanged = False
+        async def send_cached(message) -> None:
+            nonlocal unchanged
+            if message.get("type") == "http.response.start":
+                # Route authorization and any file-response wait happened first.
+                wanted = static_version(name)
+                immutable = bool(wanted) and any(
+                    part == f"v={wanted}" for part in query.split("&")
+                )
+                message, unchanged = cache_response(scope, message, wanted, immutable)
+            elif unchanged:
+                if message.get("type") == "http.response.pathsend" or not message.get("more_body", False):
+                    await send({"type": "http.response.body", "body": b""})
+                return
             await send(message)
 
-        await self.app(scope, receive, send_immutable)
+        await self.app(scope, receive, send_cached)
 
 
 from .i18n import t as _i18n_t  # noqa: E402
@@ -580,6 +630,7 @@ def _account_pages_unavailable(request: Request) -> set[str]:
     from . import (
         device_pairing_api,
         employee_activation,
+        human_conversation_handoffs,
         permission_requests_api,
         personal_notifications_api,
     )
@@ -588,7 +639,8 @@ def _account_pages_unavailable(request: Request) -> set[str]:
     for path, admit in (("/access-requests", permission_requests_api.authority),
                         ("/devices", device_pairing_api._principal),
                         ("/get-started/employee", employee_activation.actor),
-                        ("/notifications", personal_notifications_api.page_authority)):
+                        ("/notifications", personal_notifications_api.page_authority),
+                        ("/human-conversations", human_conversation_handoffs.authority)):
         try:
             admit(request)
         except Exception:  # a refused or unreadable check hides the link
@@ -710,10 +762,21 @@ def _nav_context(request: Request) -> dict:
                                      can_open_page=can_open_page, global_admin=viewer_global_admin,
                                      personal=personal),
         "nav_go_to_keys": GO_TO_KEYS,
+        # Where a page kept out of the sidebar sits: its highlighted parent in
+        # the sidebar and the breadcrumb (ui_visibility.where).
+        "nav_where": _nav_where(request, groups, finder),
         # The navigation style ("classic" or "areas") and, in areas mode, the
         # areas and where this page sits in them.
         **area_context(request, role, finder, switched_off, viewer_global_admin),
     }
+
+
+def _nav_where(request, groups, finder):
+    from . import ui_visibility
+    try:
+        return ui_visibility.where(request.url.path, groups, finder)
+    except Exception:  # pragma: no cover -- shell rendering never fails on it
+        return None
 
 
 templates.context_processors.append(_nav_context)
@@ -778,6 +841,7 @@ templates.env.globals.setdefault("help_topic", None)
 templates.env.globals.setdefault("support_status_page_url", "")
 templates.env.globals.setdefault("help_menu_text", False)
 templates.env.globals.setdefault("service_status", None)
+templates.env.globals.setdefault("service_notices", [])
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
@@ -939,10 +1003,12 @@ def _warm_dashboard_caches() -> dict[str, float]:
     """Pay the dashboard's once-per-process first-hit costs now.
 
     Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
-    first ``/openapi.json`` 4.2 s (schema build, which also materialises
-    every lazily included route), ``builtin_domains()`` 0.78 s (2,031 pack
-    files), ``_build_shield()`` 37 ms. Each step is independent and
-    fail-open; the returned timings are for logs and tests.
+    every included route's context about 2.5 s (FastAPI 0.141 builds them
+    on the first request that routes past them), ``builtin_domains()``
+    0.78 s (2,031 pack files), ``_build_shield()`` 37 ms. Each step is
+    independent and fail-open; the returned timings are for logs and tests.
+    The OpenAPI schema (about 4.3 s, needed only by /openapi.json and the
+    guided API forms) is not built here: :func:`_build_openapi_when_idle`.
     """
     timings: dict[str, float] = {}
 
@@ -966,16 +1032,70 @@ def _warm_dashboard_caches() -> dict[str, float]:
 
         builtin_domains()
 
+    def _agents() -> None:
+        # The agent roster's tool inventory (about 0.6 s cold), cached per
+        # installation configuration. Ctrl+K's first agent lookup needs it;
+        # nothing in it is about a person.
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+
+    def _routes() -> None:
+        # Request routing needs these contexts; the schema build used to be
+        # what materialised them (58edcc4b), at four seconds of extra CPU.
+        from .route_identity import iter_compatible_route_contexts
+
+        for _context in iter_compatible_route_contexts(app.routes):
+            pass
+
     def _shield() -> None:
         from maverick.orchestrator import _build_shield
 
         _build_shield()
 
-    _step("templates", _templates)
-    _step("openapi", app.openapi)
+    # The pack catalogue first: the first Ctrl+K search after start needs it,
+    # and the OpenAPI build after it is the slowest step.
     _step("domains", _domains)
+    _step("agents", _agents)
+    _step("routes", _routes)
+    _step("templates", _templates)
     _step("shield", _shield)
     return timings
+
+
+def _warm_pack_catalogue() -> None:
+    """Parse the shipped pack catalogue (2,031 files) and the roster's tool
+    inventory before hook discovery: both are person-independent and cached
+    for the process, and Ctrl+K's first agent lookup needs them."""
+    try:
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+    except Exception:  # pragma: no cover - warm-up is best-effort
+        log.debug("pack catalogue warm-up skipped", exc_info=True)
+
+
+def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0) -> bool:
+    """Build the OpenAPI schema once the dashboard has been quiet for
+    ``quiet`` seconds, so its seconds of CPU do not land on someone's first
+    searches. Ten seconds, not one or two: a person opening the dashboard
+    pauses that long only rarely while working, but often while a browser
+    starts. A request for /openapi.json before then builds it on demand, as
+    FastAPI always did. Gives up after ``limit`` seconds of steady traffic."""
+    from . import request_activity
+
+    waited = 0.0
+    while not request_activity.quiet_for(quiet):
+        if waited >= limit:
+            return False
+        sleep(0.5)
+        waited += 0.5
+    try:
+        app.openapi()
+    except Exception:  # pragma: no cover - the schema still builds on demand
+        log.debug("OpenAPI warm-up skipped", exc_info=True)
+        return False
+    return True
 
 
 def _warm_goal_runtime() -> None:
@@ -986,6 +1106,7 @@ def _warm_goal_runtime() -> None:
     startup."""
 
     def _warm() -> None:
+        _warm_pack_catalogue()
         try:
             import asyncio as _asyncio
 
@@ -997,6 +1118,7 @@ def _warm_goal_runtime() -> None:
         timings = _warm_dashboard_caches()
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
+        _build_openapi_when_idle()
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
 
@@ -1100,6 +1222,8 @@ async def _lifespan(app: FastAPI):
             log.warning("Personal notification observer did not start (%s)", type(exc).__name__)
         from .conversation_inbox_scheduler import start_conversation_inbox_scheduler
         await run_in_threadpool(start_conversation_inbox_scheduler)
+        from .knowledge_sources_scheduler import start_knowledge_sources_scheduler
+        await run_in_threadpool(start_knowledge_sources_scheduler)
         _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
@@ -1493,7 +1617,9 @@ install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(api_documentation_router)
+app.include_router(capability_assessment_controls_api.router, prefix="/api/v1")
 app.include_router(runtime_policy_recovery_api.router, prefix="/api/v1")
+app.include_router(learning_acquisition_api.router, prefix="/api/v1")
 app.include_router(draft_router)
 
 app.include_router(preferences_router)
@@ -1510,6 +1636,9 @@ app.include_router(settings_runtime_router)
 templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
 app.include_router(conversation_inbox_router)
+app.include_router(chat_message_actions_router, prefix="/api/v1")
+app.include_router(workspace_erasure_router)
+app.include_router(specialist_drafts_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
@@ -1533,20 +1662,36 @@ from .web_vitals_api import vitals_context as _web_vitals_context  # noqa: E402
 
 app.include_router(web_vitals_router)
 templates.context_processors.append(_web_vitals_context)
+
+from . import usage_measures_api as _usage_measures_api  # noqa: E402
+
+# ONB-1 / AI-13 research measures: off unless [analytics] usage_measures.
+app.include_router(_usage_measures_api.router)
+templates.context_processors.append(_usage_measures_api.context)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
 app.include_router(first_outcome_router)
+from . import practice_mode  # noqa: E402
+
+# ONB-4: a person's practice session runs in the separate practice workspace,
+# with a marker on every screen and live changes refused until Back to live.
+app.include_router(practice_mode.router)
+app.middleware("http")(practice_mode.middleware)
+templates.context_processors.append(practice_mode.context)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .comments_api import router as comments_router  # noqa: E402
 from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
 from .feature_actions_api import router as feature_actions_router  # noqa: E402
 from .flow_action_fields import router as flow_action_fields_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
+from .policy_preview_api import router as policy_preview_router  # noqa: E402
+from .policy_suggestions_api import router as policy_suggestions_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
@@ -1563,6 +1708,9 @@ from .voice_unlock_api import router as voice_unlock_router  # noqa: E402
 app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
+app.include_router(comments_router)
+app.include_router(policy_suggestions_router)
+app.include_router(policy_preview_router)
 app.include_router(system_checks_router)
 app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
@@ -1821,11 +1969,20 @@ from .research_api import router as research_router  # noqa: E402
 app.include_router(research_router)
 app.include_router(research_page_router)
 app.include_router(knowledge_access_router)
+from .knowledge_sources_api import router as knowledge_sources_router  # noqa: E402
+
+app.include_router(knowledge_sources_router, prefix="/api/v1")
+from .vendor_profile_api import router as vendor_profile_router  # noqa: E402
+
+app.include_router(vendor_profile_router, prefix="/api/v1")
 from .answer_feedback_operations import router as answer_feedback_router  # noqa: E402
 from .department_team_updates_api import router as department_team_updates_router  # noqa: E402
 
 app.include_router(department_team_updates_router)
 app.include_router(answer_feedback_router)
+from .flow_run_feedback import router as flow_run_feedback_router  # noqa: E402
+
+app.include_router(flow_run_feedback_router)
 from .compliance_questionnaire_builder_api import (  # noqa: E402
     router as compliance_questionnaire_builder_router,
 )
@@ -2037,6 +2194,60 @@ app.include_router(ekko_router)
 # flow isn't fully configured, so including the router unconditionally is inert
 # off by default. See maverick_dashboard.oidc_login.
 app.include_router(oidc_login_router)
+from .company_signin_tests import router as company_signin_tests_router  # noqa: E402
+from .connected_event_sources_api import router as connected_event_sources_router  # noqa: E402
+
+app.include_router(company_signin_tests_router)
+from .company_signin_migration_api import router as company_signin_migration_router  # noqa: E402
+
+app.include_router(company_signin_migration_router)
+from .company_saml_setup_api import recovery_router as company_saml_recovery_router  # noqa: E402
+from .company_saml_setup_api import router as company_saml_setup_router  # noqa: E402
+
+app.include_router(company_saml_setup_router)
+app.include_router(company_saml_recovery_router)
+
+
+@app.get("/auth/company-signin-recovery", response_class=HTMLResponse)
+def company_signin_recovery_page(request: Request):
+    from .company_signin_migration import recovery_page_allowed
+
+    recovery_page_allowed(request)
+    response = templates.TemplateResponse(request, "company_signin_recovery.html", {})
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
+
+
+@app.get("/auth/company-saml-recovery", response_class=HTMLResponse)
+def company_saml_recovery_page(request: Request):
+    from .company_signin_migration import recovery_page_allowed
+
+    recovery_page_allowed(request)
+    return templates.TemplateResponse(request, "company_saml_recovery.html", {},
+                                      headers={"Cache-Control": "private, no-store", "Referrer-Policy": "same-origin"})
+
+
+app.include_router(connected_event_sources_router, prefix="/api/v1")
+from .personal_alert_tests import router as personal_alert_tests_router  # noqa: E402
+
+app.include_router(personal_alert_tests_router)
+from .human_conversation_handoffs_api import (  # noqa: E402
+    router as human_conversation_handoffs_router,
+)
+
+app.include_router(human_conversation_handoffs_router)
+
+
+@app.get("/human-conversations", response_class=HTMLResponse)
+def human_conversations_page(request: Request):
+    from .human_conversation_handoffs import authority
+
+    _actor, context = authority(request)
+    return templates.TemplateResponse(request, "human_conversation_handoffs.html", {"human_conversation_context": context},
+                                      headers={"Cache-Control": "private, no-store"})
+
+
 # Email invite links (/auth/invite/{token}): single-use onboarding links an
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
@@ -2047,8 +2258,14 @@ from .invite_routes import router as invite_router  # noqa: E402
 # [dashboard] api_keys (404 when off).
 app.include_router(api_keys_router)
 from .local_owner_routes import router as local_owner_router  # noqa: E402
+from .session_expiry import page_session as _page_session  # noqa: E402
+from .session_expiry import router as session_expiry_router  # noqa: E402
 
 app.include_router(local_owner_router)
+app.include_router(session_expiry_router)
+# The page shell's sign-in timer (lightwork-session.js): when this browser's
+# sign-in ends and how to stay signed in. None when nobody is signed in.
+templates.env.globals["page_session"] = _page_session
 
 app.include_router(invite_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
@@ -2261,6 +2478,7 @@ _AUTH_EXEMPT = {
     # the dashboard bearer / same-origin checks (external senders have
     # neither), so it must bypass the centralized middleware.
     *SELF_AUTH_WEBHOOK_PATHS,
+    *SELF_AUTH_SIGNIN_RECOVERY_PATHS,
     # The exact HMAC webhook paths are shared with the global dependency. A
     # future /webhook/* route is authenticated by default until explicitly
     # added to that reviewed set.
@@ -2781,6 +2999,9 @@ async def bearer_auth(request: Request, call_next):
         # DSAR response links are addressed by their unguessable token,
         # exactly like /form/ — the requester has no dashboard bearer.
         or path.startswith("/dsar/response/")
+        # One-action mute links in notification messages: the signed link is
+        # the credential and only quiets that one person's own notifications.
+        or path.startswith("/unsubscribe/")
         or path.startswith("/saml/")
         or path.startswith("/auth/invite/")
         # External integrations authenticate inside their route family
@@ -3038,6 +3259,11 @@ def _not_found_page(request: Request):
 def _task_limit_error(status, detail, headers, title, message):
     if status == 400 and (headers or {}).get("X-Lightwork-Task-Settings") == "agent.max_steps":
         return "Review the task limit", detail, "task_steps"
+    if status == 409 and isinstance(detail, dict) and detail.get("retryable") is True:
+        # Still changing (a task that has just started): the page reloads
+        # itself in a moment instead of asking the person to try again.
+        return ("Still getting this ready",
+                "This page is still being set up. It refreshes by itself in a moment.", "retry")
     return title, message, ""
 
 
@@ -3095,7 +3321,12 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         # The owner and invited colleagues both sign in on that page.
         if ((local_owner_claimed() or passphrase_sign_in())
                 and request.url.path not in {"/auth/local-owner", "/auth/local-login"}):
-            return RedirectResponse("/auth/local-login", status_code=302)
+            # Back to this page after signing in again (the sign-in keeps
+            # only a local path; see local_owner_routes).
+            from urllib.parse import quote
+
+            return_to = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            return RedirectResponse(f"/auth/local-login?return_to={quote(return_to, safe='')}", status_code=302)
     if _wants_html(request):
         status = int(exc.status_code)
         title, message = {
@@ -3356,12 +3587,19 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
               reference, occurred_at, request.method, route,
               exc_info=(type(exc), exc, exc.__traceback__))
     headers = {"Cache-Control": "private, no-store", "X-Lightwork-Failure-Reference": reference}
+    from maverick.service_status import READ_ONLY_REFUSAL, is_read_only_error
+
+    # CTL-5: a write refused by a read-only database says what broke, that
+    # saved work is safe and what to do, never the database error itself.
+    read_only = is_read_only_error(exc)
+    status = 503 if read_only else 500
     if _wants_html(request):
         try:
             return templates.TemplateResponse(
                 request, "500.html", {"failure_reference": reference, "failure_time": occurred_at,
-                                      "uncertain_mutation": request.method not in {"GET", "HEAD"}},
-                status_code=500, headers=headers,
+                                      "uncertain_mutation": request.method not in {"GET", "HEAD"},
+                                      "read_only_error": read_only},
+                status_code=status, headers=headers,
             )
         except Exception:
             # Deliberately independent of the normal layout and its data reads.
@@ -3372,8 +3610,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
                 f'<a href="/help?failure={reference}">Open Help</a></html>',
                 status_code=500, headers=headers,
             )
-    return JSONResponse({"detail": "The request could not be completed. Check its current state before retrying a change.",
-                         "failure_reference": reference, "occurred_at": occurred_at}, status_code=500, headers=headers)
+    detail = READ_ONLY_REFUSAL if read_only else (
+        "The request could not be completed. Check its current state before retrying a change.")
+    return JSONResponse({"detail": detail, "failure_reference": reference, "occurred_at": occurred_at},
+                        status_code=status, headers=headers)
 
 
 @app.middleware("http")
@@ -3983,6 +4223,7 @@ async def learning_page(request: Request) -> HTMLResponse:
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
             "agent_feedback": _agent_feedback_summary(),
+            "flow_feedback": _flow_feedback_summary(),
             "learning_can_operate": has_permission(request, "operate"),
         },
     )
@@ -3997,6 +4238,25 @@ def _agent_feedback_summary() -> list[dict]:
         rows = goal_feedback_store.summary_by_agent(world=_world())
         for row in rows:
             row["title"] = agent_title(row["agent"])
+        return rows
+    except Exception:  # pragma: no cover -- the page renders without the summary
+        return []
+
+
+def _flow_feedback_summary() -> list[dict]:
+    """Useful / not useful per flow for the Learning page (flow_run_feedback.py)."""
+    try:
+        from maverick.flow import store as flow_store
+
+        from . import flow_run_feedback
+
+        rows = flow_run_feedback.summary_by_flow()
+        for row in rows:
+            try:
+                flow = flow_store.load_flow(row["flow_id"])
+            except Exception:  # noqa: BLE001 -- a removed or unreadable flow keeps its id
+                flow = None
+            row["title"] = (getattr(flow, "name", "") or row["flow_id"]) if flow else row["flow_id"]
         return rows
     except Exception:  # pragma: no cover -- the page renders without the summary
         return []
@@ -4243,6 +4503,7 @@ def _deliverable_specs() -> list[dict]:
 @app.get("/deliverables", response_class=HTMLResponse)
 def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     """Show the caller's completed work; explicit role links browse pack output."""
+    from . import auth as _auth
     from .auth import caller_suites
     from .deliverables import PAGE_SIZE, build_inbox, persona_roles_for, recent_runs_by_domain
 
@@ -4273,6 +4534,8 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
             "browse": False, "recent_results": shown, "awaiting": awaiting,
             "result_labels": {domain: spec["deliverable"] for domain, spec in gates.items()},
             "results_page": page, "results_more": len(rows) > PAGE_SIZE,
+            # Only the task owner may rate a result (answer_feedback_operations).
+            "feedback_owner": _auth.caller_principal(request) or "", "can_rate": has_permission(request, "operate"),
         })
 
     # Job-function scoping: a scoped caller's inbox lists only their
@@ -4645,8 +4908,17 @@ def spend_page(request: Request) -> HTMLResponse:
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
          "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
-         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"])},
+         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"]),
+         "practice_cost": _practice_cost_text(value_view["owner"], when="across all time")},
     )
+
+
+def _practice_cost_text(owner, *, when: str, since: float | None = None) -> str:
+    """The labelled practice line for a cost view (maverick.practice_costs), or ""."""
+    from maverick import practice_costs
+
+    line = practice_costs.summary(owner, since=since)
+    return practice_costs.label(line, when) if line else ""
 
 
 # One assessment engine, one workspace chassis per department: each
@@ -4776,6 +5048,11 @@ async def privacy_page(request: Request) -> HTMLResponse:
     records, estate = await run_in_threadpool(_privacy_page_data)
     ctx["records"] = records
     ctx["estate"] = estate
+    if records.get("dsar"):
+        from . import people_directory
+
+        # Who a request can be assigned to: people who may work privacy requests.
+        ctx["dsar_assignees"] = await run_in_threadpool(people_directory.candidates, "operate")
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 
@@ -5791,9 +6068,10 @@ async def _ai_incident_page_data(module: Any) -> dict[str, Any]:
                         "status": record.get("status"),
                         "deadline_citation": record.get("deadline_citation"),
                         "clock_label": (
-                            "OVERDUE"
-                            if is_overdue
-                            else f"{remaining / 86_400:.1f}d left"
+                            {"initial_reported": "First report filed; full report to follow",
+                             "complete_reported": "Full report filed", "withdrawn": "Withdrawn"}
+                            .get(record.get("status"))
+                            or ("OVERDUE" if is_overdue else f"{remaining / 86_400:.1f}d left")
                         ),
                         "overdue": is_overdue,
                         "revision": record.get("revision"),
@@ -6660,6 +6938,8 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "can_manage_assumptions": has_global_permission(request, "operate"),
             "value_view": value_view,
             "assumptions_confirmed": assumptions_confirmed(),
+            "practice_cost": _practice_cost_text(value_view["owner"], when=f"in the last {days} days, not part of these savings",
+                                                 since=time.time() - days * 86400),
         },
     )
 
@@ -6755,6 +7035,16 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
                                  episode.input_tokens, episode.output_tokens, episode.tool_calls,
                                  *export_fields(episode)])
                 yield buf.getvalue()
+            # Practice runs cost real provider money: one labelled row, apart from the real runs.
+            from maverick import practice_costs
+
+            extra = practice_costs.export_row(practice_costs.summary(owner, since=start.timestamp(),
+                                                                     until=end.timestamp()), 9 + len(EXPORT_HEADERS))
+            if extra:
+                buf.seek(0)
+                buf.truncate(0)
+                writer.writerow(extra)
+                yield buf.getvalue()
         safe_tenant = "".join(c for c in tenant if c.isalnum() or c in "-_")[:64] or "workspace"
         return StreamingResponse(rows(), media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="statement-{safe_tenant}-{sel}.csv"',
@@ -6770,8 +7060,11 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     if previous and previous["cost"] > 0 and not previous["unknown_cost_runs"] and not current["unknown_cost_runs"]:
         delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
+    from maverick import practice_costs
     from maverick.quotas import UsageLedger, UsageLedgerError
 
+    _practice = practice_costs.summary(owner, since=practice_costs.month_bounds()[0])
+    practice_cost = practice_costs.label(_practice, "this month") if _practice else ""
     receipt_error = None
     receipts = {"items": [], "total": 0, "offset": max(0, receipt_offset), "limit": 50, "has_more": False}
     try:
@@ -6791,6 +7084,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "practice_cost": practice_cost,
             "spend_recorded_at": newest_cost_at,
             "invoice_admin": has_global_permission(request, "admin"),
             "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
@@ -6907,6 +7201,31 @@ def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> 
     return [{**e, "scope": "deployment"} for e in rows if isinstance(e, dict)]
 
 
+def _audit_matcher(*, kind: str, person: str, agent: str, q: str):
+    """The activity log's filter: kind of event, person, agent or specialist,
+    and words. Words also find an AI action by a file, address or table it
+    reached, which the row shows only as a fingerprint (ADM-5)."""
+    from . import audit_actions_api as _audit_plain
+    from .content_access import resource_fingerprint
+
+    needle = q.lower()
+    resource_hit = resource_fingerprint(q) if q else ""
+
+    def matches(e: dict) -> bool:
+        if kind and e.get("kind") != kind:
+            return False
+        if person and _audit_plain.event_person(e) != person:
+            return False
+        if agent and e.get("agent") != agent:
+            return False
+        if q and resource_hit in (e.get("resource_fingerprints") or []):
+            return True
+        return not needle or (needle in json.dumps(e, default=str).lower()
+                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+
+    return matches
+
+
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """The activity log: recent events for a day or a date range, filtered by
@@ -6948,16 +7267,9 @@ async def audit_page(request: Request) -> HTMLResponse:
     read_report = ReadReport()
     kind = (request.query_params.get("kind") or "").strip()
     person = (request.query_params.get("person") or "").strip()
+    agent = (request.query_params.get("agent") or "").strip()[:128]
     q = (request.query_params.get("q") or "").strip()[:200]
-    needle = q.lower()
-
-    def _matches(e: dict) -> bool:
-        if kind and e.get("kind") != kind:
-            return False
-        if person and _audit_plain.event_person(e) != person:
-            return False
-        return not needle or (needle in json.dumps(e, default=str).lower()
-                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+    _matches = _audit_matcher(kind=kind, person=person, agent=agent, q=q)
 
     from datetime import datetime, timezone
     from urllib.parse import urlencode
@@ -6967,7 +7279,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     from .audit_search import search_events
 
     window_note, next_href = "", None
-    events, kind_set, people_set = [], set(), set()
+    events, kind_set, people_set, agent_set = [], set(), set(), set()
     deployment_filter_view = False
     displayed_audit_log = audit_log
     if not filter_error:
@@ -6996,6 +7308,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             before=before_event, scan_limit=_AUDIT_RANGE_SCAN_LIMIT,
         )
         events, kind_set, people_set = result["events"], result["kinds"], result["people"]
+        agent_set = result.get("agents", set())
         if deployment_filter_view:
             events = [{**event, "scope": "deployment"} for event in events]
         if not result["cursor_found"]:
@@ -7015,7 +7328,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     # Deployment-wide records have a separate chain and are shown as a
     # clearly bounded recent view, never silently mixed into this cursor.
     deployment_events = []
-    if not (filter_error or since or until or before_event or kind or person or q):
+    if not (filter_error or since or until or before_event or kind or person or agent or q):
         deployment_events = await run_in_threadpool(
             _global_audit_tail, request, audit_log, min(n, 200), day)
     order = "oldest" if request.query_params.get("order") == "oldest" else "newest"
@@ -7038,6 +7351,8 @@ async def audit_page(request: Request) -> HTMLResponse:
             "kinds": kinds,
             "person": person,
             "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
+            "agent": agent,
+            "agents": [{"value": a, "label": _idfmt.humanize(a)} for a in sorted(agent_set)],
             "q": q,
             "order": order,
             "can_admin": has_permission(request, "admin"),
@@ -7335,7 +7650,7 @@ async def simulate_research_page(
         research_error = (
             "Sign in with your own named account to run a practice study."
             if exc.status_code in (401, 403)
-            else "The practice study could not start. Please try again."
+            else "The practice study could not start. Try again."
         )
     except ValueError:
         status_code = 400
@@ -7676,7 +7991,7 @@ def assessments_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "assessments.html",
-        {"agents": agents, "flows": flows},
+        {"agents": agents, "flows": flows, "assessment_can_review": has_permission(request, "admin")},
     )
 
 
@@ -8095,6 +8410,14 @@ def _compliance_view(framework: str) -> dict:
         checks = compliance_report()
     except Exception:  # pragma: no cover - never 500 the console if core is absent
         return {"framework": framework, "groups": {}, "summary": {}, "disclaimer": ""}
+    history = {"checked_at": None, "controls": {}, "changes": []}
+    try:
+        from maverick.compliance_history import record
+
+        # Each visit is a check too: keep when it ran and since when each status holds.
+        history = record(checks)
+    except Exception:  # noqa: BLE001 -- the page renders without its history
+        log.warning("compliance history unavailable", exc_info=True)
     if framework != "all":
         checks = [c for c in checks if c.framework == framework]
     # Group by framework bucket ("eu"/"us") for labelled tables on the page.
@@ -8118,6 +8441,7 @@ def _compliance_view(framework: str) -> dict:
         "groups": groups,
         "summary": summary,
         "disclaimer": COMPLIANCE_DISCLAIMER,
+        "control_history": history,
     }
 
 
@@ -8152,9 +8476,10 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
         return with_landing_headers(templates.TemplateResponse(request, "autonomous_compliance.html", context))
     view = _compliance_view(request.query_params.get("framework") or "all")
     view["compliance_tabs"] = tabs if areas_on(request) else None
-    from .compliance_controls_api import RETENTION_FIELDS, guide_for
+    from .compliance_controls_api import RETENTION_FIELDS, STATUS_TEXT, guide_for
 
     view["guide_for"] = guide_for
+    view["status_word"] = lambda status: STATUS_TEXT.get(status, "Unknown").lower()
     view["retention_fields"] = RETENTION_FIELDS
     view["report_download_context"] = _conversation_context(request)
     view["can_admin"] = has_permission(request, "admin")
@@ -9210,6 +9535,10 @@ def _approval_source(provenance: str | None) -> str | None:
         return "Agent wants to change its own instructions"
     if provenance == "assessment":
         return "Assessment review"
+    if provenance == "plan":
+        # [autonomy] confirm_plan: the task's first outside action waits for
+        # a person to check the whole plan (maverick.plan_review).
+        return "Plan to check before the task acts"
     if provenance == "goal_risk":
         # A task held before it starts because its wording looks risky.
         return "Task waiting to start"
@@ -10709,7 +11038,8 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
 
     workspace = workspace_readiness()
     w = _world()
-    recent = w.list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
+    recent = [goal for goal in w.list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
+              if can_access_goal(request, goal)]
     # "Use template" on /templates links here with ?title=&description= to
     # prefill the form (never auto-start; the user reviews, edits, submits).
     prefill_title = (request.query_params.get("title") or "")[:200]
@@ -10736,11 +11066,23 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             # one limit that is true in code.
             "chat_examples": _chat_examples(request),
             "chat_limits": _CHAT_LIMITS,
+            "chat_capability": _CHAT_CAPABILITY,
             "compose_form": compose_form,
             "compose_form_available": page_visible(request, "/goal-builder"),
+            "typical_cost": _own_typical_cost(request, w),
             "channels": _goal_builder_channels() if compose_form else [],
         },
     )
+
+
+def _own_typical_cost(request: Request, world) -> dict | None:
+    """What the signed-in person's own past tasks cost (none without a named account)."""
+    principal = caller_principal(request) or ""
+    if not principal.startswith("user:"):
+        return None
+    from maverick.typical_cost import typical_cost
+
+    return typical_cost(world, owner=principal)
 
 
 def _goal_builder_channels() -> list:
@@ -10758,6 +11100,7 @@ def _chat_examples(request: Request) -> dict:
         return {"department": None, "examples": [], "sample": None}
 
 
+from .chat_examples import CAPABILITY as _CHAT_CAPABILITY  # noqa: E402
 from .chat_examples import LIMITS as _CHAT_LIMITS  # noqa: E402
 
 
@@ -10815,7 +11158,8 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         target = w.goal_stream_state(target_id)
         if target is None:
             continue
-        assert_goal_access(request, target)
+        if not can_access_goal(request, target):
+            continue
         stop_kind = ""
         if target.status == "blocked":
             try:
@@ -12527,16 +12871,31 @@ def _chat_history_download_states(request: Request, w, turns) -> dict:
 @app.get("/chat/goal/{goal_id}/answer-panel", response_class=HTMLResponse)
 def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
     """Current authorized saved result, actions, release gate and artifact versions."""
-    from .answer_projection import projection
+    from .answer_projection import projection, settled
 
-    context = projection(request, _world(), goal_id)
+    context = settled(lambda: projection(request, _world(), goal_id))
     return templates.TemplateResponse(request, "_chat_answer_panel.html", context,
                                       headers={"Cache-Control": "no-store, private",
                                                "X-Lightwork-Context": context["conversation_context"]})
 
 
+def _stop_progress(world, goal):
+    from .stop_progress import summarize
+    try:
+        return summarize(world, goal)
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        return None
+
+
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
+    """A task's page; built again when the task changed while it was read."""
+    from .answer_projection import settled
+
+    return settled(lambda: _chat_goal_page(request, goal_id))
+
+
+def _chat_goal_page(request: Request, goal_id: int) -> HTMLResponse:
     require_permission(request, "view")
     original_context = _conversation_context(request)
     w = _world()
@@ -12616,6 +12975,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "can_operate": not handed_off and has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
             "handoff_closed": handed_off,
             "stop": stop,
+            "stop_progress": _stop_progress(w, g),
             "show_technical_details": show_technical,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
@@ -12785,6 +13145,13 @@ def shared_goal(request: Request, token: str) -> HTMLResponse:
 def _require_shared_goal_release(world, goal, goal_id: int):
     """Fail closed when a removed policy or revoked sign-off blocks sharing."""
     try:
+        from maverick.chat_message_actions import require_copy_sources
+        from maverick.conversation_inbox import current_authority
+
+        require_copy_sources(world, goal_id, authorize=current_authority)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    try:
         from maverick.domain import available_domains, deliverable_release_allowed
 
         profile = available_domains().get(goal.domain) if goal.domain else None
@@ -12846,7 +13213,7 @@ def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
     # already copied. Fail closed without revealing whether a gate exists.
     if g.status != "done" or not g.result:
         raise HTTPException(status_code=404, detail="not found")
-    prof = _require_shared_goal_release(w, g, goal_id)
+    _require_shared_goal_release(w, g, goal_id)
     from .deliverable_sharing import release_matches, release_snapshot, source_generation
     try:
         generation = source_generation(w) if token.startswith("r1_") else None
@@ -12861,8 +13228,7 @@ def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
     # Re-check after materializing the composite payload. If an artifact or
     # result changed between the first authorization read and these reads, its
     # transaction revoked sign-off; never render that mixed-version snapshot.
-    if prof is not None:
-        _require_shared_goal_release(w, g, goal_id)
+    _require_shared_goal_release(w, g, goal_id)
     try:
         fresh_goal = w.get_goal(goal_id)
         if (fresh_goal is None or w.resolve_share_link(token) != goal_id
@@ -13188,6 +13554,14 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
+        # Practice runs cost real provider money: one labelled row, apart from the real runs.
+        from maverick import practice_costs
+
+        extra = practice_costs.export_row(practice_costs.summary(owner, since=start_ts, until=end_ts),
+                                          9 + len(EXPORT_HEADERS))
+        if extra:
+            writer.writerow(extra)
+            yield buf.getvalue()
 
     fname = f"maverick-cost-{month}.csv" if month else "maverick-cost-all.csv"
     return StreamingResponse(
@@ -13374,6 +13748,14 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-thread-history.js")
 @app.get("/static/lightwork-employee-companion.css")
 @app.get("/static/lightwork-product-operations.js")
+@app.get("/static/lightwork-specialist-drafts.js")
+@app.get("/static/lightwork-company-signin-migration.js")
+@app.get("/static/lightwork-company-saml-setup.js")
+@app.get("/static/lightwork-connected-event-sources.js")
+@app.get("/static/lightwork-knowledge-sources.js")
+@app.get("/static/lightwork-personal-alert-tests.js")
+@app.get("/static/lightwork-human-conversation-handoffs.js")
+@app.get("/static/lightwork-vendor-profile.js")
 @app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-shortcuts.js")
 @app.get("/static/lightwork-pins.js")
@@ -13388,6 +13770,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-portal-routing-key.js")
 @app.get("/static/lightwork-task-file-recovery.js")
 @app.get("/static/lightwork-connections.js")
+@app.get("/static/lightwork-chat-message-actions.js")
 @app.get("/static/lightwork-account-inventory.js")
 @app.get("/static/lightwork-schedule-management.js")
 @app.get("/static/lightwork-connection-setup.js")
@@ -14759,11 +15142,14 @@ def main() -> None:
 # contexts and request-scope route objects receive the same final identity.
 _stabilize_effective_route_names(app)
 
-# Outermost (added last): every middleware and handler below it shares one
-# per-request memo for configuration-derived authorization predicates.
+# Every middleware and handler below the memo shares one per-request memo for
+# configuration-derived authorization predicates. Outside it (added last), the
+# activity count lets start-up work wait for a quiet moment.
 from ._request_memo import RequestMemoMiddleware  # noqa: E402
+from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
+app.add_middleware(RequestActivityMiddleware)
 
 
 if __name__ == "__main__":

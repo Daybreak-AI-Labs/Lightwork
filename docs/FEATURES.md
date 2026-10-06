@@ -6,7 +6,7 @@
   removal in Your paired devices. Mobile/watch/vision settings store the
   connection securely. See [scope, retention and qualification](device-pairing.md).
 
-What Lightwork **does today**, grounded in the code on `main`. This is the
+What Lightwork **does today**, grounded in the current repository code. This is the
 catalogue of built features and tools; the forward backlog (what's *not* done
 yet) lives in [`ROADMAP.md`](./ROADMAP.md). When a roadmap item ships, it moves
 here.
@@ -24,6 +24,32 @@ here.
   `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
 
 ## Agent kernel & orchestration
+
+- **Conversation alternatives** — Try again, Edit and resend, and Branch from
+  here open a complete review before starting a separate conversation. The
+  original stays intact; the selected prior messages, answered clarifications,
+  files and named account restrictions are retained. Answer only is the default;
+  repeating connected actions requires a separate choice and review. Settings
+  and the installer expose `[chat_message_actions] enabled`. Copilot opens the
+  same protected form. Interrupted admission reads its original receipt without
+  repeating work; copied content keeps its sources' current access rules.
+
+- **Complete workflow-pilot controls** — ordinary forms and Copilot prepare
+  unstarted tasks, freeze a paired plan, record time and complete cost evidence,
+  and obtain an independent review. Each write has a complete consequence review
+  and a pure original-outcome reader. Prepared tasks are admitted atomically on
+  SQLite and PostgreSQL; pilot-plan creation currently requires the local
+  governed-record backend. Task start and release publication remain separate.
+  Reported measurements do not by themselves establish causal improvement.
+
+- **Decision checks and joint observation planning** — Decision evidence accepts
+  named possible situations, choices, exact decimal losses and observation costs.
+  It checks whether a choice stays acceptable across every remaining declared
+  situation, then finds the least-cost joint observation batch whose possible
+  answers each support a choice, within the entered limits. UI and Copilot share
+  check, reservation, acknowledgement and original-outcome controls. The bounded
+  model supports eight facts, sixteen cases, four choices and 128 situations;
+  it records operator premises and requests, without executing business actions.
 
 - **Employee companion preview** - default-off `[features] employee_companions`
   adds an explicitly enrolled employee's private conversation and workspace-admin
@@ -6204,3 +6230,203 @@ examples cannot become invented training evidence. The ordinary form and
 Copilot show usable, skipped and unresolved counts before admission. Cross-checks
 abstain from missing or tied structural evidence; original answer-preference
 pairs remain available for their separate purpose.
+
+### Current signed skill preparation and local provider choices
+
+Learning shows whether automatic skill preparation is off, needs trusted
+publishers, lacks available signature verification, or can check signed matches.
+The ordinary status and Copilot use the same current protected read. A working
+Settings link opens the existing publisher-file upload. Missing prerequisites
+stop before catalog search or optional AI analysis and post a plain task
+observation; native signature enforcement remains unchanged. Readiness never
+promises that a matching signed skill exists.
+
+Local-first model choices use actual native provider identities and aliases,
+preserving the selected model string. Unsupported adapters are excluded. Probe
+ports agree with native Ollama and TGI dispatch; explicit role choices, the
+existing opt-in and configured fallback retain their precedence.
+
+Nightly learning review now stops the combined scheduled command visibly when
+the native learning stop is active, configuration cannot be read, or the review
+fails. It reports a nonzero exit and warns that earlier changes may already be
+saved. Explicitly disabled review stays a no-op; failure payloads are not copied
+into the user-facing refusal.
+
+Page controllers and styles in trusted literal template tags now use the same
+content-versioned URLs as the shell. Public unchanged scripts and styles can
+revalidate without another response body; private or refused assets keep their
+native authorization and cache policy. File metadata changes refresh cached
+hashes, including a file that appears after an earlier missing-file check.
+
+### Configured gateway screening and bounded web content
+
+When request screening is explicitly enabled, an unavailable built-in checker
+returns a readable service refusal before upstream forwarding or spending
+admission. Existing text-free and screening-off behavior stays available, and
+actual detector refusals remain blocked. Activity keeps digest/count metadata;
+private request or exception payloads are not copied into the new refusal.
+
+Web-page reads keep their 64KB default and accept at most 10MiB of retained
+response content. Invalid download limits refuse before request preflight.
+The ordinary workflow input uses the same native schema range; exact-limit
+completion is distinguished from actual omitted content with one extra byte.
+
+### Reviewed improvement cycles and visible incomplete learning
+
+Learning and Copilot offer the same reviewed improvement cycle. Before it starts,
+the customer sees the complete current and proposed safeguards and habits,
+including removals and strength changes, the workspace, permitted work and local
+cost limit. The cycle uses existing recorded work and native causal admission;
+observational patterns alone do not qualify new guidance as proven improvements.
+
+The reviewed source, permission, settings and guidance are checked again before
+native writes. Empty permitted work preserves existing guidance. A required
+learning safety copy and stop controls remain in place. Failed writes or missing
+activity confirmations produce a visible incomplete or uncertain outcome,
+including any earlier saved changes. The original task stays readable after an
+interrupted reply without automatically repeating the cycle.
+
+The combined nightly command also stops with a nonzero exit when this cycle is
+incomplete or halted. Earlier changes may remain saved; failure is not reported
+as a successful empty review.
+
+### Reviewed product switches and truthful queued-task outcomes
+
+All current product switches are available through the existing reviewed Settings
+controls, with plain On/Off comparisons and original-save recovery. The Features
+overview opens those controls. An old whole-form Features submission refuses
+instead of overwriting newer switches. Current configuration precedence and
+configured administrator verification are checked before physical replacement.
+
+Queued tasks defer for a confirmed concurrency-slot refusal. A deleted task,
+closed admission or unconfirmed outcome stops with its actual reason instead of
+repeatedly reporting a busy slot. Scheduled task creation records its intent
+before creation; a later attempt with an unconfirmed original creation reads that
+state and stops instead of creating another task. Ordinary confirmed task failure
+keeps the existing retry policy, and future schedule occurrences keep clean inputs.
+
+### Local lesson maintenance when AI checks are held
+
+Enabled stale-lesson retirement can run for the selected model even when the
+AI testing prerequisites are incomplete. New lessons and trial acceptance,
+failure and relapse decisions remain held. The result distinguishes held checks
+from actual retirement; missing model selection does not retire every model.
+
+Reviewed maintenance checks the current learning stop, sources, permissions and
+planned guidance generation at physical writes. A failed write or missing
+activity confirmation retains an incomplete outcome and any earlier saved
+change. Reading the original task does not start another pass. The nightly
+summary reports inspection-only when all model reports have held qualification.
+
+Assessment lists, due items and details use current specialist or workflow names
+from the authorized picker. A name unavailable in that view is identified as
+unavailable; an optional recorded reference remains available for support.
+Native record identity, version checks and review permissions are unchanged.
+
+### Scoped trial decisions and protected assessment review
+
+Recorded trial outcomes change only the exact model and scope that supplied
+them. Identical lesson text in another department stays intact. Governed passes
+check current sources, evidence, learning stops and budgets at the native write,
+confirm each change before advancing, and retain failed or partial outcomes.
+Unreadable transfer history refuses its rewrite. Result summaries distinguish
+accepted, removed and returned-to-trial lessons. Legacy deliberate whole-model
+rollback and transfer-attempt memory keep their existing meaning.
+
+On Assessments, Copilot can open the selected specialist or workflow's complete
+current findings and, for an administrator, its existing human review controls.
+The protected handoff binds account, workspace, record version and content;
+opening it records no new review decision. Auditors retain readable findings
+without enabled administrator actions. A changed account clears private
+assessment content and its owned evidence dialog. Current review permission is
+checked after writer waits and again at physical replacement. A decision already
+published before a later refusal remains explicitly unconfirmed until read back.
+
+### Assessment actions and interrupted bulk refresh
+
+Refresh, evidence changes and removal recheck the current actor and workspace
+at native replacement, after waiting for another writer. A refused write leaves
+the original unchanged; a refusal after a saved effect asks the person to check
+the current record before retrying. Assessment reviews also require the named
+decision scope when called with an access key.
+
+Bulk refresh reports confirmed checks and unavailable or unconfirmed checks.
+A changed account stops the operation and clears private screen content.
+Interrupted responses offer a read-only current-state check. That check is not
+the original operation's receipt and does not repeat a refresh, decision or
+removal. Unsaved frequency and evidence drafts survive ordinary same-account
+errors; losing access clears private findings and disables write controls.
+
+### Model checks, spending and add-on readiness
+
+Model checks belong to the current workspace and configured connection. Changing
+the key or endpoint invalidates the old evidence. A failed refresh preserves
+previous model choices and their last successful check, while showing that they
+are unconfirmed. Settings updates that status without discarding unsaved choices;
+changed lists offer an explicit reload. Overlapping checks cannot let an older
+response replace a newer check, even after a connection changes away and back.
+
+An expired OpenRouter zero-price listing is checked before a new request when
+discovery is enabled. Waiters share one bounded check, and a recent failure has a
+short retry pause. Only fresh evidence from the official listing with all
+advertised prices at zero grants a zero-price quote. OpenRouter advertises
+[request and other price fields](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
+as well as input and output prices; an additional charge excludes that row.
+
+Each actual SDK attempt retains its admitted price for response accounting.
+Expiry or a changed connection after dispatch does not discard an already
+returned answer. Retries, hedges and compatibility resends recheck the current
+connection and price before their own sends. Async initial metadata checks run
+off the event loop; accounting does not make model-list requests.
+
+Python add-ons with a declared unsupported or unreadable contract are refused
+before their entry point loads. Older supported contracts and add-ons without a
+manifest retain their existing behavior. The add-on page shows the reason, and
+Copilot offers a complete count summary plus a selected add-on's current
+compatibility and practice-readiness details, including refused add-ons.
+
+### Read connection status without enabling actions
+
+Copilot connection diagnostics use a read-only control, so they remain available
+when its write actions are disabled. The summary shows the saved credential's
+presence, dated check, permitted related-work counts and coverage gaps, with a
+link to Connections. An earlier credential revision or unconfirmed check time
+is explicit. Current ownership and account context still apply. Reading this
+summary contacts no service and does not prove current task access.
+
+Recovery's source-checkpoint form keeps the chosen date and collection effect
+visible when paging or another lookup fails. A new read clears confirmation;
+manual changes are identified, and invalid manual fields reveal their remedy.
+The ordinary form and its Copilot host retain the same exact checkpoint binding.
+Choosing a collection checkpoint does not confirm an earlier message's delivery.
+
+### Named access requests and interrupted decisions
+
+Access requests offer named dashboard and tool actions, search and ordinary
+paging instead of requiring an internal action name. The complete review shows
+the selected action, current policies, responsible administrator and business
+reason. Copilot uses the same choices and native review. Supported built-in
+actions and authorized personally created actions are discoverable without
+loading add-on code; the interface explains that add-on choices are unavailable
+through this listing. A listed action is not evidence that its connection works.
+
+A request or review whose reply was lost offers a read-only check of the exact
+saved operation in Copilot. It rechecks the current account and workspace and
+does not submit another request, decision or activity write. Incomplete history
+or a pending activity receipt remains explicitly unconfirmed. Recording a review
+does not grant access; only the actual current policy can confirm permission.
+
+Privacy-notice release approval, approval withdrawal and update-proposal review
+require current administrator authority. Access keys also need approval
+permission in addition to administrator scope. Those decisions recheck the
+account, workspace, session and current key permissions after a writer wait and
+before the native transaction finishes. Independent reviewers, exact versions,
+original operation keys and native activity records keep their existing meaning.
+An unconfirmed decision asks the person to read the current notice before
+deciding again; ordinary failure messages distinguish missing key permission
+from author or approval-ownership restrictions.
+
+Copilot's standard change review shows named business headings and complete
+values. When both an existing and proposed value are supplied, their comparison
+is explicit. Other review shapes keep all their details, and an incomplete
+review still cannot be applied from the compact panel.

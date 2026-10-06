@@ -13,6 +13,82 @@
   // public address the identity provider must return to after sign-in.
   var signInGuide = document.getElementById('settings-signin-guide');
   if (signInGuide) {
+    var signInGeneration = 0;
+    var signInAccessGeneration = 0;
+    var signInTry = signInGuide.querySelector('[data-signin-try]');
+    var signInProvider = signInGuide.querySelector('[data-signin-provider-link]');
+    var signInRefresh = signInGuide.querySelector('[data-signin-refresh]');
+    var signInResults = signInGuide.querySelector('[data-signin-results]');
+    var signInHistory = signInGuide.querySelector('[data-signin-history]');
+    async function refreshSignInResults() {
+      var generation = ++signInGeneration;
+      signInHistory.replaceChildren();
+      signInRefresh.disabled = true;
+      signInResults.textContent = 'Reading saved sign-in results…';
+      try {
+        var response = await fetch('/api/v1/settings/sign-in-tests', {credentials: 'same-origin', cache: 'no-store'});
+        var value = await response.json();
+        if (generation !== signInGeneration) return;
+        if (!response.ok || value.context !== root.dataset.requestContext || !Array.isArray(value.checks)) throw new Error('unavailable');
+        signInResults.textContent = value.checks.length ? 'Saved provider sign-in checks. Current sign-in and administrator access were kept.' : 'No verified provider sign-in is saved for your current account and workspace.';
+        if (new URLSearchParams(location.search).get('signin_test') === 'unconfirmed') {
+          signInResults.textContent = 'The latest attempt was not confirmed. Nothing was enabled. Check the saved details before starting a separate attempt.';
+        }
+        value.checks.forEach(function (check) {
+          var item = document.createElement('li');
+          item.textContent = new Date(check.checked_at * 1000).toLocaleString() + ' · ' + check.provider + ' · ' + check.account + ' · ' + (check.current ? 'Matches current saved details' : 'Saved details have changed; check them again');
+          signInHistory.appendChild(item);
+        });
+      } catch (_) {
+        if (generation === signInGeneration) signInResults.textContent = 'The saved sign-in results could not be checked. Nothing was enabled.';
+      } finally {
+        if (generation === signInGeneration) signInRefresh.disabled = false;
+      }
+    }
+    function clearSignInResults() {
+      signInGeneration += 1;
+      signInAccessGeneration += 1;
+      signInTry.disabled = true;
+      signInProvider.hidden = true;
+      signInProvider.removeAttribute('href');
+      signInHistory.replaceChildren();
+      signInResults.textContent = 'Your account or workspace changed. Reload Settings before reading private sign-in results.';
+      signInRefresh.disabled = true;
+    }
+    signInTry.addEventListener('click', async function () {
+      var access = signInAccessGeneration;
+      var providerTab = window.open('about:blank', '_blank');
+      if (providerTab) providerTab.opener = null;
+      signInTry.disabled = true;
+      signInProvider.hidden = true;
+      signInProvider.removeAttribute('href');
+      signInResults.textContent = 'Preparing a sign-in against your saved provider details…';
+      try {
+        var response = await fetch('/api/v1/settings/sign-in-tests/start', {method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json'}});
+        var value = await response.json();
+        if (access !== signInAccessGeneration) throw new Error('changed');
+        if (!response.ok || value.context !== root.dataset.requestContext || typeof value.authorization_url !== 'string') throw new Error('unavailable');
+        var provider = new URL(value.authorization_url);
+        if (provider.protocol !== 'https:') throw new Error('unavailable');
+        if (providerTab && !providerTab.closed) {
+          providerTab.location.href = provider.href;
+          signInResults.textContent = 'Continue in your provider tab. Your current Lightwork access is kept.';
+        } else {
+          signInProvider.href = provider.href;
+          signInProvider.hidden = false;
+          signInResults.textContent = 'Your browser blocked the new tab. Choose Continue to your sign-in provider to complete this check.';
+        }
+      } catch (_) {
+        if (providerTab && !providerTab.closed) providerTab.close();
+        if (access === signInAccessGeneration) signInResults.textContent = 'The sign-in check could not start. Save and check the provider details first. Nothing was enabled.';
+      } finally {
+        if (access === signInAccessGeneration) signInTry.disabled = false;
+      }
+    });
+    signInRefresh.addEventListener('click', refreshSignInResults);
+    document.addEventListener('lightwork:copilot-context-changed', clearSignInResults);
+    window.addEventListener('lightwork:draft-context-changed', clearSignInResults);
+    refreshSignInResults();
     var secureSignInAddress = window.location.protocol === 'https:';
     var signInAddresses = {
       oidc: window.location.origin + '/auth/callback',
@@ -71,7 +147,7 @@
   }
 
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function rows(scope) {
     return Array.prototype.slice.call((scope || root).querySelectorAll('.settings-all-row[data-setting-id]'));
@@ -211,6 +287,7 @@
 
   // ---- writing a control from the server's state ---------------------------
   function apply(row, data) {
+    delete row.dataset.companySigninDefault;
     var control = row.dataset.control;
     var input = row.querySelector('[data-input]');
     if (control === 'toggle' && input) input.checked = data.value === true;
@@ -300,6 +377,13 @@
   }
 
   // ---- saving --------------------------------------------------------------
+  function valueChange(row) {
+    var defaults = ['auth.oidc.authorization_endpoint', 'auth.oidc.token_endpoint', 'auth.oidc.jwks_uri', 'auth.oidc.end_session_endpoint'];
+    if (row.dataset.companySigninDefault === '1' && defaults.indexOf(row.dataset.settingId) !== -1 && read(row) === '') {
+      return {id: row.dataset.settingId, reset: true};
+    }
+    return {id: row.dataset.settingId, value: read(row)};
+  }
   // ---- "Test connection" / "Check this location" ------------------------------
   function checkValue(row) {
     var control = row.dataset.control;
@@ -334,6 +418,10 @@
       return;
     }
     if (root.dataset.saving === '1') return;
+    // Reset and inherit replace what was typed, so only a save of values is checked.
+    var problems = changes.some(function (c) { return 'value' in c; }) ? cellProblems(busyRows) : [];
+    if (problems.length) { showCellProblems(problems); return; }
+    clearCellProblems();
     var revision = busyRows.length ? busyRows[0].dataset.revision : '';
     var disabled = [];
     root.dataset.saving = '1';
@@ -391,7 +479,7 @@
 
   function saveRows(list) {
     var pending = list.filter(function (row) { return editable(row) && changed(row); });
-    var changes = pending.map(function (row) { return {id: row.dataset.settingId, value: read(row)}; });
+    var changes = pending.map(valueChange);
     if (!pending.length) {
       list.forEach(function (row) { if (editable(row)) say(row, ''); });
       announce('There are no changes to save in this group.');
@@ -407,7 +495,7 @@
     if (target.hasAttribute('data-save') && row) {
       var needsNew = row.dataset.control === 'secret' || row.dataset.control === 'document';
       var single = needsNew && !changed(row)
-        ? [] : [{id: row.dataset.settingId, value: read(row)}];
+        ? [] : [valueChange(row)];
       if (!single.length) {
         say(row, row.dataset.control === 'document' ? 'Choose the file to import first.'
           : 'Choose Replace and enter a value first.');
@@ -491,6 +579,19 @@
       var ok = await window.mvConfirm('Put every setting in ' + name + ' back to its product default? Deployment-locked rows are excluded.', {okText: 'Review product defaults'});
       if (!ok) return;
       await commit(list.map(function (r) { return {id: r.dataset.settingId, reset: true}; }), list, 'reset the settings');
+    } else if (target.hasAttribute('data-signin-key-create') && row) {
+      if (row.dataset.settingId !== 'auth.oidc.session_secret' || !editable(row) || root.dataset.saving === '1' || target.disabled) return;
+      var keyInput = row.querySelector('[data-input]');
+      if (!keyInput || keyInput.value.trim()) { say(row, 'Your entered key has been kept. Clear that draft before creating a different one.'); return; }
+      try {
+        var randomKey = window.crypto.getRandomValues(new Uint8Array(32));
+        keyInput.value = Array.from(randomKey, function (byte) { return byte.toString(16).padStart(2, '0'); }).join('');
+        randomKey.fill(0);
+        keyInput.hidden = false;
+        keyInput.dispatchEvent(new Event('input', {bubbles: true}));
+        say(row, 'A secure sign-in key is ready as an unsaved draft. Review Save setting before it changes sign-in.');
+        keyInput.focus();
+      } catch (_) { say(row, 'A secure key could not be created. Nothing was saved.'); }
     } else if (target.hasAttribute('data-secret-replace') && row) {
       var input = row.querySelector('[data-input]');
       if (input) { input.hidden = false; input.focus(); }
@@ -999,7 +1100,80 @@
     }
     input.setAttribute('data-cell-input', '');
     input.setAttribute('aria-label', column.label + ' ' + where + (column.unit ? ' (' + column.unit + ')' : ''));
+    input.setAttribute('data-cell-label', '\u201c' + column.label + '\u201d ' + where);
+    if (column.required && /^(select|pick|number|path|program)$|^$/.test(kind || '') && input.type !== 'checkbox') input.required = true;
+    if (kind === 'number' && column.integer) input.step = '1';
     td.appendChild(input);
+  }
+  // CTL-3: a value in a table that can't be saved (missing, out of range, not
+  // a whole number) is named next to its row and in a summary at the top that
+  // takes focus; the page title starts with "Error: " while it remains, and
+  // nothing typed is cleared.
+  var ERROR_PREFIX = 'Error: ';
+  function cellMessage(c) {
+    var label = c.getAttribute('data-cell-label') || c.getAttribute('aria-label') || 'this value';
+    var v = c.validity || {};
+    if (v.valueMissing) return (c.tagName === 'SELECT' ? 'Choose ' : 'Fill in ') + label + '.';
+    if (v.badInput) return 'Enter ' + label + ' as a number.';
+    if ((v.rangeUnderflow || v.rangeOverflow) && c.min && c.max) return 'Enter ' + label + ' from ' + c.min + ' to ' + c.max + '.';
+    if (v.rangeUnderflow) return 'Enter ' + label + ' of at least ' + c.min + '.';
+    if (v.rangeOverflow) return 'Enter ' + label + ' of no more than ' + c.max + '.';
+    if (v.stepMismatch) return 'Enter a whole number for ' + label + '.';
+    return 'Check ' + label + '.';
+  }
+  function cellProblems(list) {
+    var found = [];
+    list.forEach(function (row) {
+      row.querySelectorAll('[data-cell-input]').forEach(function (c) {
+        if (c.disabled || !c.checkValidity || c.checkValidity()) return;
+        found.push({row: row, control: c, message: cellMessage(c)});
+      });
+    });
+    return found;
+  }
+  var cellIds = 0;
+  function clearCellProblems() {
+    var box = document.getElementById('settings-all-errors');
+    if (box) { box.hidden = true; box.replaceChildren(); }
+    root.querySelectorAll('[data-cell-input][aria-invalid="true"]').forEach(function (c) { c.removeAttribute('aria-invalid'); });
+    if (document.title.indexOf(ERROR_PREFIX) === 0) document.title = document.title.slice(ERROR_PREFIX.length);
+  }
+  function showCellProblems(found) {
+    clearCellProblems();
+    var box = document.getElementById('settings-all-errors');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'settings-all-errors'; box.className = 'mv-error-summary'; box.tabIndex = -1;
+      box.setAttribute('data-mv-error-summary', ''); box.setAttribute('aria-labelledby', 'settings-all-errors-title');
+      var groups = document.getElementById('settings-all-groups');
+      if (groups && groups.parentNode) groups.parentNode.insertBefore(box, groups); else root.insertBefore(box, root.firstChild);
+    }
+    var title = document.createElement('h2');
+    title.className = 'mv-error-summary__title'; title.id = 'settings-all-errors-title'; title.textContent = 'There is a problem';
+    var list = document.createElement('ul');
+    list.className = 'mv-error-summary__list';
+    var byRow = [];
+    found.forEach(function (problem) {
+      var c = problem.control;
+      if (!c.id) { cellIds += 1; c.id = 'settings-all-cell-' + cellIds; }
+      c.setAttribute('aria-invalid', 'true');
+      var status = problem.row.querySelector('[data-row-status]');
+      if (status) {
+        if (!status.id) { cellIds += 1; status.id = 'settings-all-row-status-' + cellIds; }
+        var described = (c.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+        if (described.indexOf(status.id) < 0) c.setAttribute('aria-describedby', described.concat(status.id).join(' '));
+      }
+      var entry = byRow.filter(function (item) { return item.row === problem.row; })[0];
+      if (entry) entry.messages.push(problem.message); else byRow.push({row: problem.row, messages: [problem.message]});
+      var item = document.createElement('li'), link = document.createElement('a');
+      link.href = '#' + c.id; link.textContent = problem.message;
+      item.appendChild(link); list.appendChild(item);
+    });
+    byRow.forEach(function (entry) { say(entry.row, entry.messages.join(' ') + ' Nothing was saved.'); });
+    box.replaceChildren(title, list);
+    box.hidden = false;
+    if (document.title.indexOf(ERROR_PREFIX) !== 0) document.title = ERROR_PREFIX + document.title;
+    box.focus();
   }
   function addGridRow(row, entry) {
     var state = gridState(row);
@@ -1248,7 +1422,7 @@
   function showDocument(row, doc) {
     var text = row.querySelector('[data-document-text]');
     var items = row.querySelector('[data-document-items]');
-    if (text) text.textContent = doc ? doc.text : 'Nothing imported yet.';
+    if (text) text.textContent = doc ? doc.text : 'Nothing imported yet. Import a document below.';
     if (!items) return;
     items.textContent = '';
     ((doc && doc.items) || []).forEach(function (item) {
@@ -1284,7 +1458,7 @@
       doc.value = '';
       return;
     }
-    var level = event.target.closest('select[data-preview-url]');
+    var level = event.target.closest('select[data-preview-url], input[data-preview-url]');
     if (level) await showPreview(level.closest('.settings-all-row'), level);
   });
 
@@ -1338,6 +1512,24 @@
     box.appendChild(only);
   }
 
+  // ---- what a shorter keep period would delete -------------------------------
+  // Report only, from a trial run of the clean-up (maverick.policy_preview).
+  function retentionPreview(box, data) {
+    var lead = document.createElement('p');
+    // The server names the unit in the right number ("1 message", "3 messages").
+    lead.textContent = data.days == null ? data.basis
+      : 'At the next clean-up, ' + data.count + ' ' + data.unit + ' older than ' +
+        count(data.days, 'day', 'days') + ' would be deleted.';
+    box.appendChild(lead);
+    if (data.days != null) {
+      var basis = document.createElement('p'); basis.className = 'muted'; basis.textContent = data.basis;
+      box.appendChild(basis);
+    }
+    var only = document.createElement('p'), strong = document.createElement('strong');
+    strong.textContent = 'Preview only. Nothing changes until you save.';
+    only.appendChild(strong); box.appendChild(only);
+  }
+
   // ---- what saving a choice would also change -------------------------------
   async function showPreview(row, select) {
     var box = row.querySelector('[data-preview]');
@@ -1357,6 +1549,7 @@
         return;
       }
       if (data.kind === 'approval_checks') { approvalPreview(box, data); return; }
+      if (data.kind === 'retention') { retentionPreview(box, data); return; }
       var lead = document.createElement('p');
       lead.textContent = (data.items || []).length
         ? 'Saving this also changes:' : 'Saving this changes nothing else: every setting it covers already matches.';
@@ -1479,14 +1672,16 @@
       if (offer) offer.hidden = true;
     }
   }
-  async function fetchRows(query) {
+  async function fetchRows(query, beforeInsert) {
     if (fetched[query]) return true;
     try {
       var response = await window.fetch(ROWS + '?' + query, {
         cache: 'no-store', credentials: 'same-origin', headers: {Accept: 'text/html'}
       });
       if (!response.ok) throw response;
-      insertRows(new window.DOMParser().parseFromString(await response.text(), 'text/html'));
+      var text = await response.text();
+      if (beforeInsert && !await beforeInsert()) return false;
+      insertRows(new window.DOMParser().parseFromString(text, 'text/html'));
       fetched[query] = true;
       return true;
     } catch (failure) {
@@ -1494,12 +1689,12 @@
       return false;
     }
   }
-  async function loadGroup(slug) {
+  async function loadGroup(slug, beforeInsert) {
     var group = section(slug);
     if (!group || complete(group)) return !!group;
     var offer = group.querySelector('[data-load-group]');
     if (offer) offer.setAttribute('aria-busy', 'true');
-    var ok = await fetchRows('group=' + encodeURIComponent(slug));
+    var ok = await fetchRows('group=' + encodeURIComponent(slug), beforeInsert);
     if (offer) offer.removeAttribute('aria-busy');
     return ok;
   }
@@ -1552,6 +1747,49 @@
   var changedOnly = document.getElementById('settings-all-changed');
   var status = document.getElementById('settings-all-filter-status');
   var empty = document.getElementById('settings-all-empty');
+  window.stageCompanySigninDraft = async function (values, expectedContext, isCurrent) {
+    var ids = ['issuer', 'client_id', 'audience', 'redirect_uri', 'authorization_endpoint', 'token_endpoint', 'jwks_uri', 'end_session_endpoint']
+      .map(function (name) { return 'auth.oidc.' + name; });
+    if (!values || Object.keys(values).length !== ids.length || ids.some(function (id) {
+      return typeof values[id] !== 'string' || values[id].length > 300;
+    }) || !/^[a-f0-9]{64}$/.test(expectedContext || '') || root.dataset.saving === '1') return false;
+    var ticket = lazySelectGeneration, controller = new AbortController();
+    var deadline = setTimeout(function () { controller.abort(); }, 20000);
+    async function current() {
+      var response = await fetch('/api/v1/settings/sign-in-migration/context', {credentials: 'same-origin',
+        cache: 'no-store', redirect: 'error', signal: controller.signal, headers: {Accept: 'application/json'}});
+      if (!(response.headers.get('content-type') || '').startsWith('application/json')) return false;
+      var text = await response.text(); if (text.length > 4096) return false;
+      return response.ok && JSON.parse(text).context === expectedContext && ticket === lazySelectGeneration
+        && (!isCurrent || isCurrent()) && root.dataset.saving !== '1';
+    }
+    try {
+      if (!await current() || !await loadGroup('people-access', current) || !await current()) return false;
+      var selectedRows = ids.map(rowById);
+      if (selectedRows.some(function (row) { return !row || !row.isConnected || !editable(row)
+        || changed(row) || row.dataset.control !== 'text' || row.querySelector('[data-segment-at]'); })) {
+        announce('Provider fields contain entered work or are controlled by installation policy. Keep that work; review or cancel it before preparing a preset.');
+        return false;
+      }
+      selectedRows.forEach(function (row) {
+        var input = row.querySelector('[data-input]'); input.value = values[row.dataset.settingId];
+        row.dataset.companySigninDefault = input.value === '' ? '1' : '0';
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        say(row, input.value === '' ? 'Unsaved preset: use the provider\'s published details by restoring this field to its product default. Review and save explicitly.'
+          : 'Unsaved provider preset. Review and save this choice explicitly.');
+      });
+      if (search) search.value = ''; if (groupPick) groupPick.value = 'people-access';
+      if (changedOnly) changedOnly.checked = false;
+      var group = section('people-access'), part = group.querySelector('[data-subgroup-pick]');
+      if (part) part.value = selectedRows[0].dataset.subgroup;
+      updateFilter(); selectedRows[0].scrollIntoView({block: 'start'});
+      selectedRows[0].querySelector('[data-input]').focus({preventScroll: true});
+      return true;
+    } catch (_) {
+      announce('Current provider controls could not be checked. Your entered work was kept; reload the current controls before using a preset.');
+      return false;
+    } finally { clearTimeout(deadline); }
+  };
   window.LightworkInstalledPracticeEnvironment = {open: async function (context) {
     if (!/^[a-f0-9]{64}$/.test(context || '') || root.dataset.saving === '1') return false;
     var ticket = lazySelectGeneration, controller = new AbortController();

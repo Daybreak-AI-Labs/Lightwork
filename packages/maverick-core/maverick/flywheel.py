@@ -24,6 +24,7 @@ entry point and returns an empty report when it is disabled.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 from . import (
@@ -48,6 +49,8 @@ class FlywheelReport:
     hypotheses: tuple = field(default_factory=tuple)        # operations_scientist.Hypothesis
     simulations: tuple = field(default_factory=tuple)       # operations_scientist.SimResult
     predicted_lift: float = 0.0   # outcome recoverable from the learned guardrails
+    complete: bool = True
+    problem: str = ""
 
     @property
     def acted(self) -> bool:
@@ -68,13 +71,29 @@ def grounded_outcome_fn():
     return of
 
 
+def _before_write(guard, observe, family, items, expected):
+    def checked():
+        if guard is not None:
+            guard()
+        if expected is not None and [item.to_dict() for item in items] != expected[family]:
+            raise RuntimeError("The reviewed learning guidance changed before persistence")
+        if observe is not None:
+            observe(family, "writing", len(items))
+    return checked
+
+
 def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_states=None,
              failure_threshold: float = 0.5, min_support: int = 8,
-             top_k: int = 10) -> FlywheelReport:
+             top_k: int = 10, strict: bool = False, guard=None,
+             effect_scope=None, observe=None, expected_guidance=None) -> FlywheelReport:
     """One grounded, HALT-governed turn of the flywheel."""
     check_learning_halt("flywheel", "start")
+    if guard is not None:
+        guard()
     steps = list(steps)
     n_eps = len({(s.goal_id, s.episode_id) for s in steps})
+    if not steps:
+        return FlywheelReport(n_episodes=0)
     outcome_fn = grounded_outcome_fn()
 
     classes = data_engine.triage(
@@ -89,18 +108,42 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
     rails = negative_knowledge.mine(classes)
     guard_store = guardrails or negative_knowledge.shared()
     check_learning_halt("flywheel", "guardrail_persistence")
-    guard_store.update(rails)
-    record(EventKind.LEARNING_UPDATE, agent="flywheel", store="guardrails",
-           episodes=n_eps, written=len(rails))
+    with effect_scope() if effect_scope is not None else nullcontext():
+        if guard is not None:
+            guard()
+        if strict:
+            guard_store.update(rails, strict=True, before_write=_before_write(guard, observe, "guardrails", rails, expected_guidance))
+        else:
+            guard_store.update(rails)
+        if observe is not None:
+            observe("guardrails", "saved", len(rails))
+        written = record(EventKind.LEARNING_UPDATE, agent="flywheel", store="guardrails",
+                         episodes=n_eps, written=len(rails))
+        if strict and written is not True:
+            raise RuntimeError("Learning change activity was not confirmed")
+        if observe is not None:
+            observe("guardrails", "recorded", len(rails))
 
     mem_store = memory or procedural_memory.shared()
     mems = procedural_memory.consolidate(
         steps, prior=mem_store.recall(top_k=128), min_support=min_support,
         outcome_fn=outcome_fn)
     check_learning_halt("flywheel", "procedural_memory_persistence")
-    mem_store.update(mems)
-    record(EventKind.LEARNING_UPDATE, agent="flywheel", store="procedural_memory",
-           episodes=n_eps, written=len(mems))
+    with effect_scope() if effect_scope is not None else nullcontext():
+        if guard is not None:
+            guard()
+        if strict:
+            mem_store.update(mems, strict=True, before_write=_before_write(guard, observe, "habits", mems, expected_guidance))
+        else:
+            mem_store.update(mems)
+        if observe is not None:
+            observe("habits", "saved", len(mems))
+        written = record(EventKind.LEARNING_UPDATE, agent="flywheel", store="procedural_memory",
+                         episodes=n_eps, written=len(mems))
+        if strict and written is not True:
+            raise RuntimeError("Learning change activity was not confirmed")
+        if observe is not None:
+            observe("habits", "recorded", len(mems))
 
     hyps = operations_scientist.propose(classes, mems, top_k=top_k)
     sims: tuple = ()
@@ -114,7 +157,7 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
         predicted_lift=sum(g.severity for g in rails))
 
 
-def maybe_run() -> FlywheelReport:
+def maybe_run(*, raise_errors: bool = False) -> FlywheelReport:
     """Governed entry point: turn the flywheel over the captured Operating Record,
     or a no-op (empty report) when ``[data_engine]`` is disabled."""
     if not data_engine.enabled():
@@ -131,11 +174,15 @@ def maybe_run() -> FlywheelReport:
             failure_threshold=float(cfg.get("failure_threshold", 0.5)),
             min_support=int(cfg.get("min_support", 8)),
             top_k=int(cfg.get("top_k", 10)),
+            strict=True,
         )
     except Halted:
         raise
-    except Exception:  # pragma: no cover -- a maintenance loop must never crash a run
-        return FlywheelReport(n_episodes=0)
+    except Exception:
+        if raise_errors:
+            raise
+        return FlywheelReport(n_episodes=0, complete=False,
+                              problem="The improvement cycle did not finish. Earlier learning changes may have been kept; check current guidance before starting another cycle.")
 
 
 __all__ = ["FlywheelReport", "grounded_outcome_fn", "run_once", "maybe_run"]

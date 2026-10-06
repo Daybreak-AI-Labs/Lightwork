@@ -21,12 +21,13 @@ from .draft_store import DraftStore
 
 STORE = GovernedRecordStore("personal_data_requests", "PDR", "personal_data_request")
 KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
-         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins"}
+         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins", "comments", "policy_suggestions"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
     {"store": "workspace_gallery_curation", "state": "retained", "reason": "Gallery curation is a separate workspace record. Erasing an account's saved views and task pins does not delete featured task content or curator history."},
     {"store": "task_feedback_and_trace_annotations", "state": "retained", "reason": "Task verdicts and trace annotations are separate workspace records; conversation deletion does not erase them. Historical deployment-wide feedback and legacy UX files lack reliable workspace lineage and are unavailable to normal reads; they require a separate records-custodian review, not automatic reassignment."},
     {"store": "fact_operation_receipts", "state": "retained", "reason": "Shared fact action receipts retain the actor, review digest and outcome only, without fact names or values. These replay barriers are not automatically erased or expired; removal could let an old create action recreate deleted data."},
+    {"store": "private_notification_test_receipts", "state": "retained", "reason": "Original private test receipts retain the actor, destination reference, review digest and service outcome without task content. They remain separate from ordinary alert-history erasure so an interrupted test cannot be silently sent again.", "href": "/notifications#private-alert-test-title"},
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
     {"store": "local_selected_result_bundles", "state": "retained", "reason": "Captured local copies and review receipts are separate from their original tasks. My data lists currently readable owned copies. Revoking future access does not delete saved or downloaded copies.", "href": "/deliverable-bundles"},
     {"store": "local_responsibility_handoffs", "state": "retained", "reason": "Offer and acceptance evidence remains separate. Withdraw outstanding offers in Handoffs; an accepted recipient's independent task is not yours to erase.", "href": "/task-handoffs"},
@@ -102,7 +103,7 @@ def _preview_owned_account(kind, actor):
         target["records"] = owned_inventory(actor)
         target["count"] = len(target["records"])
         if any(item["inflight"] for item in target["records"]):
-            raise ValueError("Some queued conversation work is consuming or dispatching. Reconcile it before reviewing erasure.")
+            raise ValueError("Some queued or human conversation work is active or unconfirmed. Settle queued work and finish human sharing before reviewing erasure.")
     elif kind == "generated_tools":
         from maverick.personal_learning import reviewed_targets
         target["records"] = reviewed_targets(actor)
@@ -166,6 +167,12 @@ def preview(actor, channel, user_id, selected, world):
         elif kind == "project_defaults":
             from maverick.project_workspaces import owned_defaults_inventory
             target["records"] = owned_defaults_inventory(actor)
+        elif kind == "comments":
+            from maverick import comments
+            target["count"] = comments.count_by(actor)
+        elif kind == "policy_suggestions":
+            from maverick import policy_suggestions
+            target["count"] = policy_suggestions.count_by(actor)
         targets.append(target)
     holds = preservation_snapshot()
     result = {"owner": actor, "channel": channel, "user_id": user_id, "targets": targets,
@@ -232,7 +239,7 @@ def _erase_owned_account(row, target):
         for item in target["records"]:
             result = erase_owned(actor, item["id"], item["revision"], _digest([row["id"], kind, item["id"]])[:32], actor=row["reviewer"])
             if result["status"] not in {"confirmed", "replayed"}:
-                raise ValueError("Queued conversation erasure receipt is unconfirmed.")
+                raise ValueError("Conversation-work erasure receipt is unconfirmed.")
         return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free operation tombstones, generation barriers, submitted tasks and accounting/audit receipts remain separately retained."}
     if kind == "generated_tools":
         from maverick.personal_learning import erase_reviewed
@@ -244,6 +251,17 @@ def _erase_owned_account(row, target):
         return {"state": "purged" if result["status"] == "confirmed" else "unconfirmed",
                 "removed": result["removed"], "retained": target["inventory"]["retained"]}
     raise ValueError("Unsupported owned account store")
+
+def _erase_collaboration(kind, actor):
+    """A person's comments, or the edits they suggested to AI use rules."""
+    if kind == "policy_suggestions":
+        from maverick import policy_suggestions
+        return {"state": "purged", "removed": policy_suggestions.erase_person(actor),
+                "retained": "Decisions stay on the rules' history without your name. The activity record keeps its own entries."}
+    from maverick import comments
+    return {"state": "purged", "removed": comments.erase_person(actor),
+            "retained": "Other people's comments, including ones that mention you, are theirs and remain."}
+
 
 def _erase_target(world, row, target):
     kind, actor = target["store"], row["owner"]
@@ -271,6 +289,8 @@ def _erase_target(world, row, target):
     if kind == "experience_preferences":
         from maverick.experience_preferences import erase_personal
         return {"state": "purged", "removed": erase_personal(actor)}
+    if kind in ("comments", "policy_suggestions"):
+        return _erase_collaboration(kind, actor)
     if kind == "notification_receipts":
         from maverick.personal_notification_delivery import remove_personal_history
         return {"state": "purged", "result": remove_personal_history(actor), "retained": "Notification preferences, provider records and recipient enrollment are separate."}

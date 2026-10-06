@@ -9,6 +9,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.channel_review import channel_review_token
+
 _ORIGIN = {"Origin": "http://testserver"}
 
 
@@ -145,6 +147,7 @@ def test_activity_log_records_invites_channels_and_workspace_pauses(monkeypatch,
     assert r.status_code == 200, r.text
     assert "/auth/invite/" in r.text  # the one-time link is shown
     r = client.post("/channels/save", data={"channel": "slack", "enabled": "on",
+                                            "review_token": channel_review_token(client),
                                             "app_token": "xapp-1", "bot_token": "xoxb-1"},
                     follow_redirects=False)
     assert r.status_code == 303, r.text
@@ -314,9 +317,16 @@ def test_results_page_shows_a_real_empty_state_and_a_typeahead():
 
 def test_channels_page_answers_json_for_the_inline_test(monkeypatch):
     from maverick_dashboard import channel_check_api, settings_store
-    settings_store.set_channel("slack", True, {"app_token": "xapp-1", "bot_token": "xoxb-1"})
+    # Someone is permitted: a chat app with nobody on its list is refused before any test.
+    settings_store.set_channel("slack", True, {"app_token": "xapp-1", "bot_token": "xoxb-1",
+                                               "allowed_user_ids": "U01ABCDEF"})
     monkeypatch.setattr(channel_check_api, "check_credentials",
                         lambda name, cfg: (False, "the service did not accept the saved details"))
+    # The chat app's own components are installed (the check under test is the
+    # credential test, not this machine's optional Slack packages).
+    from maverick_dashboard import integration_readiness
+    monkeypatch.setattr(integration_readiness, "_channel_dependency",
+                        lambda _name: integration_readiness.check("passed", "fixture", kind="channel_adapter"))
     client = _client()
     r = client.post("/channels/test", data={"channel": "slack"}, headers={"Accept": "application/json"})
     assert r.status_code == 200, r.text

@@ -30,15 +30,16 @@ FINANCE_DISCLAIMER = (
 def _money_gate_active() -> tuple[bool, str]:
     """Is every money/posting action gated to a human (config + regimes)?"""
     from ..governance import Policy
-    from ..safety.tool_risk import risk_rank
+    from ..safety.tool_risk import risk_rank, tool_risk
     effective = _regimes.union_policies(
         [Policy.from_config(), _regimes.compile_policy(_regimes.configured_regimes())])
-    floor_ok = (effective.require_human_min_risk is not None
-                and risk_rank(effective.require_human_min_risk) <= risk_rank("high"))
     covered = set(effective.require_human_actions) | set(effective.deny_actions)
-    missing = [a for a in _regimes._MONEY_ACTIONS if a not in covered]
-    if floor_ok or not missing:
-        return True, "money movement pauses for a human (require_human gate)"
+    covered.update(action for action, level in effective.automation.items() if level in {"draft", "approve"})
+    missing = [a for a in _regimes._MONEY_ACTIONS if a not in covered and not (
+        effective.require_human_min_risk is not None
+        and risk_rank(tool_risk(a)) >= risk_rank(effective.require_human_min_risk))]
+    if not missing:
+        return True, "Money and posting actions require a person to perform or approve them."
     return False, ("set [governance] require_human_min_risk=\"high\" or enable a "
                    "finance regime (e.g. [finance] regimes=[\"sox\"]); ungated: "
                    + ", ".join(missing[:5]))
@@ -54,9 +55,9 @@ def _amount_tiers_active() -> tuple[bool, str]:
 
 
 def _sod_active() -> tuple[bool, str]:
-    from ..domain import builtin_dir, load_domains
+    from ..domain import available_domains
     from .sod_linter import lint_roster
-    packs = {n: p for n, p in load_domains(builtin_dir()).items()
+    packs = {n: p for n, p in available_domains().items()
              if n.startswith("finance_")}
     conflicts = lint_roster(packs)
     if conflicts:

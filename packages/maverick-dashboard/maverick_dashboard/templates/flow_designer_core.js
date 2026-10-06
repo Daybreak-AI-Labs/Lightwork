@@ -303,13 +303,91 @@ var FDCore = (function () {
   var COND_OPS = ['==', '!=', '>', '<', '>=', '<=', 'contains'];
   var COND_RE = /^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$/;
 
+  function splitCondition(text, operator) {
+    var parts = [], quote = '', start = 0;
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      if (quote) { if (ch === quote) quote = ''; continue; }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (text.slice(i, i + operator.length).toLowerCase() === operator &&
+          (i === 0 || /\s/.test(text[i - 1])) &&
+          (i + operator.length === text.length || /\s/.test(text[i + operator.length]))) {
+        parts.push(text.slice(start, i).trim()); i += operator.length - 1; start = i + 1;
+      }
+    }
+    if (quote) throw new Error('This saved question contains unfinished quotation marks. Its original meaning was kept.');
+    parts.push(text.slice(start).trim()); return parts;
+  }
+  function parseCondition(text) {
+    text = String(text || '').trim();
+    if (text.length > 16000) throw new Error('This saved question is too large for the visual editor. Its original meaning was kept.');
+    if (!text) return [[{key: '', op: '==', kind: 'text', value: ''}]];
+    var groups = splitCondition(text, 'or'), count = 0;
+    if (groups.length > 32) throw new Error('This saved question has too many groups for the visual editor.');
+    return groups.map(function (group) {
+      return splitCondition(group, 'and').map(function (part) {
+        if (!part || ++count > 64) throw new Error('Every group needs a question; up to 64 questions are supported.');
+        var match = COND_RE.exec(part);
+        if (!match) {
+          if (/\s/.test(part)) throw new Error('This saved question cannot be edited safely. Its original meaning was kept.');
+          return {key: part, op: 'truthy', kind: 'text', value: ''};
+        }
+        var literal = match[3], kind = 'text', value = literal;
+        if (literal.length >= 2 && ['"', "'"].includes(literal[0]) && literal[literal.length - 1] === literal[0]) value = literal.slice(1, -1);
+        else if (/^(true|false)$/i.test(literal)) { kind = 'boolean'; value = literal.toLowerCase(); }
+        else if (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(literal) && Number.isFinite(Number(literal))) { kind = 'number'; value = literal; }
+        return {key: match[1], op: match[2], kind: kind, value: value, literal: literal};
+      });
+    });
+  }
+  function conditionQuestions(groups) {
+    var count = 0;
+    if (!Array.isArray(groups) || !groups.length || groups.length > 32) throw new Error('Choose between 1 and 32 question groups.');
+    var text = groups.map(function (group) {
+      if (!Array.isArray(group) || !group.length) throw new Error('Each group needs at least one question.');
+      return group.map(function (question) {
+        if (++count > 64) throw new Error('Use no more than 64 questions.');
+        if (!question.key || /\s/.test(question.key)) throw new Error('Choose the information for every question.');
+        if (question.op === 'truthy') return question.key;
+        if (!COND_OPS.includes(question.op)) throw new Error('Choose a supported comparison.');
+        var value = String(question.value == null ? '' : question.value), literal = question.literal;
+        if (literal === undefined) {
+          if (question.kind === 'boolean') {
+            if (!['true', 'false'].includes(value)) throw new Error('Choose Yes or No.');
+            literal = value;
+          } else if (question.kind === 'number') {
+            if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value) || !Number.isFinite(Number(value))) throw new Error('Enter a finite number for every number comparison.');
+            literal = value;
+          } else {
+            if (value.includes("'") && value.includes('"')) throw new Error('This text contains both kinds of quotation marks. Choose text with one kind before saving.');
+            var quote = value.includes("'") ? '"' : "'"; literal = quote + value + quote;
+          }
+        }
+        return question.key + ' ' + question.op + ' ' + literal;
+      }).join(' and ');
+    }).join(' or ');
+    if (text.length > 16000) throw new Error('Shorten the questions to fit the supported size.');
+    return text;
+  }
+  function conditionProblems(flow) {
+    var problems = [];
+    (flow.nodes || []).forEach(function (item) {
+      if (item._conditionProblem) problems.push((item.label || 'A question step') + ': ' + item._conditionProblem);
+      if (item.body) problems = problems.concat(conditionProblems(item.body));
+      (item.branches || []).forEach(function (branch) { if (branch) problems = problems.concat(conditionProblems(branch)); });
+    });
+    return problems;
+  }
+
   return { normalizeNode: normalizeNode, serializeNode: serializeNode,
            serializeFlow: serializeFlow, cloneFlow: cloneFlow,
            commitRawParams: commitRawParams,
            upstreamOutputs: upstreamOutputs, fitView: fitView,
            validateFlow: validateFlow, plainProblems: plainProblems,
            unreachableNodeIds: unreachableNodeIds,
-           COND_OPS: COND_OPS, COND_RE: COND_RE };
+           COND_OPS: COND_OPS, COND_RE: COND_RE,
+           parseCondition: parseCondition, conditionQuestions: conditionQuestions,
+           conditionProblems: conditionProblems };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FDCore;

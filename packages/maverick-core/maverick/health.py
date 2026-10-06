@@ -54,39 +54,37 @@ def _is_outage(exc: BaseException) -> bool:
     return "InternalServerError" in names
 
 
+def _console_text(value: str) -> str:
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        value.encode(encoding)
+        return value
+    except UnicodeEncodeError:
+        return value.translate(str.maketrans({"✓": "OK", "✗": "FAIL", "→": "->"})).encode(
+            encoding, errors="replace").decode(encoding)
+
+
 def _row(marker: str, label: str, detail: str = "", fix: str = "") -> None:
     if marker == RED:
         _FAILURES.append(label)
     line = f"  {marker} {label}"
     if detail:
         line += click.style(f"  ({detail})", fg="bright_black")
-    click.echo(line)
+    click.echo(_console_text(line))
     if fix:
-        click.echo(click.style(f"      → {fix}", fg="cyan"))
+        click.echo(_console_text(click.style(f"      → {fix}", fg="cyan")))
 
 
 def _check_config() -> dict:
-    # tomllib (with config.py's 3.10 tomli fallback) is reused for the
-    # validity probe below.
-    from .config import config_path, load_config, tomllib
-    p = config_path()
-    if not p.exists():
-        _row(RED, "config", f"{p} not found",
-             fix="run  maverick init")
+    from .operator_preflight import _config_state
+
+    check, cfg = _config_state()
+    if check.status == "blocked":
+        _row(RED, "config", check.detail,
+             fix="Open Settings > Installation health. Ask an administrator to repair unavailable settings or restore a known-good copy.")
         return {}
-    # Parse directly: load_config() fails SOFT (returns {} + logs a warning) on
-    # a syntax error, so checking validity through it always reported GREEN --
-    # a corrupt config that silently drops every user setting went unflagged by
-    # the very tool meant to catch it.
-    try:
-        with open(p, "rb") as f:
-            tomllib.load(f)
-    except Exception as e:
-        _row(RED, "config", f"invalid TOML -- your settings are being IGNORED ({e})",
-             fix="ask an installation administrator to repair the saved settings or restore a known-good backup; setup will not replace them")
-        return {}
-    _row(GREEN, "config", str(p))
-    return load_config(p)
+    _row(GREEN, "config", check.detail)
+    return cfg or {}
 
 
 def _check_config_lint(cfg: dict) -> None:

@@ -2033,6 +2033,16 @@ class TestLearnTool:
 
 
 class TestPreflight:
+    @pytest.fixture(autouse=True)
+    def signed_catalog_prerequisites(self, monkeypatch):
+        from maverick import config
+        ed25519 = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519")
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+        public = ed25519.Ed25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        existing = config.get_skills()
+        monkeypatch.setattr(config, "get_skills", lambda: {**existing, "trusted_pubkeys": [public]})
+
     @pytest.mark.asyncio
     async def test_pre_acquires_matching_skill(self, monkeypatch):
         from maverick import self_learning as sl

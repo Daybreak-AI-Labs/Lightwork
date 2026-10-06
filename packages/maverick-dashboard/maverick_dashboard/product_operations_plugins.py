@@ -11,13 +11,26 @@ from pydantic import Field
 from . import plugin_practice_forms_api as practice
 from . import plugin_workbench_api as native
 from .draft_api import context_for
-from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
+from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
+
+
+class StatusInput(StrictInput):
+    fingerprint: str = Field(default="", pattern=r"^([a-f0-9]{64})?$")
 
 
 def state(request):
     native._authority(request)
+    from maverick import plugins
+
     context = context_for(request)
-    return {"context": context, "plugins": workbench.snapshot(), **workbench.history(context)}
+    rows = workbench.snapshot()
+    entries = {(group, entry.name, plugins._ep_dist_name(entry) or ""): entry
+               for group in plugins._PLUGIN_GROUPS for entry in plugins._entry_points(group)}
+    for row in rows:
+        entry = entries.get((row["group"], row["name"], row["distribution"]))
+        if entry is not None:
+            row["compatibility_reason"] = plugins._entry_compatibility_error(entry)
+    return {"context": context, "plugins": rows, **workbench.history(context)}
 
 
 def snapshot(request, selection, kind="status"):
@@ -25,6 +38,11 @@ def snapshot(request, selection, kind="status"):
     choices = [{"value": row["fingerprint"], "label": row["name"] + " / " + row["version"]}
                for row in value["plugins"] if row["eligible"]]
     fields = []
+    if kind == "status":
+        fields.append({"name": "fingerprint", "label": "Add-on to check", "kind": "select", "value": "",
+                       "choices": [{"value": "", "label": "All add-ons — summary"}]
+                       + [{"value": row["fingerprint"], "label": row["name"] + " / " + row["version"]}
+                          for row in value["plugins"]]})
     if kind in {"check", "inspect", "publish", "migrate"}:
         fields.append({"name": "fingerprint", "label": "Exact plugin version", "kind": "select", "choices": choices, "required": True})
     if kind == "publish":
@@ -118,6 +136,25 @@ def prepare(request, selection, arguments):
                         {"label": "What happens next", "after": "Only this selected work's plugin version changes. No task resumes and no previous action repeats."}])
     return Preview("Review this exact plugin operation. Network, credentials and host writes remain unavailable; nothing installs, resumes or replays work.",
                    changes=changes, native=prepared)
+
+
+def status_prepare(request, selection, arguments):
+    value = state(request)
+    rows = value["plugins"]
+    details = {"Add-ons found": len(rows), "Compatibility refusals": sum(bool(row.get("compatibility_reason")) for row in rows),
+               "Policy allows use": sum(bool(row.get("policy_allowed")) for row in rows),
+               "Ready for guided practice": sum(bool(row.get("eligible")) for row in rows),
+               "Saved practice checks": len(value["checks"]), "href": "/plugins"}
+    if arguments.get("fingerprint"):
+        row = next((row for row in rows if row["fingerprint"] == arguments["fingerprint"]), None)
+        if row is None:
+            raise ValueError("This add-on changed. Refresh the list before checking it again.")
+        details.update({"Add-on": row["name"], "Version": row["version"],
+                        "Compatibility reason": row.get("compatibility_reason") or "No compatibility refusal is recorded for this entry.",
+                        "Use": "Current policy allows it" if row.get("policy_allowed") else "Blocked by current policy",
+                        "Practice": "Ready for a guided check" if row.get("eligible") else "Not ready for a guided check"})
+    return Preview("Current add-on compatibility and saved practice checks. No add-on code was run.",
+                   native=details)
 
 
 def recover_check(request, selection, arguments, prepared, operation):
@@ -235,7 +272,7 @@ def migrate(request, selection, arguments, prepared, operation):
 def entries():
     shared = {"family": "plugins", "direct_ui": "/plugins", "pages": ("/plugins",)}
     return (
-        Adapter("plugins.status", "Review plugin qualification", input_model=EmptyInput, snapshot=snapshot, prepare=prepare, **shared),
+        Adapter("plugins.status", "Review plugin qualification", input_model=StatusInput, snapshot=snapshot, prepare=status_prepare, **shared),
         Adapter("plugins.inspect", "Read a plugin's practice questions", input_model=CheckInput,
                 snapshot=lambda r, s: snapshot(r, s, "inspect"), prepare=inspect_prepare, execute=inspect_execute, recover=inspect_recover, read_recovery=inspect_recover, **shared),
         Adapter("plugins.check", "Open a guided plugin practice check", input_model=CheckInput,

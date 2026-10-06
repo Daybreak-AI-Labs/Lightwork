@@ -169,6 +169,8 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
     provider = _resolve_provider_field(setting, layers)
     if provider is not None:
         return provider
+    if setting.section == "features":
+        return _resolve_feature(setting, layers)
     if setting.section.startswith("channels."):
         name = setting.section.removeprefix("channels.")
         access = catalog.CHANNEL_ALLOWLISTS.get(name)
@@ -216,6 +218,22 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
         return {"source": "installer", "locked": False, "value": value, "known": True}
     return {"source": "default", "locked": False, "value": _default_in(setting, layers),
             "known": True}
+
+
+def _resolve_feature(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
+    """Use the switch's real native layers; installation trust is global only."""
+    if any(name in os.environ for name in setting.env):
+        return {"source": "deployment", "locked": True, "value": None, "known": False}
+    names = ("operator", "here", "base") if setting.key == "signing_identity_transition" else (
+        "tenant", "operator", "here", "base")
+    for name in names:
+        present, value = _layer_value(setting, layers[name])
+        if present:
+            source = {"tenant": "deployment", "operator": "deployment",
+                      "here": "here", "base": "installer"}[name]
+            return {"source": source, "locked": name in {"tenant", "operator"},
+                    "value": value, "known": type(value) is bool}
+    return {"source": "default", "locked": False, "value": setting.default, "known": True}
 
 
 def _resolve_provider_field(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any] | None:
@@ -373,17 +391,20 @@ def _build_source_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 -
                     out.append((model, f"{model} ({PROVIDER_LABELS.get(provider, provider)})"))
         return out
     if source == "local_models":
-        from maverick.llm import catalog_specs
-        from maverick.provider_local_first import LOCAL_PROVIDERS, is_local
+        from maverick.llm import PROVIDER_LABELS, catalog_specs
+        from maverick.provider_local_first import is_local
+        from maverick.providers import _canonical
 
         from .model_pickers import config_catalog
 
         out = [("", "None chosen")]
         specs = [spec for spec, _label in catalog_specs()] + config_catalog()
         for spec in dict.fromkeys(specs):
-            if is_local(spec) and spec.split(":", 1)[0] in LOCAL_PROVIDERS:
+            if is_local(spec):
                 provider, _, model = spec.partition(":")
-                out.append((spec, f"{model} ({identity_format.humanize(provider)})"))
+                provider = _canonical(provider)
+                label = PROVIDER_LABELS.get(provider) or {"tgi": "Hugging Face (local)", "vllm": "vLLM (local)"}[provider]
+                out.append((spec, f"{model} ({label})"))
         return out
     if source == "tools":
         return [*TOOL_FAMILIES,
@@ -1642,7 +1663,8 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
         return JSONResponse({'detail': str(exc), 'message': str(exc)}, status_code=409, headers={'Cache-Control': 'no-store'})
     except _Refused as exc:
         return JSONResponse({'detail': exc.message, 'message': exc.message}, status_code=exc.status, headers={'Cache-Control': 'no-store'})
-    if any(c["setting"].id in settings_access_guard.SIGN_IN_IDS
+    if any(c["setting"].section == "features"
+           or c["setting"].id in settings_access_guard.SIGN_IN_IDS
            or c["setting"].id.startswith(settings_access_guard.SIGN_IN_PREFIXES)
            or c["setting"].id.startswith(settings_access_guard.KEY_PREFIXES)
            for c in changes):
@@ -1808,6 +1830,15 @@ async def catalog_preview(request: Request, setting_id: str, value: str = "") ->
 
     headers = {"Cache-Control": "no-store"}
     setting = catalog.BY_ID.get(setting_id)
+    if setting is not None and setting.preview == "retention":
+        # A shorter keep period: what the next clean-up would delete (a dry run).
+        from maverick import policy_preview
+        try:
+            shown = await run_in_threadpool(policy_preview.retention, setting.key, value)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=422,
+                                headers=headers)
+        return JSONResponse(shown, headers=headers)
     if setting is not None and setting.preview == "approval_checks":
         # The approval threshold: what the recorded checks would have needed (report only).
         from . import approval_threshold_preview

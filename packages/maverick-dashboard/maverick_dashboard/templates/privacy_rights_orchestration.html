@@ -28,6 +28,7 @@
     <li>Deleting data in another system needs approval from a second administrator first.</li>
     <li>Closing a request needs approval from someone other than the person who opened it.</li>
     <li>Connected systems (Microsoft 365, Google Workspace, Salesforce, ServiceNow) are only contacted once your administrator has set them up.</li>
+    <li>A manually recorded result is your statement. A document fingerprint does not independently verify its contents. A completed request does not certify permanent deletion from retained copies or backups.</li>
   </ul>
 </details>
 
@@ -41,7 +42,7 @@
   <p id="pro-status" class="muted" role="status" aria-live="polite">Loading requests…</p>
 
   <div class="section-head"><h2>Requests</h2>
-    <button type="button" class="btn btn--primary" id="pro-new-case">New request</button></div>
+    <button type="button" class="btn btn--primary" id="pro-new-case">Create request</button></div>
   <div class="panel" id="pro-cases"><p class="muted">Loading…</p></div>
 
   <section class="panel" id="pro-case" hidden aria-labelledby="pro-case-title">
@@ -50,6 +51,10 @@
     <div id="pro-case-steps" style="display:flex; gap:.5rem; flex-wrap:wrap; margin:.75rem 0;"></div>
     <h3>Work in each system</h3>
     <div id="pro-case-tasks"></div>
+    <section id="pro-evidence-review" class="panel" hidden aria-labelledby="pro-evidence-title">
+      <h3 id="pro-evidence-title">Original result evidence</h3>
+      <div id="pro-evidence-details"></div>
+    </section>
     <h3>Completeness checks</h3>
     <div id="pro-case-manifests"></div>
   </section>
@@ -97,7 +102,7 @@
         <option value="callback-requeue" data-method="POST" data-path="/callbacks/{callback_id}/requeue">Callback: requeue dead letter</option>
         <option value="source-runtime-run" data-method="POST" data-path="/source-runtime/run">Provider runtime: execute bounded batch</option>
         <option value="source-runtime-reconcile" data-method="POST" data-path="/source-runtime/reconcile">Provider runtime: reconcile ambiguous deletes</option>
-        <option value="source-evidence" data-method="PUT" data-path="/cases/{case_id}/sources/{source_id}/phases/{phase}/evidence/{evidence_id}">Source work: record evidence</option>
+        <option value="source-evidence" data-method="PUT" data-path="/cases/{case_id}/sources/{source_id}/phases/{phase}/evidence/{evidence_id}">Source work: record a manual attestation</option>
         <option value="manifest-build" data-method="PUT" data-path="/cases/{case_id}/manifests/{manifest_id}">Case: build completeness manifest</option>
         <option value="package-create" data-method="PUT" data-path="/cases/{case_id}/packages/{package_id}">Response package: record metadata</option>
         <option value="package-get" data-method="GET" data-path="/packages/{package_id}">Response package: get metadata</option>
@@ -142,7 +147,7 @@
     "identity-evidence", "legal-hold", "retention-gate",
     "destructive-approve", "callback-claim", "callback-fail", "callback-ack",
     "callback-requeue", "source-runtime-run", "source-runtime-reconcile",
-    "closure-approve", "case-close", "retention-purge"
+    "closure-approve", "case-close", "retention-purge", "source-evidence"
   ]);
 
   function show(value) {
@@ -211,6 +216,9 @@
       var route = selectedRoute();
       var pathValues = JSON.parse(paths.value || "{}");
       var payload = JSON.parse(body.value || "{}");
+      if (operation.value === "source-evidence" && payload.manual_attestation !== true) {
+        throw new Error("Recording evidence here saves your manual statement. Confirm manual_attestation as true after reviewing the document. Lightwork will not independently verify deletion.");
+      }
       if (Object.prototype.hasOwnProperty.call(payload, "tenant") ||
           Object.prototype.hasOwnProperty.call(payload, "tenant_id") ||
           Object.prototype.hasOwnProperty.call(payload, "actor") ||

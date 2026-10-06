@@ -18,7 +18,7 @@
 {% set _command_copy = {
   'new-task': {'label': 'New task', 'synonyms': 'start a task|create a task|new chat|ask|compose', 'href': '/chat', 'context': 'Opens the composer'},
   'approvals': {'label': 'Approve or reject…', 'synonyms': 'approve|reject|approval|approvals|decide|decision|sign off', 'href': '/approvals', 'context': 'Choose a waiting request'},
-  'halt': {'label': 'Pause all work (emergency stop)', 'synonyms': 'pause|stop|emergency stop|halt|stop all work|pause everything', 'href': '#halt-pill', 'context': 'Asks you to confirm first'},
+  'halt': {'label': 'Pause all work (emergency stop)', 'synonyms': 'pause|stop|emergency stop|halt|stop all work|pause everything|stop all agents|stop every agent|stop agents|stop all tasks|stop everything|kill switch', 'href': '#halt-pill', 'context': 'Asks you to confirm first'},
   'invite': {'label': 'Invite someone', 'synonyms': 'invite|add user|add a person|new user|colleague', 'href': '/users#invite-email', 'context': 'Opens the invite form'},
   'setting': {'label': 'Open setting…', 'synonyms': 'setting|settings|preference|preferences|option|configure', 'href': '#navfinder-input', 'context': 'Find a setting by name'},
   'pin': {'label': 'Unpin this page' if (_personal_menu and _personal_menu.current_pinned) else 'Pin this page', 'synonyms': 'pin|unpin|favorite|bookmark|sidebar', 'href': '#navpins', 'context': 'Pinned pages in the sidebar'},
@@ -70,7 +70,7 @@
     {# Destinations arrive from GET /nav/finder only when the finder opens. #}
     <ul class="navfinder__results" id="navfinder-results" role="listbox"
         aria-label="{{ ut("Search results") }}" lang="{{ ul("Search results") }}"
-        data-navfinder-src="/nav/finder"{% if _people_search %} data-navfinder-people="/nav/finder/people"{% endif %}{% if record_search_context %} data-navfinder-records{% endif %}>
+        data-navfinder-src="/nav/finder" data-navfinder-find="/nav/finder/find"{% if _people_search %} data-navfinder-people="/nav/finder/people"{% endif %}{% if record_search_context %} data-navfinder-records{% endif %}>
       {% for _id in _commands %}{% set _copy = _command_copy[_id] %}
       <li role="none"><a id="navfinder-action-{{ _id }}" href="{{ _copy.href }}" role="option" tabindex="-1" aria-selected="false"
          data-navfinder-action="{{ _id }}" data-label="{{ _copy.label }}|{{ ut(_copy.label) }}" data-heading=""

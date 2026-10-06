@@ -21,7 +21,7 @@
       <div style="display: flex; gap: 0.25rem;">
         <button type="button" class="btn btn--ghost wf-up">Move up</button>
         <button type="button" class="btn btn--ghost wf-down">Move down</button>
-        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove</button>
+        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove step</button>
       </div>
     </div>
     <label style="display: block; margin-top: 0.4rem;">What to do in this step
@@ -82,6 +82,9 @@
   .af-card input:focus, .af-card textarea:focus, .af-card select:focus{
     outline: none; border-color: var(--brand-border); box-shadow: 0 0 0 3px var(--brand-subtle); }
   #f-persona{ min-height: 7rem; line-height: 1.5; resize: vertical; }
+  .agent-tests { margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); }
+  .agent-tests h3 { margin-top: 0; }
+  .agent-tests__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 
   /* tool chips */
   .chips{ display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -169,7 +172,7 @@
   {% from "_hero.html" import hero, state %}
   {# The main action: a new custom agent. While a specialist is open, saving
      it is the main action, so the header link steps back to a plain button. #}
-  {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">New custom agent</a>{% endset %}
+  {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">Build a custom agent</a>{% endset %}
   {% call hero('Build your workforce', 'Agent Factory',
                subtitle='Build agents and tailor specialists',
                lede='Describe an agent in plain English — its job, the
@@ -382,7 +385,9 @@
       {% endif %}
       {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
-      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}">
+      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}" data-mv-validate>
+        {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
+        {% from "_form_field.html" import error_summary %}{{ error_summary('agent-form-errors') }}
         {% if creating %}
         <div class="fld">
           <label for="f-new-id">Short name <span class="sub">— filled in from the name below; change it if you like</span></label>
@@ -391,11 +396,13 @@
         {% endif %}
         <div class="fld">
           <label for="f-description">Name <span class="sub">— a short summary of the role</span></label>
-          <input id="f-description" name="description" type="text" value="{{ selected.description if selected else '' }}">
+          <input id="f-description" name="description" type="text" value="{{ selected.description if selected else '' }}" required
+                 data-error-required="Give the {{ kind_word }} a name, for example Onboarding assistant.">
         </div>
         <div class="fld">
           <label for="f-persona">What should it do? <span class="sub">— plain English</span></label>
-          <textarea id="f-persona" name="persona" rows="6" placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
+          <textarea id="f-persona" name="persona" rows="6" required data-error-required="Describe what the {{ kind_word }} should do, in a sentence or two."
+                    placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
           <p class="sub" style="margin: var(--space-1) 0 0; font-size: var(--text-sm);">The clearer the brief, the better the {{ kind_word }} — say what it handles, and what a finished result looks like.</p>
         </div>
 
@@ -499,8 +506,24 @@
         </details>
 
         {% if editable %}
+        {% if selected and not creating %}
+        {# AI-14: the saved test set and its latest result, before publishing.
+           Changed instructions need a passing run of every saved test on
+           exactly these words, or a reason that goes to the activity record. #}
+        <section class="agent-tests" id="agent-tests" aria-labelledby="agent-tests-title">
+          <h3 id="agent-tests-title">Tests before publishing</h3>
+          <p id="agent-tests-status" role="status" aria-live="polite">Reading the saved test results…</p>
+          {% if can_open_page is defined and can_open_page('/workforce') %}
+          <p class="agent-tests__actions">
+            <a class="btn btn--ghost" id="agent-tests-run" href="/workforce?specialist={{ selected.name | urlencode }}&amp;compare=1#wo-compare">Test these instructions</a>
+            <a id="agent-tests-open" href="/workforce?specialist={{ selected.name | urlencode }}#wo-my-tests">Open the saved tests</a>
+          </p>
+          {% endif %}
+          <p id="agent-tests-restore" hidden><button type="button" class="btn btn--ghost" id="agent-tests-restore-btn">Restore the instructions you were testing</button></p>
+        </section>
+        {% endif %}
         <div class="af-actions">
-          <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else ('Save specialist' if selected_kind == 'specialist' else 'Save agent') }}</button>
+          <button type="button" class="btn btn--primary" id="btn-save">Save draft</button>
           <button type="button" class="btn" id="btn-validate">Check settings</button>
           {% if not creating and selected %}<button type="button" class="btn {{ 'btn--ghost' if selected.is_builtin else 'btn--danger' }}" id="btn-reset"
             data-agent-change="{{ selected.name }}" data-agent-change-action="{{ 'reset_builtin' if selected.is_builtin else 'remove_custom' }}">{{ 'Reset to built-in' if selected.is_builtin else 'Remove custom agent' }}</button>{% endif %}
@@ -509,6 +532,39 @@
         <p class="muted">Editing is disabled in this deployment.</p>
         {% endif %}
       </form>
+
+      {% if editable %}
+      <section class="panel" id="specialist-drafts" data-specialist-drafts aria-labelledby="specialist-drafts-title" style="margin-top: var(--space-4);">
+        <h3 id="specialist-drafts-title">Preview, try and publish</h3>
+        <p>Keep a draft before changing the specialist people use. Preview shows every entered setting together with the other settings being preserved.</p>
+        <p>Answer checks send the draft instructions and fictional questions to your configured AI service. They use no tools, files, company knowledge or shared learning. A plausible answer does not prove connected actions work.</p>
+        <label for="sd-title">Draft name (optional)</label><input class="input" id="sd-title" data-sd-title maxlength="120" placeholder="For example, Clearer invoice follow-up">
+        <div class="af-actions" style="margin-block: var(--space-3);">
+          <button class="btn" type="button" data-sd-action="preview">Preview entered draft</button>
+          <button class="btn btn--ghost" type="button" data-sd-action="refresh">Refresh retained versions</button>
+        </div>
+        <label for="sd-task">Fictional sample request</label><textarea class="input" id="sd-task" data-sd-task rows="3" maxlength="4000" placeholder="Ask about a made-up situation. Do not enter private company information."></textarea>
+        <div class="af-actions" style="margin-block: var(--space-3);">
+          <button class="btn" type="button" data-sd-action="try">Try entered draft</button>
+          <button class="btn" type="button" data-sd-action="check">Check every saved question on entered draft</button>
+        </div>
+        <p class="muted">One shared check allowance: at most $0.25, 10,000 input tokens, 640 output tokens and two minutes. A stopped or partial run does not count as a complete passing check.</p>
+        <p><a href="/workforce{% if selected %}?specialist={{ selected.name | urlencode }}{% endif %}#wo-my-tests">Add or edit saved answer questions in Workforce</a></p>
+        <label for="sd-draft">Saved draft</label><select class="input" id="sd-draft" data-sd-draft><option value="">Choose…</option></select>
+        <div class="af-actions" style="margin-block: var(--space-3);"><button class="btn" type="button" data-sd-action="load">Load draft into editor</button><button class="btn btn--primary" type="button" data-sd-action="publish">Review Publish</button></div>
+        <label for="sd-earlier">Earlier definition</label><select class="input" id="sd-earlier" data-sd-earlier><option value="">Choose…</option></select>
+        <button class="btn" type="button" data-sd-action="restore" style="margin-block: var(--space-3);">Review Restore</button>
+        <label for="sd-reason">Reason for proceeding without a complete passing check (optional)</label><textarea class="input" id="sd-reason" data-sd-reason rows="2" maxlength="300"></textarea>
+        <label><input type="checkbox" data-sd-acknowledge> I read any earlier unconfirmed original and acknowledge that earlier work may already exist. This is a separate new intent.</label>
+        <p class="muted">Publication requires the current passing-test policy or your explicit recorded reason. Restoring also requires a fresh full review; it does not discard all tailoring.</p>
+        <p data-sd-status role="status" aria-live="polite"></p>
+        <div data-sd-review tabindex="-1"></div>
+        <button class="btn" type="button" data-sd-read-original hidden>Read this original decision</button>
+        <label for="sd-original">Earlier original decision</label><select class="input" id="sd-original" data-sd-original><option value="">Choose…</option></select>
+        <div data-sd-result aria-live="polite"></div>
+      </section>
+      <style>.specialist-draft-review-row{padding-block:var(--space-3);border-bottom:1px solid var(--border);overflow-wrap:anywhere}.specialist-draft-review-row h3{margin-top:0}.specialist-draft-review-row dl{margin-block:var(--space-2)}.specialist-draft-review-row dt{font-weight:600}.specialist-draft-review-row dd{margin-inline-start:var(--space-3)}#specialist-drafts .input{display:block;width:100%;margin-block:var(--space-2)}#specialist-drafts [data-sd-review]>label{display:block;margin-block:var(--space-3)}#specialist-drafts [data-sd-review]>button{margin:var(--space-1)}</style>
+      {% endif %}
 
       {% if selected and (selected.errors or selected.warnings) %}
       <div class="panel" style="margin-top: 1rem;">
@@ -584,7 +640,7 @@
   <script>
     // ---- shared page helpers: plain errors, readable names, action pickers ----
     function plainError(failure, what) {
-      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
     }
     function humanName(v) {
       if (window.mvHuman) return window.mvHuman(v);
@@ -652,6 +708,7 @@
         box.appendChild(sel);
       }
       paint();
+      document.addEventListener('lightwork:specialist-draft-loaded', paint);
     }
     function mountToolPicks() { document.querySelectorAll('.af-toolpick').forEach(mountToolPick); }
 
@@ -859,6 +916,7 @@
       var installed = null;
 
       function sync() { input.value = sel.join(' '); }
+      document.addEventListener('lightwork:specialist-draft-loaded', function () { sel = input.value.split(/\s+/).filter(Boolean); render(); });
       function render() {
         host.textContent = '';
         var seen = {};
@@ -1092,10 +1150,12 @@
       const creating = form.dataset.creating === '1';
       const idInput = document.getElementById('f-new-id');
       const msg = document.getElementById('agent-msg');
+      let retainedDraftName = '';
       // The target agent name: the pre-selected pack, or (new mode) the id typed
       // in. Normalized to the lowercase/underscore shape packs use.
       function targetName() {
         if (!creating) return form.dataset.name;
+        if (retainedDraftName && idInput.value.trim() === retainedDraftName) return retainedDraftName;
         return (idInput ? idInput.value : '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       }
       const words = (s) => s.split(/\s+/).filter(Boolean);
@@ -1238,7 +1298,10 @@
         }
         return { status: 200, data };
       }
+      // The shared pattern finds missing answers first (CTL-3); nothing typed is cleared.
+      function formReady() { return !window.mvFieldErrors || window.mvFieldErrors.validate(form); }
       document.getElementById('btn-validate').addEventListener('click', async () => {
+        if (!formReady()) return;
         try {
           fieldMessage('', '');
           const name = targetName();
@@ -1256,30 +1319,136 @@
           fieldMessage(error && error.field, error && error.message);
         }
       });
+      // ---- AI-14: tests before publishing ----
+      const testsStatus = document.getElementById('agent-tests-status');
+      const proposedKey = (n) => 'lightwork-proposed-instructions:' + n;
+      function testsLine(v) {
+        let text = v.message;
+        if (v.latest && v.latest.started_at) {
+          const when = window.mvTimeRelative ? window.mvTimeRelative(v.latest.started_at) : '';
+          text += ' Last run on these instructions: ' + v.latest.passed + ' of ' + v.latest.total + ' passed' + (when ? ', ' + when : '') + '.';
+        }
+        if (v.blocked) text += ' Publishing these changes needs a passing run, or a reason that is written to the activity record.';
+        else if (!v.gate_on && v.instructions_changed) text += ' This workspace does not require passing tests before publishing.';
+        return text;
+      }
+      async function publishCheck() {
+        return window.mvFetchJSON(`/api/v1/agents/${targetName()}/publish-check`, { method: 'POST', body: payload() }, 'read the saved test results');
+      }
+      let testsTimer = null;
+      async function refreshTests() {
+        if (!testsStatus) return;
+        try { testsStatus.textContent = testsLine(await publishCheck()); }
+        catch (failure) { testsStatus.textContent = window.mvErrorText ? window.mvErrorText(failure, 'read the saved test results') : 'The saved test results could not be read.'; }
+      }
+      if (testsStatus && !creating) {
+        // The shared fetch helper loads after this page script.
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshTests);
+        else refreshTests();
+        document.getElementById('f-persona').addEventListener('input', () => {
+          clearTimeout(testsTimer); testsTimer = setTimeout(refreshTests, 600);
+        });
+        const runLink = document.getElementById('agent-tests-run');
+        if (runLink) runLink.addEventListener('click', () => {
+          // Hand the unsaved instructions to the comparison in Workforce.
+          try { window.sessionStorage.setItem(proposedKey(targetName()), document.getElementById('f-persona').value); } catch (_) { /* no storage: the comparison starts empty */ }
+        });
+        let pending = null;
+        try { pending = window.sessionStorage.getItem(proposedKey(targetName())); } catch (_) { pending = null; }
+        const restore = document.getElementById('agent-tests-restore');
+        if (pending && restore && pending.trim() !== document.getElementById('f-persona').value.trim()) {
+          restore.hidden = false;
+          document.getElementById('agent-tests-restore-btn').addEventListener('click', () => {
+            document.getElementById('f-persona').value = pending;
+            restore.hidden = true;
+            refreshTests();
+            document.getElementById('f-persona').focus();
+          });
+        }
+      }
+      // Changed instructions without a passing run: test them, or publish with a reason.
+      async function publishDecision() {
+        if (creating) return { ok: true, extra: {} };
+        const verdict = await publishCheck();
+        if (!verdict.blocked) return { ok: true, extra: {}, line: verdict.tests ? ' ' + testsLine(verdict) : '' };
+        const answers = window.mvForm ? await window.mvForm('Publish without a passing test run?', [
+          { key: 'reason', label: 'Why publish these instructions before every saved test passes?', type: 'text', required: true,
+            help: testsLine(verdict) + ' To test them first, cancel and choose Test these instructions.' },
+        ], { okText: 'Publish without passing tests' }) : null;
+        if (!answers || !String(answers.reason || '').trim()) {
+          show('Nothing was published. Test these instructions first, or give a reason to publish without passing tests.', false);
+          const link = document.getElementById('agent-tests-run');
+          if (link) link.focus();
+          return { ok: false };
+        }
+        return { ok: true, extra: { publish_without_passing_tests: true, override_reason: String(answers.reason).trim() }, skipConfirm: true };
+      }
+      // What taking actions away would have stopped, from the activity
+      // record of the last 30 days (ADM-3). Report only; "" when nothing is
+      // taken away or it can't be worked out.
+      const startAllow = words(document.getElementById('f-allow').value);
+      const startDeny = words(document.getElementById('f-deny').value);
+      async function toolChangePreview(name) {
+        const now = payload();
+        const lost = startAllow.filter((t) => !now.allow_tools.includes(t))
+          .concat(now.deny_tools.filter((t) => !startDeny.includes(t)));
+        if (creating || !lost.length) return '';
+        try {
+          const data = await window.mvFetchJSON('/api/v1/policy-preview/tools?tools=' + encodeURIComponent(lost.join(',')) +
+            '&agent=' + encodeURIComponent(name), {}, 'work out what this changes');
+          const what = lost.length === 1 ? 'the action it loses' : 'the ' + lost.length + ' actions it loses';
+          if (!data.recorded) return 'There is no tool use in the activity record for the last 30 days to compare ' + what + ' with. ';
+          return 'In the last 30 days it used ' + what + ' ' + data.calls + (data.calls === 1 ? ' time' : ' times') + ' in ' +
+            data.tasks + (data.tasks === 1 ? ' task' : ' tasks') + ' for ' + data.people + (data.people === 1 ? ' person. ' : ' people. ');
+        } catch (_) { return ''; }
+      }
       const saveBtn = document.getElementById('btn-save');
+      let loadedDraftProfile = null;
+      window.LWSpecialistDraftEditor = {
+        name: targetName,
+        identify: name => { if (creating && idInput && !idInput.value.trim()) { retainedDraftName = name; idInput.value = name; idTouched = true; } },
+        get: () => ({...(loadedDraftProfile || {}), ...payload()}),
+        apply: value => {
+          if (creating && idInput) { retainedDraftName = value.name; idInput.value = value.name; idTouched = true; }
+          loadedDraftProfile = structuredClone(value);
+          document.getElementById('f-description').value = value.description;
+          document.getElementById('f-persona').value = value.persona;
+          document.getElementById('f-allow').value = value.allow_tools.join(' ');
+          document.getElementById('f-deny').value = value.deny_tools.join(' ');
+          document.getElementById('f-risk').value = value.max_risk;
+          document.querySelectorAll('#risk-seg [data-risk]').forEach(button => { const on = button.dataset.risk === value.max_risk; button.classList.toggle('on', on); button.setAttribute('aria-pressed', String(on)); });
+          stepsEl.replaceChildren();
+          value.workflow.forEach(step => {
+            const row = document.getElementById('wf-row-tpl').content.firstElementChild.cloneNode(true);
+            row.querySelector('.wf-name').value = step.name; row.querySelector('.wf-instruction').value = step.instruction;
+            row.querySelector('.wf-tools').value = step.tools.join(' '); row.querySelector('.wf-gate').value = step.gate || ''; stepsEl.append(row);
+          });
+          mountToolPicks();
+          if (value.autonomy) {
+            ['default','low','medium','high'].forEach(risk => { document.getElementById('f-auto-' + risk).value = value.autonomy[risk] || ''; });
+            document.getElementById('f-auto-onboarding').checked = value.autonomy.onboarding;
+          }
+          document.dispatchEvent(new CustomEvent('lightwork:specialist-draft-loaded'));
+        }
+      };
       saveBtn.addEventListener('click', async () => {
+        if (!formReady()) return;
         const name = targetName();
         if (!name) { show('Give your ' + kindWord() + ' a name first.', false); return; }
-        if (!beginMutation(saveBtn)) return;
-        try {
-          fieldMessage('', '');
-          if (!(await mvConfirm(
-            (creating ? 'Create the agent “' : 'Save your changes to the ' + kindWord() + ' “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.',
-            { okText: creating ? 'Create agent' : (kindWord() === 'specialist' ? 'Save specialist' : 'Save agent') }
-          ))) return;
-          await call('POST', `/api/v1/agents/${name}/override`, payload());
-          show(creating ? 'Custom agent created.' : 'Deployed.', true);
-          window.location.search = '?name=' + encodeURIComponent(name);
-        } catch (error) {
-          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
-          fieldMessage(error && error.field, error && error.message);
-        } finally {
-          finishMutation(saveBtn);
-        }
+        if (window.LWSpecialistDrafts) { await window.LWSpecialistDrafts.reviewEntered('save'); return; }
+        show('The complete draft controls are unavailable. Refresh Agent Factory before saving.', false);
+        return;
       });
     })();
   </script>
   {% endif %}
+  <section class="panel" id="specialist-original-history" data-specialist-original-history hidden aria-labelledby="specialist-original-title">
+    <h2 id="specialist-original-title">Your original specialist decisions</h2>
+    <p>Read the retained outcome without repeating a Save draft, answer request or publication. Private source details are withheld when current access is unavailable.</p>
+    <label for="specialist-original-choice">Original decision</label><select id="specialist-original-choice" class="input"><option value="">Choose…</option></select>
+    <button type="button" class="btn" data-specialist-history-refresh>Refresh original decisions</button>
+    <p data-specialist-history-status role="status" aria-live="polite"></p><div data-specialist-history-result></div>
+  </section>
 
   {% if selected %}
   <style>
@@ -1418,7 +1587,7 @@
       (jd.responsibilities||[]).forEach(function(w){
         var li=document.createElement('li'); li.textContent=w.name?(w.name+' — '+(w.instruction||'')):String(w); resp.appendChild(li);
       });
-      if(!(jd.responsibilities||[]).length){ resp.innerHTML='<li class="sub">No steps listed yet.</li>'; }
+      if(!(jd.responsibilities||[]).length){ resp.innerHTML='<li class="sub">No steps listed yet. Add steps to its playbook in the editor.</li>'; }
       el('jc-deliver').textContent=(jd.deliverable||'—')+
         (jd.cadence?(' · '+jd.cadence):'')+(jd.gate?(' · needs '+(jd.gate==='approval'?'someone to approve':'someone to review')):'');
       chips(el('jc-tools'), (jd.tools||[]).map(function(t){ return window.mvHuman?mvHuman(t):t; }));

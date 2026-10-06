@@ -120,7 +120,9 @@ def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(
         if ln["href"] not in unavailable
     ]
     assert unavailable.isdisjoint(markup.finder_hrefs)
-    assert "/fleets" in markup.finder_hrefs and "/fleets" not in markup.sidebar_hrefs
+    # Teams is on the rail now; a page folded out of it is found only here.
+    assert "/fleets" in markup.sidebar_hrefs
+    assert "/security/soc" in markup.finder_hrefs and "/security/soc" not in markup.sidebar_hrefs
     assert all(href.startswith("/") for href in markup.finder_hrefs)
     assert "#" not in markup.finder_hrefs
     assert not any(href.startswith("//") for href in markup.finder_hrefs)
@@ -166,3 +168,33 @@ def test_indexed_heading_is_the_heading_the_page_shows(monkeypatch, tmp_path):
         shown = " ".join(unescape(re.sub(r"<[^>]+>", "", shown)).split()).casefold()
         page = ui_visibility.page_for(path)
         assert shown in {page["label"].casefold(), ui_visibility.HEADINGS.get(path, "").casefold()}, path
+
+
+# NAV-2: the name a person picks in the menu or the finder is the name the
+# page shows. A heading that must differ is recorded in HEADINGS so the finder
+# still finds the page by it. Gated pages (turned off, no permission) are
+# skipped: they show the gate, not the page.
+_GATE_HEADINGS = ("this page is turned off", "permission required", "not available", "sign in")
+
+
+def test_every_registered_page_shows_its_menu_label_as_its_heading(monkeypatch, tmp_path):
+    from maverick_dashboard import ui_visibility
+
+    client = _client(monkeypatch, tmp_path)
+    checked, mismatched = 0, []
+    for page in ui_visibility.PAGES:
+        path = page["path"]
+        if "{" in path or "#" in path:
+            continue
+        response = client.get(path)
+        found = re.search(r"<h1[^>]*>(.*?)</h1>", response.text, re.DOTALL) if response.status_code == 200 else None
+        if found is None:
+            continue
+        shown = " ".join(unescape(re.sub(r"<[^>]+>", "", found.group(1))).split()).casefold()
+        if not shown or shown.startswith(_GATE_HEADINGS):
+            continue
+        checked += 1
+        if shown not in {page["label"].casefold(), ui_visibility.HEADINGS.get(path, "").casefold()}:
+            mismatched.append((path, page["label"], shown))
+    assert checked >= 100, checked
+    assert mismatched == [], mismatched

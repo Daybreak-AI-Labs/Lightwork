@@ -75,7 +75,7 @@ def test_pending_approval_shows_on_page(monkeypatch, tmp_path):
     assert "saved but not in effect yet" in text
     assert "This older request is missing the details needed to approve it safely" in text
     assert 'data-action="approve" disabled' in text
-    assert 'data-action="deny">Reject</button>' in text
+    assert 'data-action="deny">Reject &#34;Rm rf&#34;</button>' in text
     assert 'data-action="revise">Send back for changes</button>' in text
     assert "window.prompt" not in text
     assert "'Failed: '" not in text and "String(e)" not in text
@@ -191,7 +191,11 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
             "X-Lightwork-Approval-Binding": old_card["binding_sha256"],
         },
     )
-    assert old_replay.status_code == 404
+    # The reviewed vote path refuses a decided round as stale (409) and says to
+    # read its current status; the superseded request stays denied.
+    assert old_replay.status_code == 409, old_replay.text
+    assert "Read its current status" in old_replay.text
+    assert w.get_approval(old_id).status == "denied"
 
     fresh_card = _structured_card(
         action="browser.click", expires_at=old_card["expires_at"] + 60,
@@ -485,7 +489,7 @@ def test_approval_card_reads_plainly_with_fingerprints_tucked_away(monkeypatch, 
     assert "This is Lightwork's suggestion — the decision is yours." in text
     assert "Up to $0.25" in text
     assert "Technical details (for auditors)" in text
-    assert 'data-action="approve">Approve</button>' in text or '>Approve</button>' in text
+    assert '>Approve &#34;Send email&#34;</button>' in text
     # Fingerprints only appear inside the collapsed auditor section.
     before_tech = text.split("Technical details (for auditors)")[0]
     assert card["target"]["sha256"] not in before_tech

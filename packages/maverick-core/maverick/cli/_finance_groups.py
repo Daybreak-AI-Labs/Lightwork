@@ -6,6 +6,7 @@ __init__ so the @main.group decorators fire on package import.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -93,10 +94,16 @@ def _run_self_harness_nightly(world) -> None:
     Each model's pass auto-builds its live A/B from ``[self_harness]
     eval_corpus`` when configured (else it is a dry inspection + stale-line
     retirement + canary review). With ``corpus_harvest`` on, hindsight pairs
-    feed the corpus too. Never breaks dreaming."""
+    feed the corpus too. Refusal or failure stops the combined run visibly;
+    earlier dreaming changes may already have been retained."""
+    from ..learning_guard import Halted
+
     try:
         from .. import self_harness
+        from ..config import config_source_errors
         st = self_harness.settings()
+        if not st.get("_config_valid", True) or config_source_errors(include_tenant=True):
+            raise ValueError("Nightly learning settings could not be read")
         if not (self_harness.enabled() and st.get("auto_run")):
             return
         from .. import self_improvement_runner as si_runner
@@ -109,8 +116,20 @@ def _run_self_harness_nightly(world) -> None:
                 f"retired={report['improvements_retired']} "
                 f"held_back={report['reviews_held_back']} "
                 f"examples={report['examples_prepared']}")
-    except Exception:  # pragma: no cover -- the harness must never break dreaming
-        pass
+    except Halted as exc:
+        raise click.ClickException(
+            "Nightly learning review was stopped by the learning safety policy. "
+            "Earlier learning changes may already be saved. Review Learning "
+            "before starting another pass."
+        ) from exc
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Nightly learning review could not finish (%s).", type(exc).__name__
+        )
+        raise click.ClickException(
+            "Nightly learning review could not finish. Earlier learning changes "
+            "may already be saved. Review Learning before trying again."
+        ) from exc
 
 
 @main.command()
@@ -220,19 +239,34 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
         # Cognitive Data Engine: turn the flywheel as part of the nightly cycle --
         # triage failures by causal impact, mine self-correcting guardrails,
         # consolidate beneficial habits, propose improvements, all grounded in real
-        # outcomes. No-op unless [data_engine] is enabled; never breaks dreaming.
+        # outcomes. No-op unless [data_engine] is enabled; incomplete work is visible.
+        from ..learning_guard import Halted
         try:
             from .. import data_engine
             if data_engine.enabled():
                 from ..flywheel import maybe_run
                 fw = maybe_run()
+                if not fw.complete:
+                    raise RuntimeError("The improvement cycle did not finish")
                 if fw.acted:
                     click.echo(
                         f"[flywheel] {len(fw.guardrails)} guardrails, {len(fw.memories)} "
                         f"habits, {len(fw.hypotheses)} improvements "
                         f"(recoverable lift ~{fw.predicted_lift:.2f})")
-        except Exception:  # pragma: no cover -- the flywheel must never break dreaming
-            pass
+        except Halted as exc:
+            raise click.ClickException(
+                "The improvement cycle was stopped by the learning safety policy. "
+                "Earlier learning changes may already be saved. Review Learning "
+                "before starting another cycle."
+            ) from exc
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "The improvement cycle could not finish (%s).", type(exc).__name__
+            )
+            raise click.ClickException(
+                "The improvement cycle could not finish. Earlier learning changes "
+                "may already be saved. Review Learning before trying again."
+            ) from exc
         _run_self_harness_nightly(world)
     if not rehearse:
         return

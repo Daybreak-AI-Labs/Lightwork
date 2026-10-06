@@ -272,7 +272,10 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
     # scoped to the authenticated account/workspace; no job payload is stored.
     assert "'lightwork:consent-submission:' + shell.dataset.requestContext" in source
     assert "global.sessionStorage.setItem(recoveryKey, reference)" in source
-    assert source.count("sessionStorage.setItem(") == 1
+    # An allowance request keeps its own opaque reference under the same scope.
+    assert "allowanceKey = recoveryKey ? recoveryKey + ':allowance' : ''" in source
+    assert "global.sessionStorage.setItem(allowanceKey,reference)" in source
+    assert source.count("sessionStorage.setItem(") == 2
     assert "global.sessionStorage.removeItem(recoveryKey)" in source
 
 

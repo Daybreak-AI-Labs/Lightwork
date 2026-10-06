@@ -1164,6 +1164,7 @@ def get_features() -> dict:
         "deliverable_bundles": cfg.get("deliverable_bundles", False) is True,
         "project_workspaces": cfg.get("project_workspaces", False) is True,
         "task_handoffs": cfg.get("task_handoffs", False) is True,
+        "human_conversation_handoffs": cfg.get("human_conversation_handoffs", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
         "commitment_viability": cfg.get("commitment_viability", False) is True,
         "commitment_capability_learning": cfg.get("commitment_capability_learning", False) is True,
@@ -1199,6 +1200,18 @@ def get_features() -> dict:
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),
     }
+
+
+def get_chat_message_actions() -> dict:
+    """Conversation alternatives respect both workspace and organization controls."""
+    workspace = load_config().get("chat_message_actions", {})
+    organization = load_global_config().get("chat_message_actions", {})
+    return {"enabled": (
+        not config_source_errors(include_tenant=True)
+        and isinstance(workspace, dict) and isinstance(organization, dict)
+        and workspace.get("enabled", True) is True
+        and organization.get("enabled", True) is True
+    )}
 
 
 def get_first_outcome() -> dict:
@@ -2085,6 +2098,9 @@ def get_autonomy() -> dict:
 
     return {
         "enable": bool(cfg.get("enable", False)),
+        # AI-3: show the plan and wait for a person before a task's first
+        # action with an outside effect. Independent of ``enable``; off by default.
+        "confirm_plan": cfg.get("confirm_plan", False) is True,
         "min_confidence": _clamp01("min_confidence", 0.5),
         "disagreement_high": _clamp01("disagreement_high", 0.5),
         "escalate_verification": bool(cfg.get("escalate_verification", True)),

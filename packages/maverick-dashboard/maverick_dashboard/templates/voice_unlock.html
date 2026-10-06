@@ -142,7 +142,10 @@
         });
       });
       var del = document.getElementById('vu-delete');
-      if (del) del.addEventListener('click', function () {
+      if (del) del.addEventListener('click', async function () {
+        // A privacy erasure is never held back for an undo window; it is
+        // confirmed by name and consequence, then sent at once.
+        if (!(await window.mvConfirm('Delete your voice print? Voice unlock stops working until you set it up again. This cannot be undone.', { okText: 'Delete voice print', danger: true }))) return;
         fetch(API + '/profile', { method: 'DELETE' }).then(function (r) {
           document.getElementById('vu-delete-msg').textContent =
             r.ok ? 'Your voice print was deleted.' : 'It could not be deleted. Try again.';

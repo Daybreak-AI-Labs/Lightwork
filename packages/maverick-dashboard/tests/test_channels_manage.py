@@ -6,6 +6,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.channel_review import channel_review_token
+
 _ORIGIN = {"origin": "http://testserver"}
 
 
@@ -119,6 +121,7 @@ def test_channel_page_saves_and_checks_permitted_people():
 
     client = _client()
     saved = client.post("/channels/save", headers=_ORIGIN, data={
+        "review_token": channel_review_token(client), "confirm_people": "yes",
         "channel": "slack", "enabled": "on", "app_token": "xapp-fixture",
         "bot_token": "xoxb-fixture", "allowed_user_ids": "U01ABCDEF\nU02ABCDE,U01ABCDEF",
     }, follow_redirects=False)
@@ -129,6 +132,7 @@ def test_channel_page_saves_and_checks_permitted_people():
     page = client.get("/channels")
     assert "U01ABCDEF\nU02ABCDE" in page.text
     invalid = client.post("/channels/save", headers=_ORIGIN, data={
+        "review_token": channel_review_token(client), "confirm_people": "yes",
         "channel": "slack", "enabled": "on", "allowed_user_ids": "anyone",
     })
     assert invalid.status_code == 400
@@ -136,10 +140,13 @@ def test_channel_page_saves_and_checks_permitted_people():
         "U01ABCDEF", "U02ABCDE",
     ]
     cleared = client.post("/channels/save", headers=_ORIGIN, data={
+        "review_token": channel_review_token(client), "confirm_people": "yes",
         "channel": "slack", "enabled": "on", "allowed_user_ids": "",
     }, follow_redirects=False)
     assert cleared.status_code == 303
-    assert "allowed_user_ids" not in settings_store.load_overlay()["channels"]["slack"]
+    # An explicit empty list denies everyone; removing the key would silently
+    # restore installer access (settings_store.set_channel).
+    assert settings_store.load_overlay()["channels"]["slack"]["allowed_user_ids"] == []
     config.reset_config_cache()
     readiness = integration_readiness.channel_readiness("slack", config.load_config()["channels"]["slack"])
     assert readiness["runtime"]["status"] == "failed"
@@ -166,7 +173,8 @@ def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
 
     settings = client.get("/settings/all?id=channels.voice.allowed_callers")
     assert settings.status_code == 200
-    assert "With no effective list, incoming calls cannot start work" in settings.text
+    assert "With no permitted callers, incoming calls cannot start work" in settings.text
+    assert "Saving a blank list denies everyone" in settings.text
 
     configured = {"enabled": True, "api_key": "fixture", "webhook_token": "fixture",
                   "allowed_callers": ["+12025550111"]}
@@ -184,10 +192,12 @@ def test_email_sender_check_is_configurable_and_required_from_the_page():
     assert 'name="trusted_authserv_id"' in page.text
     assert "Messages without that confirmation are refused" in page.text
     bad = client.post("/channels/save", headers=_ORIGIN, data={
+        "review_token": channel_review_token(client),
         "channel": "email", "enabled": "on", "trusted_authserv_id": "not a server",
     })
     assert bad.status_code == 400
     saved = client.post("/channels/save", headers=_ORIGIN, data={
+        "review_token": channel_review_token(client), "confirm_people": "yes",
         "channel": "email", "enabled": "on", "trusted_authserv_id": "mx.example.com",
         "allowed_user_ids": "owner@example.com",
     }, follow_redirects=False)
@@ -287,7 +297,7 @@ def test_channel_tests_stop_before_external_call_when_support_is_missing(monkeyp
 def test_save_channel_enables_and_hides_secret():
     c = _client()
     r = c.post("/channels/save", headers=_ORIGIN, follow_redirects=False, data={
-        "channel": "slack", "enabled": "on",
+        "channel": "slack", "enabled": "on", "review_token": channel_review_token(c),
         "app_token": "xapp-leak", "bot_token": "xoxb-leak"})
     assert r.status_code == 303
     from maverick_dashboard import settings_store as ss
@@ -300,10 +310,10 @@ def test_save_channel_enables_and_hides_secret():
 def test_save_without_checkbox_disables():
     c = _client()
     c.post("/channels/save", headers=_ORIGIN, data={
-        "channel": "telegram", "enabled": "on", "bot_token": "t"})
+        "channel": "telegram", "enabled": "on", "bot_token": "t", "review_token": channel_review_token(c)})
     # second save omits the checkbox -> disabled, token kept
     r = c.post("/channels/save", headers=_ORIGIN, follow_redirects=False, data={
-        "channel": "telegram", "bot_token": ""})
+        "channel": "telegram", "bot_token": "", "review_token": channel_review_token(c)})
     assert r.status_code == 303
     from maverick_dashboard import settings_store as ss
     ch = ss.load_overlay()["channels"]["telegram"]
@@ -313,9 +323,10 @@ def test_save_without_checkbox_disables():
 def test_clear_route_removes_channel():
     c = _client()
     c.post("/channels/save", headers=_ORIGIN, data={
-        "channel": "discord", "enabled": "on", "bot_token": "t"})
+        "channel": "discord", "enabled": "on", "bot_token": "t", "review_token": channel_review_token(c)})
+    # Clearing restores the inherited people list, so it is reviewed and confirmed.
     r = c.post("/channels/clear", headers=_ORIGIN, follow_redirects=False,
-               data={"channel": "discord"})
+               data={"channel": "discord", "review_token": channel_review_token(c), "confirm_people": "yes"})
     assert r.status_code == 303
     from maverick_dashboard import settings_store as ss
     assert "discord" not in (ss.load_overlay().get("channels") or {})

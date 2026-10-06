@@ -10,6 +10,8 @@
   .auto details[open] > summary { margin-bottom: var(--space-3); }
   .auto .field, .auto input, .auto select, .auto textarea { min-width: 0; max-width: 100%; }
   .auto__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--space-3); }
+  .auto [data-source-review] { grid-column: 1 / -1; min-width: 0; padding: var(--space-3); overflow-wrap: anywhere; }
+  .auto [data-source-review] dd { margin-inline-start: 0; margin-bottom: var(--space-2); }
   .auto__hint { color: var(--muted); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
   .auto__new { margin-top: var(--space-4); }
   .auto__new summary { cursor: pointer; font-weight: var(--font-semibold, 600); }
@@ -35,7 +37,7 @@
 {% set automation_total = schedule_count + trigger_count + event_trigger_count %}
 {% set channels_on = (1 if scheduling_enabled else 0) + (1 if triggers_enabled else 0) + (1 if event_triggers_enabled else 0) %}
 {# The main action: a new schedule, or turning automations on when all are off. #}
-{% set all_off = not scheduling_enabled and not triggers_enabled and not import_enabled %}
+{% set all_off = not scheduling_enabled and not triggers_enabled and not event_triggers_enabled and not import_enabled %}
 {% set automation_actions %}{% if scheduling_enabled %}<a class="btn btn--primary" href="#auto-new-sched">Create a schedule</a>{% else %}<a class="btn btn--primary" href="/settings#settings-features">Turn on automations</a>{% endif %}{% endset %}
 {% call hero('Always-on operations', 'Automations',
              subtitle='Schedules, triggers & flows',
@@ -220,9 +222,11 @@
           <option value="86400">Once a day</option>
         </select>
       </div>
-      <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center;">
+      <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center; flex-wrap:wrap;">
         <button class="btn" type="submit" id="auto-event-create" disabled>Create automation</button>
+        <button class="btn btn--ghost" type="button" id="auto-event-original">Read original creation result</button>
       </div>
+      <p class="auto__hint">For SharePoint, Salesforce, ServiceNow and Teams, choose a saved account from <a href="/connections">Connections</a> and review the actual source before creating an automation.</p>
     </form>
     </details>
 
@@ -294,6 +298,7 @@
 {% endblock %}
 {% block scripts_extra %}
 <script>{% include "flow_hardening_review.js" %}</script>
+<script src="/static/lightwork-connected-event-sources.js"></script>
 <script>
 (function () {
   var fmtWhen = window.mvWhen, el = window.mvEl;   // shared primitives (base.html)
@@ -331,7 +336,7 @@
     b.addEventListener('click', onClick); return b;
   }
   function plainError(failure, what) {
-    return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
   }
   function runLabel(r) {
     var when = r.created_at ? new Date(r.created_at * 1000) : null;
@@ -414,11 +419,11 @@
   function rowWith(list, key, value) {
     return list ? Array.prototype.find.call(list.children, function (li) { return li.dataset[key] === String(value); }) || null : null;
   }
-  function deleteWithUndo(row, heading, message, url, action, reload, latest) {
+  function deleteWithUndo(row, heading, message, url, action, reload, latest, values) {
     if (row) row.hidden = true;
     refocus(heading);
     mvUndo(message, {
-      action: action, latest: latest,
+      action: action, latest: latest, values: values,
       run: function (keepalive) { return fetch(url, { method: 'DELETE', keepalive: keepalive }); },
       undo: function () { if (row) { row.hidden = false; var b = row.querySelector('button'); if (b) b.focus(); } },
       done: reload
@@ -441,8 +446,8 @@
       } catch (e) { mvFail(e, 'delete the schedule'); }
       return;
     }
-    deleteWithUndo(row, 'auto-sched-h', 'Schedule “' + name + '” deleted.', url, 'delete the schedule', loadSchedules,
-      next ? next - 15000 : undefined);
+    deleteWithUndo(row, 'auto-sched-h', 'Schedule “{name}” deleted.', url, 'delete the schedule', loadSchedules,
+      next ? next - 15000 : undefined, {name: name});
   }
 
   var trigList = document.getElementById('auto-trig-list');
@@ -485,8 +490,8 @@
   }
   function delTrigger(name) {
     deleteWithUndo(rowWith(trigList, 'trigger', name), 'auto-trig-h',
-      'Start “' + name + '” deleted. Other apps can no longer start this workflow.',
-      '/api/v1/triggers/' + encodeURIComponent(name), 'delete the start', loadTriggers);
+      'Start “{name}” deleted. Other apps can no longer start this workflow.',
+      '/api/v1/triggers/' + encodeURIComponent(name), 'delete the start', loadTriggers, undefined, {name: name});
   }
 
   // Run history (provenance): "N runs · ✓X · ✗Y · #ids" with drill-down links.
@@ -507,7 +512,7 @@
     var sum = data.summary || {}, runs = data.runs || [];
     var total = Object.keys(sum).reduce(function (a, k) { return a + sum[k]; }, 0);
     into.textContent = '';
-    if (!total) { into.textContent = 'No runs yet'; return; }
+    if (!total) { into.textContent = 'No runs yet. Runs appear here after the first scheduled or connected start.'; return; }
     var failed = (sum.failed || 0) + (sum.error || 0);
     into.appendChild(document.createTextNode(total + (total === 1 ? ' run' : ' runs')));
     if (sum.done) into.appendChild(document.createTextNode(' · ✓ ' + sum.done));
@@ -546,6 +551,7 @@
     var evTarget = document.getElementById('auto-event-template');
     var evTargetKind = document.getElementById('auto-event-target-kind');
     var sourceDrafts = Object.create(null), currentSource = '', sourceControls = [];
+    var connectedSource = window.LwConnectedEventSource.create();
     var targetCatalog = { template: [], flow: [] }, targetErrors = {}, creatingEvent = false;
     // Keys are the existing source contract; labels are for people setting up work.
     // [key, label, kind, required, default, tucked under "More settings"]
@@ -556,9 +562,9 @@
       github_issues: [['owner', 'GitHub organization or owner', 'text', true], ['repo', 'Repository name', 'text', true], ['state', 'Which issues', [['open', 'Open issues'], ['closed', 'Closed issues'], ['all', 'All issues']], false, 'open'], ['provider', 'Connected account (optional for public repositories)', 'provider']],
       imap_email: [['host', 'Mail server', 'text', true], ['username', 'Email account', 'text', true], ['password_env', 'Password name from your administrator', 'text', true], ['trusted_authserv_id', 'Server that checks incoming mail', 'text', true], ['allowed_senders', 'People whose email may start this workflow (separate addresses with commas)', 'text', true], ['mailbox', 'Mailbox', 'text', false, 'INBOX', true], ['port', 'Server port', 'number', false, 993, true], ['include_body', 'Include the message body', 'checkbox', false, false]],
       file_dir: [['path', 'Folder inside the approved incoming-files area', 'text', true], ['glob', 'Which files (for example *.pdf)', 'text', false, '*', true], ['recursive', 'Include subfolders', 'checkbox', false, false]],
-      form: []
+      form: [], sharepoint_files: [], salesforce_records: [], servicenow_tickets: [], teams_messages: []
     };
-    var SOURCE_LABELS = { http_json: 'Web feed', rss: 'RSS or Atom feed', oauth_http_json: 'Connected account feed', github_issues: 'GitHub issues', imap_email: 'Email inbox', file_dir: 'Incoming files', form: 'Form submissions' };
+    var SOURCE_LABELS = { http_json: 'Web feed', rss: 'RSS or Atom feed', oauth_http_json: 'Connected account feed', github_issues: 'GitHub issues', imap_email: 'Email inbox', file_dir: 'Incoming files', form: 'Form submissions', sharepoint_files: 'New SharePoint files', salesforce_records: 'Salesforce records or closed opportunities', servicenow_tickets: 'New ServiceNow tickets', teams_messages: 'New Teams channel messages' };
     var SOURCE_HINTS = {
       rss: 'Paste the public address of an RSS or Atom feed. The first check remembers existing posts; later checks start your workflow for new posts.',
       http_json: 'Use a feed that returns a list of items.',
@@ -566,10 +572,15 @@
       github_issues: 'Watch new issues in a repository. Connect GitHub below for private repositories.',
       imap_email: 'Your administrator gives you the password name and the server that verifies incoming senders. Only verified mail from the addresses you list can start this workflow. The mail connection is always encrypted. Passwords are never stored in automation settings.',
       file_dir: 'This folder is on the Lightwork server, inside your organization’s approved incoming-files area. An administrator must set this up.',
-      form: 'Lightwork gives this automation a private form link when you save. If you update an existing automation, its link stays the same.'
+      form: 'Lightwork gives this automation a private form link when you save. If you update an existing automation, its link stays the same.',
+      sharepoint_files: 'Choose your saved account, site, document library and folder. Check and review the actual source; existing files are remembered.',
+      salesforce_records: 'Choose your saved Salesforce account and record type. Closed opportunities start once when first observed as closed, including older opportunities.',
+      servicenow_tickets: 'Choose your saved ServiceNow account and ticket type. Check and review the actual source; existing tickets are remembered.',
+      teams_messages: 'Choose your saved Microsoft account, team and channel. New root messages can start work; replies and later edits do not create another run.'
     };
     var connectedProviders = [];
     function readSourceConfig() {
+      if (connectedSource.isConnected(currentSource)) return connectedSource.config();
       if (currentSource === 'form') return {};
       return Object.assign({}, sourceDrafts[currentSource] || {});
     }
@@ -582,6 +593,10 @@
     function fillSourceFields() {
       evFields.textContent = ''; if (evMore) evMore.textContent = '';
       sourceControls = [];
+      if (connectedSource.isConnected(currentSource)) {
+        connectedSource.render(currentSource, sourceDrafts[currentSource] || {}, evFields);
+        showFormUrl(); return;
+      }
       var cfg = sourceDrafts[currentSource] || (sourceDrafts[currentSource] = {});
       (SOURCE_FIELDS[evSource.value] || []).forEach(function (field) {
         var key = field[0], kind = field[2], choices = Array.isArray(kind) ? kind : null;
@@ -617,8 +632,10 @@
       showFormUrl();
     }
     function changeSource() {
-      if (currentSource) sourceDrafts[currentSource] = readSourceConfig();
+      if (currentSource) sourceDrafts[currentSource] = connectedSource.isConnected(currentSource) ? connectedSource.draft() : readSourceConfig();
+      connectedSource.clear();
       currentSource = evSource.value;
+      document.getElementById('auto-event-name').placeholder = connectedSource.isConnected(currentSource) ? 'An individual name is assigned if blank' : 'Defaults to the workflow name';
       document.getElementById('auto-event-source-hint').textContent = SOURCE_HINTS[currentSource] || '';
       evAdvanced.open = false;
       evAdvanced.hidden = !(SOURCE_FIELDS[currentSource] || []).some(function (field) { return field[5]; });
@@ -660,7 +677,7 @@
     loadTargetChoices();
     fetch('/api/v1/oauth/providers').then(function (r) { if (!r.ok) throw new Error(); return r.json(); }).then(function (data) {
       connectedProviders = (data.providers || []).filter(function (p) { return (data.connected || []).indexOf(p.name) !== -1; });
-      if (currentSource) fillSourceFields();
+      if (currentSource && !connectedSource.isConnected(currentSource)) fillSourceFields();
     }).catch(function () { /* Connection setup below retains its own feedback. */ });
     async function loadEventTriggers(expectedForm) {
       var data = {};
@@ -678,7 +695,7 @@
         return false;
       }
       if (evSource && !evSource.children.length) {
-        var order = ['rss', 'form', 'http_json', 'github_issues', 'oauth_http_json', 'imap_email', 'file_dir'];
+        var order = ['rss', 'form', 'sharepoint_files', 'salesforce_records', 'servicenow_tickets', 'teams_messages', 'http_json', 'github_issues', 'oauth_http_json', 'imap_email', 'file_dir'];
         var offered = (data.sources || []).filter(function (s) { return Object.prototype.hasOwnProperty.call(SOURCE_FIELDS, s); });
         offered.sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
         offered.forEach(function (s) {
@@ -969,8 +986,8 @@
     }
     async function delEventTrigger(name) {
       deleteWithUndo(rowWith(evList, 'eventTrigger', name), 'auto-event-h',
-        'Automation “' + name + '” deleted. Lightwork stops checking for new items.',
-        '/api/v1/event-triggers/' + encodeURIComponent(name), 'delete the automation', loadEventTriggers);
+        'Automation “{name}” deleted. Lightwork stops checking for new items.',
+        '/api/v1/event-triggers/' + encodeURIComponent(name), 'delete the automation', loadEventTriggers, undefined, {name: name});
     }
     evForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();
@@ -980,7 +997,9 @@
         evMsg.textContent = 'Choose an available workflow or flow and source before creating an automation.';
         return;
       }
-      var config = readSourceConfig();
+      var config;
+      try { config = readSourceConfig(); }
+      catch (error) { evMsg.textContent = error.message; return; }
       if (!evForm.reportValidity()) return;
       var intervalRaw = String(document.getElementById('auto-event-interval').value || '').trim();
       var body = {
@@ -997,17 +1016,35 @@
       var submit = evForm.querySelector('button[type="submit"]'); submit.disabled = true;
       evMsg.textContent = 'Creating automation…';
       try {
+        if (connectedSource.isConnected(body.source)) {
+          body.name = body.name || 'event-' + window.crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+          var selectedWork = targetCatalog[evTargetKind.value].find(function (item) { return item.name === evTarget.value; });
+          var consequence = 'Create “' + body.name + '” for ' + SOURCE_LABELS[body.source] + '? ' + connectedSource.summary() +
+            '. Later new items will start “' + (selectedWork && selectedWork.title || evTarget.value) + '” ' +
+            (intervalRaw ? 'when checked every ' + intervalRaw + ' seconds' : 'when checked every 5 minutes') +
+            '. Existing source items will not start this work. Its normal approvals, account permissions and budget limits still apply. Future event delivery is unconfirmed.';
+          if (Object.keys(body.params).length) consequence += ' Fallback inputs: ' + Object.keys(body.params).map(function (key) { return mvHuman(key) + ': ' + body.params[key]; }).join('; ') + '.';
+          if (!(await mvConfirm(consequence, {okText: 'Create automation'}))) { evMsg.textContent = 'Creation cancelled. Nothing was armed.'; return; }
+          await connectedSource.retainOriginal(body);
+        }
         var resp = await fetch('/api/v1/event-triggers', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
         });
         var data = await resp.json().catch(function () { return null; });
-        if (!resp.ok) { evMsg.textContent = plainError(resp, 'create the automation'); return; }
+        if (!resp.ok) { evMsg.textContent = connectedSource.isConnected(body.source) ? 'The original save is unconfirmed. Read the original creation result before deciding to repeat creation. ' + plainError(resp, 'read the save acknowledgement') : plainError(resp, 'create the automation'); return; }
         if (!data || typeof data.name !== 'string') throw new Error('The automation could not be confirmed. Refresh the list before trying again.');
-        evMsg.textContent = 'Created “' + data.name + '”. Lightwork checks for new items while it is running. You can also choose Check now.';
+        evMsg.textContent = connectedSource.isConnected(body.source) ? (await connectedSource.original()).message : 'Created “' + data.name + '”. Lightwork checks for new items while it is running. You can also choose Check now.';
         evForm.reset(); sourceDrafts = Object.create(null); currentSource = ''; changeSource(); renderTargetChoices();
         loadEventTriggers();
-      } catch (e) { evMsg.textContent = (e && /confirmed/.test(e.message || '')) ? e.message : plainError(e, 'create the automation'); }
-      finally { creatingEvent = false; submit.disabled = false; }
+      } catch (e) { evMsg.textContent = connectedSource.isConnected(body.source) ? 'The original save is unconfirmed. Read the original creation result before deciding to repeat creation. ' + plainError(e, 'confirm the original automation') : ((e && /confirmed/.test(e.message || '')) ? e.message : plainError(e, 'create the automation')); }
+      finally { creatingEvent = false; submit.disabled = false; if (connectedSource.isConnected(body.source) && evMsg.textContent) { evMsg.tabIndex = -1; evMsg.focus(); } }
+    });
+    document.getElementById('auto-event-original').addEventListener('click', async function () {
+      if (this.disabled) return;
+      this.disabled = true; evMsg.textContent = 'Reading the original creation result…';
+      try { var original = await connectedSource.original(); evMsg.textContent = 'Original “' + original.name + '”: ' + original.message; }
+      catch (error) { evMsg.textContent = error.message || plainError(error, 'read the original result'); }
+      finally { this.disabled = false; evMsg.tabIndex = -1; evMsg.focus(); }
     });
     document.getElementById('auto-event-poll').addEventListener('click', async function () {
       if (this.disabled) return;

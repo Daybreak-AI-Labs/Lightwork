@@ -16,7 +16,9 @@
 .settings-review { max-width: min(54rem, 95vw); max-height: 90vh; overflow: auto; }
 .settings-review pre, #settings-tools pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.cs-account .prefs__panel { bottom: 100%; top: auto; left: 0; right: auto; }
+/* The shared help and account cluster (_topbar_utilities.html) lays out as
+   part of whichever top bar holds it. */
+.topbar-utilities { display: contents; }
 
 /* The workspace line at the top of the product sidebar (base.html). */
 .active-workspace-banner { margin: 0 var(--space-3) var(--space-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -82,6 +84,18 @@
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.20);
       --shadow-md: 0 4px 16px rgba(0,0,0,0.28);
       --shadow-lg: 0 12px 40px rgba(0,0,0,0.40);
+      /* ---- print: reports and conversations on paper look the same in
+         every theme (ink on white, one rule colour, one muted grey) ---- */
+      --print-paper: #ffffff; --print-ink: #111111; --print-ink-strong: #000000;
+      --print-muted: #555555; --print-rule: #bbbbbb; --print-border: #cccccc;
+      /* ---- workflow designer: one colour per kind of step. A categorical
+         set, the same in every theme (each is readable on light and dark
+         canvases); status colours stay --success/--danger/--warn. ---- */
+      --fd-kind-agent: #6366f1; --fd-kind-action: #0891b2; --fd-kind-branch: #d97706;
+      --fd-kind-foreach: #7c3aed; --fd-kind-parallel: #db2777; --fd-kind-approval: #16a34a;
+      --fd-kind-delay: #64748b; --fd-kind-subflow: #0d9488; --fd-kind-switch: #b45309;
+      --fd-kind-while: #8b5cf6; --fd-kind-wait-event: #0369a1; --fd-kind-scope: #4d7c0f;
+      --fd-kind-setvar: #4f46e5;
     }
     /* Core palettes. :root carries the dark values so a class-less render
        still looks right; the body always also carries body.theme-*. */
@@ -752,6 +766,23 @@
     .halt-banner__text { flex: 1 1 16rem; min-width: 0; }
     .halt-banner .btn.halt-banner__resume { background: var(--danger-fg); color: var(--danger); border-color: var(--danger-fg); }
     .chat-shell .halt-banner { border-radius: 0; }
+    /* ONB-4: the practice marker. The banner says what practice means; the
+       stripe along the top of the window stays visible while scrolling. */
+    .practice-banner {
+      display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+      margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-4); border-radius: var(--radius-md);
+      background: var(--warn-subtle); border: 1px solid var(--warn); color: var(--text); font-size: var(--text-sm);
+    }
+    .practice-banner__text { flex: 1 1 20rem; min-width: 0; margin: 0; }
+    .practice-banner__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+    .practice-banner__outbox { flex: 1 1 100%; }
+    .practice-banner__outbox[hidden] { display: none; }
+    .practice-banner__status { flex: 1 1 100%; margin: 0; }
+    .practice-banner__status:empty { display: none; }
+    .practice-banner--stopped { border-color: var(--danger); }
+    .chat-shell .practice-banner { border-radius: 0; }
+    body.is-practice { box-shadow: inset 0 4px 0 var(--warn); }
+    body.is-practice .topbar, body.is-practice .cs-topbar { box-shadow: inset 0 4px 0 var(--warn); }
     /* The AI service banner (an AI service paused after repeated errors). */
     .service-banner {
       margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-4); border-radius: var(--radius-md);
@@ -938,6 +969,39 @@
     .mv-row__sub { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-0-5); word-break: break-word; }
     .mv-row__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; flex: none; }
     .btn--icon { flex: none; padding: 0.3rem 0.55rem; font-size: var(--text-sm); line-height: var(--leading-none); }
+    /* Bulk work on admin lists (window.mvBulk): filter, select all matching,
+       one counted confirmation, then a change report with undo. */
+    .mv-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); }
+    .mv-bulk__filter { display: flex; align-items: center; gap: var(--space-2); flex: 1 1 14rem; min-width: 0; }
+    .mv-bulk__filter .input { flex: 1 1 auto; min-width: 0; }
+    .mv-bulk__all { display: inline-flex; align-items: center; gap: var(--space-1); }
+    .mv-bulk__count { font-size: var(--text-sm); }
+    .mv-bulk__cell { width: 2.5rem; }
+    .mv-bulk__pick { display: flex; align-items: center; gap: var(--space-1); }
+    .mv-bulk__report { margin: 0 0 var(--space-3); }
+    .mv-bulk__title { margin: 0 0 var(--space-2); font-size: var(--text-base); }
+    .mv-bulk__lines { margin: 0 0 var(--space-3); padding-inline-start: 1.2rem; }
+    .mv-bulk__failed { color: var(--danger); }
+    /* Comment threads with @mentions (templates/_comments.html). */
+    .mv-comments__title { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
+    .mv-comments--collapsed { margin-top: var(--space-2); }
+    .mv-comments--collapsed > summary { cursor: pointer; color: var(--brand); font-size: var(--text-sm); }
+    /* Suggested edits to AI use rules (NOT-4): removed words struck, added words underlined. */
+    .mv-suggestions { margin-top: var(--space-3); }
+    .mv-suggestions__item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); margin: var(--space-2) 0; }
+    .mv-suggestions__item h5 { margin: 0 0 var(--space-1); font-size: var(--text-md); }
+    .mv-suggestions__diff { overflow-wrap: anywhere; }
+    .mv-suggestions__diff del { color: var(--danger); text-decoration: line-through; }
+    .mv-suggestions__diff ins { color: var(--success); text-decoration: underline; }
+    .mv-suggestions__reason { display: inline-flex; gap: var(--space-1); align-items: center; }
+    .mv-comments__lede { margin: 0 0 var(--space-3); font-size: var(--text-sm); }
+    .mv-comments__list { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
+    .mv-comments__item { padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); }
+    .mv-comments__meta { margin: 0 0 var(--space-1); font-size: var(--text-sm); color: var(--muted); }
+    .mv-comments__text { margin: 0 0 var(--space-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .mv-comments__form { display: grid; gap: var(--space-2); }
+    .mv-comments__mention { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+    .mv-comments__mentioned { margin: 0; font-size: var(--text-sm); }
     /* Shared empty / get-started state: centered title + body + one next
        step. Markup: templates/_empty_state.html or window.mvEmpty(). */
     .mv-empty { text-align: center; padding: var(--space-6) var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--muted); }
@@ -1969,13 +2033,9 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 /* Today: pinned pages and card links stack one per line, so each is a
    24 px target (WCAG 2.5.8) rather than a 19 px line of text. */
 .today-pins li > a, .today-grid li > a { display: inline-flex; align-items: center; min-height: 24px; }
-/* Target size (WCAG 2.5.8): the chat shell's account links and Help summary
-   are at least 24 px tall, like every disclosure summary below. */
-.cs-account a, .cs-account .help-menu > summary, .cs-workspace a { display: inline-flex; align-items: center; min-height: 24px; }
-.cs-account .help-menu { position: static; }
-.cs-account .help-menu .help-menu__panel { left: 0; right: 0; min-width: 0; }
-.cs-account .help-menu > summary { color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
-.cs-account .help-menu > summary:hover, .cs-account .help-menu[open] > summary { color: var(--text); }
+/* Target size (WCAG 2.5.8): the chat shell's account links are at least
+   24 px tall, like every disclosure summary below. (Help is in the top bar.) */
+.cs-account a, .cs-workspace a { display: inline-flex; align-items: center; min-height: 24px; }
 
 /* Optional ease-of-use survey panels (lightwork-usability-survey.js). */
 .mv-survey { margin-bottom: var(--space-4); }
@@ -2004,6 +2064,11 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 .areanav ol, .areanav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
 .areanav__crumbs { font-size: var(--text-sm); color: var(--muted); }
 .areanav__crumbs li + li::before { content: "›"; margin-inline-end: var(--space-2); color: var(--muted); }
+/* Where a page kept out of the sidebar sits (_where_crumbs.html). */
+.where-crumbs { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+.where-crumbs ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.where-crumbs li + li::before { content: "›"; margin-inline-end: var(--space-2); color: var(--muted); }
+.where-crumbs [aria-current="page"] { color: var(--text); }
 .areanav__tabs, .areanav__pages { overflow-x: auto; }
 .areanav__tabs { border-bottom: 1px solid var(--border); }
 .areanav__tabs ul { flex-wrap: nowrap; }

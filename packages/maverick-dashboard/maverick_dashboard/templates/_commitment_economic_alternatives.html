@@ -6,7 +6,7 @@
  <p id="cea-message" role="status" aria-live="polite"></p><div id="cea-results"></div>
  <details id="cea-author"><summary tabindex="-1">Enter the complete financial assumptions</summary>
   <form id="cea-model" class="cmv-stack">
-   <p>Enter currency amounts such as 1.25 in the single currency below. Choose whole amounts or up to two decimal places; Lightwork keeps the accounting exact. Keep all variable expenses in the per-unit cost, offer-specific expenses in its fixed cost, each addition's full cost in its own row, and common expenses in shared cost. Do not count the same expense twice. Existing cost points compare capabilities; they are never converted into money.</p>
+   <p>Enter currency amounts such as 1.25 in the single currency below. Choose whole amounts or up to two decimal places; Lightwork keeps the accounting exact. Put variable expenses in the per-unit cost and offer-specific expenses in its fixed cost. Give each addition's full cost its own row, and put common expenses in shared cost. Do not count the same expense twice. Existing cost points compare capabilities; they are never converted into money.</p>
    <div class="cmv-grid"><label>Single three-letter currency<input class="input" name="currency" pattern="[A-Z]{3}" minlength="3" maxlength="3" placeholder="USD" required></label>
    <label>Precision for all currency amounts<select class="input" name="unit_scale" required><option value="100">Up to two decimal places</option><option value="1">Whole amounts only</option></select></label>
    <label>All shared incremental costs<input class="input" name="shared_cost" type="text" inputmode="decimal" pattern="(0|[1-9][0-9]*)(\.[0-9]{1,2})?" required></label>

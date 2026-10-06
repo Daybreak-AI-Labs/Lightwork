@@ -166,6 +166,18 @@ def _read_inbox(request, selection, _arguments):
     return Preview(current.summary, native=current.details)
 
 
+def test_snapshot(request, _selection):
+    state = native._state(request)
+    return Snapshot(hashlib.sha256(json.dumps([state["context"], state["private_delivery"]], sort_keys=True).encode()).hexdigest(),
+                    "Your verified private notification accounts", "Review one fixed private message using the same notification controls. It does not change preferences.")
+
+
+def test_prepare(request, selection, _arguments):
+    state = test_snapshot(request, selection)
+    return Preview(state.summary + " Choose your verified private account, read the full message and explicitly send it. Original results can be read without another send.",
+                   native={"open": {"label": "Review a private notification test", "href": "/notifications#private-alert-test-title"}})
+
+
 def entries():
     shared = {"family": "notifications", "direct_ui": "/notifications#notification-preferences",
               "pages": ("/notifications", "/preferences", "/account", "/chat", "/chat/goal/*")}
@@ -174,6 +186,8 @@ def entries():
                 snapshot=_inbox_snapshot, prepare=_read_inbox, **shared),
         Adapter(id="notifications.personal_status", label="Show my personal alert preferences", input_model=EmptyInput,
                 snapshot=lambda request, selection: snapshot(request, selection, edit=False), prepare=_read, **shared),
+        Adapter(id="notifications.personal_test", label="Try my private notification account", input_model=EmptyInput,
+                snapshot=test_snapshot, prepare=test_prepare, **shared),
         Adapter(id="notifications.personal_update", label="Change my personal alert preferences", input_model=ChangeInput,
                 snapshot=snapshot, prepare=prepare, execute=execute, recover=recover, **shared),
     )

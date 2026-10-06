@@ -31,7 +31,8 @@ def event_source_authority(source: str, config: dict) -> str:
     uses_process_github_token = source == "github_issues" and not uses_tenant_oauth
     if source == "imap_email" or source == "file_dir" or uses_process_github_token:
         return "global_admin"
-    if uses_tenant_oauth:
+    from maverick.automation_connected_events import SOURCES
+    if uses_tenant_oauth or source in SOURCES:
         return "tenant_admin"
     return "operate"
 
@@ -632,7 +633,14 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                 batch = event_admission.poll_batch(active_world, generation)
                 if batch is None:
                     admitted_config["_lightwork_cursor_format"] = int(trig.get("cursor_format") or 0)
-                    res = poll_source(trig["source"], admitted_config, trig["cursor"])
+                    from maverick import connections
+                    with connections.bind_principal(owner):
+                        if trig["source"] in {"sharepoint_files", "salesforce_records", "servicenow_tickets", "teams_messages"}:
+                            admitted_config["_lightwork_authority_check"] = lambda current_owner=owner, current_authority=authority: (
+                                stored_automation_identity(current_owner),
+                                _require_stored_event_source_authority(current_owner, current_authority),
+                            )
+                        res = poll_source(trig["source"], admitted_config, trig["cursor"])
                     if res.events:
                         batch = event_admission.poll_batch(active_world, generation, {
                             "events": res.events, "event_ids": getattr(res, "event_ids", None),

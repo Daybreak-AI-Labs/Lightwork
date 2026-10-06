@@ -123,7 +123,7 @@
               <strong>{{ label }}</strong>
               {% if is_admin %}
               <button type="button" class="btn btn--danger" data-skill-remove="{{ s.name }}"
-                      data-skill-label="{{ label }}" aria-label="Remove {{ label }}">Remove</button>
+                      data-skill-label="{{ label }}" aria-label="Remove skill {{ label }}">Remove skill</button>
               {% endif %}
             </div>
             {% if s.triggers %}
@@ -257,10 +257,10 @@
       head.appendChild(nm);
       if (canRemove) {
         var rm = document.createElement('button');
-        rm.type = 'button'; rm.className = 'btn btn--danger'; rm.textContent = 'Remove';
+        rm.type = 'button'; rm.className = 'btn btn--danger'; rm.textContent = 'Remove skill';
         rm.setAttribute('data-skill-remove', s.name);
         rm.setAttribute('data-skill-label', human(s.name));
-        rm.setAttribute('aria-label', 'Remove ' + human(s.name));
+        rm.setAttribute('aria-label', 'Remove skill ' + human(s.name));
         head.appendChild(rm);
       }
       card.appendChild(head);

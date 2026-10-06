@@ -1,5 +1,20 @@
 # Invention register: implementation status
 
+October 6 product integration: complete ordinary and Copilot workflow-pilot
+controls now prepare unstarted tasks, freeze plans, record complete observations
+and costs, request independent review, and read the exact original write after
+an interrupted reply. Task preparation uses one native SQLite/PostgreSQL
+transaction. P14/N05 now include exact robust-choice qualification and the
+least-cost joint observation batch across every declared possible answer, plus
+complete named situation authoring and conservative unknown-check recovery.
+Chat alternatives independently admit retry, edit/resend and earlier-answer
+branches with default answer-only execution and retained current source access.
+These are implemented product functions with native UI/Copilot journey evidence;
+they do not change the distinct research dispositions or claim causal customer
+lift. Pilot records now support local and PostgreSQL governed storage; guarded
+decision records currently require local storage. The [operation coverage](../post-install-operation-coverage.md)
+records these functional boundaries separately from the research status counts.
+
 Initial static source review on October 1, 2026 at `1c27445dda93e21e2eb38ef2dde5193646832da8`;
 dated follow-through below updates the selected implementations through October 6.
 This maps the 28 stable IDs in the [invention register](lightwork-invention-register.md)
@@ -261,6 +276,31 @@ correctness repairs to existing learning, not a new research algorithm or proof
 of answer accuracy, causal value or independent audit custody. Counts remain
 6 partial product foundations, 18 bounded pilots and 4 parked/rejected results.
 
+Access-request follow-through replaces internal action-name entry with named
+ordinary/Copilot choices and complete current-policy review. Read-only exact
+request and decision recovery uses existing native custody without replay or
+activity effects. The pure inventory does not execute add-on factories or
+generated-action probes; unavailable add-on names are disclosed. These are
+usability and recovery repairs, not a new learning mechanism, independently held
+audit trail or proven customer benefit. Research status counts remain unchanged.
+
+Privacy-notice decision follow-through requires both current administrator
+authority and named approval permission for access keys, with native checks
+after writer waits and before transaction completion. Ordinary refusals preserve
+the actual cause and uncertainty. This repairs existing governance behavior;
+it does not establish independent audit custody or change the research counts.
+
+Read-only connection diagnostics follow-through removes a false mutation phase
+from an existing Copilot operation. Its current scoped status stays usable with
+writes disabled and agrees with ordinary native records. This is product
+correctness, not a new research mechanism; the 28-item status counts are unchanged.
+
+Recovery checkpoint follow-through keeps a person's selected source date and
+collection effect visible across reads, paging and errors in the existing
+ordinary/Copilot form. Exact native bindings remain internal. This repairs an
+interpretation trap without claiming external-effect verification, independent
+custody or a new learning mechanism. The research status counts are unchanged.
+
 October 6 recovery follow-through narrows F03/F04/F06: an administrator can
 completely review and separately restore verified historical deployment safety
 settings through Help and protected Copilot, including original unknown-outcome
@@ -278,3 +318,81 @@ failure evidence. Original answer-preference data stays intact. Native
 UI/Copilot admission, original recovery and scoring were checked with retained
 local examples. This fixes attribution and readiness, not a new reward-learning
 algorithm or independently measured quality lift.
+
+October 6 skill follow-through narrows F04/F05: current signed-acquisition
+prerequisites are visible in ordinary Learning and Copilot, with the existing
+trusted publisher upload/remedy. Native missing trust refuses before catalog or
+optional provider analysis; actual local signed installation was freshly
+verified without relaxing signature enforcement. Local provider aliases and
+ordinary model choices also agree with native dispatch. These are setup and
+correctness repairs, not general autonomous acquisition or a new learning
+algorithm; research status counts remain unchanged.
+
+Nightly combined-command follow-through also stops on native learning refusal,
+unreadable policy or an incomplete review instead of reporting a successful
+continuation. Prior changes may already be retained. This is operational
+truthfulness; the register research status counts remain unchanged.
+
+Asset follow-through makes trusted literal page controllers use current versioned
+URLs and revalidate unchanged public bytes after native authorization. Cached
+ordinary UI remained usable across both current-worker file changes and a native
+restart. This is deployment continuity, not an invention or quality-lift claim;
+research status counts remain unchanged.
+
+Configured-screen failure and finite web-content admission close correctness and
+resource-control gaps in current native operation. The native client receives a
+refusal when its chosen checker is unavailable, and bounded workflow inputs
+agree with native fetch execution. Neither repair establishes a new security or
+learning algorithm; the research status counts remain unchanged.
+
+Reviewed flywheel follow-through adds complete ordinary/Copilot before/after
+guidance review, native source and authority checks at replacement, and retained
+partial/uncertain outcomes rather than silent empty success. Empty work preserves
+existing guidance, and original reads do not repeat the cycle or flush pending
+audit writes. The existing causal promotion gates remain unchanged. This improves
+operating correctness and usability; it does not establish a new learning
+algorithm or independent quality lift. The register status counts remain unchanged.
+
+Product-switch and queue follow-through improve native configuration review and
+failure attribution. Product switches use the existing Settings authority and
+receipts, while unavailable queued tasks distinguish actual slot refusal from
+missing or unconfirmed work and stop uncertain scheduled creation from duplicating
+a task. These are operating repairs, not new invention mechanisms; the research
+status counts remain unchanged.
+
+Held-qualification maintenance follow-through permits explicitly enabled local
+stale-lesson retirement while keeping AI-dependent changes and trial decisions
+held. Strict governed persistence, current physical-write checks and truthful
+partial outcomes repair operation of the existing learning pass. Assessment
+names also follow current authorized product records. Neither change establishes
+a new learning algorithm, measured quality lift or completion of the broader
+assessment Copilot journey. Counts remain 6 partial product foundations,
+18 bounded pilots and 4 parked/rejected results.
+
+Scoped trial follow-through preserves other scopes with identical lesson text and
+checks current evidence, source permission, stops and budgets at governed native
+writes. Failed custody or confirmation retains an incomplete result. Protected
+assessment read/review handoffs also share the existing native identity, authority
+and version checks. These repairs improve product correctness and recoverability;
+synthetic reported outcome windows are not causal quality-lift evidence, and
+local audit confirmation is not independently held custody. Research status
+counts remain unchanged.
+
+Assessment mutation follow-through extends physical current-authority checks to
+refresh, evidence and removal, and makes guarded bulk refresh distinguish
+confirmed work from unavailable or uncertain work. Explicit access-key decision
+scope closes a Settings-permission interpretation trap. Read-only current-state
+checks preserve recovery honesty without claiming an original receipt. These
+are correctness and usability repairs to the existing assessment product; they
+do not complete the wider learning research mechanisms or establish independent
+audit custody. The 28-item research status counts remain unchanged.
+
+Model and add-on follow-through binds provider evidence to its actual workspace
+and connection, prevents stale refresh publication and preserves admitted prices
+for individual physical request accounting. Settings makes failed checks and
+previous choices explicit without losing drafts. Declared incompatible Python
+add-ons refuse entry-point loading and expose complete ordinary/Copilot reasons.
+These repairs improve reliability and usable control of the existing platform.
+Fictional provider and add-on fixtures do not establish live pricing, learning
+lift, independent audit custody or invention novelty. The register remains
+6 partial product foundations, 18 bounded pilots and 4 parked/rejected results.

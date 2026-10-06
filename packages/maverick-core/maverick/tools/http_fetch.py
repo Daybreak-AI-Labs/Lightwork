@@ -26,6 +26,9 @@ from ._ssrf import BlockedAddress, address_is_blocked, allow_private
 
 log = logging.getLogger(__name__)
 
+# Match the adjacent remote-image tool ceiling; ordinary page reads stay 64KB.
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
 
 _FETCH_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -50,8 +53,11 @@ _FETCH_INPUT_SCHEMA: dict[str, Any] = {
             "description": "Output rendering. Default 'markdown'.",
         },
         "max_bytes": {
+            "title": "Response size limit (bytes)",
             "type": "integer",
-            "description": "Cap response body size (default 64_000).",
+            "minimum": 1,
+            "maximum": _MAX_RESPONSE_BYTES,
+            "description": "Maximum response size in bytes (default 64,000; at most 10MiB).",
         },
     },
     "required": ["url"],
@@ -443,9 +449,11 @@ def _stream_fetch(method: str, url: str, headers: dict, body: Any, max_bytes: in
                 content_type = (resp.headers.get("content-type") or "").lower()
                 buf = bytearray()
                 truncated = False
-                for chunk in resp.iter_bytes():
-                    buf += chunk
-                    if len(buf) >= max_bytes:
+                # Keep one extra byte to distinguish exact-limit completion
+                # from genuinely omitted content, including chunk boundaries.
+                for chunk in resp.iter_bytes(chunk_size=min(8192, max_bytes + 1)):
+                    buf.extend(chunk[:max_bytes + 1 - len(buf)])
+                    if len(buf) > max_bytes:
                         truncated = True
                         break
     except BlockedHost as e:
@@ -457,6 +465,12 @@ def _stream_fetch(method: str, url: str, headers: dict, body: Any, max_bytes: in
 
 
 def _run_fetch(args: dict[str, Any]) -> str:
+    max_bytes = args.get("max_bytes", 64_000)
+    if type(max_bytes) is float and max_bytes.is_integer():
+        max_bytes = int(max_bytes)  # JSON Schema also admits integral numbers.
+    if type(max_bytes) is not int or not 1 <= max_bytes <= _MAX_RESPONSE_BYTES:
+        return ("ERROR: Download limit must be a whole number between 1 and "
+                f"{_MAX_RESPONSE_BYTES:,} bytes.")
     url = (args.get("url") or "").strip()
     if not url:
         return "ERROR: url is required"
@@ -482,8 +496,7 @@ def _run_fetch(args: dict[str, Any]) -> str:
     body = args.get("body")
     # 64 KB default: a page render trims to markdown anyway, and the old
     # 200 KB default guaranteed one fetch filled the whole per-tool-result
-    # context budget. Callers needing more pass max_bytes explicitly.
-    max_bytes = int(args.get("max_bytes") or 64_000)
+    # context budget. Callers can request more within the native 10MiB ceiling.
     render = (args.get("render") or "markdown").lower()
 
     # Connect to the IP we validated above, not a freshly-resolved one:
@@ -494,8 +507,9 @@ def _run_fetch(args: dict[str, Any]) -> str:
     # Stream with a hard byte ceiling instead of client.request(): the latter
     # buffers the ENTIRE body into memory before we slice to max_bytes, so a
     # model-supplied URL to a multi-GB / endless body could exhaust memory
-    # (max_bytes bounded only the returned text, not the download). Read at
-    # most max_bytes off the wire, then stop and mark the result truncated.
+    # (max_bytes bounded only the returned text, not the download). Read
+    # a bounded decoded chunk at a time and retain at most max_bytes + 1;
+    # the extra byte proves whether content was actually omitted.
     streamed = _stream_fetch(method, url, headers, body, max_bytes)
     if isinstance(streamed, str):
         return streamed

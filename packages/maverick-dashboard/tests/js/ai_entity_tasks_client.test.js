@@ -276,7 +276,7 @@ test("a failed availability check leaves no task loader spinning", async (t) => 
   await h.settle();
   assert.equal(h.text("aet-readiness"), "Unavailable");
   assert.equal(h.text("aet-list-status"), "Could not load the tasks. Try again in a few minutes.");
-  assert.doesNotMatch(h.text("aet-list-status") + h.text("aet-readiness-detail"), /Loading|Checking/);
+  assert.doesNotMatch(h.text("aet-list-status") + h.text("aet-readiness-detail") + h.text("aet-inventory-status"), /Loading|Checking/);
 });
 
 test("unfinished setup says when tasks will appear instead of loading forever", async (t) => {
@@ -284,6 +284,7 @@ test("unfinished setup says when tasks will appear instead of loading forever", 
   await h.settle();
   assert.equal(h.text("aet-readiness"), "Setup not finished");
   assert.equal(h.text("aet-list-status"), "Tasks appear here once an administrator finishes the setup.");
+  assert.equal(h.text("aet-inventory-status"), "AI systems can be chosen once an administrator finishes the setup.");
 });
 
 test("a server that reports the module off says so without pointing at a missing gate", async (t) => {
@@ -291,6 +292,7 @@ test("a server that reports the module off says so without pointing at a missing
   await h.settle();
   assert.equal(h.text("aet-readiness-detail"), "AI system tasks are turned off. Ask an administrator to turn them on.");
   assert.equal(h.text("aet-list-status"), "Tasks appear here once AI system tasks are turned on.");
+  assert.equal(h.text("aet-inventory-status"), "AI systems can be chosen once AI system tasks are turned on.");
 });
 
 test("a turned-off module starts no checks or loads behind its gate", async (t) => {

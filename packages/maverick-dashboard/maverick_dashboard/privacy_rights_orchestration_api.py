@@ -175,6 +175,7 @@ class AckCallbackIn(RevisionIn):
 
 
 class SourceEvidenceIn(_StrictModel):
+    manual_attestation: Literal[True]
     status: Literal["complete", "not_found", "partial", "failed"]
     provider_evidence_sha256: Digest
     record_count: int = Field(ge=0, le=1_000_000_000)
@@ -728,7 +729,7 @@ def create_privacy_rights_orchestration_router(  # noqa: C901, PLR0915
                 source_id,
                 phase,
                 evidence_id=evidence_id,
-                **body.model_dump(),
+                **body.model_dump(exclude={"manual_attestation"}),
             )
         )
 

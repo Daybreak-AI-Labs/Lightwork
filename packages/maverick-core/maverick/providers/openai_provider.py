@@ -27,7 +27,7 @@ from typing import Any
 
 from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
-from ..retry import async_retry, sync_retry
+from ..retry import async_physical_attempt, async_retry, sync_physical_attempt, sync_retry
 from ..secrets import scrub
 
 log = logging.getLogger(__name__)
@@ -718,13 +718,13 @@ class OpenAIClient:
         )
         def request():
             try:
-                return self._sync.chat.completions.create(**kwargs)
+                return sync_physical_attempt(lambda: self._sync.chat.completions.create(**kwargs))
             except Exception as exc:
                 if not self._disable_rejected_tool_reasoning(kwargs, exc):
                     raise
-                return self._sync.chat.completions.create(**kwargs)
+                return sync_physical_attempt(lambda: self._sync.chat.completions.create(**kwargs))
 
-        resp = sync_retry(request)
+        resp = sync_retry(request, observe_attempts=False)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,
@@ -748,13 +748,13 @@ class OpenAIClient:
         )
         async def request():
             try:
-                return await self._async.chat.completions.create(**kwargs)
+                return await async_physical_attempt(lambda: self._async.chat.completions.create(**kwargs))
             except Exception as exc:
                 if not self._disable_rejected_tool_reasoning(kwargs, exc):
                     raise
-                return await self._async.chat.completions.create(**kwargs)
+                return await async_physical_attempt(lambda: self._async.chat.completions.create(**kwargs))
 
-        resp = await async_retry(request)
+        resp = await async_retry(request, observe_attempts=False)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,

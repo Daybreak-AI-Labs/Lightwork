@@ -54,3 +54,17 @@ def stop_reviewed(request: Request, goal_id: int, body: StopInput):
     from .app import _require_same_origin
     _require_same_origin(request)
     return apply(request, goal_id, body)
+
+
+@router.get("/api/v1/goals/{goal_id}/stop-progress")
+def stop_progress(request: Request, goal_id: int):
+    """Finished and remaining steps of a stopped task, for the halt card."""
+    from .app import _world
+    from .stop_progress import summarize
+    auth.require_permission(request, "view")
+    world = _world()
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "This task is unavailable.")
+    auth.assert_goal_access(request, goal)
+    return {"goal_id": goal_id, "status": goal.status, "progress": summarize(world, goal)}

@@ -92,13 +92,27 @@ def _projection(request, *, max_dollars=None, max_wall_seconds=None, goal_id=Non
     return value
 
 
+def _practice_cost(actor) -> str:
+    """Today's practice spending for this person, on its own line: it costs
+    real provider money but never counts against their limits."""
+    from maverick import practice, practice_costs
+    try:
+        state = practice.spending(actor or "user:local")  # runs are charged to user:local
+    except Exception:  # noqa: BLE001 -- the page still renders without the line
+        return ""
+    if not state["spent_today"]:
+        return ""
+    return (f"Practice: ${state['spent_today']:,.2f} today, within its ${state['cap']:,.2f} daily practice limit "
+            f"({practice_costs.NOT_COUNTED})")
+
+
 @router.get("/budget")
 def page(request: Request, goal_id: int | None = None):
-    _actor(request)
+    actor = _actor(request)
     _goal(request, goal_id)
     from maverick.spending_limits import spend_recorded_at
     return _app().templates.TemplateResponse(request, "budget_guidance.html", {
-        "goal_id": goal_id, "spend_recorded_at": spend_recorded_at()},
+        "goal_id": goal_id, "spend_recorded_at": spend_recorded_at(), "practice_cost": _practice_cost(actor)},
         headers={"Cache-Control": "private, no-store"})
 
 

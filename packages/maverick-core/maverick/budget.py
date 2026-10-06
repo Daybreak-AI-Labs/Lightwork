@@ -19,6 +19,9 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from .pricing import (
@@ -73,6 +76,19 @@ _FALLBACK_PRICE_IN = 3.0
 _FALLBACK_PRICE_OUT = 15.0
 _TOKEN_OPERATION = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_TOKEN_OPERATIONS = 5000
+_ATTEMPT_PRICE: ContextVar[Callable[[object, str | None], ModelPrice] | None] = ContextVar(
+    "maverick_attempt_price", default=None,
+)
+
+
+@contextmanager
+def _attempt_price_scope(resolve: Callable[[object, str | None], ModelPrice]):
+    """Use the exact native physical attempt's price while its adapter meters."""
+    token = _ATTEMPT_PRICE.set(resolve)
+    try:
+        yield
+    finally:
+        _ATTEMPT_PRICE.reset(token)
 
 # Model ids already warned about (estimate-priced); warn once each, not per call.
 _UNPRICED_WARNED: set[str] = set()
@@ -804,6 +820,8 @@ class Budget:
             not isinstance(cache_write_ttl, str) or len(cache_write_ttl) > 64
         ):
             raise BudgetExceeded("invalid cache write TTL")
+        resolve_attempt = _ATTEMPT_PRICE.get()
+        admitted_quote = resolve_attempt(self, model) if resolve_attempt is not None else None
         split_cache_write = bool(cache_write_5m_tok or cache_write_1h_tok)
         if split_cache_write:
             cache_write_tok = cache_write_5m_tok + cache_write_1h_tok
@@ -857,7 +875,7 @@ class Budget:
                 raise BudgetExceeded("token metering operation capacity reached")
             # Resolve inside the operation lock. Two concurrent exact retries
             # must not both miss the receipt and mutate the same counters.
-            quote = _lookup_price_quote(model)
+            quote = admitted_quote if admitted_quote is not None else _lookup_price_quote(model)
             in_rate, out_rate = quote.rates
             pricing_evidence = quote.metadata()
             # A private gateway's cache discount is unknown. Provider adapter

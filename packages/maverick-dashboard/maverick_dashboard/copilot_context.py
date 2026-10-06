@@ -207,8 +207,8 @@ _OPERATIONAL_GUIDES = (
      "Where are my finished results?", "How do I download an answer?"),
     ("/automations", "Automations", "Manage schedules, connected-service starts, new-item starts and recent flow runs.",
      "Create a schedule or event automation when its source, flow and required access are ready.",
-     "Open Schedules to create timed work, or Starts when new items arrive for an event-based start.",
-     "Saving a schedule does not confirm a future run; check occurrence history after its due time.",
+     "Open Schedules for timed work, or Starts when new items arrive to choose a saved SharePoint, Salesforce, ServiceNow or Teams account, review its dated source snapshot and explicitly arm the selected work.",
+     "A source preview confirms its observed starting point; saving does not confirm future delivery. Read an original creation result without recreating or polling the source.",
      "How do I schedule a workflow?", "Where can I check recent runs?"),
     # Insights
     ("/overview", "Overview", "See recorded task momentum, current task states, recent work and department activity.",
@@ -247,10 +247,15 @@ _OPERATIONAL_GUIDES = (
      "The savings view uses entered targets and costs; check actual results before claiming a benefit.",
      "How do I add a business area?", "What is waiting for a person?"),
     ("/knowledge-access", "Knowledge", "Search current approved sources and inspect why a result may be usable.",
-     "Search current sources, download visible results or request a correction or removal.",
-     "Choose an available use, search current sources, then open Source detail before using a result.",
-     "Search results can disappear when source rights, approval or freshness change.",
+     "Manage named company sources, review refresh history and permitted snapshots, attach approved sources to an unpublished specialist draft, or search current sources and request a correction.",
+     "Open Company Knowledge sources to choose an existing connected account and source. Source-use permission and independent approval are required before retrieval; saving an attachment draft does not publish it.",
+     "A connected account proves access, not permission to use the source. Search results can disappear when source rights, approval or freshness change.",
      "How do I find an approved source?", "How do I correct a source?"),
+    ("/human-conversations", "Human conversations", "Let an available named person handle a reviewed web conversation inside Lightwork.",
+     "Declare your availability, read assigned conversations, send human replies or review a return to future AI work.",
+     "Enable Human help in Chat in Settings, then ask a person to take over from the conversation. Only the exact reviewed brief, saved reply and human exchange are shared.",
+     "Current AI work must settle before a person claims it. Stopping does not reverse external actions; returning to AI never automatically resumes old work or sends human replies to a model.",
+     "Who can take this conversation?", "What information will they see?"),
     ("/learning/approval-challenges", "Approval challenges", "Build or receive a fictional approval practice and check this installation’s safeguards in a disposable copy.",
      "Choose a fictional request change and sign-off count, run the limited local check, review its source and limits, or import an authorized practice file for separate checking.",
      "An installation administrator can allow challenges here. Each local check and exact file export needs its own review. Copilot uses those same guarded controls.",
@@ -358,9 +363,9 @@ _OPERATIONAL_GUIDES = (
      "Whichever applicable limit is reached first stops new spending; a limit is not an invoice.",
      "Which spending limit applies first?", "How do I set a personal limit?"),
     ("/tenants", "Workspaces", "Create and manage separate workspaces, their daily limits and feature choices.",
-     "Create a workspace, review its features, or pause and resume one when authorized.",
+     "Create a workspace, review its features, pause or resume one, or review erasure of a removed workspace when authorized.",
      "Use Create a workspace for a new team; open Your workspaces before changing an existing one.",
-     "Pause or removal affects that workspace's access and work; review its people and history first.",
+     "Pause or removal affects access and work. Erasure permanently removes reviewed local records; backups and external copies need separate care.",
      "How do I create a workspace?", "Where do I set its daily limit?"),
     # Common pages reached from those workspaces
     ("/help", "Help and diagnostics", "Prepare a support report or a reviewed draft about a task that stopped.",
@@ -416,10 +421,12 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Start a task from your message, or draft a flow or agent when those choices are available.",
                 "Attach files, review the task budget, and continue work in a saved chat.",
+                "Copy, print, share or download an answer; try another answer, edit and resend, or branch from a saved answer when enabled.",
             ),
             boundaries=(
                 "Sending a message starts work and may use a paid AI service; spending limits and approval rules still apply.",
                 "Starting or continuing work depends on your access and whether an AI service is ready.",
+                "An alternative keeps the original conversation and starts separately reviewed work. Connected actions may repeat effects, so answer-only is the default.",
             ),
             next_steps=(
                 "Describe the result you need, then add any useful files or details.",
@@ -1459,11 +1466,13 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Triage privacy work and inspect assessment flow, residual risk, and framework views.",
                 "Review vendor paper and supporting evidence beside the governed record.",
+                "Inspect a registered vendor's current assessments, screening, contracts and open tasks together; explicitly link an existing profile or review activation after the latest assessment.",
                 "Inspect program insights, lineage, and bounded privacy records.",
             ),
             boundaries=(
                 "Generated analysis and redlines are decision support, not legal advice or approval.",
                 "Vendor submissions and local workflow state are not independently verified external facts.",
+                "Vendor activation requires the latest complete evaluated assessment; linking existing identities does not create fresh screening or independent identity verification.",
                 "Final applicability, risk acceptance, and disposition remain human decisions.",
             ),
             next_steps=(
@@ -1546,6 +1555,8 @@ _CONTEXTS = tuple(
                 "Raw subject and external request references are HMACed and never persisted or returned.",
                 "Identity status records external evidence only; Lightwork does not perform identity verification.",
                 "Callbacks are local worker intent, not network transport, provider write, response delivery, or completeness proof.",
+                "Manual result statements and document fingerprints remain independently unverified; open the native complete evidence review before manually attesting.",
+                "A connected-system active-record lookup with no match does not prove purge from retained copies or backups. Closure and completeness describe workflow status, not deletion certification.",
             ),
             next_steps=(
                 "Confirm case, HMAC, task, callback, and package authorities are composed.",
@@ -1900,24 +1911,24 @@ _CONTEXTS = tuple(
         _registered(
             path="/assessments",
             summary=(
-                "Create, assign, answer, discuss, review, and decide governed assessments "
-                "against exact questionnaire and evidence revisions."
+                "Review the declared capabilities of specialists and workflows through "
+                "privacy, security and AI-risk findings."
             ),
             capabilities=(
-                "Coordinate assessment owners and due dates.",
-                "Keep threaded reviewer comments beside the governed assessment record.",
-                "Record evidence, review, and final decisions with separation of duties.",
+                "Choose a specialist or workflow and draft its assessment from declared capabilities.",
+                "Read each finding and add an evidence note or link.",
+                "With administrator access, approve a review, mark it as needing work and choose its review frequency.",
             ),
             boundaries=(
-                "Comments are collaboration evidence, not approval or a compliance conclusion.",
-                "A final decision still requires the configured human authority and exact revision.",
+                "Automatic findings are a review aid, not a legal conclusion or certification.",
+                "Auditors may read; administrator access and the current assessment revision are required for changes.",
             ),
             next_steps=(
-                "Open the assessment that needs attention.",
-                "Resolve evidence questions in the review thread before final disposition.",
+                "Open an assessment from Register or Needs attention and read its complete findings.",
+                "Review the evidence before approving each part; re-assess when its capabilities change.",
             ),
             suggested_questions=(
-                "How do assessment comments affect approval?",
+                "What do privacy, security and AI-risk reviews cover?",
                 "What should I review before deciding?",
             ),
         ),
@@ -2067,7 +2078,7 @@ def context_for_page(page: object) -> CopilotPageContext:
         if kind in {"task", "task_chat"}:
             section = parts[1] if kind == "task" else ""
             label = "Current chat task" if kind == "task_chat" else {"plan": "Task plan", "trajectory": "Task timeline", "errors": "Task errors"}.get(section, "Task result")
-            base = _registered_page_context("/goals")
+            base = _CONTEXT_BY_PATH["/chat"] if kind == "task_chat" else _registered_page_context("/goals")
             assert base is not None
             return replace(
                 base, path=path, title=label,
@@ -2096,7 +2107,7 @@ def context_for_page(page: object) -> CopilotPageContext:
             path=path, title="Build a task mapping",
             summary="Choose a final compliance scope and define the control and evidence tasks it needs.",
             capabilities=("Review named final scopes and their controls.", "Prepare a task mapping and request a separate person's approval."),
-            boundaries=("Only an approved mapping can support a task plan.", "This page records your team's choices; it does not supply licensed framework text."),
+            boundaries=("Only an approved mapping can support a task plan.", "This page records your team's choices; it does not supply licensed framework text.", _READ_ONLY_BOUNDARY),
             next_steps=("Choose a final scope, then the work status, responsible role and evidence cadence.", "Review the exact mapping and ask another authorized person to approve it."),
             suggested_questions=("Which controls need tasks?", "How do I prepare this scope's mapping?"),
         )
@@ -2105,7 +2116,7 @@ def context_for_page(page: object) -> CopilotPageContext:
             path=path, title="AI on this computer",
             summary="Choose an installed model program and an existing local model, then review starting or stopping it.",
             capabilities=("Review local model setup and current service state.", "Prepare supported setup, start and stop actions with original-result readback."),
-            boundaries=("A model loading on this computer may need time and memory.", "A running service or connection check does not establish answer quality."),
+            boundaries=("A model loading on this computer may need time and memory.", "A running service or connection check does not establish answer quality.", _READ_ONLY_BOUNDARY),
             next_steps=("Choose a supported program and an existing model in the setup form.", "Review each action and read its original request if the response is interrupted."),
             suggested_questions=("Is the local AI service responding?", "How do I start the selected model?"),
         )
@@ -2114,7 +2125,7 @@ def context_for_page(page: object) -> CopilotPageContext:
             path=path, title="Sign-in and work protection",
             summary="Review how people sign in and how automated work is contained on this installation.",
             capabilities=("Review current sign-in and work-protection policies.", "Prepare and confirm supported policy changes through the same native controls."),
-            boundaries=("Only an installation administrator may change these policies.", "A connection check does not confirm that someone successfully signed in."),
+            boundaries=("Only an installation administrator may change these policies.", "A connection check does not confirm that someone successfully signed in.", _READ_ONLY_BOUNDARY),
             next_steps=("Choose sign-in or work protection, review current settings and their source.", "Review each exact change and read its original saved result after an interruption."),
             suggested_questions=("How is work protected?", "Which sign-in settings need attention?"),
         )
@@ -2183,7 +2194,7 @@ _PANEL_TIPS = {
     "/privacy": "Draft analysis helps with review; it is not legal advice or final approval.",
     "/privacy/data-discovery": "No findings in a report do not prove that no private data exists.",
     "/privacy/regulatory-intelligence": "Sources must be cleared for their intended use before they are added.",
-    "/privacy/rights-orchestration": "Lightwork records identity-check evidence from another source; it does not verify identity itself.",
+    "/privacy/rights-orchestration": "Lightwork records identity-check evidence from another source; it does not verify identity itself. Open the native complete evidence review before manually attesting. Manual result statements remain independently unverified, and an active-record lookup with no match does not certify permanent deletion.",
     "/privacy/rights-consumer-delivery": "A case or package does not prove someone's identity. Access needs a separate check.",
     "/privacy/notice-governance": "A finished local release does not confirm browser behavior or legal sufficiency.",
     "/privacy/drop": "A finished local record does not confirm that California's DROP service accepted it.",
@@ -2194,7 +2205,7 @@ _PANEL_TIPS = {
     "/third-party/collaboration": "A supplier's answer is their statement, not independently checked evidence.",
     "/security/governance": "These records support a review. They do not provide legal advice or certify a result.",
     "/security/assurance": "Local AI risk records support decisions. They are not legal conclusions or certification.",
-    "/assessments": "Comments help reviewers; they are not an approval or compliance conclusion.",
+    "/assessments": "Automatic findings help a person review declared capabilities; they are not a compliance conclusion.",
 }
 
 

@@ -43,7 +43,7 @@
     {% if can_decide %}<p class="muted">Decide on the <a href="/approvals">Approvals page</a>, or from Slack with the buttons on the card.</p>{% endif %}
     {% if d.approvals | selectattr('waiting_on', 'equalto', 'requester') | list %}<p class="muted">“The person who asked” means the request comes from a colleague's private task, so you can't open it here; they can decide their own request.</p>{% endif %}
     {% else %}
-    <p class="muted">Nothing is waiting for your decision.</p>
+    <p class="muted">Nothing is waiting for your decision. Requests appear here when an agent needs your approval.</p>
     {% endif %}
   </div>
 
@@ -56,7 +56,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="muted">No agent is waiting on you for an answer.</p>
+    <p class="muted">No agent is waiting on you for an answer. Questions appear here when a task needs something from you.</p>
     {% endif %}
   </div>
 
@@ -77,7 +77,7 @@
     </table>
     <p class="muted">Results from the last 7 days. See everything on <a href="/deliverables">Deliverables</a>.</p>
     {% else %}
-    <p class="muted">No results in the last 7 days.</p>
+    <p class="muted">No results in the last 7 days. Start a task in Chat to get one.</p>
     {% endif %}
   </div>
 
@@ -119,7 +119,7 @@
       <p>{{ pending.channel | capitalize }} account <strong>{{ pending.sender_id }}</strong> in workspace <strong>{{ pending.provider_tenant }}</strong>.</p>
       {% if bridge_can_connect %}<form method="post" action="/me/channels/oidc/confirm">
         <input type="hidden" name="challenge_id" value="{{ pending.id }}" />
-        <button type="submit" class="btn btn--primary">Yes, connect this account</button>
+        <button type="submit" class="btn btn--primary">Connect this account</button>
       </form>{% endif %}
     </div>
     {% endfor %}
@@ -134,7 +134,7 @@
         <td>{% if link.status == 'active' %}Connected{% elif link.status == 'revoked' %}Disconnected; finish removal{% else %}Confirmation needs retry{% endif %}</td><td>
           <form method="post" action="/me/channels/oidc/unlink" class="users-inline">
             <input type="hidden" name="link_id" value="{{ link.id }}" />
-            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect{% else %}Finish removal{% endif %}</button>
+            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect account{% else %}Finish removal{% endif %}</button>
           </form>
         </td></tr>
       {% endfor %}</tbody>
@@ -170,7 +170,7 @@
             <form method="post" action="/me/channels/unlink" class="users-inline">
               <input type="hidden" name="channel" value="{{ l.channel }}" />
               <input type="hidden" name="external_id" value="{{ l.external_id }}" />
-              <button type="submit" class="btn btn--danger" aria-label="Unlink {{ l.channel }} account {{ l.external_id }}">Unlink</button>
+              <button type="submit" class="btn btn--danger" aria-label="Unlink account {{ l.external_id }} on {{ l.channel }}">Unlink account</button>
             </form>
           </td>
         </tr>
@@ -178,7 +178,7 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted">No chat accounts are linked yet.</p>
+    <p class="muted">No chat accounts are linked yet. Get a link code below to link one.</p>
     {% endif %}
     <form method="post" action="/me/channels/link-code" class="users-row-form">
       <label class="users-field">

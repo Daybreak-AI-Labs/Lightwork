@@ -76,7 +76,7 @@ def test_goal_page_folds_the_kernels_withheld_markers_and_renders_prose(page_env
     assert "class=\"steps\"" in text
     assert "'[' + fmtAgent(e.agent) + '] '" not in text
     # Status stays machine-readable for the scripts; the page shows no raw badge.
-    assert 'id="status" class="badge done" data-status="done" hidden>done<' in text
+    assert re.search(r'id="status" class="badge done" data-status="done"[^>]* hidden>Done<', text)
     # The chat shell exposes the real, role-filtered product navigation.
     assert 'class="chat-shell' in text
     assert 'aria-label="Chats"' in text
@@ -93,7 +93,7 @@ def test_blocked_goal_reads_as_paused_and_keeps_the_question_in_the_conversation
     world.ask("Which audience first?", goal_id=gid)
 
     text = client.get(f"/chat/goal/{gid}").text
-    assert 'id="status" class="badge blocked" data-status="blocked" hidden>paused<' in text
+    assert re.search(r'id="status" class="badge blocked" data-status="blocked"[^>]* hidden>Paused<', text)
     assert "Lightwork needs one thing from you" in text
     assert 'id="qa-thread"' in text
     # Answering re-opens the live stream instead of leaving the page on a
@@ -191,6 +191,10 @@ def test_markdown_export_fails_closed_when_domain_policy_missing(page_env):
     page = client.get(f"/chat/goal/{gid}")
     assert f'href="/chat/goal/{gid}/download.md"' not in page.text
     assert "review requirements can be checked" in page.text
+    # The live answer panel reads the same way; the export stays withheld.
+    panel = client.get(f"/chat/goal/{gid}/answer-panel")
+    assert panel.status_code == 200, panel.text
+    assert f'href="/chat/goal/{gid}/download.md"' not in panel.text
 
 
 def test_markdown_export_fails_closed_when_policy_read_fails(page_env, monkeypatch):

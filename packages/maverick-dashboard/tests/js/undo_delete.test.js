@@ -131,7 +131,49 @@ test("the most common deletes use the undo window instead of a question", () => 
     assert.match(body, /deleteWithUndo\(/, fn);
   }
   assert.match(automations, /mvUndo\(message, \{[\s\S]*?keepalive: keepalive/);
+  // Skills: the Remove button opens the reviewed removal (exact saved
+  // version, retained receipt; lightwork-manual-skill-removal.js). Its last
+  // step hides the card and offers Undo; the reviewed removal is sent when
+  // that time is up, and an undone removal sends nothing.
   const skills = fs.readFileSync(path.join(root, "templates/skills.html"), "utf8");
-  assert.match(skills, /window\.mvUndo\('Skill “' \+ label \+ '” removed\./);
+  assert.match(skills, /LightworkManualSkillRemoval\.review\(name\)/);
   assert.doesNotMatch(skills, /mvConfirm\('Remove the skill/);
+  const removal = fs.readFileSync(path.join(root, "static/lightwork-manual-skill-removal.js"), "utf8");
+  assert.match(removal, /window\.mvUndo\('Skill “\{name\}” removed\. Agents stop using it from the next task\.'/);
+  assert.match(removal, /run: async function \(keepalive\)[\s\S]*?\/remove'[\s\S]*?keepalive: keepalive[\s\S]*?token: checked\.token/);
+  assert.match(removal, /undo: function \(\)[\s\S]*?card\.hidden = false/);
+});
+
+test("the toast's words go through the translator, and the name stays as written", async () => {
+  const dom = new JSDOM(`<script type="application/json" id="lightwork-i18n-data">${JSON.stringify({language: "fr", locale: "fr", catalog: {
+      'Team "{name}" removed. Past tasks stay in your task list.': {text: "Équipe « {name} » retirée. Les tâches passées restent dans votre liste.", lang: "fr"},
+      "Undo": {text: "Annuler", lang: "fr"}, "Restored.": {text: "Rétabli.", lang: "fr"}}})}</script>
+    <div id="mv-toasts"></div><div id="mv-toasts-alert"></div>`, {url: "https://lightwork.test/fleets", runScripts: "outside-only"});
+  const w = dom.window;
+  w.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  w.eval(fs.readFileSync(path.join(root, "static/lightwork-i18n.js"), "utf8"));
+  w.eval(source);
+  w.mvUndo('Team "{name}" removed. Past tasks stay in your task list.', {values: {name: "<b>Ops</b>"}, run: async () => ({ok: true})});
+  const shown = w.document.querySelector(".mv-toast--undo");
+  assert.match(shown.textContent, /^Équipe « <b>Ops<\/b> » retirée\. Les tâches passées restent dans votre liste\. Annuler$/);
+  assert.equal(shown.querySelector("bdi[data-user-content]").textContent, "<b>Ops</b>", "the name is text, never markup");
+  shown.querySelector("button").click();
+  await flush();
+  assert.match(w.document.getElementById("mv-toasts").textContent, /Rétabli\./);
+  w.close();
+});
+
+test("a refusal the page already explained puts the item back without a second message", async () => {
+  const w = load(), calls = [];
+  let failed = 0;
+  w.mvFail = () => { failed += 1; };
+  deleteRow(w, calls, {run: async keepalive => { calls.push(keepalive); throw {handled: true}; }});
+  w.advance(10000); await flush(); await flush();
+  assert.deepEqual(calls, [false]);
+  assert.equal(w.document.getElementById("row").hidden, false, "the item comes back");
+  assert.equal(failed, 0, "no generic failure on top of the page's own explanation");
+  deleteRow(w, calls, {run: async () => { throw new Error("offline"); }});
+  w.advance(10000); await flush(); await flush();
+  assert.equal(failed, 1, "an unexplained failure still shows the shared message");
+  w.close();
 });

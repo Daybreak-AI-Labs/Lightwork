@@ -31,6 +31,7 @@ profile; ``MAVERICK_SELF_HARNESS=0`` or config can opt out.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
@@ -42,7 +43,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable, Mapping
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -184,11 +185,12 @@ def load_addenda(path: Path | None = None) -> dict[str, str]:
     return {}
 
 
-def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
+def _write_addenda(addenda: dict[str, str], path: Path | None = None, *,
+                   effect_guard=None) -> None:
     p0 = path if path is not None else _store_path()
     if _world_routed(p0):
         from . import learning_store
-        learning_store.write_addenda_db(addenda)
+        learning_store.write_addenda_db(addenda, effect_guard=effect_guard)
         return
     # Route through atomic_write_text: a UNIQUE temp + os.replace + chmod 0600
     # that CLEANS THE TEMP UP on any failure. A hand-rolled fixed "<name>.tmp"
@@ -200,7 +202,8 @@ def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
     # fault-injection battery.)
     from .file_lock import atomic_write_text
     p = path if path is not None else _store_path()
-    atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600)
+    atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600,
+                      effect_guard=effect_guard)
 
 
 def _load_addenda_strict(path: Path) -> dict[str, str]:
@@ -474,14 +477,15 @@ def load_line_meta(path: Path | None = None) -> dict[str, dict]:
     return {}
 
 
-def _write_line_meta(meta: dict[str, dict], path: Path | None = None) -> None:
+def _write_line_meta(meta: dict[str, dict], path: Path | None = None, *,
+                     effect_guard=None) -> None:
     if _world_routed(path if path is not None else _store_path()):
         from . import learning_store
-        learning_store.write_line_meta_db(meta)
+        learning_store.write_line_meta_db(meta, effect_guard=effect_guard)
         return
     from .file_lock import atomic_write_text
     atomic_write_text(_meta_path(path),
-                      json.dumps(meta, indent=2, sort_keys=True), mode=0o600)
+                      json.dumps(meta, indent=2, sort_keys=True), mode=0o600, effect_guard=effect_guard)
 
 
 def _reconcile_meta(meta: dict[str, dict], model_id: str,
@@ -717,10 +721,140 @@ def list_learned(path: Path | None = None) -> dict[str, list[str]]:
     return out
 
 
+@contextmanager
+def _lifecycle_writer(path: Path, *, strict: bool):
+    from .file_lock import cross_process_lock
+
+    if strict:
+        from .authority_effects import authority_effect_fence
+        from .learning_store import guidance_fence
+
+        with authority_effect_fence():
+            if path == _store_path():
+                with guidance_fence():
+                    yield
+            else:
+                with _lock, cross_process_lock(path, strict=True), _store_rmw_lock(path):
+                    yield
+    else:
+        with _lock, cross_process_lock(path), _store_rmw_lock(path):
+            yield
+
+
+def _lifecycle_state(path: Path, *, strict: bool):
+    if not strict:
+        return load_addenda(path), load_line_meta(path)
+    if _world_routed(path):
+        from .learning_store import export_guidance_snapshot
+
+        state = export_guidance_snapshot()
+        addenda = {row[0]: row[1] for row in state["addenda"]}
+        meta = {row[0]: json.loads(row[1]) for row in state["line_meta"]}
+    else:
+        addenda = _load_addenda_strict(path)
+        meta_path = _meta_path(path)
+        if meta_path.is_symlink():
+            raise ValueError("lesson evidence must not be a symbolic link")
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            if addenda:
+                raise RuntimeError("Current lesson evidence is unavailable") from None
+            meta = {}
+    if not isinstance(meta, dict) or any(not isinstance(key, str) or not isinstance(row, dict)
+                                         for key, row in meta.items()):
+        raise ValueError("Current lesson evidence is malformed")
+    return addenda, meta
+
+
+def _lifecycle_guard(path, before, after, before_meta, after_meta, *,
+                     lineage, before_write=None, write_guard_factory=None):
+    if before_write is not None:
+        before_write()
+    staged = (write_guard_factory(after, before_meta, after_meta)
+              if write_guard_factory is not None else before_write)
+
+    def current_write():
+        check_learning_halt("self_harness", "lesson-lifecycle")
+        current = _lifecycle_state(path, strict=True)
+        if current not in ((before, before_meta), (after, before_meta), (after, after_meta)):
+            raise RuntimeError("The current lessons or their evidence changed")
+        if not all(_shared_line_current(key, line, before_meta) for key, line in lineage):
+            raise RuntimeError("Current lesson source permission is unavailable")
+        if staged is not None:
+            staged()
+
+    current_write()
+    return current_write
+
+
+def _lifecycle_readback(path, after, after_meta):
+    if _lifecycle_state(path, strict=True) != (after, after_meta):
+        raise RuntimeError("The lesson change could not be confirmed; some work may remain")
+
+
+def _lifecycle_audit(model_id, scope, line, phase, **values):
+    from .audit import EventKind, record
+
+    if record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=model_id,
+              scope=scope, rung="prompt", line=line, phase=phase, **values) is not True:
+        raise RuntimeError("The lesson change could not be recorded; some work may remain")
+
+
+def _forget_keys(before, model_id, *, scope, domain):
+    if scope is not None:
+        key = _scoped_key(str(model_id), scope)
+        return [key] if key in before else []
+    if domain:
+        key = _scoped_key(str(model_id), f"domain={domain}")
+        return [key] if key in before else []
+    return _model_store_keys(before, model_id)
+
+
+def _forget_plan(before, keys, line):
+    after, touched = dict(before), []
+    for key in keys:
+        existing = _bullets(before[key])
+        kept = [entry for entry in existing if entry != line] if line is not None else []
+        if line is not None and kept == existing:
+            continue
+        touched.append(key)
+        if kept:
+            after[key] = _ADDENDUM_HEADER + "\n" + "\n".join(f"- {entry}" for entry in kept)
+        else:
+            after.pop(key, None)
+    return after, touched
+
+
+def _forget_finalize(model_id, line, before, after, touched, *, path, strict, effect_guard):
+    try:
+        gone = {entry for key in touched for entry in _bullets(before[key])
+                if entry not in _bullets(after.get(key, ""))}
+        if gone:
+            options = {"strict": True, "effect_guard": effect_guard} if strict else {}
+            _record_transfer_tried([_line_id(str(model_id), entry) for entry in sorted(gone)],
+                                   path=path, **options)
+    except Exception:
+        if strict:
+            raise
+        log.debug("self_harness: transfer-tried record on forget failed", exc_info=True)
+    try:
+        if strict:
+            _lifecycle_audit(model_id, _split_key(touched[0])[1], line, "forget")
+        else:
+            from .audit import EventKind, record
+            record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=model_id,
+                   rung="prompt", line=line or "*", phase="forget")
+    except Exception:
+        if strict:
+            raise
+
+
 def forget_addendum(model_id: str, *, line: str | None = None,
                     domain: str | None = None, scope: str | None = None,
                     expected_token: str | None = None,
-                    path: Path | None = None) -> bool:
+                    path: Path | None = None, strict: bool = False,
+                    before_write=None, write_guard_factory=None) -> bool:
     """Operator rollback: remove a model's learned addendum, or a single line.
 
     The user-facing undo handle for self-harness learning. By default it spans ALL
@@ -730,92 +864,54 @@ def forget_addendum(model_id: str, *, line: str | None = None,
     rollback leaves a trail. Returns ``True`` if something was removed, ``False``
     if there was nothing matching to remove."""
     p = path if path is not None else _store_path()
-    from .file_lock import cross_process_lock
     if scope is not None and domain is not None:
         raise ValueError("choose one lesson scope")
     if expected_token is not None and (line is None or scope is None
                                        or re.fullmatch(r"[0-9a-f]{64}", expected_token) is None):
         raise ValueError("an exact current lesson is required")
-    removed = False
-    with _lock, cross_process_lock(p), _store_rmw_lock(p):
-        before = load_addenda(p)
-        # Span ALL of the model's scopes (bare + composite "<model>\x00domain=...")
-        # so a full rollback can't ORPHAN a domain-scoped block that recall still
-        # injects, and a single-line forget can target a line in any scope. With an
-        # explicit domain, operate ONLY on that scope's composite key.
-        if scope is not None:
-            sk = _scoped_key(str(model_id), scope)
-            keys = [sk] if sk in before else []
-        elif domain:
-            sk = _scoped_key(str(model_id), f"domain={domain}")
-            keys = [sk] if sk in before else []
-        else:
-            keys = _model_store_keys(before, model_id)
+    if strict and (scope is None or line is None):
+        raise ValueError("Strict lesson removal needs one exact scope and line")
+    with _lifecycle_writer(p, strict=strict):
+        before, before_meta = _lifecycle_state(p, strict=strict)
+        keys = _forget_keys(before, model_id, scope=scope, domain=domain)
         if not keys:
             return False
         if expected_token is not None:
-            current_meta = load_line_meta(p)
             if (line not in _bullets(before[keys[0]])
-                    or not _shared_line_current(keys[0], line, current_meta)
+                    or not _shared_line_current(keys[0], line, before_meta)
                     or not hmac.compare_digest(
-                        _lesson_token(keys[0], line, current_meta), expected_token)):
+                        _lesson_token(keys[0], line, before_meta), expected_token)):
                 raise ValueError("the selected lesson changed; review it again")
-        after = dict(before)
-        touched: list[str] = []
-        for k in keys:
-            if line is None:
-                del after[k]
-                touched.append(k)
-                removed = True
-            else:
-                existing = _bullets(before[k])
-                kept = [ln for ln in existing if ln != line]
-                if len(kept) == len(existing):
-                    continue  # the line isn't in this scope's block
-                removed = True
-                touched.append(k)
-                if kept:
-                    header = _ADDENDUM_HEADER
-                    after[k] = header + "\n" + "\n".join(f"- {ln}" for ln in kept)
-                else:
-                    del after[k]
-        if not removed:
+        after, touched = _forget_plan(before, keys, line)
+        if not touched:
             return False
-        _write_addenda(after, p)
-        try:  # keep the provenance sidecar in step (best-effort)
-            meta = load_line_meta(p)
-            for k in touched:
-                _reconcile_meta(meta, k, _bullets(after.get(k, "")))
-            _write_line_meta(meta, p)
-        except Exception:  # pragma: no cover -- sidecar is best-effort
+        meta = copy.deepcopy(before_meta)
+        for key in touched:
+            _reconcile_meta(meta, key, _bullets(after.get(key, "")))
+        guard = (_lifecycle_guard(p, before, after, before_meta, meta,
+                    lineage=[(key, line) for key in touched], before_write=before_write,
+                    write_guard_factory=write_guard_factory) if strict else before_write)
+        options = {"effect_guard": guard} if guard is not None else {}
+        _write_addenda(after, p, **options)
+        try:
+            _write_line_meta(meta, p, **options)
+        except Exception:
+            if strict:
+                raise
             log.debug("self_harness: line-meta prune failed", exc_info=True)
-    # A governed removal must be durable against auto-transfer: record the
-    # removed lines in the transfer tried-memory so a nightly sweep can't
-    # resurrect a line this model just rolled back (operator forget, canary
-    # demotion, efficacy retirement) from a fleet peer that still carries it.
-    # Outside the store lock -- the recorder takes the same lock.
-    try:
-        gone: set[str] = set()
-        for k in touched:
-            kept_now = set(_bullets(after.get(k, "")))
-            gone |= {ln for ln in _bullets(before[k]) if ln not in kept_now}
-        if gone:
-            _record_transfer_tried(
-                [_line_id(str(model_id), ln) for ln in sorted(gone)], path=p)
-    except Exception:  # pragma: no cover -- the memory is best-effort
-        log.debug("self_harness: transfer-tried record on forget failed",
-                  exc_info=True)
-    try:
-        from .audit import EventKind, record
-        record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=model_id,
-               rung="prompt", line=line or "*", phase="forget")
-    except Exception:  # pragma: no cover -- audit best-effort
-        pass
-    return removed
+        if strict:
+            _lifecycle_readback(p, after, meta)
+            _forget_finalize(model_id, line, before, after, touched, path=p,
+                             strict=True, effect_guard=guard)
+    if not strict:
+        _forget_finalize(model_id, line, before, after, touched, path=p,
+                         strict=False, effect_guard=guard)
+    return True
 
 
 def retire_stale(*, older_than_days: float, model_id: str | None = None,
-                 now: float | None = None, path: Path | None = None) -> int:
+                 now: float | None = None, path: Path | None = None,
+                 strict: bool = False, before_write=None, write_guard_factory=None) -> int:
     """Retire learned lines not refreshed within ``older_than_days``.
 
     Prompt guidance goes stale as models, tools, and APIs change; a loop that
@@ -824,16 +920,18 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
     so a line that keeps proving useful stays. A line with NO record (legacy /
     pre-sidecar) is NEVER retired -- its age is unknown. Removes from both the
     addenda block and the sidecar, audits each removal with phase ``retire``, and
-    returns the count. ``now`` is injectable for testing. Never raises."""
+    returns the count. ``now`` is injectable for testing. Legacy callers remain
+    best-effort; governed cycles use ``strict`` to retain failed/partial outcomes."""
     p = path if path is not None else _store_path()
     cutoff = (now if now is not None else time.time()) - older_than_days * 86400.0
     removed: list[tuple[str, str]] = []
     from .file_lock import cross_process_lock
     try:
-        with _lock, cross_process_lock(p), _store_rmw_lock(p):
+        with _lock, cross_process_lock(p, strict=strict), _store_rmw_lock(p):
             add = load_addenda(p)
             meta = load_line_meta(p)
             after = dict(add)
+            before_meta = {key: dict(row) for key, row in meta.items()}
             for m, block in list(add.items()):
                 # Match the BARE model so a per-model retire also covers that
                 # model's domain-scoped blocks (composite keys); ``m`` stays the
@@ -860,12 +958,28 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
                     after.pop(m, None)
                 _reconcile_meta(meta, m, kept)
             if removed:
-                _write_addenda(after, p)
+                if before_write is not None:
+                    before_write()
+                staged_guard = (write_guard_factory(after, before_meta, meta)
+                                if write_guard_factory is not None else before_write)
+
+                def current_write():
+                    check_learning_halt("self_harness", "retirement")
+                    if staged_guard is not None:
+                        staged_guard()
+
+                current_write()
+                _write_addenda(after, p, effect_guard=current_write)
                 try:
-                    _write_line_meta(meta, p)
-                except Exception:  # pragma: no cover -- sidecar best-effort
-                    pass
-    except Exception:  # pragma: no cover -- retirement never perturbs a run
+                    _write_line_meta(meta, p, effect_guard=current_write)
+                except Exception:  # pragma: no cover -- legacy sidecar best-effort
+                    if strict:
+                        raise
+    except Halted:
+        raise
+    except Exception:  # pragma: no cover -- legacy retirement remains best-effort
+        if strict:
+            raise
         log.warning("self_harness: retire_stale failed", exc_info=True)
         return 0
     for m, ln in removed:
@@ -873,10 +987,13 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
             from .audit import EventKind, record
             # Audit with the BARE model id (+ scope), never the raw NUL key.
             mid, ctx = _split_key(m)
-            record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=mid,
+            recorded = record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=mid,
                    scope=(ctx or None), rung="prompt", line=ln, phase="retire")
-        except Exception:  # pragma: no cover -- audit best-effort
-            pass
+            if strict and recorded is not True:
+                raise RuntimeError("The retired lesson could not be recorded; the change may remain")
+        except Exception:  # pragma: no cover -- legacy audit best-effort
+            if strict:
+                raise
     return len(removed)
 
 
@@ -2512,30 +2629,50 @@ def review_efficacy(model_id: str, cases: list[str], *,
 # probation. A slow-rollout valve on top of the gate; failures win ties (safe).
 
 def mark_canary(model_id: str, line: str, *, canary: bool = True,
-                path: Path | None = None) -> bool:
+                scope: str | None = None, path: Path | None = None,
+                strict: bool = False, before_write=None, write_guard_factory=None,
+                expected_token: str | None = None, audit_phase: str = "canary",
+                audit_values: Mapping | None = None) -> bool:
     """Mark/unmark a learned line as a canary. Returns True if the flag changed
     (False if the line has no sidecar record or already had this state). Atomic;
-    never raises."""
+    legacy calls never raise. Scope defaults to all matching scopes; an explicit
+    empty scope selects only model-wide guidance. Strict calls retain failures."""
     if not model_id or line is None:
         return False
+    if strict and scope is None:
+        raise ValueError("Strict trial changes need one exact lesson scope")
     try:
         p = path if path is not None else _store_path()
-        from .file_lock import cross_process_lock
-        with _lock, cross_process_lock(p), _store_rmw_lock(p):
-            store = load_addenda(p)
-            meta = load_line_meta(p)
+        with _lifecycle_writer(p, strict=strict):
+            store, before_meta = _lifecycle_state(p, strict=strict)
+            meta = copy.deepcopy(before_meta)
             changed = False
+            lineage = []
             for k, ln in _iter_model_lines(store, str(model_id)):
-                if ln != line:
+                if ln != line or (scope is not None and _split_key(k)[1] != scope):
                     continue
                 rec = meta.get(_line_id(k, ln))
+                if expected_token is not None and not hmac.compare_digest(
+                        _lesson_token(k, ln, before_meta), expected_token):
+                    raise ValueError("The selected lesson changed; review it again")
                 if rec is not None and bool(rec.get("canary")) != bool(canary):
                     rec["canary"] = bool(canary)
+                    lineage.append((k, ln))
                     changed = True
             if changed:
-                _write_line_meta(meta, p)
+                guard = (_lifecycle_guard(p, store, store, before_meta, meta,
+                            lineage=lineage, before_write=before_write,
+                            write_guard_factory=write_guard_factory) if strict else before_write)
+                options = {"effect_guard": guard} if guard is not None else {}
+                _write_line_meta(meta, p, **options)
+                if strict:
+                    _lifecycle_readback(p, store, meta)
+                    _lifecycle_audit(model_id, scope, line, audit_phase,
+                                     canary=bool(canary), **dict(audit_values or {}))
             return changed
     except Exception:  # pragma: no cover -- canary state never perturbs a run
+        if strict:
+            raise
         log.debug("self_harness: mark_canary failed", exc_info=True)
         return False
 
@@ -2551,7 +2688,9 @@ def list_canaries(model_id: str, path: Path | None = None) -> list[str]:
 
 
 def review_canaries(model_id: str, *, graduate_after: int = 3,
-                    demote_after: int = 2, path: Path | None = None) -> dict:
+                    demote_after: int = 2, path: Path | None = None,
+                    strict: bool = False, before_write=None, write_guard_factory=None,
+                    after_write=None) -> dict:
     """Advance the canary lifecycle from the recall->outcome counters:
     DEMOTE (audited forget) a canary with ``>= demote_after`` failures; else
     GRADUATE (clear the flag -> permanent) one with ``>= graduate_after``
@@ -2561,31 +2700,45 @@ def review_canaries(model_id: str, *, graduate_after: int = 3,
     not shielded by its lifetime successes); a legacy record with no window keeps
     the lifetime-counter behavior. Spans every scope, so domain-scoped
     canaries are reviewed too. Returns ``{"graduated": [...], "demoted": [...]}``.
-    Never raises."""
+    Legacy calls never raise; strict callers receive incomplete-write failures."""
     graduated: list[str] = []
     demoted: list[str] = []
     try:
-        store = shared_addenda(path)
-        meta = load_line_meta(path)
-        # Snapshot pairs first -- forget/mark mutate the store/meta mid-loop.
-        for k, ln in list(_iter_model_lines(store, str(model_id))):
-            rec = meta.get(_line_id(k, ln)) or {}
-            if not rec.get("canary"):
-                continue
-            s, f = _recent_counts(rec)
-            if f >= demote_after:
-                if forget_addendum(model_id, line=ln, path=path):
-                    demoted.append(ln)
-            elif s >= graduate_after:
-                if mark_canary(model_id, ln, canary=False, path=path):
-                    graduated.append(ln)
+        p = path if path is not None else _store_path()
+        with _lifecycle_writer(p, strict=True) if strict else nullcontext():
+            store, meta = _lifecycle_state(p, strict=True) if strict else (shared_addenda(p), load_line_meta(p))
+            for k, ln in list(_iter_model_lines(store, str(model_id))):
+                rec = meta.get(_line_id(k, ln)) or {}
+                if not rec.get("canary") or not _shared_line_current(k, ln, meta):
+                    continue
+                s, f = _recent_counts(rec)
+                scope = _split_key(k)[1]
+                options = {"strict": strict, "before_write": before_write,
+                           "write_guard_factory": write_guard_factory} if strict else {}
+                if strict:
+                    options["expected_token"] = _lesson_token(k, ln, meta)
+                changed = False
+                if f >= demote_after:
+                    changed = forget_addendum(model_id, line=ln, scope=scope, path=p, **options)
+                    if changed:
+                        demoted.append(ln)
+                elif s >= graduate_after:
+                    changed = mark_canary(model_id, ln, canary=False, scope=scope, path=p, **options)
+                    if changed:
+                        graduated.append(ln)
+                if changed and after_write is not None:
+                    after_write()
     except Exception:  # pragma: no cover -- review never perturbs a run
+        if strict:
+            raise
         log.debug("self_harness: review_canaries failed", exc_info=True)
     return {"graduated": graduated, "demoted": demoted}
 
 
 def review_relapses(model_id: str, *, failure_share: float,
-                    min_outcomes: int = 5, path: Path | None = None) -> list[str]:
+                    min_outcomes: int = 5, path: Path | None = None,
+                    strict: bool = False, before_write=None, write_guard_factory=None,
+                    after_write=None) -> list[str]:
     """Put a GRADUATED (non-canary) line whose recent outcomes have gone bad
     BACK on canary probation -- the recency guard the lifetime counters lack: a
     line with a few ancient successes is otherwise immune to the counter-driven
@@ -2598,36 +2751,51 @@ def review_relapses(model_id: str, *, failure_share: float,
     window) graduates it back or pulls it via the audited ``forget`` path as
     fresh evidence arrives. Lines already on probation and legacy records with
     no window are skipped. Each re-probation is audited (phase ``relapse``).
-    Returns the re-probated lines. Never raises."""
+    Returns the re-probated lines. Legacy calls never raise; strict calls retain failures."""
     relapsed: list[str] = []
     try:
         if not failure_share or failure_share <= 0:
             return relapsed
-        store = shared_addenda(path)
-        meta = load_line_meta(path)
-        for k, ln in list(_iter_model_lines(store, str(model_id))):
-            rec = meta.get(_line_id(k, ln)) or {}
-            if rec.get("canary"):
-                continue  # already on probation, already watched
-            if not _is_relapsing(rec, failure_share=failure_share,
-                                 min_outcomes=min_outcomes):
-                continue
-            window = rec.get("recent_outcomes") or []
-            fails = sum(1 for o in window if not o)
-            if mark_canary(model_id, ln, canary=True, path=path):
-                relapsed.append(ln)
-                try:
-                    from .audit import EventKind, record
-                    mid, ctx = _split_key(k)
-                    record(EventKind.LEARNING_UPDATE, agent="self_harness",
-                           model_id=mid, scope=(ctx or None), rung="prompt",
-                           line=ln, phase="relapse",
-                           recent_failures=fails, recent_total=len(window))
-                except Exception:  # pragma: no cover -- audit best-effort
-                    pass
+        p = path if path is not None else _store_path()
+        with _lifecycle_writer(p, strict=True) if strict else nullcontext():
+            store, meta = _lifecycle_state(p, strict=True) if strict else (shared_addenda(p), load_line_meta(p))
+            for k, ln in list(_iter_model_lines(store, str(model_id))):
+                rec = meta.get(_line_id(k, ln)) or {}
+                if rec.get("canary") or not _shared_line_current(k, ln, meta):
+                    continue
+                if not _is_relapsing(rec, failure_share=failure_share, min_outcomes=min_outcomes):
+                    continue
+                options = {"strict": strict, "before_write": before_write,
+                           "write_guard_factory": write_guard_factory,
+                           "expected_token": _lesson_token(k, ln, meta)} if strict else {}
+                if strict:
+                    window = rec.get("recent_outcomes") or []
+                    options.update(audit_phase="relapse", audit_values={
+                        "recent_failures": sum(1 for outcome in window if not outcome),
+                        "recent_total": len(window)})
+                if mark_canary(model_id, ln, canary=True, scope=_split_key(k)[1], path=p, **options):
+                    if not strict:
+                        _relapse_audit(k, ln, rec)
+                    relapsed.append(ln)
+                    if after_write is not None:
+                        after_write()
     except Exception:  # pragma: no cover -- review never perturbs a run
+        if strict:
+            raise
         log.debug("self_harness: review_relapses failed", exc_info=True)
     return relapsed
+
+
+def _relapse_audit(key, line, rec):
+    try:
+        from .audit import EventKind, record
+        mid, scope = _split_key(key)
+        window = rec.get("recent_outcomes") or []
+        record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=mid,
+               scope=(scope or None), rung="prompt", line=line, phase="relapse",
+               recent_failures=sum(1 for outcome in window if not outcome), recent_total=len(window))
+    except Exception:
+        pass
 
 
 # ---- CROSS-MODEL TRANSFER --------------------------------------------------
@@ -2648,37 +2816,52 @@ def _transfer_tried_path(addenda_path: Path | None = None) -> Path:
     return p.with_suffix(".transfer.json")
 
 
-def _load_transfer_tried(path: Path | None = None) -> dict[str, float]:
+def _load_transfer_tried(path: Path | None = None, *, strict: bool = False) -> dict[str, float]:
     """The ``{line_id: ts}`` transfer attempt memory for the store at ``path``
     (empty on any error). Keys are :func:`_line_id` of (target, line) -- the
     same content-addressed identity the provenance sidecar uses."""
     if _world_routed(path if path is not None else _store_path()):
         from . import learning_store
-        return learning_store.load_transfer_tried_db()
-    p = _transfer_tried_path(path)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return {str(k): v for k, v in data.items() if isinstance(v, (int, float))}
-    except (FileNotFoundError, ValueError, OSError):
-        pass
-    return {}
+        data = (learning_store.load_transfer_tried_db(strict=True) if strict
+                else learning_store.load_transfer_tried_db())
+    else:
+        p = _transfer_tried_path(path)
+        if strict and p.is_symlink():
+            raise ValueError("Lesson transfer memory must not be a symbolic link")
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (ValueError, OSError):
+            if strict:
+                raise
+            return {}
+    if strict:
+        if not isinstance(data, dict) or any(
+                not isinstance(key, str) or type(stamp) not in (int, float)
+                or not math.isfinite(stamp) for key, stamp in data.items()):
+            raise ValueError("Current lesson transfer memory is malformed")
+        return dict(data)
+    return {str(k): v for k, v in data.items() if isinstance(v, (int, float))} if isinstance(data, dict) else {}
 
 
-def _record_transfer_tried(keys: list[str], *, path: Path | None = None) -> None:
+def _record_transfer_tried(keys: list[str], *, path: Path | None = None,
+                           strict: bool = False, effect_guard=None) -> None:
     from .file_lock import atomic_write_text, cross_process_lock
     ap = path if path is not None else _store_path()
     p = _transfer_tried_path(path)
     ts = time.time()
-    with _lock, cross_process_lock(p), _store_rmw_lock(ap):
-        tried = _load_transfer_tried(path)
+    with _lock, cross_process_lock(p, strict=strict), _store_rmw_lock(ap):
+        tried = _load_transfer_tried(path, strict=True) if strict else _load_transfer_tried(path)
         for k in keys:
             tried[k] = ts
         if _world_routed(ap):
             from . import learning_store
-            learning_store.write_transfer_tried_db(tried)
+            options = {"effect_guard": effect_guard} if effect_guard is not None else {}
+            learning_store.write_transfer_tried_db(tried, **options)
             return
-        atomic_write_text(p, json.dumps(tried, indent=2, sort_keys=True), mode=0o600)
+        options = {"effect_guard": effect_guard} if effect_guard is not None else {}
+        atomic_write_text(p, json.dumps(tried, indent=2, sort_keys=True), mode=0o600, **options)
 
 
 def transfer_memory_stats(path: Path | None = None) -> dict:
@@ -2858,6 +3041,7 @@ class SelfHarnessReport:
     # judge is unreliable) and/or the promotion gate is disabled. Both are
     # best-effort reads; neither changes the pass's behavior (the gate still
     # enforces them), they only EXPLAIN it.
+    qualification_held: bool = False
     frozen: bool = False
     gate_enabled: bool = True
     # Outcome-driven lifecycle results, populated by the driver cycle from the

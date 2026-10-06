@@ -10,6 +10,7 @@ import hashlib
 import json
 import time
 import uuid
+from contextlib import nullcontext
 from typing import Any
 
 from maverick.file_lock import (
@@ -21,7 +22,9 @@ from maverick.file_lock import (
 from maverick.paths import data_dir
 
 MAX_CASES_PER_SPECIALIST = 20
+# A Copilot-reviewed run picks at most this many; a person can run the whole set.
 MAX_CASES_PER_RUN = 5
+MAX_CASES_PER_FULL_RUN = MAX_CASES_PER_SPECIALIST
 _MAX_ALL_CASES = 1000
 _MAX_RUNS = 500
 
@@ -41,14 +44,18 @@ def _read(path) -> dict:
     return value
 
 
-def _with_store(fn):
+def _with_store(fn, *, effect_guard=None):
+    from maverick.authority_effects import authority_effect_fence
+
     path = _path()
     ensure_private_directory(path.parent)
-    with cross_process_lock(path.with_suffix(".lock"), strict=True):
+    with (authority_effect_fence() if effect_guard is not None else nullcontext()), cross_process_lock(path.with_suffix(".lock"), strict=True):
         value = _read(path)
+        if effect_guard is not None:
+            effect_guard()
         result, changed = fn(value)
         if changed:
-            atomic_write_text(path, json.dumps(value, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+            atomic_write_text(path, json.dumps(value, ensure_ascii=False, allow_nan=False), encoding="utf-8", effect_guard=effect_guard)
         return result
 
 
@@ -130,19 +137,21 @@ def snapshot(specialist: str, selected_ids: list[str] | None = None) -> list[dic
     if not rows:
         raise ValueError("Add at least one test before running the checks.")
     if selected_ids:
-        if len(selected_ids) > MAX_CASES_PER_RUN or len(set(selected_ids)) != len(selected_ids):
-            raise ValueError(f"Choose between 1 and {MAX_CASES_PER_RUN} different checks.")
+        if len(selected_ids) > MAX_CASES_PER_FULL_RUN or len(set(selected_ids)) != len(selected_ids):
+            raise ValueError(f"Choose between 1 and {MAX_CASES_PER_FULL_RUN} different checks.")
         selected = set(selected_ids)
         rows = [row for row in rows if row["id"] in selected]
         if len(rows) != len(selected):
             raise ValueError("One selected check changed or was removed. Refresh the list.")
-    elif len(rows) > MAX_CASES_PER_RUN:
-        raise ValueError(f"Choose at most {MAX_CASES_PER_RUN} checks for one run.")
+    elif len(rows) > MAX_CASES_PER_FULL_RUN:
+        raise ValueError(f"Choose at most {MAX_CASES_PER_FULL_RUN} checks for one run.")
     return rows
 
 
 def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[dict],
-                actor: str, identity: str, *, comparison: dict | None = None) -> dict:
+                actor: str, identity: str, *, comparison: dict | None = None,
+                instructions_key: str | None = None, instructions: str | None = None,
+                single_variant: bool = False, effect_guard=None) -> dict:
     """Persist a reviewed operation before starting a background worker."""
     def mutate(db):
         prior = db["runs"].get(identity)
@@ -157,9 +166,10 @@ def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[
         if len(db["runs"]) >= _MAX_RUNS:
             finished = sorted((r for r in db["runs"].values()
                                if r["state"] not in {"running", "prepared"}
+                               and not r.get("comparison", {}).get("draft_profile")
                                and time.time() - r["started_at"] > 600),
                               key=lambda r: r["started_at"])
-            if not finished:
+            if effect_guard is not None or not finished:
                 raise ValueError("Test history is full. No new test was started.")
             del db["runs"][finished[0]["id"]]
         row = {"id": identity, "specialist": specialist, "model": model,
@@ -167,15 +177,19 @@ def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[
                "finished_at": None, "state": "prepared", "results": [], "total": len(cases),
                "passed": 0, "spent_dollars": 0.0, "case_revisions": revisions,
                "case_snapshots": [dict(c) for c in cases]}
+        if instructions_key:
+            # The exact words tested, so each answer can point back to them.
+            row.update(instructions_key=instructions_key, instructions=(instructions or "")[:6000])
         if comparison:
-            row.update(comparison=dict(comparison), total=len(cases) * 2)
+            row.update(comparison=dict(comparison), total=len(cases) if single_variant else len(cases) * 2)
         db["runs"][identity] = row
         return dict(row), True
-    return _with_store(mutate)
+    return _with_store(mutate, effect_guard=effect_guard)
 
 
 def begin_run(specialist: str, model: str, instruction_hash: str, cases: list[dict], actor: str,
-              identity: str | None = None) -> tuple[dict, bool]:
+              identity: str | None = None, *, instructions_key: str | None = None,
+              instructions: str | None = None, effect_guard=None) -> tuple[dict, bool]:
     def mutate(db):
         if identity and identity in db["runs"]:
             prior = db["runs"][identity]
@@ -188,7 +202,8 @@ def begin_run(specialist: str, model: str, instruction_hash: str, cases: list[di
         if len(db["runs"]) >= _MAX_RUNS:
             # Retain the newest history, including every unfinished operation.
             finished = sorted((r for r in db["runs"].values()
-                               if r["state"] != "running" and time.time() - r["started_at"] > 600),
+                               if r["state"] != "running" and not r.get("comparison", {}).get("draft_profile")
+                               and time.time() - r["started_at"] > 600),
                               key=lambda r: r["started_at"])
             if not finished:
                 raise ValueError("Test history is full. No new test was started.")
@@ -199,16 +214,19 @@ def begin_run(specialist: str, model: str, instruction_hash: str, cases: list[di
                "total": len(cases), "passed": 0, "spent_dollars": 0.0,
                "case_revisions": [{"id": c["id"], "revision": c["revision"]} for c in cases],
                "case_snapshots": [dict(c) for c in cases]}
+        if instructions_key:
+            # The exact words tested, so each answer can point back to them.
+            row.update(instructions_key=instructions_key, instructions=(instructions or "")[:6000])
         db["runs"][row["id"]] = row
         return (dict(row), True), True
-    return _with_store(mutate)
+    return _with_store(mutate, effect_guard=effect_guard)
 
 
 def run_by_id(identity: str) -> dict | None:
     return _with_store(lambda db: (dict(db["runs"][identity]) if identity in db["runs"] else None, False))
 
 
-def append_result(run_id: str, result: dict, spent_dollars: float) -> None:
+def append_result(run_id: str, result: dict, spent_dollars: float, *, effect_guard=None) -> None:
     def mutate(db):
         row = db["runs"].get(run_id)
         if row is None or row["state"] != "running":
@@ -219,10 +237,10 @@ def append_result(run_id: str, result: dict, spent_dollars: float) -> None:
         row["passed"] = sum(bool(r.get("passed")) for r in row["results"])
         row["spent_dollars"] = round(max(0.0, spent_dollars), 6)
         return None, True
-    _with_store(mutate)
+    _with_store(mutate, effect_guard=effect_guard)
 
 
-def finish_run(run_id: str, state: str, spent_dollars: float, message: str = "") -> dict:
+def finish_run(run_id: str, state: str, spent_dollars: float, message: str = "", *, effect_guard=None) -> dict:
     if state not in {"done", "stopped", "unknown"}:
         raise ValueError("Invalid test result")
     def mutate(db):
@@ -234,7 +252,7 @@ def finish_run(run_id: str, state: str, spent_dollars: float, message: str = "")
         row.update(state=state, finished_at=time.time(), message=message[:240],
                    spent_dollars=round(max(0.0, spent_dollars), 6))
         return dict(row), True
-    return _with_store(mutate)
+    return _with_store(mutate, effect_guard=effect_guard)
 
 
 def runs_for(specialist: str) -> list[dict]:
@@ -244,13 +262,22 @@ def runs_for(specialist: str) -> list[dict]:
     return [public_run(row) for row in rows]
 
 
+def _stale_after(row: dict) -> float:
+    """A whole set takes longer than a few checks; allow 30 s per answer."""
+    return max(180.0, 30.0 * float(row.get("total") or 0))
+
+
 def public_run(row: dict) -> dict:
     result = dict(row)
-    if result["state"] == "running" and time.time() - result["started_at"] > 180:
+    if result["state"] == "running" and time.time() - result["started_at"] > _stale_after(result):
         result["state"] = "unknown"
         result["message"] = "No final result arrived. A provider call may still have been billed. Nothing was retried."
     if result["state"] == "prepared" and time.time() - result["started_at"] > 180:
-        result["message"] = "This request was prepared, but no provider call started. Use its original request reference to start it."
+        if result.get("comparison", {}).get("draft_profile"):
+            result["state"] = "unknown"
+            result["message"] = "No confirmed worker outcome arrived. Read the original decision; this answer request will not be repeated automatically."
+        else:
+            result["message"] = "This request was prepared, but no provider call started. Use its original request reference to start it."
     return result
 
 
@@ -274,8 +301,10 @@ def answer_system(profile) -> str:
               "taken an action or checked a source you cannot access.")
 
 
-def grade(case: dict, output: str) -> dict[str, Any]:
+def grade(case: dict, output: str, *, retain_full: bool = False) -> dict[str, Any]:
     from maverick.domain_eval import EvalCase, score_output
+    if retain_full and len(output.encode("utf-8")) > 64000:
+        raise ValueError("The complete answer exceeds the supported result limit. Nothing was shortened or counted as passing.")
     if not output or not output.strip():
         return {"case_id": case["id"], "task": case["task"], "passed": False,
                 "score": 0.0, "checks": {"empty_answer": 0.0}, "answer": ""}
@@ -285,4 +314,4 @@ def grade(case: dict, output: str) -> dict[str, Any]:
                       expect_refusal=case["refusal"], expect_citation=case["citation"])
     result = score_output(rubric, output, pass_threshold=1.0)
     return {"case_id": case["id"], "task": case["task"], "passed": result.passed,
-            "score": result.score, "checks": result.checks, "answer": output[:2000]}
+            "score": result.score, "checks": result.checks, "answer": output if retain_full else output[:2000]}

@@ -18,19 +18,24 @@ clear hint if it's absent. Endpoints (mounted under the dashboard app):
   GET  /saml/login     -> redirect to the IdP SSO (AuthnRequest)
   POST /saml/acs       -> consume + verify the SAMLResponse, set session, redirect
 
-NOTE: untested against a live IdP in this build -- the pysaml2 calls
-(``_client``/metadata/redirect/parse) are isolated so the surrounding routing,
-attribute mapping and session minting are unit-tested with the client mocked;
-certify a real Okta/Entra round-trip before relying on it.
+The installed XMLSecurity backend verifies signed, unencrypted assertions.
+Encrypted assertions require the xmlsec1 backend. Provider-specific deployment
+still requires a real sign-in check before activation.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import secrets
+import shutil
+import tempfile
 import time
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -62,6 +67,7 @@ class SamlConfig:
     want_assertions_signed: bool = True
     name_attr: str = ""  # attribute to prefer for display, optional
     default_relay_state: str = "/"
+    enabled: bool = True  # absence preserves legacy complete-configuration activation
 
 
 def _content_length(headers: Mapping[str, str]) -> int | None:
@@ -123,6 +129,7 @@ def load_saml_config() -> SamlConfig:
         want_assertions_signed=bool(c.get("want_assertions_signed", True)),
         name_attr=str(c.get("name_attr") or "").strip(),
         default_relay_state=str(c.get("default_relay_state") or "/").strip() or "/",
+        enabled=c.get("enabled", True) is not False,
     )
 
 
@@ -131,7 +138,7 @@ def saml_enabled(cfg: SamlConfig | None = None) -> bool:
     missing the surface 404s (inert)."""
     cfg = cfg or load_saml_config()
     return bool(
-        cfg.sp_entity_id and cfg.acs_url and (cfg.idp_metadata_url or cfg.idp_metadata_file)
+        cfg.enabled and cfg.sp_entity_id and cfg.acs_url and (cfg.idp_metadata_url or cfg.idp_metadata_file)
     )
 
 
@@ -146,7 +153,55 @@ def _session_secret() -> str:
         return ""
 
 
-# --- pysaml2 isolation (untestable here; mocked in tests) -------------------
+# --- Native PySAML2 verification and installed backend selection -----------
+
+
+def runtime_readiness() -> dict:
+    """Installed native backends; no downloads or provider contact."""
+    try:
+        import saml2
+        _ = saml2.BINDING_HTTP_POST
+        if shutil.which("xmlsec1") or shutil.which("xmlsec"):
+            return {"ready": True, "backend": "xmlsec1", "encrypted_assertions": True,
+                    "message": "Single sign-on signature and encrypted-response support are installed."}
+        import xmlsec
+        if not callable(getattr(xmlsec, "verify", None)) or not callable(getattr(xmlsec, "sign", None)):
+            raise ImportError
+        return {"ready": True, "backend": "XMLSecurity", "encrypted_assertions": False,
+                "message": "Signed single sign-on responses are supported. Encrypted responses require the installation's additional XML security component."}
+    except ImportError:
+        return {"ready": False, "backend": "", "encrypted_assertions": False,
+                "message": "Single sign-on support is not installed. Use the full Lightwork installer with Single sign-on selected before enabling this provider."}
+
+
+@contextmanager
+def client_scope(cfg=None):
+    """Keep protected uploaded files alive for exactly the native operation."""
+    from .company_saml_materials import materialized
+    with materialized(cfg or load_saml_config()) as current:
+        client = _client(current)
+        if os.name != "nt" or client.config.crypto_backend != "XMLSecurity":
+            yield client
+            return
+        # PySAML2's open delete-on-close certificate files cannot be reopened on
+        # Windows. Keep the exact native-selected trusted certificates in closed,
+        # private files while its unchanged signature verifier uses them.
+        from maverick import file_lock
+        from saml2.sigver import pem_format
+        with tempfile.TemporaryDirectory(prefix="lightwork-saml-certs-") as folder:
+            file_lock.prepare_private_directory(folder)
+            selected = client.metadata.certs
+            def certificates(*args, **kwargs):
+                result = []
+                for name, cert in selected(*args, **kwargs):
+                    if isinstance(cert, str):
+                        path = Path(folder) / (secrets.token_hex(16) + ".pem")
+                        file_lock.atomic_write_bytes(path, pem_format(cert), mode=0o600)
+                        cert = SimpleNamespace(name=str(path))
+                    result.append((name, cert))
+                return result
+            client.metadata.certs = certificates
+            yield client
 
 
 def _pysaml2_config(cfg: SamlConfig) -> dict:
@@ -176,6 +231,12 @@ def _pysaml2_config(cfg: SamlConfig) -> dict:
         "metadata": metadata,
         "allow_unknown_attributes": True,
     }
+    ready = runtime_readiness()
+    if not ready["ready"]:
+        raise SamlUnavailable(ready["message"])
+    conf["crypto_backend"] = ready["backend"]
+    if ready["backend"] == "xmlsec1":
+        conf["xmlsec_binary"] = shutil.which("xmlsec1") or shutil.which("xmlsec")
     if cfg.sp_cert_file and cfg.sp_key_file:
         conf["cert_file"] = cfg.sp_cert_file
         conf["key_file"] = cfg.sp_key_file
@@ -190,16 +251,24 @@ def _client(cfg: SamlConfig | None = None):  # pragma: no cover -- needs pysaml2
         from saml2.client import Saml2Client  # type: ignore
         from saml2.config import Config  # type: ignore
     except ImportError as e:
-        raise SamlUnavailable("SAML SSO needs pysaml2 (python -m pip install -e './packages/maverick-core[saml]')") from e
+        raise SamlUnavailable(runtime_readiness()["message"]) from e
     conf = Config()
     conf.load(_pysaml2_config(cfg))
-    return Saml2Client(config=conf)
+    client = Saml2Client(config=conf)
+    if conf.crypto_backend == "XMLSecurity" and cfg.sp_key_file:
+        # Redirect requests use PySAML2's own RSA signer, which its alternative
+        # XML backend otherwise leaves unset. XML assertion checks stay native.
+        from saml2.sigver import RSACrypto, import_rsa_key_from_file
+        client.sec.sec_backend = RSACrypto(import_rsa_key_from_file(cfg.sp_key_file))
+    return client
 
 
 def sp_metadata_xml(client=None, cfg: SamlConfig | None = None) -> str:  # pragma: no cover
     from saml2.metadata import create_metadata_string  # type: ignore
 
-    client = client or _client(cfg)
+    if client is None:
+        with client_scope(cfg) as scoped:
+            return sp_metadata_xml(scoped, cfg)
     return create_metadata_string(None, config=client.config).decode("utf-8")
 
 
@@ -211,10 +280,12 @@ def prepare_login_redirect(
         from saml2 import BINDING_HTTP_REDIRECT  # type: ignore
     except ImportError as e:
         raise SamlUnavailable(
-            "SAML SSO needs pysaml2 (python -m pip install -e './packages/maverick-core[saml]')"
+            "Single sign-on support is unavailable. Update Lightwork using the full installer with single sign-on support."
         ) from e
 
-    client = client or _client(cfg)
+    if client is None:
+        with client_scope(cfg) as scoped:
+            return prepare_login_redirect(scoped, cfg, relay_state=relay_state)
     extra: dict = {}
     requested = _requested_authn_context()
     if requested is not None:
@@ -256,7 +327,7 @@ def login_redirect_url(
 
 
 def verify_acs_response(
-    saml_response: str, *, request_id: str
+    saml_response: str, *, request_id: str, cfg: SamlConfig | None = None
 ) -> SamlIdentity:  # pragma: no cover
     """Verify a posted SAMLResponse (pysaml2 checks the XML signature) and return
     the identity.  ``request_id`` is required so pysaml2 also verifies the
@@ -267,19 +338,52 @@ def verify_acs_response(
         from saml2 import BINDING_HTTP_POST  # type: ignore
     except ImportError as e:
         raise SamlUnavailable(
-            "SAML SSO needs pysaml2 (python -m pip install -e './packages/maverick-core[saml]')"
+            "Single sign-on support is unavailable. Update Lightwork using the full installer with single sign-on support."
         ) from e
 
-    client = _client()
-    authn = client.parse_authn_request_response(
-        saml_response,
-        BINDING_HTTP_POST,
-        outstanding={request_id: ""},
-    )
+    cfg = cfg or load_saml_config()
+    with client_scope(cfg) as client:
+        authn = client.parse_authn_request_response(
+            saml_response,
+            BINDING_HTTP_POST,
+            outstanding={request_id: ""},
+        )
+    if cfg.idp_metadata_file.startswith("managed-saml:"):
+        _require_managed_signature_strength(authn)
     in_response_to = str(getattr(authn, "in_response_to", "") or "")
     if not in_response_to or not secrets.compare_digest(in_response_to, request_id):
         raise ValueError("SAML response did not match the login request")
     return extract_identity(authn)
+
+
+def _require_managed_signature_strength(authn):
+    """Inspect native verified structures; PySAML2 still owns XML and crypto."""
+    signatures = {
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384",
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512",
+    }
+    digests = {"http://www.w3.org/2001/04/xmlenc#sha256",
+               "http://www.w3.org/2001/04/xmldsig-more#sha384",
+               "http://www.w3.org/2001/04/xmlenc#sha512"}
+    assertions = getattr(authn, "assertion", None)
+    if not isinstance(assertions, (list, tuple)):
+        assertions = [assertions] if assertions is not None else []
+    if not assertions:
+        raise ValueError("The verified response contains no signed assertion.")
+    items = list(assertions)
+    response = getattr(authn, "response", None)
+    if getattr(response, "signature", None) is not None:
+        items.append(response)
+    for item in items:
+        signature = getattr(item, "signature", None)
+        info = getattr(signature, "signed_info", None)
+        method = getattr(info, "signature_method", None)
+        references = getattr(info, "reference", None)
+        if (getattr(method, "algorithm", None) not in signatures or not references
+                or any(getattr(getattr(reference, "digest_method", None), "algorithm", None)
+                       not in digests for reference in references)):
+            raise ValueError("This uploaded provider must use RSA SHA-256 or stronger signatures and SHA-256 or stronger digests.")
 
 
 # --- mapping + session (testable) -------------------------------------------
@@ -560,6 +664,9 @@ async def saml_login(request: Request):
 
 @router.post("/saml/acs")
 async def saml_acs(request: Request):
+    from . import company_saml_setup
+    if request.cookies.get(company_saml_setup.COOKIE):
+        return await company_saml_setup.finish(request)
     if (off := _disabled()) is not None:
         return off
     cfg = load_saml_config()

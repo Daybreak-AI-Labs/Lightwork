@@ -60,5 +60,42 @@
       </tbody>
     </table>
   </div>
+  <div class="section-head"><h2 id="first-session-results">First result in the first session</h2></div>
+  <div class="panel">
+    <p class="muted">For each new person: whether they saw a finished result of their own task within {{ first_session_hours }} hours of first signing in, by access role. Counted only while usage measures are on; names are never kept.</p>
+    {% if not measures_on %}<p role="status"><strong>Usage measures are turned off.</strong> Nothing is counted. {% if can_open_page('/settings/all') %}<a href="/settings/all?q=usage_measures">Turn on usage measures</a>{% endif %}</p>{% endif %}
+    {% if first_session %}
+    <table>
+      <thead><tr><th scope="col">Access role</th><th scope="col">New people</th><th scope="col">First result in first session</th><th scope="col">Share</th><th scope="col">Median time</th></tr></thead>
+      <tbody>
+      {% for row in first_session %}
+        <tr><th scope="row">{{ row.role | role_label if row.role != 'unknown' else 'Not known' }}</th><td>{{ row.people }}</td><td>{{ row.first_session }}</td>
+          <td>{{ row.share | percent }}</td><td>{{ (row.median_minutes ~ ' minutes') if row.median_minutes is not none else 'None yet' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      {{ empty_state('Nobody new has been counted yet', 'When usage measures are on, each person is counted the first time they sign in, and again when they first see a finished result of their own task.', compact=true) }}
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2 id="suggestion-results">AI suggestions</h2></div>
+  <div class="panel">
+    <p class="muted">How often each kind of suggestion is shown, used or dismissed. A kind dismissed more than half the time is marked for review; a dismissed suggestion shown again to the same person is counted.</p>
+    {% if suggestions %}
+    <table>
+      <thead><tr><th scope="col">Suggestion</th><th scope="col">Shown</th><th scope="col">Used</th><th scope="col">Dismissed</th><th scope="col">Shown again after dismissal</th><th scope="col">Shown while typing</th><th scope="col">Review</th></tr></thead>
+      <tbody>
+      {% for row in suggestions %}
+        <tr><th scope="row">{{ {'copilot-question': 'Copilot suggested questions', 'chat-example': 'Example requests in chat'}.get(row.kind, row.kind | replace('-', ' ') | capitalize) }}</th>
+          <td>{{ row.shown }}</td><td>{{ row.accepted }}</td><td>{{ row.dismissed }} ({{ row.dismissed_share | percent }})</td>
+          <td>{{ row.reshown }}</td><td>{{ row.while_typing }}</td><td>{{ 'Review this suggestion' if row.review else 'No' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      {{ empty_state('No suggestions counted yet', 'When usage measures are on, suggestions people see in Copilot and in an empty chat are counted here.', compact=true) }}
+    {% endif %}
+  </div>
   <p class="muted">How to run moderated sessions and score them the same way each quarter: the usability research guide in the documentation (docs/usability-research.md).</p>
 {% endblock %}

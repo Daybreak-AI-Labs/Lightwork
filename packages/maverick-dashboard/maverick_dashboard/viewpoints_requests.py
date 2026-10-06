@@ -135,7 +135,10 @@ def _check(request, prepared, *, spending=True):
     from maverick.tenant.registry import assert_tenant_active
 
     from .auth import execution_user_id_from_request
-    killswitch.check()
+    try:
+        killswitch.check()
+    except killswitch.Halted as exc:
+        raise HTTPException(409, "Lightwork is paused by an emergency stop. An administrator can resume it. The original request will not be repeated.") from exc
     assert_tenant_active(current_tenant_id())
     if not spending:
         return

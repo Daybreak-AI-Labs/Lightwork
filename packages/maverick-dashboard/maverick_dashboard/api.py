@@ -62,6 +62,7 @@ from ._shared import _world_cache as _world_cache  # re-export: tests clear api.
 from ._shared import dashboard_token as _dashboard_token
 from .answer_feedback_operations import FeedbackChangeIn as FeedbackIn
 from .api_schemas import (
+    AGENT_PUBLISH_FIELDS,
     ActiveTenantIn,
     AgentGraduationIn,
     AgentOverrideIn,
@@ -1306,6 +1307,11 @@ async def delete_tenant(
 ) -> Response:
     require_global_permission(request, "admin")
     step_up.require_recent_mfa(request, "delete_workspace")
+    if purge:
+        raise HTTPException(status_code=409, detail=(
+            "Remove the workspace first. Then use Workspaces > Removed workspaces > Review erasure "
+            "to review and confirm every local record selected for permanent removal."
+        ))
     import os
 
     from maverick.tenant import registry as tenant_registry
@@ -1957,7 +1963,9 @@ def list_goals(
         if before_id is None:
             response.headers["Pagination-Next-Offset"] = str(offset + limit)
         response.headers["Pagination-Next-Before-Id"] = str(goals[-1].id)
-    return [_to_goal_out(g) for g in goals]
+    # Continuation follows scanned rows, including copied conversations whose
+    # original source access has since ended. Those rows expose no content.
+    return [_to_goal_out(g) for g in goals if can_access_goal(request, g)]
 
 
 @router.get("/goals/search-context")
@@ -3138,7 +3146,7 @@ async def vendor_questionnaire_responses(request: Request, response: Response,
     except vm.QuestionnaireResponsesUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="We couldn't check questionnaire replies. Please try again shortly.",
+            detail="We couldn't check questionnaire replies. Try again shortly.",
         ) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="no such vendor") from exc
@@ -3164,7 +3172,7 @@ async def replace_vendor_questionnaire_link(
     except vm.QuestionnaireLinkUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="The old link could not be safely closed. Please try again.",
+            detail="The old link could not be safely closed. Try again.",
         ) from exc
     except RecordConflict as exc:
         raise HTTPException(status_code=409, detail="This vendor changed. Refresh and try again.") from exc
@@ -6615,12 +6623,20 @@ async def export_assessments_endpoint(request: Request, format: str = "json") ->
 
 @router.post("/assessments/sweep")
 async def sweep_assessments_endpoint(request: Request) -> dict:
-    """Re-assess every subject now (catch drift) and return what needs attention.
-    The same sweep the automation scheduler runs daily, on demand."""
-    require_permission(request, "admin")
+    """Re-check current subjects without hiding incomplete checks."""
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
 
-    return assessments.sweep_due()
+    _actor, guard = _assessment_effect_guard(request)
+    try:
+        with authority_effect_fence():
+            guard()
+            return assessments.sweep_due(effect_guard=guard)
+    except HTTPException as exc:
+        raise HTTPException(exc.status_code, "These checks were interrupted because your current account, workspace or access changed. Checks completed before the interruption may be saved. Reload the current assessments before trying again.",
+                            headers=exc.headers) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "These checks could not be confirmed. Checks completed before the interruption may be saved. Reload the current assessments before trying again.") from exc
 
 
 @router.get("/assessments/{kind}/{name}")
@@ -6639,21 +6655,76 @@ async def refresh_assessment_endpoint(
     request: Request, kind: str, name: str, payload: AssessmentRefreshIn
 ) -> dict:
     """Auto-draft (or re-draft, detecting drift) the assessment for a subject."""
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    _actor, guard = _assessment_effect_guard(request)
 
     try:
-        a = assessments.refresh(
-            _assess_kind(kind),
-            name,
-            template=payload.template,
-            expected_revision=payload.expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            a = assessments.refresh(
+                _assess_kind(kind),
+                name,
+                template=payload.template,
+                expected_revision=payload.expected_revision, effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This change could not be confirmed. It may already be saved. Reload the current assessments before trying again.") from exc
     if a is None:
         raise HTTPException(status_code=404, detail=f"unknown {kind}: {name!r}")
     return a
+
+
+def _assessment_effect_guard(request: Request, *, review: bool = False):
+    """Bind a native assessment mutation to current account and access."""
+    from maverick import assessments
+    from maverick.paths import current_tenant_id_strict
+
+    from . import auth, session_revocation, workspace_tenants
+
+    with auth.fresh_configuration():
+        require_permission(request, "admin")
+        if review:
+            auth.require_api_key_scope(request, "approvals:decide")
+    actor, tenant = caller_principal(request), current_tenant_id_strict()
+    register_path = assessments._path()
+    selection = (workspace_tenants.get_selection_binding(actor)
+                 if getattr(request.state, "workspace_tenant_source", None) == "principal_selection" else None)
+
+    def guard():
+        with auth.fresh_configuration():
+            require_permission(request, "admin")
+            if review:
+                auth.require_api_key_scope(request, "approvals:decide")
+            if (caller_principal(request) != actor or current_tenant_id_strict() != tenant
+                    or assessments._path() != register_path):
+                raise HTTPException(409, "Your account or workspace changed. Reopen this assessment before reviewing it.")
+            if selection is not None and selection != workspace_tenants.get_selection_binding(actor):
+                raise HTTPException(409, "Your workspace changed. Reopen this assessment before reviewing it.")
+            principal = getattr(request.state, "principal", None)
+            if principal is not None:
+                claims = principal.claims or {}
+                via = claims.get("via")
+                fresh = principal
+                if via in {"session", "invite", "proxy"}:
+                    fresh = (auth._session_principal(request) if via == "session" else
+                             auth._invite_session_principal(request) if via == "invite" else
+                             auth._proxy_principal(request))
+                expiry = claims.get("exp")
+                if (fresh is None or fresh.principal != actor
+                        or (expiry is not None and (type(expiry) not in (int, float)
+                            or not time.time() < expiry < float("inf")))
+                        or (via not in {"session", "invite", "proxy", "api_key"}
+                            and session_revocation.is_revoked(principal.sub, claims.get("iat")))):
+                    raise HTTPException(401, "Sign in again before reviewing this assessment.")
+                if via != "api_key":
+                    auth._enforce_scim_active(fresh)
+                auth._enforce_workspace_policies(request, fresh)
+
+    return actor, guard
 
 
 @router.post("/assessments/{kind}/{name}/review")
@@ -6661,22 +6732,24 @@ async def review_assessment_endpoint(
     request: Request, kind: str, name: str, payload: AssessmentReviewIn
 ) -> dict:
     """Record a reviewer's accept / needs-work decision on one lens."""
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    actor, guard = _assessment_effect_guard(request, review=True)
 
     try:
-        a = assessments.record_review(
-            _assess_kind(kind),
-            name,
-            payload.lens,
-            payload.decision,
-            reviewer=caller_principal(request) or "",
-            note=payload.note or "",
-            cadence_days=payload.cadence_days,
-            expected_revision=payload.expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            a = assessments.record_review(
+                _assess_kind(kind), name, payload.lens, payload.decision,
+                reviewer=actor or "", note=payload.note or "",
+                cadence_days=payload.cadence_days, expected_revision=payload.expected_revision,
+                effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This review could not be confirmed. It may already be saved. Check the current assessment before reviewing it again.") from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if a is None:
@@ -6688,20 +6761,26 @@ async def review_assessment_endpoint(
 async def add_assessment_evidence_endpoint(
     request: Request, kind: str, name: str, payload: AssessmentEvidenceIn
 ) -> dict:
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    _actor, guard = _assessment_effect_guard(request)
 
     try:
-        a = assessments.add_evidence(
-            _assess_kind(kind),
-            name,
-            payload.lens,
-            payload.control,
-            payload.evidence,
-            expected_revision=payload.expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            a = assessments.add_evidence(
+                _assess_kind(kind),
+                name,
+                payload.lens,
+                payload.control,
+                payload.evidence,
+                expected_revision=payload.expected_revision, effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This change could not be confirmed. It may already be saved. Reload the current assessments before trying again.") from exc
     if a is None:
         raise HTTPException(status_code=404, detail="no such finding")
     return a
@@ -6714,15 +6793,21 @@ async def delete_assessment_endpoint(
     name: str,
     expected_revision: int = Query(..., ge=1),
 ) -> Response:
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    _actor, guard = _assessment_effect_guard(request)
 
     try:
-        assessments.delete_assessment(
-            _assess_kind(kind), name, expected_revision=expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            assessments.delete_assessment(
+                _assess_kind(kind), name, expected_revision=expected_revision, effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This change could not be confirmed. It may already be saved. Reload the current assessments before trying again.") from exc
     return Response(status_code=204)
 
 
@@ -9492,8 +9577,12 @@ def get_spend(request: Request) -> dict:
     w = _world()
     total = w.total_spend(owner=owner)
     episodes = w.list_episodes(limit=30, owner=owner)
+    from maverick import practice_costs
+
     return {
         "total": total,
+        # Practice runs cost real provider money; reported apart, never in "total".
+        "practice": practice_costs.summary(owner),
         "episodes": [
             {
                 "id": e.id,
@@ -9536,7 +9625,11 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     cfg = resolution["effective_assumptions"]
     view = value_scope(request)
     report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=view["owner"])
+    from maverick import practice_costs
+
+    practice = await run_in_threadpool(practice_costs.summary, view["owner"], since=practice_costs.window(days))
     return {
+        "practice": practice,  # real provider cost of practice runs, not part of the savings
         "enabled": cfg["enable"],
         "scope": view["scope"],
         "report": savings_mod.to_dict(report),
@@ -11431,14 +11524,20 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
     )
 
 
-def _govern_event_source_config(request: Request, source: str, config: dict) -> dict:
+def _govern_event_source_config(request: Request, source: str, config: dict, *, review_required=False) -> dict:
     """Authorize shared host resources and confine file watches.
 
     Tenant-local OAuth providers remain tenant-admin capabilities. Sources
     which consume process credentials or local filesystem access are instead
     deployment control-plane capabilities and require a global admin.
     """
+    from maverick.automation_connected_events import SOURCES
+
     from maverick_dashboard import event_poll
+
+    if source in SOURCES:
+        from .connected_event_sources_api import call, canonical_config
+        return call(lambda: canonical_config(request, source, config, review_required=review_required))
 
     authority = event_poll.event_source_authority(source, config)
     if authority == "global_admin":
@@ -11514,13 +11613,36 @@ def list_event_triggers_endpoint(request: Request) -> dict:
     }
 
 
+def _check_connected_source_binding(request, payload, cfg, target_flow, target_flow_release, target_template):
+    from maverick.flow import store as flow_store
+    from maverick.templates import load_template
+
+    from maverick_dashboard import event_triggers_store
+
+    require_permission(request, "operate")
+    _require_event_triggers()
+    if _govern_event_source_config(request, payload.source, payload.config, review_required=True) != cfg:
+        raise HTTPException(409, "The saved source changed after review. Check it again; nothing was armed.")
+    if target_flow is not None:
+        _assert_flow_access(request, target_flow)
+        current_release = flow_store.load_published_bundle(payload.flow)
+        if current_release is None or current_release[1]["release_id"] != target_flow_release["release_id"]:
+            raise HTTPException(409, "The published workflow changed. Review its current version before creating the automation.")
+    elif target_template is not None:
+        assert_template_access(request, target_template)
+        current = event_triggers_store.snapshot_from_template(load_template(payload.template))
+        expected = event_triggers_store.snapshot_from_template(target_template)
+        if event_triggers_store.snapshot_revision(current) != event_triggers_store.snapshot_revision(expected):
+            raise HTTPException(409, "The selected task changed. Review it before creating the automation.")
+
+
 @router.post("/event-triggers", response_model=EventTriggerOut, status_code=201)
 def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
     from maverick import form_store
 
     require_permission(request, "operate")
     _require_event_triggers()
-    cfg = _govern_event_source_config(request, payload.source, payload.config)
+    cfg = _govern_event_source_config(request, payload.source, payload.config, review_required=True)
     from maverick.automation_events import EventSourceError, get_source
 
     try:
@@ -11588,6 +11710,8 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
             status_code=409, detail="an event trigger with that name already exists"
         )
     durable_owner = durable_automation_owner(request)
+    from maverick.automation_connected_events import SOURCES as connected_sources
+
     try:
         rec = event_triggers_store.set_trigger(
             default_name,
@@ -11610,6 +11734,8 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
             tenant=tenant,
             mint_public_form_token=payload.source == "form",
             expected_owner=existing.get("owner", "") if existing is not None else durable_owner,
+            create_only=payload.source in connected_sources,
+            effect_guard=(lambda: _check_connected_source_binding(request, payload, cfg, target_flow, target_flow_release, target_template)) if payload.source in connected_sources else None,
         )  # bind OAuth vault reads to this tenant
     except event_triggers_store.FormTriggerPending as e:
         raise HTTPException(
@@ -13837,6 +13963,66 @@ def _record_agent_reset_intent(request: Request, name: str, fields: list[str]) -
         raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
 
 
+def _publish_check(name: str, payload: AgentOverrideIn, before_view: dict | None) -> dict:
+    """The test result these instructions have, and whether publishing needs one."""
+    from maverick.agent_publish_policy import require_passing_tests
+    from maverick.llm import model_for_role
+
+    from . import agent_publish_gate
+
+    creating = before_view is None
+    return agent_publish_gate.check(
+        name, model=model_for_role(name), current_instructions=(before_view or {}).get("persona", ""),
+        new_instructions=payload.persona, creating=creating, required=require_passing_tests())
+
+
+def _require_tested_instructions(request: Request, name: str, payload: AgentOverrideIn,
+                                 before_view: dict | None) -> None:
+    """Changed instructions need a passing run of the saved tests, or a recorded reason."""
+    try:
+        verdict = _publish_check(name, payload, before_view)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The saved test results could not be read. Nothing was changed.") from exc
+    if not verdict["blocked"]:
+        return
+    reason = " ".join((payload.override_reason or "").split())
+    if not payload.publish_without_passing_tests:
+        raise HTTPException(status_code=409, detail=(
+            "These instructions have no passing test run. Run the saved tests on them, "
+            "or publish without passing tests and give a reason. Nothing was changed."))
+    if len(reason) < 8:
+        raise HTTPException(status_code=422, detail="Give a reason of at least 8 characters for publishing without passing tests.")
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        recorded = audit_event(
+            EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
+            verb="agent_published_without_passing_tests",
+            actor=caller_principal(request) or "local administrator", specialist=name,
+            reason=reason, tests=verdict["tests"], latest=verdict["latest"])
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
+    if not recorded:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
+
+
+@router.post("/agents/{name}/publish-check")
+def agent_publish_check(request: Request, name: str, payload: AgentOverrideIn) -> dict:
+    """What the saved tests say about these instructions, before publishing them."""
+    _require_pack_editing(request)
+    from urllib.parse import quote
+
+    from maverick.agent_publish_policy import require_passing_tests
+    from maverick.domain_edit import resolved_view
+
+    try:
+        verdict = _publish_check(name, payload, resolved_view(name))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The saved test results could not be read. Try again shortly.") from exc
+    return {**verdict, "gate_on": require_passing_tests(),
+            "tests_url": "/workforce?specialist=" + quote(name, safe="") + "#wo-my-tests"}
+
+
 @router.post("/agents/{name}/validate")
 def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Lint the merged result of a proposed override without persisting it."""
@@ -13845,7 +14031,8 @@ def validate_agent_override(request: Request, name: str, payload: AgentOverrideI
     _require_pack_editing(request)
     from maverick.domain_edit import validate_override
 
-    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True, exclude_none=True))
+    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
+                                                                  exclude=set(AGENT_PUBLISH_FIELDS)))
     errors.extend(_agent_autonomy_errors(name, payload))
     try:
         errors.extend(_agent_action_errors(name, payload))
@@ -13856,40 +14043,12 @@ def validate_agent_override(request: Request, name: str, payload: AgentOverrideI
 
 @router.post("/agents/{name}/override")
 def save_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
-    """Persist a tenant override for ``name``. 403 if pack editing is disabled,
-    422 if the merged pack fails lint (the override is rejected, not written)."""
+    """Require a complete retained draft review before a live definition changes."""
     _require_pack_editing(request)
-    from maverick.domain_edit import OverrideConflict, read_override, resolved_view, write_override
-
-    try:
-        errors = _agent_autonomy_errors(name, payload)
-        errors += _agent_action_errors(name, payload)
-        if errors:
-            raise ValueError("; ".join(errors))
-        if payload.autonomy is not None and payload.expected_generation is None:
-            raise OverrideConflict("Reload the " + _kind_word(name) + " before changing independence settings.")
-        previous = read_override(name)
-        if payload.autonomy is None and "autonomy" in previous:
-            raise OverrideConflict(_this_one(name) + " has independence settings. Reload the editor before saving.")
-        before_view = resolved_view(name)
-        if payload.autonomy is not None:
-            before = (before_view or {}).get("autonomy", {}).get("pack", {})
-            after = payload.autonomy.model_dump()
-            if before != after:
-                _record_agent_autonomy_intent(request, name, before, after)
-        view = write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
-                                                       exclude={"expected_generation"}),
-                              expected_generation=payload.expected_generation, return_view=True)
-        _record_agent_change(request, name, before_view, view)
-        return view
-    except OverrideConflict as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=503, detail="Available actions could not be checked. Try again shortly.") from e
+    raise HTTPException(
+        status_code=409,
+        detail="Save the complete draft in Agent Factory, then review Publish. No live specialist change was made.",
+    )
 
 
 @router.post("/agents/{name}/graduate")
@@ -16218,7 +16377,7 @@ def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> G
 # domain pack with persona, tool allowlist, risk ceiling, and gated steps).
 # Drafting is one budget-capped LLM call (see maverick_dashboard.workflow_ai);
 # templates save here (writes ~/.maverick/templates/<name>.md), while a playbook
-# saves via the existing POST /agents/<name>/override (write_override).
+# is retained through specialist-drafts review/apply and published separately.
 
 _WORKFLOW_DOC_MAX_BYTES = 512_000  # ample for a spec/runbook; the model sees a truncated head
 

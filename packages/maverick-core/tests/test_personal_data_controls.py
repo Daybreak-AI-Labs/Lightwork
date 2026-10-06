@@ -111,3 +111,29 @@ def test_existing_source_exclusion_stops_prompt_recall(personal_store, monkeypat
     monkeypatch.setattr(pilot_learning, "excluded", lambda gid: gid == 7)
     assert memory.records("dashboard", "alice")
     assert memory.recall("dashboard", "alice") == []
+
+
+def test_a_deleted_fact_is_used_in_none_of_ten_recalls_and_pausing_stops_all_recall(personal_store, monkeypatch):
+    """AI-9 controls audit at the recall layer every answer draws from: after a
+    person deletes one remembered fact it is offered in 0 of 10 recalls while
+    their other facts still are; pausing recall offers nothing until resumed."""
+    from maverick import user_notes
+    path = personal_store / "user_notes.ndjson"
+    rows = [{"channel": "dashboard", "user_id": "alice", "note": note, "source_ts": index}
+            for index, note in enumerate(("I prefer metric units.", "My cost center is 4410.",
+                                          "Send summaries on Fridays."), start=1)]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    monkeypatch.setattr(user_notes, "default_path", lambda: path)
+    forgotten = next(r for r in memory.records("dashboard", "alice") if r["note"] == "My cost center is 4410.")
+    record = memory.update("user:alice", "dashboard", "alice", expected_revision=0, note=forgotten["id"],
+                           operation="delete")
+    used = 0
+    for _ in range(10):
+        offered = " ".join(str(item) for item in memory.recall("dashboard", "alice"))
+        used += "cost center" in offered
+        assert "metric units" in offered
+    assert used == 0
+    record = memory.update("user:alice", "dashboard", "alice", expected_revision=record["revision"], recall=False)
+    assert memory.recall("dashboard", "alice") == []
+    memory.update("user:alice", "dashboard", "alice", expected_revision=record["revision"], recall=True)
+    assert "metric units" in " ".join(str(item) for item in memory.recall("dashboard", "alice"))

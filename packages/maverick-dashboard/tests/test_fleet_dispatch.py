@@ -21,6 +21,18 @@ def _client():
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def _save_team(client, key):
+    """Review and save a department team the way Update team does."""
+    context = client.get("/api/v1/department-team-updates/context").json()["context"]
+    review = client.post("/api/v1/department-team-updates/review",
+                         json={"department": key, "expected_context": context})
+    assert review.status_code == 200, review.text
+    saved = client.post("/api/v1/department-team-updates/save",
+                        json={"token": review.json()["token"], "confirmed": True})
+    from maverick.fleet import load_fleet
+    return review.json()["preview"], saved, load_fleet("dept-" + key)
+
+
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -321,12 +333,11 @@ def test_deployed_department_agent_runs_under_domain_capability(monkeypatch, tmp
     c = _client()
 
     # Self-host fail-open entitlement: deploy the Sales & GTM department.
-    r = c.post("/api/v1/departments/sales_gtm/deploy")
-    assert r.status_code == 201, r.text
-    fleet = r.json()["fleet"]
-    agent = next(a for a in fleet["agents"] if a["name"] == "gtm_deal_inspection")
-    assert agent["domain"] == "gtm_deal_inspection"  # bound to its pack
-    assert not any(a["name"] == "gtm_demand_gen" for a in fleet["agents"])
+    _preview, r, fleet = _save_team(c, "sales_gtm")
+    assert r.status_code == 200, r.text
+    agent = next(a for a in fleet.agents if a.name == "gtm_deal_inspection")
+    assert agent.domain == "gtm_deal_inspection"  # bound to its pack
+    assert not any(a.name == "gtm_demand_gen" for a in fleet.agents)
 
     rr = c.post("/api/v1/fleets/dept-sales_gtm/run",
                 json={"agent": "gtm_deal_inspection", "prompt": "inspect pipeline risks"})
@@ -528,12 +539,14 @@ def test_deployed_department_specialist_reaches_model_with_persona_and_capabilit
     monkeypatch.setattr(domain_mod, "agent_from_profile", capture_root)
 
     client = _client()
-    deployed = client.post("/api/v1/departments/sales_gtm/deploy")
-    assert deployed.status_code == 201, deployed.text
-    assert any(agent["name"] == "gtm_deal_inspection" and agent["domain"] == "gtm_deal_inspection"
-               for agent in deployed.json()["fleet"]["agents"])
-    assert any(row["name"] == "gtm_demand_gen" and row["reason"] == "Needs Web search"
-               for row in deployed.json()["skipped_specialists"])
+    from maverick_dashboard.plain_labels import pack_display_name
+
+    preview, deployed, fleet = _save_team(client, "sales_gtm")
+    assert deployed.status_code == 200, deployed.text
+    assert any(agent.name == "gtm_deal_inspection" and agent.domain == "gtm_deal_inspection"
+               for agent in fleet.agents)
+    assert any(row["Specialist"] == pack_display_name("gtm_demand_gen") and row["Reason"] == "Needs Web search"
+               for row in preview["Setup still needed"])
 
     assigned = client.post("/api/v1/fleets/dept-sales_gtm/run", json={
         "agent": "gtm_deal_inspection", "prompt": "Inspect pipeline risks",

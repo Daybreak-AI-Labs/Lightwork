@@ -545,7 +545,7 @@
       }
       if (!r.ok) {
         showError(window.mvErrorText ? window.mvErrorText({ status: r.status, headers: r.headers }, action)
-                                     : "Could not " + action + ". Please try again.");
+                                     : "Could not " + action + ". Try again.");
         return false;
       }
       return r.status === 204 ? true : reply.body;

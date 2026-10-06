@@ -826,33 +826,12 @@ async def settings_set_capabilities(request: Request) -> RedirectResponse:
 
 @router.post("/settings/features")
 async def settings_set_features(request: Request) -> RedirectResponse:
-    """Activate/deactivate features via the dashboard config overlay."""
+    """Old whole-form submissions cannot overwrite current feature choices."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick_dashboard import settings_store
-    form = await request.form()
-    selected = {name: name in form for name in settings_store.FEATURE_DEFAULTS}
-    try:
-        with _setting_write(request, "features", "all", lambda d:
-                            d.get("features") or {}):
-            await run_in_threadpool(settings_store.set_toggles, "features", selected)
-        await run_in_threadpool(
-            settings_store.assert_effective_copilot_operations,
-            selected["copilot_operations"],
-        )
-        await run_in_threadpool(
-            settings_store.assert_effective_employee_companions,
-            selected["employee_companions"],
-        )
-    except settings_store.FeatureSettingNotEffective as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Settings could not be confirmed. Refresh Settings and Activity before retrying.",
-        ) from exc
-    _admin_audit(request, "settings_features")
-    return RedirectResponse("/settings?saved=features", status_code=303)
+    raise HTTPException(409, "This older feature form was not saved. Your draft is kept. "
+                        "Open Settings, then All settings and Product features to review "
+                        "only the switches you want to change.")
 
 
 @router.post("/settings/ui-visibility")
@@ -1096,6 +1075,8 @@ def _users_context(request: Request) -> dict:
     workspace_options, wm_tenant = _workspace_options(request)
     role_map = rbac.list_users()
     labels = _invite_labels(all_invites)
+    from .company_signin_tests import verified_people
+    labels.update(verified_people(request))
     grants = suite_grants.list_grants()
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
     from .access_explanations import role_descriptions, standard_role
@@ -1643,7 +1624,7 @@ _LIMIT_ERRORS = {
     "period": "Choose how often the limit resets.",
     "person": "Choose a person.",
     "full": "There are too many personal limits to add another.",
-    "unreadable": "The saved spending limits could not be read. Please try again.",
+    "unreadable": "The saved spending limits could not be read. Try again.",
 }
 
 

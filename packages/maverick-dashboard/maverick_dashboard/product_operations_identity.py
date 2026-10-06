@@ -225,34 +225,48 @@ def content_recover(request, _selection, args, _prepared, operation_id, *, actio
 
 
 def permission_snapshot(request, _selection, *, action="status"):
-    state = permission_requests_api.state(request)
+    state = permission_requests_api.state(request, include_choices=action == "request")
     fields = []
     if action == "request":
-        fields = [_field("kind", "Capability type", "select", choices=_choices((("permission", "Dashboard permission"), ("tool", "Tool")))),
-                  _field("capability", "Permission or tool name; no resource paths"),
+        choices = state["choices"]
+        fields = [_field("kind", "Action type", "select", value="permission", choices=_choices((("permission", "Dashboard action"), ("tool", "Tool action")))),
+                  _field("capability", "Action to review", "select", depends_on="kind",
+                         choices_by={kind: [{"value": "", "label": "Choose an action"}] + choices[kind] for kind in ("permission", "tool")}),
                   _field("reason", "Business need, explicitly shared with the policy reviewer; no private content or secrets", "textarea"),
                   _field("confirm_shared_with_reviewer", "Share this business reason with the policy owner", "boolean", value=False)]
     elif action == "decide":
-        fields = [_field("request_id", "Permission request", "select", choices=_choices((r["id"], r["owner"] + ": " + r["capability"]) for r in state["records"] if r["can_review"])),
+        fields = [_field("request_id", "Permission request", "select", choices=_choices((r["id"], r["owner"] + ": " + r["label"]) for r in state["records"] if r["can_review"])),
                   _field("decision", "Reviewed result", "select", choices=_choices((v, v.replace("_", " ")) for v in ("reviewing", "deny", "confirm_effective"))),
                   _field("note", "Review explanation, shared with the employee", "textarea")]
-    return Snapshot(permission_requests.digest(state), "Current permission resolver and scoped review cases", "Reviews never grant access; effective completion checks the real current policy.", state, fields,
+    details = {key: value for key, value in state.items() if key != "choices"}
+    summary = "Reviews never grant access; effective completion checks the real current policy."
+    if action == "request":
+        details["Tool choices"] = state["choices"]["tools_notice"]
+        summary += " " + state["choices"]["tools_notice"]
+    return Snapshot(permission_requests.digest(state), "Current account permissions and authorized requests", summary, details, fields,
                     "Permission requests are disabled." if action != "status" and not state["enabled"] else "")
 
 
 def permission_prepare(request, _selection, args, *, action):
     actor = permission_requests_api.authority(request, write=action != "status")
     if action == "status":
-        return Preview("Current root permission explanations and your authorized request cases.", native=permission_requests_api.state(request))
+        return Preview("Current action permissions and your authorized request cases.", native=permission_requests_api.state(request))
     if action == "request":
         explanation = permission_requests.explain(actor, args["kind"], args["capability"])
         if explanation["allowed"]:
-            raise HTTPException(409, "This root permission is already allowed. Review task/resource/consent restrictions separately.")
-        return Preview("Share this business need with the actual policy owner for review. No permission is granted automatically.", [{"explanation": explanation, "reason": args["reason"]}], {"snapshot": explanation["snapshot"]})
+            raise HTTPException(409, "Your current policy already allows this action. Check the task's other permissions, data access and consent separately.")
+        public = permission_requests_api.public_explanation(explanation)
+        return Preview("Share this business need with the actual policy owner for review. No permission is granted automatically.",
+                       [{"label": "Action", "after": permission_requests_api.action_label(args["kind"], args["capability"])},
+                        {"label": "Current permission", "after": "Your current policy blocks this action."},
+                        {"label": "Responsible administrator", "after": explanation["owner"]},
+                        {"label": "Scope of this check", "after": public["limit"]},
+                        {"label": "Current policies", "after": [{"Policy": layer["source"], "Result": layer["reason"]} for layer in public["layers"]]},
+                        {"label": "Shared business need", "after": args["reason"]}], {"snapshot": explanation["snapshot"]})
     row = permission_requests.STORE.get(args["request_id"])
     if row is None or not permission_requests.can_review(request, row):
         raise HTTPException(404, "Choose a permission request you may independently review.")
-    return Preview("Record this review. Confirm effective succeeds only after the real current permission allows the action; no role or ACL is changed here.", [{"request": permission_requests.public(request, row), "decision": args["decision"], "note": args["note"]}], {"revision": row["revision"]})
+    return Preview("Record this review. Permission can be confirmed only after the actual current policy allows the action. This review does not change a role or access policy.", [{"request": permission_requests.public(request, row), "decision": args["decision"], "note": args["note"]}], {"revision": row["revision"]})
 
 
 def permission_execute(request, _selection, args, prepared, operation_id, *, action):
@@ -272,6 +286,27 @@ def permission_recover(request, _selection, args, _prepared, operation_id, *, ac
     return None
 
 
+def permission_read_recovery(request, _selection, _args, _prepared, operation_id, *, action):
+    bound = permission_requests_api._binding(request)
+    actor = permission_requests_api.authority(request)
+    rows = permission_requests.STORE.list(limit=10001)
+    if len(rows) > 10000:
+        raise HTTPException(409, "Saved permission-request history could not be read completely. Check the current native requests; no action was repeated.")
+    key = "operation_id" if action == "request" else "decision_operation_id"
+    owner = "owner" if action == "request" else "reviewed_by"
+    row = next((row for row in rows if row.get(key) == operation_id and row.get(owner) == actor and permission_requests.visible(request, row)), None)
+    if permission_requests_api._binding(request) != bound:
+        raise HTTPException(409, "Your account or workspace changed while checking the original request.")
+    if row is None:
+        return None
+    pending = bool(row.get("_audit_pending"))
+    return Outcome("unconfirmed" if pending else "replayed",
+                   "This exact request is saved, but its activity receipt is pending. No action was repeated." if pending else
+                   "This exact permission-review operation is already saved. Read its current case; no request or decision was repeated.",
+                   {"Action": permission_requests_api.action_label(row["kind"], row["capability"]),
+                    "Current request": {"requested": "Requested", "reviewing": "Under review", "denied": "Declined", "effective": "Permission confirmed"}.get(row["status"], "Saved")})
+
+
 def entries():
     result = []
     groups = [
@@ -288,5 +323,6 @@ def entries():
                 snapshot=lambda request, selection, fn=snapshot, value=action: fn(request, selection, action=value),
                 prepare=lambda request, selection, args, fn=prepare, value=action: fn(request, selection, args, action=value),
                 execute=(lambda request, selection, args, prepared, operation_id, fn=execute, value=action: fn(request, selection, args, prepared, operation_id, action=value)) if action != "status" else None,
-                recover=(lambda request, selection, args, prepared, operation_id, fn=recover, value=action: fn(request, selection, args, prepared, operation_id, action=value)) if action != "status" else None))
+                recover=(lambda request, selection, args, prepared, operation_id, fn=recover, value=action: fn(request, selection, args, prepared, operation_id, action=value)) if action != "status" else None,
+                read_recovery=(lambda request, selection, args, prepared, operation_id, value=action: permission_read_recovery(request, selection, args, prepared, operation_id, action=value)) if prefix == "permissions" and action != "status" else None))
     return tuple(result)

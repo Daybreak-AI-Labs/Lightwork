@@ -75,7 +75,7 @@ def test_automation_advanced_forms_contain_their_own_submit_and_preserve_visible
     response = client.get("/automations")
     assert response.status_code == 200
     page = Markup(response.text)
-    for disclosure, form_id in [("auto-event-setup", "auto-event-form"), ("auto-import-advanced", "auto-import-form")]:
+    for disclosure, form_id in [("auto-event-setup", "auto-event-form"), ("air-author", "air-form")]:
         page.closed(disclosure)
         assert page.within(form_id, disclosure)
         form = page.ids[form_id]
@@ -83,7 +83,9 @@ def test_automation_advanced_forms_contain_their_own_submit_and_preserve_visible
                    and form in node["parents"] for node in page.nodes)
     for identifier in ["auto-event-list", "auto-event-poll", "auto-event-msg"]:
         assert not page.within(identifier, "auto-event-setup")
-    assert not page.within("auto-import-results", "auto-import-advanced")
+    # The import's status and original results stay visible outside the form.
+    for identifier in ["air-status", "air-result"]:
+        assert not page.within(identifier, "air-author")
     page.closed("oauth-advanced-setup")
     assert not page.within("oauth-list", "oauth-advanced-setup")
     assert page.within("oauth-code", "oauth-advanced-setup")
@@ -91,7 +93,6 @@ def test_automation_advanced_forms_contain_their_own_submit_and_preserve_visible
     assert not page.within("oauth-msg", "oauth-advanced-setup")
     page.closed("auto-event-config-advanced")
     assert page.within("auto-event-more", "auto-event-config-advanced")
-    assert page.within("auto-event-extra-add", "auto-event-config-advanced")
     assert not page.within("auto-event-fields", "auto-event-config-advanced")
     assert page.ids["auto-event-template"]["tag"] == "select"
     assert page.ids["auto-event-interval"]["tag"] == "select"

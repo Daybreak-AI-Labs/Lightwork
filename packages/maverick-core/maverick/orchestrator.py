@@ -986,9 +986,11 @@ async def _apply_brief_enrichments(
     # gaps and pre-acquire matching catalog skills before the swarm
     # starts, so the agent's first turn already has them. Provider egress,
     # MCP acquisition and generated tools retain separate authority gates.
+    from .chat_message_actions import answer_only_runtime, require_dispatch_sources
+    require_dispatch_sources()
     with _enrich("self-learning preflight"):
         from . import self_learning
-        if self_learning.enabled() and self_learning.settings()["preflight"]:
+        if not answer_only_runtime() and self_learning.enabled() and self_learning.settings()["preflight"]:
             acquired = await self_learning.preflight(
                 llm, f"{goal.title}\n{goal.description or ''}", budget,
                 blackboard,
@@ -2808,8 +2810,10 @@ async def run_goal(
 ) -> str:
     """Hold task execution authority until all finalization work has stopped."""
     from .goal_mutations import GoalMutationConflict
+    from .human_conversation_handoffs import require_ai_open
     from .task_handoffs import apply_ceiling, require_open
     try:
+        require_ai_open(world, goal_id)
         require_open(world, goal_id)
     except GoalMutationConflict as exc:
         return f"BLOCKED: {exc}"
@@ -2854,6 +2858,7 @@ async def run_goal(
     sandbox = sandbox or LocalBackend()
     try:
         with execution_lease(world, goal_id):
+            require_ai_open(world, goal_id)
             require_open(world, goal_id)
             apply_ceiling(world, goal_id, budget)
             with bind_goal(world, goal_id, _execution_principal(user_id=user_id, capability=capability)), run_scope(world, goal_id, sandbox), organization_run_scope(

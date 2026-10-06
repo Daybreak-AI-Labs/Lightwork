@@ -67,6 +67,7 @@ def _queue_goal_acquire_timeout() -> float:
 _MAX_GOAL_SLOT_DEFERS = env_int("MAVERICK_GOAL_SLOT_MAX_DEFERS", 20)
 _GOAL_SLOT_DEFER_SECONDS = env_float("MAVERICK_GOAL_SLOT_DEFER_SECONDS", 15.0)
 _SLOT_DEFERS_KEY = "_slot_defers"
+_GOAL_CREATION_STARTED_KEY = "_goal_creation_started"
 
 
 Handler = Callable[[Job], None]
@@ -152,6 +153,10 @@ class GoalRunFailed(Exception):
     queue's retry/backoff path instead of marking the job done."""
 
 
+class GoalRunStopped(Exception):
+    """An unavailable task or unconfirmed attempt must not automatically replay."""
+
+
 class RearmFailed(Exception):
     """Raised by ``_maybe_rearm`` when enqueuing a cron job's next occurrence
     fails (e.g. a transient ``database is locked``). Surfaced through
@@ -202,7 +207,7 @@ class Worker:
 
         ``claim()`` bumps ``attempts`` on every claim regardless of outcome,
         so resetting the SAME row's ``run_at`` in place would still march it
-        toward ``max_attempts`` even though the goal never ran. Enqueuing a
+        toward ``max_attempts`` even though this attempt never ran. Enqueuing a
         fresh row instead -- mirroring
         ``maverick_dashboard.automation_queue._defer_for_slot``'s pattern for
         flow concurrency caps -- lets the original job complete normally.
@@ -235,27 +240,10 @@ class Worker:
             from .runner import run_goal_in_thread
             status = run_goal_in_thread(
                 int(goal_id), acquire_timeout=_queue_goal_acquire_timeout(),
+                detailed_outcome=True,
                 **_run_identity_kwargs(job.payload),
             )
-            if status is None:
-                # No slot within the short probe window -- the goal never
-                # started, so this is not a failed attempt. Defer instead of
-                # raising, so a busy lane can't dead-letter a goal that never ran.
-                if self._defer_for_concurrency_slot(job):
-                    return
-                raise GoalRunFailed(
-                    f"goal {goal_id}: no concurrency slot after "
-                    f"{_MAX_GOAL_SLOT_DEFERS} deferrals"
-                )
-            # Retry only a genuine internal crash ('error'/'failed'). A goal
-            # that ended 'blocked' is a DELIBERATE stop -- budget cap hit,
-            # killswitch armed, or awaiting user input -- and must NOT be
-            # retried, or run_once() re-executes the entire swarm and
-            # re-spends budget. Let those complete the job normally.
-            if status in ("error", "failed"):
-                raise GoalRunFailed(
-                    f"goal {goal_id} terminal status={status!r}"
-                )
+            self._finish_goal_run(job, goal_id, status)
         self._handlers["run_goal"] = _run_goal
 
         def _start_goal(job: Job) -> None:
@@ -276,48 +264,98 @@ class Worker:
             # original (goal_id-free) payload and creates its own fresh goal.
             goal_id = job.payload.get("goal_id")
             if not goal_id:
-                title = (job.payload.get("title") or text).strip()[:80]
-                from .world_model import close_world_if_owned, open_world
-                world = open_world()  # client/tenant-floored canonical world
-                try:
-                    owner = str(job.payload.get("owner") or "")
-                    from .template_connections import validate
-                    refs = validate(owner, job.payload.get("connection_references", []))
-                    goal_id = world.create_goal(title, text, owner=owner,
-                        **({"connection_references": refs} if refs else {}))
-                    # Provenance: link this run to its schedule so the dashboard
-                    # Automations page can show the schedule's run history. Only
-                    # on first creation (not retries, which reuse goal_id).
-                    schedule_id = job.payload.get("schedule_id")
-                    if schedule_id:
-                        world.record_goal_origin(goal_id, "schedule", str(schedule_id))
-                finally:
-                    close_world_if_owned(world)
-                job.payload["goal_id"] = goal_id
-                if not self.queue.set_payload(
-                    job.id, job.payload, expected_attempts=job.attempts,
-                ):
-                    raise LeaseLost(f"job {job.id}: goal checkpoint lease was lost")
+                goal_id = self._create_scheduled_goal(job, text)
             # Same retry contract as run_goal: only a genuine crash requeues;
             # a missing concurrency slot defers instead (W1-73).
             from .runner import run_goal_in_thread
             status = run_goal_in_thread(
                 int(goal_id), acquire_timeout=_queue_goal_acquire_timeout(),
+                detailed_outcome=True,
                 **_run_identity_kwargs(job.payload),
                 **run_budget,
             )
-            if status is None:
+            self._finish_goal_run(job, goal_id, status)
+        self._handlers["start_goal"] = _start_goal
+
+    def _finish_goal_run(self, job: Job, goal_id, status) -> None:
+        from .runner import GoalRunUnavailable
+
+        if isinstance(status, GoalRunUnavailable):
+            if status.reason == "concurrency_slot":
                 if self._defer_for_concurrency_slot(job):
                     return
-                raise GoalRunFailed(
-                    f"scheduled goal {goal_id}: no concurrency slot after "
-                    f"{_MAX_GOAL_SLOT_DEFERS} deferrals"
+                raise GoalRunStopped(
+                    f"Task {goal_id} could not obtain a concurrency slot after "
+                    f"{_MAX_GOAL_SLOT_DEFERS} deferrals. Automatic attempts have stopped."
                 )
-            if status in ("error", "failed"):
-                raise GoalRunFailed(
-                    f"scheduled goal {goal_id} terminal status={status!r}"
+            if status.reason == "missing":
+                raise GoalRunStopped(
+                    f"Task {goal_id} is no longer available. This job will not restart it."
                 )
-        self._handlers["start_goal"] = _start_goal
+            if status.reason == "admission_closed":
+                raise GoalRunStopped(
+                    "This worker has stopped accepting tasks. This job will not restart the task."
+                )
+        if status is None or isinstance(status, GoalRunUnavailable):
+            raise GoalRunStopped(
+                f"Task {goal_id}'s outcome could not be confirmed. Check its activity "
+                "before starting more work. This job will not restart it."
+            )
+        # Preserve the existing retry policy for a genuine crash; an intentional
+        # blocked result (budget, cancellation, or user input) completes normally.
+        if status in ("error", "failed"):
+            raise GoalRunFailed(f"goal {goal_id} terminal status={status!r}")
+
+    def _create_scheduled_goal(self, job: Job, text: str) -> int:
+        from .world_model import close_world_if_owned, open_world
+
+        world = None
+        try:
+            if job.payload.get(_GOAL_CREATION_STARTED_KEY):
+                raise GoalRunStopped(
+                    "An earlier attempt's scheduled task creation could not be confirmed. "
+                    "Check task history before starting more work. This job will not create another task."
+                )
+            # Persist the uncertain boundary before task creation. A reclaimed
+            # lease with this marker and no task id cannot mint a second task.
+            # Recurrence's immutable clean template was captured before dispatch.
+            job.payload[_GOAL_CREATION_STARTED_KEY] = True
+            if not self.queue.set_payload(
+                job.id, job.payload, expected_attempts=job.attempts,
+            ):
+                raise LeaseLost(f"job {job.id}: creation admission lease was lost")
+            world = open_world()  # client/tenant-floored canonical world
+            title = (job.payload.get("title") or text).strip()[:80]
+            owner = str(job.payload.get("owner") or "")
+            from .template_connections import validate
+            refs = validate(owner, job.payload.get("connection_references", []))
+            goal_id = world.create_goal(title, text, owner=owner,
+                **({"connection_references": refs} if refs else {}))
+            schedule_id = job.payload.get("schedule_id")
+            if schedule_id:
+                world.record_goal_origin(goal_id, "schedule", str(schedule_id))
+            job.payload.pop(_GOAL_CREATION_STARTED_KEY)
+            job.payload["goal_id"] = goal_id
+            if not self.queue.set_payload(
+                job.id, job.payload, expected_attempts=job.attempts,
+            ):
+                raise LeaseLost(f"job {job.id}: goal checkpoint lease was lost")
+            return goal_id
+        except (LeaseLost, GoalRunStopped):
+            raise
+        except Exception as exc:
+            raise GoalRunStopped(
+                "The scheduled task's creation or saved link could not be confirmed. "
+                "Check task history before starting more work. This job will not create another task."
+            ) from exc
+        finally:
+            if world is not None:
+                try:
+                    close_world_if_owned(world)
+                except Exception:
+                    # A connection cleanup failure cannot undo the durable
+                    # checkpoint or authorize another task creation.
+                    log.warning("worker: scheduled task connection cleanup failed")
 
     def stop(self) -> None:
         self._stop.set()
@@ -390,6 +428,12 @@ class Worker:
                             retry_after=None, max_attempts=0,
                             expected_attempts=job.attempts)
             log.warning("worker: job %d has no handler (%s)", job.id, e)
+        except GoalRunStopped as exc:
+            # The fixed native message contains no source bodies or exception
+            # details. Fail this owned attempt without replaying uncertain work.
+            self.queue.fail(job.id, str(exc), retry_after=None, max_attempts=0,
+                            expected_attempts=job.attempts)
+            log.warning("worker: job %d stopped: %s", job.id, exc)
         except Exception as exc:
             # Put the actionable exception summary first: JobQueue bounds the
             # durable error, and long Windows paths can otherwise consume that

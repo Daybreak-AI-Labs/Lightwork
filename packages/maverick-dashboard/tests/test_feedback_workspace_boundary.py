@@ -57,10 +57,11 @@ def test_native_goal_read_and_aggregate_pass_trusted_owner(tmp_path, monkeypatch
         request = Request({"type": "http", "method": "GET", "headers": [], "path": "/", "query_string": b""})
         with paths.tenant_scope(tenant="feedback-alpha"):
             feedback.record(goal_id, "someone-else", "down", value=0, note="Private previous lineage")
-            assert api.get_feedback(request, goal_id) == {"feedback": None}
+            # The read is a private, uncached response; its body is what matters.
+            assert json.loads(api.get_feedback(request, goal_id).body) == {"feedback": None}
             assert api.get_flywheel_state(request)["signal"]["human_feedback"] == 0
             feedback.record(goal_id, "", "up", value=1, note="Local current lineage")
-            assert api.get_feedback(request, goal_id)["feedback"]["note"] == "Local current lineage"
+            assert json.loads(api.get_feedback(request, goal_id).body)["feedback"]["note"] == "Local current lineage"
             assert api.get_flywheel_state(request)["signal"]["human_feedback"] == 1
     finally:
         world.close()

@@ -1214,6 +1214,120 @@ def _build_holdout_authorizer(
     )
 
 
+def _lifecycle_review_options(*, strict, dispatch_guard, evaluation_budget, advance):
+    if not strict:
+        return {}
+
+    def current():
+        if evaluation_budget is not None:
+            evaluation_budget.check()
+        if dispatch_guard is not None:
+            dispatch_guard()
+
+    factory = getattr(advance, "lifecycle_guard", None)
+
+    def staged(after, before_meta, after_meta):
+        reviewed = factory(after, before_meta, after_meta)
+
+        def checked():
+            if evaluation_budget is not None:
+                evaluation_budget.check()
+            reviewed()
+
+        return checked
+
+    return {"strict": True, "before_write": current,
+            "write_guard_factory": staged if factory is not None else None,
+            "after_write": advance if callable(advance) else None}
+
+
+def _finish_self_harness_cycle(report, *, model_id, st, retire,
+                               retire_after_days, score_with, score_without,
+                               held_out, held_in, provider_work_item, effect_scope,
+                               dispatch_guard, strict=False, qualification_held=False,
+                               evaluation_budget=None):
+    """Keep separately authorized local maintenance independent of AI eligibility."""
+    from . import self_harness
+    from .learning_guard import check_learning_halt
+    from .provider_cost_cap import work_item_scope
+
+    check_learning_halt("self_harness", "local-maintenance")
+    if dispatch_guard is not None:
+        dispatch_guard()
+    resolved = (report.model_id or model_id) or None
+    # OUTCOME-DRIVEN LIFECYCLE: graduate/demote canaries from the accumulated
+    # recall->outcome counters (safe -- only touches canary-flagged lines), and
+    # optionally re-measure each line's live A/B lift to demote dead weight
+    # (opt-in: a general corpus can under-credit a narrow line).
+    if resolved and self_harness.enabled() and not qualification_held:
+        try:
+            with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                options = _lifecycle_review_options(strict=strict, dispatch_guard=dispatch_guard,
+                    evaluation_budget=evaluation_budget, advance=advance)
+                res = self_harness.review_canaries(resolved, **options)
+                if not strict and (res.get("graduated") or res.get("demoted")) and callable(advance):
+                    advance()
+            report.graduated = list(res.get("graduated", []))
+            report.demoted = list(res.get("demoted", []))
+        except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+            if strict:
+                raise
+            log.debug("self-harness canary review failed", exc_info=True)
+        # Relapse recency guard (opt-in): AFTER the canary review, so a
+        # line re-probated now gets adjudicated on the NEXT cycle's
+        # evidence rather than instantly demoted in the same pass.
+        try:
+            share = float((st or {}).get("relapse_failure_share") or 0.0)
+            if share > 0:
+                with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                    options = _lifecycle_review_options(strict=strict, dispatch_guard=dispatch_guard,
+                        evaluation_budget=evaluation_budget, advance=advance)
+                    report.relapsed = self_harness.review_relapses(
+                        resolved, failure_share=share,
+                        min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)), **options)
+                    if not strict and report.relapsed and callable(advance):
+                        advance()
+        except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+            if strict:
+                raise
+            log.debug("self-harness relapse review failed", exc_info=True)
+        if ((st or {}).get("risk_limited") and (st or {}).get("efficacy_review")):
+            report.skipped.append(
+                "risk-limited efficacy review requires a separately budgeted live set")
+        elif (self_harness.settings().get("efficacy_review")
+                and score_with is not None and score_without is not None):
+            try:
+                cases = list(held_out or []) + list(held_in or [])
+                with work_item_scope(provider_work_item):
+                    report.demoted += self_harness.review_efficacy(
+                        resolved, cases, score_with=score_with,
+                        score_without=score_without, effect_scope=effect_scope)
+            except Exception:  # pragma: no cover
+                log.debug("self-harness efficacy review failed", exc_info=True)
+    if qualification_held:
+        report.qualification_held = True
+        report.frozen, report.gate_enabled = self_harness._governance_readiness()
+        report.skipped.append("Trial-lesson decisions remain held; qualification was not completed")
+    retired = 0
+    if retire and not resolved:
+        report.skipped.append("Local retirement needs a currently selected model")
+    if retire and resolved and self_harness.enabled():
+        days = retire_after_days
+        if days is None:
+            days = self_harness.settings().get("retire_after_days", 0.0)
+        if days and float(days) > 0:
+            with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                retired = self_harness.retire_stale(
+                    older_than_days=float(days), model_id=resolved,
+                    strict=strict, before_write=dispatch_guard,
+                    write_guard_factory=getattr(advance, "retirement_guard", None))
+                if retired and callable(advance):
+                    advance()
+    if dispatch_guard is not None:
+        dispatch_guard()
+    return report, retired
+
+
 def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration boundary
     reflexions=None, *, model_id: str | None = None, limit: int = 500,
     retire: bool = True, retire_after_days: float | None = None,
@@ -1268,6 +1382,15 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         bound_verifier_model: str | None = None
         bound_metamorphic_model: str | None = None
         calibration_evaluator_id: str | None = None
+
+        def held_qualification(report):
+            return _finish_self_harness_cycle(
+                report, model_id=model_id, st=st, retire=retire,
+                retire_after_days=retire_after_days, score_with=None,
+                score_without=None, held_out=None, held_in=None,
+                provider_work_item=None, effect_scope=effect_scope,
+                dispatch_guard=dispatch_guard, strict=raise_errors,
+                qualification_held=True, evaluation_budget=eval_budget)
         # AUTO-WIRE the live A/B from config so a scheduled cycle can actually
         # PROMOTE, not just dry-inspect: if the caller injected no scorers and
         # [self_harness] eval_corpus is set, build the model-generates /
@@ -1310,12 +1433,12 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report = self_harness.SelfHarnessReport(model_id=str(model_id))
                     report.skipped.append(
                         "risk-limited auto-evaluation requires deployed prompt snapshot")
-                    return report, 0
+                    return held_qualification(report)
                 if st.get("risk_limited") and not bound_verifier_model:
                     report = self_harness.SelfHarnessReport(model_id=str(model_id))
                     report.skipped.append(
                         "risk-limited auto-evaluation requires a bound verifier model")
-                    return report, 0
+                    return held_qualification(report)
                 if st.get("risk_limited"):
                     calibration_evaluator_id = eval_module.judge_evaluator_identity(
                         str(bound_verifier_model),
@@ -1332,7 +1455,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report.skipped.append(
                         "risk-limited metamorphic evaluation requires a bound "
                         "paraphraser model")
-                    return report, 0
+                    return held_qualification(report)
                 if (st.get("risk_limited")
                         and pass_kwargs.get("metamorphic_fn") is not None
                         and pass_kwargs.get("holdout_authorize") is None):
@@ -1340,7 +1463,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report.skipped.append(
                         "risk-limited injected metamorphic evaluation requires a "
                         "caller-supplied holdout authorizer bound to that transform")
-                    return report, 0
+                    return held_qualification(report)
                 if st.get("risk_limited") and pass_kwargs.get(
                         "holdout_authorize") is None:
                     try:
@@ -1357,7 +1480,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                         report.skipped.append(
                             "risk-limited auto-evaluation requires a valid provisioned "
                             "holdout ledger and remaining query budget")
-                        return report, 0
+                        return held_qualification(report)
                 # With metamorphic validation on, paraphrased (non-corpus)
                 # goals must be JUDGEABLE, not indeterminate -- the LLM judge
                 # doesn't need the expected hint.
@@ -1399,7 +1522,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
             report = self_harness.SelfHarnessReport(model_id=str(model_id or ""))
             report.skipped.append(
                 "risk-limited evaluation requires sealed holdout query authorization")
-            return report, 0
+            return held_qualification(report)
         # Metamorphic validation (opt-in, [self_harness] metamorphic): reject a
         # candidate whose lift does not survive PARAPHRASING the held-out cases
         # (overfit to exact wording). Built only when something will actually
@@ -1428,7 +1551,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report.skipped.append(
                         "risk-limited metamorphic evaluation could not construct "
                         "the authorized paraphraser")
-                    return report, 0
+                    return held_qualification(report)
         # Keep every physical provider attempt in this cycle discoverable under
         # one exact work item.  Callers may bind an authoritative business work
         # item; scheduled/local cycles receive a fresh opaque operation id.
@@ -1447,62 +1570,13 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 controller=controller, effect_scope=effect_scope, **pass_kwargs)
         if dispatch_guard is not None:
             dispatch_guard()
-        resolved = (report.model_id or model_id) or None
-        # OUTCOME-DRIVEN LIFECYCLE: graduate/demote canaries from the accumulated
-        # recall->outcome counters (safe -- only touches canary-flagged lines), and
-        # optionally re-measure each line's live A/B lift to demote dead weight
-        # (opt-in: a general corpus can under-credit a narrow line).
-        if resolved and self_harness.enabled():
-            try:
-                with effect_scope() if effect_scope is not None else nullcontext() as advance:
-                    res = self_harness.review_canaries(resolved)
-                    if (res.get("graduated") or res.get("demoted")) and callable(advance):
-                        advance()
-                report.graduated = list(res.get("graduated", []))
-                report.demoted = list(res.get("demoted", []))
-            except Exception:  # pragma: no cover -- lifecycle never perturbs a run
-                log.debug("self-harness canary review failed", exc_info=True)
-            # Relapse recency guard (opt-in): AFTER the canary review, so a
-            # line re-probated now gets adjudicated on the NEXT cycle's
-            # evidence rather than instantly demoted in the same pass.
-            try:
-                share = float((st or {}).get("relapse_failure_share") or 0.0)
-                if share > 0:
-                    with effect_scope() if effect_scope is not None else nullcontext() as advance:
-                        report.relapsed = self_harness.review_relapses(
-                            resolved, failure_share=share,
-                            min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)))
-                        if report.relapsed and callable(advance):
-                            advance()
-            except Exception:  # pragma: no cover -- lifecycle never perturbs a run
-                log.debug("self-harness relapse review failed", exc_info=True)
-            if ((st or {}).get("risk_limited") and (st or {}).get("efficacy_review")):
-                report.skipped.append(
-                    "risk-limited efficacy review requires a separately budgeted live set")
-            elif (self_harness.settings().get("efficacy_review")
-                    and score_with is not None and score_without is not None):
-                try:
-                    cases = list(held_out or []) + list(held_in or [])
-                    with work_item_scope(provider_work_item):
-                        report.demoted += self_harness.review_efficacy(
-                            resolved, cases, score_with=score_with,
-                            score_without=score_without, effect_scope=effect_scope)
-                except Exception:  # pragma: no cover
-                    log.debug("self-harness efficacy review failed", exc_info=True)
-        retired = 0
-        if retire and self_harness.enabled():
-            days = retire_after_days
-            if days is None:
-                days = self_harness.settings().get("retire_after_days", 0.0)
-            if days and float(days) > 0:
-                with effect_scope() if effect_scope is not None else nullcontext() as advance:
-                    retired = self_harness.retire_stale(
-                        older_than_days=float(days), model_id=resolved)
-                    if retired and callable(advance):
-                        advance()
-        if dispatch_guard is not None:
-            dispatch_guard()
-        return report, retired
+        return _finish_self_harness_cycle(
+            report, model_id=model_id, st=st, retire=retire,
+            retire_after_days=retire_after_days, score_with=score_with,
+            score_without=score_without, held_out=held_out, held_in=held_in,
+            provider_work_item=provider_work_item, effect_scope=effect_scope,
+            dispatch_guard=dispatch_guard, strict=raise_errors,
+            evaluation_budget=eval_budget)
     except Halted:
         raise
     except Exception as exc:  # pragma: no cover -- maintenance stays best-effort
@@ -2005,7 +2079,8 @@ def _run_nightly_self_harness(world) -> dict:
                                              and settings.get("risk_limited"))
         summary["examples_prepared"] = run_corpus_harvest(world, raise_errors=True)
         summary["inspection_only"] = (not bool(settings.get("eval_corpus"))
-                                      or not _learning_provider_egress_enabled())
+                                      or not _learning_provider_egress_enabled()
+                                      or bool(reports) and all(report.qualification_held for report in reports))
         record("completed", **summary)
         return summary
     except Exception:

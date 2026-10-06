@@ -13,7 +13,7 @@
   </div>
   <details id="cs-disable" hidden>
     <summary>Turn off account connections</summary>
-    <p>Accounts connected here (Google Drive, Google Cloud Storage and Jira Cloud) stop working straight away: workflows that use them can't read or change anything through them, and nobody can connect a new account. Their saved sign-in stays stored and encrypted, so turning this back on makes them work again. To remove an account for good, use its own remove button instead.</p>
+    <p>Accounts connected here (Google Drive, Google Cloud Storage and Jira Cloud) stop working straight away. Workflows that use them can't read or change anything through them, and nobody can connect a new account. Their saved sign-in stays stored and encrypted, so turning this back on makes them work again. To remove an account for good, use its own remove button instead.</p>
     <fieldset>
       <legend>What to turn off</legend>
       <label class="cs-check"><input id="cs-disable-scope-authorization" name="cs-disable-scope" type="radio" value="authorization" checked>Only account sign-in (saved connections with their own access key keep working)</label>
@@ -33,7 +33,7 @@
       <button id="cs-callback-copy" class="btn" type="button">Copy return address</button>
       <details id="cs-native-settings"><summary>Using the Lightwork desktop app?</summary><p>Also add this second return address: <strong>http://127.0.0.1:8766/connections</strong>, then tick the box below.</p></details>
       <div id="cs-native-enable" hidden><label class="cs-check"><input id="cs-native-enable-confirm" type="checkbox">Enable system-browser sign-in returns to this desktop installation.</label><button id="cs-native-enable-button" class="btn" type="button" disabled>Enable desktop returns</button></div>
-      <div id="cs-native-disable" hidden><p>Desktop returns are on. Turning them off means people using the Lightwork desktop app can't finish connecting an account in their web browser; they can still connect from this page in a browser. Accounts already connected keep working.</p><label class="cs-check"><input id="cs-native-disable-confirm" type="checkbox">Turn off system-browser sign-in returns to this desktop installation.</label><button id="cs-native-disable-button" class="btn btn--danger" type="button" disabled>Turn off desktop returns</button></div>
+      <div id="cs-native-disable" hidden><p>Desktop returns are on. Turning them off means people using the Lightwork desktop app can't finish connecting an account in their web browser. They can still connect from this page in a browser. Accounts already connected keep working.</p><label class="cs-check"><input id="cs-native-disable-confirm" type="checkbox">Turn off system-browser sign-in returns to this desktop installation.</label><button id="cs-native-disable-button" class="btn btn--danger" type="button" disabled>Turn off desktop returns</button></div>
       <form id="cs-application" autocomplete="off" data-draft-recovery="off">
         <label for="cs-provider">Provider</label><select id="cs-provider" class="input"><option value="google">Google</option><option value="atlassian">Atlassian</option></select>
         <p id="cs-app-status"></p>

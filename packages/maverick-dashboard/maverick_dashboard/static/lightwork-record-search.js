@@ -1,7 +1,7 @@
 /* Current, authority-scoped metadata results for the existing keyboard finder. */
 (function (global) {
   "use strict";
-  function errText(failure,action){return global.mvErrorText?global.mvErrorText(failure,action):'Could not '+action+'. Please try again.';}
+  function errText(failure,action){return global.mvErrorText?global.mvErrorText(failure,action):'Could not '+action+'. Try again.';}
   function plainError(text){var error=new Error(text);error.plain=true;return error;}
   function init() {
     var doc=global.document, meta=doc.querySelector('meta[name="lightwork-search-context"]');

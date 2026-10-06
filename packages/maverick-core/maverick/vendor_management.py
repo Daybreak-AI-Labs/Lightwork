@@ -190,7 +190,7 @@ def register_vendor(
         "category": _text(category, "category", 128),
         "criticality": criticality,
         "owner": _text(owner, "owner", 256),
-        "status": "active",
+        "status": "under_review",
         "links": [],
         "questionnaires": [],
         "monitoring_notes": [],
@@ -212,6 +212,9 @@ def set_vendor_status(
     *,
     actor: str,
     expected_revision: int,
+    effect_guard=None,
+    assessment_id: str | None = None,
+    assessment_revision: int | None = None,
 ) -> dict[str, Any]:
     _require_enabled()
     if status not in STATUSES:
@@ -221,13 +224,42 @@ def set_vendor_status(
     def mutate(value: dict[str, Any]) -> None:
         value["status"] = status
 
-    saved = _VENDORS.update(
-        _text(vendor_id, "vendor_id", 64),
-        mutate,
-        expected_revision=int(expected_revision),
-        action="set_vendor_status",
-        actor=operator,
-    )
+    identifier = _text(vendor_id, "vendor_id", 64)
+    current = _VENDORS.get(identifier)
+    if current is None:
+        raise KeyError(f"vendor is not registered: {vendor_id}")
+    from contextlib import nullcontext
+
+    from .third_party_lifecycle import ThirdPartyLifecycleError
+    scope = nullcontext(None)
+    if status == "active" and current.get("status") != "active":
+        from .paths import current_tenant_id_strict, data_dir
+        from .third_party_lifecycle import ThirdPartyLifecycleError, ThirdPartyLifecycleStore
+        tenant = current_tenant_id_strict()
+        if not tenant:
+            raise VendorManagementError("Select the vendor's workspace before activating it.")
+        try:
+            lifecycle = ThirdPartyLifecycleStore(data_dir("third_party_management", "third-party-lifecycle.sqlite3", tenant=tenant))
+            scope = lifecycle.activation_scope(tenant, identifier)
+        except ThirdPartyLifecycleError as exc:
+            raise VendorManagementError("Turn on Third-party lifecycle and complete this vendor's assessment before activation.") from exc
+    try:
+        with scope as evaluation:
+            def checked_mutate(value):
+                if effect_guard is not None:
+                    effect_guard()
+                if status == "active" and value.get("status") != "active" and evaluation is None:
+                    raise VendorManagementError("The vendor status changed. Review its latest assessment before activation.")
+                mutate(value)
+                if evaluation is not None:
+                    if ((assessment_id is not None and evaluation["assessment_id"] != assessment_id)
+                            or (assessment_revision is not None and evaluation["revision"] != assessment_revision)):
+                        raise VendorManagementError("This vendor's evaluated assessment changed. Review activation again.")
+                    value["activation_assessment"] = evaluation
+            saved = _VENDORS.update(identifier, checked_mutate, expected_revision=int(expected_revision),
+                action="set_vendor_status", actor=operator)
+    except ThirdPartyLifecycleError as exc:
+        raise VendorManagementError(str(exc)) from exc
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
     return _public_vendor(saved)

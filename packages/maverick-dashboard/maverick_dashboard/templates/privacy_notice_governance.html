@@ -64,7 +64,7 @@
   </section>
 
   <div class="section-head"><h2>Notice versions</h2>
-    <button type="button" class="btn btn--primary" id="png-new-version">New notice version</button></div>
+    <button type="button" class="btn btn--primary" id="png-new-version">Create notice version</button></div>
   <div class="panel" id="png-releases"><p class="muted">Loading…</p></div>
 
   <section class="panel" id="png-release-panel" hidden aria-labelledby="png-release-title">
@@ -155,6 +155,7 @@
   <div class="section-head"><h2>Suggested updates</h2></div>
   <p class="muted">Recorded fingerprints and research references for an independent decision. Original files are not retained here; acceptance does not publish a notice or establish legal applicability.</p>
   <div class="panel" id="png-proposals"><p class="muted">Loading…</p></div>
+  {% if suggestions_enabled is defined and suggestions_enabled() %}<div class="panel">{% from "_policy_suggestions.html" import policy_suggestions, policy_suggestions_script %}{{ policy_suggestions("privacy-notice", "A new notice version still needs submitting, its approvals and scheduling before anyone sees it.", "h3") }}{{ policy_suggestions_script() }}</div>{% endif %}
 
   <div class="section-head"><h2>Approval rules</h2>
     {% if can_admin %}<button type="button" class="btn btn--ghost" id="png-new-policy">Add an approval rule</button>{% endif %}</div>
@@ -474,13 +475,20 @@
       state = result; render(); say("Saved.");
     } catch (error) { say(failText(error, "save the target"), true); }
   }
-  async function remove(target) {
-    if (!(await window.mvConfirm("Stop publishing approved notices to " + window.mvHuman(target.binding_id) + "?", {okText: "Stop publishing"}))) return;
-    try {
-      var result = await call("DELETE", "/" + encodeURIComponent(target.binding_id));
-      if (result.status === 409) { say(failText({status: 409, detail: result.detail}, "remove the target"), true); return; }
-      state = result; render(); say("Removed.");
-    } catch (error) { say(failText(error, "remove the target"), true); }
+  function remove(target, row) {
+    // One action with a way back (CTL-1): publishing to this target stops
+    // when the Undo time is up.
+    if (row) row.hidden = true;
+    window.mvUndo("Stopped publishing approved notices to {target}.", { values: {target: window.mvHuman(target.binding_id)},
+      action: "remove the target",
+      run: async function () {
+        var result = await call("DELETE", "/" + encodeURIComponent(target.binding_id));
+        if (result.status === 409) throw {status: 409, detail: result.detail};
+        state = result; return {ok: true};
+      },
+      undo: function () { if (row) row.hidden = false; },
+      done: function () { render(); say("Removed."); }
+    });
   }
   function render() {
     list.textContent = "";
@@ -506,7 +514,7 @@
       if (t.removable) {
         var del = document.createElement("button"); del.type = "button"; del.className = "btn btn--danger"; del.textContent = "Remove";
         del.setAttribute("aria-label", "Remove " + window.mvHuman(t.binding_id));
-        del.addEventListener("click", function () { remove(t); }); actions.appendChild(del);
+        del.addEventListener("click", function () { remove(t, row); }); actions.appendChild(del);
       }
     });
     list.appendChild(table);

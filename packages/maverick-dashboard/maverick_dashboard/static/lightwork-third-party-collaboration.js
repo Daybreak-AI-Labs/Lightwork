@@ -107,7 +107,14 @@
     return Promise.all(jobs).then(function () {
       if (!canAudit) { say("Only auditors and administrators can see invitations."); render(); return; }
       return loadInvitations(false).then(function () { say("Up to date."); });
-    }).catch(fail("load the invitations"));
+    }).catch(function (f) {
+      fail("load the invitations")(f);
+      // The list never stays on "Loading…": say what happened and offer a retry.
+      var box = document.getElementById("tpc-invitations");
+      box.textContent = "";
+      box.appendChild(window.mvEmpty((window.LightworkI18n ? window.LightworkI18n.text("Invitations could not be loaded") : "Invitations could not be loaded"), R.errorText(f, "load the invitations"),
+        { label: (window.LightworkI18n ? window.LightworkI18n.text("Try again") : "Try again"), onClick: loadAll }));
+    });
   }
 
   function assessmentOf(inv) { return state.assessments.filter(function (a) { return a.assessment_id === inv.assessment_id; })[0]; }
@@ -246,7 +253,7 @@
     if (!mb.length) { mb = [Math.max(0, Math.floor(limits.max_artifact_bytes / 1048576))]; }
     fillSelect(F("max_size"), mb.map(function (n) { return { value: String(n), label: n + " MB" }; })); F("max_size").value = String(mb[mb.length - 1]);
     state.notice = null;
-    document.getElementById("tpc-notice-name").textContent = "No file chosen yet.";
+    document.getElementById("tpc-notice-name").textContent = "No file chosen yet. Choose the notice file to attach.";
     syncRespondents();
     panel.hidden = false;
     window.mvReveal(panel);

@@ -68,7 +68,6 @@ ENGINES = ("vllm", "tgi", "llamacpp")
 PRECISIONS = ("auto", "fp16", "bf16", "int8", "int4")
 _KV_MODES = ("", "persistent")
 
-_ENV_PREFIX = "MAVERICK_LOCAL_RUNTIME_"
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off", ""})
 
@@ -186,6 +185,30 @@ def _normalize(section: dict | None) -> dict:
     return cfg
 
 
+# Each knob's environment override, spelled out so a reader (and the Settings
+# catalogue's audit) can find it by name. Keep in step with DEFAULTS.
+ENV_VARS: dict[str, str] = {
+    "enabled": "MAVERICK_LOCAL_RUNTIME_ENABLED",
+    "engine": "MAVERICK_LOCAL_RUNTIME_ENGINE",
+    "model": "MAVERICK_LOCAL_RUNTIME_MODEL",
+    "host": "MAVERICK_LOCAL_RUNTIME_HOST",
+    "port": "MAVERICK_LOCAL_RUNTIME_PORT",
+    "max_concurrent": "MAVERICK_LOCAL_RUNTIME_MAX_CONCURRENT",
+    "max_batch_tokens": "MAVERICK_LOCAL_RUNTIME_MAX_BATCH_TOKENS",
+    "kv_cache": "MAVERICK_LOCAL_RUNTIME_KV_CACHE",
+    "kv_offload_dir": "MAVERICK_LOCAL_RUNTIME_KV_OFFLOAD_DIR",
+    "kv_swap_gb": "MAVERICK_LOCAL_RUNTIME_KV_SWAP_GB",
+    "precision": "MAVERICK_LOCAL_RUNTIME_PRECISION",
+    "extra_args": "MAVERICK_LOCAL_RUNTIME_EXTRA_ARGS",
+    "autoscale": "MAVERICK_LOCAL_RUNTIME_AUTOSCALE",
+    "min_replicas": "MAVERICK_LOCAL_RUNTIME_MIN_REPLICAS",
+    "max_replicas": "MAVERICK_LOCAL_RUNTIME_MAX_REPLICAS",
+    "scale_up_depth": "MAVERICK_LOCAL_RUNTIME_SCALE_UP_DEPTH",
+    "scale_down_depth": "MAVERICK_LOCAL_RUNTIME_SCALE_DOWN_DEPTH",
+    "hold_seconds": "MAVERICK_LOCAL_RUNTIME_HOLD_SECONDS",
+}
+
+
 def load_local_runtime(section: dict | None = None) -> dict:
     """The normalized ``[local_runtime]`` config.
 
@@ -201,7 +224,7 @@ def load_local_runtime(section: dict | None = None) -> dict:
             section = {}
     merged = dict(section)
     for key in DEFAULTS:
-        raw = os.environ.get(_ENV_PREFIX + key.upper())
+        raw = os.environ.get(ENV_VARS[key])
         if raw is not None:
             merged[key] = raw
     return _normalize(merged)

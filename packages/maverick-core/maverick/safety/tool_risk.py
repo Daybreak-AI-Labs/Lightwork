@@ -37,7 +37,8 @@ log = logging.getLogger(__name__)
 RISK_LEVELS = ("low", "medium", "high")
 
 # Built-in risk classification. Anything not listed (and not matched by a
-# configured override) defaults to ``medium``. High-risk tools can mutate
+# configured override) defaults to ``high`` until it is deliberately rated.
+# High-risk tools can mutate
 # the host, run arbitrary code, or drive a real machine/browser; low-risk
 # tools are read-only or pure lookups.
 _DEFAULT_RISK: dict[str, str] = {
@@ -45,8 +46,7 @@ _DEFAULT_RISK: dict[str, str] = {
     # high: arbitrary code / host mutation / full control
     "shell": "high",
     # The session kernel executes model-written Python. It is exactly as
-    # consequential as `shell` and must never fall through to the medium
-    # default that an unclassified name would get.
+    # consequential as `shell` and needs an intentional high classification.
     "repl_exec": "high",
     "computer": "high",
     "browser": "high",
@@ -71,6 +71,17 @@ _DEFAULT_RISK: dict[str, str] = {
     # no allow-list concept. Had no entry at all, so it fell to "medium".
     "webrtc": "high",
     "websocket": "high",
+    # Native tools with paid/external data dispatch, credential exchange,
+    # device control, shared-store mutation or executable document processing.
+    "image_edit": "high", "huggingface": "high", "translate": "high",
+    "newsapi": "high", "reddit": "high", "wolfram": "high",
+    "bitbucket": "high", "view_image": "high", "speak": "high",
+    "transcribe_audio": "high", "oidc": "high", "oauth_helper": "high",
+    "embedded_device": "high", "ffmpeg": "high", "pandoc": "high",
+    "imagemagick": "high", "office_convert": "high", "ocr": "high",
+    "latex": "high", "cache_admin": "high",
+    # Bounded native goal-local memory/link records, without an external effect.
+    "kv_memory": "medium", "remember_outcome_key": "medium",
     # high: mutate external state / money / send messages / drive infra or a
     # device / recursively spawn. These used to fall through to the "medium"
     # default, so a max_risk="medium" channel ceiling failed to drop them.
@@ -283,6 +294,7 @@ _DEFAULT_RISK: dict[str, str] = {
 }
 
 _DEFAULT_RISK_LEVEL = "medium"
+_UNCLASSIFIED_RISK_LEVEL = "high"
 
 
 # The long-tail enterprise connectors (built by ``enterprise_connectors.py`` via
@@ -413,7 +425,8 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
     from ``enterprise_connectors.py``), which is write-capable by construction.
     A config override is checked first, so either can be relaxed deliberately,
     e.g. ``[security.tool_risk]`` ``"mcp_*" = "medium"`` or ``okta = "medium"``.
-    Any other unclassified tool falls back to ``medium``.
+    Any other unclassified tool falls back to ``high``. That refusal floor is
+    not an intentional classification; ``tool_risk_is_classified`` stays false.
     """
     overrides = _current_overrides(overrides)
     if name in overrides:
@@ -435,7 +448,8 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
         return builtin
     # Unclassified. An MCP tool is externally-defined arbitrary code reached
     # through a third-party server, and an enterprise connector is write-capable
-    # by construction -> both fail safe to high. Anything else -> medium.
+    # by construction -> both fail safe to high. Other unknown names likewise
+    # cannot enter a low/medium risk ceiling merely because they were unrated.
     if name.startswith("mcp_"):
         return "high"
     if name in _read_connector_names():
@@ -444,17 +458,15 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
         return "high"
     # A namespaced action (``salesforce.write``, ``servicenow.read``) inherits
     # its namespace's classification when it has none of its own -- UPWARD
-    # ONLY, so a suffix can raise the floor but never launder a high-risk
-    # connector down to the medium default. Without this, ``salesforce`` is
-    # high while ``salesforce.write`` -- the governed action that actually
-    # posts to the system of record -- landed on medium and slipped under a
-    # max_risk="medium" ceiling.
+    # ONLY, so a suffix never launders a high-risk connector into a lower
+    # inherited rating. Unknown suffixes otherwise retain the high refusal
+    # floor; they are not thereby marked intentionally classified.
     namespace = name.split(".", 1)[0]
     if namespace and namespace != name:
         inherited = tool_risk(namespace, overrides)
         if risk_rank(inherited) > risk_rank(_DEFAULT_RISK_LEVEL):
             return inherited
-    return _DEFAULT_RISK_LEVEL
+    return _UNCLASSIFIED_RISK_LEVEL
 
 
 def tool_risk_is_classified(
@@ -462,8 +474,8 @@ def tool_risk_is_classified(
 ) -> bool:
     """Whether ``name`` has an intentional risk classification.
 
-    ``tool_risk`` retains its compatibility fallback of ``medium`` for unknown
-    names, but reliability and workflow governance must distinguish that
+    ``tool_risk`` conservatively refuses unknown names under low/medium
+    ceilings, but reliability and workflow governance must distinguish that
     fallback from an explicitly reviewed medium-risk tool. Otherwise a newly
     installed mutating plugin silently gains automatic retries and bypasses
     high-risk approval gates merely because its name is absent from the table.

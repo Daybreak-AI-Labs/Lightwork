@@ -46,7 +46,7 @@ DEFAULTS = {"mode": "immediate", "timezone": "UTC", "quiet_enabled": False,
             "quiet_start": "22:00", "quiet_end": "08:00", "digest_time": "09:00",
             "critical_exceptions": False, "events": ["needs-decision", "blocked", "failed", "completed"],
             "muted_tasks": {}, "muted_agents": {}, "watch_all_projects": True, "projects": [],
-            "external_links": []}
+            "external_links": [], "mentions": True}
 _CLOCK = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]\Z")
 _AGENT = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}\Z")
 #: A one-click mute from an alert lasts as long as the longest mute a person
@@ -70,6 +70,10 @@ CATEGORY_COPY = {
                        "Nothing is due"),
     "deadline": ("You started this task", "Finish the task or change its deadline", "Due",
                  "No deadline"),
+    # Someone named this person in a comment (NOT-4). On unless they turn
+    # "When someone mentions me" off; it follows mode, quiet hours and mutes.
+    "mention": ("Someone mentioned you in a comment", "Read the comment and reply", "Due",
+                "Nothing is due"),
 }
 
 
@@ -115,7 +119,7 @@ def validate_preferences(value: object) -> dict:
     result = {**DEFAULTS, **value}
     if not isinstance(result["mode"], str) or result["mode"] not in {"immediate", "digest", "off"}:
         raise ValueError("Choose immediate alerts, a daily digest, or off.")
-    for key in ("quiet_enabled", "critical_exceptions", "watch_all_projects"):
+    for key in ("quiet_enabled", "critical_exceptions", "watch_all_projects", "mentions"):
         if not isinstance(result[key], bool):
             raise ValueError("Choose whether to enable this notification option.")
     if not isinstance(result["timezone"], str) or len(result["timezone"]) > 100:
@@ -240,6 +244,8 @@ class PersonalInbox:
         with cross_process_lock(self.path):
             stored = self._read()
             def subscribed(source):
+                if source["category"] == "mention":
+                    return preferences["mentions"] and preferences["mode"] != "off"
                 return (source["category"] in preferences["events"] and preferences["mode"] != "off"
                         and (preferences["watch_all_projects"] or not source.get("goal_id")
                              or source.get("project_id") in preferences["projects"]))

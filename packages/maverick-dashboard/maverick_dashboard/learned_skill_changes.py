@@ -129,7 +129,8 @@ def original(request, operation):
         result = {"operation": operation, "context": context, "confirmed": False,
                   "message": "The original change is not confirmed. Absence does not establish failure. Nothing was repeated."}
         if row:
-            confirmed = row["state"] == "confirmed"
+            # A completion whose activity record is still pending is not confirmed.
+            confirmed = row["state"] == "confirmed" and not row.get("_audit_pending")
             result.update(confirmed=confirmed, action=row["action"], name=row["name"],
                           recorded_at=row["updated_at"], result=row.get("result"),
                           message=("Your original reviewed skill was added." if row["action"] == "admit" else
@@ -156,7 +157,7 @@ def recent(request):
     rows.sort(key=lambda r: (r["created_at"], r["id"]), reverse=True)
     authority(request, context)
     return {"context": context, "requests": [{"operation": r["id"][4:], "name": r["name"], "action": r["action"],
-             "confirmed": r["state"] == "confirmed", "created_at": r["created_at"]} for r in rows[:20]]}
+             "confirmed": r["state"] == "confirmed" and not r.get("_audit_pending"), "created_at": r["created_at"]} for r in rows[:20]]}
 
 
 def original_for_review(request, prepared, operation):

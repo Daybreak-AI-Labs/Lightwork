@@ -92,13 +92,41 @@ def customer_status(value):
                 recheck_before=datetime.fromtimestamp(check["decision_before"]).astimezone().isoformat())
         decisions.append(decision)
     selected = evaluation["acquisition"]["selected"]
-    return {"review": value["model"]["title"], "cases": decisions,
+    result = {"review": value["model"]["title"], "cases": decisions,
         "next_information": {"fact": facts[selected["fact"]]["name"], "cases_supported_in_least_helpful_entered_outcome": selected["worst_case_new_cases"],
             "effort_points": selected["cost"]} if selected else "No useful next question within the current permission and allowance",
-        "remaining_shared_allowance": evaluation["budget"], "possible_situations_entered": evaluation["states"], "meaning": native.NOTICE}
+        "remaining_shared_allowance": evaluation["budget"], "possible_situations_entered": evaluation["states"], "meaning": native.NOTICE,
+        "complete_native_review": {"href": PAGE + "?review=" + value["id"], "label": "Open all entered situations, losses and current source permissions"}}
+    if "robust" in value["model"]:
+        result.pop("cases")
+        result.pop("next_information")
+        result.update(_robust_status(value, facts, cases))
+    return result
+
+
+def _robust_status(value, facts, cases):
+    evaluation, model = value["evaluation"], value["model"]
+    robust = evaluation["robust"]
+    checks = []
+    for row in robust["cases"]:
+        case = cases[row["case"]]
+        choices = [action["name"] for action in case["actions"] if action["id"] in row["choices"]]
+        checks.append(case["name"] + ": " + ("Supported entered choices: " + "; ".join(choices) if choices else "Unknown. " + row["reason"]))
+    batch = robust.get("batch")
+    return {"entered_loss_check": "\n".join(checks) or robust.get("reason", "A complete current check is needed."),
+        "observation_batch": ("; ".join(facts[key]["name"] for key in batch["facts"]) + "; cost " + batch["cost"] + " " + model["robust"]["unit"]
+            if batch and batch["facts"] else "No additional observation is needed for the checked entered choices." if batch else "Unknown; no sufficient batch within current permissions and allowances."),
+        "earlier_observation_costs": evaluation["cost_used"] + " " + model["robust"]["unit"],
+        "complete_checks_used": str(evaluation["checks_used"]) + " of " + str(evaluation["check_limit"]),
+        "extra_loss_allowed": model["robust"]["epsilon"] + " " + model["robust"]["unit"],
+        "unconfirmed_check": "Read the earlier original, then separately acknowledge its hold; the allowance stays spent." if evaluation["check_hold"] else "None"}
 
 
 def snapshot(request, selection, *, action):
+    if action == "author":
+        identifier = selected(selection) if selection else ""
+        value = native.author_handoff(request, identifier)
+        return Snapshot(digest(value), "Your current account, workspace and complete decision form", "Open all bounded fields without replacing entered work.")
     if action == "original":
         history = native.historical_requests(request)
         return Snapshot(digest(history), "Your own exact original requests in this workspace", "Reading history does not repeat a reviewed change or reserve another observation.",
@@ -136,6 +164,10 @@ def snapshot(request, selection, *, action):
 
 
 def prepare(request, selection, arguments, *, action):
+    if action == "author":
+        identifier = selected(selection) if selection else ""
+        return Preview("Open the complete decision form. This does not save, check losses, reserve observations or replace entered work.",
+            native={"decision_evidence_author": native.author_handoff(request, identifier)})
     if action == "original":
         identifier, operation = arguments["original"].split("|")
         return Preview("This is the original recorded result, not permission to repeat it.", native=native.original(request, identifier, operation))
@@ -169,7 +201,15 @@ def entries():
             ("withdraw", "Withdraw a fact from selected cases", ScopeInput), ("acquire", "Reserve one shared observation under the budget", EmptyInput),
             ("refresh", "Review a source again and clear its previous observation", FactInput),
             ("answer", "Record an operator observation", AnswerInput), ("remove", "Remove this decision review", EmptyInput)))
+    values += tuple(Adapter("decisions." + action, label, input_model=EmptyInput,
+        snapshot=partial(snapshot, action=action), prepare=partial(prepare, action=action), execute=execute,
+        recover=recover, read_recovery=recover, **common) for action, label in (
+            ("qualify", "Check every entered loss and joint observation answer"),
+            ("acquire_batch", "Reserve the complete checked observation batch"),
+            ("acknowledge", "Acknowledge an unconfirmed check without repeating it")))
     return values + (Adapter("decisions.read", "Read current choices and useful information", input_model=EmptyInput,
         snapshot=partial(snapshot, action="read"), prepare=partial(prepare, action="read"), **common),
         Adapter("decisions.original", "Read your exact original decision request", input_model=OriginalInput,
-        snapshot=partial(snapshot, action="original"), prepare=partial(prepare, action="original"), **common))
+        snapshot=partial(snapshot, action="original"), prepare=partial(prepare, action="original"), **common),
+        Adapter("decisions.author", "Open the complete decision form", input_model=EmptyInput,
+            snapshot=partial(snapshot, action="author"), prepare=partial(prepare, action="author"), **common))

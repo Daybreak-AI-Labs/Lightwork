@@ -21,7 +21,24 @@
   var PROPOSAL = { pending_review: ['Waiting for review', 'warn'], approved: ['Accepted', 'active'], rejected: ['Rejected', 'idle'] };
 
   function say(text) { window.mvStatus(statusEl, text); }
-  function fail(f, action) { say(R.errorText(f, action)); }
+  function fail(f, action) {
+    var detail = f && f.detail;
+    if (f && f.status === 403 && detail === 'This API key does not have a scope that allows this. Create a key with the scope you need on your account page.') {
+      say('This access key is not allowed to make approval decisions. Use a key with approval permission and installation administrator access.');
+      return;
+    }
+    var refusals = {
+      'the release author cannot approve their own release': 'A different person must approve this notice version.',
+      'a role or authenticated human already approved this release': 'This person or approval role has already approved this notice version.',
+      'only the authenticated approver can revoke this approval': 'Only the person who gave this approval can withdraw it.',
+      'update proposal requires a reviewer distinct from its creator': 'A different person must review this update proposal.'
+    };
+    if (f && f.status === 403 && Object.prototype.hasOwnProperty.call(refusals, detail)) {
+      say(refusals[detail]); return;
+    }
+    var plain = f && f.status === 503 && window.mvPlainDetail ? window.mvPlainDetail(detail) : '';
+    say(plain || R.errorText(f, action));
+  }
   function badge(map, v) { var s = map[v] || [R.human(v), 'info']; return R.badge(s[0], s[1]); }
   function name(id) { return R.human(id); }
   function checkedValues(nameAttr) {
@@ -88,7 +105,7 @@
     R.table(document.getElementById('png-records'), [
       { label: 'Notice', value: function (e) { return name(e.notice_id); } },
       { label: 'Created', value: function (e) { return R.when(e.created_at); } },
-    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet.' });
+    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet. Records appear here when a notice version is published.' });
 
     var q = data.queue || {};
     var waiting = (q.pending || 0) + (q.leased || 0);
@@ -128,7 +145,6 @@
     return R.call('POST', API + '/releases/' + encodeURIComponent(r.notice_id) + '/versions/' + r.version + path, body)
       .then(function () { say(done); return load(); })
       .catch(function (f) {
-        if (f && f.status === 403) { say('You cannot do this step: the author of a version, or someone who already approved it, cannot approve it again.'); return; }
         if (f && f.status === 409) { say('This version changed or is not ready for this step. The list has been refreshed.'); load(); return; }
         fail(f, action);
       });
@@ -164,7 +180,6 @@
           { expected_approval_revision: a.revision, idempotency_key: R.newKey() })
           .then(function () { say('Approval withdrawn.'); return load(); })
           .catch(function (f) {
-            if (f && f.status === 403) { say('Only the person who gave this approval can withdraw it.'); return; }
             fail(f, 'withdraw the approval');
           });
       });
@@ -284,7 +299,7 @@
   document.getElementById('png-effective').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var prop = document.getElementById('png-eff-property').value;
-    if (!prop) { say('There are no notices yet.'); return; }
+    if (!prop) { say('There are no notices yet. Create a notice first, then check which version is live.'); return; }
     var q = '?jurisdiction=' + encodeURIComponent(document.getElementById('png-eff-jur').value) +
       '&locale=' + encodeURIComponent(document.getElementById('png-eff-lang').value);
     var at = R.toEpoch(document.getElementById('png-eff-at').value);

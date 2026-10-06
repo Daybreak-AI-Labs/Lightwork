@@ -23,6 +23,24 @@
   var testLiveEnabled = false;
   var editingCase = null;
   var testBaseline = '', testInstructions = '', testContext = '', testLoad = 0, comparisonReview = null;
+  // A whole saved set runs at once (the most an agent or specialist can save).
+  var MAX_RUN = 20, PER_QUESTION = 0.05;
+  function costLimit(n) { return '$' + (PER_QUESTION * n).toFixed(2); }
+  // The editor in Agent Factory hands over the instructions it wants tested.
+  function proposedKey(specialist) { return 'lightwork-proposed-instructions:' + specialist; }
+  function canOpenAgents() { var root = $('wo-root'); return !!(root && root.dataset.canOpenAgents === 'true'); }
+  function sourceLink(specialist, anchorId) {
+    // Go to the instructions that produced an answer: the words tested in this
+    // run, and the live editor where they can be changed.
+    var box = el('span');
+    var here = el('a', null, 'See the instructions used'); here.href = '#' + anchorId; box.appendChild(here);
+    if (canOpenAgents()) {
+      box.appendChild(document.createTextNode(' · '));
+      var edit = el('a', null, 'Edit in Agent Factory');
+      edit.href = '/agents?name=' + encodeURIComponent(specialist) + '#f-persona'; box.appendChild(edit);
+    }
+    return box;
+  }
   function runStorageKey(specialist) { return 'lightwork-specialist-answer-run:' + testContext + ':' + specialist; }
   function pendingRun(specialist) {
     try { return window.sessionStorage.getItem(runStorageKey(specialist)); } catch (error) { return null; }
@@ -55,6 +73,7 @@
         var card = el('div', 'wo-answer-card', null), answer = run.results.find(function (r) { return r.case_id === question.id && r.variant === variant; });
         card.appendChild(el('h5', null, variant === 'current' ? 'Current instructions' : 'Proposed instructions'));
         card.appendChild(el('p', 'wo-answer-text', answer ? answer.answer : 'Not checked.'));
+        card.appendChild(sourceLink(run.specialist, 'wo-run-' + run.id + '-' + variant));
         if (answer) {
           var labels = {includes:'Required phrases', excludes:'Forbidden phrases', refusal:'Refusal', citation:'Source marker', empty_answer:'Answer present'};
           card.appendChild(el('p', null, Object.keys(answer.checks).map(function (key) { return (labels[key] || 'Answer check') + ': ' + (answer.checks[key] === 1 ? 'Passed' : 'Needs review'); }).join(' · ')));
@@ -64,8 +83,12 @@
       });
       section.appendChild(pair); nodes.push(section);
     });
-    var instructions = el('details'); instructions.appendChild(el('summary', null, 'Instructions used'));
-    ['current', 'proposed'].forEach(function (variant) { instructions.appendChild(el('h4', null, variant === 'current' ? 'Current instructions' : 'Proposed instructions')); instructions.appendChild(el('p', 'wo-answer-text', run.comparison[variant + '_instructions'])); });
+    var instructions = el('details'); instructions.open = true; instructions.appendChild(el('summary', null, 'Instructions used'));
+    ['current', 'proposed'].forEach(function (variant) {
+      var heading = el('h4', null, variant === 'current' ? 'Current instructions' : 'Proposed instructions');
+      heading.id = 'wo-run-' + run.id + '-' + variant; heading.tabIndex = -1;
+      instructions.appendChild(heading); instructions.appendChild(el('p', 'wo-answer-text', run.comparison[variant + '_instructions']));
+    });
     nodes.push(instructions); return nodes;
   }
   function newRunId() {
@@ -110,10 +133,10 @@
     var list = [];
     if (!testCases.length) list.push(el('p', 'muted', 'No answer checks yet. Add one below.'));
     else {
-      list.push(el('p', null, plural(testCases.length, 'saved check') + ' for this one. Choose up to 5 for the next run.'));
+      list.push(el('p', null, plural(testCases.length, 'saved check') + ' for this one. All are chosen, so the whole set runs together; clear any you want to leave out.'));
       var rows = testCases.map(function (c) {
         var choose = el('input'); choose.type = 'checkbox'; choose.className = 'wo-test-choice';
-        choose.value = c.id; choose.checked = testCases.length <= 5;
+        choose.value = c.id; choose.checked = testCases.length <= MAX_RUN;
         choose.setAttribute('aria-label', 'Include this answer check in the next run');
         choose.addEventListener('change', updateRunAvailability);
         var actions = el('span');
@@ -170,9 +193,15 @@
       }
       box.appendChild(el('p', 'muted', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
         '. Each check used the instructions shown by this version; no actions or company knowledge were used.'));
-      if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result'], r.results.map(function (answer) {
-        return [answer.task, answer.answer, answer.passed ? 'Passed' : 'Needs review'];
+      var anchor = 'wo-run-' + r.id + '-current';
+      if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result', 'Where it came from'], r.results.map(function (answer) {
+        return [answer.task, answer.answer, answer.passed ? 'Passed' : 'Needs review', sourceLink(r.specialist, anchor)];
       })));
+      var used = el('details'); used.appendChild(el('summary', null, 'Instructions used'));
+      var heading = el('h4', null, 'Instructions this run tested'); heading.id = anchor; heading.tabIndex = -1;
+      used.appendChild(heading);
+      used.appendChild(el('p', 'wo-answer-text', r.instructions || 'This older run did not keep a copy of its instructions.'));
+      box.appendChild(used);
       return box;
     }));
   }
@@ -195,7 +224,19 @@
       if (generation !== testLoad || specialist !== $('wo-test-specialist').value) return;
       $('wo-test-status').textContent = '';
       renderTests(data);
+      offerProposed(specialist);
     } catch (failure) { if (generation === testLoad) $('wo-test-status').textContent = await J.problem(failure, 'load the answer checks'); }
+  }
+  function offerProposed(specialist) {
+    // Arriving from Agent Factory's "Test these instructions": open the
+    // comparison with the editor's unsaved instructions, every check chosen.
+    var params = new URLSearchParams(location.search), proposed = null;
+    if (params.get('compare') !== '1') return;
+    try { proposed = window.sessionStorage.getItem(proposedKey(specialist)); } catch (_) { proposed = null; }
+    if (!proposed || !testAdmin) return;
+    $('wo-compare').open = true;
+    $('wo-compare-instructions').value = proposed;
+    $('wo-compare-instructions').focus();
   }
   function selectedTestIds() {
     return Array.from(document.querySelectorAll('#wo-tests-list .wo-test-choice:checked'), function (box) { return box.value; });
@@ -203,10 +244,9 @@
   function updateRunAvailability() {
     clearComparisonReview();
     var count = selectedTestIds().length;
-    $('wo-test-run').disabled = !$('wo-test-specialist').value || (!pendingRun($('wo-test-specialist').value) && (!testLiveEnabled || !count || count > 5));
-    $('wo-compare-review-button').disabled = !testLiveEnabled || !count || count > 5 || !!pendingRun($('wo-test-specialist').value);
-    if (testCases.length > 5) $('wo-test-status').textContent = count > 5
-      ? 'Choose no more than 5 checks for one run.' : count ? '' : 'Choose up to 5 checks to run.';
+    $('wo-test-run').disabled = !$('wo-test-specialist').value || (!pendingRun($('wo-test-specialist').value) && (!testLiveEnabled || !count || count > MAX_RUN));
+    $('wo-compare-review-button').disabled = !testLiveEnabled || !count || count > MAX_RUN || !!pendingRun($('wo-test-specialist').value);
+    if (testCases.length && !count) $('wo-test-status').textContent = 'Choose at least one check to run.';
   }
   async function loadTestSpecialists() {
     try {
@@ -381,7 +421,7 @@
       var specialist = $('wo-test-specialist').value;
       var selected = selectedTestIds();
       var id = pendingRun(specialist);
-      if (!specialist || (!id && (!selected.length || selected.length > 5))) return;
+      if (!specialist || (!id && (!selected.length || selected.length > MAX_RUN))) return;
       var button = $('wo-test-run'); button.disabled = true;
       try {
         if (id) {
@@ -393,7 +433,7 @@
           return;
         }
         if (!(await window.mvConfirm('Check ' + plural(selected.length, 'answer') +
-          ' now? This may make paid AI requests. The run has a $0.25 spending limit, uses no tools, and never automatically retries an interrupted request.',
+          ' now? This may make paid AI requests. The run has a ' + costLimit(selected.length) + ' spending limit ($0.05 a question), uses no tools, and never automatically retries an interrupted request.',
           {okText: 'Check answers'}))) return;
         id = newRunId();
         if (!id) { $('wo-test-run-status').textContent = 'This browser cannot keep a safe request reference, so no check was started.'; return; }
@@ -427,7 +467,7 @@
     $('wo-compare-form').addEventListener('submit', function (event) {
       event.preventDefault();
       var ids = selectedTestIds(), specialist = $('wo-test-specialist').value, proposed = $('wo-compare-instructions').value;
-      if (!testBaseline || !testContext || !ids.length || ids.length > 5 || pendingRun(specialist)) return;
+      if (!testBaseline || !testContext || !ids.length || ids.length > MAX_RUN || pendingRun(specialist)) return;
       var selected = testCases.filter(function (row) { return ids.includes(row.id); }), revisions = {};
       selected.forEach(function (row) { revisions[row.id] = row.revision; });
       comparisonReview = {specialist:specialist, case_ids:ids, case_revisions:revisions, proposed_instructions:proposed,
@@ -443,7 +483,7 @@
     $('wo-compare-start').addEventListener('click', async function () {
       var reviewed = comparisonReview, button = $('wo-compare-start');
       if (!reviewed || pendingRun(reviewed.specialist)) return;
-      if (!(await window.mvConfirm('Compare these two instruction versions on the reviewed questions? At most $0.25 total. No instructions will change and uncertain paid requests will not be repeated.', {okText:'Start comparison'}))) return;
+      if (!(await window.mvConfirm('Compare these two instruction versions on the reviewed questions? At most ' + costLimit(reviewed.case_ids.length) + ' total. No instructions will change and uncertain paid requests will not be repeated.', {okText:'Start comparison'}))) return;
       if (comparisonReview !== reviewed) return;
       button.disabled = true;
       var id = newRunId();

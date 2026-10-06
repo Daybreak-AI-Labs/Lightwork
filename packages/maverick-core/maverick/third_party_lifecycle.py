@@ -16,6 +16,7 @@ The capability is default-off and uses the exact lifecycle gates::
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -586,6 +587,7 @@ class LifecycleRecord:
     created_at: float
     updated_at: float
     integrity_sha256: str
+    activation_assessment: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -1206,6 +1208,7 @@ class ThirdPartyLifecycleStore:
         respondent_assignments: Mapping[str, str],
         retention_seconds: int,
         idempotency_key: str,
+        effect_guard: Callable[[], None] | None = None,
     ) -> Assessment:
         """Create an assessment only from an independently approved version."""
 
@@ -1248,6 +1251,9 @@ class ThirdPartyLifecycleStore:
                     "assessment",
                 )
                 return self._assessment_from(payload, digest)
+            if effect_guard is not None:
+                effect_guard()
+            self._registered_vendor(tenant, vendor)
             selected = self._get_template(connection, tenant, template, version)
             if selected.state != "approved":
                 raise ThirdPartyLifecyclePermissionDenied(
@@ -2081,6 +2087,7 @@ class ThirdPartyLifecycleStore:
         dependencies: Sequence[Mapping[str, object]],
         retention_seconds: int,
         idempotency_key: str,
+        effect_guard: Callable[[], None] | None = None,
     ) -> LifecycleRecord:
         """Create an onboarding lifecycle with only opaque dependency evidence."""
 
@@ -2119,6 +2126,9 @@ class ThirdPartyLifecycleStore:
                     "lifecycle",
                 )
                 return self._lifecycle_from(payload, digest)
+            if effect_guard is not None:
+                effect_guard()
+            self._registered_vendor(tenant, vendor)
             payload = {
                 "tenant_id": tenant,
                 "lifecycle_id": lifecycle,
@@ -2160,6 +2170,16 @@ class ThirdPartyLifecycleStore:
                 now,
             )
             return self._lifecycle_from(payload, digest)
+
+    @staticmethod
+    def _registered_vendor(tenant, vendor):
+        # Legacy opaque references remain readable. New register selections
+        # carry the actual master ID, never a slug or name-derived match.
+        if vendor.startswith("VMR-"):
+            from . import vendor_management
+            from .paths import current_tenant_id_strict
+            if current_tenant_id_strict() != tenant or vendor_management.get_vendor(vendor) is None:
+                raise ThirdPartyLifecycleConflict("The selected registered vendor is no longer available in this workspace.")
 
     def get_lifecycle(self, tenant_id: str, lifecycle_id: str) -> LifecycleRecord:
         tenant = _tenant(tenant_id)
@@ -2209,6 +2229,9 @@ class ThirdPartyLifecycleStore:
         reason_code: str,
         expected_revision: int,
         idempotency_key: str,
+        assessment_id: str | None = None,
+        assessment_revision: int | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> LifecycleRecord:
         """Apply ordinary stage transitions; offboarding has a dedicated workflow."""
 
@@ -2232,6 +2255,10 @@ class ThirdPartyLifecycleStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
+        if assessment_id is not None:
+            request["assessment_id"] = assessment_id
+        if assessment_revision is not None:
+            request["assessment_revision"] = assessment_revision
         allowed = {
             "onboarding": frozenset({"active", "suspended"}),
             "active": frozenset({"suspended"}),
@@ -2252,6 +2279,8 @@ class ThirdPartyLifecycleStore:
             )
             if operation is not None:
                 return self._lifecycle_from(raw, stored_digest)
+            if effect_guard is not None:
+                effect_guard()
             record = self._lifecycle_from(raw, stored_digest)
             if record.revision != expected:
                 raise ThirdPartyLifecycleConflict(
@@ -2265,6 +2294,12 @@ class ThirdPartyLifecycleStore:
                 raise ThirdPartyLifecycleConflict(
                     f"lifecycle transition {record.stage} -> {target_stage} is prohibited"
                 )
+            activation = None
+            if target_stage == "active":
+                activation = self._activation_assessment(
+                    connection, tenant, record.vendor_ref,
+                    assessment_id=assessment_id, assessment_revision=assessment_revision,
+                )
             payload = dict(raw)
             payload.update(
                 {
@@ -2273,6 +2308,10 @@ class ThirdPartyLifecycleStore:
                     "updated_at": now,
                 }
             )
+            if activation is not None:
+                payload["activation_assessment"] = activation
+            if effect_guard is not None:
+                effect_guard()
             digest = self._write(
                 connection,
                 "lifecycles",
@@ -2299,6 +2338,41 @@ class ThirdPartyLifecycleStore:
                 now,
             )
             return self._lifecycle_from(payload, digest)
+
+    def _activation_assessment(self, connection, tenant, vendor_ref, *, assessment_id=None, assessment_revision=None):
+        """Use the latest actual evaluation; an older passing result cannot hide a newer concern."""
+        rows = connection.execute("SELECT * FROM assessments WHERE tenant_id=?", (tenant,)).fetchall()
+        candidates = [self._assessment_from(self._payload(row, "assessment"), row["integrity_sha256"]) for row in rows]
+        candidates = sorted((row for row in candidates if row.vendor_ref == vendor_ref), key=lambda row: (row.updated_at, row.assessment_id), reverse=True)
+        if not candidates:
+            raise ThirdPartyLifecycleConflict("Complete and evaluate this registered vendor's assessment before marking it active.")
+        selected = candidates[0]
+        if ((assessment_id is not None and selected.assessment_id != assessment_id)
+                or (assessment_revision is not None and selected.revision != assessment_revision)):
+            raise ThirdPartyLifecycleConflict("The current vendor assessment changed. Review its latest evaluation.")
+        template = self._get_template(connection, tenant, selected.template_id, selected.template_version)
+        evaluation = self._evaluation(template, selected)
+        if (selected.retained_until <= self._clock() or template.state != "approved"
+                or selected.route != "owner_review" or evaluation[3] != selected.route
+                or any(task["status"] == "open" for task in selected.tasks)):
+            raise ThirdPartyLifecycleConflict("The latest vendor assessment must be evaluated, complete, ready for owner review, and have no open tasks before activation.")
+        return {"assessment_id": selected.assessment_id, "revision": selected.revision,
+                "integrity_sha256": selected.integrity_sha256, "route": selected.route,
+                "highest_severity": selected.highest_severity}
+
+    def activation_assessment(self, tenant_id, vendor_ref, *, assessment_id=None, assessment_revision=None):
+        tenant = _tenant(tenant_id)
+        with self._connect() as connection:
+            return self._activation_assessment(connection, tenant, _id(vendor_ref, "vendor_ref"),
+                assessment_id=assessment_id, assessment_revision=assessment_revision)
+
+    @contextlib.contextmanager
+    def activation_scope(self, tenant_id, vendor_ref):
+        """Keep actual assessment writers waiting until a dependent native status commits."""
+        tenant = _tenant(tenant_id)
+        with self._connect() as connection:
+            self._begin(connection)
+            yield self._activation_assessment(connection, tenant, _id(vendor_ref, "vendor_ref"))
 
     @staticmethod
     def _derive_blockers(

@@ -73,7 +73,7 @@
     let submitted = false, outcome = '';
     lock(true);
     try {
-      const confirm = typeof window.mvConfirm === 'function' ? await window.mvConfirm(prompt, {okText: 'Confirm'}) : window.confirm(prompt);
+      const confirm = typeof window.mvConfirm === 'function' ? await window.mvConfirm(prompt, {okText: path === '/rules-only' ? 'Save rule-only draft' : 'Request release review'}) : window.confirm(prompt);
       if (!confirm) return;
       submitted = true;
       const result = await request(path, {context: state.context, confirm: true, flow_id: row.id,
