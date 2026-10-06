@@ -2058,6 +2058,9 @@ body.glass-on:not(.theme-hicontrast) .settings-index { backdrop-filter: blur(22p
   :root { --shell-topbar-h: calc(2 * var(--space-2) + 2 * 44px + var(--space-1) + 1px); }
   .topbar { flex-wrap: wrap; row-gap: var(--space-1); }
   .topbar__controls { flex-basis: 100%; justify-content: space-between; }
+  /* Two rows cover too much of a phone while reading: scrolling down tucks
+     the bar away and scrolling up brings it back (lightwork-ui.js). */
+  body.topbar-tucked .topbar { transform: translateY(-100%); }
 }
 /* Below 360 px even that row is too narrow for seven 44 px controls. */
 @media (max-width: 360px) {

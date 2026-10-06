@@ -2387,3 +2387,38 @@ window.mvReveal = function (element, options) {
   }
   if (document.readyState === 'complete') whenIdle(); else window.addEventListener('load', whenIdle, {once: true});
 })();
+
+// Phones: the top bar's controls need two 44 px rows (109 px), too much of a
+// small screen to cover while reading. Scrolling down tucks the bar away;
+// scrolling up, the top of the page, a focus inside it or an open menu or
+// drawer shows every control again (lightwork.css: body.topbar-tucked).
+(function () {
+  'use strict';
+  var bar = document.querySelector('.topbar');
+  if (!bar || typeof window.matchMedia !== 'function') return;
+  var phone = window.matchMedia('(max-width: 560px)');
+  var body = document.body, last = window.scrollY || 0, queued = false;
+  function tuck(on) { body.classList.toggle('topbar-tucked', on); }
+  function held() {
+    return !phone.matches || body.classList.contains('nav-open') || bar.contains(document.activeElement) ||
+      !!bar.querySelector('[aria-expanded="true"], details[open]');
+  }
+  function update() {
+    queued = false;
+    var y = window.scrollY || 0;
+    if (y <= 0 || held()) { tuck(false); last = y; return; }
+    if (Math.abs(y - last) < 8) return;   // jitter and momentum ends change nothing
+    tuck(y > last);
+    last = y;
+  }
+  window.addEventListener('scroll', function () {
+    if (queued) return;
+    queued = true;
+    (window.requestAnimationFrame || setTimeout)(update);
+  }, {passive: true});
+  bar.addEventListener('focusin', function () { tuck(false); });
+  // Shift+Tab heads back towards the bar: show it before focus arrives, so
+  // the browser does not scroll the page to reach a control out of view.
+  document.addEventListener('keydown', function (event) { if (event.key === 'Tab' && event.shiftKey) tuck(false); }, true);
+  if (typeof phone.addEventListener === 'function') phone.addEventListener('change', function () { if (!phone.matches) tuck(false); });
+})();
