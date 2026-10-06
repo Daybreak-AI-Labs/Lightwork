@@ -125,9 +125,14 @@ def _submit_reviewed(request, goal_id, payload):
     from . import goal_feedback_store
     follow_up = (not value.get("replayed") and goal_feedback_store.should_follow_up(
         actor, value.get("agent", ""), previous=previous, rating=payload.rating, world=world))
+    hand_off = goal_feedback_store.should_offer_person(
+        actor, value.get("agent", ""), rating=payload.rating, world=world)
     return {"context": context_for(request), "feedback": feedback, "saved": True, "training_completed": False,
             "acknowledgement": _acknowledgement(value),
-            "follow_up": {"question": "What would make this better?"} if follow_up else None}
+            "follow_up": {"question": "What would make this better?"} if follow_up else None,
+            # A person is one step away once the AI's answers keep missing (HLP-3).
+            "hand_off": {"label": "Get help from a person",
+                         "href": f"/help?from=/chat/goal/{goal_id}&task={goal_id}#get-help"} if hand_off else None}
 
 
 def _acknowledgement(value):

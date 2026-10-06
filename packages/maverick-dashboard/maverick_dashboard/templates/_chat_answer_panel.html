@@ -76,7 +76,7 @@
       {% endif %}
       {% if goal.status in ('done', 'blocked', 'failed') %}
         {% if goal.status in ('blocked', 'failed') %}
-        <p><a class="btn btn--ghost" href="/tasks/{{ goal.id }}/diagnostics">{{ ui("Review safe task diagnostics") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">{{ ui("Prepare support report") }}</a></p>
+        <p><a class="btn btn--ghost" href="/tasks/{{ goal.id }}/diagnostics">{{ ui("Review safe task diagnostics") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">{{ ui("Prepare support report") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#get-help" data-get-help>{{ ui('Get help from a person') }}</a></p>
         {% endif %}
         {# Always-available thumbs up/down (unlike the gated approval above): any
            finished result can be rated, and the verdict grounds a real outcome
@@ -109,6 +109,7 @@
           </form>
           <button id="feedback-recover" class="btn btn--ghost" type="button" hidden style="min-height:44px;">{{ ui('Check my original feedback') }}</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted" style="flex-basis:100%;min-height:1em;"></span>
+          <p id="feedback-hand-off" hidden style="flex-basis:100%;margin:0;">{{ ui("Still not right? A person can help, with this task attached.") }} <a class="btn btn--ghost" href="/help?task={{ goal.id }}#get-help" data-get-help>{{ ui('Get help from a person') }}</a></p>
         </div>{% endif %}
         {% if goal.result %}<div class="answer-actions" role="group" aria-label="{{ ut('Answer actions') }}">
           <button id="copy-result" class="btn btn--ghost" type="button">{{ ui('Copy answer') }}</button>
