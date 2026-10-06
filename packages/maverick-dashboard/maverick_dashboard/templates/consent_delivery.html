@@ -240,7 +240,7 @@
     }
     async function retireKey(d, button) {
       var keys = oldKeys(d).map(function (k) { return {value: k.key_id, label: k.key_id}; });
-      var answer = await window.mvForm("Retire an old signing key", [{key: "key", label: "Key to retire", type: "select", options: keys, required: true}], {okText: "Continue"});
+      var answer = await window.mvForm("Retire an old signing key", [{key: "key", label: "Key to retire", type: "select", options: keys, required: true}], {okText: "Review key retirement"});
       if (!answer) return;
       if (!(await CW.confirm("Retire the key " + answer.key + " for " + CW.human(d.destination_id) + "? Updates signed with it will no longer be accepted.", "Retire key"))) return;
       CW.busy(button, async function () {

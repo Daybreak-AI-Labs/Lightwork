@@ -534,7 +534,7 @@
     }
     $("tcb-copy-code").addEventListener("click", function () { window.mvCopy($("tcb-challenge-code").textContent); });
     $("tcb-new-domain").addEventListener("click", async function () {
-      var answers = await window.mvForm("Add a web address", [{key: "host", label: "Web address, for example trust.example.com", type: "text", required: true}], {okText: "Continue"});
+      var answers = await window.mvForm("Add a web address", [{key: "host", label: "Web address, for example trust.example.com", type: "text", required: true}], {okText: "Review web address"});
       if (!answers || !answers.host) return;
       var host = String(answers.host).trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
       var claimId = CW.slug(host, "address");

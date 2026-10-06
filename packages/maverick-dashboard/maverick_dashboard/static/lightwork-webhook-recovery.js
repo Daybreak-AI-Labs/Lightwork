@@ -39,7 +39,7 @@
     const context = value.context, ticket = ++generation; let submitted = false, result, failure;
     lock(true);
     try {
-      if (!window.mvConfirm || !await window.mvConfirm(row.summary + ' Record this verified check for “' + row.label + '”? No secret will be saved or sent again.')) return;
+      if (!window.mvConfirm || !await window.mvConfirm(row.summary + ' Record this verified check for “' + row.label + '”? No secret will be saved or sent again.', {okText: 'Record this check'})) return;
       if (ticket !== generation) return;
       submitted = true;
       result = await request('/' + encodeURIComponent(row.id) + '/check', {context, review: row.review, confirm: true});

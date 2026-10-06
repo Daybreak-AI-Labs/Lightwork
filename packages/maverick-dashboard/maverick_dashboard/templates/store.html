@@ -97,7 +97,7 @@
           <td>{% if catalogs_default %}Built-in catalog{% else %}{{ url }}{% endif %}</td>
           <td>
             {% if not catalogs_default %}
-            <form method="post" action="/store/catalogs" data-st-confirm="Stop listing skills from {{ url }}?" class="st-inline">
+            <form method="post" action="/store/catalogs" data-st-ok="Stop listing this catalog" data-st-confirm="Stop listing skills from {{ url }}?" class="st-inline">
               <input type="hidden" name="action" value="remove" />
               <input type="hidden" name="url" value="{{ url }}" />
               <button type="submit" class="btn btn--danger" aria-label="Remove catalog {{ url }}">Remove</button>
@@ -119,7 +119,7 @@
     <p id="st-catalog-help" class="muted st-small">Your IT team gives you this web address. Adding your own
       catalog replaces the built-in one.</p>
     {% if not catalogs_default %}
-    <form method="post" action="/store/catalogs" data-st-confirm="Go back to the built-in catalog? Your own catalogs will be removed from this list." class="st-inline">
+    <form method="post" action="/store/catalogs" data-st-ok="Use the built-in catalog" data-st-confirm="Go back to the built-in catalog? Your own catalogs will be removed from this list." class="st-inline">
       <input type="hidden" name="action" value="reset" />
       <button type="submit" class="btn">Use the built-in catalog</button>
     </form>
@@ -179,7 +179,7 @@
         form.addEventListener('submit', function(event) {
           if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
           event.preventDefault();
-          window.mvConfirm(form.dataset.stConfirm, {okText: 'Continue'}).then(function(ok) {
+          window.mvConfirm(form.dataset.stConfirm, {okText: form.dataset.stOk}).then(function(ok) {
             if (!ok) return;
             form.dataset.confirmed = 'true';
             if (form.requestSubmit) form.requestSubmit(); else form.submit();

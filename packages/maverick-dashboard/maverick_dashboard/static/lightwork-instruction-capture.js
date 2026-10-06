@@ -90,7 +90,9 @@
     let submitted = false, result, failure;
     lock(true);
     try {
-      if (!window.mvConfirm || !await window.mvConfirm(prompt)) return;
+      const okText = path === '' ? 'Keep the instructions' : path === '/setup' ? (body.enabled ? 'Allow recording' : 'Turn recording off')
+        : path.endsWith('/withdraw') ? 'Withdraw capture' : 'Finish capture';
+      if (!window.mvConfirm || !await window.mvConfirm(prompt, {okText})) return;
       submitted = true;
       clear();
       result = await request(path, {...body, context, confirm: true});

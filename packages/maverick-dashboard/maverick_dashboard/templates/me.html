@@ -119,7 +119,7 @@
       <p>{{ pending.channel | capitalize }} account <strong>{{ pending.sender_id }}</strong> in workspace <strong>{{ pending.provider_tenant }}</strong>.</p>
       {% if bridge_can_connect %}<form method="post" action="/me/channels/oidc/confirm">
         <input type="hidden" name="challenge_id" value="{{ pending.id }}" />
-        <button type="submit" class="btn btn--primary">Yes, connect this account</button>
+        <button type="submit" class="btn btn--primary">Connect this account</button>
       </form>{% endif %}
     </div>
     {% endfor %}

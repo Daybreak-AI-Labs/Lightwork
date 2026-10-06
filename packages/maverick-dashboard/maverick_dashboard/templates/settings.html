@@ -1144,8 +1144,8 @@
         // A form that asks first (Remove key, reset visibility) confirms
         // before anything is sent; declining sends nothing.
         if (form.dataset.confirm) {
-          var confirmText = {okText: form.dataset.confirmOk || 'Confirm'};
-          var agreed = window.mvConfirm ? await window.mvConfirm(form.dataset.confirm, confirmText) : window.confirm(form.dataset.confirm);
+          var agreed = window.mvConfirm ? await window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Save this change'})
+            : window.confirm(form.dataset.confirm);
           if (!agreed) { delete form.dataset.saving; return; }
         }
         var status = form.querySelector('[data-save-status]') || providerStatus(form);
