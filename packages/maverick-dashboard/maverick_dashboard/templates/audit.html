@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Activity log · Lightwork{% endblock %}
 {% block content %}
-  <p class="panel">This is the audit metadata view. Private prompts, task text and tool inputs are withheld from display, search and downloads. Projected downloads are not the original signed audit bytes. <a href="/content-access">Review specific content access</a>.</p>
+  <p class="panel">This view summarizes recorded activity. Private messages, task details and tool inputs are hidden from this view, search and downloads. Downloads contain summaries, rather than the original signed log. <a href="/content-access">Review access to specific content</a>.</p>
   <style>
     .aud-detail { display: flex; flex-direction: column; gap: var(--space-0-5); max-width: 46rem; }
     .aud-kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2); align-items: baseline; }
@@ -21,20 +21,33 @@
     .aud-links { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
     .aud-nowrap { white-space: nowrap; }
     .aud-order { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin: 0 0 var(--space-3); font-size: var(--text-sm); }
+    #maintenance-results p, #maintenance-results span { overflow-wrap: anywhere; }
+    #audit-maintenance-review .table-scroll { overflow-x: auto; max-width: 100%; min-width: 0; margin-block: var(--space-3); }
+    #audit-maintenance-review table { width: 100%; min-width: 38rem; border-collapse: collapse; }
+    #audit-maintenance-review th, #audit-maintenance-review td { padding: var(--space-3); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+    #audit-maintenance-review label { display: flex; gap: var(--space-3); align-items: start; padding-block: var(--space-3); }
+    @media (max-width: 600px) {
+      #audit-maintenance-review table { min-width: 0; }
+      #audit-maintenance-review thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+      #audit-maintenance-review tbody, #audit-maintenance-review tr, #audit-maintenance-review td { display: block; }
+      #audit-maintenance-review tr { margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); }
+      #audit-maintenance-review td { padding: var(--space-2) 0; border: 0; overflow-wrap: anywhere; }
+      #audit-maintenance-review td::before { content: attr(data-label); display: block; margin-bottom: var(--space-1); color: var(--muted); font-size: var(--text-xs); }
+    }
   </style>
 
   {% from "_hero.html" import hero, state %}
   {% from "_empty_state.html" import empty_state %}
   {% call hero('Governance', 'Activity log',
-               subtitle='Everything that happened, in order',
-               lede='Everything Lightwork and its assistants did, in the order it happened. Filter by date,
+               subtitle='Recorded activity, in order',
+               lede='The activity recorded by Lightwork and its assistants. Filter by date,
                      kind of event or person, and download it when an auditor asks.') %}
     {{ state('Current state',
              'Tamper-evident: on' if audit_signing_enabled else 'Tamper-evident: off',
-             badge='Protected' if audit_signing_enabled else 'Not protected',
+             badge='Signing on' if audit_signing_enabled else 'Signing off',
              badge_class='ok' if audit_signing_enabled else 'warn',
-             copy=('Each entry is sealed so later changes can be detected.' if audit_signing_enabled
-                   else 'Entries are kept but not sealed. Turn on tamper-evident records on the Compliance page.')) }}
+             copy=('Check the saved signatures below. Keep a checkpoint receipt elsewhere to detect a rolled-back history.' if audit_signing_enabled
+                   else 'Entries are kept without signatures. Turn on tamper-evident records on the Compliance page.')) }}
     <div class="aud-links">
       <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a>
       {% if can_open_page('/replay') %}<a class="btn btn--ghost" href="/replay">Replay a task</a>{% endif %}
@@ -231,10 +244,20 @@
         <button type="button" class="btn btn--ghost" id="aud-proof-key">Show the key checkers need</button>
         {% if can_global_admin %}<button type="button" class="btn btn--danger" id="aud-rotate">Make a new signing key</button>{% endif %}
       </div>
-      <p class="muted">A proof bundle lets someone outside your company confirm what Lightwork did. Give them the key separately, for example by email.</p>
+      <p class="muted">A signed proof bundle lets an independent checker verify who signed the included records and whether those records changed. It does not prove that a recorded business result is true. Give the checker the public key separately through a trusted channel.</p>
     </details>
     {% endif %}
   </section>
+
+  <section class="panel" id="maintenance-results" aria-labelledby="audit-maintenance-title">
+    <h2 id="audit-maintenance-title">Saved maintenance reviews and results</h2>
+    <p class="muted">Review the exact closed days before encryption or a storage copy. After an interrupted reply, read the original saved result here. Reading it never repeats a copy. Uncertain copies need their original proof; another request for the same record versions is held.</p>
+    <p id="audit-maintenance-message" role="status" aria-live="polite">Loading saved maintenance results…</p>
+    {% if can_global_admin %}<button class="btn btn--ghost" type="button" id="audit-maintenance-separate" hidden>Review a separate copy for uncertain work</button>{% endif %}
+    <div id="audit-maintenance-review" hidden></div>
+    <div id="audit-maintenance-saved"></div>
+  </section>
+  <script src="/static/lightwork-audit-actions.js" defer></script>
 
   {% include "_ops_audit_checkpoints.html" %}
 
@@ -288,7 +311,7 @@
       if (!d) return;
       var lines = [];
       if (!d.days_checked) lines.push('There is nothing recorded for these dates to check.');
-      else if (d.intact) lines.push('All ' + plural(d.days_checked, 'day', 'days') + ' checked: nothing has been changed.');
+      else if (d.intact) lines.push('The saved signatures and retained links match for all ' + plural(d.days_checked, 'day', 'days') + ' checked. A receipt kept elsewhere is needed to check whether newer history was removed.');
       else if (d.problems.length) lines = ['Some entries were changed or could not be confirmed:'].concat(d.problems);
       if (d.unsigned_days) lines.push(plural(d.unsigned_days, 'day was', 'days were') + ' recorded before tamper-evident records were turned on, so they cannot be checked.');
       if (d.removed_by_policy) lines.push(plural(d.removed_by_policy, 'older day was', 'older days were') + ' deleted by your record-keeping policy; that deletion is itself recorded.');
@@ -308,27 +331,15 @@
       var d = await call('POST', '/api/v1/audit/forward', range(), 'send the activity');
       if (d) show(['Sent ' + plural(d.sent, 'entry', 'entries') + '.']);
     });
-    wire('aud-seal', async function () {
-      var p = await call('POST', '/api/v1/audit/seal', { preview: true }, 'check which days can be encrypted');
-      if (!p) return;
-      if (!p.days) { show(['All older days are already encrypted.']); return; }
-      if (!(await window.mvConfirm('Encrypt ' + plural(p.days, 'older day', 'older days') + ' of the log? They stay readable here and can still be checked.', { okText: 'Encrypt' }))) return;
-      var d = await call('POST', '/api/v1/audit/seal', { preview: false }, 'encrypt older days');
-      if (d) show(['Encrypted ' + plural(d.days, 'day', 'days') + '.']);
-    });
-    wire('aud-worm-push', async function () {
-      var p = await call('POST', '/api/v1/audit/write-once/push', { preview: true }, 'check which days can be copied');
-      if (!p) return;
-      if (!p.days) { show(['All older days are already copied.']); return; }
-      if (!(await window.mvConfirm('Copy ' + plural(p.days, 'older day', 'older days') + ' to write-once storage? Copies there cannot be changed or deleted, even by administrators.', { okText: 'Copy' }))) return;
-      var d = await call('POST', '/api/v1/audit/write-once/push', { preview: false }, 'copy older days');
-      if (d) show(['Copied ' + plural(d.days, 'day', 'days') + '.' + (d.failed ? ' ' + plural(d.failed, 'day', 'days') + ' could not be copied; try again later.' : '')]);
-    });
     wire('aud-worm-check', async function () {
       var d = await call('GET', '/api/v1/audit/write-once/check', null, 'check the write-once copies');
       if (!d) return;
-      show([d.not_copied.length ? d.copied + ' of ' + d.days + ' older days are safely copied. Not copied yet: ' + d.not_copied.join(', ') + '.'
-        : 'All ' + plural(d.days, 'older day is', 'older days are') + ' safely copied.']);
+      var lines = [d.message];
+      if (!d.empty) lines.push(d.copied + ' of ' + d.days + ' closed days have matching current bytes and destination proof.' + (d.not_copied.length ? ' Could not verify: ' + d.not_copied.join(', ') + '.' : ''));
+      if (d.destination) lines.push(d.destination.mode + ': ' + d.destination.protection);
+      if (!d.automatic_copy_enabled) lines.push('Automatic copying is currently off. This check reads retained copies; it does not turn protection on.');
+      if (d.native_unknown && d.native_unknown.length) lines.push(plural(d.native_unknown.length, 'earlier copy attempt has', 'earlier copy attempts have') + ' no recorded completion. Those original effects remain uncertain.');
+      show(lines);
     });
     wire('aud-rotate', async function () {
       if (!(await window.mvConfirm('Make a new signing key? New entries are signed with it; older entries can still be checked with the old key.', { okText: 'Make new key' }))) return;
@@ -336,7 +347,7 @@
       if (d) show(['A new signing key is ready. It is used after Lightwork restarts.']);
     });
     wire('aud-proof', async function () {
-      if (!(await window.mvConfirm('Build and download a signed proof bundle of what Lightwork did?', { okText: 'Download' }))) return;
+      if (!(await window.mvConfirm('Build and download a signed bundle of retained records for independent checking? Its signature does not prove that a business result is true.', { okText: 'Download' }))) return;
       try {
         var r = await fetch('/api/v1/audit/proof-bundle', { method: 'POST', credentials: 'same-origin' });
         if (!r.ok) { var j = await r.json().catch(function () { return {}; }); show([window.mvErrorText({status: r.status, detail: j.detail}, 'build the proof bundle')]); return; }

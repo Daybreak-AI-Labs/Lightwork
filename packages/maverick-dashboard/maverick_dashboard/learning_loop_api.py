@@ -71,6 +71,11 @@ class RunIn(BaseModel):
     instructions: str | None = Field(default=None, max_length=1024 * 1024 + 1)
 
 
+class ReviewedPassIn(BaseModel):
+    token: str = Field(min_length=1, max_length=6 * 1024 * 1024)
+    confirm: Literal[True]
+
+
 class QualityIn(BaseModel):
     model_id: str | None = Field(default=None, max_length=200)
     remove_weak: bool = False
@@ -851,44 +856,77 @@ def _instructions(text: str | None) -> str | None:
 
 @router.post("/run")
 async def run_now(request: Request, body: RunIn) -> dict:
-    """``self-harness run``: a background job the page polls. Every model
-    (``--all-models``) can be stopped between models."""
+    """Legacy admission hands off to the current protected full review."""
     require_global_permission(request, "admin")
-    from maverick import self_harness
-    from maverick import self_improvement_runner as runner
-    from maverick.learning_guard import Halted, check_learning_halt
+    from .learning_ops_api import _halt_preflight
+    _halt_preflight("self-harness")
+    raise HTTPException(409, "Review the current models, work and spending before starting at /learned#learning-passes. No pass was started.")
 
-    from .learning_ops_api import start_job
-    if not self_harness.enabled():
-        from .learning_ops_api import switch_place
-        raise HTTPException(status_code=409, detail=(
-            f"Self-coaching is off. Turn on {switch_place('self_harness')} first."))
-    evaluation_system = _instructions(body.instructions)
-    chosen = None
-    if body.scope == "chosen":
-        chosen = await run_in_threadpool(_model_choice, body.model_id)
-        if not chosen:
-            raise HTTPException(status_code=422, detail="Choose a model from the list.")
+
+def _pass_response(value):
+    import json
+    return Response(json.dumps(value), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/passes/current")
+async def current_learning_passes(request: Request):
+    from . import learning_passes
+    return _pass_response(await run_in_threadpool(learning_passes.catalog, request))
+
+
+@router.post("/passes/review")
+async def review_learning_pass(request: Request):
+    import json
+    import secrets
+
+    from maverick import crypto_at_rest
+
+    from . import learning_passes
+    require_global_permission(request, "admin")
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > 2 * 1024 * 1024:
+            raise HTTPException(413, "Choose an instructions copy smaller than 1 MB.")
+        chunks.append(chunk)
     try:
-        check_learning_halt("self-harness", "dashboard-start")
-    except Halted as exc:
-        raise HTTPException(status_code=409, detail=_HALTED) from exc
-    stage = True if body.trial else None
-    _audit(request, "self_harness_run", scope=body.scope, model=chosen or "", trial=body.trial,
-           retire=body.retire, with_instructions=evaluation_system is not None)
+        values = json.loads(b"".join(chunks))
+        context, revision = values.pop("context"), values.pop("revision")
+        prepared = await run_in_threadpool(learning_passes.prepare, request, values, context=context, revision=revision)
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise HTTPException(422, "Complete the displayed learning choices before reviewing.") from exc
+    material = {"purpose": "lightwork.learning-pass.v1", "operation": secrets.token_hex(16), "expires": time.time() + learning_passes.TTL, "prepared": prepared}
+    token = crypto_at_rest.seal_to_str(json.dumps(material, ensure_ascii=False, separators=(",", ":")))
+    if not crypto_at_rest.is_sealed_str(token) or len(token) > 6 * 1024 * 1024:
+        raise HTTPException(409, "This review could not be protected. Nothing was started; your entered work is kept.")
+    return _pass_response({"token": token, "operation": material["operation"], "context": prepared["context"],
+                           "review": learning_passes.review_rows(prepared), "notice": learning_passes.NOTICE})
 
-    def _run(job) -> dict:
-        check_learning_halt("self-harness", "dashboard-start")
-        if body.scope == "all":
-            results = runner.run_self_harness_all_models(
-                retire=body.retire, canary=stage, evaluation_system=evaluation_system,
-                should_stop=lambda: job.cancelled)
-            return {"reports": [_report_view(rep, ret) for _m, (rep, ret) in sorted(results.items())][:20]}
-        pin = {"model_id": chosen} if chosen else {}
-        report, retired = runner.run_self_harness_cycle(
-            retire=body.retire, canary=stage, evaluation_system=evaluation_system, **pin)
-        return {"reports": [_report_view(report, retired)]}
-    return start_job(request, "self_harness_run", "Learning pass", _run, cancellable=body.scope == "all")
+
+@router.post("/passes/start")
+async def start_reviewed_learning_pass(request: Request, body: ReviewedPassIn):
+    import json
+
+    from maverick import crypto_at_rest
+
+    from . import learning_passes
+    try:
+        if not crypto_at_rest.is_sealed_str(body.token):
+            raise ValueError
+        value = json.loads(crypto_at_rest.unseal_from_str(body.token))
+        if set(value) != {"purpose", "operation", "expires", "prepared"} or value["purpose"] != "lightwork.learning-pass.v1":
+            raise ValueError
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(409, "This review could not be checked. Read the original request before reviewing another.") from exc
+    return _pass_response(await run_in_threadpool(learning_passes.start, request, value["prepared"], value["operation"], expires=value["expires"]))
+
+
+@router.get("/passes/requests/{operation}")
+async def original_learning_pass(request: Request, operation: str):
+    from . import learning_passes
+    return _pass_response(await run_in_threadpool(learning_passes.original, request, operation))
 
 
 @router.post("/corpus-quality")

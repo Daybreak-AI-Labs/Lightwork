@@ -306,6 +306,7 @@ def enqueue_flow_run_once(
     definition_version: int = 0,
     definition_revision: str = "",
     subflow_digests: dict[str, str | None] | None = None,
+    repair_existing: bool = True,
 ) -> tuple[str, bool]:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
@@ -390,7 +391,7 @@ def enqueue_flow_run_once(
             if idem_key else None
         )
         if existing is not None:
-            if existing.status == "queued":
+            if repair_existing and existing.status == "queued":
                 _ensure_queued_flow_job(existing, tenant=str(
                     _job_tenant_payload().get("tenant") or ""))
             return existing.run_id, True
@@ -541,7 +542,7 @@ def enqueue_published_flow_run_once(
                     raise store.FlowSnapshotError("Legacy event identity is ambiguous; reconcile the existing run before retrying")
                 if all(str(original[k]) == str(v) for k, v in identity.items()):
                     idem_key = legacy_key
-        return enqueue_flow_run_once(
+        result = enqueue_flow_run_once(
             flow_id,
             data,
             owner,
@@ -556,7 +557,21 @@ def enqueue_published_flow_run_once(
             definition_version=int(locked_release["definition_version"]),
             definition_revision=str(locked_release["definition_revision"]),
             subflow_digests=dict(locked_release.get("subflow_digests") or {}),
+            repair_existing=False,
         )
+    if result[1]:
+        # Do not wait for an executing run while holding its definition fence:
+        # execution needs that fence to finish its immutable schema checkpoint.
+        with store.run_lock(result[0]):
+            existing = store.load_run(result[0], owner=owner, flow_id=flow_id)
+            if (existing is None
+                    or existing.release_id != str(locked_release["release_id"])
+                    or existing.definition_digest != str(locked_release["definition_digest"])):
+                raise store.FlowSnapshotError("The original queued workflow changed before recovery.")
+            if existing.status == "queued":
+                _ensure_queued_flow_job(existing, tenant=str(
+                    _job_tenant_payload().get("tenant") or ""))
+    return result
 
 
 def enqueue_published_flow_run(

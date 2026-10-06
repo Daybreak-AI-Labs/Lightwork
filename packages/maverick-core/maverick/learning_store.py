@@ -35,6 +35,7 @@ import logging
 import math
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -148,6 +149,9 @@ def _conn():
     return _pg_conn() if _postgres() else _sqlite_conn()
 
 
+_rmw_session = threading.local()
+
+
 @contextlib.contextmanager
 def rmw_lock():
     """DB-side serialization for a whole load-modify-save. A no-op on SQLite
@@ -157,13 +161,25 @@ def rmw_lock():
     if not _postgres():
         yield
         return
+    dsn = _pg_dsn()
+    bindings = getattr(_rmw_session, "bindings", None)
+    if bindings is None:
+        bindings = _rmw_session.bindings = {}
+    binding = os.getpid(), dsn
+    if binding in bindings:
+        if bindings[binding].closed:
+            raise RuntimeError("The current learning writer session is unavailable")
+        yield
+        return
     import psycopg
-    conn = psycopg.connect(_pg_dsn(), autocommit=True)
+    conn = psycopg.connect(dsn, autocommit=True)
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_lock(%s)", (_PG_RMW_LOCK,))
+        bindings[binding] = conn
         yield
     finally:
+        bindings.pop(binding, None)
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT pg_advisory_unlock(%s)", (_PG_RMW_LOCK,))

@@ -366,11 +366,19 @@
 
   // ---- self-coaching read-outs ------------------------------------------
   var picker = $('llp-model');
+  var ownsModelSelection = true, publishingModelSelection = false;
   function model() { return picker && picker.value ? picker.value : ''; }
   function publishModel() {
-    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection',
-      { detail: { selection: model() ? { kind: 'learning_model', id: model() } : {} } }));
+    if (!ownsModelSelection) return;
+    publishingModelSelection = true;
+    try {
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection',
+        { detail: { selection: model() ? { kind: 'learning_model', id: model() } : {} } }));
+    } finally { publishingModelSelection = false; }
   }
+  document.addEventListener('lightwork:copilot-selection', function (event) {
+    if (!publishingModelSelection) ownsModelSelection = event.detail?.selection?.kind === 'learning_model';
+  });
   async function withdrawLesson(row, reason, buttonEl) {
     var chosenModel = model();
     var why = reason.value.trim();
@@ -489,7 +497,7 @@
       say('llp-harness-msg', await problem(failure, 'load the models'));
     });
   }
-  if (picker) picker.addEventListener('change', modelChanged);
+  if (picker) picker.addEventListener('change', function () { ownsModelSelection = true; modelChanged(); });
 
   var previewBtn = $('llp-preview-btn');
   if (previewBtn) previewBtn.addEventListener('click', async function () {
@@ -581,27 +589,6 @@
       cost.textContent = parts.join(' ');
     }).catch(function () { /* the default sentence stays */ });
   }
-  if (J) J.wire($('llp-run'), async function () {
-    var scope = $('llp-scope').value;
-    var input = $('llp-instructions');
-    var file = input && input.files && input.files[0];
-    var text = null;
-    if (file) {
-      if (file.size > 1024 * 1024) { say('llp-run-status', 'That instructions file is larger than 1 MB.'); return null; }
-      text = await J.readText(file);
-    }
-    if (scope === 'chosen' && !model()) { say('llp-run-status', 'Choose a model first.'); return null; }
-    var who = scope === 'all' ? 'every model in use' : (scope === 'chosen' ? 'the model chosen above' : 'the main assistant model');
-    if (!(await window.mvConfirm('Run a learning pass now for ' + who +
-      '? It looks for repeated mistakes, tests possible lessons within the evaluation spending limit' +
-      ($('llp-retire').checked ? ', and retires old ones.' : '.'), { okText: 'Run now' }))) return null;
-    var body = { scope: scope, trial: $('llp-trial').checked, retire: $('llp-retire').checked, instructions: text };
-    if (scope === 'chosen') body.model_id = model();
-    return { url: API + '/run', init: { method: 'POST', json: body } };
-  }, runUi('run the learning pass', function (d) {
-    return d.reports.map(reportBlock);
-  }, function () { modelChanged(); loadLog(); }));
-
   if (J) J.wire($('llp-quality-btn'), async function () {
     var remove = $('llp-quality-remove').checked;
     var msg = remove

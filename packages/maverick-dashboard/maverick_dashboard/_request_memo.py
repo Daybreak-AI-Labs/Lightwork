@@ -3,17 +3,18 @@
 Several authorization predicates (``auth_genuinely_off``,
 ``non_static_auth_configured``) take no request argument and re-derive their
 answer from the configuration files each time. One page render asked them a
-dozen times (the shell's nav context, the permission checks and the bearer
-middleware each ask again), each costing ~1 ms of config reads. Within one
-request the configuration cannot meaningfully change, so a pure-ASGI
-middleware opens a memo scope per request and :func:`memoized` serves repeat
-questions from it. Outside a request scope (CLI, tests calling the functions
-directly, background threads) nothing is cached.
+dozen times (the shell's nav context and bearer middleware ask again), each
+costing ~1 ms of config reads. A pure-ASGI middleware opens a memo scope per
+request and :func:`memoized` serves repeat display/configuration questions.
+An authorization boundary uses :func:`fresh_configuration` because policy may
+change while a request waits. Retained background workers explicitly discard
+their copied HTTP memo. Outside a request scope nothing is cached.
 """
 from __future__ import annotations
 
 import contextvars
 from collections.abc import Callable
+from contextlib import contextmanager
 from typing import Any, TypeVar
 
 T = TypeVar("T")
@@ -39,12 +40,32 @@ def in_scope() -> bool:
     return _SCOPE.get() is not None
 
 
+def discard_request_memo() -> None:
+    """Remove a copied HTTP memo from a retained background-worker context.
+
+    Tenant and owner context still travel with the worker. Configuration-derived
+    grants belong to the originating HTTP request, not the worker's lifetime.
+    Call this in the copied context, leaving the live request's memo intact.
+    """
+    _SCOPE.set(None)
+
+
+@contextmanager
+def fresh_configuration():
+    """Recheck live policy at an authorization boundary without clearing a page."""
+    token = _SCOPE.set(None)
+    try:
+        yield
+    finally:
+        _SCOPE.reset(token)
+
+
 class RequestMemoMiddleware:
     """Pure ASGI: one fresh memo per HTTP request or WebSocket connection.
 
     The scope is a context variable, so it follows the request into FastAPI's
     thread pool (``def`` handlers, ``run_in_threadpool``) and is dropped with
-    the request; nothing leaks between requests or into other tasks.
+    the request. Retained workers must discard the scope in their copied context.
     """
 
     def __init__(self, app) -> None:

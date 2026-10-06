@@ -373,13 +373,24 @@ def export(out_path: Path | str, *, audit_dir: Path | str | None = None,
     return out
 
 
-def publisher_key() -> tuple[str, str]:
+def publisher_key(*, create: bool = True) -> tuple[str, str]:
     """This instance's ``(key_id, pubkey_hex)`` -- what to publish out of band.
 
     A verifier needs this through a channel that does not run through the
     bundle: a key page, a signed contract, an existing engagement. Handing it
     over inside the artifact it authenticates would be circular.
     """
+    from .audit import signing
+    if not create:
+        # A read must never provision injected keys, contact KMS, or generate
+        # a local keypair. Only already provisioned trust is available here.
+        registry = signing.trusted_audit_public_keys()
+        active = signing._active_key_id(signing._key_dir()) if registry else None
+        if active and active in registry:
+            return active, registry[active]
+        if len(registry) == 1:
+            return next(iter(registry.items()))
+        raise ValueError("no unambiguous provisioned active signing key")
     from .audit.signing import _load_or_create_keypair
     _priv, pub, key_id = _load_or_create_keypair()
     return key_id, pub.hex()

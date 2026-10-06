@@ -222,6 +222,11 @@ def original(request, operation):
     return result
 
 
+def _deadline(expires):
+    if type(expires) not in {float, int} or not math.isfinite(expires) or not time.time() < expires <= time.time() + 600:
+        raise HTTPException(409, "The training review expired before work could start. Review current outlines again.")
+
+
 def start(request, prepared, operation, *, expires):
     body = prepared["body"]
     actor = learning_ops_api._actor(request)
@@ -234,11 +239,12 @@ def start(request, prepared, operation, *, expires):
             if existing["binding"] != binding:
                 raise HTTPException(409, "Read the original request; it belongs to a different training review.")
             return original(request, operation)
-        if not isinstance(expires, (float, int)) or not math.isfinite(expires) or expires <= time.time():
-            raise HTTPException(409, "The training review expired before its start was accepted. Review current outlines again.")
+        _deadline(expires)
         if prepare(request, body) != prepared:
             raise HTTPException(409, "The source changed before training could start. Review it again.")
         learning_ops_api._record(request, "reward_model_train", phase="prepared", operation=operation, reviewed_revision=body["revision"])
+        authority(request, context, write=True)
+        _deadline(expires)
         claim = _store().create({"id": "RMT-" + operation, "actor": actor, "context": context, "binding": binding,
                                 "prepared": prepared, "state": "admitting"}, action="learning.reward.prepare", actor=actor, max_records=1000)
 
@@ -252,6 +258,10 @@ def start(request, prepared, operation, *, expires):
                 state, rows = current(request, {key: body[key] for key in ("min_margin", "max_pairs", "epochs", "lr")})
                 if state["source"] != prepared["source"]:
                     raise HTTPException(409, "The source changed before training. No model was saved.")
+                # Retaining the actual worker identity and reading its source
+                # can wait on native writers. Recheck at the final admission.
+                authority(request, context, write=True)
+                _deadline(expires)
             model, report = train_reward_model(rows, min_margin=float(body["min_margin"]), max_pairs_per_group=body["max_pairs"],
                                                epochs=body["epochs"], lr=float(body["lr"]))
             if report["pairs"] < 1 or any(not math.isfinite(float(w)) for w in model.weights.values()):

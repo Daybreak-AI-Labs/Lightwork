@@ -9187,15 +9187,20 @@ async def catalog_install_skill(request: Request, payload: CatalogInstallIn) -> 
     return SkillOut(name=s.name, triggers=s.triggers, tools_needed=s.tools_needed)
 
 
-@router.delete("/skills/{name}", status_code=204)
-async def remove_skill_endpoint(request: Request, name: str) -> None:
+@router.delete("/skills/{name}")
+async def remove_skill_endpoint(request: Request, name: str, payload: dict | None = None) -> Response:
     # Removing an installed skill is a control-plane mutation of agent-loaded
     # code; require admin (a view-only principal must not pull skills).
     require_permission(request, "admin")
-    from maverick.skills import remove_skill
+    from .manual_skill_removal_api import RemoveIn, remove_sealed
 
-    if not remove_skill(name):
-        raise HTTPException(status_code=404, detail="no such skill")
+    if payload is None:
+        raise HTTPException(409, "Review this exact saved skill in the Skills page before removing it. Nothing was removed.")
+    try:
+        reviewed = RemoveIn.model_validate(payload)
+    except ValueError as exc:
+        raise HTTPException(422, "Confirm a complete current removal review from the Skills page.") from exc
+    return await run_in_threadpool(remove_sealed, request, reviewed, expected_name=name)
 
 
 # ---------- self-learning: learned ledger + generated tools (#427) ----------

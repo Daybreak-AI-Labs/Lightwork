@@ -186,7 +186,7 @@ def job_problem(exc: Exception) -> str | None:
     from maverick.learning_guard import Halted
     from maverick.provider_cost_cap import ProviderCapExceeded
     if isinstance(exc, Halted):
-        return _HALTED
+        return "Learning is stopped. Work completed before it stopped may have been kept."
     if isinstance(exc, BudgetExceeded):
         return "It reached its spending limit and stopped. Anything finished before then was kept."
     if isinstance(exc, ProviderCapExceeded):

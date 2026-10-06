@@ -23,7 +23,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from .auth import caller_principal, require_global_permission, require_permission
@@ -245,7 +245,12 @@ class CheckIn(BaseModel):
 
 
 class PreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     preview: bool = True
+    review: str | None = Field(default=None, pattern=r"^AAR-[a-f0-9]{32}$")
+    operation: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    reconcile: bool = False
+    acknowledge_uncertain: bool = False
 
 
 class ForwardIn(BaseModel):
@@ -300,7 +305,7 @@ async def check_log(request: Request, body: CheckIn) -> dict:
         anchor_breaks = verify_anchors(audit_dir) if audit_dir.exists() else []
         if anchor_breaks:
             problems.append("The record that links the days together shows a day was removed or changed.")
-        retired = retention_purged_days(audit_dir) if audit_dir.exists() else []
+        retired = retention_purged_days(audit_dir) if audit_dir.exists() and not anchor_breaks else []
         return {"days_checked": len(paths[-400:]), "intact": not problems and not unsigned,
                 "problems": problems[:50], "unsigned_days": unsigned,
                 "removed_by_policy": len(retired)}
@@ -387,18 +392,7 @@ async def forward(request: Request, body: ForwardIn) -> dict:
 
 @router.post("/audit/seal")
 async def seal(request: Request, body: PreviewIn) -> dict:
-    require_permission(request, "admin")
-    from maverick.audit.sealing import seal_closed_segments
-    from maverick.crypto_at_rest import EncryptionUnavailable
-    try:
-        report = await run_in_threadpool(lambda: seal_closed_segments(dry_run=body.preview))
-    except EncryptionUnavailable as exc:
-        raise HTTPException(status_code=409, detail=(
-            "Turn on encryption for stored data first (on the Compliance page).")) from exc
-    done = sum(1 for s in report.values() if s in ("sealed", "would seal"))
-    if not body.preview:
-        _audit_event(request, "audit_seal", days=done)
-    return {"preview": body.preview, "days": done}
+    return await _maintenance(request, body, "seal")
 
 
 @router.post("/audit/rotate-key")
@@ -417,31 +411,59 @@ async def rotate_key(request: Request) -> dict:
 
 @router.post("/audit/write-once/push")
 async def worm_push(request: Request, body: PreviewIn) -> dict:
-    require_global_permission(request, "admin")
-    from maverick.audit.worm import WormUnavailable, push_closed_dayfiles
+    return await _maintenance(request, body, "copy")
+
+
+async def _maintenance(request: Request, body: PreviewIn, action: str) -> dict:
+    from . import audit_action_service as native
+    if body.preview:
+        return await _maintenance_call(native.prepare, request, action, reconcile=body.reconcile)
+    if not body.review or not body.operation:
+        raise HTTPException(409, "Review the exact closed days and destination before continuing. No maintenance action was started.")
+    return await _maintenance_call(native.execute, request, action, body.review, body.operation,
+                                   acknowledge_uncertain=body.acknowledge_uncertain)
+
+
+async def _maintenance_call(function, *args, **kwargs):
     try:
-        report = await run_in_threadpool(lambda: push_closed_dayfiles(dry_run=body.preview))
-    except WormUnavailable as exc:
-        raise HTTPException(status_code=409, detail=(
-            "Write-once storage is not set up for this installation.")) from exc
-    failed = [n for n, s in report.items() if s.startswith(("error", "refused"))]
-    shipped = sum(1 for s in report.values() if s.startswith(("pushed", "re-pushed", "would")))
-    if not body.preview:
-        _audit_event(request, "audit_write_once_push", days=shipped, failed=len(failed))
-    return {"preview": body.preview, "days": shipped, "failed": len(failed)}
+        return await run_in_threadpool(function, *args, **kwargs)
+    except HTTPException:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(503, "The saved maintenance result could not be read. Keep the original review and read it again before considering another action.") from exc
+
+
+@router.get("/audit/action-reviews")
+async def maintenance_reviews(request: Request) -> dict:
+    from . import audit_action_service as native
+    return await _maintenance_call(native.inventory, request)
+
+
+@router.get("/audit/action-reviews/{review}")
+async def maintenance_result(request: Request, review: str) -> dict:
+    from . import audit_action_service as native
+    return await _maintenance_call(native.receipt, request, review)
+
+
+@router.post("/audit/action-reviews/{review}/cancel")
+async def cancel_maintenance(request: Request, review: str) -> dict:
+    from . import audit_action_service as native
+    return await _maintenance_call(native.cancel, request, review)
+
+
+@router.get("/audit/action-reviews/{review}/evidence")
+async def maintenance_evidence(request: Request, review: str):
+    from fastapi.responses import JSONResponse
+
+    from . import audit_action_service as native
+    return JSONResponse(await _maintenance_call(native.evidence, request, review), headers={
+        "Content-Disposition": 'attachment; filename="activity-maintenance-review.json"', "Cache-Control": "private, no-store"})
 
 
 @router.get("/audit/write-once/check")
 async def worm_check(request: Request) -> dict:
-    require_permission(request, "audit")
-    from maverick.audit.worm import WormUnavailable, verify
-    try:
-        report = await run_in_threadpool(verify)
-    except WormUnavailable as exc:
-        raise HTTPException(status_code=409, detail=(
-            "Write-once storage is not set up for this installation.")) from exc
-    missing = sorted(n.split(".")[0] for n, s in report.items() if s != "ok")
-    return {"days": len(report), "copied": len(report) - len(missing), "not_copied": missing[:100]}
+    from . import audit_action_service as native
+    return await _maintenance_call(native.check_copies, request)
 
 
 @router.get("/audit/proof-key")
@@ -449,9 +471,9 @@ async def proof_key(request: Request) -> dict:
     require_permission(request, "audit")
     from maverick.attestation import publisher_key
     try:
-        key_id, pub = await run_in_threadpool(publisher_key)
+        key_id, pub = await run_in_threadpool(lambda: publisher_key(create=False))
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail="Signing is not available on this installation.") from exc
+        raise HTTPException(status_code=409, detail="No unambiguous signing key has been provisioned yet. Turn on tamper-evident records before sharing its existing public key.") from exc
     return {"key_name": key_id, "key": pub}
 
 
@@ -461,14 +483,17 @@ async def proof_bundle(request: Request) -> StreamingResponse:
     from maverick.attestation import export
 
     def _build() -> bytes:
-        with tempfile.TemporaryDirectory(prefix="lw-attest-") as tmp:
-            path = export(Path(tmp) / "proof.json")
-            return path.read_bytes()
+        from maverick.authority_effects import authority_effect_fence
+        with authority_effect_fence():
+            require_permission(request, "admin")
+            with tempfile.TemporaryDirectory(prefix="lw-attest-") as tmp:
+                path = export(Path(tmp) / "proof.json")
+                return path.read_bytes()
     try:
         data = await run_in_threadpool(_build)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=(
-            "A proof bundle needs signing turned on for the activity log.")) from exc
+            "The signed bundle could not be created. Check signing and key access on the Compliance page.")) from exc
     return StreamingResponse(iter([data]), media_type="application/json",
                              headers={"Content-Disposition": 'attachment; filename="lightwork-proof.json"',
                                       "Cache-Control": "no-store"})

@@ -1307,13 +1307,56 @@ def _fetch_skill_source_bytes(source: str) -> bytes:
     )
 
 
-def remove_skill(name: str, skills_dir: Path | None = None) -> bool:
+def _manual_skill_snapshot(target: Path) -> tuple[Skill, str]:
+    """Exact readable regular-file version; learned skills use their own review."""
+    from .governed_operations import digest
+    before = target.lstat()
+    if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+            or getattr(before, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+        raise ValueError("This skill's storage is unavailable for ordinary removal.")
+    with target.open("rb") as stream:
+        raw = stream.read(MAX_SKILL_DOWNLOAD_BYTES + 1)
+    if len(raw) > MAX_SKILL_DOWNLOAD_BYTES:
+        raise ValueError("This skill is too large for a complete removal review.")
+    item = Skill.parse(raw.decode("utf-8").replace("\r\n", "\n"), target)
+    if item.source.startswith("auto-distilled"):
+        raise ValueError("Remove this learned skill under Suggestions from completed work, where its source review is preserved.")
+    after = target.lstat()
+    def identity(value):
+        return [value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns]
+    if identity(before) != identity(after):
+        raise ValueError("This skill changed while it was read. Review it again.")
+    return item, digest([str(target.absolute()), str(target.parent.resolve()), identity(after), hashlib.sha256(raw).hexdigest()])
+
+
+def manual_skill_snapshot(name: str, skills_dir: Path | None = None) -> tuple[Skill, str]:
+    from .file_lock import cross_process_lock
+    target = _resolved_skills_dir(skills_dir) / f"{_safe_name(name)}.md"
+    with cross_process_lock(target, strict=True):
+        return _manual_skill_snapshot(target)
+
+
+def remove_skill(name: str, skills_dir: Path | None = None, *, expected_revision: str | None = None,
+                 before_delete: Callable[[Skill], None] | None = None,
+                 effect_guard: Callable[[], None] | None = None) -> bool:
+    from .file_lock import cross_process_lock
     target_dir = _resolved_skills_dir(skills_dir)
     target = target_dir / f"{_safe_name(name)}.md"
-    if target.exists():
+    with cross_process_lock(target, strict=True):
+        if not target.exists():
+            return False
+        if expected_revision is not None:
+            item, revision = _manual_skill_snapshot(target)
+            if revision != expected_revision:
+                raise ValueError("This saved skill changed. Review its current version before removing it.")
+            if before_delete is not None:
+                before_delete(item)
+        elif before_delete is not None:
+            raise ValueError("A complete current skill review is required before recording removal.")
+        if effect_guard is not None:
+            effect_guard()
         target.unlink()
         return True
-    return False
 
 
 def distill(

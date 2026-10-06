@@ -215,9 +215,9 @@
         var v = await request('/api/v1/audit/checkpoints/verify', {method: 'POST', json: {receipt: receipt}});
         result.textContent = '';
         if (v.intact) {
-          result.appendChild(el('p', null, 'Every checkpoint matches the activity log.' +
+          result.appendChild(el('p', null, 'The signed checkpoint commitments match the retained prefixes of the activity log. Later entries beyond those prefixes are outside this check.' +
             (v.keys_pinned ? ' Every checkpoint is signed with a pinned key.' : '') +
-            (v.pinned ? ' Your kept receipt matches too.' : ' Choose a kept receipt to also check nothing was rolled back.')));
+            (v.pinned ? ' Your kept receipt matches too.' : ' Choose a receipt you kept independently to compare checkpoint history through that receipt.')));
         } else if (v.none_yet) {
           result.appendChild(el('p', null, 'No checkpoints have been published yet.'));
         } else {

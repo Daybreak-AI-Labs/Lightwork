@@ -140,6 +140,21 @@
           </div>
         {% endif %}
       </div>
+      {% if is_admin %}
+      <section id="manual-skill-removal" class="stack" aria-labelledby="manual-skill-removal-title">
+        <h3 id="manual-skill-removal-title">Remove a saved skill</h3>
+        <p class="muted sk-small">Review its exact current instructions before removing it. Nothing changes until you confirm; a lost reply can be checked here without removing it again.</p>
+        <div class="sk-actions">
+          <label for="manual-skill-original">Original removal</label>
+          <select id="manual-skill-original" class="select"><option value="">Choose an original removal</option></select>
+          <button type="button" class="btn btn--ghost" id="manual-skill-read" disabled>Read original result</button>
+          <button type="button" class="btn btn--ghost" id="manual-skill-refresh">Refresh original removals</button>
+        </div>
+        <p id="manual-skill-status" role="status" aria-live="polite" class="muted sk-small"></p>
+        <div id="manual-skill-review" class="stack" style="overflow-wrap:anywhere"></div>
+        <div id="manual-skill-result" class="stack" style="overflow-wrap:anywhere"></div>
+      </section>
+      {% endif %}
     </section>
   </div>
 
@@ -268,26 +283,14 @@
     }
     window.lwAppendSkill = appendSkill;
 
-    // Remove a skill (administrators): the card goes at once and the toast
-    // offers Undo (window.mvUndo); the delete is sent when that time is up.
+    // Review the current version first. The card stays until the native
+    // original receipt confirms removal; a lost reply never means success.
     installedEl.addEventListener('click', function (event) {
       var btn = event.target.closest('[data-skill-remove]');
       if (!btn) return;
       var name = btn.getAttribute('data-skill-remove');
-      var label = btn.getAttribute('data-skill-label') || human(name);
-      var card = btn.closest('.skill-card');
-      if (card) card.hidden = true;
-      var heading = document.getElementById('sk-list-title');
-      if (heading && heading.focus) { if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1'); heading.focus(); }
-      window.mvUndo('Skill “' + label + '” removed. Agents stop using it from the next task.', {
-        action: 'remove the skill',
-        run: async function (keepalive) {
-          var r = await fetch('/api/v1/skills/' + encodeURIComponent(name), {method: 'DELETE', credentials: 'same-origin', keepalive: keepalive});
-          return r.ok || r.status === 404 ? {ok: true} : r;
-        },
-        undo: function () { if (card) { card.hidden = false; btn.focus(); } },
-        done: function () { if (card) card.remove(); }
-      });
+      if (window.LightworkManualSkillRemoval) window.LightworkManualSkillRemoval.review(name);
+      else window.mvToast('Removal controls are still loading. Nothing was removed.');
     });
 
     // Tools picker: a filterable checklist of the tools agents can use.
@@ -377,4 +380,5 @@
   </script>
   <script src="/static/lightwork-feature-actions.js" defer></script>
   <script src="/static/lightwork-tool-ops.js" defer></script>
+  <script src="/static/lightwork-manual-skill-removal.js" defer></script>
 {% endblock %}

@@ -35,7 +35,7 @@ from starlette.concurrency import run_in_threadpool
 # maverick.suite_grants) so the HTTP gates and the kernel deploy/dispatch
 # gates both see group-derived department grants from the first request.
 from . import scim_groups  # noqa: F401
-from ._request_memo import memoized
+from ._request_memo import fresh_configuration, memoized
 
 # Probe/discovery endpoints that must answer without a bearer even when OIDC is
 # on (load balancers and k8s liveness/readiness probes, plus the OpenAPI docs,
@@ -396,19 +396,18 @@ def _authorization_principal(request: Request) -> str | None:
     after the static dashboard bearer has authenticated the request. A missing
     proxy/OIDC/session identity must never inherit the legacy local-admin path.
 
-    A grant is remembered on ``request.state`` (a page render asks ten times);
-    a refusal is re-evaluated every time.
+    Principal-less requests recheck current local policy or the static bearer
+    at every gate, including after writer waits and in retained workers.
     """
     principal = caller_principal(request)
     if principal is not None:
         return principal
     state = getattr(request, "state", None)
-    if state is not None and getattr(state, "_anonymous_grant_verified", False):
-        return None
-    if anonymous_local_access_allowed() or _dashboard_token_authenticated(request):
-        if state is not None:
-            state._anonymous_grant_verified = True
-        return None
+    with fresh_configuration():
+        if anonymous_local_access_allowed() or _dashboard_token_authenticated(request):
+            if state is not None:
+                state._anonymous_grant_verified = True
+            return None
     raise HTTPException(status_code=401, detail="authenticated identity required")
 
 
@@ -663,6 +662,8 @@ def _permission_denied(request: Request, permission: str, *, installation: bool 
 
 def require_permission(request: Request, permission: str, *, api_scope: str | None = None) -> None:
     """Raise ``HTTPException(403)`` unless the caller's role grants ``permission``."""
+    from .execution_identity import refresh_explicit_api_key
+    refresh_explicit_api_key(request)
     # The action override is meaningful only for a key bearer. Preserve the
     # ordinary two-argument role check for browser/session callers.
     allowed = (has_permission(request, permission, api_scope=api_scope)
@@ -690,6 +691,8 @@ def has_global_permission(request: Request, permission: str) -> bool:
 
 def require_global_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the global role grants permission."""
+    from .execution_identity import refresh_explicit_api_key
+    refresh_explicit_api_key(request)
     if not has_global_permission(request, permission):
         raise _permission_denied(request, permission, installation=True)
 

@@ -226,7 +226,7 @@ def test_exact_manifest_bytes_must_carry_valid_signatures(tmp_path, monkeypatch)
     sink = worm.LocalWormSink(ad / "worm" / "store")
     worm.push_closed_dayfiles(audit_dir=ad, today="2025-01-01", sink=sink)
     manifest = ad / "worm" / "manifest.ndjson"
-    signed = json.loads(manifest.read_text(encoding="utf-8"))
+    signed = json.loads(manifest.read_text(encoding="utf-8").splitlines()[-1])
     forged = {
         key: value
         for key, value in signed.items()

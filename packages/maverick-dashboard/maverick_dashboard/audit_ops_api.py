@@ -142,10 +142,10 @@ def _days() -> list[str]:
 
 
 def _retired_by_policy() -> set[str]:
-    from maverick.audit.signing import retention_purged_days
+    from maverick.audit.signing import retention_purged_days, verify_anchors
 
     root = _audit_dir()
-    if not root.is_dir():
+    if not root.is_dir() or verify_anchors(root):
         return set()
     return {str(entry.get("day")) for entry in retention_purged_days(root)}
 
@@ -212,8 +212,7 @@ def _publish(body: PublishIn, supersede: str | None) -> dict:
 def _publish_problem(exc: Exception) -> str:
     text = str(exc).lower()
     if "prefix/count changed" in text:
-        return ("This day's log changed since its last checkpoint, which happens when a person's data "
-                "is erased. Choose \"The log changed after an erasure\" and publish again.")
+        return ("The retained prefix of this day's log no longer matches its checkpoint. This can be an erasure, truncation or another change. Check the log first. A new checkpoint after erasure is allowed only when the retained signed erasure evidence confirms it.")
     if "retired" in text:
         return "This day was deleted by your record-keeping policy, so it cannot get a new checkpoint."
     if "missing" in text:
@@ -320,13 +319,16 @@ async def publish(request: Request, body: PublishIn) -> dict:
     require_permission(request, "admin")
     if not _DAY.fullmatch(body.day):
         raise HTTPException(status_code=422, detail="Choose a day from the list.")
-    days = await run_in_threadpool(_days)
-    if body.day not in days:
-        raise HTTPException(status_code=422, detail="Choose a day from the list.")
-    supersede = await _run(_latest_digest_for_day, body.day) if body.after_erasure else None
-    await run_in_threadpool(_record, request, "audit_checkpoint_publish", day=body.day,
-                            after_erasure=body.after_erasure)
-    return await _run(_publish, body, supersede)
+    def change():
+        from maverick.authority_effects import authority_effect_fence
+        with authority_effect_fence():
+            require_permission(request, "admin")
+            if body.day not in _days():
+                raise HTTPException(status_code=422, detail="Choose a day from the list.")
+            supersede = _latest_digest_for_day(body.day) if body.after_erasure else None
+            _record(request, "audit_checkpoint_publish", day=body.day, after_erasure=body.after_erasure)
+            return _publish(body, supersede)
+    return await _run(change)
 
 
 @router.post("/verify")
@@ -352,10 +354,14 @@ async def retire(request: Request, body: RetireIn) -> dict:
     require_permission(request, "admin")
     if body.confirm is not True:
         raise HTTPException(status_code=409, detail="Confirm the retirement to continue. Nothing was changed.")
-    target = await _run(_retire_target, body.sequence)
-    await run_in_threadpool(_record, request, "audit_checkpoint_retire", sequence=body.sequence,
-                            day=target["day"])
-    return await _run(_retire, target)
+    def change():
+        from maverick.authority_effects import authority_effect_fence
+        with authority_effect_fence():
+            require_permission(request, "admin")
+            target = _retire_target(body.sequence)
+            _record(request, "audit_checkpoint_retire", sequence=body.sequence, day=target["day"])
+            return _retire(target)
+    return await _run(change)
 
 
 # ---- where checkpoints live and which keys sign them (installation-wide) -------
@@ -397,7 +403,7 @@ def _own_key() -> str | None:
     try:
         from maverick.attestation import publisher_key
 
-        return publisher_key()[1]
+        return publisher_key(create=False)[1]
     except Exception:  # noqa: BLE001 -- no key material reachable
         return None
 

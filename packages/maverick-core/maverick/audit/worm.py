@@ -1,21 +1,21 @@
 """Write-once (WORM) export of closed audit day-files.
 
-The signed hash-chain + cross-file anchors make the audit log tamper-**evident**
-(an alteration is *detectable*). WORM makes the historical records
-**un-alterable in the first place**: each *closed* day-file is shipped to a
-write-once target with a retention lock, so neither a privileged insider nor an
-attacker with filesystem/root access can rewrite or delete the trail. Two
-targets (``[audit.worm] provider``):
+The signed hash-chain and cross-file anchors detect changes against their
+retained commitments. Each closed day-file can also be copied to a configured
+target. Its protection depends on that target, independently retained evidence,
+and who controls the signing keys. Two targets (``[audit.worm] provider``):
 
   - ``s3`` -- S3 (or S3-compatible) **Object-Lock** in ``COMPLIANCE`` (or
     ``GOVERNANCE``) mode with a retain-until date: the object cannot be
-    overwritten or deleted until it expires, even by the account root under
-    COMPLIANCE. Regulator-grade. The bucket must have Object-Lock + versioning
+    overwritten or deleted under the configured service's enforcement.
+    GOVERNANCE permits authorized bypass. Lightwork checks the returned exact
+    version, bytes and reported retention, without establishing independent
+    provider enforcement or future availability. The bucket needs Object-Lock + versioning
     enabled (a one-time operator setup), so every re-push is a new locked version.
   - ``local`` -- copy into a WORM directory as an immutable, owner-read-only
     mode-``0400`` file (protected DACL + DOS read-only bit on Windows),
     versioned file. Best-effort on-box (an owner can still chmod it back), but
-    tamper-**evident** via the manifest hash. Use ``s3`` for true WORM.
+    evidence via the signed manifest hash. It is not independent immutable custody.
 
 Only **closed** day-files (date < today, UTC) are shipped -- today's file is
 still being appended. Idempotent: a manifest (``worm/manifest.ndjson``) records
@@ -36,11 +36,13 @@ import re
 import stat
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from ..file_lock import (
     atomic_create_bytes,
+    cross_process_lock,
     ensure_private_file,
     prepare_private_directory,
     private_path_is_restricted,
@@ -498,17 +500,25 @@ def _valid_locator_schema(locator: object, *, name: str, retain_until: str) -> b
 def _valid_manifest_record(rec: object) -> bool:
     if not isinstance(rec, dict):
         return False
+    if rec.get("kind") == "worm_push_attempt":
+        return _valid_attempt_record(rec)
+    if rec.get("kind") == "worm_push_resolution":
+        return _valid_resolution_record(rec)
     required = {
         "kind", "schema", "name", "sha256", "pushed_at", "retain_until",
         "locator", "prev_hash", "key_id", "hash", "sig",
     }
+    if rec.get("schema") == 2:
+        required.add("request_id")
+        if not _SHA256_RE.fullmatch(str(rec.get("request_id") or "")):
+            return False
     name = rec.get("name")
     pushed_at = _parse_utc(rec.get("pushed_at"))
     retain_until = _parse_utc(rec.get("retain_until"))
     return bool(
         set(rec) == required
         and rec.get("kind") == "worm_manifest"
-        and rec.get("schema") == 1
+        and rec.get("schema") in (1, 2)
         and _valid_day_name(name)
         and isinstance(rec.get("sha256"), str)
         and _SHA256_RE.fullmatch(rec["sha256"])
@@ -521,7 +531,36 @@ def _valid_manifest_record(rec: object) -> bool:
     )
 
 
-def _load_manifest(audit_dir: Path) -> dict[str, dict]:
+def _valid_attempt_record(rec):
+    required = {"kind", "schema", "name", "sha256", "request_id", "attempted_at", "retain_until", "destination",
+                "prev_hash", "key_id", "hash", "sig"}
+    attempted, until = _parse_utc(rec.get("attempted_at")), _parse_utc(rec.get("retain_until"))
+    return (set(rec) == required and rec.get("schema") == 1 and _valid_day_name(rec.get("name"))
+            and bool(_SHA256_RE.fullmatch(str(rec.get("sha256") or "")))
+            and bool(_SHA256_RE.fullmatch(str(rec.get("request_id") or "")))
+            and isinstance(rec.get("destination"), dict) and bool(rec["destination"])
+            and all(isinstance(key, str) and isinstance(value, str) for key, value in rec["destination"].items())
+            and attempted is not None and until is not None and until > attempted)
+
+
+def _valid_resolution_record(rec):
+    required = {"kind", "schema", "name", "sha256", "request_id", "authorized_at", "retain_until", "destination",
+                "prior_request_ids", "authorization_id", "actor", "context", "prev_hash", "key_id", "hash", "sig"}
+    prior = rec.get("prior_request_ids")
+    return (set(rec) == required and rec.get("schema") == 1 and _valid_day_name(rec.get("name"))
+            and bool(_SHA256_RE.fullmatch(str(rec.get("sha256") or "")))
+            and bool(_SHA256_RE.fullmatch(str(rec.get("request_id") or "")))
+            and isinstance(prior, list) and bool(prior) and len(prior) <= 10_000
+            and all(isinstance(value, str) and _SHA256_RE.fullmatch(value) for value in prior) and len(set(prior)) == len(prior)
+            and bool(re.fullmatch(r"AAR-[a-f0-9]{32}", str(rec.get("authorization_id") or "")))
+            and isinstance(rec.get("actor"), str) and bool(rec["actor"])
+            and bool(_SHA256_RE.fullmatch(str(rec.get("context") or "")))
+            and isinstance(rec.get("destination"), dict) and bool(rec["destination"])
+            and all(isinstance(key, str) and isinstance(value, str) for key, value in rec["destination"].items())
+            and _parse_utc(rec.get("authorized_at")) is not None and _parse_utc(rec.get("retain_until")) is not None)
+
+
+def _load_manifest_records(audit_dir: Path) -> list[dict]:
     """Latest verified manifest entry per day-file name.
 
     The manifest is itself a signed append-only audit chain.  Skipping a bad
@@ -530,27 +569,130 @@ def _load_manifest(audit_dir: Path) -> dict[str, dict]:
     whole operation closed.
     """
     path = _manifest_path(audit_dir)
-    latest: dict[str, dict] = {}
     if not path.exists():
-        return latest
+        return []
     try:
         raw = _read_custodied_file(
             path, mode=0o600, max_bytes=_MAX_MANIFEST_BYTES
         )
         records = _verified_chain_records(raw)
         for rec in records:
-            name = rec.get("name")
             if not _valid_manifest_record(rec):
                 raise WormUnavailable("WORM manifest record schema is invalid")
-            assert isinstance(name, str)
-            latest[name] = rec   # later signed lines supersede earlier versions
     except WormUnavailable as exc:
         raise WormUnavailable(
             "WORM manifest signature/hash chain or schema is invalid"
         ) from exc
     except (OSError, UnicodeError, PermissionError) as exc:
         raise WormUnavailable("WORM manifest is unreadable or not private") from exc
-    return latest
+    return records
+
+
+def _load_manifest(audit_dir: Path) -> dict[str, dict]:
+    return {rec["name"]: rec for rec in _load_manifest_records(audit_dir) if rec["kind"] == "worm_manifest"}
+
+
+def request_receipts(audit_dir: Path, request_id: str) -> dict[str, dict]:
+    """Read signed completions of one original push, including superseded ones.
+
+    This is historical evidence of that request, not a current destination
+    availability check. It never uploads or promotes an unknown PUT to success.
+    """
+    if not _SHA256_RE.fullmatch(request_id):
+        raise WormUnavailable("invalid WORM request reference")
+    return {rec["name"]: rec for rec in _load_manifest_records(audit_dir)
+            if rec["kind"] == "worm_manifest" and rec.get("request_id") == request_id}
+
+
+def unknown_attempts(audit_dir: Path) -> list[dict]:
+    records = _load_manifest_records(audit_dir)
+    completed = {(rec.get("request_id"), rec["name"], rec["sha256"]) for rec in records if rec["kind"] == "worm_manifest"}
+    released = _released_versions(records)
+    return [rec for rec in records if rec["kind"] == "worm_push_attempt"
+            and (rec["request_id"], rec["name"], rec["sha256"]) not in completed | released]
+
+
+def _released_versions(records):
+    return {(prior, rec["name"], rec["sha256"]) for rec in records if rec["kind"] == "worm_push_resolution"
+            for prior in rec["prior_request_ids"]}
+
+
+def released_versions(audit_dir: Path) -> set[tuple[str, str, str]]:
+    """Released holds only: no claim that any original copy completed."""
+    return _released_versions(_load_manifest_records(audit_dir))
+
+
+def _attempt_destination(sink):
+    if isinstance(sink, LocalWormSink):
+        return {"target": "local", "directory": str(sink._dir)}
+    if isinstance(sink, S3WormSink):
+        return {"target": "s3", "bucket": sink._bucket, "prefix": sink._prefix,
+                "mode": sink._mode, "authority_id": sink._authority_id()}
+    return {"target": "operator-supplied", "identity": type(sink).__qualname__}
+
+
+def _attempt_fence(audit_dir, name, sha256, request_id, retain_until, sink, reconcile):
+    records = _load_manifest_records(audit_dir)
+    completed = {(rec.get("request_id"), rec["name"], rec["sha256"]) for rec in records if rec["kind"] == "worm_manifest"}
+    released = _released_versions(records)
+    pending = []
+    for rec in records:
+        if rec["kind"] != "worm_push_attempt" or rec["name"] != name or rec["sha256"] != sha256:
+            continue
+        identity = (rec["request_id"], name, sha256)
+        if identity not in completed | released:
+            pending.append(rec["request_id"])
+        if identity in completed and rec["request_id"] == request_id:
+            return False  # Original signed completion survives source/destination changes.
+    if reconcile:
+        authorization = reconcile(name, sha256, sorted(set(pending)))
+        if authorization:
+            _release_attempts(audit_dir, name, sha256, request_id, retain_until, sink, pending, authorization)
+            pending = []
+    if pending:
+        raise WormUnavailable("an earlier WORM copy has an unknown result; no copy was repeated. Review its original proof and the current source and destination before a separate intentional attempt")
+    payload = {"kind": "worm_push_attempt", "schema": 1, "name": name, "sha256": sha256,
+               "request_id": request_id, "attempted_at": _utcnow().isoformat(), "retain_until": retain_until.isoformat(),
+               "destination": _attempt_destination(sink)}
+    _write_manifest_payload(audit_dir, payload)
+    return True
+
+
+def _release_attempts(audit_dir, name, sha256, request_id, retain_until, sink, pending, authorization):
+    # The caller's live authority callback identifies an actual independently
+    # confirmed governed review. Read it here rather than accepting a fabricated
+    # actor/receipt or an operator-supplied acknowledgment as provider proof.
+    from ..governed_records import GovernedRecordStore
+    row = GovernedRecordStore("audit-action-reviews", "AAR", "audit_action_review").get(authorization)
+    if (not row or row.get("state") != "reserved" or not row.get("reconcile") or not row.get("acknowledge_uncertain")
+            or row.get("source") != str(audit_dir.absolute()) or row.get("request_id") != request_id
+            or row.get("action") != "copy" or not _matches_review_destination(row.get("destination", {}), sink)
+            or not any(item["name"] == name and item["sha256"] == sha256 and item["selected"] for item in row.get("rows", []))
+            or row.get("retain_until") != retain_until.isoformat() or row.get("_audit_pending")):
+        raise WormUnavailable("separate human copy review could not be verified")
+    item = next((value for value in row.get("reconciliation", []) if value["name"] == name and value["sha256"] == sha256), None)
+    if not item or not set(pending).issubset(item["prior_request_ids"]):
+        raise WormUnavailable("uncertain copy holds changed after independent review")
+    payload = {"kind": "worm_push_resolution", "schema": 1, "name": name, "sha256": sha256,
+        "request_id": request_id, "authorized_at": _utcnow().isoformat(), "retain_until": retain_until.isoformat(),
+        "destination": _attempt_destination(sink), "prior_request_ids": item["prior_request_ids"],
+        "authorization_id": authorization, "actor": row["actor"], "context": row["context"]}
+    # Validate the generated shape before appending its signed authority record.
+    if not _valid_resolution_record({**payload, "prev_hash": "", "key_id": "", "hash": "", "sig": ""}):
+        raise WormUnavailable("separate copy authorization is invalid")
+    _write_manifest_payload(audit_dir, payload)
+
+
+def _matches_review_destination(destination, sink):
+    if isinstance(sink, LocalWormSink):
+        return destination.get("provider") == "local" and Path(destination.get("directory", "")).resolve() == sink._dir
+    if isinstance(sink, S3WormSink):
+        if destination.get("provider") != "s3":
+            return False
+        expected = S3WormSink(bucket=destination.get("bucket", ""), prefix=destination.get("prefix", ""),
+            mode=destination.get("mode", ""), region=destination.get("region"), endpoint_url=destination.get("endpoint_url"))
+        return _attempt_destination(expected) == _attempt_destination(sink)
+    return False
 
 
 
@@ -621,7 +763,6 @@ def _locator_verified(
     return False
 
 def _append_manifest(audit_dir: Path, rec: dict) -> None:
-    path = _manifest_path(audit_dir)
     payload = {
         "kind": "worm_manifest",
         "schema": 1,
@@ -631,6 +772,10 @@ def _append_manifest(audit_dir: Path, rec: dict) -> None:
         "retain_until": rec.get("retain_until"),
         "locator": rec.get("locator"),
     }
+    if rec.get("request_id") is not None:
+        if not _SHA256_RE.fullmatch(str(rec["request_id"])):
+            raise WormUnavailable("invalid WORM request reference")
+        payload.update(schema=2, request_id=rec["request_id"])
     if (
         not _valid_day_name(payload["name"])
         or not isinstance(payload["sha256"], str)
@@ -645,6 +790,11 @@ def _append_manifest(audit_dir: Path, rec: dict) -> None:
         or _parse_utc(payload["retain_until"]) <= _parse_utc(payload["pushed_at"])
     ):
         raise WormUnavailable("refusing to append an invalid WORM manifest record")
+    _write_manifest_payload(audit_dir, payload)
+
+
+def _write_manifest_payload(audit_dir, payload):
+    path = _manifest_path(audit_dir)
     try:
         signer = AuditSigner(path)
         if signer.write(payload) is not True:
@@ -799,6 +949,36 @@ def _read_verified_source(audit_dir: Path, path: Path) -> bytes:
 
 # --- orchestration ----------------------------------------------------------
 
+
+def _reviewed_closed(audit_dir, today, expected_sources):
+    closed = [p for p in day_files(audit_dir) if p.stem < today]
+    if expected_sources is None:
+        return closed
+    available = {p.name: p for p in closed}
+    if not set(expected_sources).issubset(available):
+        raise WormUnavailable("reviewed closed audit source is missing")
+    return [available[name] for name in sorted(expected_sources)]
+
+
+def _reviewed_deadline(retain_until, retention_days, request_id):
+    deadline = retain_until or (_utcnow() + _dt.timedelta(days=retention_days))
+    if deadline.tzinfo is None or deadline <= _utcnow():
+        raise WormUnavailable("reviewed retention deadline expired")
+    if request_id is not None and not _SHA256_RE.fullmatch(request_id):
+        raise WormUnavailable("invalid WORM request reference")
+    return deadline
+
+
+def _retention_days(cfg, retention_days):
+    if retention_days is None:
+        try:
+            retention_days = int(cfg.get("retention_days") or _DEFAULT_RETENTION_DAYS)
+        except (TypeError, ValueError):
+            retention_days = _DEFAULT_RETENTION_DAYS
+    if not isinstance(retention_days, int) or not 1 <= retention_days <= 36_500:
+        raise WormUnavailable("WORM retention_days must be between 1 and 36500")
+    return retention_days
+
 def push_closed_dayfiles(
     *,
     audit_dir: Path | None = None,
@@ -806,6 +986,12 @@ def push_closed_dayfiles(
     sink: Any | None = None,
     retention_days: int | None = None,
     dry_run: bool = False,
+    expected_sources: Mapping[str, str] | None = None,
+    retain_until: _dt.datetime | None = None,
+    request_id: str | None = None,
+    before_effect: Callable[[str, str], None] | None = None,
+    completed: Callable[[str, str], None] | None = None,
+    reconcile: Callable[[str, str, list[str]], str | None] | None = None,
 ) -> dict[str, str]:
     """Ship every closed (date < today), not-yet-shipped day-file to the WORM
     target. Returns a ``{filename: status}`` report. Idempotent: an unchanged,
@@ -815,18 +1001,12 @@ def push_closed_dayfiles(
         audit_dir = data_dir("audit")
     today = today or _utcnow().strftime("%Y-%m-%d")
     cfg = _worm_cfg()
-    if retention_days is None:
-        try:
-            retention_days = int(cfg.get("retention_days") or _DEFAULT_RETENTION_DAYS)
-        except (TypeError, ValueError):
-            retention_days = _DEFAULT_RETENTION_DAYS
-    if not isinstance(retention_days, int) or not 1 <= retention_days <= 36_500:
-        raise WormUnavailable("WORM retention_days must be between 1 and 36500")
+    retention_days = _retention_days(cfg, retention_days)
 
     report: dict[str, str] = {}
     if not audit_dir.exists():
         return report
-    closed = [p for p in day_files(audit_dir) if p.stem < today]
+    closed = _reviewed_closed(audit_dir, today, expected_sources)
     if not closed:
         return report
 
@@ -841,7 +1021,8 @@ def push_closed_dayfiles(
     manifest = _load_manifest(audit_dir)
     if sink is None and not dry_run:
         sink = build_sink(cfg)   # raises WormUnavailable if unconfigured
-    retain_until = _utcnow() + _dt.timedelta(days=retention_days)
+    retain_until = _reviewed_deadline(retain_until, retention_days, request_id)
+    native_request_id = request_id or hashlib.sha256(uuid.uuid4().bytes).hexdigest()
 
     # Never ship PLAINTEXT audit data into an immutable WORM lock. A closed
     # day-file is sealed in-place by `audit seal`; WORM push is a separate
@@ -866,39 +1047,53 @@ def push_closed_dayfiles(
     from ..crypto_at_rest import is_sealed
 
     for p in closed:
-        data = source_snapshot[p.name]
-        if seal_required and not is_sealed(data):
-            report[p.name] = (
-                "refused: unsealed plaintext -- run `maverick audit seal` before "
-                "WORM push (at-rest encryption is on)"
-            )
-            continue
-        digest = _sha256(data)
-        prior = manifest.get(p.name)
-        if prior and prior.get("sha256") == digest and _locator_verified(prior, digest, sink, audit_dir):
-            report[p.name] = "already pushed"
-            continue
-        changed = prior is not None
-        if dry_run:
-            report[p.name] = "would re-push (changed)" if changed else "would push"
-            continue
-        try:
-            locator = sink.put(p.name, data, retain_until=retain_until)
-        # failure-policy: fail_soft_with_audit
-        except Exception as exc:  # surface class only; provider errors may carry secrets
-            report[p.name] = f"error ({type(exc).__name__})"
-            continue
-        rec = {
-            "name": p.name, "sha256": digest,
-            "pushed_at": _utcnow().isoformat(),
-            "retain_until": retain_until.isoformat(),
-            "locator": locator,
-        }
-        if not _locator_verified(rec, digest, sink, audit_dir):
-            report[p.name] = "error (retention proof unavailable)"
-            continue
-        _append_manifest(audit_dir, rec)
-        report[p.name] = "re-pushed (changed)" if changed else "pushed"
+        with cross_process_lock(p, strict=True):
+            data = source_snapshot[p.name]
+            digest = _sha256(data)
+            if expected_sources is not None and _sha256(_read_custodied_file(p, mode=0o600)) != digest:
+                raise WormUnavailable("reviewed audit source changed before copy")
+            if expected_sources is not None and expected_sources[p.name] != digest:
+                raise WormUnavailable("reviewed audit source changed")
+            if seal_required and not is_sealed(data):
+                report[p.name] = (
+                    "refused: unsealed plaintext -- run `maverick audit seal` before "
+                    "WORM push (at-rest encryption is on)"
+                )
+                continue
+            prior = manifest.get(p.name)
+            separate = bool(reconcile and reconcile(p.name, digest, []))
+            if prior and prior.get("sha256") == digest and _locator_verified(prior, digest, sink, audit_dir) and not separate:
+                report[p.name] = "already pushed"
+                continue
+            changed = prior is not None
+            if dry_run:
+                report[p.name] = "would re-push (changed)" if changed else "would push"
+                continue
+            if before_effect:
+                before_effect(p.name, digest)
+            if not _attempt_fence(audit_dir, p.name, digest, native_request_id, retain_until, sink, reconcile):
+                report[p.name] = "already pushed"
+                continue
+            try:
+                locator = sink.put(p.name, data, retain_until=retain_until)
+            # failure-policy: fail_soft_with_audit
+            except Exception as exc:  # surface class only; provider errors may carry secrets
+                report[p.name] = f"error ({type(exc).__name__})"
+                continue
+            rec = {
+                "name": p.name, "sha256": digest,
+                "pushed_at": _utcnow().isoformat(),
+                "retain_until": retain_until.isoformat(),
+                "locator": locator,
+            }
+            rec["request_id"] = native_request_id
+            if not _locator_verified(rec, digest, sink, audit_dir):
+                report[p.name] = "error (retention proof unavailable)"
+                continue
+            _append_manifest(audit_dir, rec)
+            report[p.name] = "re-pushed (changed)" if changed else "pushed"
+            if completed:
+                completed(p.name, report[p.name])
     return report
 
 
@@ -940,5 +1135,5 @@ def verify(*, audit_dir: Path | None = None) -> dict[str, str]:
 
 __all__ = [
     "WormUnavailable", "LocalWormSink", "S3WormSink", "build_sink",
-    "worm_enabled", "push_closed_dayfiles", "verify",
+    "worm_enabled", "push_closed_dayfiles", "verify", "request_receipts", "unknown_attempts",
 ]

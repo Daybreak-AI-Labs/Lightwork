@@ -70,7 +70,7 @@ def refresh(request, run_id, payload):
         raise HTTPException(422, "Confirm the fresh review request first.")
     run, actor = _owned(request, run_id)
     try:
-        with _guard(run), store.run_lock(run.run_id):
+        with store.run_lock(run.run_id), _guard(run):
             run, actor = _owned(request, run_id)
             receipt = (run.human or {}).get("approval_refresh") or {}
             if (run.status == "paused_approval" and receipt.get("previous_binding") == payload.binding

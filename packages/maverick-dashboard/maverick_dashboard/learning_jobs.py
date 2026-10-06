@@ -232,6 +232,8 @@ def start(kind: str, label: str, fn: Callable[[Job], dict], *, started_by: str,
         _jobs[job.id] = job
         _prune()
     ctx = contextvars.copy_context()
+    from ._request_memo import discard_request_memo
+    ctx.run(discard_request_memo)
     try:
         threading.Thread(target=ctx.run, args=(_run, job, fn, problem), daemon=True,
                          name=f"lightwork-job-{kind}").start()

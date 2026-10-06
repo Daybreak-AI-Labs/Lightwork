@@ -103,8 +103,8 @@
       <div class="mv-form__field"><label for="lx-review-reason">Why this example is or isn't right</label>
         <textarea class="textarea" id="lx-review-reason" maxlength="2000" rows="2"></textarea></div>
       <div class="fr__actions">
-        <button type="button" class="btn btn--primary" id="lx-accept">Accept as a learning example</button>
-        <button type="button" class="btn btn--ghost" id="lx-reject">Don't use this example</button>
+        <button type="button" class="btn btn--primary" id="lx-accept">Review acceptance</button>
+        <button type="button" class="btn btn--ghost" id="lx-reject">Review rejection</button>
       </div>
     </div>
     <div id="lx-grant" hidden>
@@ -115,7 +115,15 @@
       <div class="mv-form__field"><label for="lx-grant-reason">Why it may be used for learning</label>
         <textarea class="textarea" id="lx-grant-reason" maxlength="2000" rows="2"></textarea></div>
       <label><input type="checkbox" id="lx-grant-copies"> Keep the copies made while learning until that date</label>
-      <div class="fr__actions"><button type="button" class="btn btn--primary" id="lx-grant-go">Allow learning from this example</button></div>
+      <div class="fr__actions"><button type="button" class="btn btn--primary" id="lx-grant-go">Review learning permission</button></div>
+    </div>
+    <div id="lx-decision-review" style="overflow-wrap:anywhere;min-width:0"></div>
+    <div id="lx-original" hidden>
+      <h3>Original example decision</h3>
+      <label for="lx-original-choice">Your original decisions</label>
+      <select class="select" id="lx-original-choice"><option value="">Choose an original decision</option></select>
+      <p id="lx-original-status" role="status" aria-live="polite"></p>
+      <button type="button" class="btn btn--ghost" id="lx-original-read">Read original result</button>
     </div>
     <p id="lx-next" class="fr__msg" hidden><a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a></p>
   </section>{% endif %}

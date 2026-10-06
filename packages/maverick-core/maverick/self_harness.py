@@ -42,6 +42,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -2249,7 +2250,7 @@ def _cas_rollback_handle(
 # cross-process flock -- because without it two writers that both read the old
 # store both write back, losing one's addendum (8 concurrent promotions
 # collapsed to 1 in a forced-interleaving probe).
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 
 def _apply_addendum_locked(
@@ -2468,7 +2469,7 @@ def line_efficacy(model_id: str, path: Path | None = None) -> list[dict]:
 def review_efficacy(model_id: str, cases: list[str], *,
                     score_with: ScoreFn, score_without: ScoreFn,
                     min_lift: float = 0.0, min_samples: int = 1,
-                    path: Path | None = None) -> list[str]:
+                    path: Path | None = None, effect_scope=None) -> list[str]:
     """Re-measure each current line's CAUSAL lift with a live A/B and DEMOTE the
     dead weight -- a line whose lift has fallen to ``<= min_lift`` over at least
     ``min_samples`` cases no longer earns its place in every prompt (the model,
@@ -2493,8 +2494,11 @@ def review_efficacy(model_id: str, cases: list[str], *,
                     and math.isfinite(w) and math.isfinite(wo)):
                 continue
             if len(cases) >= min_samples and (w - wo) <= min_lift:
-                if forget_addendum(model_id, line=ln, path=path):
-                    demoted.append(ln)
+                with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                    if forget_addendum(model_id, line=ln, path=path):
+                        demoted.append(ln)
+                        if callable(advance):
+                            advance()
     except Exception:  # pragma: no cover -- review never perturbs a run
         log.debug("self_harness: review_efficacy failed", exc_info=True)
     return demoted
@@ -2975,6 +2979,7 @@ def run_self_harness(  # noqa: C901 - fail-closed orchestration boundary
     canary: bool = False,
     eval_for_context: Callable[[str], tuple | None] | None = None,
     promotion_authorize: Callable[[], bool] | None = None,
+    effect_scope=None,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -3108,7 +3113,8 @@ def run_self_harness(  # noqa: C901 - fail-closed orchestration boundary
 
             ok, why = _gate_and_apply(proposal, vr, controller=controller,
                                       path=path, canary=canary,
-                                      promotion_authorize=promotion_authorize)
+                                      promotion_authorize=promotion_authorize,
+                                      effect_scope=effect_scope)
             if not ok:
                 # Surface WHY the gate refused (e.g. "too few samples (3 < 5)",
                 # frozen verifier, disabled controller) so an operator with a
@@ -3141,6 +3147,7 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
     controller=None, path: Path | None = None,
     canary: bool = False,
     promotion_authorize: Callable[[], bool] | None = None,
+    effect_scope=None,
 ) -> tuple[bool, str]:
     """Prepare, CAS-apply, and commit one governed prompt promotion.
 
@@ -3182,7 +3189,7 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
         apply_prov["canary"] = True
 
     store_key = _scoped_key(proposal.model_id, proposal.context)
-    with _lock, cross_process_lock(p), _store_rmw_lock(p):
+    with effect_scope() if effect_scope is not None else nullcontext() as advance, _lock, cross_process_lock(p), _store_rmw_lock(p):
         try:
             before_store = _load_addenda_strict(p)
             before_revision = _addenda_artifact_revision(p, before_store)
@@ -3311,6 +3318,8 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
                 return False, verdict.blocking_reason or "promotion commit failed"
         else:
             return False, "promotion transaction is not applicable"
+        if callable(advance):
+            advance()
 
     return True, "promoted"
 

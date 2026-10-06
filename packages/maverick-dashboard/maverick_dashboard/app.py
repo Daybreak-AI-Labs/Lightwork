@@ -1820,6 +1820,16 @@ from .compliance_questionnaire_builder_api import (  # noqa: E402
 )
 
 app.include_router(compliance_questionnaire_builder_router, prefix="/api/v1")
+
+from .manual_skill_removal_api import router as manual_skill_removal_router  # noqa: E402
+
+app.include_router(manual_skill_removal_router, prefix="/api/v1")
+
+from .learning_example_decisions_api import (  # noqa: E402
+    router as learning_example_decisions_router,
+)
+
+app.include_router(learning_example_decisions_router, prefix="/api/v1")
 from .plugin_practice_forms_api import router as plugin_practice_forms_router  # noqa: E402
 
 app.include_router(plugin_practice_forms_router)
@@ -14027,13 +14037,12 @@ async def flow_run_page(request: Request, flow_id: str, run_id: str) -> HTMLResp
     (redacted), and the recovery actions (approve/reject, retry, retry from the
     failed step). Data comes from /api/v1/flows/runs/{run_id} client-side, so
     owner-scoping and the flow-engine gate are enforced by the API."""
-    from maverick.config import get_flows
 
     signed_in = bool(caller_principal(request))
     return templates.TemplateResponse(request, "flow_run.html", {
         "flow_id": flow_id, "run_id": run_id,
         "learning_example_panel": signed_in,
-        "learning_capture_panel": signed_in and get_flows().get("action_episode_capture") is True,
+        "learning_capture_panel": signed_in,
     })
 
 

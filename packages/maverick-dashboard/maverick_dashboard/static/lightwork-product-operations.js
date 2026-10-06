@@ -40,6 +40,9 @@
       try { return {kind: 'flow', id: decodeURIComponent(flow[1])}; } catch (_) { return {}; }
     }
     var query = new URLSearchParams(window.location.search);
+    var learningPass = query.get('learning_pass');
+    if (window.location.pathname === '/learned' && learningPass && /^[a-f0-9]{32}$/.test(learningPass))
+      return {kind: 'learning_pass', operation: learningPass};
     // The workflow builder's Steps mode is the flow designer's editor for ?flow=<id>.
     var builderFlow = query.get('flow');
     if (window.location.pathname === '/workflow-builder' && query.get('mode') === 'steps' &&
@@ -604,6 +607,9 @@
             completeReview = item.id === 'teams.department.update'
               ? !!(window.LWDepartmentTeamUpdates && window.LWDepartmentTeamUpdates.renderReview &&
                    window.LWDepartmentTeamUpdates.renderReview(formHost, review.changes) === true)
+              : ['learning.example_accept', 'learning.example_reject', 'learning.example_grant'].includes(item.id)
+                ? !!(window.LightworkLearningCapture && window.LightworkLearningCapture.renderReview &&
+                     window.LightworkLearningCapture.renderReview(formHost, review.changes) === true)
               : renderData(formHost, review.changes, {complete: review.read_only !== true});
           }
           if (review.read_only) { renderData(formHost, review.details); status.textContent = 'Current information checked. Nothing was changed.'; }

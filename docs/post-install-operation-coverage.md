@@ -830,3 +830,94 @@ repeating the effect. Actual 320px journeys completed three additions and two
 removals, refused stale sources and expired queued reviews, and kept current
 skills separate from five original records without document overflow or
 JavaScript errors.
+
+## October 5 reviewed audit maintenance and original custody
+
+Activity log now reviews every selected closed day, exact source bytes,
+destination and recorded retention before encryption or copying. Ordinary
+controls and Copilot call the same native writers. Native signed copy intent
+precedes each upload, including command-line uploads. An uncertain upload holds
+automatic repetition. A current administrator can separately review and
+authorize a new copy while explicitly accepting that an earlier copy may
+already exist; the earlier original remains uncertain.
+
+Original result reads recover exact signed request completions rather than
+inferring completion from a matching object. A departing administrator's
+private review remains private. A successor can resolve the shared copy hold
+without inheriting the earlier person's authority or rewriting that outcome.
+Narrow screens show each day's complete labeled review in cards. Recorded
+source-chain consistency, service-reported retention, local read-only files
+and independent custody remain distinct.
+
+Actual local page and Copilot journeys encrypted three synthetic closed days
+and produced six native local objects, including lost completion replies and
+current-administrator succession. Three simulated remote admissions remained
+uncertain with no blind repetition. A separate native 320px review displayed
+all eight fields for two closed days without horizontal scrolling, script
+errors, encryption or copying. No real remote service was contacted or its
+retention enforcement independently qualified.
+
+## October 5 reviewed saved-skill removal and captured examples
+
+Manually saved skills now have full instruction review and exact-version
+removal through Skills and Copilot. Removal uses the native file lock and
+checks current authority, the reviewed bytes and deadline immediately before
+deletion. Exact original receipts remain separate from today's file state.
+An interrupted deletion-to-receipt gap stays uncertain and is never replayed.
+Actual native 320px journeys covered four deletions, a competing replacement,
+lost replies, foreign context and an uncertain original; no AI call occurred.
+
+Captured learning examples now expose complete retained inputs, actions,
+results, teaching questions, choices and guards before Accept, Reject or
+permission to learn. Ordinary controls and typed Copilot share this exact
+review; a missing full-review renderer prevents confirmation. Permission
+expiry and full current workflow definition are checked inside the native
+write. A changed saved workflow cannot receive an old reviewed decision or
+grant, including through the older API. Historical originals remain readable
+after a later source change or learning is switched off, subject to current
+read authority.
+
+The actual native phone journey reviewed 259 retained values, completed the
+three decisions, recovered lost responses without repeating them, and refused
+changed sources, foreign context and withdrawn access. Native queued-run
+repair and approval refresh now acquire their locks in the same order as
+execution. A deterministic native concurrent repair preserved the exact owner,
+input and run while restoring its missing original queue job once.
+
+## October 5 current authority in retained work
+
+Self-coaching now uses a complete current review of shareable recent mistakes,
+questions, accepted instructions, configured models and spending settings
+before its retained native worker starts. Current sources and authority are
+checked before every physical AI request and every native learning write.
+Successful writes advance only their own expected instruction generation;
+another person's edits cannot silently become part of the reviewed pass.
+The worker is recorded before AI dispatch, requires a safety copy and does not
+repeat an uncertain admission. A confirmed cooperative stop keeps earlier
+completed learning visible and reports the unfinished work as stopped.
+
+Actual file-backed and single-host SQLite-world passes each adopted one
+synthetic lesson for each of two models. The real SDK used a local synthetic
+HTTP response only. Changed instructions, settings, authority and source
+permission between requests stopped further calls and writes. Native local
+PostgreSQL advisory locking also exercised nested same-thread writes,
+cross-thread exclusion and exception release against a disposable server.
+These checks establish the bounded operating contract, not live AI accuracy,
+customer lift or complete shared-host deployment acceptance.
+
+Retained learning workers discard the initial HTTP configuration memo while
+keeping their admitted owner and workspace. Principal-less local and static
+token access is checked against current authentication settings rather than
+a cached admission flag. Explicit API keys are reverified at protected
+permission gates without changing the admitted owner or workspace. Key
+revocation, expiry, service-account lifecycle and scope reductions therefore
+apply before delayed protected effects. Key mutation and effect admission now
+share the native authority fence in a consistent lock order.
+
+Actual retained workers refused authentication activation and static-token
+rotation. Native reviewed audit writes and retained workers also refused
+revoked, expired, disabled and scope-reduced keys before changing source bytes.
+Existing browser-owner admission and throttled key-use recording remained
+intact. The local ranking trainer rechecks its deadline after native job
+identity and source loading; a delayed admission created no model or trainer
+run, and repeat submission read the original request.
