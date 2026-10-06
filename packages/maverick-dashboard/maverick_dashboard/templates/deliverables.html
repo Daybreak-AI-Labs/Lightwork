@@ -40,13 +40,13 @@
           <strong>{{ g.title }}</strong>
           {% if result_labels.get(g.domain) %}<span class="muted">{{ result_labels[g.domain] }}</span>{% endif %}
           <span class="muted" data-when="{{ g.updated_at }}"></span>
-          <a class="dlv-finished__open" href="/chat/goal/{{ g.id }}">Open result →</a>
+          <a class="dlv-finished__open" href="/chat/goal/{{ g.id }}">{{ ui('Open result →') }}</a>
           {# AI-written, and rated in one tap where the viewer owns the task (AI-2, AI-10). #}
-          <div class="dlv-feedback" data-result-feedback data-goal="{{ g.id }}" role="group" aria-label="Rate this result">
-            <span class="muted">Written by an agent.{% if can_rate and (g.owner or '') == feedback_owner %} Was it useful?{% endif %}</span>
+          <div class="dlv-feedback" data-result-feedback data-goal="{{ g.id }}" role="group" aria-label="{{ ut('Rate this result') }}" lang="{{ ul('Rate this result') }}">
+            <span class="muted">{{ ui('Written by an agent.') }}{% if can_rate and (g.owner or '') == feedback_owner %} {{ ui('Was it useful?') }}{% endif %}</span>
             {% if can_rate and (g.owner or '') == feedback_owner %}
-            <button class="btn btn--ghost dlv-feedback__btn" type="button" data-rating="up" aria-pressed="false" aria-label="Yes, useful">👍</button>
-            <button class="btn btn--ghost dlv-feedback__btn" type="button" data-rating="down" aria-pressed="false" aria-label="No, not useful">👎</button>
+            <button class="btn btn--ghost dlv-feedback__btn" type="button" data-rating="up" aria-pressed="false" aria-label="{{ ut('Yes, useful') }}">👍</button>
+            <button class="btn btn--ghost dlv-feedback__btn" type="button" data-rating="down" aria-pressed="false" aria-label="{{ ut('No, not useful') }}">👎</button>
             {% endif %}
             <span class="muted dlv-feedback__msg" data-feedback-msg role="status" aria-live="polite"></span>
           </div>
