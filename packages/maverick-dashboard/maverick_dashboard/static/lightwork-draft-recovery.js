@@ -102,7 +102,19 @@
       panel.style.cssText = 'padding:var(--space-2);margin-block:var(--space-2);min-width:0';
       // The loading words appear only when the check takes longer than
       // 300 ms (the mvLoading rule), so a quick check never flashes them.
-      root.setTimeout(function () { slowCheck = true; if (!initialized) { checkingSince = Date.now(); compactControls(); } }, 300);
+      root.setTimeout(function () {
+        slowCheck = true;
+        if (initialized) return;
+        checkingSince = Date.now(); compactControls();
+        // Counted from the first frame that can show the words: a busy phone
+        // paints late, and a page still loading is inert (not yet shown).
+        function shown() {
+          if (!checkingSince) return;
+          if (disclosureTitle.closest('[inert], [hidden]')) { root.requestAnimationFrame(shown); return; }
+          checkingSince = Date.now();
+        }
+        if (typeof root.requestAnimationFrame === 'function') root.requestAnimationFrame(shown);
+      }, 300);
       disclosureTitle.addEventListener('click', function (event) {
         if (blocked || failed || pendingOperation) { event.preventDefault(); disclosure.open = true; }
         else automaticallyOpened = false;

@@ -170,11 +170,13 @@ test('request failures show plain sentences, never server text or browser errors
 // Chat's compact row said "Checking draft recovery…" for 18-109 ms on every
 // load. A check that answers within 300 ms now never shows the loading words;
 // a slow one still says so.
-async function compactRow(delayMs){
+async function compactRow(delayMs,frameMs,inertMs){
   const dom=new JSDOM('<meta name="lightwork-draft-context" content="account-workspace"><form id="editor"><textarea id="brief"></textarea></form>',{url:'https://lightwork.test/chat',runScripts:'outside-only'});
   const w=dom.window,d=w.document;Object.defineProperty(w,'crypto',{value:webcrypto});w.TextEncoder=TextEncoder;
   const labels=[];
   w.fetch=async url=>{await new Promise(resolve=>setTimeout(resolve,delayMs));return {ok:true,json:async()=>({context:'account-workspace',revision:0,payload:null,slot:url.split('/').pop()})};};
+  if(frameMs!==undefined)w.requestAnimationFrame=callback=>setTimeout(callback,frameMs);
+  if(inertMs){d.getElementById('editor').setAttribute('inert','');setTimeout(()=>d.getElementById('editor').removeAttribute('inert'),inertMs);}
   w.eval(source);
   const recovery=w.mvDraftRecovery.create({key:'chat',compact:true,host:d.getElementById('editor'),read:()=>({brief:''}),restore:()=>{}});
   const summary=recovery.panel.querySelector('.draft-recovery__compact > summary');
@@ -194,6 +196,28 @@ test('a slow recovery check says it is checking, long enough to read',async()=>{
   // Shown at 300 ms and answered at 450 ms: the words stay 500 ms, not 150.
   assert.equal(ui.summary.textContent,'Checking draft recovery…');
   await new Promise(resolve=>setTimeout(resolve,500));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});
+
+// A busy phone painted the words up to 200 ms after they were set, so they
+// were on screen for 283 ms, not 500: the 500 ms count from the first frame.
+test('the checking words stay 500 ms from the frame that shows them',async()=>{
+  const started=Date.now();
+  const ui=await compactRow(450,200);   // set at 300 ms, first frame at about 500 ms
+  await new Promise(resolve=>setTimeout(resolve,Math.max(0,900-(Date.now()-started))));
+  assert.equal(ui.summary.textContent,'Checking draft recovery…');
+  await new Promise(resolve=>setTimeout(resolve,300));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});
+
+// While the page is still inert (not yet usable) the words cannot be seen;
+// the 500 ms start once it is usable.
+test('the checking words stay 500 ms from when the page can show them',async()=>{
+  const started=Date.now();
+  const ui=await compactRow(450,20,600);   // set at 300 ms, page usable at 600 ms
+  await new Promise(resolve=>setTimeout(resolve,Math.max(0,1000-(Date.now()-started))));
+  assert.equal(ui.summary.textContent,'Checking draft recovery…');
+  await new Promise(resolve=>setTimeout(resolve,250));
   assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
 });
 
