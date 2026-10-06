@@ -275,19 +275,14 @@ def people_results(request: Request, q: str = Query("", max_length=200)) -> JSON
 
 
 @router.get("/nav/finder/find", include_in_schema=False)
-def find_results(request: Request, q: str = Query("", max_length=200), warm: bool = Query(False)) -> JSONResponse:
+def find_results(request: Request, q: str = Query("", max_length=200)) -> JSONResponse:
     """People, agents and specialists, waiting approvals and help topics for
     the command menu's ordinary search (navfinder_find.py): each from its own
-    page's permission check, for this person, on this request. ``warm`` (sent
-    when the menu opens) reads the same sources with the same checks and
-    returns nothing, so the first real search answers in time."""
+    page's permission check, for this person, on this request."""
     auth.require_permission(request, "view")
-    from .navfinder_find import find, warm_up
+    from .navfinder_find import find
 
     can_open_page = _app()._nav_context(request)["can_open_page"]
-    if warm:
-        warm_up(request, can_open_page)
-        return JSONResponse({"results": []}, headers=_PRIVATE)
     return JSONResponse({"results": find(request, q, can_open_page)}, headers=_PRIVATE)
 
 

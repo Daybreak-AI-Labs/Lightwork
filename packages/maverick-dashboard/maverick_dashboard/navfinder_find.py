@@ -57,7 +57,7 @@ def people(request, terms, can_open_page) -> list[dict]:
 def agents(request, terms, can_open_page) -> list[dict]:
     if not can_open_page("/agents"):
         return []
-    from maverick.domain_edit import list_agents
+    from maverick.domain import available_domains, suites_for_domain
 
     from .agent_changelog import agent_kind
     from .auth import caller_suites
@@ -65,25 +65,27 @@ def agents(request, terms, can_open_page) -> list[dict]:
 
     allowed = caller_suites(request)
     found = []
-    for agent in list_agents():
-        if allowed is not None and not set(agent["suites"]) <= allowed:
-            continue
-        description = str(agent.get("description") or "")
+    # The parsed pack catalogue is cached for the process (domain.builtin_domains);
+    # workspace packs are read live. Readiness, which the /agents roster
+    # recomputes per pack, is not needed to find a name.
+    for pack, profile in available_domains().items():
+        description = str(profile.description or "")
         # Two thousand packs: words the pack cannot hold skip the naming work.
-        if not all(term in f"{agent['name']} {humanize(agent['name'])} {description} agent specialist".casefold()
-                   for term in terms):
+        if not all(term in f"{pack} {humanize(pack)} {description} agent specialist".casefold() for term in terms):
             continue
-        kind = agent_kind(agent["name"])
+        if allowed is not None and not set(suites_for_domain(pack, profile)) <= allowed:
+            continue
+        kind = agent_kind(pack)
         # "Trade Finance: Prepare letter-of-credit..." is known as "Trade Finance".
         known, _, _rest = description.partition(":")
-        title = known.strip() if _rest and 0 < len(known.strip()) <= 60 else humanize(agent["name"])
-        names = list(dict.fromkeys([title, humanize(agent["name"])]))
+        title = known.strip() if _rest and 0 < len(known.strip()) <= 60 else humanize(pack)
+        names = list(dict.fromkeys([title, humanize(pack)]))
         labels = [*names, *(f"{name} {kind}" for name in names)]
-        rank = _rank(labels, f"{' '.join(labels)} {description} {agent['name']}".casefold(), terms)
+        rank = _rank(labels, f"{' '.join(labels)} {description} {pack}".casefold(), terms)
         # Two thousand packs: a word met only in a description is noise here.
         if rank is not None and rank <= 2:
             found.append((rank, {"kind": kind, "title": title, "labels": labels,
-                                 "context": description, "href": "/agents?name=" + quote(agent["name"], safe="")}))
+                                 "context": description, "href": "/agents?name=" + quote(pack, safe="")}))
     return _best(found)
 
 
@@ -144,13 +146,3 @@ def find(request, query: str, can_open_page) -> list[dict]:
             continue
     return results
 
-
-def warm_up(request, can_open_page) -> None:
-    """Read every source this person may use, with the same checks, and keep
-    nothing: a word no name holds matches no row, so only the catalogs'
-    first-read cost is paid before the person types."""
-    for source in SOURCES:
-        try:
-            source(request, ["\x00"], can_open_page)
-        except Exception:  # a closed or unreadable source adds nothing  # noqa: BLE001
-            continue

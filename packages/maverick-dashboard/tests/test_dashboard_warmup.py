@@ -14,7 +14,8 @@ def test_warm_dashboard_caches_compiles_templates_and_openapi():
 
     timings = dashboard._warm_dashboard_caches()
 
-    assert set(timings) == {"templates", "openapi", "domains", "shield"}
+    assert set(timings) == {"templates", "openapi", "domains", "agents", "shield"}
+    assert list(timings)[:2] == ["domains", "agents"], "the pack catalogue warms first"
     cached = {getattr(t, "name", None) for t in env.cache.values()}
     for name in dashboard._WARM_TEMPLATES:
         assert name in cached, name
@@ -47,3 +48,14 @@ def test_template_bytecode_cache_lives_under_maverick_home(tmp_path, monkeypatch
     assert cache is not None
     assert os.path.isdir(tmp_path / "cache" / "templates")
     assert dashboard.templates.env.bytecode_cache is not None
+
+
+def test_the_pack_catalogue_warms_before_the_slower_steps(monkeypatch):
+    """Ctrl+K's first agent lookup needs the parsed pack catalogue and the
+    tool inventory; both are person-independent and warm before hooks and
+    the OpenAPI build, so the first search after start answers in time."""
+    order = []
+    monkeypatch.setattr("maverick.domain_edit.list_agents", lambda: order.append("agents") or [])
+    monkeypatch.setattr(dashboard.app, "openapi", lambda: order.append("openapi"))
+    dashboard._warm_dashboard_caches()
+    assert order.index("agents") < order.index("openapi")

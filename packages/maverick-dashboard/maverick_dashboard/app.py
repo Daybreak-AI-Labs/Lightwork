@@ -977,16 +977,39 @@ def _warm_dashboard_caches() -> dict[str, float]:
 
         builtin_domains()
 
+    def _agents() -> None:
+        # The agent roster's tool inventory (about 0.6 s cold), cached per
+        # installation configuration. Ctrl+K's first agent lookup needs it;
+        # nothing in it is about a person.
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+
     def _shield() -> None:
         from maverick.orchestrator import _build_shield
 
         _build_shield()
 
+    # The pack catalogue first: the first Ctrl+K search after start needs it,
+    # and the OpenAPI build after it is the slowest step.
+    _step("domains", _domains)
+    _step("agents", _agents)
     _step("templates", _templates)
     _step("openapi", app.openapi)
-    _step("domains", _domains)
     _step("shield", _shield)
     return timings
+
+
+def _warm_pack_catalogue() -> None:
+    """Parse the shipped pack catalogue (2,031 files) and the roster's tool
+    inventory before hook discovery: both are person-independent and cached
+    for the process, and Ctrl+K's first agent lookup needs them."""
+    try:
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+    except Exception:  # pragma: no cover - warm-up is best-effort
+        log.debug("pack catalogue warm-up skipped", exc_info=True)
 
 
 def _warm_goal_runtime() -> None:
@@ -997,6 +1020,7 @@ def _warm_goal_runtime() -> None:
     startup."""
 
     def _warm() -> None:
+        _warm_pack_catalogue()
         try:
             import asyncio as _asyncio
 

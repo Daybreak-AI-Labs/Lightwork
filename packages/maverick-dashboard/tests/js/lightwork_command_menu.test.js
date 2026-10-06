@@ -335,9 +335,7 @@ test("plain search also finds people, agents and specialists, approvals and help
   assert.equal(ui.timers.length, 1);
   ui.timers.shift()();
   await ui.flush();
-  // Opening warmed the server's sources (for this person, nothing returned);
-  // the search itself asks again, on its own request.
-  assert.deepEqual(ui.fetches.map((call) => [call.method, call.url]), [["GET", "/nav/finder/find?warm=1"], ["GET", "/nav/finder/find?q=finance%20specialist"]]);
+  assert.deepEqual(ui.fetches.map((call) => [call.method, call.url]), [["GET", "/nav/finder/find?q=finance%20specialist"]]);
   // The exact name ranks first; rows the server did not vouch for are dropped.
   assert.equal(ui.visible()[0], "/agents?name=finance");
   assert.ok(!ui.visible().some((href) => href.startsWith("https:") || href === "/agents?name=x"));
@@ -351,15 +349,12 @@ test("plain search also finds people, agents and specialists, approvals and help
   ui.dom.window.close();
 });
 
-test("opening the menu warms the server search once, and only where it is offered", () => {
+test("opening the menu asks the server nothing until words are typed", () => {
+  // The pack catalogue warms when the server starts (app._warm_pack_catalogue),
+  // so opening adds no request of its own.
   const ui = menu({ find: true });
-  assert.deepEqual(ui.fetches.map((call) => call.url), ["/nav/finder/find?warm=1"]);
-  assert.equal(ui.visible().some((href) => href.startsWith("/agents?")), false, "the warm reply adds no rows");
-  ui.finder.close && ui.finder.close();
+  assert.deepEqual(ui.fetches, []);
   ui.dom.window.close();
-  const plain = menu();
-  assert.ok(!plain.fetches.some((call) => call.url.includes("warm")));
-  plain.dom.window.close();
 });
 
 test("a match only in an agent's description stays below the named records", async () => {
