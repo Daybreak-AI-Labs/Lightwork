@@ -950,10 +950,12 @@ def _warm_dashboard_caches() -> dict[str, float]:
     """Pay the dashboard's once-per-process first-hit costs now.
 
     Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
-    first ``/openapi.json`` 4.2 s (schema build, which also materialises
-    every lazily included route), ``builtin_domains()`` 0.78 s (2,031 pack
-    files), ``_build_shield()`` 37 ms. Each step is independent and
-    fail-open; the returned timings are for logs and tests.
+    every included route's context about 2.5 s (FastAPI 0.141 builds them
+    on the first request that routes past them), ``builtin_domains()``
+    0.78 s (2,031 pack files), ``_build_shield()`` 37 ms. Each step is
+    independent and fail-open; the returned timings are for logs and tests.
+    The OpenAPI schema (about 4.3 s, needed only by /openapi.json and the
+    guided API forms) is not built here: :func:`_build_openapi_when_idle`.
     """
     timings: dict[str, float] = {}
 
@@ -985,6 +987,14 @@ def _warm_dashboard_caches() -> dict[str, float]:
 
         list_agents()
 
+    def _routes() -> None:
+        # Request routing needs these contexts; the schema build used to be
+        # what materialised them (58edcc4b), at four seconds of extra CPU.
+        from .route_identity import iter_compatible_route_contexts
+
+        for _context in iter_compatible_route_contexts(app.routes):
+            pass
+
     def _shield() -> None:
         from maverick.orchestrator import _build_shield
 
@@ -994,8 +1004,8 @@ def _warm_dashboard_caches() -> dict[str, float]:
     # and the OpenAPI build after it is the slowest step.
     _step("domains", _domains)
     _step("agents", _agents)
+    _step("routes", _routes)
     _step("templates", _templates)
-    _step("openapi", app.openapi)
     _step("shield", _shield)
     return timings
 
@@ -1010,6 +1020,29 @@ def _warm_pack_catalogue() -> None:
         list_agents()
     except Exception:  # pragma: no cover - warm-up is best-effort
         log.debug("pack catalogue warm-up skipped", exc_info=True)
+
+
+def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0) -> bool:
+    """Build the OpenAPI schema once the dashboard has been quiet for
+    ``quiet`` seconds, so its seconds of CPU do not land on someone's first
+    searches. Ten seconds, not one or two: a person opening the dashboard
+    pauses that long only rarely while working, but often while a browser
+    starts. A request for /openapi.json before then builds it on demand, as
+    FastAPI always did. Gives up after ``limit`` seconds of steady traffic."""
+    from . import request_activity
+
+    waited = 0.0
+    while not request_activity.quiet_for(quiet):
+        if waited >= limit:
+            return False
+        sleep(0.5)
+        waited += 0.5
+    try:
+        app.openapi()
+    except Exception:  # pragma: no cover - the schema still builds on demand
+        log.debug("OpenAPI warm-up skipped", exc_info=True)
+        return False
+    return True
 
 
 def _warm_goal_runtime() -> None:
@@ -1032,6 +1065,7 @@ def _warm_goal_runtime() -> None:
         timings = _warm_dashboard_caches()
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
+        _build_openapi_when_idle()
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
 
@@ -14824,11 +14858,14 @@ def main() -> None:
 # contexts and request-scope route objects receive the same final identity.
 _stabilize_effective_route_names(app)
 
-# Outermost (added last): every middleware and handler below it shares one
-# per-request memo for configuration-derived authorization predicates.
+# Every middleware and handler below the memo shares one per-request memo for
+# configuration-derived authorization predicates. Outside it (added last), the
+# activity count lets start-up work wait for a quiet moment.
 from ._request_memo import RequestMemoMiddleware  # noqa: E402
+from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
+app.add_middleware(RequestActivityMiddleware)
 
 
 if __name__ == "__main__":
