@@ -9,7 +9,10 @@ One daemon thread, started with the dashboard, does two jobs:
 * every ``_RETRY_PUMP_SECONDS`` it runs
   :func:`maverick.webhook_subscriptions.process_due`, so a webhook delivery
   whose receiver was down is retried on its backoff schedule even when no new
-  event arrives.
+  event arrives;
+* every hour it re-checks the compliance protections
+  (:func:`maverick.compliance_history.recheck_if_due`), so a protection that
+  breaks shows as failing within the hour, with when it changed.
 
 The retry pump runs whenever the thread runs; the deadline evaluation only
 when alerts are enabled. Both are wrapped so one bad cycle is logged and the
@@ -63,6 +66,12 @@ def _scheduler_loop(stop: threading.Event) -> None:
             webhook_subscriptions.process_due(world=_world(), now=now)
         except Exception:  # noqa: BLE001 - one bad pump must not end the thread
             log.warning("webhook retry pump failed", exc_info=True)
+        try:
+            from maverick.compliance_history import recheck_if_due
+
+            recheck_if_due(now=now)
+        except Exception:  # noqa: BLE001 - a failed check is retried next pass
+            log.warning("compliance re-check failed", exc_info=True)
         try:
             cfg = deadline_alerts.settings()
             if cfg["enabled"] and now >= next_eval:

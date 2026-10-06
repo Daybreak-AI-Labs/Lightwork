@@ -8136,6 +8136,14 @@ def _compliance_view(framework: str) -> dict:
         checks = compliance_report()
     except Exception:  # pragma: no cover - never 500 the console if core is absent
         return {"framework": framework, "groups": {}, "summary": {}, "disclaimer": ""}
+    history = {"checked_at": None, "controls": {}, "changes": []}
+    try:
+        from maverick.compliance_history import record
+
+        # Each visit is a check too: keep when it ran and since when each status holds.
+        history = record(checks)
+    except Exception:  # noqa: BLE001 -- the page renders without its history
+        log.warning("compliance history unavailable", exc_info=True)
     if framework != "all":
         checks = [c for c in checks if c.framework == framework]
     # Group by framework bucket ("eu"/"us") for labelled tables on the page.
@@ -8159,6 +8167,7 @@ def _compliance_view(framework: str) -> dict:
         "groups": groups,
         "summary": summary,
         "disclaimer": COMPLIANCE_DISCLAIMER,
+        "control_history": history,
     }
 
 
@@ -8193,9 +8202,10 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
         return with_landing_headers(templates.TemplateResponse(request, "autonomous_compliance.html", context))
     view = _compliance_view(request.query_params.get("framework") or "all")
     view["compliance_tabs"] = tabs if areas_on(request) else None
-    from .compliance_controls_api import RETENTION_FIELDS, guide_for
+    from .compliance_controls_api import RETENTION_FIELDS, STATUS_TEXT, guide_for
 
     view["guide_for"] = guide_for
+    view["status_word"] = lambda status: STATUS_TEXT.get(status, "Unknown").lower()
     view["retention_fields"] = RETENTION_FIELDS
     view["report_download_context"] = _conversation_context(request)
     view["can_admin"] = has_permission(request, "admin")
