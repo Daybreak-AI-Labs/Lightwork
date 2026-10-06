@@ -10758,9 +10758,20 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             "chat_limits": _CHAT_LIMITS,
             "compose_form": compose_form,
             "compose_form_available": page_visible(request, "/goal-builder"),
+            "typical_cost": _own_typical_cost(request, w),
             "channels": _goal_builder_channels() if compose_form else [],
         },
     )
+
+
+def _own_typical_cost(request: Request, world) -> dict | None:
+    """What the signed-in person's own past tasks cost (none without a named account)."""
+    principal = caller_principal(request) or ""
+    if not principal.startswith("user:"):
+        return None
+    from maverick.typical_cost import typical_cost
+
+    return typical_cost(world, owner=principal)
 
 
 def _goal_builder_channels() -> list:

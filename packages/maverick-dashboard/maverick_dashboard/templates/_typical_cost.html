@@ -14,3 +14,12 @@ Not enough past tasks to estimate yet: {{ tc.runs }} of the {{ tc.min_runs }} fi
 Past costs could not be read.
 {%- endif -%}
 {%- endmacro %}
+{# The same line for the person starting a task: what their own past tasks
+   cost, shown under the chat's Start button (ADM-4). #}
+{% macro own_typical_cost_text(tc) -%}
+{%- if tc and tc.enough -%}
+Your past tasks usually cost {{ tc.low | money }} to {{ tc.high | money }}, {{ tc.median | money }} in the middle (from your last {{ tc.runs }} finished {{ 'task' if tc.runs == 1 else 'tasks' }}). This is past spending, not a prediction.
+{%- elif tc -%}
+No cost range yet: {{ tc.runs }} of the {{ tc.min_runs }} finished tasks needed to show what your tasks usually cost.
+{%- endif -%}
+{%- endmacro %}
