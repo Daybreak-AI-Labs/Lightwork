@@ -121,7 +121,7 @@
         !ID.test(value.asset_id) || !ID.test(value.version) ||
         !SHA.test(value.manifest_sha256) ||
         value.schema !== "lightwork.research-registry-ref.v1") {
-      throw failure("The knowledge response contained an invalid exact source reference.");
+      throw failure("A source in the answer could not be matched to its exact place. Refresh the page and try again.");
     }
     return {
       kind: value.kind,
@@ -234,7 +234,7 @@
       text(value.proposed_correction, "proposed correction", 8192, true);
     var evidence = value.decision_evidence_sha256;
     if (evidence !== null && !SHA.test(evidence)) {
-      throw failure("The rights response contained invalid decision evidence.");
+      throw failure("The access decision could not be read. Refresh the page and try again.");
     }
     if (value.status === "applying" &&
         (value.decision !== "approve" || typeof value.decided_by !== "string" ||
@@ -337,7 +337,7 @@
         fresh_until: finiteTime(eligibility.fresh_until, "freshness time", false),
         consent_until: finiteTime(eligibility.consent_until, "consent time", true),
         approval_sha256: SHA.test(eligibility.approval_sha256) ? eligibility.approval_sha256 :
-          (function () { throw failure("The knowledge response contained invalid approval evidence."); }()),
+          (function () { throw failure("The approval record in the answer could not be read. Refresh the page and try again."); }()),
         requested_action: eligibility.requested_action,
         actor: text(eligibility.actor, "authorized actor", 512, false),
         actor_authorization_sha256: eligibility.actor_authorization_sha256

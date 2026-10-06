@@ -159,7 +159,7 @@
     if (Array.isArray(detail)) {
       var entries = detail.slice(0, 8).map(function (entry) {
         if (typeof entry === "string") { return entry.slice(0, 250); }
-        if (!entry || typeof entry !== "object") { return "Invalid request value."; }
+        if (!entry || typeof entry !== "object") { return "One of the values sent was not accepted."; }
         var location = Array.isArray(entry.loc)
           ? entry.loc.filter(function (part) {
             return part !== "body" && part !== "query" && part !== "path";
@@ -167,7 +167,7 @@
           : "";
         var message = typeof entry.msg === "string" && entry.msg
           ? entry.msg
-          : "Invalid request value.";
+          : "One of the values sent was not accepted.";
         return (location ? location + ": " : "") + message.slice(0, 250);
       });
       if (detail.length > entries.length) {
@@ -842,27 +842,27 @@
   function validateToolList(value, field) {
     if (!Array.isArray(value) || value.length > 256 ||
         value.some(function (name) { return !toolPattern.test(name); })) {
-      throw failServer("The list contained an invalid " + field + " tool list.");
+      throw failServer("The list had a " + field + " tool list that could not be read.");
     }
     return value.slice();
   }
 
   function validateRosterRow(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw failServer("The list contained an invalid roster row.");
+      throw failServer("The list had a row that could not be read.");
     }
     var row = Object.assign({}, value);
     row.principal = checkPrincipal(row.principal);
     if (row.kind !== "native" && row.kind !== "external") {
-      throw failServer("The list contained an invalid roster principal kind.");
+      throw failServer("The list had a row whose kind of agent or person is not recognized.");
     }
     if (typeof row.state !== "string" || !row.state || row.state.length > 64 ||
         /[\u0000-\u001f\u007f-\u009f]/.test(row.state)) {
-      throw failServer("The list contained an invalid roster state.");
+      throw failServer("The list had a row with a state that is not recognized.");
     }
     if (!isNonNegativeInteger(row.running_goals) ||
         typeof row.revoked !== "boolean" || typeof row.contained !== "boolean") {
-      throw failServer("The list contained invalid roster control state.");
+      throw failServer("The list had a row whose controls could not be read.");
     }
     if (row.label !== undefined && (typeof row.label !== "string" || row.label.length > 512)) {
       row.label = "";
@@ -870,21 +870,21 @@
     if (row.platform !== undefined &&
         (typeof row.platform !== "string" || row.platform.length > 128 ||
          /[\u0000-\u001f\u007f-\u009f]/.test(row.platform))) {
-      throw failServer("The list contained an invalid roster platform label.");
+      throw failServer("The list had a row whose platform name could not be read.");
     }
     if (row.revoked_reason !== undefined &&
         (typeof row.revoked_reason !== "string" || row.revoked_reason.length > 500 ||
          /[\u0000-\u001f\u007f-\u009f]/.test(row.revoked_reason))) {
-      throw failServer("The list contained an invalid roster incident summary.");
+      throw failServer("The list had a row whose incident summary could not be read.");
     }
     if (row.max_risk !== null && row.max_risk !== undefined &&
         !["low", "medium", "high"].includes(row.max_risk)) {
-      throw failServer("The list contained an invalid roster risk ceiling.");
+      throw failServer("The list had a row whose risk limit could not be read.");
     }
     ["max_dollars", "max_wall_seconds"].forEach(function (field) {
       if (row[field] !== null && row[field] !== undefined &&
           (typeof row[field] !== "number" || !Number.isFinite(row[field]) || row[field] <= 0)) {
-        throw failServer("The list contained an invalid roster numeric ceiling.");
+        throw failServer("The list had a row whose number limit could not be read.");
       }
     });
     row.allow_tools = validateToolList(row.allow_tools || [], "allowed");
@@ -1148,7 +1148,7 @@
 
   function applyRoster(payload) {
     if (!payload || !Array.isArray(payload.items)) {
-      throw failServer("The list contained an invalid bounded roster page.");
+      throw failServer("The list page was larger than allowed or could not be read.");
     }
     var validatedItems = payload.items.map(validateRosterRow);
     var focus = currentRosterFocus();
@@ -1165,7 +1165,7 @@
         end > total || payload.has_more !== expectedHasMore ||
         (expectedHasMore && suppliedNext !== end) ||
         (!expectedHasMore && suppliedNext !== null)) {
-      throw failServer("The list contained invalid roster pagination metadata.");
+      throw failServer("The details for moving between list pages could not be read.");
     }
     rosterOffset = offset;
     rosterNextOffset = expectedHasMore ? suppliedNext : null;

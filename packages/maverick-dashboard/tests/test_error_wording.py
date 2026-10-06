@@ -1,7 +1,7 @@
 """Error messages say what happened and how to move on (TXT-3).
 
 GOV.UK's error message rules: describe what happened, tell people how to fix
-it, and leave out "please", "sorry", "oops" and "invalid". Three checks over
+it, and leave out "please", "sorry", "oops" and "invalid". Four checks over
 the dashboard's own copy (templates, browser scripts and the dashboard's
 Python messages):
 
@@ -9,7 +9,9 @@ Python messages):
   names it as a verb phrase ("save the policy"), because the shared helper
   turns it into "Could not save the policy." followed by the next step;
 * no message says "Please try again", "sorry" or "oops";
-* sentences that call something "invalid" only go down (a ratchet).
+* no sentence calls something "invalid";
+* the supplier portal's reply checks, which show in logs and support views,
+  read as plain sentences.
 """
 from __future__ import annotations
 
@@ -22,10 +24,8 @@ _ACTION_CALL = re.compile(
 _LITERAL = re.compile(r"'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"|`((?:[^`\\]|\\.)*)`")
 _BANNED = re.compile(r"\bplease try again\b|\bsorry\b|\boops\b", re.IGNORECASE)
 
-#: Sentences that still call something "invalid" (internal list checks in a
-#: few scripts and one fail-closed money check whose test reads the word).
-#: Lower this as they are rewritten; never raise it.
-MAX_INVALID_SENTENCES = 21
+#: Sentences that call something "invalid". All were rewritten; keep it at 0.
+MAX_INVALID_SENTENCES = 0
 
 
 def _browser_copy() -> list[Path]:
@@ -61,3 +61,12 @@ def test_sentences_calling_things_invalid_only_go_down():
     found = [f"{path.name}: {text}" for path in _browser_copy() for text in _literals(path)
              if re.match(r"[A-Z]", text) and text.rstrip().endswith(".") and re.search(r"\binvalid\b", text, re.IGNORECASE)]
     assert len(found) <= MAX_INVALID_SENTENCES, "\n".join(found)
+
+
+def test_supplier_portal_reply_checks_read_as_plain_sentences():
+    source = (PACKAGE / "static/lightwork-third-party-portal.js").read_text(encoding="utf-8")
+    messages = re.findall(r"(?:fail|PortalContractError)\((\"[^\"]*\"|`[^`]*`)\)", source)
+    assert len(messages) > 30
+    rough = [m for m in messages if not re.fullmatch(r"[\"`](?:The \$\{label\}|[A-Z]).*[.][\"`]", m)
+             or re.search(r"\b(contract|bound|schema|manifest|invalid)\b", m)]
+    assert rough == [], rough

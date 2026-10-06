@@ -225,14 +225,14 @@
   }
 
   function closedRecord(value, keys, label) {
-    if (!isRecord(value)) fail(`${label} must be an object`);
+    if (!isRecord(value)) fail(`The ${label} in the reply is not a set of fields.`);
     const actual = Object.keys(value);
     if (actual.length !== keys.size || actual.some((key) => !keys.has(key))) {
-      fail(`${label} does not match the closed contract`);
+      fail(`The ${label} in the reply has fields this page does not expect.`);
     }
     for (const key of keys) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) {
-        fail(`${label} is missing a required field`);
+        fail(`The ${label} in the reply is missing a field.`);
       }
     }
     return value;
@@ -240,45 +240,45 @@
 
   function integer(value, minimum, maximum, label) {
     if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
-      fail(`${label} is outside its bound`);
+      fail(`The ${label} in the reply is outside the allowed range.`);
     }
     return value;
   }
 
   function finiteNumber(value, minimum, maximum, label) {
     if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) {
-      fail(`${label} is outside its bound`);
+      fail(`The ${label} in the reply is outside the allowed range.`);
     }
     return value;
   }
 
   function identifier(value, label) {
     if (typeof value !== "string" || !ID_RE.test(value)) {
-      fail(`${label} is invalid`);
+      fail(`The ${label} in the reply is not in the expected form.`);
     }
     return value;
   }
 
   function digest(value, label) {
     if (typeof value !== "string" || !SHA256_RE.test(value)) {
-      fail(`${label} is invalid`);
+      fail(`The ${label} in the reply is not in the expected form.`);
     }
     return value;
   }
 
   function boolean(value, label) {
-    if (typeof value !== "boolean") fail(`${label} must be boolean`);
+    if (typeof value !== "boolean") fail(`The ${label} in the reply is not a yes or no value.`);
     return value;
   }
 
   function closedIdentifierList(value, label, maximum, allowed) {
     if (!Array.isArray(value) || value.length > maximum) {
-      fail(`${label} exceeds its bound`);
+      fail(`The ${label} in the reply has more items than allowed.`);
     }
     const result = value.map((item) => identifier(item, label));
-    if (new Set(result).size !== result.length) fail(`${label} contains duplicates`);
+    if (new Set(result).size !== result.length) fail(`The ${label} in the reply lists the same item twice.`);
     if (allowed && result.some((item) => !allowed.has(item))) {
-      fail(`${label} contains an unsupported value`);
+      fail(`The ${label} in the reply has a value this page does not recognize.`);
     }
     return result;
   }
@@ -319,7 +319,7 @@
   function validateArtifact(value, policy, label) {
     const item = closedRecord(value, ARTIFACT_KEYS, label);
     const kind = identifier(item.kind, `${label} kind`);
-    if (!policy.allowed_kinds.includes(kind)) fail(`${label} kind is not allowed`);
+    if (!policy.allowed_kinds.includes(kind)) fail(`The ${label} in the reply is a kind of file this request does not accept.`);
     return {
       artifact_id: identifier(item.artifact_id, `${label} ID`),
       kind,
@@ -333,14 +333,14 @@
     const item = closedRecord(value, QUESTION_KEYS, "question");
     const responseType = item.response_type;
     if (typeof responseType !== "string" || !RESPONSE_TYPES.has(responseType)) {
-      fail("question response type is unsupported");
+      fail("A question asks for a kind of answer this page does not support.");
     }
     const options = closedIdentifierList(item.options, "question options", 1000);
     if (
       (["single_choice", "multi_choice"].includes(responseType) && options.length === 0) ||
       (!["single_choice", "multi_choice"].includes(responseType) && options.length !== 0)
     ) {
-      fail("question options do not match its response type");
+      fail("A question has choices that do not fit the kind of answer it asks for.");
     }
     return {
       question_id: identifier(item.question_id, "question ID"),
@@ -354,15 +354,15 @@
 
   function validateContract(value) {
     const item = closedRecord(value, CONTRACT_KEYS, "invitation contract");
-    if (item.schema !== CONTRACT_SCHEMA) fail("invitation contract schema is unsupported");
+    if (item.schema !== CONTRACT_SCHEMA) fail("The request uses a format this page does not support.");
     const policy = validateArtifactPolicy(item.artifact_policy);
     if (!Array.isArray(item.questions) || item.questions.length > MAX_QUESTIONS) {
-      fail("questions exceed their bound");
+      fail("The request has more questions than this page can show.");
     }
     const questions = item.questions.map(validateQuestion);
     const questionIds = questions.map((question) => question.question_id);
     const questionSet = new Set(questionIds);
-    if (questionSet.size !== questionIds.length) fail("question IDs contain duplicates");
+    if (questionSet.size !== questionIds.length) fail("The request lists the same question twice.");
     const required = closedIdentifierList(
       item.required_question_ids,
       "required question IDs",
@@ -374,27 +374,27 @@
       MAX_QUESTIONS,
     );
     if (required.some((questionId) => !questionSet.has(questionId))) {
-      fail("required questions are outside the visible contract");
+      fail("The request lists required questions that are not on this page.");
     }
     if (answered.some((questionId) => !questionSet.has(questionId))) {
-      fail("answered questions are outside the visible contract");
+      fail("The saved answers include questions that are not on this page.");
     }
     if (!Array.isArray(item.draft_artifacts) || item.draft_artifacts.length > policy.maximum_artifacts) {
-      fail("draft artifact manifests exceed the invitation policy");
+      fail("The saved draft has more files than this request allows.");
     }
     const draftArtifacts = item.draft_artifacts.map((artifact) =>
       validateArtifact(artifact, policy, "draft artifact manifest"),
     );
     const artifactIds = draftArtifacts.map((artifact) => artifact.artifact_id);
     if (new Set(artifactIds).size !== artifactIds.length) {
-      fail("draft artifact IDs contain duplicates");
+      fail("The saved draft lists the same file twice.");
     }
     const totalBytes = draftArtifacts.reduce((total, artifact) => total + artifact.size_bytes, 0);
     if (totalBytes > policy.maximum_total_bytes) {
-      fail("draft artifact manifests exceed the byte policy");
+      fail("The saved draft has files larger than this request allows.");
     }
     if (!Array.isArray(item.limitations) || item.limitations.length !== 4) {
-      fail("contract limitations are incomplete");
+      fail("The request's list of limitations is incomplete.");
     }
     const limitations = closedIdentifierList(item.limitations, "contract limitations", 4);
     if (
@@ -403,7 +403,7 @@
       ) ||
       new Set(limitations).size !== Object.keys(LIMITATION_LABELS).length
     ) {
-      fail("contract limitations are unsupported or incomplete");
+      fail("The request's list of limitations is missing or not recognized.");
     }
     return {
       schema: CONTRACT_SCHEMA,
@@ -449,7 +449,7 @@
       MAX_QUESTIONS,
     );
     if (required.some((questionId) => !new Set(active).has(questionId))) {
-      fail("draft receipt required questions are not active");
+      fail("The saved draft lists required questions that are no longer in the request.");
     }
     return {
       invitation_id: identifier(item.invitation_id, "draft invitation ID"),
@@ -464,9 +464,9 @@
 
   function validateFinalReceipt(value) {
     const item = closedRecord(value, FINAL_RECEIPT_KEYS, "final receipt");
-    if (item.schema !== RECEIPT_SCHEMA) fail("final receipt schema is unsupported");
+    if (item.schema !== RECEIPT_SCHEMA) fail("The receipt for the sent answers uses a format this page does not support.");
     if (item.evidence_status !== "respondent_attestation_unverified") {
-      fail("final receipt evidence status is unsupported");
+      fail("The receipt gives a file status this page does not recognize.");
     }
     return {
       schema: RECEIPT_SCHEMA,
@@ -595,7 +595,7 @@
 
   function element(id) {
     const value = global.document.getElementById(id);
-    if (!value) fail("portal document contract is incomplete");
+    if (!value) fail("The page is missing parts it needs to show the request.");
     return value;
   }
 
@@ -654,7 +654,7 @@
     const pending = state.pendingOperations.get(action);
     if (pending && pending.fingerprint === fingerprint) return pending.key;
     if (!global.crypto || typeof global.crypto.randomUUID !== "function") {
-      fail("secure operation identifiers are unavailable");
+      fail("This browser cannot create the secure reference the page needs. Use an up-to-date browser.");
     }
     const key = `portal-${action}-${global.crypto.randomUUID()}`;
     state.pendingOperations.set(action, { fingerprint, key });
@@ -700,7 +700,7 @@
       if (!response.ok) throw new PortalRequestError(response.status);
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.toLowerCase().startsWith("application/json")) {
-        throw new PortalContractError("portal response content type is invalid");
+        throw new PortalContractError("The reply from the server was not in the expected format.");
       }
       return await response.json();
     } catch (error) {
@@ -885,13 +885,13 @@
     const question = state.contract.questions.find(
       (item) => item.question_id === card.dataset.questionId,
     );
-    if (!question) fail("question is outside the visible contract");
+    if (!question) fail("That question is not part of this request.");
     if (type === "multi_choice") {
       const checked = Array.from(card.querySelectorAll('input[type="checkbox"]:checked')).map(
         (input) => input.value,
       );
       if (checked.length === 0) return { missing: true };
-      if (checked.some((value) => !question.options.includes(value))) fail("choice response is invalid");
+      if (checked.some((value) => !question.options.includes(value))) fail("That answer is not one of the choices.");
       return { value: checked };
     }
     if (type === "boolean" || (type === "single_choice" && card.querySelector('input[type="radio"]'))) {
@@ -900,9 +900,9 @@
       if (type === "boolean") {
         if (chosen.value === "true") return { value: true };
         if (chosen.value === "false") return { value: false };
-        fail("yes or no response is invalid");
+        fail("That answer is not Yes or No.");
       }
-      if (!question.options.includes(chosen.value)) fail("choice response is invalid");
+      if (!question.options.includes(chosen.value)) fail("That answer is not one of the choices.");
       return { value: chosen.value };
     }
     const control = card.querySelector("input[data-answer], select[data-answer]");
@@ -926,7 +926,7 @@
       }
       return { value: raw };
     }
-    if (!question.options.includes(raw)) fail("choice response is invalid");
+    if (!question.options.includes(raw)) fail("That answer is not one of the choices.");
     return { value: raw };
   }
 
@@ -1130,7 +1130,7 @@
       });
       const receipt = validateEvidenceReceipt(raw, state.contract.artifact_policy);
       if (receipt.invitation_id !== state.contract.invitation_id) {
-        fail("evidence receipt invitation does not match the contract");
+        fail("The file receipt belongs to a different request.");
       }
       if (receipt.size_bytes !== file.size) {
         return `${quoted(name)} changed while it was being checked. Choose it again.`;
@@ -1211,7 +1211,7 @@
   }
 
   function collectSubmission(requireComplete) {
-    if (!state.contract) fail("invitation contract is unavailable");
+    if (!state.contract) fail("The request details have not loaded.");
     const answers = {};
     const problems = [];
     for (const card of elements.questions.querySelectorAll(".portal-question")) {
@@ -1331,7 +1331,7 @@
     const raw = await portalRequest("/contract", "GET");
     const contract = validateContract(raw);
     if (state.contract && state.contract.invitation_id !== contract.invitation_id) {
-      fail("invitation identity changed");
+      fail("The request changed to a different invitation while it was open.");
     }
     renderContract(contract, preserveLocal);
     return contract;
@@ -1376,7 +1376,7 @@
   }
 
   async function unlock(rawCredential) {
-    if (!state.initialized) fail("portal is not initialized");
+    if (!state.initialized) fail("The page has not finished opening the request.");
     if (state.busy) return false;
     const candidate = typeof rawCredential === "string" ? rawCredential.trim() : "";
     elements.credential.value = "";
@@ -1451,7 +1451,7 @@
       const rawReceipt = await portalRequest("/draft", "PUT", body);
       const receipt = validateDraftReceipt(rawReceipt);
       if (receipt.invitation_id !== state.contract.invitation_id) {
-        fail("draft receipt invitation does not match the contract");
+        fail("The saved draft belongs to a different request.");
       }
       state.pendingOperations.delete("draft");
       await loadContract(true);
@@ -1525,7 +1525,7 @@
         receipt.invitation_id !== state.contract.invitation_id ||
         receipt.assessment_id !== state.contract.assessment_id
       ) {
-        fail("final receipt authority does not match the invitation contract");
+        fail("The receipt for the sent answers belongs to a different request.");
       }
       state.pendingOperations.delete("final");
       renderReceipt(receipt, Object.keys(payload.answers).length, payload.artifacts.length);
