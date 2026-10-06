@@ -244,7 +244,7 @@ class TestOverrideLifecycle:
         assert "Check it." in html
         assert ">Add a step</button>" in html and 'id="wf-row-tpl"' in html
         # Steps move and are removed with labelled buttons, not bare arrows.
-        assert ">Move up</button>" in html and ">Remove</button>" in html
+        assert ">Move up</button>" in html and ">Remove step</button>" in html
         row = html.split('id="wf-row-tpl"', 1)[1].split("</template>", 1)[0]
         assert "↑" not in row and "✕" not in row
         assert 'name="workflow"' not in html   # the old JSON textarea is gone

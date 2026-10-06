@@ -65,7 +65,7 @@ test("the background-work panel lists failed work in a table with plain cells", 
 test("with nothing failed the panel says so, and a failed load shows plain words", async () => {
   const empty = await page(() => json(200, { waiting: 0, running: 0, finished: 0, failed: 0, failed_items: [] }));
   const note = empty.d.querySelector("#ac-queue-failed p");
-  assert.equal(note.textContent, "Nothing has failed.");
+  assert.equal(note.textContent, "Nothing has failed. Failed work appears here with what went wrong.");
   assert.equal(note.className, "muted");
   empty.w.close();
   const broken = await page(() => json(500, { detail: "Traceback: KeyError" }));

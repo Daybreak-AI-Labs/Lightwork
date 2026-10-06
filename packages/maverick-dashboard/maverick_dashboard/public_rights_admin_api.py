@@ -84,6 +84,12 @@ class ExtendIn(BaseModel):
     days: int | None = Field(default=None, ge=1, le=90)
 
 
+class AssignIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: ``user:...`` of someone who may work privacy requests, or "" to unassign.
+    assignee: str = Field(default="", max_length=200)
+
+
 class VerifyIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     method: str = Field(min_length=1, max_length=32)
@@ -275,6 +281,30 @@ async def acknowledge_dsar(request: Request, request_id: str) -> dict:
     ops = _ops_or_403()
     record = await run_in_threadpool(
         ops.acknowledge_dsar, request_id[:64], acknowledged_by=_actor(request))
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such request")
+    return record
+
+
+@router.post("/privacy/dsar/{request_id}/assign")
+async def assign_dsar(request: Request, request_id: str, body: AssignIn) -> dict:
+    """Name who works a request. Only someone who may work privacy requests
+    (``operate``) can be named; the previous assignee stays on the record so
+    the list's bulk change can be undone."""
+    require_permission(request, "operate")
+    ops = _ops_or_403()
+    from . import people_directory
+
+    if body.assignee and not people_directory.may(body.assignee, "operate"):
+        raise HTTPException(
+            status_code=422,
+            detail="That person can't work privacy requests. Choose someone from the list.",
+        )
+    try:
+        record = await run_in_threadpool(
+            ops.assign_dsar, request_id[:64], body.assignee, assigned_by=_actor(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such request")
     return record

@@ -123,7 +123,7 @@
     </div>
     <div class="panel">
       <h3 style="margin-top:0;">Cross-border transfer map</h3>
-      <p class="muted" style="font-size: var(--text-sm);">Where personal data flows out, from your processing record and transfer assessments, and whether a legal transfer safeguard (such as standard contractual clauses) is on file.</p>
+      <p class="muted" style="font-size: var(--text-sm);">Where personal data flows out, from your processing record and transfer assessments. Each one shows whether a legal transfer safeguard, such as standard contractual clauses, is on file.</p>
       <div id="pv-transfer" aria-live="polite"></div>
     </div>
   </div>
@@ -304,12 +304,11 @@
          ('dsar', 'Data requests (DSAR) (%d)' % records.dsar | length),
          ('paper', 'Vendor contracts (%d)' % records.paper | length),
          ('lineage', 'Vendor history'),
-         ('incidents', pw_incidents_label)], 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}
+         ('incidents', pw_incidents_label)], 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-', hash='pv-') }}
 
     <div {{ tab_panel('lineage', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
-        Answer the questions a regulator asks about a vendor: its full history,
-        why it was approved, and what else depends on a clause or document
+        Answer the questions a regulator asks about a vendor: its full history and why it was approved. See what else depends on a clause or document
         that turned out to be a problem. Every answer links to the record it
         came from.
       </p>
@@ -364,8 +363,7 @@
     <div {{ tab_panel('paper', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         When the vendor insists on <strong>their</strong> paper. Upload it and
-        Lightwork works out whether it is a DPA or a privacy addendum, compares
-        every clause against your playbook, and returns their document marked up
+        Lightwork works out whether it is a DPA or a privacy addendum. It compares every clause against your playbook and returns their document marked up
         with real Word tracked changes. Which clauses fall short is decided
         deterministically — a model only re-words <em>your</em> clause to match
         their drafting, and never weakens it.
@@ -543,8 +541,7 @@
           <button class="btn" id="pw-ai-register" type="button" {% if not aira_sessions %}disabled{% endif %}>Register from assessment</button>
           <span class="pw-form-err" id="pw-ai-err" role="alert"></span>
         </div>
-        <p class="muted" style="margin:0; font-size:var(--text-xs);">Answers in the assessment can only raise
-          the risk level: if it confirms a banned or high-risk use, that counts even when the description sounds harmless.</p>
+        <p class="muted" style="margin:0; font-size:var(--text-xs);">Answers in the assessment can only raise the risk level. If it confirms a banned or high-risk use, that counts even when the description sounds harmless.</p>
       </div>
       {% if records.ai %}
       <div class="pw-scroll">
@@ -706,11 +703,11 @@
       <table>
         <thead><tr><th scope="col">Person</th>
           <th scope="col">Asked for</th><th scope="col">Where from</th><th scope="col">Law</th>
-          <th scope="col">Status</th>
+          <th scope="col">Status</th><th scope="col">Assigned to</th>
           <th scope="col">Deadline</th><th scope="col">Actions</th></tr></thead>
-        <tbody>
+        <tbody id="pw-dsar-rows">
           {% for r in records.dsar %}
-          <tr>
+          <tr data-bulk-id="{{ r.id }}" data-bulk-label="{{ r.subject_id }} ({{ r.id }})" data-acknowledged="{{ 'yes' if r.acknowledged_at else 'no' }}" data-status="{{ r.status }}">
             <td><a href="/privacy/dsar/{{ r.id }}">{{ r.subject_id }}</a>{% if r.intake %}<br><span class="muted" style="font-size:var(--text-xs);" title="Matched: {{ r.intake.signals | join('; ') }}">Opened from a message</span>{% endif %}</td>
             <td>{{ {'access': 'A copy of their data', 'portability': 'Portable copy', 'erasure': 'Delete their data', 'correction': 'Correct their data', 'opt_out': 'Opt out of sale or sharing', 'limit_sensitive': 'Limit sensitive data use', 'objection': 'Stop a use', 'restriction': 'Restrict use', 'withdraw_consent': 'Withdraw consent'}.get(r.kind, (r.kind or '') | replace('_', ' ') | capitalize) }}</td>
             <td>{{ {'public_form': 'From your website', 'message': 'From a message', 'dashboard': 'Entered here'}.get(r.source, 'Entered here') }}
@@ -729,6 +726,7 @@
                 <br><span class="badge warn">Saved export needs cleanup</span>
               {% endif %}
             </td>
+            <td class="pw-dsar-assignee">{% if r.assignee %}{{ r.assignee | identity }}{% else %}<span class="muted">Not assigned</span>{% endif %}</td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
               {% if r.response_pending %}
                 {% if not r.overdue %}{{ r.days_left }} day{{ '' if r.days_left == 1 else 's' }} left{% else %}{{ r.days_left | abs }} day{{ '' if (r.days_left | abs) == 1 else 's' }} overdue{% endif %}
@@ -754,6 +752,7 @@
         </tbody>
       </table>
       </div>
+      <script type="application/json" id="pw-dsar-assignees">{{ (dsar_assignees or []) | tojson }}</script>
       <div id="pe-worksheet-result"></div>
       <div id="pw-fulfill-out" role="status" aria-live="polite" style="font-size:var(--text-sm);"></div>
       <p class="muted" style="font-size:var(--text-xs);">&ldquo;Gather their data&rdquo; collects
@@ -856,7 +855,7 @@
     {{ panel_tabs('Estate registers', [
          ('vendors', 'Vendors (%d)' % estate.vendors | length),
          ('consent', pe_consent_label),
-         ('datamap', 'Data map (%d)' % estate.assets | length)], 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}
+         ('datamap', 'Data map (%d)' % estate.assets | length)], 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-', hash='pe-') }}
 
     <div {{ tab_panel('vendors', 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}>
       {% if estate.vendors_enabled %}
@@ -1144,8 +1143,8 @@
         by their names. This is a starting point for your team, not a scan of the data itself.
         {% if estate.data_map_posture %}
         <strong>{{ estate.data_map_posture.flagged_assets }}</strong> of
-        {{ estate.data_map_posture.assets }} places hold likely personal data,
-        {{ estate.data_map_posture.special_category_assets }} of them sensitive (such as health data), and
+        {{ estate.data_map_posture.assets }} places hold likely personal data.
+        {{ estate.data_map_posture.special_category_assets }} of them are sensitive, such as health data, and
         {{ estate.data_map_posture.unlinked_flagged_assets }} are not yet linked to a processing record entry.
         {% if estate.data_map_posture.by_category %}By kind of data:
         {% for category, count in estate.data_map_posture.by_category.items() %}{{ category | humanize }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}.{% endif %}
@@ -1235,7 +1234,7 @@
         return window.mvFetchJSON(url, { method: 'POST', body: body });
       }
       function errText(e, action) {
-        return window.mvErrorText ? window.mvErrorText(e, action) : 'Could not ' + action + '. Please try again.';
+        return window.mvErrorText ? window.mvErrorText(e, action) : 'Could not ' + action + '. Try again.';
       }
       var QTYPES = {{ templates | tojson }};
 
@@ -1298,7 +1297,7 @@
             var verb = { under_review: 'Mark ' + btn.dataset.name + ' as under review?',
                          active: 'Reactivate ' + btn.dataset.name + '?',
                          offboarded: 'Offboard ' + btn.dataset.name + '? They will be marked as no longer working with you.' }[btn.dataset.status];
-            request = mvConfirm(verb || 'Change this vendor?', { okText: 'Confirm' }).then(function (ok) {
+            request = mvConfirm(verb || 'Change this vendor?', { okText: { under_review: 'Mark under review', active: 'Reactivate vendor', offboarded: 'Offboard vendor' }[btn.dataset.status] || 'Change vendor status' }).then(function (ok) {
               if (!ok) return null;
               btn.disabled = true;
               return post('/api/v1/vendors/' + vendor + '/status',
@@ -1651,7 +1650,7 @@
     return failure;
   }
   function errText(e, action) {
-    return window.mvErrorText ? window.mvErrorText(e, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(e, action) : 'Could not ' + action + '. Try again.';
   }
   function human(v) {
     var t = String(v == null ? '' : v).replace(/_/g, ' ').trim();
@@ -1891,7 +1890,7 @@
     var pbFailed = function (r) { var f = new Error('request failed'); f.status = r.status; f.headers = r.headers; return f; };
     var pbErrText = function (e, action) {
       if (typeof window !== 'undefined' && window.mvErrorText) { return window.mvErrorText(e, action); }
-      return 'Could not ' + action + (e && e.status === 403 ? '. You do not have permission to do this. Ask an administrator.' : '. Please try again.');
+      return 'Could not ' + action + (e && e.status === 403 ? '. You do not have permission to do this. Ask an administrator.' : '. Try again.');
     };
     var pbHuman = function (v) { var t = String(v || '').replace(/_/g, ' '); return t.charAt(0).toUpperCase() + t.slice(1); };
     var loaded = false;
@@ -2132,6 +2131,59 @@
       });
     });
   });
+
+  // Many requests at once (ADM-7): filter, select all matching, then assign
+  // them to one person (undo puts each back with its earlier assignee) or
+  // record that receipt was confirmed to each requester.
+  (function wireBulk() {
+    var list = document.getElementById('pw-dsar-rows');
+    if (!list) return;
+    // The shared helpers load at the end of the page; wire the bar after them.
+    if (!window.mvBulk) { document.addEventListener('DOMContentLoaded', wireBulk, {once: true}); return; }
+    var people = [];
+    try { people = JSON.parse(document.getElementById('pw-dsar-assignees').textContent || '[]'); } catch (_) { people = []; }
+    function assigneeCell(row, principal) {
+      var cell = row.querySelector('.pw-dsar-assignee');
+      if (!cell) return;
+      var person = people.find(function (p) { return p.principal === principal; });
+      cell.textContent = principal ? (person ? person.label : principal.replace(/^user:/, '')) : 'Not assigned';
+    }
+    async function assign(item, principal) {
+      var record = await mvFetchJSON('/api/v1/privacy/dsar/' + encodeURIComponent(item.id) + '/assign',
+        {method: 'POST', body: {assignee: principal}}, 'assign the request');
+      assigneeCell(item.row, record.assignee || '');
+      return record;
+    }
+    window.mvBulk({
+      list: list, rows: 'tr[data-bulk-id]', noun: 'request', nouns: 'requests', filter: true,
+      actions: [
+        {label: 'Assign', verb: 'Assign',
+         ask: async function () {
+           if (!window.mvForm) return null;
+           var answers = await window.mvForm('Assign the selected requests', [
+             {key: 'assignee', label: 'Who works on them?', type: 'select',
+              options: [{value: '', label: 'Nobody (not assigned)'}].concat(people.map(function (p) { return {value: p.principal, label: p.label}; })),
+              help: 'Only people who may work privacy requests are listed.'}], {okText: 'Assign requests'});
+           return answers === null ? null : {assignee: String((answers && answers.assignee) || '')};
+         },
+         run: async function (item, extra) {
+           var record = await assign(item, extra.assignee);
+           var before = record.previous_assignee || '';
+           return {note: extra.assignee ? 'assigned' : 'unassigned',
+                   undo: async function () { await assign(item, before); }};
+         }},
+        {label: 'Confirm receipt', verb: 'Confirm receipt for', button: 'Confirm receipt for selected', title: 'Receipt confirmed',
+         run: async function (item) {
+           if (item.row.dataset.acknowledged === 'yes') throw {status: 409, detail: 'Receipt was already confirmed.'};
+           if (item.row.dataset.status === 'closed') throw {status: 409, detail: 'The request is closed.'};
+           await mvFetchJSON('/api/v1/privacy/dsar/' + encodeURIComponent(item.id) + '/acknowledge',
+             {method: 'POST'}, 'confirm receipt');
+           item.row.dataset.acknowledged = 'yes';
+           return {note: 'receipt confirmed'};
+         }}
+      ]
+    });
+  })();
 
   // Incident register: record the notification decision (with its reason) / close.
   // A transient rejection never destroys the reason: it is kept as a draft and

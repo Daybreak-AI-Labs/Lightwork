@@ -51,7 +51,7 @@
   // Hand-drawn horizontal bar chart for {label: count}.
   function barsSVG(counts, w, color, textColor) {
     const labels = Object.keys(counts).sort();
-    if (!labels.length) return '<span class="muted">No tasks yet</span>';
+    if (!labels.length) return '<span class="muted">No tasks yet. Finished tasks appear here.</span>';
     const max = Math.max(...labels.map((k) => counts[k])) || 1;
     const rowH = 18;
     const rows = labels.map((k, i) => {

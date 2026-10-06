@@ -134,6 +134,20 @@ def should_follow_up(by: str, agent: str, *, previous: dict | None, rating: str,
     return rejections(by, agent, since=since, world=world) == FOLLOW_UP_AFTER
 
 
+#: After this many of one agent's answers rated down, offer a person (HLP-3).
+HAND_OFF_AFTER = 2
+
+
+def should_offer_person(by: str, agent: str, *, rating: str, world=None) -> bool:
+    """Offer "Get help from a person" once someone has rejected two of one
+    agent's or specialist's answers within the window, and on every later
+    rejection: the AI has not resolved it, so a person should be one step away."""
+    if rating != "down":
+        return False
+    since = time.time() - _FOLLOW_UP_WINDOW
+    return rejections(by, agent, since=since, world=world) >= HAND_OFF_AFTER
+
+
 def summary_by_agent(*, recent: int = 5, world=None) -> list[dict]:
     """Per-agent counts and recent reasons for administrators. Written
     comments are never included: they stay with the person and their task."""
@@ -160,5 +174,5 @@ def summary_by_agent(*, recent: int = 5, world=None) -> list[dict]:
     return sorted(out, key=lambda entry: (-(entry["up"] + entry["down"]), entry["agent"]))
 
 
-__all__ = ["FOLLOW_UP_AFTER", "REASONS", "REASON_PATTERN", "count", "latest_for_goal",
-           "record", "rejections", "should_follow_up", "summary_by_agent"]
+__all__ = ["FOLLOW_UP_AFTER", "HAND_OFF_AFTER", "REASONS", "REASON_PATTERN", "count", "latest_for_goal",
+           "record", "rejections", "should_follow_up", "should_offer_person", "summary_by_agent"]

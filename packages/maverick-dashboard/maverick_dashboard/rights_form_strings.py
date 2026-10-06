@@ -45,6 +45,12 @@ STRINGS: dict[str, dict[str, str]] = {
             "privacy request, please contact the organisation directly."
         ),
         "error_generic": "Something went wrong. Please check the form and try again.",
+        "error_summary_title": "There is a problem",
+        "error_title_prefix": "Error: ",
+        "error_email_missing": "Enter your email address, so we can send you the confirmation link.",
+        "error_email_format": "Enter an email address like name@example.com.",
+        "error_answer_missing": "Answer the quick check, using numbers.",
+        "error_answer_format": "Answer the quick check using numbers only.",
         "error_challenge": "That answer was not right. Please try the new sum.",
         "error_rate": "Too many requests right now. Please wait a while and try again.",
         "verify_title": "Confirm your privacy request",

@@ -57,15 +57,15 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
                 'aria-label="Turn off {{ pname }}"',
                 'aria-label="Turn on {{ pname }}"',
                 'aria-label="Use your organization\'s default for {{ pname }}"',
-                'aria-label="Install {{ plabel }}"',
+                'aria-label="Install plugin {{ plabel }}"',
             ),
         ),
-        ("mcp.html", ('aria-label="Test {{ label }}"', 'aria-label="Remove {{ label }}"')),
+        ("mcp.html", ('aria-label="Test server {{ label }}"', 'aria-label="Remove server {{ label }}"')),
         (
             "trust.html",
             (
                 'aria-label="Unblock {{ label }}"',
-                'aria-label="Block {{ label }}"',
+                'aria-label="Block agent {{ label }}"',
                 'aria-label="Remove {{ label }}"',
                 'aria-label="Check access for {{ label }}"',
                 'aria-label="Edit {{ label }}"',
@@ -74,7 +74,7 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "users.html",
             (
-                'aria-label="Delete the {{ name | role_label }} role"',
+                'aria-label="Delete role {{ name | role_label }}"',
                 'aria-label="Save role for {{ name_of(principal) }}"',
                 'aria-label="Use standard role for {{ name_of(principal) }}"',
                 'aria-label="Save departments for {{ name_of(principal) }}"',

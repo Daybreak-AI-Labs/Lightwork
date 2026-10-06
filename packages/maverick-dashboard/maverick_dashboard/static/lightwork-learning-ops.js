@@ -196,7 +196,7 @@
   function loadRewardModels() {
     J.request(TO + '/reward-models').then(function (d) {
       var nodes = [el('p', 'muted', plural(d.waiting_outlines, 'task outline') + ' waiting on this server to learn from.')];
-      if (!d.models.length) nodes.push(el('p', 'muted', admin ? 'No scoring guide yet. Learn from eligible task approaches below.' : 'No scoring guide yet.'));
+      if (!d.models.length) nodes.push(el('p', 'muted', admin ? 'No scoring guide yet. Learn from eligible task approaches below.' : 'No scoring guide yet. It appears here once an administrator trains one.'));
       else nodes.push(J.table(['Trained', 'Comparisons', 'Agreed with the checker', ''], d.models.map(function (m) {
         var link = el('a', 'btn btn--ghost', 'Download');
         link.href = TO + '/reward-models/' + encodeURIComponent(m.name) + '/download';

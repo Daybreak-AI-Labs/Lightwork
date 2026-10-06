@@ -62,9 +62,9 @@
     chunks.forEach(function (chunk) { bytes.set(chunk, offset); offset += chunk.byteLength; });
     var text;
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Try again."); }
     try { return text ? JSON.parse(text) : {}; }
-    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Try again."); }
   }
 
   async function request(path, options) {
@@ -87,7 +87,7 @@
   }
   function errorText(failure, action) {
     if (failure && failure.plain) { return failure.message; }
-    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
+    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Try again.";
   }
 
   // The raw answer is kept only inside the collapsed "Technical details".

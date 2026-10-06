@@ -74,8 +74,9 @@
     parent.appendChild(row);
   }
 
-  async function transition(candidate, action, prompt, extra = {}) {
-    if (busy || !(await confirmAction(prompt, 'Continue'))) return;
+  // The dialog's button repeats the action the person chose.
+  async function transition(candidate, action, prompt, extra = {}, okText = 'Save this decision') {
+    if (busy || !(await confirmAction(prompt, okText))) return;
     if (busy) return;
     setBusy(true);
     try {
@@ -98,7 +99,7 @@
   function actionButton(text, candidate, action, prompt, className = 'btn') {
     const button = element('button', text, className);
     button.type = 'button';
-    button.addEventListener('click', () => transition(candidate, action, prompt));
+    button.addEventListener('click', () => transition(candidate, action, prompt, {}, text));
     return button;
   }
 
@@ -135,6 +136,7 @@
           ? 'Approve this exact candidate for staged qualification? This does not activate it.'
           : 'Reject this exact candidate and retain the decision in its history?',
         {approve: decision, reason_code: reason.value, note: note.value.trim()},
+        (decision ? approve : reject).textContent,
       );
     }
     approve.addEventListener('click', () => submit(true));
@@ -162,6 +164,7 @@
       'rollback',
       candidate.local_release ? candidate.local_release.rollback : 'Roll back this candidate and reconcile application state, pending work, and external state?',
       {reason_code: reason.value},
+      button.textContent,
     ));
     form.append(labelNode, button);
     return form;

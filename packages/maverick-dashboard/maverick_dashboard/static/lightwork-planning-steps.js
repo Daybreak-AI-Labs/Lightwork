@@ -31,7 +31,7 @@
   function say(text) { product($('status'), text); }
   function failText(failure) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, 'show the planning steps')
-      : 'Could not show the planning steps. Please try again.';
+      : 'Could not show the planning steps. Try again.';
   }
   function valid(data) {
     return data && data.ran === true && Array.isArray(data.plan) && Array.isArray(data.steps) && Array.isArray(data.reviews)
@@ -87,7 +87,7 @@
       });
       if (!response.ok) { say(failText(response)); return; }
       const started = await response.json();
-      if (!started || !/^[a-f0-9]{32}$/.test(String(started.job))) { say('The request couldn’t be checked. Please try again.'); return; }
+      if (!started || !/^[a-f0-9]{32}$/.test(String(started.job))) { say('The request couldn’t be checked. Try again.'); return; }
       for (let tries = 0; tries < 600; tries += 1) {
         await new Promise(resolve => setTimeout(resolve, tries ? 2000 : 500));
         const poll = await fetch('/api/v1/goals/' + goal + '/planning-steps/' + started.job, {
@@ -98,7 +98,7 @@
         if (job && job.state === 'running') continue;
         const data = job && job.result;
         if (data && data.ran === false) { say(typeof data.message === 'string' ? data.message : 'This couldn’t be started.'); return; }
-        if (!valid(data)) { say((data && typeof data.message === 'string' && data.message) || 'The planning steps couldn’t be checked. Please try again.'); return; }
+        if (!valid(data)) { say((data && typeof data.message === 'string' && data.message) || 'The planning steps couldn’t be checked. Try again.'); return; }
         show(data);
         say('The planning steps are ready below.');
         return;

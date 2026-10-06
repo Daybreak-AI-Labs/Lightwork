@@ -85,7 +85,7 @@
     button.addEventListener('click', function () {
       if (active) { stop('Reading stopped.'); return; }
       var source = document.getElementById('result') || document.getElementById('deliverable') || document.getElementById('result-section');
-      if (!source) { copy(status, 'No result is available to read yet.'); return; }
+      if (!source) { copy(status, 'No result is available to read yet. Read aloud works once the task has a result.'); return; }
       // Result language is content metadata, never the interface or inherited html language.
       contentLanguage = source.getAttribute('lang') || 'und';
       var selection = source.cloneNode(true);

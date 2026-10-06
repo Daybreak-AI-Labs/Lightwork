@@ -153,7 +153,7 @@
       <input type="hidden" name="scope" value="selected" />
       <input type="hidden" name="confirmed" value="yes" />
       <input type="hidden" name="expected_count" value="{{ bc.count }}" />
-      <button type="submit" class="btn">Yes, change {{ bc.count }} {{ 'person' if bc.count == 1 else 'people' }}</button>
+      <button type="submit" class="btn">Change the role for {{ bc.count }} {{ 'person' if bc.count == 1 else 'people' }}</button>
       <a class="btn btn--ghost" href="/users#people">Cancel</a>
     </form>
   </section>
@@ -316,7 +316,7 @@
               {{ workspace_binding() }}
               <input type="hidden" name="channel" value="{{ l.channel }}" />
               <input type="hidden" name="external_id" value="{{ l.external_id }}" />
-              <button type="submit" class="btn btn--danger" aria-label="Unlink {{ l.channel }} account {{ l.external_id }}">Unlink</button>
+              <button type="submit" class="btn btn--danger" aria-label="Unlink account {{ l.external_id }} on {{ l.channel }}">Unlink account</button>
             </form>
           </td>
         </tr>
@@ -396,7 +396,7 @@
         <input type="hidden" name="scope" value="selected" />
         <input type="hidden" name="confirmed" value="yes" />
         <input type="hidden" name="expected_count" value="{{ ic.invites | length }}" />
-        <button type="submit" class="btn btn--danger">Yes, cancel {{ ic.invites | length }} invitation{{ '' if ic.invites | length == 1 else 's' }}</button>
+        <button type="submit" class="btn btn--danger">Cancel {{ ic.invites | length }} invitation{{ '' if ic.invites | length == 1 else 's' }}</button>
         <a class="btn btn--ghost" href="/users#invite-email">Keep them</a>
       </form>
     </section>
@@ -653,7 +653,7 @@
               {{ workspace_binding() }}
               <input type="hidden" name="name" value="{{ name }}" />
               <button type="submit" class="btn btn--danger"
-                      aria-label="Delete the {{ name | role_label }} role">Delete</button>
+                      aria-label="Delete role {{ name | role_label }}">Delete role</button>
             </form>
           </td>
         </tr>
@@ -735,7 +735,7 @@
       form.addEventListener('submit', function (event) {
         if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
         event.preventDefault();
-        window.mvConfirm(form.dataset.usersConfirm, {okText: form.dataset.usersOk || 'Confirm'}).then(function (ok) {
+        window.mvConfirm(form.dataset.usersConfirm, {okText: form.dataset.usersOk || 'Save this change'}).then(function (ok) {
           if (!ok) return;
           form.dataset.confirmed = 'true';
           if (form.requestSubmit) form.requestSubmit(); else form.submit();

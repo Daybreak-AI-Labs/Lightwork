@@ -92,6 +92,14 @@ class AgentOverrideIn(BaseModel):
     compartment: str | None = None
     extends: str | None = None
     autonomy: AgentAutonomyIn | None = None
+    # Publishing changed instructions without a passing test run is allowed
+    # only with a reason, which goes to the activity record. Never saved.
+    publish_without_passing_tests: bool = False
+    override_reason: str | None = Field(None, max_length=300)
+
+
+# Request-only fields that are never part of the saved agent.
+AGENT_PUBLISH_FIELDS = frozenset({"publish_without_passing_tests", "override_reason"})
 
 
 class AgentGraduationIn(BaseModel):

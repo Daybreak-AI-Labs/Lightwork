@@ -109,7 +109,7 @@
   byId('apply').addEventListener('click', async () => {
     if (busy || !state || !review || pending) return; const saved = review, ticket = generation, context = state.context; lock(true); let sent = false;
     try {
-      if (!window.mvConfirm || !await window.mvConfirm('Apply exactly the policy shown in this review? Sign-in and independent approval safeguards still apply.') || ticket !== generation) return;
+      if (!window.mvConfirm || !await window.mvConfirm('Apply exactly the policy shown in this review? Sign-in and independent approval safeguards still apply.', {okText: 'Apply this policy'}) || ticket !== generation) return;
       save({operation: saved.operation, context}); sent = true; invalidate(); byId('attempt').hidden = false;
       const result = await request('/apply', {token: saved.token, confirmed: true});
       if (ticket !== generation || state?.context !== context) return;
@@ -122,7 +122,7 @@
   byId('acknowledge').addEventListener('click', async () => {
     if (busy || !pending || !state) return; const original = pending, ticket = generation; lock(true);
     try {
-      if (!window.mvConfirm || !await window.mvConfirm('I have reviewed current policy and Activity. Record my review without claiming the earlier change succeeded or repeating it.') || ticket !== generation) return;
+      if (!window.mvConfirm || !await window.mvConfirm('I have reviewed current policy and Activity. Record my review without claiming the earlier change succeeded or repeating it.', {okText: 'Record my review'}) || ticket !== generation) return;
       const result = await request('/attempt/review', {context: state.context, operation: original.operation, confirmed: true});
       if (ticket !== generation || state?.context !== original.context) return;
       byId('attempt-message').textContent = result.message; if (result.status !== 'unconfirmed') save(null);

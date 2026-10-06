@@ -257,7 +257,9 @@ def test_expiring_access_keys_section_is_optional(tmp_path, monkeypatch):
                                            sees_everything=True, now=now)
     assert [k["label"] for k in everyone["expiring_keys"]] == ["bobs", "deploy"]
     text = daily_digest.render_text(mine)
-    assert "access key(s) stop working within 7 days" in text and "deploy (in 2 day(s))" in text
+    # NOT-1: each line also says what to do and by when.
+    assert "access key(s) stop working within 7 days" in text
+    assert "deploy stops working in 2 day(s). Replace it before then" in text
     assert "deploy" in daily_digest.render_html(mine)
     assert "stop working within 7 days" in digest_blocks(mine)[1]["text"]["text"]
     fake.list_keys = lambda owner=None: (_ for _ in ()).throw(RuntimeError("store down"))

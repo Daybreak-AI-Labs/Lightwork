@@ -16,7 +16,7 @@ test('Help reviews the actual redacted support report before downloading its exa
   await expect(page.locator('.support-scope')).toContainText('the folder locations');
   await expect(page.locator('.support-scope')).toContainText('Task names, task types and raw error messages are left out');
   await expect(page.locator('.support-scope')).toContainText('The report preview is kept, encrypted, on this installation for up to ten minutes');
-  await expect(page.locator('#support-status')).toHaveText('No report has been collected.');
+  await expect(page.locator('#support-status')).toHaveText('No report has been collected. Press Prepare support report when you need help from support.');
   const response=page.waitForResponse(r=>r.url().endsWith('/api/v1/support/preview'));
   await page.getByRole('button',{name:'Prepare support report',exact:true}).click();
   const report=await json(await response);

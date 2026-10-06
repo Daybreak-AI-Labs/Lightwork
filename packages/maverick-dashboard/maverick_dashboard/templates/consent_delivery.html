@@ -70,7 +70,7 @@
           <legend class="sr-only">Send updates</legend>
           <fieldset class="cw-wide">
             <legend>Send to</legend>
-            <div class="cw-checks" id="cd-run-destinations"><span class="muted">No destinations yet.</span></div>
+            <div class="cw-checks" id="cd-run-destinations"><span class="muted">No destinations yet. Add one below to send consent updates.</span></div>
           </fieldset>
           <details class="governance-details cw-wide">
             <summary>Batch size</summary>
@@ -240,7 +240,7 @@
     }
     async function retireKey(d, button) {
       var keys = oldKeys(d).map(function (k) { return {value: k.key_id, label: k.key_id}; });
-      var answer = await window.mvForm("Retire an old signing key", [{key: "key", label: "Key to retire", type: "select", options: keys, required: true}], {okText: "Continue"});
+      var answer = await window.mvForm("Retire an old signing key", [{key: "key", label: "Key to retire", type: "select", options: keys, required: true}], {okText: "Review key retirement"});
       if (!answer) return;
       if (!(await CW.confirm("Retire the key " + answer.key + " for " + CW.human(d.destination_id) + "? Updates signed with it will no longer be accepted.", "Retire key"))) return;
       CW.busy(button, async function () {
@@ -352,7 +352,7 @@
             {label: "What happened", value: function (e) { return EVENTS[e.event_type] || CW.human(e.event_type); }},
             {label: "Destination", value: function (e) { return e.details && e.details.destination_id ? CW.human(e.details.destination_id) : ""; }},
           ],
-          empty: {title: "Nothing has happened yet."},
+          empty: {title: "Nothing has happened yet.", body: "Deliveries appear here once a destination receives a consent update."},
         });
       } catch (error) { $("cd-history-table").replaceChildren(); CW.fail(status, error, "load delivery history"); }
     }

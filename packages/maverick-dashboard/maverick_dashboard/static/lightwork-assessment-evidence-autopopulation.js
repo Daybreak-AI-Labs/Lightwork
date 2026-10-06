@@ -69,7 +69,7 @@
     }
     if (status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (status === 409) return "This changed since you opened it. Refresh the page and try again.";
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   function identifier(value, label) {
@@ -227,7 +227,7 @@
     setText(status, message || "Done.");
   }
   function showError(error) {
-    setText(status, error && error.message ? error.message : "Something went wrong. Please try again.");
+    setText(status, error && error.message ? error.message : "Something went wrong. Try again.");
     setText(output, error && error.technical ? error.technical : "");
   }
   function sessionById(id) {

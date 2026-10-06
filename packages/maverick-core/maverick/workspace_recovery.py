@@ -90,6 +90,10 @@ def version() -> str:
     return importlib.metadata.version("maverick-agent")
 
 
+_COHORT = ("maverick", "maverick_dashboard", "maverick_shield", "maverick_channels",
+           "maverick_evolve", "maverick_knowledge", "maverick_mcp", "maverick_installer")
+
+
 def application_identity() -> str:
     """Exact frozen executable, or source bytes of the installed cohort.
 
@@ -99,8 +103,7 @@ def application_identity() -> str:
     if getattr(sys, "frozen", False):
         return "binary-sha256:" + backup._sha256(Path(sys.executable))
     digest = hashlib.sha256()
-    for name in ("maverick", "maverick_dashboard", "maverick_shield", "maverick_channels",
-                 "maverick_evolve", "maverick_knowledge", "maverick_mcp", "maverick_installer"):
+    for name in _COHORT:
         spec = importlib.util.find_spec(name)
         digest.update(name.encode() + b"\0")
         if spec is None or not spec.origin:
@@ -789,6 +792,18 @@ def export_drill_report(identifier: str, report_id: str, *, actor: str) -> bytes
         return (json.dumps(report, allow_nan=False, indent=2) + "\n").encode("utf-8")
 
 
+def _application_roots() -> list[str]:
+    """The directories the running application's packages were imported from."""
+    roots: list[str] = []
+    for name in _COHORT:
+        spec = importlib.util.find_spec(name)
+        if spec is not None and spec.origin:
+            root = str(Path(spec.origin).parent.parent)
+            if root not in roots:
+                roots.append(root)
+    return roots
+
+
 def _custody_environment(directory: Path, tenant: str) -> dict[str, str]:
     """A fresh child's settings never inherit operator credentials or aliases."""
     allowed = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
@@ -802,6 +817,10 @@ def _custody_environment(directory: Path, tenant: str) -> dict[str, str]:
     paths = [str(Path(sys.executable).parent)]
     if os.name == "nt":
         paths.append(str(Path(os.environ["SystemRoot"]) / "System32"))
+    if not getattr(sys, "frozen", False):
+        # Import exactly the application that is running (the identity check
+        # compares source bytes), never another copy installed elsewhere.
+        environment["PYTHONPATH"] = os.pathsep.join(_application_roots())
     environment.update(PATH=os.pathsep.join(paths), HOME=str(profile), USERPROFILE=str(profile),
                        APPDATA=str(appdata), LOCALAPPDATA=str(appdata), TEMP=str(temporary), TMP=str(temporary),
                        TMPDIR=str(temporary), MAVERICK_HOME=str(home), MAVERICK_CONFIG=str(home / "config.toml"),

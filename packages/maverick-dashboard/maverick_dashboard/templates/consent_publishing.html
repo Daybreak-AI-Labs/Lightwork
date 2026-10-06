@@ -79,7 +79,7 @@
           <input type="hidden" name="expected_revision" value="0">
           <input type="hidden" data-auto-reference name="idempotency_key">
           <div class="cw-actions">
-            <button class="btn btn--primary" type="submit">Save</button>
+            <button class="btn btn--primary" type="submit">Save property</button>
             <button class="btn btn--ghost" type="button" data-cpp-close="cpp-property">Cancel</button>
           </div>
         </fieldset>
@@ -96,7 +96,7 @@
           <input type="hidden" data-auto-reference name="idempotency_key">
           <div class="cw-actions">
             <button class="btn" type="button" id="cpp-preview">Preview</button>
-            <button class="btn btn--primary" type="button" id="cpp-publish"{% if not pub_admin %} disabled{% endif %}>Publish</button>
+            <button class="btn btn--primary" type="button" id="cpp-publish"{% if not pub_admin %} disabled{% endif %}>Publish version</button>
             <button class="btn btn--ghost" type="button" data-cpp-close="cpp-promotion">Close</button>
           </div>
           <div id="cpp-preview-result" class="cw-wide cw-result" role="status" aria-live="polite"></div>
@@ -114,7 +114,7 @@
     <section class="panel" aria-labelledby="cpp-content-heading">
       <div class="section-head">
         <h2 id="cpp-content-heading">Content</h2>
-        <button class="btn btn--primary" type="button" id="cpp-resource-new"{% if not pub_admin %} disabled{% endif %}>New</button>
+        <button class="btn btn--primary" type="button" id="cpp-resource-new"{% if not pub_admin %} disabled{% endif %}>Add content</button>
       </div>
       <div class="cw-toolbar">
         <label>Show<select class="select" id="cpp-kind">
@@ -141,7 +141,7 @@
           <input type="hidden" name="version">
           <input type="hidden" name="expected_current_version">
           <div class="cw-actions">
-            <button class="btn btn--primary" type="submit"{% if not pub_admin %} disabled{% endif %}>Save</button>
+            <button class="btn btn--primary" type="submit"{% if not pub_admin %} disabled{% endif %}>Save content</button>
             <button class="btn btn--ghost" type="button" data-cpp-close="cpp-resource">Cancel</button>
           </div>
         </fieldset>

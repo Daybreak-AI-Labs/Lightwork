@@ -201,12 +201,12 @@
             {label: "Since", value: function (x) { return CW.when(x.created_at); }},
           ],
           actions: [{label: "Revoke access", kind: "danger", when: function (x) { return can.admin && x.profile_status === "active"; }, run: function (x, b) { revokeProfile(x, b); }}],
-          empty: {title: "No one has signed in through your banner yet."},
+          empty: {title: "No one has signed in through your banner yet.", body: "Sign-ins appear here once a visitor uses your banner to sign in."},
         });
       } catch (error) { $("pcc-profiles").replaceChildren(); CW.fail(status, error, "load people"); }
     }
     async function revokeProfile(x, button) {
-      var answer = await window.mvForm("Revoke access for " + x.profile_id, [{key: "reason", label: "Why", type: "select", options: REASONS, required: true}], {okText: "Continue"});
+      var answer = await window.mvForm("Revoke access for " + x.profile_id, [{key: "reason", label: "Why", type: "select", options: REASONS, required: true}], {okText: "Review revocation"});
       if (!answer) return;
       CW.busy(button, async function () {
         if (!(await CW.confirm("Revoke " + x.profile_id + "’s access? Their saved choices are kept, but they will need to make them again on that website or app.", "Revoke access"))) return;

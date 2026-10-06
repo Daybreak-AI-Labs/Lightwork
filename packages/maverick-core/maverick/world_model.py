@@ -1091,10 +1091,20 @@ def _approval_audit_event_from_row(row) -> ApprovalAuditEvent:
 
 
 def default_db_path() -> Path:
-    """Return the active tenant's world path unless explicitly overridden."""
+    """Return the active tenant's world path unless explicitly overridden.
+
+    While practice mode is on (:mod:`maverick.practice`), the practice world
+    beside it, so practised tasks never mix with real records."""
+    from . import practice
+
     if DEFAULT_DB is not _INITIAL_DEFAULT_DB:
-        return Path(DEFAULT_DB).expanduser()
+        override = Path(DEFAULT_DB).expanduser()
+        if practice.active():
+            return override.with_name(override.stem + ".practice" + override.suffix)
+        return override
     tenant = current_tenant_id()
+    if practice.active():
+        return practice.world_path(bind_tenant_namespace(tenant) if tenant else None)
     if tenant:
         tenant = bind_tenant_namespace(tenant)
         return data_dir("world.db", tenant=tenant)
@@ -2737,11 +2747,13 @@ class WorldModel:
         return [(str(r["owner"] or ""), float(r["ended_at"]), float(r["cost"] or 0.0)) for r in rows]
 
     def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
-                       limit: int = 500) -> list[float]:
+                       limit: int = 500, owner: str = "") -> list[float]:
         """What the most recent finished tasks run by one specialist (``domain``)
-        or one agent (``execution_principal``) cost, newest first: the sum of
-        each task's finished runs. Read-only history for "typical cost"."""
-        column, value = ("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+        or one agent (``execution_principal``), or started by one person
+        (``owner``), cost, newest first: the sum of each task's finished runs.
+        Read-only history for "typical cost"."""
+        column, value = (("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+                         if execution_principal else ("g.owner", owner))
         if not value:
             return []
         rows = self._read_all(
@@ -5124,6 +5136,10 @@ def open_world(path: Path | None = None) -> Any:
     from .world_model_backends import is_postgres_configured
 
     if is_postgres_configured():
+        from . import practice
+
+        if practice.active():  # the practice world is a local file; never write practice live
+            raise practice.PracticeUnavailable(practice.POSTGRES_REASON)
         from .world_model_backends import open_postgres_world
 
         return open_postgres_world()
@@ -5187,7 +5203,9 @@ def world_for_tenant(tenant: str | None = None) -> WorldModel:
     """
     if tenant is not None:
         tenant = bind_tenant_namespace(tenant)
-    path = data_dir("world.db", tenant=tenant)
+    from . import practice
+
+    path = practice.world_path(tenant) if practice.active() else data_dir("world.db", tenant=tenant)
     key = _world_cache_key(path)
     shared_key = _world_cache_key(data_dir("world.db", tenant=None))
     with _tenant_worlds_lock:

@@ -16,7 +16,7 @@
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function say(node, text) { window.mvStatus(node, text || ''); }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function failText(failure, action) {
     try {
@@ -241,6 +241,17 @@
         if (started === generation) say(status, await failText(failure, 'read the original change') + ' Nothing was repeated.');
       } finally { if (started === generation) lock(false); }
     }
+    // Keep the page's installed skills list in step with a confirmed change.
+    function syncInstalled(outcome, row) {
+      var done = outcome && outcome.confirmed && outcome.result;
+      if (!done || typeof done.name !== 'string') return;
+      document.querySelectorAll('#installed-skills [data-skill]').forEach(function (card) {
+        if (card.getAttribute('data-skill') === done.name) card.remove();
+      });
+      if (outcome.action === 'admit' && window.lwAppendSkill) {
+        window.lwAppendSkill({name: done.name, triggers: row.triggers || [], tools_needed: row.tools || []});
+      }
+    }
     async function reviewAction(row, action, chosen, nameInput) {
       if (busy || !context) return;
       var started = generation, draft = ++reviewGeneration; preview.replaceChildren(); lock(true);
@@ -274,8 +285,10 @@
             if (started !== generation) return;
             if (outcome.context !== context) { changed(); return; }
             show(outcome); say(status, outcome.message);
+            syncInstalled(outcome, row);
             invalidate(); lock(false);
-            await refresh();
+            // Refreshing the lists must not replace the confirmation the person just got.
+            if (await refresh()) say(status, outcome.message);
           } catch (failure) {
             if (started === generation) {
               invalidate();

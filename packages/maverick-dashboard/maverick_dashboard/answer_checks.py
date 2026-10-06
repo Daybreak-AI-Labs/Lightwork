@@ -109,6 +109,22 @@ def _matching_run(world, goal):
     return row, start, end
 
 
+def _since_last_use(world, goal, started: float) -> list[dict]:
+    """AI-12: changes to this agent between the person's previous task with it
+    and this run, newest first, so the next answer says the agent changed."""
+    from . import agent_changelog
+
+    try:
+        previous = world.list_goals(owner=goal.owner or None, domain=goal.domain, before_id=goal.id,
+                                    order="desc", limit=1)
+    except Exception:  # an unreadable history makes no claim
+        return []
+    if not previous:
+        return []
+    last = previous[0].completed_at or previous[0].updated_at or previous[0].created_at
+    return [row for row in agent_changelog.entries(goal.domain, limit=50) if last < row["ts"] <= started][:3]
+
+
 def answer_facts(world, goal, withheld: frozenset[str] = frozenset(), *, request=None) -> dict:
     """Available recorded history and check evidence for this exact saved answer.
 
@@ -146,7 +162,8 @@ def answer_facts(world, goal, withheld: frozenset[str] = frozenset(), *, request
         label["update_label"] = "last recorded change before this run" if run else "latest recorded change"
         label["history_note"] = ("Available recorded agent history. It does not identify the exact instructions or AI model used for this answer."
                                  if run else "Available recorded agent history. A matching completed run for this saved answer is unavailable.")
-        for row in (*label["changes"], *label["changed_since"]):
+        label["since_last_use"] = _since_last_use(world, goal, run[1]) if run and goal.domain else []
+        for row in (*label["changes"], *label["changed_since"], *label["since_last_use"]):
             row["date_text"] = datetime_text(row["ts"], date_only=True)
     # Recheck the caller and exact native source after history/event reads.
     fresh = world.get_goal(goal.id)
@@ -163,6 +180,9 @@ def answer_facts(world, goal, withheld: frozenset[str] = frozenset(), *, request
         run, events = None, []
         label = None
     check = verification(events, withheld) if run else {"state": "not_recorded", "label": LABELS["not_recorded"], "reason": NO_RECORD}
+    if request is not None:
+        from .usage_measures_api import note_first_result
+        note_first_result(request, fresh)
     return {"answer_check": check, "answer_agent": label, "answer_fallback": used_backup_model(events) if run else False}
 
 

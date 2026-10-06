@@ -46,6 +46,7 @@ _DEFAULTS = {
     "escalate_verification": True,
     "tighten_on_low_trust": True,
     "headless_assume": False,
+    "confirm_plan": False,
 }
 
 
@@ -67,6 +68,16 @@ def _resolve() -> dict:
     elif env in {"0", "false", "no", "off"}:
         s["enable"] = False
     return s
+
+
+def confirm_plan_enabled() -> bool:
+    """``[autonomy] confirm_plan``: show the plan and wait for a person before
+    a task's first action that could reach outside Lightwork. Off by default;
+    an unreadable config keeps it off (the pre-existing behaviour)."""
+    try:
+        return bool(_resolve().get("confirm_plan", False))
+    except Exception:  # pragma: no cover -- config must never block a run
+        return False
 
 
 def autonomy_enabled() -> bool:

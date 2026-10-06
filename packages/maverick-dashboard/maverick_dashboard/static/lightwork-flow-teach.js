@@ -44,7 +44,7 @@
   function failText(failure, what) {
     const plain = failure instanceof Error && typeof window.mvPlainDetail === 'function' && window.mvPlainDetail(failure.message);
     if (plain) return plain;
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
   }
   async function api(path, body, method, source) {
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
@@ -110,7 +110,7 @@
     $('ft-save-cancel').disabled = state.busy;
   }
   async function guarded(what, action, statusId) {
-    if (state.busy) { say('Still finishing the last step. Please try again in a moment.', statusId); return; }
+    if (state.busy) { say('Still finishing the last step. Try again in a moment.', statusId); return; }
     state.busy = true;
     root.setAttribute('aria-busy', 'true');
     syncNextActions();
@@ -405,7 +405,7 @@
   async function receiveAcquisition(initialGeneration) {
     const id = new URLSearchParams(location.search).get('acquisition');
     if (!id) return false;
-    if (!/^OAC-[a-f0-9]{32}$/.test(id)) { say('This learning result link is invalid. Open the original learning result again.'); return true; }
+    if (!/^OAC-[a-f0-9]{32}$/.test(id)) { say('This learning result link does not work. Open the original learning result again.'); return true; }
     const source = state.overview && state.overview.flow, generation = accountGeneration;
     const entered = () => authoringGeneration !== initialGeneration || state.draft || state.artifact || state.recipe ||
       state.pkg || state.question || state.trust || state.bundles.length;
@@ -781,7 +781,7 @@
     try { data = await api('/api/v1/flow-teach/approved'); } catch (_) { return; }
     const list = $('sg-approved');
     list.replaceChildren();
-    if (!(data.recipes || []).length) { list.append(make('li', 'muted', 'No approved recipes yet.')); return; }
+    if (!(data.recipes || []).length) { list.append(make('li', 'muted', 'No approved recipes yet. Teach a flow above and approve its recipe.')); return; }
     data.recipes.forEach(r => {
       const item = make('li', 'mv-row');
       const when = r.approved_at && typeof window.mvWhen === 'function' ? window.mvWhen(r.approved_at) : '';

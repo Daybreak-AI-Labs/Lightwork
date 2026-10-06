@@ -161,7 +161,7 @@ def _self_authenticated_path(path: str) -> bool:
     The trailing slashes matter: the ADMIN surfaces stay under normal dashboard
     authentication."""
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
-        ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
+        ("/share/", "/scim/", "/form/", "/dsar/response/", "/unsubscribe/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
          "/api/v1/public/consent/", "/api/v1/public/policies/",
          "/api/v1/devices/pairing/", "/rights/", "/api/v1/public/rights/")

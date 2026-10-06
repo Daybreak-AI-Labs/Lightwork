@@ -142,7 +142,7 @@
     });
 
     function keyTable(keys, showOwner) {
-      if (!keys.length) return el('p', 'muted', 'No keys yet.');
+      if (!keys.length) return el('p', 'muted', 'No keys yet. Create one above to let a script or app use Lightwork.');
       var table = el('table');
       var head = el('thead'); var tr = el('tr');
       ['Name', 'Starts with'].concat(showOwner ? ['Owner'] : []).concat(['Permissions', 'Stops', 'Last used', 'State', 'Actions']).forEach(function (h) {
@@ -196,7 +196,7 @@
         status.appendChild(el('strong', null, soon === 1 ? 'One key stops working within ' + state.defaults.warning_days + ' days. ' : soon + ' keys stop working within ' + state.defaults.warning_days + ' days. '));
         status.appendChild(document.createTextNode('Rotate them before then so nothing breaks.'));
       } else {
-        status.textContent = state.showing_everyone ? 'Showing every key on this installation.' : (mine.length ? 'You have ' + mine.length + (mine.length === 1 ? ' key.' : ' keys.') : 'You have no keys yet.');
+        status.textContent = state.showing_everyone ? 'Showing every key on this installation.' : (mine.length ? 'You have ' + mine.length + (mine.length === 1 ? ' key.' : ' keys.') : 'You have no keys yet. Create one above when a script or app needs access.');
       }
       var keysPanel = $('ak-keys');
       keysPanel.textContent = '';
@@ -234,7 +234,7 @@
           note.appendChild(el('p', 'muted', 'The shared server access token is set. It never expires, has no scopes and is not tied to a person; its use is recorded as break-glass access. Prefer service accounts for programs.'));
         }
         var list = $('ak-sa-list'); list.textContent = '';
-        if (!(state.service_accounts || []).length) list.appendChild(el('p', 'muted', 'No service accounts yet.'));
+        if (!(state.service_accounts || []).length) list.appendChild(el('p', 'muted', 'No service accounts yet. Add one above for an app that acts on its own.'));
         (state.service_accounts || []).forEach(function (a) {
           var h = el('h3', null, a.slug + (a.disabled_at ? ' (disabled)' : ''));
           list.appendChild(h);

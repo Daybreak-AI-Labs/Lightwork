@@ -246,7 +246,7 @@
     if (!mb.length) { mb = [Math.max(0, Math.floor(limits.max_artifact_bytes / 1048576))]; }
     fillSelect(F("max_size"), mb.map(function (n) { return { value: String(n), label: n + " MB" }; })); F("max_size").value = String(mb[mb.length - 1]);
     state.notice = null;
-    document.getElementById("tpc-notice-name").textContent = "No file chosen yet.";
+    document.getElementById("tpc-notice-name").textContent = "No file chosen yet. Choose the notice file to attach.";
     syncRespondents();
     panel.hidden = false;
     window.mvReveal(panel);

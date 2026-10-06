@@ -74,7 +74,7 @@
     }
     if (!responseText) { return {}; }
     try { return JSON.parse(responseText); }
-    catch (_error) { throw plain("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw plain("Lightwork sent an answer this page could not read. Try again."); }
   }
   async function request(path, method, body) {
     var options = { method: method || "GET", credentials: "same-origin", cache: "no-store", redirect: "error",
@@ -239,7 +239,7 @@
         { label: "What happened", value: function (h) { return words(h.event_type); } },
         { label: "By", value: function (h) { return personName(h.actor_ref); } },
         { label: "Changed", value: function (h) { return (h.changed_fields || []).map(words).join(", ") || "—"; } },
-      ], d.items || [], [], { text: "No history yet." });
+      ], d.items || [], [], { text: "No history yet. Changes to this record appear here." });
     }, fail(listStatus, "load the history"));
   }
   function tombstone(r, host) {

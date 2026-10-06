@@ -69,7 +69,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="muted">{% if membership_filtered %}You do not have access to a workspace yet.{% else %}No workspaces exist yet.{% endif %}</p>
+    <p class="muted">{% if membership_filtered %}You do not have access to a workspace yet.{% else %}No workspaces exist yet. An administrator can create one in Workspaces.{% endif %}</p>
     {% if is_admin and not env_tenant %}
     <button type="button" class="btn btn--primary" id="tsel-quick">Set up my workspace</button>
     <p class="tsel__note">Creates your first workspace, called "My workspace", and

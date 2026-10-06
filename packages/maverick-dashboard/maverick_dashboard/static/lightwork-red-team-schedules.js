@@ -22,7 +22,7 @@
   function say(el, text) { window.mvStatus(el, String(text || '')); }
   function errorText(failure, action) {
     if (typeof window.mvErrorText === 'function') return window.mvErrorText(failure, action);
-    return 'Could not ' + action + '. Please try again.';
+    return 'Could not ' + action + '. Try again.';
   }
   function when(ts) {
     return (typeof window.mvWhen === 'function' ? window.mvWhen(ts) : '') || '';

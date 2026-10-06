@@ -34,8 +34,9 @@ function fixture() {
   return { context, get, calls, renders, Element };
 }
 const record = () => ({ id: "record", revision: 1, status: "pending_review", question_text: { first: { text: "Has this been checked?" }, second: { text: "Is there supporting evidence?" } }, answers: {}, followups: [] });
-function editor(rec = record()) {
+function editor(rec = record(), globals = {}) {
   const ui = fixture(), source = fs.readFileSync(path.join(templates, "_assessment_review.html"), "utf8");
+  Object.assign(ui.context, globals);
   vm.runInContext(source.slice(source.indexOf("    function renderAnswerEditor("), source.indexOf("    const RISK_RANK")), ui.context);
   ui.context.renderAnswerEditor(rec);
   ui.form = ui.context.body.children[0].children.find(child => child.tag === "form");
@@ -211,4 +212,28 @@ test("using a precedent rechecks its exact saved fragment before changing one dr
   assert.equal(ui.get("arv-answer-note").value, "Reviewed rationale");
   assert.equal(ui.context.answerDirty, true);
   assert.equal(ui.renders.length, 0);
+});
+
+test("an AI-suggested answer a person changed can go back to the AI's value in the draft only", async () => {
+  const rec = {...record(), answers: {first: {answer: "no", note: "Checked by hand"}},
+    answer_history: [{question_id: "first", previous_answer: {answer: "yes", note: "From the vendor's SOC 2 report", ai_metadata: {source: "evidence_autopopulation", confidence: 0.82}}}]};
+  const ui = editor(rec, {ANSWER_LABEL: {yes: "Yes", no: "No"}, person: (value) => value, human: (value) => value});
+  ui.get("arv-answer-question").value = "q:first"; await ui.get("arv-answer-question").listeners.change();
+  assert.ok(descend(ui.form, "Suggested by AI before a person changed it: Yes (From the vendor's SOC 2 report)."));
+  await descend(ui.form, "Restore the AI suggestion").listeners.click();
+  assert.equal(ui.get("arv-answer-value").value, "yes");
+  assert.equal(ui.get("arv-answer-note").value, "From the vendor's SOC 2 report");
+  assert.equal(ui.context.answerDirty, true);
+  assert.equal(ui.calls.some(call => call.options?.method === "PUT"), false, "nothing is saved until the person saves");
+  ui.context.mvConfirm = async () => true;  // discard the restored draft to look at another question
+  ui.get("arv-answer-question").value = "q:second"; await ui.get("arv-answer-question").listeners.change();
+  assert.equal(descend(ui.form, "Restore the AI suggestion"), null, "only the question the AI answered offers it");
+});
+
+test("an answer still holding the AI's value offers nothing to restore", async () => {
+  const rec = {...record(), answers: {first: {answer: "yes", ai_metadata: {source: "evidence_autopopulation"}}},
+    answer_history: [{question_id: "first", previous_answer: {answer: "no", ai_metadata: {source: "evidence_autopopulation"}}}]};
+  const ui = editor(rec, {ANSWER_LABEL: {yes: "Yes", no: "No"}, person: (value) => value, human: (value) => value});
+  ui.get("arv-answer-question").value = "q:first"; await ui.get("arv-answer-question").listeners.change();
+  assert.equal(descend(ui.form, "Restore the AI suggestion"), null);
 });

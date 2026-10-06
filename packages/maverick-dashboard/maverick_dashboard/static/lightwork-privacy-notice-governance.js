@@ -105,7 +105,7 @@
     R.table(document.getElementById('png-records'), [
       { label: 'Notice', value: function (e) { return name(e.notice_id); } },
       { label: 'Created', value: function (e) { return R.when(e.created_at); } },
-    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet.' });
+    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet. Records appear here when a notice version is published.' });
 
     var q = data.queue || {};
     var waiting = (q.pending || 0) + (q.leased || 0);
@@ -299,7 +299,7 @@
   document.getElementById('png-effective').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var prop = document.getElementById('png-eff-property').value;
-    if (!prop) { say('There are no notices yet.'); return; }
+    if (!prop) { say('There are no notices yet. Create a notice first, then check which version is live.'); return; }
     var q = '?jurisdiction=' + encodeURIComponent(document.getElementById('png-eff-jur').value) +
       '&locale=' + encodeURIComponent(document.getElementById('png-eff-lang').value);
     var at = R.toEpoch(document.getElementById('png-eff-at').value);

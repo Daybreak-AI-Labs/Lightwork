@@ -57,7 +57,7 @@
         {% endfor %}
       </ul>
     </details>
-    {% else %}<p class="muted">No tool servers connected.</p>{% endif %}
+    {% else %}<p class="muted">No tool servers connected. Add one in Tool servers to give agents more tools.</p>{% endif %}
   </div>
 
   <div class="grid">
@@ -69,7 +69,7 @@
     <div class="panel">
       <div class="section-head"><h2>Channels</h2></div>
       {% if discovery.channels %}<p>{% for c in discovery.channels %}<span class="badge">{{ c|humanize }}</span> {% endfor %}</p>
-      {% else %}<p class="muted">No channels installed.</p>{% endif %}
+      {% else %}<p class="muted">No channels installed. Connect a chat app in Channels to give work from it.</p>{% endif %}
     </div>
     <div class="panel">
       <div class="section-head"><h2>Outside agents</h2></div>

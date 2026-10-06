@@ -15,6 +15,11 @@
                 flex-wrap: wrap; }
   .rf-hp { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
   .rf-note { color: var(--muted); font-size: var(--text-xs); margin-top: var(--space-4); }
+  .rf-errors { border: 2px solid var(--danger); border-radius: var(--radius-md); padding: var(--space-3);
+               margin-bottom: var(--space-3); }
+  .rf-errors h2 { font-size: var(--text-base); margin: 0 0 var(--space-2); }
+  .rf-errors ul { margin: 0; padding-left: 1.2rem; }
+  .rf-error { color: var(--danger); font-size: var(--text-sm); margin: 0; }
 </style>
 {% from "_hero.html" import hero %}
 <div class="rf-page">
@@ -25,6 +30,11 @@
          data-api="/api/v1/public/rights/{{ slug }}/requests"
          data-form="/api/v1/public/rights/{{ slug }}/form">
   <form id="rf-form" novalidate>
+    {# CTL-3: problems are listed in a summary that takes focus and next to each field; nothing typed is cleared. #}
+    <div class="rf-errors" id="rf-errors" tabindex="-1" aria-labelledby="rf-errors-title" hidden>
+      <h2 id="rf-errors-title">{{ rf.error_summary_title }}</h2>
+      <ul id="rf-errors-list"></ul>
+    </div>
     <div class="rf-field">
       <label for="rf-jurisdiction">{{ rf.jurisdiction_label }}</label>
       <span class="rf-help" id="rf-jurisdiction-help">{{ rf.jurisdiction_help }}</span>
@@ -49,6 +59,7 @@
     <div class="rf-field">
       <label for="rf-email">{{ rf.email_label }}</label>
       <span class="rf-help" id="rf-email-help">{{ rf.email_help }}</span>
+      <p class="rf-error" id="rf-email-error" hidden></p>
       <input id="rf-email" name="email" class="input" type="email" maxlength="200" autocomplete="email" aria-describedby="rf-email-help" required>
     </div>
     <div class="rf-field">
@@ -78,6 +89,7 @@
     <div class="rf-field">
       <label for="rf-answer" id="rf-challenge-label">{{ rf.challenge_label.replace('{question}', form.challenge.question) }}</label>
       <span class="rf-help" id="rf-challenge-help">{{ rf.challenge_help }}</span>
+      <p class="rf-error" id="rf-answer-error" hidden></p>
       <input id="rf-answer" name="challenge_answer" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-describedby="rf-challenge-help" required>
       <input type="hidden" id="rf-token" name="challenge_token" value="{{ form.challenge.token }}">
     </div>
@@ -103,8 +115,45 @@
     var T = {
       sending: {{ rf.sending | tojson }}, generic: {{ rf.error_generic | tojson }},
       challenge: {{ rf.error_challenge | tojson }}, rate: {{ rf.error_rate | tojson }},
-      label: {{ rf.challenge_label | tojson }}, submit: {{ rf.submit | tojson }}
+      label: {{ rf.challenge_label | tojson }}, submit: {{ rf.submit | tojson }},
+      prefix: {{ rf.error_title_prefix | tojson }}, emailMissing: {{ rf.error_email_missing | tojson }},
+      emailFormat: {{ rf.error_email_format | tojson }}, answerMissing: {{ rf.error_answer_missing | tojson }},
+      answerFormat: {{ rf.error_answer_format | tojson }}
     };
+    // CTL-3: each problem next to its field and in a summary that takes focus;
+    // the page title starts with the error prefix while problems remain.
+    var summary = document.getElementById('rf-errors');
+    var title = document.title;
+    function mark(field, message) {
+      var note = document.getElementById(field.id + '-error');
+      var help = (field.getAttribute('aria-describedby') || '').split(' ').filter(function (id) { return id && id !== note.id; });
+      note.textContent = message || ''; note.hidden = !message;
+      if (message) { field.setAttribute('aria-invalid', 'true'); help.unshift(note.id); }
+      else field.removeAttribute('aria-invalid');
+      field.setAttribute('aria-describedby', help.join(' '));
+    }
+    function problems() {
+      var email = document.getElementById('rf-email'), answer = document.getElementById('rf-answer'), found = [];
+      var emailText = !email.value.trim() ? T.emailMissing : (email.validity && email.validity.typeMismatch) ? T.emailFormat : '';
+      var answerText = !answer.value.trim() ? T.answerMissing : !/^[0-9]+$/.test(answer.value.trim()) ? T.answerFormat : '';
+      mark(email, emailText); mark(answer, answerText);
+      if (emailText) found.push([email, emailText]);
+      if (answerText) found.push([answer, answerText]);
+      return found;
+    }
+    function showProblems(found) {
+      var list = document.getElementById('rf-errors-list');
+      list.textContent = '';
+      found.forEach(function (item) {
+        var li = document.createElement('li'), link = document.createElement('a');
+        link.href = '#' + item[0].id; link.textContent = item[1];
+        link.addEventListener('click', function (ev) { ev.preventDefault(); item[0].focus(); });
+        li.appendChild(link); list.appendChild(li);
+      });
+      summary.hidden = !found.length;
+      document.title = found.length ? T.prefix + title : title;
+      if (found.length) summary.focus();
+    }
     var jurisdiction = document.getElementById('rf-jurisdiction');
     var type = document.getElementById('rf-type');
     function filterTypes() {
@@ -129,6 +178,9 @@
     }
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
+      var found = problems();
+      showProblems(found);
+      if (found.length) return;
       var body = {
         jurisdiction: jurisdiction.value, request_type: type.value,
         name: document.getElementById('rf-name').value,
@@ -157,6 +209,8 @@
         if (out.status === 422 && out.data.code === 'challenge') {
           if (out.data.challenge) newChallenge(out.data.challenge);
           msg.textContent = T.challenge;
+          var answer = document.getElementById('rf-answer');
+          mark(answer, T.challenge); showProblems([[answer, T.challenge]]);
         } else if (out.status === 429) {
           msg.textContent = T.rate;
         } else {

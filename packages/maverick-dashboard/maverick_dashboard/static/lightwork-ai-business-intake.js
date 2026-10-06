@@ -23,7 +23,7 @@
   async function api(path,method='GET',body){const response=await fetch(base+path,{method,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json',...(contract?{'X-Lightwork-Intake-Context':contract.context}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
     // A refusal's body is never read: release it so the request ends instead of staying open.
     if([401,403].includes(response.status)){response.body?.cancel().catch(()=>{});lock();throw new Error('Your sign-in or access changed. Sign in again and reload AI business intake.');}
-    const friendly=action=>window.mvErrorText?window.mvErrorText(response,action):'Could not '+action+'. Please try again.';
+    const friendly=action=>window.mvErrorText?window.mvErrorText(response,action):'Could not '+action+'. Try again.';
     if(response.status>=500)throw new Error('The intake service is unavailable. Your answers are kept; try again.');
     const raw=await response.text();if(new TextEncoder().encode(raw).length>2*1024*1024)throw new Error('The intake response is too large. Narrow the draft search.');
     let data;try{data=JSON.parse(raw);}catch(_){throw new Error('The intake response could not be read. Your unsaved answers are still here. Refresh the page and try again.');}
@@ -31,7 +31,7 @@
       if(response.status===409&&/account or workspace changed/i.test(detail)){lock();throw new Error('The account or workspace changed. Reload AI business intake.');}
       else if(response.status===409)conflicted=true;
       const error=new Error(response.status===409?'Someone else changed this intake since you opened it.':friendly('complete the intake request'));error.status=response.status;throw error;}
-    if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('The intake service returned an invalid result.');
+    if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('The intake reply could not be read. Refresh the page and try again.');
     if(contract&&data.context!==contract.context){lock();throw new Error('The account or workspace changed. Reload AI business intake.');}
     return data;
   }
@@ -74,7 +74,7 @@
     el('import').value='';update();
   }
   async function list(more=false){const result=await api('/drafts?'+new URLSearchParams({limit:'100',offset:String(more?offset:0),q:el('search').value.trim()}));if(!Array.isArray(result.intakes)||!Number.isSafeInteger(result.count)||typeof result.has_more!=='boolean')throw new Error('The draft list could not be read. Refresh the page and try again.');
-    if(!more){el('drafts').replaceChildren(new Option('Choose a saved intake',''));offset=0;}for(const row of result.intakes){if(!/^ABI-[a-f0-9]{24}$/.test(row.id))throw new Error('The draft list contains an invalid reference.');el('drafts').append(new Option((row.use_case_name||'Untitled intake')+' · '+statusLabel(row.status),row.id));}offset+=result.intakes.length;hasMore=result.has_more;el('list-status').textContent=result.count?'Showing '+offset+' of '+result.count+' matching workspace intakes.':'No matching workspace intakes. Start a new draft above.';update();}
+    if(!more){el('drafts').replaceChildren(new Option('Choose a saved intake',''));offset=0;}for(const row of result.intakes){if(!/^ABI-[a-f0-9]{24}$/.test(row.id))throw new Error('The saved intake list has an entry that could not be read. Refresh the page and try again.');el('drafts').append(new Option((row.use_case_name||'Untitled intake')+' · '+statusLabel(row.status),row.id));}offset+=result.intakes.length;hasMore=result.has_more;el('list-status').textContent=result.count?'Showing '+offset+' of '+result.count+' matching workspace intakes.':'No matching workspace intakes. Start a new draft above.';update();}
   el('answers').addEventListener('input',()=>{el('validation').textContent='';update();});el('answers').addEventListener('change',update);el('drafts').addEventListener('change',update);
   el('new').addEventListener('click',()=>run(async()=>{if(!await confirmReplace())return;current=null;conflicted=false;references.clear();build();savedAnswers='{}';el('current').textContent='New intake';el('progress').textContent='Start a draft with what you know, then return to finish it.';el('missing').replaceChildren();say('New intake ready. Nothing has been saved or submitted.');}));
   el('refresh').addEventListener('click',()=>run(()=>contract?list():initialize()));el('find').addEventListener('submit',event=>{event.preventDefault();run(()=>list());});el('more').addEventListener('click',()=>run(()=>list(true)));

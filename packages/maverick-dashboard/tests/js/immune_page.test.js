@@ -7,7 +7,7 @@ const { JSDOM } = require("jsdom");
 const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-immune-console.js"), "utf8");
-const html = `<div id="ic-root" data-console="immune" data-api-url="/api/v1/immune/summary" data-can-admin="true" data-can-global-admin="true">
+const html = `<div id="mv-toasts"></div><div id="mv-toasts-alert"></div><div id="ic-root" data-console="immune" data-api-url="/api/v1/immune/summary" data-can-admin="true" data-can-global-admin="true">
 <p id="ic-status"></p><p id="ic-error"></p>
 <strong id="ic-trifectas"></strong><strong id="ic-exfil"></strong><strong id="ic-ifc-events"></strong><strong id="ic-replays"></strong>
 <table><tbody id="ic-comp-rows"></tbody></table><p id="ic-ifc-mode"></p><table><tbody id="ic-ifc-rows"></tbody></table>
@@ -76,12 +76,18 @@ test("turning reviewer tests on asks first and saves the switch", async (t) => {
   assert.deepEqual(JSON.parse(call.body), { canaries: true });
 });
 
-test("deleting a recording is confirmed; cancelling sends nothing", async (t) => {
-  const ui = await fixture({ confirm: false });
+test("deleting a recording leaves at once with Undo, and Undo sends nothing", async (t) => {
+  const ui = await fixture();
   t.after(() => ui.window.close());
   const del = [...ui.doc.querySelectorAll("#ic-recorded-rows button")].find((b) => b.textContent === "Delete recording");
+  const row = del.closest("tr");
   del.click(); await ui.settle();
-  assert.equal(ui.confirms.length, 1);
+  assert.equal(ui.confirms.length, 0, "one action: no question first");
+  assert.equal(row.hidden, true);
+  const toast = ui.doc.querySelector(".mv-toast--undo");
+  assert.match(toast.textContent, /Recording for .* deleted\. Past re-run results are kept\./);
+  toast.querySelector("button").click(); await ui.settle();
+  assert.equal(row.hidden, false);
   assert.equal(ui.calls.some((c) => c.method === "DELETE"), false);
 });
 

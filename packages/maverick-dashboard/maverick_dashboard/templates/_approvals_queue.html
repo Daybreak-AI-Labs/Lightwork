@@ -14,6 +14,7 @@
    a sentence, never a mapping; the raw record is under Technical details. #}
 {% macro _budget_text(budget) -%}{{ budget | approval_spending }}{%- endmacro %}
 {% from "_empty_state.html" import empty_state %}
+{% from "_comments.html" import comments %}
 <div id="approval-queue" class="approval-list" aria-label="Requests waiting for your decision">
 {% if approvals %}
   {% for a in approvals %}
@@ -33,7 +34,7 @@
        text rather than one status request and announcement per card. #}
     {% set progress = approval_progress.get(a.id) if approval_progress else None %}
     {% set own_note = own_request_notes.get(a.id, '') if own_request_notes else '' %}
-    <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}"{% if own_request %} data-own-request="yes"{% endif %}
+    <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}" data-bulk-id="{{ a.id }}" data-bulk-label="{{ action_label }} (#{{ a.id }})"{% if own_request %} data-own-request="yes"{% endif %}
              data-scope="{{ scope_text }}"
              {% if card %}data-target="{{ card.target.label }}" data-spending="{{ _budget_text(card.budget) | trim }}" data-irreversible="{{ 'yes' if card.consequences.irreversible else 'no' }}"{% endif %}
              {% if assessment_id %} data-assessment-id="{{ assessment_id }}"{% endif %} id="approval-{{ a.id }}"
@@ -88,6 +89,7 @@
           <p class="approval-card-error" role="alert">This older request is missing the details needed to approve it safely. Reject it and ask for a new request.</p>
         {% endif %}
       </div>
+      {% if comments_enabled() %}{{ comments('approval', a.id, 'Comments on this request', collapsed=True) }}{% endif %}
       <p class="approval-item__decided muted" hidden></p>
       {% if own_note %}<p class="muted approval-own-note" id="approval-own-note-{{ a.id }}">{{ own_note }}</p>{% endif %}
       <div class="approval-actions">
@@ -273,7 +275,7 @@
     }
     function plainError(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what)
-        : 'Could not ' + what + '. Please try again.';
+        : 'Could not ' + what + '. Try again.';
     }
     function itemFor(id) {
       return document.querySelector('article.approval-item[data-id="' + id + '"]');
@@ -637,6 +639,8 @@
       }
     }
     window.mvDecideApproval = decide;
+    // The bulk bar below moves the cards it decided, like one decision does.
+    window.mvApprovalQueue = {markDecided: markDecided, restoreToQueue: restoreToQueue, itemFor: itemFor, say: say};
 
     async function undo(btn, pointer) {
       const id = btn.dataset.id;
@@ -703,6 +707,66 @@
   })();
 </script>
 
+<script>
+  // Reject or send back many requests at once (ADM-7). Approving stays one
+  // request at a time: each approval needs its own reading of what it does.
+  (function wireBulk() {
+    const queue = document.getElementById('approval-queue');
+    const api = window.mvApprovalQueue;
+    // The shared helpers load at the end of the page; wire the bar after them.
+    if (queue && api && !window.mvBulk) { document.addEventListener('DOMContentLoaded', wireBulk, {once: true}); return; }
+    if (!queue || !api || !window.mvBulk || !queue.querySelector('article.approval-item[data-bulk-id]')) return;
+    async function post(id, verb, body) {
+      const r = await fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/' + verb, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {}),
+      });
+      if (!r.ok || r.status === 202) throw r.status === 202 ? {status: 409, detail: 'The decision is saved but not in effect yet. Open the request to check it.'} : r;
+      return r;
+    }
+    window.mvBulk({
+      list: queue, rows: 'article.approval-item[data-bulk-id]', noun: 'request', nouns: 'requests', filter: true,
+      actions: [
+        {label: 'Reject', verb: 'Reject', danger: true,
+         ask: async function () {
+           if (!window.mvForm) return {};
+           const answers = await window.mvForm('Reject the selected requests', [
+             {key: 'reason', label: 'Why are you rejecting them? (optional)', type: 'text', required: false,
+              help: 'Written to the audit log next to each decision.'}], {okText: 'Reject requests'});
+           return answers === null ? null : {reason: ((answers && answers.reason) || '').trim()};
+         },
+         run: async function (item, extra) {
+           const r = await post(item.id, 'deny', extra.reason ? {reason: extra.reason} : {});
+           const seconds = parseInt(r.headers.get('X-Lightwork-Undo-Seconds') || '0', 10) || 0;
+           const card = api.itemFor(item.id);
+           if (card) api.markDecided(card, 'denied', r.headers.get('X-Lightwork-Decided-By') || '', seconds);
+           if (seconds <= 0) return {note: 'rejected'};
+           return {note: 'rejected', undo: async function () {
+             await post(item.id, 'undo');
+             const back = api.itemFor(item.id);
+             if (back) api.restoreToQueue(back);
+           }};
+         },
+         after: function (report) { api.say(report.undone != null ? 'The rejections were undone. Those requests are waiting again.' : 'The selected requests were decided. Read the report above the list.'); }},
+        {label: 'Send back', verb: 'Send back',
+         ask: async function () {
+           if (!window.mvForm) return null;
+           const answers = await window.mvForm('Send the selected requests back for changes', [
+             {key: 'rationale', label: 'What should the requesters change?', type: 'text', required: true,
+              help: 'Each requester sees this note and prepares a new request.'}], {okText: 'Send back requests'});
+           const rationale = ((answers && answers.rationale) || '').trim();
+           return rationale ? {rationale: rationale} : null;
+         },
+         run: async function (item, extra) {
+           await post(item.id, 'revise', {rationale: extra.rationale});
+           const card = api.itemFor(item.id);
+           if (card) api.markDecided(card, 'revised', '', 0);
+           return {note: 'sent back'};
+         }}
+      ]
+    });
+  })();
+</script>
+
 <details id="request-decision-history" class="panel">
   <summary>Decisions on your requests</summary>
   <p>Authorization, execution and external verification are separate. These records show the decisions on requests you made; current task status does not prove an external change occurred.</p>
@@ -711,3 +775,4 @@
   <button type="button" id="request-decision-more" class="btn btn--ghost">Load decisions</button>
 </details>
 <script src="/static/lightwork-approval-history.js" defer></script>
+{% if comments_enabled() %}<script src="/static/lightwork-comments.js" defer></script>{% endif %}

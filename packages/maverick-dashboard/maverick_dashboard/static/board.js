@@ -418,7 +418,10 @@ window.LWBoard = (function () {
   // one), stamp, fetch, and the 60s visible-tab refresh. `endpoint` overrides
   // the default board API for pages whose payload already exists elsewhere.
   function attach(cfg) {
-    var days = 90;
+    // The range the tab bar shows as chosen (an address like #range-30 may
+    // have chosen it already); 90 days otherwise.
+    var chosen = document.querySelector('[role="tab"][data-days][aria-selected="true"]');
+    var days = chosen ? (parseInt(chosen.dataset.days, 10) || 90) : 90;
     var generation = 0, active = null, retired = false, updated = '';
     var stampEl = document.getElementById('bd-stamp');
     function stamp(msg) {

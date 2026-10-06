@@ -29,6 +29,9 @@ test('invited employee connects only an approved own account, shares a captured 
     const passphrase='Synthetic invited colleague passphrase'; // pragma: allowlist secret - disposable synthetic account fixture
     await page.locator('input[name="password"]').fill(passphrase);await page.locator('input[name="password2"]').fill(passphrase);
     await page.getByRole('button',{name:'Accept invitation',exact:true}).click({timeout:45000});
+    // The saved grant is confirmed first; opening the workspace is a separate step.
+    await expect(page.getByRole('heading',{name:'Invitation accepted'})).toBeVisible();
+    await page.getByRole('button',{name:/^Open /}).click();
     await expect(page).not.toHaveURL(/\/auth\/invite\//);
     expect((await value.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     return page;
@@ -45,7 +48,11 @@ test('invited employee connects only an approved own account, shares a captured 
     expect(fixture.outbound_calls).toBe('blocked');
     const employee=await context(),manager=await context();
     const page=await accept(employee,fixture.invites.employee),review=await accept(manager,fixture.invites.manager);
-    expect((await employee.request.get(fixture.invites.employee)).status()).toBe(410);
+    // Reopening a used link shows its own account the saved result, never a second grant;
+    // anyone else gets "no longer valid".
+    const reopened=await employee.request.get(fixture.invites.employee);expect(reopened.status()).toBe(200);
+    const receipt=await reopened.text();expect(receipt).toContain('Invitation accepted');expect(receipt).not.toContain('Accept invitation');
+    expect((await (await context()).request.get(fixture.invites.employee)).status()).toBe(410);
     expect((await employee.request.get(fixture.invites.expired)).status()).toBe(410);
     console.info('Enterprise journey: invitation and least privilege');
     for(const forbidden of ['/settings','/users','/users/departures']){

@@ -110,11 +110,11 @@
     if (!payload || payload.format !== 1 || !payload.editor || !payload.editor.flow || !Array.isArray(payload.editor.flow.nodes) || !payload.base) throw new Error('This recovery copy is not a supported flow draft.');
     var state = payload.editor, source = payload.base;
     if (!Number.isInteger(source.version) || source.version < 0 || typeof source.id !== 'string' || typeof source.revision !== 'string' ||
-        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This flow recovery copy has invalid editor fields. Current work was kept.');
+        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This saved copy of the flow is missing some of its fields, so it was not restored. Current work was kept.');
     var pending = [state.flow];
     while (pending.length) {
       var graph = pending.pop();
-      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This flow recovery copy has invalid steps. Current work was kept.');
+      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This saved copy of the flow has steps that could not be read, so it was not restored. Current work was kept.');
       graph.nodes.forEach(function (node) { if (node.body) pending.push(node.body); });
     }
     var before = JSON.stringify(recoveryPayload());
@@ -734,7 +734,7 @@
     say('Copied ' + stepName(n) + ' — press Ctrl+V to paste it.');
   }
   function pasteNode() {
-    if (!clipboard) { say('Nothing copied yet.'); return; }
+    if (!clipboard) { say('Nothing copied yet. Select a step and choose Copy first.'); return; }
     pushHistory();
     var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
     flow.nodes.push(copy); selectNode(copy.id); render();
@@ -1620,7 +1620,7 @@
     if (window.mvErrorText) return window.mvErrorText(response, what);
     var status = response && response.status;
     if (status === 409) return 'Could not ' + what + '. This flow was changed since you opened it. Reload it and try again.';
-    return 'Could not ' + what + '. Please try again.';
+    return 'Could not ' + what + '. Try again.';
   }
   // Problems in words, naming the step ("The step “Send to Slack” needs an action chosen.").
   function problemText(f) {
@@ -2043,7 +2043,7 @@
       if (retry) retry.hidden = !draftNotes.length;
     } catch (e) {
       if (generation === draftGeneration) {
-        say(e.message || 'Could not draft the flow. Please try again.', true);
+        say(e.message || 'Could not draft the flow. Try again.', true);
         if (retry) retry.hidden = false;
       }
     } finally {
@@ -2291,16 +2291,20 @@
           copy.addEventListener('click', function () { if (window.mvCopy) window.mvCopy(address); });
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
-          rm.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove start' }))) return;
-            apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
-              .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
-              .catch(function (e) { say(failText(e, 'remove it'), true); });
+          rm.addEventListener('click', function () {
+            // One action with a way back (CTL-1): removed when Undo ends.
+            row.hidden = true;
+            window.mvUndo('“{name}” removed. The other app can no longer start this flow.', { values: {name: t.name},
+              action: 'remove it',
+              run: function (keepalive) { return apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE', keepalive: keepalive }); },
+              undo: function () { row.hidden = false; rm.focus(); },
+              done: function () { showTriggers(); }
+            });
           });
           row.appendChild(nm); row.appendChild(copy); row.appendChild(rm); wl.appendChild(row);
         });
         if (mine.length) wl.appendChild(hint('In the other app, send a web request to the copied address and include the start’s name.'));
-        else wl.appendChild(hint('None yet.'));
+        else wl.appendChild(hint('None yet. Use “Let another app start this flow” below.'));
         wl.appendChild(addButton('Let another app start this flow', function () {
           apiFetch('/api/v1/triggers', { method: 'POST', body: JSON.stringify({ flow: rootFlow.id }) })
             .then(function (r) { return r.json().catch(function () { return {}; }).then(function (jj) { return { ok: r.ok, r: r, j: jj }; }); })
@@ -2708,7 +2712,7 @@
     if (!handoff || handoff.kind !== 'flow' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
         Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
         !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
-      say('This prepared draft is invalid or expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
+      say('This prepared draft cannot be used or has expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
     }
     var brief = document.getElementById('fd-nl');
     function hasDraft() { return brief.value.trim() || draftIsDirty() || rootFlow.id || rootFlow.name || rootFlow.nodes.length; }

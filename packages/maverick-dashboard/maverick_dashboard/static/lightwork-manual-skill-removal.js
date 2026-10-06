@@ -60,13 +60,38 @@
       var label = node('label', undefined, reviewBox), consent = node('input', undefined, label); consent.type = 'checkbox'; label.append(document.createTextNode(' I reviewed this saved version and want to remove it.'));
       var apply = node('button', 'Remove reviewed skill', reviewBox); apply.type = 'button'; apply.className = 'btn btn--danger'; apply.disabled = true;
       consent.addEventListener('change', function () { apply.disabled = busy || !consent.checked; });
-      apply.addEventListener('click', async function () {
+      apply.addEventListener('click', function () {
         if (busy || !consent.checked || current !== generation) return;
         try { sessionStorage.setItem(key, JSON.stringify({context: context, operation: checked.operation})); } catch (_) { status.textContent = 'This browser could not retain the original request. Allow site storage before removing; nothing was submitted.'; return; }
-        selected(checked.operation, 'Original removal just reviewed'); lock(true); apply.disabled = true; status.textContent = 'Submitting the reviewed removal. The skill remains visible until the original result is confirmed.';
-        try { var result = await request('/remove', {token: checked.token, confirmed: true}); if (current === generation) { reviewBox.replaceChildren(); show(result); } }
-        catch (error) { if (current === generation) { reviewBox.replaceChildren(); failure(error); } }
-        finally { if (current === generation) lock(false); }
+        selected(checked.operation, 'Original removal just reviewed'); lock(true); apply.disabled = true;
+        // One action with a way back (CTL-1), like other deletes: the card
+        // leaves at once and the reviewed removal is sent when the Undo time
+        // is up (or the page is left). An undone removal sends nothing.
+        var card = Array.prototype.find.call(document.querySelectorAll('.skill-card[data-skill]'), function (item) { return item.dataset.skill === name; });
+        var title = card && card.querySelector('strong'), sent = false;
+        if (card) card.hidden = true; reviewBox.hidden = true;
+        status.textContent = 'The reviewed removal is sent when the Undo time is up.';
+        window.mvUndo('Skill “{name}” removed. Agents stop using it from the next task.', {
+          values: {name: title ? title.textContent.trim() : name}, action: 'remove the skill',
+          run: async function (keepalive) {
+            sent = true;
+            var response = await fetch('/api/v1/manual-skill-removals/remove', {method: 'POST', credentials: 'same-origin', cache: 'no-store', keepalive: keepalive,
+              headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token: checked.token, confirmed: true})});
+            if (!response.ok) return response;
+            var result = await response.json();
+            if (current === generation) { reviewBox.replaceChildren(); reviewBox.hidden = false; show(result); }
+            return {ok: true};
+          },
+          undo: function () {
+            // A refused or lost reply keeps the retained request, so its original result can still be read.
+            if (!sent) { try { sessionStorage.removeItem(key); } catch (_) { /* best effort */ } }
+            if (card) card.hidden = false;
+            reviewBox.hidden = false; reviewBox.replaceChildren();
+            status.textContent = sent ? 'The removal could not be confirmed. Read its original result before a new decision.' : 'Removal undone. The skill was kept.';
+            if (current === generation) lock(false);
+          },
+          done: function () { if (current === generation) lock(false); }
+        });
       });
       var cancel = node('button', 'Cancel this review', reviewBox); cancel.type = 'button'; cancel.className = 'btn btn--ghost'; cancel.addEventListener('click', function () { if (!busy) { reviewBox.replaceChildren(); status.textContent = 'Review cancelled. The skill was kept.'; } });
       status.textContent = 'Nothing has been removed. Review all current instructions before confirming.'; root.scrollIntoView({block: 'start'}); consent.focus();

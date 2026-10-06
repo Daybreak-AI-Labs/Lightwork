@@ -290,7 +290,8 @@ class Setting:
     # A preview the page shows before saving (``governance_level``: the
     # settings a governance level changes; settings_governance_level.
     # ``approval_checks``: what the recorded approval checks would have
-    # needed at the chosen level; approval_threshold_preview).
+    # needed at the chosen level; approval_threshold_preview. ``retention``:
+    # what the next clean-up would delete for a keep period; policy_preview).
     preview: str = ""
 
     @property
@@ -352,6 +353,17 @@ SETTINGS: tuple[Setting, ...] = (
       "Screen agent answers for leaked secrets or harmful content.",
       "toggle", "Safety", True, "maverick.config", weaker=False,
       warning="Answers will be shown without being checked for leaked secrets or harmful content."),
+    S("practice", "enable", "Offer practice mode",
+      "Let people switch to a separate practice workspace to try tasks, specialists and approvals. In "
+      "practice nothing is sent, paid or changed outside practice, and nothing counts as real work. AI "
+      "answers still cost real money, counted apart from spending limits.", "toggle", "Safety", True,
+      "maverick.practice", aliases="practice sandbox try test drive safe mode training demo"),
+    S("practice", "daily_spend_cap", "Practice spending cap per person",
+      "AI answers in practice come from the real AI service and cost real money. That spending is counted "
+      "apart from real spending limits and stops at this amount per person each day (never more than a "
+      "real limit that applies). Each task's own budget still applies.", "number", "Safety", 1.0,
+      "maverick.practice", minimum=0, maximum=1000, unit="dollars per day", weaker="higher",
+      aliases="practice budget practice spending sandbox cost"),
     S("safety", "compartments", "Share blocked threats across a team of agents",
       "When one agent's check blocks a threat, the other agents on the same task are protected from it too.",
       "toggle", "Safety", False, "maverick.config"),
@@ -423,6 +435,12 @@ SETTINGS: tuple[Setting, ...] = (
     S("autonomy", "enable", "Extra checks on uncertain work",
       "When agents disagree or are unsure, double-check the answer and tighten what risky tools may do.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMY_GATE",)),
+    S("autonomy", "confirm_plan", "Show the plan before acting",
+      "Before a task's first action that could reach outside Lightwork (a message, a payment, a change in a "
+      "connected system or a command), show its plan, first action and spending cap in Approvals and wait. "
+      "Approve to carry on, reject to stop before anything runs, or send it back with what to change.",
+      "toggle", "Safety", False, "maverick.autonomy",
+      aliases="plan before acting confirm plan review plan approve plan"),
     S("autonomy", "headless_assume", "Carry on when nobody can answer",
       "When no person is available to answer a question, let the agent make a reasonable assumption instead of waiting.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMOUS",), weaker=True,
@@ -827,6 +845,11 @@ SETTINGS: tuple[Setting, ...] = (
       "server, are reported by the role people choose, never by name, and are never sent anywhere. "
       "Results are on People > Ease-of-use results.",
       "toggle", "Privacy", False, "maverick.usability_survey"),
+    S("analytics", "usage_measures", "Count first results and AI suggestions, without names",
+      "Count whether new people see a finished result of their own task in their first session, and how often "
+      "AI suggestions are shown, used or dismissed. People and suggestions are kept only as one-way codes, and "
+      "nothing is sent anywhere. Results are on People > Ease-of-use results.",
+      "toggle", "Privacy", False, "maverick.usage_measures"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,
@@ -874,27 +897,32 @@ SETTINGS: tuple[Setting, ...] = (
       "Activity record days older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older activity records will be permanently deleted at the next clean-up."),
+      warning="Older activity records will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "episodes_days", "Keep finished work records for",
       "Records of finished work older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older work records will be permanently deleted at the next clean-up."),
+      warning="Older work records will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "events_days", "Keep task progress updates for",
       "Task progress updates older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older progress updates will be permanently deleted at the next clean-up."),
+      warning="Older progress updates will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "messages_days", "Keep messages for",
       "Messages older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older messages will be permanently deleted at the next clean-up."),
+      warning="Older messages will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "usage_days", "Keep usage tallies for",
       "Daily usage tallies older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older usage tallies will be permanently deleted at the next clean-up."),
+      warning="Older usage tallies will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("durable", "enabled", "Resume tasks after a crash",
       "Save progress as tasks run so they can continue from the last step after an interruption.",
       "toggle", "Data retention", False, "maverick.config"),
@@ -942,6 +970,24 @@ SETTINGS: tuple[Setting, ...] = (
     S("notifications", "personal_dashboard_url", "Dashboard address for personal notification links",
       "The HTTPS origin people use to sign in, without a path, query or credentials. Messages say why each alert was sent, what it needs and by when, with authenticated links, and never include task text.",
       "text", "Integrations", "", "maverick.personal_notification_delivery"),
+    S("collaboration", "comments", "Comments and mentions",
+      "Let people comment on tasks, workflow runs, approval requests and policy pages, and mention a "
+      "colleague to notify them in their own notifications. Only people who can open the item can read "
+      "its comments or be mentioned. On by default.",
+      "toggle", "People & access", True, "maverick.comments",
+      aliases="comment comments mention mentions discuss discussion thread collaborate"),
+    S("collaboration", "suggestions", "Suggested edits to rules",
+      "Let agents and colleagues suggest changes to AI use rules, data use rules and privacy notices. "
+      "A suggestion shows exactly what it changes, who or what proposed it and why. Accepting it creates "
+      "a draft that still goes through that document's own approval. On by default.",
+      "toggle", "People & access", True, "maverick.policy_suggestions",
+      aliases="suggest suggestion suggestions edit review accept reject tracked changes rules policy"),
+    S("collaboration", "ai_suggestions", "AI-drafted suggestions",
+      "Let the AI assistant draft a suggested edit to AI use rules when a person asks. Each draft "
+      "uses the AI service within the spending cap for one task and is only a suggestion until a "
+      "person accepts it. On by default.",
+      "toggle", "People & access", True, "maverick.policy_suggestions",
+      aliases="ai suggest draft assistant rules policy wording"),
     S("support", "status_page_url", "Service status page",
       "A public page that shows whether your Lightwork service is up and its incident history. When set, the Help menu on every page links to it, and so does the notice shown while an AI service is paused. Leave empty to show no link.",
       "text", "Integrations", "", "maverick.config", pattern=r"(" + _HTTPS + r")?",
@@ -3423,7 +3469,8 @@ def _assert_consistent() -> None:
         assert (s.control == "document") == bool(s.document), s.id
         assert not s.workspace_segment or s.control == "text", s.id
         assert not s.fingerprint_of or s.control == "fingerprint", s.id
-        assert not s.preview or s.control == "select", s.id
+        # A keep period previews its clean-up from the number box.
+        assert not s.preview or s.control == "select" or (s.preview == "retention" and s.control == "number"), s.id
         if s.key_kind == "entries":
             assert s.control == "table", s.id
         assert s.scale > 0, s.id

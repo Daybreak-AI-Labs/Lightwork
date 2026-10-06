@@ -22,7 +22,7 @@
     <section class="panel" aria-labelledby="ce-list-heading">
       <div class="section-head">
         <h2 id="ce-list-heading">Experiments</h2>
-        <button class="btn btn--primary" type="button" id="ce-new"{% if not ce_admin %} disabled{% endif %}>New experiment</button>
+        <button class="btn btn--primary" type="button" id="ce-new"{% if not ce_admin %} disabled{% endif %}>Create experiment</button>
       </div>
       <p class="muted">The person who creates an experiment cannot approve it; a second person must.</p>
       <div id="ce-table"><p class="muted">Loading experiments…</p></div>
@@ -119,7 +119,7 @@
       <details class="governance-details">
         <summary>About this page’s safeguards</summary>
         <ul>
-          <li>Visitors whose browser asks not to be tracked, uses that must always be on, and layouts that fail accessibility or equal-button checks always get the original version.</li>
+          <li>Visitors whose browser asks not to be tracked always get the original version. So do uses that must always be on, and layouts that fail accessibility or equal-button checks.</li>
           <li>An experiment compares 2 to 10 versions and can be checked at most 20 times; visitor records are kept at most 90 days.</li>
           <li>A statistical winner is not a legal or accessibility approval. Review the result before changing your published banner.</li>
         </ul>

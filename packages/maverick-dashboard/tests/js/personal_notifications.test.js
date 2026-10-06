@@ -4,7 +4,7 @@ const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('j
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)); };
 
 test('notification access denial clears private destination, receipt and task labels', async t => {
-  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects'];
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
     'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
     'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences'];
@@ -27,7 +27,7 @@ test('notification access denial clears private destination, receipt and task la
 });
 
 test('each alert shows why, what and by when, and mutes from the alert with an undo', async t => {
-  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects'];
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
     'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
     'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences',
@@ -72,7 +72,7 @@ test('each alert shows why, what and by when, and mutes from the alert with an u
 });
 
 test('saving notification preferences says "Saving…", then the truth, and a failure keeps the draft', async t => {
-  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects'];
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
     'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
     'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences',
@@ -107,4 +107,39 @@ test('saving notification preferences says "Saving…", then the truth, and a fa
   assert.equal(form.elements.timezone.value, 'Europe/Paris');
   assert.equal(doc.getElementById('personal-notification-error').hidden, false);
   assert.equal(pending.length, 0);
+});
+
+test('a task waiting on your answer can be stopped from its alert in one action', async t => {
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
+  const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
+    'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
+    'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences',
+    'personal-notification-mute-status'];
+  const dom = new JSDOM('<form id="notification-preferences">' + names.map(name => '<input name="'+name+'">').join('')
+    + '<button type="submit">Save</button><select id="notification-mute-task"></select><select id="notification-mute-duration"><option value="3600">Hour</option></select></form>'
+    + nodes.map(id => '<div id="'+id+'"></div>').join(''), {url:'https://dashboard.example.test/notifications', runScripts:'outside-only', pretendToBeVisual:true});
+  t.after(() => dom.window.close());
+  const prefs = {mode:'immediate',timezone:'UTC',digest_time:'09:00',quiet_start:'22:00',quiet_end:'08:00',events:[],muted_tasks:{},muted_agents:{},external_links:[]};
+  const item = {id:'c'.repeat(64), title:'Quarterly review', href:'/chat/goal/3#question-panel', label:'Needs your answer', category:'needs-decision',
+    reason:'You started this task', action:"Answer the agent's question so the task can continue", due_at:null,
+    due_label:'Due', no_due:'The task waits until you answer', waiting_since:1, goal_id:3, seen_at:null};
+  const finished = {...item, id:'d'.repeat(64), category:'completed', label:'Finished'};
+  const base = {context:'same-account', revision:'a'.repeat(64), checked_at:1, delivery_note:'Ready', tasks:[{id:3,title:'Quarterly review'}],
+    projects:[], private_delivery:{note:'Ready', channels:[]}};
+  const calls = [];
+  dom.window.fetch = async (url, options) => {
+    calls.push([String(url), options && options.method]);
+    if (String(url).endsWith('/cancel')) return {ok:true, status:204, json:async()=>({})};
+    return {ok:true, json:async()=>({...base, items:[item, finished], preferences:prefs})};
+  };
+  dom.window.setInterval = () => 1; dom.window.clearInterval = () => {};
+  dom.window.eval(fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-personal-notifications.js'),'utf8'));
+  await settle();
+  const [waiting, done] = dom.window.document.querySelectorAll('#personal-notification-items article');
+  assert.deepEqual(Array.from(done.querySelectorAll('button')).map(b => b.textContent), ['Mark seen', 'Mute this task']);
+  const stop = Array.from(waiting.querySelectorAll('button')).find(b => b.textContent === 'Stop task');
+  assert.ok(stop, 'Stop task is offered on the waiting task');
+  stop.click(); await settle();
+  assert.ok(calls.some(([url, method]) => url === '/api/v1/goals/3/cancel' && method === 'POST'));
+  assert.match(dom.window.document.getElementById('personal-notification-mute-status').textContent, /Task stopped\. Open it/);
 });

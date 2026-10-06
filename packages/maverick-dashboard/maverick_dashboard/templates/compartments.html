@@ -30,7 +30,7 @@
             {% for n in (25, 50, 100) %}<option value="{{ n }}"{% if domain_page.per_page == n %} selected{% endif %}>{{ n }} per page</option>{% endfor %}
           </select>
         </label>
-        <button class="btn btn--primary" type="submit">Search</button>
+        <button class="btn btn--primary" type="submit">Search domains</button>
         {% if domain_page.query %}<a class="btn btn--ghost" href="/compartments">Clear</a>{% endif %}
       </form>
       <p class="muted" role="status">

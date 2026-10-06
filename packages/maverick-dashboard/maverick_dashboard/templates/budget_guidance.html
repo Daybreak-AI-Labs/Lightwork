@@ -7,6 +7,7 @@
         compact=true) }}
 {% from "_spend_freshness.html" import spend_freshness %}
 {{ spend_freshness(spend_recorded_at, live=true) }}
+  {% include "_practice_cost.html" %}
 <section class="panel" id="budget-guidance" data-goal="{{ goal_id or '' }}">
   <p><a href="/chat">{{ ui('Start a conversation') }}</a> · <a href="/automations">{{ ui('Manage schedules') }}</a> · <a href="/spend">{{ ui('Spend and cost evidence') }}</a></p>
   <form id="budget-preview-form" data-product-validation>

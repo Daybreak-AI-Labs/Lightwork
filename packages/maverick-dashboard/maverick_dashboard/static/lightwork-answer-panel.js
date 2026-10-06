@@ -254,6 +254,12 @@
           if (value.follow_up && value.follow_up.question) {
             say(msg, msg.textContent + ' ' + value.follow_up.question + ' You can select Needs improvement again to add an optional reason or note.');
           }
+          // Answers keep missing: a person is one step away, with this task attached (HLP-3).
+          var handOff = panel.querySelector('#feedback-hand-off');
+          if (handOff) handOff.hidden = !(value.hand_off && value.hand_off.href);
+          if (handOff && value.hand_off && /^\/help\?[^#]*#get-help$/.test(value.hand_off.href)) {
+            handOff.querySelector('a').href = value.hand_off.href;
+          }
         } catch (error) { if (live()) { if (error.refused) { forget(); binding=null; }
           say(msg, error.message + ' Your note is kept. ' + (pendingFeedback ? 'Check your original feedback before another save; nothing will be submitted again by that check.' : 'Review the current answer before trying again.')); } }
         finally { feedbackBusy=false; if (live()) lock(); }

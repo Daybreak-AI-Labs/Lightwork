@@ -374,7 +374,7 @@
       );
       if (new Set(missingComponents).size !== missingComponents.length ||
           missingComponents.some(component => !MISSING_COMPONENTS.has(component))) {
-        fail('Missing case components are invalid. Refresh the page and try again.');
+        fail('The list of missing case parts could not be read. Refresh the page and try again.');
       }
       if (typeof itemComparison.measured_positive_roi !== 'boolean' ||
           itemComparison.measured_positive_roi !== (
@@ -449,7 +449,7 @@
       fail('Cohort cost counts do not reconcile to admitted cases.');
     }
     if (typeof costs.complete !== 'boolean' || typeof costs.allocation_assumptions_explicit !== 'boolean') {
-      fail('Cost coverage flags are invalid. Refresh the page and try again.');
+      fail('The cost coverage details could not be read. Refresh the page and try again.');
     }
     if (costs.complete && (
       costs.incomplete_records !== 0 || overflow.size || !costs.allocation_assumptions_explicit
@@ -647,7 +647,7 @@
       selector.replaceChildren(node('option', 'Choose an admitted case'));
       selector.firstChild.value = '';
       exportButton.disabled = true;
-      statusHost.textContent = 'No pilot cohort selected.';
+      statusHost.textContent = 'No pilot cohort selected. Choose a cohort above to see its value.';
       return false;
     }
     statusHost.textContent = 'Loading the exact pilot cohort…';

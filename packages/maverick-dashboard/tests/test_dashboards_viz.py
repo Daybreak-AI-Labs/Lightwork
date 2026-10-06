@@ -146,3 +146,36 @@ def test_overview_empty_still_offers_first_goal(monkeypatch, tmp_path):
     t = _client().get("/overview").text
     assert "Start your first task" in t
     assert "bd-momentum" not in t   # no board over an empty record
+
+
+def test_department_boards_show_practice_cost_apart_from_the_real_totals(monkeypatch, tmp_path):
+    """Practice AI calls cost real provider money: a department board shows
+    them on their own line, scoped like its real figures (this person's tasks
+    in their departments), and never inside the department's totals."""
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    w = _seed_world()
+    real = w.create_goal("Pay the March invoices", domain="finance_ap")
+    w.end_episode(w.start_episode(real), "ok", "success", cost_dollars=2.0)
+    from maverick import practice
+    from maverick.world_model import open_world
+
+    with practice.scope():
+        pw = open_world()
+        for title, domain, cost in (("Practice: pay invoices", "finance_ap", 0.42),
+                                    ("Practice: privacy review", "legal_privacy", 0.30)):
+            pw.end_episode(pw.start_episode(pw.create_goal(title, domain=domain)), "ok", "success", cost_dollars=cost)
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
+    client = _client()
+    for board in ("spend", "workforce", "savings"):
+        data = client.get(f"/api/v1/dashboards/{board}?days=30").json()
+        line = data["practice"]
+        # Only the finance practice run: the legal one is outside this person's departments.
+        assert line["dollars"] == 0.42 and line["runs"] == 1 and line["counted_against_limits"] is False, board
+        assert line["text"] == "Practice: $0.42 in the last 30 days (not counted against limits)", board
+    spend = client.get("/api/v1/dashboards/spend?days=30").json()
+    assert spend["totals"]["dollars"] == 2.0 and spend["all_time"]["dollars"] == 2.0  # real totals unchanged
+    for board in ("overview", "oversight"):
+        assert "practice" not in client.get(f"/api/v1/dashboards/{board}").json(), board

@@ -101,6 +101,13 @@ def _models(S, C) -> tuple:
         S("agent_factory", "jd_hiring", "Hire agents from a job description",
           "Offer the page that turns a written job description into a new agent.", "toggle",
           "AI models", True, "maverick.jd_hiring", subgroup="Effort and planning"),
+        S("agent_factory", "require_passing_tests", "Require passing tests before publishing instructions",
+          "Changed instructions for an agent or specialist are published only after every saved test "
+          "passes on exactly those instructions. Someone can still publish without a passing run by "
+          "giving a reason, which is written to the activity record.", "toggle",
+          "AI models", True, "maverick.agent_publish_policy", subgroup="Effort and planning", weaker=False,
+          warning="Changed instructions could be published without any test run.",
+          aliases="publish gate test set test cases agent tests answer checks"),
 
         # ------------------------------------------------ conversation length
         S("context", "max_output_tokens", "Longest reply per step",

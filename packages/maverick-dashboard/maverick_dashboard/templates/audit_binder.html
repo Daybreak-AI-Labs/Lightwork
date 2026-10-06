@@ -13,8 +13,8 @@
   @media print {
     .sidebar, .topbar, nav, .bnd-actions, footer, header,
     .mv-copilot, .mv-copilot__fab { display: none !important; }
-    .panel { break-inside: avoid; border: 1px solid #ccc; }
-    body { background: #fff; color: #000; }
+    .panel { break-inside: avoid; border: 1px solid var(--print-border); }
+    body { background: var(--print-paper); color: var(--print-ink-strong); }
   }
 </style>
 
@@ -23,7 +23,7 @@
   {% from "_hero.html" import hero %}
   {{ hero('Governance', 'Audit binder',
           lede='A printable evidence pack of approvals, assessments and records for the selected period, ready to hand to an auditor.') }}
-  <p class="muted">Covers the last {{ days }} days · made {{ generated }}. The privacy and finance sections show how things stand today.</p>
+  <p class="muted">Covers the last {{ days }} days · made {{ b.generated_at | datetime('absolute') }}. The privacy and finance sections show how things stand today.</p>
   <div class="bnd-actions">
     <button class="btn btn--primary" id="binder-print" type="button">Print or save as PDF</button>
     <button class="btn btn--ghost" id="binder-json" type="button">Download evidence file (for auditors)</button>
@@ -52,7 +52,7 @@
       <tbody>
         {% for f in b.chain.files %}
         <tr>
-          <td>{{ f.day }}</td>
+          <td>{{ f.day | datetime('date') }}</td>
           <td>{{ f.events }}</td>
           <td><span class="badge {{ 'done' if f.verdict == 'verified' else 'blocked' if f.verdict == 'broken' else 'warn' }}">{{ chain_words.get(f.verdict) or (f.verdict | humanize) }}</span></td>
           <td>{% if f.breaks %}{{ f.breaks | length }} entr{{ 'y' if f.breaks | length == 1 else 'ies' }} changed or could not be confirmed{% else %}None{% endif %}</td>
@@ -97,7 +97,7 @@
     </div>
     <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approval records in print. The JSON snapshot contains all {{ b.approvals_total }} records in the exact window.</p>
     {% else %}
-    <p class="muted">No approvals in this period.</p>
+    <p class="muted">No approvals in this period. Choose a longer period to include earlier decisions.</p>
     {% endif %}
   </div>
 
@@ -157,7 +157,7 @@
     </div>
     <p class="muted">Accepted first time means approved with no follow-up questions. See the monthly trend on the <a href="/privacy/board">command center</a>.</p>
     {% else %}
-    <p class="muted">No assessments have been decided yet.</p>
+    <p class="muted">No assessments have been decided yet. Decided assessments appear here once a reviewer approves or rejects one.</p>
     {% endif %}
   </div>
 

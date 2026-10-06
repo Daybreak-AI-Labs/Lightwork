@@ -10,7 +10,7 @@
   let busy = false;
   function say(text) { window.mvStatus($('msg'), text); }
   function failText(failure, what) {
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
   }
   function device() {
     const pick = window.LightworkEkkoDevice;

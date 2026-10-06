@@ -6,7 +6,7 @@
   var rowMsg = document.getElementById('tenant-quota-msg') || document.getElementById('removed-tenants-msg');
 
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function send(url, method, body) {
     return (await window.mvFetchJSON(url, {method: method, body: body})) || {};
