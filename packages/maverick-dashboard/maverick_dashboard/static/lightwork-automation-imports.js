@@ -13,10 +13,17 @@
   function selected(id) { if (!id) return; publishing = true; try { document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: {kind: 'automation_import_request', id}}})); } finally { publishing = false; } }
   function fail(value) { error.textContent = value.message || 'Import information is unavailable. Entered work was kept.'; if (value.status === 401 || value.status === 403 || value.denied) clear(); }
   async function request(path, body, expected = context) {
-    const response = await fetch('/api/v1/automation-imports' + path, {method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', ...(expected ? {'X-Lightwork-Import-Context': expected} : {})}, body: body === undefined ? undefined : JSON.stringify(body)});
-    const value = await response.json().catch(() => null);
-    if (!response.ok || !value || response.redirected) { const failure = new Error(typeof value?.detail === 'string' ? value.detail : 'Import information is unavailable. Entered work was kept.'); failure.status = response.status; failure.denied = response.redirected || response.headers.get('X-Lightwork-Import-Context-Changed') === '1'; throw failure; }
-    return value;
+    const F = 'Import information is unavailable. Entered work was kept.';
+    try {
+      // Only a redirect to sign-in counts as lost access here; a 401 or 403 is a refusal the page reads.
+      const value = await window.mvFetchJSON('/api/v1/automation-imports' + path, {method: body === undefined ? 'GET' : 'POST', headers: expected ? {'X-Lightwork-Import-Context': expected} : {},
+        body, serverDetail: F, messages: {unreadable: F}, accessStatuses: [], onAccess() {}}, 'read the import choices');
+      if (!value) throw Object.assign(new Error(F), {status: 200});
+      return value;
+    } catch (failure) {
+      failure.denied = !!failure.accessChanged || failure.headers?.get?.('X-Lightwork-Import-Context-Changed') === '1';
+      throw failure;
+    }
   }
   function setMode() {
     const found = current?.sources.find(row => row.value === source.value);

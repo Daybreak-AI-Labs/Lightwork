@@ -49,19 +49,11 @@
     original.hidden = false;
   }
   async function request(path, body) {
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
-    try {
-      const response = await fetch('/api/v1/viewpoints' + path, {method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
-        headers: {'Content-Type': 'application/json', ...(current?.context ? {'X-Lightwork-Viewpoints-Context': current.context} : {})},
-        body: body ? JSON.stringify(body) : undefined, signal: controller.signal});
-      const value = await response.json().catch(() => ({}));
-      if (response.redirected || !response.ok) {
-        const error = new Error(typeof value.detail === 'string' ? value.detail : 'The request could not be checked. Your entered question is kept.');
-        error.accessChanged = response.redirected || [401, 403].includes(response.status) || response.status === 409 && error.message.startsWith('Your account or workspace changed.');
-        throw error;
-      }
-      return value;
-    } finally {clearTimeout(timer);}
+    const F = 'The request could not be checked. Your entered question is kept.';
+    return window.mvFetchJSON('/api/v1/viewpoints' + path, {method: body ? 'POST' : 'GET', cache: 'no-store',
+      headers: current?.context ? {'X-Lightwork-Viewpoints-Context': current.context} : {}, body: body || undefined, timeout: 20000,
+      serverDetail: F, messages: {timeout: F, offline: F, unreadable: F},
+      onAccess: () => {}, onContextChange: (error) => { error.accessChanged = true; }}, 'check the viewpoints');
   }
   function valid(data) {
     return data && (data.ran === false && typeof data.message === 'string' || data.ran === true && Array.isArray(data.turns) && data.turns.length <= 6 &&

@@ -22,13 +22,9 @@
     keys.slice(0, Math.max(0, keys.length - 40)).forEach(function (key) { sessionStorage.removeItem(key); });
   }
   async function request(path, body) {
-    var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 20000);
-    try {
-      var response = await fetch(API + path, {method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined, signal: controller.signal});
-      var value = await response.json().catch(function () { return {}; });
-      if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'The current result could not be read. No work was repeated.');
-      return value;
-    } finally { clearTimeout(timer); }
+    var F = 'The current result could not be read. No work was repeated.';
+    return window.mvFetchJSON(API + path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body || undefined, timeout: 20000,
+      serverDetail: F, messages: {timeout: F, offline: F, unreadable: F}}, 'read the learning task');
   }
   function show(row) {
     current = row; output.replaceChildren();

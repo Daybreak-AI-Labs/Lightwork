@@ -36,18 +36,10 @@
   function saved(context, isSetup) { context = context || (current && current.context); if (!context) return null; try { var row = JSON.parse(sessionStorage.getItem((isSetup ? 'learning-case-setup:' : 'learning-case-save:') + context) || 'null'); return row && row.context === context && /^[a-f0-9]{32}$/.test(row.operation) ? row : null; } catch (_) { return null; } }
   function remember(operation, context, isSetup) { var row = {operation: operation, context: context}; sessionStorage.setItem((isSetup ? 'learning-case-setup:' : 'learning-case-save:') + context, JSON.stringify(row)); if(isSetup){pendingSetup=row;setupOriginal.hidden=false;}else{pending=row;original.hidden=false;} }
   async function request(path, body) {
-    var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 20000);
-    try {
-      var response = await fetch(API + path, {method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined, signal: controller.signal});
-      var value = await response.json().catch(function () { return {}; });
-      if (response.redirected || !response.ok) {
-        var error = new Error(typeof value.detail === 'string' ? value.detail : 'This question could not be read or saved. Check the original outcome before another attempt.');
-        error.status = response.status;
-        error.accessChanged = response.redirected || response.status === 401 || response.status === 403 || response.status === 409 && typeof value.detail === 'string' && value.detail.startsWith('Your account or workspace changed.');
-        throw error;
-      }
-      return value;
-    } finally { clearTimeout(timer); }
+    var F = 'This question could not be read or saved. Check the original outcome before another attempt.';
+    return window.mvFetchJSON(API + path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body || undefined, timeout: 20000,
+      serverDetail: F, messages: {timeout: F, offline: F, unreadable: F},
+      onAccess: function () {}, onContextChange: function (error) { error.accessChanged = true; }}, 'check the question');
   }
   function lines(parent, values) {
     var list = node('dl', undefined, parent);

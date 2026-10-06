@@ -9,10 +9,10 @@
   function lock(value){busy=value;refresh.disabled=original.disabled=value;location.hidden=!current||current.configured;initialize.hidden=!current||!current.configured||current.ready;location.disabled=value||!current||!!current.location_blocked||!current.revision;initialize.disabled=value||!current||!!current.initialize_blocked||!current.revision;}
   function invalidate(){reviewed=null;preview.replaceChildren();}
   function changed(){generation++;current=pending=null;invalidate();result.replaceChildren();original.hidden=true;status.textContent='Your account, workspace or access changed. Refresh before continuing.';lock(false);}
-  async function request(path,body){var controller=new AbortController(),timer=setTimeout(function(){controller.abort();},20000);try{
-    var response=await fetch(API+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:controller.signal});
-    var value=await response.json().catch(function(){return {};});if(response.redirected||!response.ok){var error=new Error(typeof value.detail==='string'?value.detail:'The current record could not be read. Check the original outcome before another attempt.');error.accessChanged=response.redirected||response.status===401||response.status===403||response.status===409&&typeof value.detail==='string'&&value.detail.startsWith('Your account or workspace changed.');throw error;}return value;
-  }finally{clearTimeout(timer);}}
+  async function request(path,body){
+    var F='The current record could not be read. Check the original outcome before another attempt.';
+    return window.mvFetchJSON(API+path,{method:body?'POST':'GET',cache:'no-store',body:body||undefined,timeout:20000,serverDetail:F,messages:{timeout:F,offline:F,unreadable:F},onAccess:function(){},onContextChange:function(error){error.accessChanged=true;}},'check the hold-out setup');
+  }
   function saved(context){try{var row=JSON.parse(sessionStorage.getItem('learning-holdout-request:'+context)||'null');return row&&row.context===context&&/^[a-f0-9]{32}$/.test(row.operation)?row:null;}catch(_){return null;}}
   function remember(row){pending={operation:row.operation,context:row.context};sessionStorage.setItem('learning-holdout-request:'+row.context,JSON.stringify(pending));original.hidden=false;}
   function show(row){result.replaceChildren();node('h4','Original setup outcome',result);node('p',row.message,result);node('h4','Current readiness',result);node('p',row.current,result);}

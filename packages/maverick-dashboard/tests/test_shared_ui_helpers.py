@@ -68,38 +68,18 @@ _KEPT_WRAPPERS = {
     # before it counts, in the page's own words.
     ("lightwork-local-runtime.js", "call"),
     ("lightwork-retention-maintenance.js", "call"),
-    # From the owner's later commits on #2529 (learning, competence, private
-    # rules, viewpoints, plugin practice, questionnaires, notices, imports,
-    # tool removal, team updates, answer feedback). Every one shows the
-    # server's own sentence as written, with the page's own fallback for a
-    # reply that carries none (mvFetchJSON filters it through mvPlainDetail
-    # and falls back to mvErrorText). Most also do what mvFetchJSON cannot:
-    # a 409 whose sentence says the account or workspace changed clears the
-    # page's private values (onAccess covers 401/403 only), a reply's context
-    # is compared with the page's before it counts, and a timeout or
-    # unreadable reply says the original outcome is unknown and that nothing
-    # repeats. Kept until mvFetchJSON grows these, then moved together.
+    # From the owner's later commits on #2529 (answer feedback, questionnaires,
+    # notices). The answer panel checks that the answer it reviewed is still
+    # the live one between the reply and its body, before any access
+    # decision, and counts a 404 as lost access only while it is live. The
+    # questionnaire builder and notice proposals pass the server's sentence
+    # through mvPlainDetail and fall back to their own, and the builder
+    # names a cancel by the page as a timeout. The other wrappers from these
+    # commits now go through mvFetchJSON's serverDetail, messages and
+    # onContextChange options.
     ("lightwork-answer-panel.js", "request"),
-    ("lightwork-automation-imports.js", "request"),
-    ("lightwork-competence-transport.js", "request"),
     ("lightwork-compliance-questionnaire-builder.js", "call"),
-    ("lightwork-department-team-updates.js", "request"),
-    ("lightwork-generated-tool-removal.js", "request"),
-    ("lightwork-learning-distinctions.js", "request"),
-    ("lightwork-learning-holdout-setup.js", "request"),
-    ("lightwork-learning-jobs.js", "request"),
-    ("lightwork-learning-passes.js", "request"),
-    ("lightwork-learning-pending-cases.js", "request"),
-    ("lightwork-learning-test-cases.js", "request"),
-    ("lightwork-model-answer-scoring.js", "request"),
-    ("lightwork-plugin-practice.js", "call"),
-    ("lightwork-plugin-practice.js", "checkResult"),
     ("lightwork-privacy-notice-proposals.js", "call"),
-    ("lightwork-procedure-interactions.js", "request"),
-    ("lightwork-reward-model-training.js", "request"),
-    ("lightwork-viewpoints.js", "request"),
-    ("lightwork-work-restructuring.js", "request"),
-    ("lightwork-workflow-step-checks.js", "request"),
 }
 
 # Status-line setters that still write the text themselves, each named with
