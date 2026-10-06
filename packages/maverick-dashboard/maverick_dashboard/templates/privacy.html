@@ -304,7 +304,7 @@
          ('dsar', 'Data requests (DSAR) (%d)' % records.dsar | length),
          ('paper', 'Vendor contracts (%d)' % records.paper | length),
          ('lineage', 'Vendor history'),
-         ('incidents', pw_incidents_label)], 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}
+         ('incidents', pw_incidents_label)], 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-', hash='pv-') }}
 
     <div {{ tab_panel('lineage', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
@@ -856,7 +856,7 @@
     {{ panel_tabs('Estate registers', [
          ('vendors', 'Vendors (%d)' % estate.vendors | length),
          ('consent', pe_consent_label),
-         ('datamap', 'Data map (%d)' % estate.assets | length)], 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}
+         ('datamap', 'Data map (%d)' % estate.assets | length)], 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-', hash='pe-') }}
 
     <div {{ tab_panel('vendors', 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}>
       {% if estate.vendors_enabled %}
@@ -1298,7 +1298,7 @@
             var verb = { under_review: 'Mark ' + btn.dataset.name + ' as under review?',
                          active: 'Reactivate ' + btn.dataset.name + '?',
                          offboarded: 'Offboard ' + btn.dataset.name + '? They will be marked as no longer working with you.' }[btn.dataset.status];
-            request = mvConfirm(verb || 'Change this vendor?', { okText: 'Confirm' }).then(function (ok) {
+            request = mvConfirm(verb || 'Change this vendor?', { okText: { under_review: 'Mark under review', active: 'Reactivate vendor', offboarded: 'Offboard vendor' }[btn.dataset.status] || 'Change vendor status' }).then(function (ok) {
               if (!ok) return null;
               btn.disabled = true;
               return post('/api/v1/vendors/' + vendor + '/status',

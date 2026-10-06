@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Private local checks · Lightwork{% endblock %}
+{% block title %}Private task calculations · Lightwork{% endblock %}
 {% block content %}
 <style>
  .ptc-stack{display:grid;gap:var(--space-3)} .ptc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,17rem),1fr));gap:var(--space-3)}
@@ -10,7 +10,7 @@
  #ptc-review[hidden],#ptc-current[hidden]{display:none} .ptc-card pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
 </style>
 {% from "_hero.html" import hero %}
-{{ hero('Your private work', 'Private local checks', lede='Answer one fixed Yes/No question from your private task file. Review exactly what may become a result file before releasing it.', compact=true) }}
+{{ hero('Your private work', 'Private task calculations', lede='Answer one fixed Yes/No question from your private task file. Review exactly what may become a result file before releasing it.', compact=true) }}
 <p style="max-width:78ch">{{ private_check_notice }}</p>
 <div id="ptc-page" data-context="{{ private_check_context }}" data-enabled="{{ 'true' if private_check_enabled else 'false' }}">
  <p id="ptc-message" role="status" aria-live="polite" tabindex="-1"></p>
