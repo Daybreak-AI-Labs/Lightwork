@@ -46,6 +46,11 @@ def client(tmp_path, monkeypatch):
     dash_app._world_cache.clear()
     yield TestClient(dash_app.app, headers=ORIGIN)
     config.reset_config_cache()
+    # A test that resolved the organisation binding while MAVERICK_CLIENT_ID
+    # was set must not hand that binding (or its world) to the next file.
+    from maverick import client as client_binding
+    client_binding.reset_client_cache()
+    dash_app._world_cache.clear()
 
 
 def _as_viewer(monkeypatch):
