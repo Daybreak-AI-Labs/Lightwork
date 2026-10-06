@@ -23,7 +23,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from .auth import require_global_permission, require_permission
@@ -140,6 +140,70 @@ async def score_task_set(request: Request, task_set: str = Query(min_length=1, m
                 "score": round(float(doc["score"]), 4), "pass_rate": round(float(doc["pass_rate"]), 4),
                 "unanswered": len(doc["missing_case_ids"]), "not_in_set": len(doc["extra_case_ids"])}
     return start_job(request, "model_improvement_score", "Scoring answers against a task set", _run)
+
+
+# ---- ordinary supplied-answer scoring --------------------------------------------
+
+@router.get("/model-improvement/questions")
+async def ordinary_model_questions(request: Request, task_set: str = Query(min_length=1, max_length=120),
+                                   split: Literal["holdout", "validation", "train"] = "holdout"):
+    from . import model_answer_scoring as scoring
+    state, _pack = await run_in_threadpool(scoring.current, request, task_set, split)
+    return Response(json.dumps(state), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/model-improvement/answer-review")
+async def ordinary_answer_review(request: Request):
+    import secrets
+
+    from maverick import crypto_at_rest
+
+    from . import model_answer_scoring as scoring
+    raw = await _upload(request, 96 * 1024)
+    try:
+        values = json.loads(raw)
+        prepared = await run_in_threadpool(scoring.prepare, request, values)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "Complete the displayed answer fields before reviewing.") from exc
+    material = {"purpose": "lightwork.provided-answer-scoring.v1", "prepared": prepared,
+                "operation": secrets.token_hex(16), "expires": time.time() + 600}
+    token = crypto_at_rest.seal_to_str(json.dumps(material, ensure_ascii=False, separators=(",", ":")))
+    if not crypto_at_rest.is_sealed_str(token) or len(token) > 262144:
+        raise HTTPException(409, "This answer review could not be protected. Your entered work is kept.")
+    return Response(json.dumps({"token": token, "operation": material["operation"], "context": prepared["body"]["context"],
+                               "review": scoring.review_rows(prepared), "notice": scoring.NOTICE}),
+                    media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+class OrdinaryScoreIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str = Field(min_length=1, max_length=262144)
+    confirmed: Literal[True]
+
+
+@router.post("/model-improvement/answer-score")
+async def ordinary_answer_score(request: Request, body: OrdinaryScoreIn):
+    from maverick import crypto_at_rest
+
+    from . import model_answer_scoring as scoring
+    try:
+        if not crypto_at_rest.is_sealed_str(body.token):
+            raise ValueError
+        material = json.loads(crypto_at_rest.unseal_from_str(body.token))
+        if (set(material) != {"purpose", "prepared", "operation", "expires"}
+                or material["purpose"] != "lightwork.provided-answer-scoring.v1" or material["expires"] <= time.time()):
+            raise ValueError
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(409, "This answer review expired or could not be checked. Read any original request before preparing another.") from exc
+    row = await run_in_threadpool(scoring.start, request, material["prepared"], material["operation"], expires=material["expires"])
+    return Response(json.dumps(row), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/model-improvement/answer-requests/{operation}")
+async def original_answer_score(request: Request, operation: str):
+    from . import model_answer_scoring as scoring
+    row = await run_in_threadpool(scoring.original, request, operation)
+    return Response(json.dumps(row), media_type="application/json", headers={"Cache-Control": "private, no-store"})
 
 
 # ---- reward model ----------------------------------------------------------------

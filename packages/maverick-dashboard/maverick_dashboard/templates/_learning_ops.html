@@ -84,15 +84,21 @@
     <div id="lo-mi-models" role="status" aria-live="polite"></div>
     {% if learning_can_manage %}
     <h4>Score a model's answers</h4>
+    <p class="muted">Check answers you supply against published example questions. No AI is called, and a passing result does not qualify a model or change its routing.</p>
     <div class="lrn__actions">
       <label for="lo-mi-set">Task set</label><select id="lo-mi-set" class="select"></select>
       <label for="lo-mi-split">Questions</label><select id="lo-mi-split" class="select"></select>
+    </div>
+    {% include '_model_answer_scoring.html' %}
+    <details><summary>Use an existing answers file</summary>
+    <div class="lrn__actions">
       <label for="lo-mi-file">Answers file</label>
       <input type="file" id="lo-mi-file" class="input" accept=".json,application/json">
       <button type="button" class="btn btn--primary" id="lo-mi-score">Score now</button>
     </div>
     <p class="muted" id="lo-mi-status" role="status" aria-live="polite"></p>
     <div id="lo-mi-out"></div>
+    </details>
     {% endif %}
   </div>
 

@@ -186,6 +186,18 @@ components below should not be marketed as completed inventions.
 
 ## Customer release and claim boundary
 
+October 5 also closes two ordinary operating gaps in the existing foundations.
+F03/F04 instruction application and Undo now retain exact native decision
+receipts, enforce source access for every restored instruction, and support a
+separate current-state human reconciliation after an interrupted confirmation.
+An authorized successor can resolve the shared hold without inheriting a former
+actor's private receipt. F04/F05's deterministic supplied-answer checker now has
+ordinary domain choices, complete answer review, protected Copilot handoff and
+retained original scoring readback for all three packaged public example sets.
+Published synthetic cases and a user-reported model label do not establish model
+quality, unseen-case generalization, autonomous evaluator improvement or a novel
+algorithm. The register's research status counts are unchanged.
+
 An engine, API route, test fixture, or research archive is not a complete
 customer feature. The [learning journey contract](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/learned-capabilities-product-contract.md#L1-L16)
 requires nontechnical setup, capture, review, teaching, use, result, withdrawal,

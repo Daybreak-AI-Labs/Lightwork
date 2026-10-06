@@ -2,8 +2,8 @@
 
 The native Learned page and Copilot use the same current-state decision. The
 model selects a control only: people choose a proposal, review every affected
-instruction and confirm. Recovery reads the actual overlay without applying a
-second time. An instruction change is not evidence of improved results.
+instruction and confirm. Recovery reads the exact original native receipt
+without applying a second time. An instruction change is not evidence of improved results.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from maverick import harness_refine
 from maverick.governed_operations import digest
 from pydantic import Field
 
-from . import auth, learning_ops_api
+from . import auth
 from . import learning_loop_api as native
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
@@ -24,7 +24,10 @@ class DecisionInput(StrictInput):
 def _state(request):
     auth.require_global_permission(request, "admin")
     rows = harness_refine.list_proposals()
+    rows = native.visible_instruction_rows(request, rows)
     current = harness_refine.refinements()
+    visible = {row["id"] for row in rows}
+    current = [row for row in current if row.get("proposal_id") in visible]
     settings = harness_refine._settings()
     return rows, current, settings
 
@@ -35,7 +38,8 @@ def review_snapshot(request, _selection):
     details = {"instruction_changes": [{"title": row["title"], "where_used": row["target"],
                                        "instructions": row["change"], "why": row["rationale"],
                                        "decision": row["approval"] or {"pending": "Waiting to apply",
-                                                                 "applied": "Applied", "reverted": "Restored"}.get(row["status"], "Needs review")}
+                                                                 "applied": "Applied", "reverted": "Restored",
+                                                                 "reconciled_absent": "Not in use after review"}.get(row["status"], "Needs review")}
                                       for row in proposals],
                "changes_in_use": [{"title": str(row["name"]).replace("-", " "),
                                    "instructions": row["change"]} for row in current[:100]],
@@ -80,7 +84,7 @@ def decision_prepare(request, selection, arguments, *, undo):
     if arguments["proposal"] not in {choice["value"] for choice in offered.fields[0]["choices"]}:
         raise HTTPException(409, "This change is no longer available to decide. Refresh current instructions.")
     review = harness_refine.change_review(arguments["proposal"])
-    plain = learning_ops_api._refine_preview(arguments["proposal"])
+    plain = native.instruction_review(request, arguments["proposal"])
     if plain["revision"] != review["revision"]:
         raise HTTPException(409, "The instructions changed while preparing this review. Refresh and review again.")
     summary = ("Restore these exact reviewed instructions. Every listed removal and return is part of this decision." if undo else
@@ -89,34 +93,37 @@ def decision_prepare(request, selection, arguments, *, undo):
                                      "before": change["before"] or "No instructions for this change",
                                      "after": change["after"] or "Removed"} for change in plain["changes"]],
                    native={"proposal": arguments["proposal"], "revision": review["revision"],
+                           "context": plain["context"], "source_revision": plain["source_revision"],
+                           "review_expires_at": plain["review_expires_at"],
                            "change": review["proposal"]["digest"], "after": digest(review["after"])})
 
 
 def decision_execute(request, selection, arguments, prepared, _operation, *, undo):
     if prepared.get("proposal") != arguments["proposal"]:
         raise HTTPException(409, "The selected instruction change changed. Review it again.")
-    result = native.change_current_refinement(request, arguments["proposal"], prepared["revision"], undo=undo)
-    return Outcome("confirmed", "Reviewed instructions restored. Current decisions were refreshed." if undo else
-                   "The approved instruction change is in use for new work. Review its actual results separately.",
-                   {"result": result, "current_instructions": {"href": "/learned", "label": "Review current instructions"}})
+    if not prepared.get("context") or not prepared.get("source_revision"):
+        raise HTTPException(409, "Open a fresh full instruction review before deciding.")
+    result = native.change_current_refinement(request, arguments["proposal"], prepared["revision"], undo=undo,
+                                              operation_id=_operation, context=prepared["context"],
+                                              source_revision=prepared["source_revision"],
+                                              review_expires_at=prepared.get("review_expires_at"))
+    receipt = result.get("receipt")
+    return Outcome(receipt["status"] if receipt else "unconfirmed",
+                   receipt["message"] if receipt else "The original result needs checking. No decision was repeated.",
+                   {"result": receipt, "current_instructions": {"href": "/learned#llp-original", "label": "Check the original decision and review current instructions"}})
 
 
 def decision_recover(request, _selection, arguments, prepared, _operation, *, undo):
-    rows, current, _settings = _state(request)
     if prepared.get("proposal") != arguments["proposal"]:
         raise HTTPException(409, "The selected instruction change changed. Review it again.")
-    row = next((row for row in rows if row["id"] == arguments["proposal"]), None)
-    if row is None or row.get("digest") != prepared.get("change"):
+    if not prepared.get("context"):
         return None
-    if undo:
-        confirmed = row.get("status") == "reverted" and digest(harness_refine._load_refinements()) == prepared.get("after")
-    else:
-        confirmed = row.get("status") == "applied" and any(
-            item.get("proposal_id") == row["id"] and item.get("digest") == row["digest"] for item in current)
-    if not confirmed:
+    receipt = native.original_instruction_result(request, arguments["proposal"], prepared["revision"],
+                                                _operation, prepared["context"], undo=undo)
+    if receipt is None:
         return None
-    return Outcome("unconfirmed", "Current instructions match this reviewed change. This does not establish which request applied or restored them. No change was repeated; review current instructions before continuing.",
-                   {"current_instructions": {"href": "/learned", "label": "Review current instructions"}})
+    return Outcome(receipt["status"], receipt["message"],
+                   {"result": receipt, "current_instructions": {"href": "/learned#llp-original", "label": "Check the original decision and review current instructions"}})
 
 
 def entries():
@@ -131,5 +138,6 @@ def entries():
                               prepare=lambda request, selection, arguments, undo=undo: decision_prepare(request, selection, arguments, undo=undo),
                               execute=lambda request, selection, arguments, prepared, operation, undo=undo: decision_execute(request, selection, arguments, prepared, operation, undo=undo),
                               recover=lambda request, selection, arguments, prepared, operation, undo=undo: decision_recover(request, selection, arguments, prepared, operation, undo=undo),
+                              read_recovery=lambda request, selection, arguments, prepared, operation, undo=undo: decision_recover(request, selection, arguments, prepared, operation, undo=undo),
                               **common))
     return tuple(result)

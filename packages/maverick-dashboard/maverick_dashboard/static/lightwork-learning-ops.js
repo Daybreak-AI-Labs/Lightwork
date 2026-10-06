@@ -175,6 +175,10 @@
       options($('lo-mi-concurrency'), c.concurrency.map(function (v) { return { value: v, label: String(v) }; }), 1);
       options($('lo-mi-set'), d.task_sets.map(function (t) { return { value: t.value, label: t.label }; }));
       options($('lo-mi-split'), c.splits);
+      var scoringChoice = new URL(window.location.href).searchParams;
+      if (scoringChoice.get('scoring_task_set')) $('lo-mi-set').value = scoringChoice.get('scoring_task_set');
+      if (scoringChoice.get('scoring_split')) $('lo-mi-split').value = scoringChoice.get('scoring_split');
+      if (scoringChoice.get('scoring_task_set') && window.LightworkModelAnswerScoring) window.LightworkModelAnswerScoring.loadSelected();
     }).catch(async function (failure) {
       fill('lo-mi-state', el('p', null, await J.problem(failure, 'load model planning')));
     });

@@ -114,7 +114,7 @@
           var savedDestination = node('dd', undefined, list);
           if (window.LightworkLearningSavedPoints) button('Open this saved point', savedDestination, async function (event) {
             if (!active(savedStarted) || busy) return;
-            event.currentTarget.disabled = true;
+            var savedButton = event.currentTarget; savedButton.disabled = true;
             try {
               var opened = await window.LightworkLearningSavedPoints.open(saved.name, saved.revision);
               if (!active(savedStarted)) return;
@@ -123,7 +123,7 @@
                 var pointSelect = document.getElementById('lrn-snapshot'); if (pointSelect) pointSelect.focus({preventScroll: true});
               } else status.textContent = 'This saved point changed or could not be opened. Review current saved points in Learning.';
             } catch (_) { if (active(savedStarted)) status.textContent = 'This saved point could not be opened. Check current saved points in Learning.'; }
-            finally { if (active(savedStarted)) event.currentTarget.disabled = false; }
+            finally { if (active(savedStarted) && savedButton.isConnected) savedButton.disabled = false; }
           });
           else { var savedLink = node('a', 'Open saved learning points', savedDestination); savedLink.href = '/learning#learning-review'; }
           return;
@@ -136,7 +136,7 @@
           var mappingLabel = mapping.mode === 'revise' ? 'Revise a saved task mapping' : 'Design a task mapping';
           if (mappingForm && typeof mappingForm.open === 'function') button(mappingLabel, mappingDestination, async function (event) {
             if (!active(mappingStarted) || busy) return;
-            event.currentTarget.disabled = true;
+            var mappingButton = event.currentTarget; mappingButton.disabled = true;
             try {
               var opened = await mappingForm.open(mapping.context, mapping.mode);
               if (!active(mappingStarted)) return;
@@ -145,7 +145,7 @@
               if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
             } catch (_) {
               if (active(mappingStarted)) status.textContent = 'This form could not be opened. Check current access on the task-mapping page.';
-            } finally { if (active(mappingStarted)) event.currentTarget.disabled = false; }
+            } finally { if (active(mappingStarted) && mappingButton.isConnected) mappingButton.disabled = false; }
           });
           else { var mappingLink = node('a', mappingLabel, mappingDestination); mappingLink.href = '/compliance/scope-actions/mapping'; mappingLink.className = 'btn btn--ghost'; }
           return;
@@ -157,7 +157,7 @@
           var noticeDestination = node('dd', undefined, list), noticeForm = window.LightworkPrivacyNoticeProposals;
           if (noticeForm && typeof noticeForm.open === 'function') button('Prepare a notice update', noticeDestination, async function (event) {
             if (!active(noticeStarted) || busy) return;
-            event.currentTarget.disabled = true;
+            var noticeButton = event.currentTarget; noticeButton.disabled = true;
             try {
               var opened = await noticeForm.open(noticeProposal.context);
               if (!active(noticeStarted)) return;
@@ -166,7 +166,7 @@
               if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
             } catch (_) {
               if (active(noticeStarted)) status.textContent = 'This form could not be opened. Check current access on the privacy-notices page.';
-            } finally { if (active(noticeStarted)) event.currentTarget.disabled = false; }
+            } finally { if (active(noticeStarted) && noticeButton.isConnected) noticeButton.disabled = false; }
           });
           else { var noticeLink = node('a', 'Prepare a notice update', noticeDestination); noticeLink.href = '/privacy/notice-governance#notice-update-proposal'; noticeLink.className = 'btn btn--ghost'; }
           return;
@@ -179,7 +179,7 @@
           var environmentForm = window.LightworkInstalledPracticeEnvironment;
           if (environmentForm && typeof environmentForm.open === 'function') button('Choose an installed practice environment', environmentDestination, async function (event) {
             if (!active(environmentStarted) || busy) return;
-            event.currentTarget.disabled = true;
+            var environmentButton = event.currentTarget; environmentButton.disabled = true;
             try {
               var opened = await environmentForm.open(environment.context);
               if (!active(environmentStarted)) return;
@@ -190,7 +190,7 @@
               }
             } catch (_) {
               if (active(environmentStarted)) status.textContent = 'This setting could not be opened. Check your current access in Settings.';
-            } finally { if (active(environmentStarted)) event.currentTarget.disabled = false; }
+            } finally { if (active(environmentStarted) && environmentButton.isConnected) environmentButton.disabled = false; }
           });
           else {
             var environmentLink = node('a', 'Choose an installed practice environment', environmentDestination);
@@ -205,7 +205,7 @@
           var peopleDestination = node('dd', undefined, list), peopleForm = window.LightworkWorkspacePeople;
           if (peopleForm && typeof peopleForm.open === 'function') button('Manage workspace people', peopleDestination, async function (event) {
             if (!active(peopleStarted) || busy) return;
-            event.currentTarget.disabled = true;
+            var peopleButton = event.currentTarget; peopleButton.disabled = true;
             try {
               var opened = await peopleForm.open(people.context);
               if (!active(peopleStarted)) return;
@@ -213,9 +213,36 @@
               if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
             } catch (_) {
               if (active(peopleStarted)) status.textContent = 'The workspace people controls could not be opened. Check current access in People.';
-            } finally { if (active(peopleStarted)) event.currentTarget.disabled = false; }
+            } finally { if (active(peopleStarted) && peopleButton.isConnected) peopleButton.disabled = false; }
           });
           else { var peopleLink = node('a', 'Manage workspace people', peopleDestination); peopleLink.href = '/users#wi-title'; peopleLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'model_answer_form') {
+          var answers = entry[1], answersStarted = generation;
+          if (!answers || Array.isArray(answers) || Object.keys(answers).sort().join(',') !== 'context,model,split,task_set' ||
+              typeof answers.task_set !== 'string' || !answers.task_set.length || answers.task_set.length > 120 ||
+              !['holdout', 'validation', 'train'].includes(answers.split) || typeof answers.model !== 'string' ||
+              answers.model.length > 200 || !/^[a-f0-9]{64}$/.test(answers.context || '')) return;
+          var answerDestination = node('dd', undefined, list), answerForm = window.LightworkModelAnswerScoring;
+          if (answerForm && typeof answerForm.open === 'function') button('Enter and review answers', answerDestination, async function (event) {
+            if (!active(answersStarted) || busy) return;
+            var answerButton = event.currentTarget;
+            answerButton.disabled = true;
+            try {
+              var opened = await answerForm.open(answers, function () { return active(answersStarted) && !busy; });
+              if (!active(answersStarted)) return;
+              status.textContent = opened ? 'The answer questions are open. No check has started.' : 'These questions or your current work changed. Refresh the answer form before continuing.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) {
+              if (active(answersStarted)) status.textContent = 'The answer questions could not be opened. Your current work is kept.';
+            } finally { if (active(answersStarted) && answerButton.isConnected) answerButton.disabled = false; }
+          });
+          else {
+            var answerLink = node('a', 'Enter and review answers', answerDestination);
+            var answerQuery = new URLSearchParams({scoring_task_set: answers.task_set, scoring_split: answers.split, scoring_model: answers.model});
+            answerLink.href = '/learning?' + answerQuery.toString() + '#lo-mi-answer-h'; answerLink.className = 'btn btn--ghost';
+          }
           return;
         }
         if (entry[0] === 'plugin_practice_page') {
@@ -226,7 +253,7 @@
           var practiceForm = window.LightworkPluginPractice;
           if (practiceForm && typeof practiceForm.open === 'function') button('Open guided practice check', practiceDestination, async function (event) {
             if (!active(practiceStarted) || busy) return;
-            event.currentTarget.disabled = true;
+            var practiceButton = event.currentTarget; practiceButton.disabled = true;
             try {
               var opened = await practiceForm.open(practice.fingerprint, practice.receipt);
               if (!active(practiceStarted)) return;
@@ -237,7 +264,7 @@
               }
             } catch (_) {
               if (active(practiceStarted)) status.textContent = 'The guided check could not be opened. Check current access in Plugins.';
-            } finally { if (active(practiceStarted)) event.currentTarget.disabled = false; }
+            } finally { if (active(practiceStarted) && practiceButton.isConnected) practiceButton.disabled = false; }
           });
           else {
             var practiceLink = node('a', 'Open guided practice checks', practiceDestination);

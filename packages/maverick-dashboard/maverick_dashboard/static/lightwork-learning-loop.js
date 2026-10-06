@@ -8,6 +8,7 @@
   if (!root) return;
   var API = '/api/v1/learning-loop';
   var admin = root.getAttribute('data-admin') === '1';
+  var instructionContext = '', instructionPending = null, instructionBusy = false, instructionLocked = false, instructionHistory = [];
   function $(id) { return document.getElementById(id); }
   function say(id, text) { window.mvStatus($(id), String(text || '')); }
   function el(tag, cls, text) {
@@ -31,10 +32,10 @@
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, action) : 'Could not ' + action + '.';
   }
   function get(path) {
-    return window.mvFetchJSON(API + path);
+    return window.mvFetchJSON(API + path, { timeout: 15000, onAccess: lockInstructions });
   }
   function post(path, body) {
-    return window.mvFetchJSON(API + path, {method: 'POST', body: body || {}});
+    return window.mvFetchJSON(API + path, {method: 'POST', body: body || {}, timeout: 15000, onAccess: lockInstructions});
   }
   function technical(pairs) {
     var box = el('details');
@@ -46,10 +47,108 @@
   }
 
   // ---- suggested instruction changes ----------------------------------
+  function lockInstructions() {
+    instructionLocked = true; instructionPending = null; instructionBusy = false;
+    instructionHistory = [];
+    ['llp-ref-rows', 'llp-in-force', 'llp-original-message', 'llp-original-review', 'llp-original-choice'].forEach(function (id) { if ($(id)) $(id).textContent = ''; });
+    var form = $('llp-propose');
+    if (form) { form.reset(); Array.from(form.elements).forEach(function (field) { field.disabled = true; }); }
+    if ($('llp-original')) $('llp-original').hidden = true;
+    say('llp-ref-msg', 'Your account, workspace or access changed. Reload before reviewing instructions.');
+  }
+  function pendingKey() { return 'lightwork-instruction-decision:' + instructionContext; }
+  function restorePending() {
+    try {
+      var value = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
+      if (value && value.context === instructionContext && /^[a-f0-9]{16}$/.test(value.proposal) &&
+          /^[a-f0-9]{32}$/.test(value.operation_id) && /^[a-f0-9]{64}$/.test(value.revision) && typeof value.undo === 'boolean') instructionPending = value;
+    } catch (_) { /* Never dispatch an unreadable original request. */ }
+    showPending();
+  }
+  function showPending(message) {
+    var box = $('llp-original');
+    if (!box) return;
+    box.hidden = (!instructionPending && !instructionHistory.length) || instructionLocked;
+    if (!box.hidden) $('llp-original-message').textContent = message ||
+      (instructionPending ? 'An original instruction decision needs checking. Check its saved result before applying or restoring again.' :
+        'Choose a recent original decision to read its saved result. No instruction change is repeated.');
+  }
+  function clearPending() {
+    try { sessionStorage.removeItem(pendingKey()); } catch (_) { /* The native result remains readable. */ }
+    instructionPending = null;
+  }
+  function showReceipt(receipt) {
+    say('llp-ref-msg', receipt.message + (receipt.recorded_at ? ' Recorded ' + when(receipt.recorded_at) + '.' : ''));
+    if ($('llp-original-resolve')) $('llp-original-resolve').hidden = receipt.status !== 'unconfirmed' || receipt.hold_closed;
+    if (receipt.status === 'confirmed' || receipt.hold_closed) {
+      clearPending(); showPending();
+    } else showPending(receipt.message);
+  }
+  async function checkOriginal(b) {
+    if (!instructionPending || instructionLocked || instructionBusy) return;
+    var original = instructionPending, bound = instructionContext;
+    instructionBusy = true; if (b) b.disabled = true;
+    try {
+      var result = original.successor ? await post('/instruction-holds/' + original.operation_id + '/receipt', {
+        context: original.context, recovery_id: original.recovery_id || null
+      }) : await post('/refinements/' + original.proposal + '/receipt', {
+        revision: original.revision, operation_id: original.operation_id, context: original.context, undo: original.undo
+      });
+      if (instructionLocked || bound !== instructionContext || instructionPending !== original) return;
+      if (result.receipt) showReceipt(result.receipt); else showPending(result.message);
+      instructionBusy = false; await loadRefinements();
+    } catch (failure) {
+      if (failure.status === 401 || failure.status === 403) lockInstructions();
+      else if (!instructionLocked) showPending(await problem(failure, 'check the original decision') + ' No change was repeated.');
+    } finally { instructionBusy = false; if (b) b.disabled = false; }
+  }
+  if ($('llp-original-check')) $('llp-original-check').addEventListener('click', function () { checkOriginal(this); });
+  if ($('llp-original-choice')) $('llp-original-choice').addEventListener('change', function () {
+    if (instructionBusy || instructionLocked || instructionPending) return;
+    var chosen = this.value === '' ? null : instructionHistory[Number(this.value)];
+    if (!chosen) return;
+    instructionPending = Object.assign({}, chosen); showPending();
+  });
+  function randomRequest() {
+    var random = new Uint8Array(16); window.crypto.getRandomValues(random);
+    return Array.from(random, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
+  }
+  if ($('llp-original-resolve')) $('llp-original-resolve').addEventListener('click', async function () {
+    if (!instructionPending || instructionBusy || instructionLocked) return;
+    var original = instructionPending, b = this;
+    instructionBusy = true; b.disabled = true;
+    try {
+      var input = { revision: original.revision, operation_id: original.operation_id, context: original.context, undo: original.undo };
+      var review = original.successor ? await post('/instruction-holds/' + original.operation_id + '/review', {context: original.context}) :
+        await post('/refinements/' + original.proposal + '/reconciliation-review', input);
+      if (instructionLocked || instructionPending !== original) return;
+      var box = $('llp-original-review'); box.textContent = '';
+      box.appendChild(el('p', null, review.message));
+      if (!review.instructions.length) box.appendChild(el('p', null, 'No instruction changes are currently in use.'));
+      review.instructions.forEach(function (row) { box.appendChild(el('h4', null, row.title)); box.appendChild(el('p', null, row.text)); });
+      if (!(await window.mvConfirm('Keep the complete current instructions shown above and close this hold? This is a new decision. The original result remains unconfirmed, and the original action is not repeated.',
+        { okText: 'Keep reviewed instructions' })) || instructionLocked || instructionPending !== original) return;
+      original.recovery_id = randomRequest(); sessionStorage.setItem(pendingKey(), JSON.stringify(original));
+      var acceptance = {
+        recovery_id: original.recovery_id, reconciliation_revision: review.revision, source_revision: review.source_revision,
+        review_expires_at: review.review_expires_at, confirm: true, context: original.context
+      };
+      var result = original.successor ? await post('/instruction-holds/' + original.operation_id + '/accept', acceptance) :
+        await post('/refinements/' + original.proposal + '/reconcile', Object.assign({}, input, acceptance));
+      if (!instructionLocked && instructionPending === original && result.receipt) { showReceipt(result.receipt); box.textContent = ''; }
+    } catch (failure) {
+      if (!instructionLocked) showPending(await problem(failure, 'accept the reviewed current instructions') + ' Check the original result before another decision; nothing is automatically repeated.');
+    } finally { instructionBusy = false; b.disabled = false; if (!instructionLocked) await loadRefinements(); }
+  });
+  window.addEventListener('lightwork:context-changed', lockInstructions);
+  document.addEventListener('lightwork:copilot-context-changed', function (event) {
+    if (!event.detail || event.detail.reason !== 'selection') lockInstructions();
+  });
   function statusText(p) {
     if (p.status === 'applied') return 'In use since ' + (when(p.applied_at) || 'it was applied');
     if (p.status === 'reverted') return 'Undone ' + (when(p.reverted_at) || '');
     if (p.status === 'pending') return p.approval || 'Waiting to be applied';
+    if (p.status === 'reconciled_absent') return 'Not in use after review';
     return typeof window.mvHuman === 'function' ? window.mvHuman(p.status) : p.status;
   }
   function refineRow(p) {
@@ -71,6 +170,7 @@
       var act = el('td');
       if (p.can_apply) act.appendChild(button('Apply', 'btn btn--primary', function (b) { applyChange(p, b); }));
       if (p.can_revert) act.appendChild(button('Undo', 'btn btn--danger', function (b) { undoChange(p, b); }));
+      act.querySelectorAll('button').forEach(function (b) { b.disabled = instructionBusy || !!instructionPending || instructionLocked; });
       if (!p.can_apply && !p.can_revert) {
         if (p.status === 'pending') {
           var link = el('a', 'btn btn--ghost', 'Decide it under Approvals');
@@ -80,6 +180,7 @@
       }
       tr.appendChild(act);
     }
+    Array.from(tr.cells).forEach(function (cell, index) { cell.setAttribute('data-label', ['Suggested change', 'What went wrong', 'Status', 'Actions'][index]); });
     return tr;
   }
   function button(label, cls, onClick) {
@@ -90,6 +191,32 @@
   }
   function loadRefinements() {
     return get('/refinements').then(function (data) {
+      if (instructionLocked) return;
+      if (instructionContext && instructionContext !== data.context) { lockInstructions(); return; }
+      if (!instructionContext) { instructionContext = data.context; restorePending(); }
+      if (admin && !data.can_manage) { lockInstructions(); return; }
+      instructionHistory = data.decisions || [];
+      if (!instructionPending) {
+        var unfinished = instructionHistory.find(function (row) { return row.unfinished; });
+        if (unfinished) instructionPending = Object.assign({}, unfinished);
+        else if (data.holds && data.holds.length) instructionPending = {
+          proposal: '0'.repeat(16), revision: '0'.repeat(64), undo: false, successor: true,
+          context: instructionContext, operation_id: data.holds[0].operation_id
+        };
+      }
+      var originalChoices = $('llp-original-choice');
+      if (originalChoices) {
+        originalChoices.textContent = ''; var placeholder = el('option', null, 'Choose an original decision'); placeholder.value = ''; originalChoices.appendChild(placeholder);
+        instructionHistory.forEach(function (row, index) {
+          var choice = el('option', null, (row.undo ? 'Restore · ' : 'Apply · ') + row.title + ' · ' + when(row.started_at));
+          choice.value = String(index); originalChoices.appendChild(choice);
+        });
+        originalChoices.disabled = instructionBusy || !!instructionPending;
+      }
+      showPending();
+      if ($('llp-original-title')) $('llp-original-title').textContent = instructionPending && instructionPending.successor ? 'Review the hold on shared instructions' : 'Check your original decision';
+      if ($('llp-original-check')) $('llp-original-check').textContent = instructionPending && instructionPending.successor ? 'Check this hold or my acceptance' : 'Check original result';
+      if (instructionPending && instructionPending.successor) showPending('Shared instructions need review after an earlier unconfirmed action. Your own full review can close the hold without accessing, confirming or repeating the former person’s original decision.');
       var rows = $('llp-ref-rows');
       rows.textContent = '';
       var state = data.enabled
@@ -128,6 +255,7 @@
       var box = $('llp-propose-box');
       if (box) box.hidden = !data.enabled;
     }).catch(async function (failure) {
+      if (instructionLocked) return;
       var rows = $('llp-ref-rows');
       rows.textContent = '';
       var tr = el('tr');
@@ -141,7 +269,8 @@
   // will say, or which later changes an undo also removes.
   async function preview(p) {
     try {
-      return await window.mvFetchJSON('/api/v1/learning-ops/refinements/' + encodeURIComponent(p.id) + '/preview');
+      if (!instructionContext || instructionLocked || instructionPending) return null;
+      return await get('/refinements/' + encodeURIComponent(p.id) + '/review?context=' + encodeURIComponent(instructionContext));
     } catch (failure) {
       say('llp-ref-msg', await problem(failure, 'show what would change'));
       return null;
@@ -159,51 +288,56 @@
     if (old) old.remove();
     cell.appendChild(box);
   }
-  async function applyChange(p, b) {
+  async function decideInstruction(p, b, undo) {
+    if (instructionBusy || instructionPending || instructionLocked) return;
+    instructionBusy = true;
     b.disabled = true;
     var pv = await preview(p);
-    if (!pv) { b.disabled = false; return; }
-    showPreview(b, previewBox([['Now it says:', pv.now || '(nothing yet for this)'], ['After applying:', pv.after]]));
-    if (!(await window.mvConfirm('Apply "' + p.title + '"? Agents follow the new text from their next task. Lightwork saves a restore point first, so you can undo it later.',
-      { okText: 'Apply change' }))) { b.disabled = false; return; }
-    say('llp-ref-msg', 'Applying…');
-    try {
-      await post('/refinements/' + encodeURIComponent(p.id) + '/apply', { revision: pv.revision, confirm: true });
-      say('llp-ref-msg', 'Change applied. Agents use it from their next task.');
-      await loadRefinements();
-    } catch (failure) {
-      say('llp-ref-msg', await problem(failure, 'apply the change'));
-      b.disabled = false;
-    }
-  }
-  async function undoChange(p, b) {
-    b.disabled = true;
-    var pv = await preview(p);
-    if (!pv) { b.disabled = false; return; }
-    var affected = pv.changes || [];
+    if (!pv || instructionLocked || pv.context !== instructionContext) { instructionBusy = false; b.disabled = instructionLocked; return; }
     var lines = [];
-    affected.forEach(function (change) {
+    (pv.changes || []).forEach(function (change) {
       lines.push([change.title + ' · Current instructions:', change.before || '(nothing for this)']);
-      lines.push(['After restoring:', change.after || '(removed)']);
+      lines.push([undo ? 'After restoring:' : 'After applying:', change.after || '(removed)']);
     });
-    showPreview(b, previewBox(lines.length ? lines : [['The complete restore affects:', (pv.undo_also_removes || []).join('; ')]]));
-    if (!(await window.mvConfirm('Undo "' + p.title + '"? Instructions go back to exactly how they were before it was applied' +
-      '. Review every change shown above; earlier instructions may return and later changes may be removed.',
-      { okText: 'Restore reviewed instructions' }))) { b.disabled = false; return; }
-    say('llp-ref-msg', 'Undoing…');
-    try {
-      await post('/refinements/' + encodeURIComponent(p.id) + '/revert', { revision: pv.revision, confirm: true });
-      say('llp-ref-msg', 'Reviewed instructions restored. The changes in use and their decision records have been refreshed.');
-      await loadRefinements();
-    } catch (failure) {
-      say('llp-ref-msg', await problem(failure, 'undo the change'));
-      b.disabled = false;
+    showPreview(b, previewBox(lines));
+    var question = undo ? 'Undo "' + p.title + '"? Review every change above; earlier instructions may return and later changes may be removed.' :
+      'Apply "' + p.title + '"? Review the full change above. Agents follow the approved instructions on new tasks, and a restore point is saved first.';
+    if (!(await window.mvConfirm(question, { okText: undo ? 'Restore reviewed instructions' : 'Apply change' })) || instructionLocked) {
+      instructionBusy = false; b.disabled = instructionLocked; return;
     }
+    try {
+      instructionPending = { proposal: p.id, revision: pv.revision, context: pv.context, undo: undo,
+        operation_id: randomRequest() };
+      sessionStorage.setItem(pendingKey(), JSON.stringify(instructionPending));
+    } catch (_) {
+      instructionPending = null; instructionBusy = false; b.disabled = false;
+      say('llp-ref-msg', 'This browser could not keep the original request safely. Nothing was submitted. Enable private session storage and try again.'); return;
+    }
+    var original = instructionPending;
+    showPending('Your reviewed decision is being saved. Its original request is kept for result checking.');
+    say('llp-ref-msg', undo ? 'Restoring reviewed instructions…' : 'Applying reviewed instructions…');
+    try {
+      var result = await post('/refinements/' + encodeURIComponent(p.id) + (undo ? '/revert' : '/apply'), {
+        revision: pv.revision, confirm: true, context: pv.context, source_revision: pv.source_revision,
+        operation_id: original.operation_id, review_expires_at: pv.review_expires_at
+      });
+      if (instructionLocked || instructionPending !== original) return;
+      if (result.receipt) showReceipt(result.receipt); else showPending();
+    } catch (failure) {
+      if (!instructionLocked && instructionPending === original) {
+        if (failure.status === 409 || failure.status === 422) {
+          clearPending(); showPending(); say('llp-ref-msg', await problem(failure, 'save this decision'));
+        } else showPending('The reply was interrupted. Check the original result; do not submit the decision again.');
+      }
+    } finally { instructionBusy = false; if (!instructionLocked) await loadRefinements(); }
   }
+  function applyChange(p, b) { return decideInstruction(p, b, false); }
+  function undoChange(p, b) { return decideInstruction(p, b, true); }
   var form = $('llp-propose');
   if (form) {
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
+      if (instructionLocked || instructionBusy || instructionPending) { showPending(); return; }
       var f = new FormData(form);
       var body = {};
       ['target', 'title', 'failure', 'change', 'rationale'].forEach(function (k) { body[k] = String(f.get(k) || '').trim(); });
@@ -216,15 +350,16 @@
       say('llp-ref-msg', 'Sending your suggestion…');
       try {
         var out = await post('/refinements', body);
+        if (instructionLocked) return;
         say('llp-ref-msg', out.needs_approval
           ? 'Suggestion saved. It now waits for approval on the Approvals page; then apply it here.'
           : 'Suggestion saved. You can apply it from the list.');
         form.reset();
         await loadRefinements();
       } catch (failure) {
-        say('llp-ref-msg', await problem(failure, 'save the suggestion'));
+        if (!instructionLocked) say('llp-ref-msg', await problem(failure, 'save the suggestion'));
       } finally {
-        if (submit) submit.disabled = false;
+        if (submit) submit.disabled = instructionLocked;
       }
     });
   }

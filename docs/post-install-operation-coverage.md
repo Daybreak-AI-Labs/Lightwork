@@ -717,3 +717,84 @@ jobs were exercised with only the HTTP transport replaced by a local response.
 Wrong providers, gateways, credential rotation and withdrawn permission were
 refused without further transport calls. This is not a live-provider quality,
 pricing or customer acceptance claim.
+
+## October 5 ordinary supplied-answer checks
+
+The task-set answer checker now offers ordinary questions and choices for the
+three packaged public example sets: personal-data request routing, processor
+privacy commitments, and privacy risks and safeguards. Supporting passages come
+from each question's information. A complete review shows the selected questions,
+entered answers, supporting passages and optional reported model before starting
+the existing local scorer. JSON imports remain an optional advanced disclosure.
+This does not contact AI, verify the reported answer producer, qualify a model,
+change routing, or treat published examples as unseen evaluation evidence.
+
+Copilot can open the protected answer form and read a selected original result.
+The handoff checks current account, question source and model choices before
+replacing or focusing work. A changed question source or superseded Copilot
+selection keeps entered answers. Scoring uses the existing retained worker and
+a distinct original request; lost replies cannot start another copy. Original
+admission, recorded completion, unavailable workers and a no-longer-retained
+detailed result remain separate outcomes. Another local check requires a fresh
+review and explicit confirmation.
+
+The actual 320px native journey checked all three packaged sets with the real
+local scorer, complete answer review, an incomplete private draft saved and
+restored after reload, lost replies, exact original readback and duplicate
+submission without another worker. Foreign requests and real authority loss
+were refused; authority loss cleared private work, while temporary unavailability
+kept it. Stale sources, unavailable model labels and delayed Copilot selections
+could not replace the draft or move focus. An expired review waiting on the
+native authority fence created no claim, worker or evaluation. Native phone
+layout and protected Copilot handoff had no JavaScript errors.
+
+## October 5 learned instruction decisions and recovery
+
+Applying a suggested instruction and undoing a prior change now retain exact
+original decision records in the native proposal store. Ordinary Learning
+controls and typed Copilot decisions use the same full review, current source
+permissions and independent approval checks. Undo also verifies every source
+whose text would be restored. Source-filtered instruction lists and reviews do
+not reveal private text merely because it remains in a shared history.
+
+An original confirmation records the native completed decision, rather than
+inferring it from matching current text. An interruption between the instruction
+write and confirmation remains unconfirmed and is never replayed. Confirmed
+history can be read when today's instruction overlay is unavailable. Original
+readback remains available through the ordinary page after a short-lived Copilot
+execution token expires. Expired full reviews are refused after a writer wait;
+refused admissions cannot create or prune instruction restore points.
+
+An unresolved change holds subsequent shared instruction edits. The administrator
+can review and accept the current instructions through a separate reconciliation
+decision, which records that human acceptance without repeating the old effect
+or relabeling an unknown original as confirmed. A currently authorized successor
+can resolve that shared hold without reading a former administrator's private
+original receipt. Both paths require a complete current-source review and record
+their own actor and exact current state. Reconciliation does not rewrite the
+instruction text. This remains a single-host recovery protocol, not independent
+audit custody.
+
+The actual 320px native journey applied four changes, performed two whole
+restores and retained six exact original records. Two deliberately interrupted
+effect-to-confirmation gaps remained unconfirmed after separate current-state
+acceptance, including a departed administrator's hold accepted by another current
+administrator after a full review and a lost acceptance reply. Expired queued
+reviews, withdrawn sources, stale versions and foreign context were refused.
+Fresh-process original and successor reads, including same-request acceptance
+readback, left the native ledger bytes unchanged. Stacked instruction cards kept
+Undo visible on the phone without document overflow or JavaScript errors. No AI
+service was contacted in either journey.
+
+## October 5 delayed Copilot handoff buttons
+
+The shared Copilot handoffs to saved learning points, compliance mappings,
+privacy-notice updates, installed practice environments, workspace people and
+plugin practice now retain the clicked control before awaiting the destination.
+A delayed refusal re-enables the correct control without reading an expired
+browser event. Detached controls and superseded selections cannot change the
+current panel. A bounded real Chromium event check covered all six callbacks,
+including delayed refusals, detached controls and obsolete selections, with no
+JavaScript errors. Only metadata and deferred destination controllers were
+substituted in that presentation check; it does not newly qualify the six native
+services or claim a customer effect.

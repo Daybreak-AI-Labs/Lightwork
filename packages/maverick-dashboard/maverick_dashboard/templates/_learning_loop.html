@@ -8,7 +8,19 @@
       instructions. A change is used only after a person approves and applies it, and every applied
       change can be undone.</p>
     <p id="llp-ref-state" class="muted"></p>
-    <table aria-labelledby="llp-ref-title">
+    {% if can_manage %}
+    <div id="llp-original" class="glass-card" hidden aria-labelledby="llp-original-title">
+      <h3 id="llp-original-title">Check your original decision</h3>
+      <p id="llp-original-message" role="status" aria-live="polite"></p>
+      <label for="llp-original-choice">Recent original decisions</label>
+      <select id="llp-original-choice" class="select"><option value="">Loading decisions…</option></select>
+      <button type="button" id="llp-original-check" class="btn btn--primary">Check original result</button>
+      <button type="button" id="llp-original-resolve" class="btn btn--ghost" hidden>Review current instructions to close the hold</button>
+      <div id="llp-original-review"></div>
+      <p class="muted">Reads the saved result without applying or restoring again. Earlier receipts remain historical when current instructions change. A current administrator can separately review shared instructions to close a hold; this never confirms another person's original action. Up to 512 original decisions are retained; a full history refuses new tracked changes.</p>
+    </div>
+    {% endif %}
+    <table id="llp-ref-table" aria-labelledby="llp-ref-title">
       <thead><tr><th scope="col">Suggested change</th><th scope="col">What went wrong</th>
         <th scope="col">Status</th>{% if can_manage %}<th scope="col">Actions</th>{% endif %}</tr></thead>
       <tbody id="llp-ref-rows"><tr><td colspan="{{ 4 if can_manage else 3 }}">Loading suggested changes…</td></tr></tbody>
@@ -119,6 +131,17 @@
   .llp-form { display: grid; gap: .4rem; max-width: 42rem; margin-top: .6rem; }
   .llp-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .5rem 0 1rem; }
   .llp-log li { margin-bottom: .4rem; }
+  #llp-original { margin-block: var(--space-4); overflow-wrap: anywhere; }
+  #llp-original .select { width: 100%; max-width: 100%; margin-block: var(--space-2); }
+  #llp-original button { max-width: 100%; white-space: normal; margin-block: var(--space-1); }
+  @media (max-width: 600px) {
+    #llp-ref-table, #llp-ref-table tbody { display: block; }
+    #llp-ref-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    #llp-ref-table tr { display: grid; margin-block: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+    #llp-ref-table td { display: block; min-width: 0; overflow-wrap: anywhere; }
+    #llp-ref-table td::before { content: attr(data-label); display: block; color: var(--muted); font-size: var(--text-sm); margin-bottom: var(--space-1); }
+    #llp-ref-table td:last-child { border-bottom: 0; }
+  }
 </style>
 <script src="/static/lightwork-ops-jobs.js" defer></script>
 <script src="/static/lightwork-learning-loop.js" defer></script>
