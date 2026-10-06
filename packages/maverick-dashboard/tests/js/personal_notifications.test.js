@@ -4,7 +4,7 @@ const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('j
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)); };
 
 test('notification access denial clears private destination, receipt and task labels', async t => {
-  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects'];
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
     'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
     'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences'];
@@ -27,7 +27,7 @@ test('notification access denial clears private destination, receipt and task la
 });
 
 test('each alert shows why, what and by when, and mutes from the alert with an undo', async t => {
-  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects'];
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
     'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
     'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences',
@@ -72,7 +72,7 @@ test('each alert shows why, what and by when, and mutes from the alert with an u
 });
 
 test('saving notification preferences says "Saving…", then the truth, and a failure keeps the draft', async t => {
-  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects'];
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
     'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
     'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences',
@@ -110,7 +110,7 @@ test('saving notification preferences says "Saving…", then the truth, and a fa
 });
 
 test('a task waiting on your answer can be stopped from its alert in one action', async t => {
-  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects'];
+  const names = ['mode','timezone','digest_time','quiet_start','quiet_end','quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   const nodes = ['personal-notification-status','personal-notification-error','personal-notification-items','personal-notification-save-status',
     'personal-notification-refresh','notification-project-watches','notification-mutes','personal-background-status','personal-external-status',
     'personal-delivery-receipts','personal-external-links','personal-critical-policy','notification-add-mute','notification-reload-preferences',

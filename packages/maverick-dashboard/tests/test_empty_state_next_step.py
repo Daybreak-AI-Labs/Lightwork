@@ -38,6 +38,7 @@ VALUES = {
     ("security_report.html", "No evidence cited yet."): "evidence cell of a report row",
     ("shoring.html", "No data yet"): "service-level status word",
     ("tenants_overview.html", "No tasks yet"): "tasks cell of a workspace row",
+    ("usability_survey.html", "None yet"): "median-time cell of a first-session row",
     ("users.html", "No description yet."): "role description field",
     ("lightwork-agent-control-plane.js", "No agents or people yet"): "select placeholder",
     ("lightwork-ai-cloud-agent-governance.js", "No policies are available from your policy service yet"): "select placeholder",

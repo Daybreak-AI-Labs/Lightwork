@@ -602,7 +602,7 @@
         <span id="halt-setup-message" role="status" aria-live="polite" class="muted"></span>
       </div>
       <form id="halt-resume-form" class="halt-card__row" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}"{% if specialist_setup %} hidden{% endif %}>
-        <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Review task start' if pilot_prepared else 'Review retry after checking AI' if provider_stop else 'Resume' if stop_progress and stop_progress.mode == 'resume' else 'Try again') }}</button>
+        <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Review task start' if pilot_prepared else 'Review retry after checking AI' if provider_stop else 'Resume task' if stop_progress and stop_progress.mode == 'resume' else 'Try again') }}</button>
         <details class="halt-card__budget" id="halt-budget"{% if not stop or stop.kind != 'spending_limit' %} hidden{% endif %}>
           <summary>{{ ui('Set a spending limit for this attempt') }}</summary>
           <div class="field">

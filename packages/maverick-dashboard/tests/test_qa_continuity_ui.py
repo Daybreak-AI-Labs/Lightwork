@@ -127,7 +127,8 @@ def test_webhook_deletion_offers_undo_and_surfaces_server_failure():
     ui = (TEMPLATES.parent / "static" / "lightwork-ui.js").read_text(encoding="utf-8")
     assert "Other apps can no longer start this workflow." in source
     assert "mvUndo(translated('{name} deleted." in source and "action: 'delete it'," in source
-    assert "if (opts.undo) opts.undo();\n              window.mvFail(failure, opts.action || 'delete it');" in ui
+    assert "if (opts.undo) opts.undo();" in ui
+    assert "if (!(failure && failure.handled)) window.mvFail(failure, opts.action || 'delete it');" in ui
     assert "translated('Delete the start {name}',{name:t.name})" in source
 
 
