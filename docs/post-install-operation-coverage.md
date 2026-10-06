@@ -356,7 +356,7 @@ The following paths were inspected beyond their labels:
 | Create a bulk consent export or change | Operation-specific controls provide paged people search, selection retained across pages, bounded list import, and older-receipt paging for every selected person. Review job refreshes the selected profiles and shows each exact change; removing a person clears their selected receipts and invalidates review. Start reviewed job separately admits the reviewed changes. Interrupted admission reads the original account/workspace-bound submission without running it again. Run now advances all bounded parts while the page stays open; Pause after this part stops between parts. An uncertain response stops further dispatch and reads saved progress. New jobs isolate effect keys by job; same-person receipt changes advance revisions only from verified successful predecessor results, and outside edits still refuse. Activity and job lists have Older/Latest controls with bounded responses. A native 390px journey pages 205 saved jobs, cancels an older job and confirms its stored state. Native phone-browser journeys also cover person 604, more than 50 selected people, old receipts and multiple changes to one person. Selecting a saved job now gives Copilot the same native read, one-part execution, future-work cancellation and verified download controls. The one-part review binds the current revision atomically before work starts; a changed or uncertain result reads progress without another part. Native phone and desktop journeys cover selection, cancellation, lost replies, denied cross-account replay and actual download. Native creation can also host the same ordinary six-operation form inside Copilot without relaying private people or receipt selections through a model. Admission reserves the current native preference store while checking exact reviewed records. Allowance changes retain an actor-bound original grant; both the direct form and typed control read a lost response without granting twice. The native phone journey covers interrupted creation, one accepted job, retained people/receipt selections across pages, actual two-receipt changes, stale profile refusal, lost allowance responses, exact replay and account-change clearing. | Qualify installed customer use and all six operation families; this new journey exercised export and expiration changes. A queued job is admission, not completion. Pausing or cancelling preserves completed changes; closing the page stops automatic advancement rather than creating an unowned worker. |
 | Prepare an incident report | `_governance_operations.html` mounts labelled structured report fields, selects an incident and carries its current revision in a hidden field. The draft goes through independent approval; recording a filing requires the authority's reference and a receipt-file fingerprint, and the page says this is not proof of external receipt. | Qualify the authenticated installed-app journey and recovery after stale state or interrupted draft, approval and filing-record writes. Verify external submission with the authority separately. |
 | Rotate a registered device's key | Mobile app consent now registers an app through its named app key, lists genuinely enrolled devices and explains automatic native-device key renewal. The ordinary page has no manual key-hex, attestation or epoch editor. | Genuine device enrollment and renewal still need the installed app, its platform attestation provider and signed device evidence. Administrator page rendering does not qualify that external device journey. |
-| Operate generic compliance consoles | Turn scope into tasks now includes a native mapping builder: choose a named final scope, its current controls, responsible role, work status, evidence action and cadence. The service creates an exact immutable mapping; another authorized person approves it before a plan can use it. Three typed Copilot controls share creation, current read and independent approval. The actual native browser journey builds two mappings, recovers a lost save without another mapping, refuses self-approval and another account, publishes independently and uses the selected mapping to create a 12-control/12-evidence plan. The ordinary selector and 320px layout passed. | This covers one formerly JSON-only customer workflow and 1–2,000 final-scope controls with uniform business choices. It does not supply licensed control text or external task-system execution. Other generic-console actions still need named record selection and business controls; unknown-property and technical-editor fallbacks remain elsewhere. |
+| Operate generic compliance consoles | Turn scope into tasks now includes a native mapping builder: choose a named final scope, its current controls, responsible role, work status, evidence action and cadence. The service creates an exact immutable mapping; another authorized person approves it before a plan can use it. Three typed Copilot controls share creation, current read and independent approval. The actual native browser journey builds two mappings, recovers a lost save without another mapping, refuses self-approval and another account, publishes independently and uses the selected mapping to create a 12-control/12-evidence plan. The ordinary selector and 320px layout passed. | This covers one formerly JSON-only customer workflow and 1–2,000 final-scope controls. Initial uniform choices remain supported; the October 5 follow-through adds individual choices and immutable revision editing as recorded below. It does not supply licensed control text or external task-system execution. Other generic-console actions still need named record selection and business controls; unknown-property and technical-editor fallbacks remain elsewhere. |
 
 The remaining boundaries are additional work items. None of this static review
 qualifies the whole application, live integrations or full Copilot operation.
@@ -419,3 +419,31 @@ on the strength of component test counts alone.
 
 These are bounded native product journeys and installed-package checks, not
 customer-outcome evidence or completion of the 28 research hypotheses.
+
+## October 5 individual task mappings and immutable revisions
+
+The native mapping form now supports a different initial status, responsible
+role and evidence work for each selected control. A control can have several
+evidence jobs with separately chosen work, responsibility and frequency. Named
+saved mappings open their exact latest immutable version for revision. Unchanged
+entries and saved evidence identities remain exact; genuinely new evidence work
+receives a new identity. Every save creates a separate version rather than
+changing earlier mappings or plans. The editor pages eight controls at a time
+while the complete reviewed save includes every control.
+
+Copilot's protected create and revision handoffs use the same native form and
+authority. The existing typed uniform creation operation keeps its contract.
+The actual 320px native journey saved mixed choices, recovered interrupted
+replies from the original operation without another save, refused an identical
+competing version without attributing it to the original request, preserved the
+editable draft, and explicitly reloaded before saving a new revision. A separate
+reviewer published that version; the ordinary Task plans page consumed its
+exact differing control states, owners, evidence work and frequencies. A further
+real save preserved an earlier evidence job while creating a distinct new job.
+Earlier immutable versions and the original plan remained unchanged.
+
+Revision requires a selected final scope whose complete framework/control set
+matches the saved mapping. An unmatched imported mapping is refused explicitly;
+no saved entries are dropped to fit the editor. Publication remains a separate
+independent decision. This does not supply licensed control text, external task
+execution or customer acceptance of those integrations.

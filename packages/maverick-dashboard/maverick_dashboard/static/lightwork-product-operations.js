@@ -128,6 +128,28 @@
           else { var savedLink = node('a', 'Open saved learning points', savedDestination); savedLink.href = '/learning#learning-review'; }
           return;
         }
+        if (entry[0] === 'compliance_mapping_form') {
+          var mapping = entry[1], mappingStarted = generation;
+          if (!mapping || Array.isArray(mapping) || Object.keys(mapping).sort().join(',') !== 'context,mode' ||
+              !/^[a-f0-9]{64}$/.test(mapping.context || '') || !['create', 'revise'].includes(mapping.mode)) return;
+          var mappingDestination = node('dd', undefined, list), mappingForm = window.LightworkComplianceMapping;
+          var mappingLabel = mapping.mode === 'revise' ? 'Revise a saved task mapping' : 'Design a task mapping';
+          if (mappingForm && typeof mappingForm.open === 'function') button(mappingLabel, mappingDestination, async function (event) {
+            if (!active(mappingStarted) || busy) return;
+            event.currentTarget.disabled = true;
+            try {
+              var opened = await mappingForm.open(mapping.context, mapping.mode);
+              if (!active(mappingStarted)) return;
+              status.textContent = opened ? 'The protected task-mapping form is open.' :
+                'This form could not be opened. Check current access on the task-mapping page.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) {
+              if (active(mappingStarted)) status.textContent = 'This form could not be opened. Check current access on the task-mapping page.';
+            } finally { if (active(mappingStarted)) event.currentTarget.disabled = false; }
+          });
+          else { var mappingLink = node('a', mappingLabel, mappingDestination); mappingLink.href = '/compliance/scope-actions/mapping'; mappingLink.className = 'btn btn--ghost'; }
+          return;
+        }
         if (entry[0] === 'installed_practice_environment') {
           var environment = entry[1], environmentStarted = generation;
           if (!environment || Array.isArray(environment) || Object.keys(environment).join(',') !== 'context' ||

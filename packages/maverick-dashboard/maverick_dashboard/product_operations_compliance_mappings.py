@@ -6,7 +6,7 @@ from functools import partial
 from pydantic import Field
 
 from . import compliance_mapping_builder as service
-from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
+from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 
 class MappingInput(StrictInput):
@@ -75,9 +75,29 @@ def recover(request, _selection, _args, prepared, _operation):
     return Outcome("replayed", value["message"], value.get("details", {}))
 
 
+def form_snapshot(request, _selection, *, mode):
+    service.authority(request, write=True)
+    value = service.state(request)
+    return Snapshot(value["revision"], "Current final scopes and immutable task mappings",
+                    "Open the protected mapping form, choose a final scope and named mapping, and review individual control and evidence work. This handoff saves or approves nothing.",
+                    details={"compliance_mapping_form": {"context": value["context"], "mode": mode},
+                             "open_mapping": {"href": service.PAGE, "label": "Build or revise a task mapping"}})
+
+
+def form_prepare(request, selection, _arguments, *, mode):
+    value = form_snapshot(request, selection, mode=mode)
+    return Preview(value.summary, native=value.details)
+
+
 def entries():
     pages = (service.PAGE, "/compliance/scope-actions", "/compliance/scoping")
     return (
+        Adapter("compliance.mapping.design", "Choose individual control and evidence work", "tasks", service.PAGE, pages, EmptyInput,
+                partial(form_snapshot, mode="create"), partial(form_prepare, mode="create"),
+                aliases=("build a mixed task mapping", "choose work for each control")),
+        Adapter("compliance.mapping.revise", "Revise the latest saved task mapping", "tasks", service.PAGE, pages, EmptyInput,
+                partial(form_snapshot, mode="revise"), partial(form_prepare, mode="revise"),
+                aliases=("update a compliance mapping", "revise control responsibilities and evidence work")),
         Adapter("compliance.mapping.create", "Build a task mapping from a final scope", "tasks", service.PAGE, pages, service.Choices,
                 partial(snapshot, kind="create"), partial(prepare, kind="create"), execute, recover,
                 aliases=("build a compliance mapping", "create a scope mapping", "map compliance evidence work")),

@@ -324,7 +324,7 @@ def current_learning_job(request, job_id):
             "job": {key: value[key] for key in ("id", "label", "started_at", "finished_at", "state", "can_stop", "problem")},
             "status": _JOB_STATES[value["state"]], "observations": _result_counts(value["result"]),
             "original_stop": {"operation": original["operation"]} if original else None,
-            "notice": "Completed work remains recorded. A stop does not undo earlier work. These results remain available only while this Lightwork process retains them; they do not establish improved business results."}
+            "notice": "Recorded observations describe this task's results. Business improvement needs separate evidence."}
     _history_job(request, job_id)
     if result["context"] != context_for(request):
         raise HTTPException(409, "Your account or workspace changed. Read current tasks again.")
@@ -339,7 +339,8 @@ def current_learning_jobs(request):
     require_permission(request, "view")
     for row in rows:
         _history_job(request, row["job"]["id"])
-    return {"jobs": rows, "notice": "Your recent learning tasks in this workspace. Up to 40 tasks are retained in this Lightwork process. A restart or older-record removal can make an original outcome unavailable; absence does not mean it failed, and work is never repeated here."}
+    return {"jobs": rows, "notice": "Choose a recent learning task to read its progress." if rows else
+                                    "No recent learning tasks are currently available to your account in this workspace."}
 
 
 def reviewed_learning_stop(request, job_id, body: JobStopIn):

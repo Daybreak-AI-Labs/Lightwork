@@ -14,13 +14,13 @@ router = APIRouter(prefix="/api/v1/compliance/mapping-builder", tags=["complianc
 page_router = APIRouter()
 
 
-class Review(service.Choices):
+class Review(service.GuidedChoices):
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
     revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class Token(StrictInput):
-    token: str = Field(min_length=1, max_length=8000)
+    token: str = Field(min_length=1, max_length=3_000_000)
 
 
 class Apply(Token):
@@ -59,6 +59,23 @@ def controls(request: Request, scope: str = Query(min_length=1, max_length=128, 
     return response(lambda: service.controls(request, scope, offset=offset))
 
 
+@router.get("/editor")
+def editor(request: Request, scope: str = Query(min_length=1, max_length=128, pattern=service.native._ID_PATTERN),
+           mapping: str = Query(default="", max_length=140), offset: int = Query(default=0, ge=0, le=2000)):
+    return response(lambda: service.editor(request, scope, mapping, offset=offset))
+
+
+class ReviewPage(Token):
+    offset: int = Field(default=0, ge=0, le=2000)
+
+
+@router.post("/read-review")
+def read_review(request: Request, body: ReviewPage):
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    return response(lambda: service.read_review(request, body.token, offset=body.offset))
+
+
 @router.get("/mapping")
 def mapping(request: Request, mapping: str = Query(min_length=3, max_length=140), offset: int = Query(default=0, ge=0, le=2000)):
     return response(lambda: service.inspect_mapping(request, mapping, offset=offset))
@@ -69,7 +86,7 @@ def review(request: Request, body: Review):
     mutation(request)
     if body.context != service.context_for(request):
         raise HTTPException(409, "Your account or workspace changed. Refresh before reviewing.")
-    return response(lambda: service.review(request, service.Choices.model_validate(body.model_dump(exclude={"context", "revision"})), body.revision))
+    return response(lambda: service.review(request, service.GuidedChoices.model_validate(body.model_dump(exclude={"context", "revision"})), body.revision))
 
 
 @router.post("/review-approval")

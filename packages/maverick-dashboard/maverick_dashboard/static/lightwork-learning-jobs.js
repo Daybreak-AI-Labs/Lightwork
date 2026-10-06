@@ -10,7 +10,7 @@
   var API = '/api/v1/learning-ops/job-history';
   function node(tag, text, parent) { var element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (parent) parent.append(element); return element; }
   function when(value) { return window.mvWhen ? window.mvWhen(value) : new Date(value * 1000).toLocaleString(); }
-  function lock(value) { busy = value; refresh.disabled = value; choice.disabled = value; stop.disabled = value || !current || current.job.state !== 'running' || !current.job.can_stop; original.disabled = value; }
+  function lock(value) { busy = value; refresh.disabled = value; choice.disabled = value; var stoppable = !!(current && current.job.state === 'running' && current.job.can_stop); stop.hidden = !stoppable; stop.disabled = value || !stoppable; original.disabled = value; }
   function selection() { document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: current ? {kind: 'learning_job', id: current.job.id} : {}}})); }
   function saved() { if (!current) return null; try { var value = JSON.parse(sessionStorage.getItem('learning-job-stop:' + current.context + ':' + current.job.id) || 'null'); if (value && value.context === current.context && value.job === current.job.id && /^[a-f0-9]{32}$/.test(value.operation)) return value; } catch (_) { /* The authorized native receipt can still be read. */ } return current.original_stop && /^[a-f0-9]{32}$/.test(current.original_stop.operation) ? {context: current.context, job: current.job.id, operation: current.original_stop.operation} : null; }
   function save(row) {
@@ -38,7 +38,7 @@
       node('h4', report.label, output); var counts = node('dl', undefined, output);
       Object.entries(report.counts).forEach(function (item) { node('dt', item[0], counts); node('dd', String(item[1]), counts); });
     });
-    node('p', row.notice, output); status.textContent = 'Current retained result read. No task was started or repeated.';
+    node('p', row.notice, output); status.textContent = 'Latest recorded progress is shown.';
     original.hidden = !saved(); selection(); lock(false);
   }
   async function readSelected() {
@@ -52,7 +52,7 @@
     if (busy) return; var selected = choice.value, started = ++generation; review.replaceChildren(); current = null; selection(); lock(true);
     try {
       var history = await request(''); if (started !== generation) return;
-      choice.replaceChildren(); var empty = node('option', 'Choose a retained learning task', choice); empty.value = '';
+      choice.replaceChildren(); var empty = node('option', 'Choose a recent learning task', choice); empty.value = '';
       history.jobs.forEach(function (row) { var option = node('option', row.job.label + ' / ' + when(row.job.started_at) + ' / ' + row.status, choice); option.value = row.job.id; });
       choice.value = history.jobs.some(function (row) { return row.job.id === selected; }) ? selected : '';
       output.replaceChildren(); status.textContent = history.notice; original.hidden = true;
@@ -94,7 +94,7 @@
     catch (error) { if (started === generation) originalStatus.textContent = error.message + ' Nothing was repeated.'; }
     finally { if (started === generation) lock(false); }
   });
-  function changed() { generation++; current = null; review.replaceChildren(); output.replaceChildren(); choice.replaceChildren(); original.hidden = true; originalStatus.textContent = ''; status.textContent = 'Your account, workspace or access changed. Refresh retained tasks before continuing.'; lock(false); }
+  function changed() { generation++; current = null; review.replaceChildren(); output.replaceChildren(); choice.replaceChildren(); original.hidden = true; originalStatus.textContent = ''; status.textContent = 'Your account, workspace or access changed. Refresh recent tasks before continuing.'; lock(false); }
   document.addEventListener('lightwork:workspace-changed', changed);
   document.addEventListener('lightwork:account-context-changed', changed);
   window.addEventListener('lightwork:context-changed', changed);
