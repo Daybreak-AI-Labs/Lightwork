@@ -328,7 +328,7 @@
   </header>
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
-    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% endif %}
+    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% else %}{% include "_where_crumbs.html" %}{% endif %}
     {# In the job-named navigation, chat pages can be pinned like any other
        page (the base shell's "Pin to sidebar"; lightwork-pins.js binds it). #}
     {% set _page_personal = nav_personal() if nav_mode == 'areas' and nav_personal is defined and nav_personal else none %}

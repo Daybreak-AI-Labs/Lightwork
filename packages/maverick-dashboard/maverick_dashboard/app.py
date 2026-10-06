@@ -710,10 +710,21 @@ def _nav_context(request: Request) -> dict:
                                      can_open_page=can_open_page, global_admin=viewer_global_admin,
                                      personal=personal),
         "nav_go_to_keys": GO_TO_KEYS,
+        # Where a page kept out of the sidebar sits: its highlighted parent in
+        # the sidebar and the breadcrumb (ui_visibility.where).
+        "nav_where": _nav_where(request, groups, finder),
         # The navigation style ("classic" or "areas") and, in areas mode, the
         # areas and where this page sits in them.
         **area_context(request, role, finder, switched_off, viewer_global_admin),
     }
+
+
+def _nav_where(request, groups, finder):
+    from . import ui_visibility
+    try:
+        return ui_visibility.where(request.url.path, groups, finder)
+    except Exception:  # pragma: no cover -- shell rendering never fails on it
+        return None
 
 
 templates.context_processors.append(_nav_context)

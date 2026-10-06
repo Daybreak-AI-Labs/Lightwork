@@ -6,7 +6,7 @@
      aria-label="Docs (opens in a new tab)" title="Docs (opens in a new tab)"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-walkthroughs"></use></svg><span class="iconbtn__text">Docs</span></a>
   {% include "_help_menu.html" %}
   {% include "_display_preferences.html" %}
-  <a class="iconbtn" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
+  <a class="iconbtn" href="/account"{% if request and request.url.path == '/account' %} aria-current="page"{% endif %} aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
     <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.75"/><path d="M2.75 14a5.25 5.25 0 0 1 10.5 0"/></svg>
   </a>
   {% if show_logout %}

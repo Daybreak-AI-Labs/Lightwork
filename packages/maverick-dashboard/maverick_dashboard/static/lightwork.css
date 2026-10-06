@@ -1986,6 +1986,11 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 .areanav ol, .areanav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
 .areanav__crumbs { font-size: var(--text-sm); color: var(--muted); }
 .areanav__crumbs li + li::before { content: "›"; margin-inline-end: var(--space-2); color: var(--muted); }
+/* Where a page kept out of the sidebar sits (_where_crumbs.html). */
+.where-crumbs { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+.where-crumbs ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.where-crumbs li + li::before { content: "›"; margin-inline-end: var(--space-2); color: var(--muted); }
+.where-crumbs [aria-current="page"] { color: var(--text); }
 .areanav__tabs, .areanav__pages { overflow-x: auto; }
 .areanav__tabs { border-bottom: 1px solid var(--border); }
 .areanav__tabs ul { flex-wrap: nowrap; }
