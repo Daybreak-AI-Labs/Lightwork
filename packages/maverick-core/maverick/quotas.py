@@ -60,7 +60,14 @@ class QuotaPolicyError(RuntimeError):
 
 
 def _ledger_path():
-    """Tenant-scoped ledger location: ``<data>/usage/ledger.json``."""
+    """Tenant-scoped ledger location: ``<data>/usage/ledger.json``.
+
+    Practice runs (:mod:`maverick.practice`) keep their own ledger beside it,
+    so practice spending never counts toward real quotas or spending limits."""
+    from . import practice
+
+    if practice.active():
+        return data_dir("practice", "usage", "ledger.json")
     return data_dir("usage", "ledger.json")
 
 

@@ -926,6 +926,8 @@ confirm_plan = false          # show the plan in Approvals and wait before a tas
 
 [practice]
 enable = true                 # offer practice mode: a separate practice workspace where nothing is sent, paid or changed
+daily_spend_cap = 1.0         # dollars per person per day for AI in practice: real provider cost, counted apart
+                              # from real spending limits and never above one that applies
 
 [analytics]
 task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)

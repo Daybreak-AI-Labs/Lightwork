@@ -13,12 +13,17 @@ in their browser session). While it is on for a request or a task run:
 * alerts, webhooks and approval cards that would leave Lightwork are
   recorded the same way.
 
-Spending is real money, so practice runs keep the live spending limits and
-budgets: nothing here changes how a run is admitted or capped.
+AI requests in practice still go to the real AI service and cost real money.
+That spending is kept on a separate practice usage ledger, so it never counts
+against a person's or the workspace's real spending limits, and it has its own
+daily cap per person (``[practice] daily_spend_cap``, never more than a real
+limit that applies). Each task's own budget and the provider and organization
+caps on real provider cost apply exactly as in live work (:func:`spending`).
 
 ``[practice] enable`` (default on) offers the switch. Practice is unavailable
 when the world model runs on Postgres or tasks run on an outside worker,
-because the separate practice database could not be guaranteed there.
+because the separate practice database could not be guaranteed there; it is
+then refused with that reason (:class:`PracticeUnavailable`), never run live.
 """
 from __future__ import annotations
 
@@ -46,23 +51,66 @@ PRACTICE_TOOLS = frozenset({
 })
 
 
+DEFAULT_DAILY_SPEND_CAP = 1.0
+_MAX_DAILY_SPEND_CAP = 1000.0
+
+
+class PracticeUnavailable(RuntimeError):
+    """Practice was asked for where it cannot be kept apart from live work."""
+
+
+def _section() -> dict | None:
+    from .config import config_source_errors, load_config
+
+    config = load_config()
+    if config_source_errors() or not isinstance(config, dict):
+        raise ValueError("settings unreadable")
+    section = config.get("practice")
+    if section is not None and not isinstance(section, dict):
+        raise ValueError("[practice] is not a table")
+    return section
+
+
+def spend_cap() -> float:
+    """``[practice] daily_spend_cap``: dollars one person may spend on AI in
+    practice per day (UTC). A value that can't be read allows no paid practice."""
+    try:
+        section = _section()
+    except Exception:  # unreadable settings: no paid practice
+        return 0.0
+    value = (section or {}).get("daily_spend_cap", DEFAULT_DAILY_SPEND_CAP)
+    if isinstance(value, bool) or not isinstance(value, int | float) or value != value:
+        return 0.0
+    return float(min(max(value, 0.0), _MAX_DAILY_SPEND_CAP))
+
+
+def spending(principal: str) -> dict:
+    """This person's practice spending today and the cap that applies to it.
+    ``real_ai_calls``: practice answers come from the real AI service."""
+    from . import spending_limits
+
+    limits = spending_limits.load()
+    with scope(True):
+        spent = spending_limits.practice_spent_today(principal)
+    return {"cap": spending_limits.practice_cap(principal, limits), "spent_today": spent,
+            "real_ai_calls": True}
+
+
 def enabled() -> bool:
     """``[practice] enable``: whether people are offered practice mode."""
     try:
-        from .config import config_source_errors, load_config
-
-        config = load_config()
-        if config_source_errors() or not isinstance(config, dict):
-            return False
-        section = config.get("practice")
-        if section is None:
-            return True
-        if not isinstance(section, dict):
-            return False
-        value = section.get("enable", True)
-        return value if isinstance(value, bool) else False
+        section = _section()
     except Exception:  # unreadable settings: stay live, offer nothing
         return False
+    if section is None:
+        return True
+    value = section.get("enable", True)
+    return value if isinstance(value, bool) else False
+
+
+POSTGRES_REASON = ("Practice mode needs the built-in database. This workspace keeps its records on a "
+                   "separate database server.")
+WORKERS_REASON = "Practice mode needs tasks to run in this server. This workspace runs tasks on separate workers."
 
 
 def unavailable_reason() -> str:
@@ -73,13 +121,13 @@ def unavailable_reason() -> str:
         from .world_model_backends import is_postgres_configured
 
         if is_postgres_configured():
-            return "Practice mode needs the built-in database. This workspace keeps its records on a separate database server."
+            return POSTGRES_REASON
     except Exception:  # backends extra absent: the built-in database is in use
         pass
     from .runner import LocalThreadDispatcher, get_dispatcher
 
     if not isinstance(get_dispatcher(), LocalThreadDispatcher):
-        return "Practice mode needs tasks to run in this server. This workspace runs tasks on separate workers."
+        return WORKERS_REASON
     return ""
 
 
@@ -174,5 +222,6 @@ def clear_outbox() -> None:
             path.unlink()
 
 
-__all__ = ["PRACTICE_TOOLS", "activate", "active", "clear_outbox", "enabled", "outbox", "record",
-           "reset", "scope", "tool_allowed", "unavailable_reason", "world_path"]
+__all__ = ["DEFAULT_DAILY_SPEND_CAP", "POSTGRES_REASON", "PRACTICE_TOOLS", "PracticeUnavailable", "WORKERS_REASON",
+           "activate", "active", "clear_outbox", "enabled", "outbox", "record", "reset", "scope", "spend_cap",
+           "spending", "tool_allowed", "unavailable_reason", "world_path"]

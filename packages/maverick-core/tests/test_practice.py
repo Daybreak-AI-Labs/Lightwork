@@ -139,3 +139,113 @@ def test_practice_is_unavailable_when_turned_off_or_on_another_database(home, mo
     config.reset_config_cache()
     assert practice.enabled() is False
     assert practice.unavailable_reason() == "Practice mode is turned off in Settings."
+
+
+class _Run:
+    """A paid run as the spending limits see it."""
+
+    def __init__(self, dollars=0.0):
+        self.dollars, self._reserved, self._organization_principal = dollars, 0.0, "pat"
+
+
+def _budget():
+    return _Run()
+
+
+def test_practice_spending_is_counted_apart_from_real_limits(home):
+    from maverick import practice, quotas, spending_limits
+
+    spending_limits.set_user_limit("pat", 1.0, "day", actor="admin")
+    with practice.scope():
+        assert quotas.record_usage("pat", 0.40)
+        assert spending_limits.recorded_spend("day", "pat", spending_limits._ledger()[0]) == pytest.approx(0.40)
+    # Live spending and the real limit never see the practice spend.
+    assert spending_limits.recorded_spend("day", "pat") == 0.0
+    spending_limits.admit(_budget(), 0.90)
+    assert practice.spending("pat") == {"cap": 1.0, "spent_today": pytest.approx(0.40), "real_ai_calls": True}
+
+
+def test_practice_spending_has_its_own_daily_cap(home):
+    from maverick import practice, quotas, spending_limits
+
+    (home / "config.toml").write_text("[practice]\ndaily_spend_cap = 0.5\n", encoding="utf-8")
+    from maverick import config
+    config.reset_config_cache()
+    assert practice.spend_cap() == 0.5
+    with practice.scope():
+        quotas.record_usage("pat", 0.30)
+        spending_limits.admit(_budget(), 0.10)
+        with pytest.raises(spending_limits.SpendingLimitReached) as refused:
+            spending_limits.admit(_budget(), 0.25)
+        assert "practice spending limit of $0.50 per day" in str(refused.value).lower()
+        assert "real spending limits are not affected" in str(refused.value)
+        assert spending_limits.start_refusal("pat") is None
+        quotas.record_usage("pat", 0.20)
+        assert "practice spending limit" in (spending_limits.start_refusal("pat") or "").lower()
+    assert spending_limits.start_refusal("pat") is None  # live work can still start
+
+
+def test_practice_cap_never_exceeds_a_real_limit(home):
+    from maverick import practice, spending_limits
+
+    spending_limits.set_user_limit("pat", 0.20, "day", actor="admin")
+    with practice.scope():
+        with pytest.raises(spending_limits.SpendingLimitReached):
+            spending_limits.admit(_budget(), 0.30)
+        assert practice.spending("pat")["cap"] == 0.20
+
+
+def test_a_running_practice_task_does_not_count_toward_live_spend(home):
+    from maverick import practice, spending_limits
+
+    spending_limits.set_user_limit("pat", 1.0, "day", actor="admin")
+    running = _Run(0.8)
+    with practice.scope():
+        spending_limits.admit(running, 0.0)
+    spending_limits.admit(_budget(), 0.9)  # live: the practice run's $0.80 is not counted
+    with practice.scope(), pytest.raises(spending_limits.SpendingLimitReached):
+        spending_limits.admit(_budget(), 0.3)  # practice: it is
+
+
+def test_a_practice_task_is_refused_on_separate_workers_not_run_live(home, monkeypatch):
+    from maverick import practice, runner
+    from maverick.world_model import open_world
+
+    submitted = []
+
+    class Queue:
+        def submit(self, goal_id, **kwargs):
+            submitted.append(goal_id)
+            return "queued"
+
+    with practice.scope():
+        goal = open_world().create_goal("Practice: chase the PO", "practice")
+        monkeypatch.setattr(runner, "_dispatcher", Queue())
+        assert runner.run_goal_in_background(goal) == "error"
+        assert submitted == []
+        row = open_world().get_goal(goal)
+        assert row.status == "blocked" and "separate workers" in (row.result or "")
+
+
+def test_practice_refuses_a_postgres_world_instead_of_writing_live(home, monkeypatch):
+    from maverick import practice, world_model_backends
+    from maverick.world_model import open_world
+
+    monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
+    with practice.scope(), pytest.raises(practice.PracticeUnavailable) as refused:
+        open_world()
+    assert "built-in database" in str(refused.value)
+
+
+def test_pins_and_notes_on_practice_tasks_stay_in_practice(home):
+    from maverick import practice, ux_store
+
+    ux_store.reset_shared()
+    with practice.scope():
+        ux_store.shared().pin("pat", 3)
+        ux_store.shared().annotate(3, 1, "practice note", author="pat")
+        assert ux_store.shared().pins("pat") == [3]
+    # Task 3 in practice is not task 3 in live work.
+    assert ux_store.shared().pins("pat") == []
+    assert ux_store.shared().annotations(3) == []
+    ux_store.reset_shared()

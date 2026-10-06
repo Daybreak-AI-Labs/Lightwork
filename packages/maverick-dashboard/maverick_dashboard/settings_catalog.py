@@ -355,8 +355,14 @@ SETTINGS: tuple[Setting, ...] = (
     S("practice", "enable", "Offer practice mode",
       "Let people switch to a separate practice workspace to try tasks, specialists and approvals. In "
       "practice nothing is sent, paid or changed outside practice, and nothing counts as real work. AI "
-      "use still counts toward spending limits.", "toggle", "Safety", True, "maverick.practice",
-      aliases="practice sandbox try test drive safe mode training demo"),
+      "answers still cost real money, counted apart from spending limits.", "toggle", "Safety", True,
+      "maverick.practice", aliases="practice sandbox try test drive safe mode training demo"),
+    S("practice", "daily_spend_cap", "Practice spending cap per person",
+      "AI answers in practice come from the real AI service and cost real money. That spending is counted "
+      "apart from real spending limits and stops at this amount per person each day (never more than a "
+      "real limit that applies). Each task's own budget still applies.", "number", "Safety", 1.0,
+      "maverick.practice", minimum=0, maximum=1000, unit="dollars per day", weaker="higher",
+      aliases="practice budget practice spending sandbox cost"),
     S("safety", "compartments", "Share blocked threats across a team of agents",
       "When one agent's check blocks a threat, the other agents on the same task are protected from it too.",
       "toggle", "Safety", False, "maverick.config"),

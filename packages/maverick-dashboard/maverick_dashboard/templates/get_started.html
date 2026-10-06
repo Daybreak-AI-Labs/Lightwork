@@ -195,10 +195,16 @@
   <section class="panel gs__practice" aria-labelledby="gs-practice-title" style="margin-bottom:var(--space-5)">
     <h2 id="gs-practice-title">Practice first, without real effects</h2>
     <p>Practice mode gives you a separate place to try tasks, specialists and approvals. Nothing is sent, paid or
-      changed outside practice, and nothing there counts as real work. A marker stays on every screen until you
+      changed outside practice, and nothing there counts as real work. AI answers still cost real money, counted
+      apart from your spending limits with a small daily practice limit. A marker stays on every screen until you
       choose Back to live.</p>
     <button type="button" class="btn" data-practice-start data-practice-status="gs-practice-status">Start practice mode</button>
     <p id="gs-practice-status" role="status" aria-live="polite"></p>
+  </section>
+  {% elif can_operate and practice_unavailable_reason and not practice_mode %}
+  <section class="panel gs__practice" aria-labelledby="gs-practice-title" style="margin-bottom:var(--space-5)">
+    <h2 id="gs-practice-title">Practice mode isn't available here</h2>
+    <p>{{ practice_unavailable_reason }} Ask your administrator if you need a separate place to try things out.</p>
   </section>
   {% endif %}
 

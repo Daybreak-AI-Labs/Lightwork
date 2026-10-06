@@ -1473,6 +1473,7 @@ def pick_capabilities() -> dict[str, Any]:
     )
     require_passing_tests = pick_agent_publish_gate()
     practice_mode = pick_practice_mode()
+    practice_cap = pick_practice_spend_cap() if practice_mode else 1.0
     return {
         "computer_use": use_computer,
         "browser": use_browser,
@@ -1484,6 +1485,7 @@ def pick_capabilities() -> dict[str, Any]:
         "jd_hiring": jd_hiring,
         "require_passing_tests": require_passing_tests,
         "practice_mode": practice_mode,
+        "practice_daily_spend_cap": practice_cap,
     }
 
 
@@ -1499,6 +1501,21 @@ def pick_practice_mode() -> bool:
         "Offer practice mode? People can try tasks, specialists and approvals in "
         "a separate practice workspace where nothing is sent, paid or changed.",
         default=True,
+    )
+
+
+def pick_practice_spend_cap() -> float:
+    """Daily practice spending cap per person, in dollars. 1.00 by default.
+
+    AI answers in practice are real provider calls that cost real money; they
+    are counted apart from real spending limits and capped by this amount
+    (never more than a real limit that applies). Written under ``[practice]``
+    as ``daily_spend_cap`` only when changed.
+    """
+    return _prompt_positive_dollars(
+        "  Practice spending cap per person per day, in dollars (AI answers in practice "
+        "still cost real money, counted apart from real spending limits)",
+        default="1.00",
     )
 
 
@@ -8591,6 +8608,14 @@ def _cfg_capabilities(
     return lines
 
 
+def _cfg_practice(offered: bool, daily_spend_cap: float) -> list[str]:
+    """``[practice]``: written only where it differs from the defaults (on, $1.00 a day)."""
+    body = [] if offered else ["enable = false"]
+    if offered and daily_spend_cap != 1.0:
+        body.append(f"daily_spend_cap = {round(daily_spend_cap, 2)}")
+    return ["", "[practice]", *body] if body else []
+
+
 def _cfg_agent_factory(jd_hiring: bool, require_passing_tests: bool = True) -> list[str]:
     # JD hiring (maverick.jd_hiring) and the publish gate
     # (maverick.agent_publish_policy) are default-on in the kernel; only write
@@ -10242,6 +10267,7 @@ def write_config(
     require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
     # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
     practice_mode = bool(capability_config.pop("practice_mode", True))
+    practice_cap = _safe_float(capability_config.pop("practice_daily_spend_cap", 1.0), default=1.0)
     # Tool exposure lives under [tools] (kernel: maverick.agent via
     # config.get_tool_exposure); "core" is the default, so only "full" is
     # written (write-only-on-divergence, like the other [tools] keys).
@@ -10250,7 +10276,7 @@ def write_config(
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
     lines += _cfg_agent_factory(jd_hiring, require_passing_tests)
-    lines += [] if practice_mode else ["", "[practice]", "enable = false"]
+    lines += _cfg_practice(practice_mode, practice_cap)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers)

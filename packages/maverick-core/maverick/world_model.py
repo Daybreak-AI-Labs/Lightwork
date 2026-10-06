@@ -5134,6 +5134,10 @@ def open_world(path: Path | None = None) -> Any:
     from .world_model_backends import is_postgres_configured
 
     if is_postgres_configured():
+        from . import practice
+
+        if practice.active():  # the practice world is a local file; never write practice live
+            raise practice.PracticeUnavailable(practice.POSTGRES_REASON)
         from .world_model_backends import open_postgres_world
 
         return open_postgres_world()

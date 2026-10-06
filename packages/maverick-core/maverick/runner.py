@@ -627,7 +627,15 @@ def run_goal_in_background(
     in-process thread execution; ``set_dispatcher`` swaps in a task queue
     without breaking callers (the contract is unchanged: returns the terminal
     status, ``"queued"`` after asynchronous acceptance, or ``None`` if it could
-    not start)."""
+    not start).
+
+    A practice task (:mod:`maverick.practice`) never goes to an outside
+    worker, which would run it live: it is stopped with the reason instead."""
+    from . import practice
+
+    if practice.active() and not isinstance(get_dispatcher(), LocalThreadDispatcher):
+        _mark_dispatch_failure(goal_id, practice.WORKERS_REASON + " This practice task did not start.")
+        return "error"
     return get_dispatcher().submit(
         goal_id, max_dollars=max_dollars,
         max_wall_seconds=max_wall_seconds, max_depth=max_depth,

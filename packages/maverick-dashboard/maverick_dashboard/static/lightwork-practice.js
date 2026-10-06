@@ -9,13 +9,8 @@
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '.';
   }
-  async function request(on) {
-    if (window.mvFetchJSON) return window.mvFetchJSON('/api/v1/practice', { method: 'POST', body: { on: on } }, on ? 'start practice mode' : 'go back to live');
-    var response = await fetch('/api/v1/practice', { method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: on }) });
-    var data = await response.json().catch(function () { return {}; });
-    if (!response.ok) throw { status: response.status, detail: data.detail };
-    return data;
+  function request(on) {
+    return window.mvFetchJSON('/api/v1/practice', { method: 'POST', body: { on: on } }, on ? 'start practice mode' : 'go back to live');
   }
   function say(node, text) {
     if (!node) return;
@@ -61,6 +56,22 @@
     });
     box.appendChild(table);
   }
+  function renderBlocked(box, rows) {
+    if (!rows.length) return;
+    var heading = document.createElement('h3');
+    heading.textContent = "What you can't do in practice";
+    var list = document.createElement('ul');
+    rows.forEach(function (item) {
+      var li = document.createElement('li');
+      var what = document.createElement('strong');
+      what.textContent = item.what;
+      li.appendChild(what);
+      li.appendChild(document.createTextNode(': ' + item.why));
+      list.appendChild(li);
+    });
+    box.appendChild(heading);
+    box.appendChild(list);
+  }
   async function toggleOutbox(button) {
     var box = document.getElementById(button.getAttribute('aria-controls'));
     if (!box) return;
@@ -70,14 +81,19 @@
     if (open) return;
     box.textContent = 'Reading what practice held back…';
     try {
-      var data = window.mvFetchJSON ? await window.mvFetchJSON('/api/v1/practice', {}, 'read what practice held back')
-        : await (await fetch('/api/v1/practice', { credentials: 'same-origin' })).json();
+      var data = await window.mvFetchJSON('/api/v1/practice', {}, 'read what practice held back');
       renderOutbox(box, data.outbox || []);
+      renderBlocked(box, data.blocked || []);
     } catch (failure) { box.textContent = errorText(failure, 'read what practice held back'); }
   }
   document.addEventListener('click', function (event) {
     var leave = event.target.closest && event.target.closest('[data-practice-leave]');
-    if (leave) { event.preventDefault(); switchTo(false, leave, document.getElementById('practice-outbox')); return; }
+    if (leave) {
+      event.preventDefault();
+      var banner = leave.closest('.practice-banner');
+      switchTo(false, leave, (banner && banner.querySelector('[data-practice-status]')) || document.getElementById('practice-outbox'));
+      return;
+    }
     var start = event.target.closest && event.target.closest('[data-practice-start]');
     if (start) { event.preventDefault(); switchTo(true, start, document.getElementById(start.getAttribute('data-practice-status') || '')); return; }
     var outbox = event.target.closest && event.target.closest('[data-practice-outbox]');

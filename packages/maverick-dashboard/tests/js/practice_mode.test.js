@@ -78,3 +78,29 @@ test("a refused start says why and leaves the person live", async (t) => {
   assert.match(ui.doc.getElementById("s").textContent, /turned off in Settings/);
   assert.equal(start.disabled, false);
 });
+
+test("the panel also lists what practice can't do, and why", async (t) => {
+  const ui = page(banner, { "GET /api/v1/practice": [200, { on: true, available: true, reason: "", outbox: [], blocked: [
+    { what: "Sharing a practice result", why: "Practice results can't be shared: share links and gists are for real results." },
+    { what: "Changing settings or spending limits", why: "Settings apply to everyone's live work." }] }] });
+  t.after(() => ui.w.close());
+  ui.doc.querySelector("[data-practice-outbox]").click();
+  await ui.settle();
+  const box = ui.doc.getElementById("practice-outbox");
+  assert.match(box.querySelector("h2, h3").textContent, /What you can't do in practice/);
+  const items = [...box.querySelectorAll("li")].map((li) => li.textContent);
+  assert.deepEqual(items, ["Sharing a practice result: Practice results can't be shared: share links and gists are for real results.",
+    "Changing settings or spending limits: Settings apply to everyone's live work."]);
+});
+
+test("a failed Back to live says why on the stopped marker too", async (t) => {
+  const stopped = banner.slice(banner.lastIndexOf("<div id=\"practice-banner\""));
+  const ui = page(stopped, { "POST /api/v1/practice": [503, { detail: "Try again shortly." }] });
+  t.after(() => ui.w.close());
+  const leave = ui.doc.querySelector("[data-practice-leave]");
+  leave.click();
+  await ui.settle();
+  assert.equal(ui.reloads(), 0);
+  assert.match(ui.doc.querySelector("[data-practice-status]").textContent, /\S/);
+  assert.equal(leave.disabled, false);
+});
