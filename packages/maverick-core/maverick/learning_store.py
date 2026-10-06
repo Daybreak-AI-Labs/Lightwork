@@ -521,35 +521,51 @@ def _decode_corpus_row(kind: str, row: str) -> object:
     return json.loads(row)
 
 
-def load_corpus_db(kind: str) -> dict:
+def load_corpus_db(kind: str, *, strict: bool = False) -> dict:
     """The corpus family from the world store, in the FILE shape:
     ``kind="live"`` returns ``{key: [row-dicts]}`` merged with any preserved
     non-list top-level entries (stored under kind ``extra``); ``"pending"``
     returns ``{key: [row-dicts]}``; ``"rejected"`` returns ``{key: [goals]}``.
-    ``{}`` on any error, like the tolerant file loaders."""
+    ``{}`` on any error, like the tolerant file loaders. Writers use ``strict``
+    so an unreadable row or database cannot become a partial whole-family save.
+    The checker keeps its historical tolerant read by default."""
     out: dict = {}
     pred, tp = _tenant_predicate()
     try:
         with _conn() as c:
-            for key, row in _rows(
-                    c, f"SELECT key, row FROM harness_corpus WHERE kind = {_ph(1)}"
+            for key, seq, row in _rows(
+                    c, f"SELECT key, seq, row FROM harness_corpus WHERE kind = {_ph(1)}"
                        f"{_and(pred)} ORDER BY key, seq", (str(kind), *tp)):
                 try:
+                    if strict and (not isinstance(key, str) or type(seq) is not int
+                                   or seq != len(out.get(key, []))):
+                        raise ValueError("The retained learning collection needs review.")
                     out.setdefault(str(key), []).append(_decode_corpus_row(str(kind), row))
                 except ValueError:
+                    if strict:
+                        raise
                     continue
             if kind == "live":
-                for key, row in _rows(
-                        c, f"SELECT key, row FROM harness_corpus "
+                for key, seq, row in _rows(
+                        c, f"SELECT key, seq, row FROM harness_corpus "
                            f"WHERE kind = {_ph(1)}{_and(pred)} ORDER BY key, seq",
                         ("extra", *tp)):
                     try:
+                        if strict and (not isinstance(key, str) or type(seq) is not int
+                                       or seq != 0 or key in out):
+                            raise ValueError("The retained learning collection needs review.")
                         out[str(key)] = _decode_corpus_row("extra", row)
                     except ValueError:
+                        if strict:
+                            raise
                         continue
+            if strict:
+                json.dumps(out, allow_nan=False)
     except LearningSchemaError:
         raise
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise ValueError("The current learning collection could not be read safely.") from exc
         log.debug("learning_store: corpus read failed (%s)", kind, exc_info=True)
         return {}
     return out

@@ -5,7 +5,24 @@
 (function () {
   'use strict';
   if (window.LWJobs) return;
-  var POLL_MS = 1500;
+  var POLL_MS = 1500, contextEpoch = 0;
+  var surfaces = new Map();
+  function contextChanged() {
+    contextEpoch++;
+    surfaces.forEach(function (out, status) {
+      if (!status.isConnected) { surfaces.delete(status); return; }
+      out.replaceChildren();
+      status.textContent = 'Your account, workspace or access changed. Read current tasks before continuing.';
+    });
+  }
+  document.addEventListener('lightwork:workspace-changed', contextChanged);
+  document.addEventListener('lightwork:account-context-changed', contextChanged);
+  document.addEventListener('lightwork:copilot-context-changed', function (event) {
+    if (event.detail?.reason !== 'selection') contextChanged();
+  });
+  window.addEventListener('lightwork:context-changed', contextChanged);
+  var LEARNING_KINDS = new Set(['self_harness_run', 'self_harness_corpus_quality', 'self_harness_clash',
+    'self_harness_transfer', 'flywheel', 'self_modify_run']);
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -77,7 +94,10 @@
   }
 
   var STATE_TEXT = {
-    running: 'Working on it. You can leave this page; the result stays here until Lightwork restarts.',
+    admitted: 'The task is recorded. Waiting for its worker to start.',
+    not_started: 'The worker did not start this task. Read its recorded admission before deciding what to do next.',
+    running: 'Working on it. You can leave this page and check progress later.',
+    unavailable: 'The worker is unavailable here. Read its last recorded progress in Learning before deciding what to do next. Work is never repeated automatically.',
     stopping: 'Stopping at the next safe point…',
     done: 'Finished.',
     stopped: 'Stopped early. Here is what was done before it stopped.',
@@ -88,35 +108,53 @@
   // status (element for the progress line), out (element for the result),
   // render(result, job) -> Node|Node[]|null, action (words for errors).
   async function run(url, init, ui) {
+    var epoch = contextEpoch;
+    surfaces.set(ui.status, ui.out);
     ui.out.textContent = '';
     ui.status.textContent = 'Starting…';
     var job;
     try {
       job = (await request(url, init)).job;
+      if (epoch !== contextEpoch) return null;
     } catch (failure) {
-      ui.status.textContent = await problem(failure, ui.action);
+      if (epoch !== contextEpoch) return null;
+      var startProblem = await problem(failure, ui.action);
+      if (epoch === contextEpoch) ui.status.textContent = startProblem;
       return null;
     }
     return follow(job, ui);
   }
 
   function follow(job, ui) {
+    var epoch = contextEpoch;
+    surfaces.set(ui.status, ui.out);
     return new Promise(function (resolve) {
       var stop = null;
       function show(j) {
-        ui.status.textContent = j.state === 'failed' ? (j.problem || 'This task could not finish. Start it again, or check Settings for what stopped it.') : STATE_TEXT[j.state] || '';
+        ui.status.textContent = j.state === 'failed' ? (j.problem || 'This task could not finish. Read its recorded result before deciding what to do next; do not repeat work automatically.') : STATE_TEXT[j.state] || '';
+        if (j.observation_saved === false || j.retention_problem) {
+          ui.status.textContent += ' ' + (j.retention_problem || 'This live result could not be confirmed in retained history. Read its underlying records before deciding what to do next.');
+        }
         if (j.can_stop && !stop) {
-          stop = el('button', 'btn btn--ghost', 'Stop');
+          var learning = LEARNING_KINDS.has(j.kind);
+          stop = el('button', 'btn btn--ghost', learning ? 'Review a stop' : 'Stop');
           stop.type = 'button';
           stop.addEventListener('click', async function () {
+            if (epoch !== contextEpoch) return;
+            if (learning) {
+              if (!/^[a-f0-9]{16}$/.test(j.id || '')) return;
+              window.location.assign('/learned?learning_task=' + encodeURIComponent(j.id) + '#learning-job-history');
+              return;
+            }
             if (!(await window.mvConfirm('Stop this task? It stops at the next safe point and keeps what it has already done.',
               { okText: 'Stop' }))) return;
+            if (epoch !== contextEpoch) return;
             stop.disabled = true;
             try {
               await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id) + '/stop', { method: 'POST', json: {} });
             } catch (failure) {
-              ui.status.textContent = await problem(failure, 'stop the task');
-              stop.disabled = false;
+              var stopProblem = await problem(failure, 'stop the task');
+              if (epoch === contextEpoch) { ui.status.textContent = stopProblem; stop.disabled = false; }
             }
           });
           ui.status.appendChild(document.createTextNode(' '));
@@ -127,13 +165,21 @@
         }
       }
       async function tick(j) {
+        if (epoch !== contextEpoch) { resolve(null); return; }
         show(j);
-        if (j.state === 'running' || j.state === 'stopping') {
+        if (['admitted', 'running', 'stopping'].includes(j.state) && j.worker_available === false) {
+          ui.status.textContent = STATE_TEXT.unavailable + (j.retention_problem ? ' ' + j.retention_problem : '');
+          resolve(null);
+          return;
+        }
+        if (j.state === 'admitted' || j.state === 'running' || j.state === 'stopping') {
           setTimeout(async function () {
             try {
               tick((await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id))).job);
             } catch (failure) {
-              ui.status.textContent = await problem(failure, 'check on the task');
+              if (epoch !== contextEpoch) { resolve(null); return; }
+              var progressProblem = await problem(failure, 'check on the task');
+              if (epoch === contextEpoch) ui.status.textContent = progressProblem;
               resolve(null);
             }
           }, POLL_MS);

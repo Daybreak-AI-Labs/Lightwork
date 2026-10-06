@@ -202,6 +202,8 @@ def start_job(request: Request, kind: str, label: str, fn, *, needs_global: bool
 
 
 def _can_see(request: Request, job: jobs.Job) -> bool:
+    if job.kind in _LEARNING_KINDS and (job.started_by != _actor(request) or job.workspace != _workspace()):
+        return False
     if job.needs_global:
         return has_global_permission(request, "admin")
     return has_permission(request, "admin") and job.workspace == _workspace()
@@ -254,22 +256,36 @@ async def _upload(request: Request, limit: int) -> bytes:
 
 @router.get("/jobs")
 async def list_jobs(request: Request) -> dict:
+    from .draft_api import context_for
     require_permission(request, "view")
-    return {"jobs": [j.view() for j in jobs.listed() if _can_see(request, j)][:20]}
+    context = context_for(request)
+    try:
+        owned = [j for j in jobs.listed() if _can_see(request, j)][:20]
+        result = {"jobs": [jobs.current_view(j) for j in owned]}
+    except jobs.JobRefused as exc:
+        raise HTTPException(503, str(exc)) from exc
+    require_permission(request, "view")
+    if context != context_for(request) or any(not _can_see(request, j) for j in owned):
+        raise HTTPException(409, "Your account, workspace or access changed. Read current tasks again.")
+    return JSONResponse(result, headers={"Cache-Control": "private, no-store"})
 
 
 def _job_or_404(request: Request, job_id: str) -> jobs.Job:
-    job = jobs.get(job_id) if _JOB_ID.fullmatch(job_id) else None
+    try:
+        job = jobs.get(job_id) if _JOB_ID.fullmatch(job_id) else None
+    except jobs.JobRefused as exc:
+        raise HTTPException(503, str(exc)) from exc
     if job is None or not _can_see(request, job):
         raise HTTPException(status_code=404, detail=(
-            "The original task result is no longer available. Lightwork may have restarted. This does not mean the work failed; do not repeat it automatically."))
+            "The original task record is unavailable to your account in this workspace. Its absence does not mean the work failed; do not repeat it automatically."))
     return job
 
 
 _LEARNING_KINDS = {"self_harness_run", "self_harness_corpus_quality", "self_harness_clash",
                    "self_harness_transfer", "flywheel", "self_modify_run"}
 _JOB_STATES = {"running": "Working", "stopping": "Stopping at the next safe point",
-               "done": "Finished", "stopped": "Stopped early", "failed": "Stopped with a problem"}
+               "done": "Finished", "stopped": "Stopped early", "failed": "Stopped with a problem",
+               "admitted": "Start admitted; worker start not yet recorded", "not_started": "Not started by this server"}
 _RESULT_COUNTS = {"patterns_found": "Patterns found", "ideas_tried": "Ideas tried",
                   "passed_testing": "Passed practice checks", "adopted": "Lessons adopted",
                   "retired": "Lessons retired", "removed": "Cases removed", "tested": "Ideas checked",
@@ -319,26 +335,67 @@ def current_learning_job(request, job_id):
     except jobs.JobRefused as exc:
         raise HTTPException(409, str(exc)) from exc
     value = current["job"]
-    original = jobs.stop_receipt(job, None, _actor(request), context_for(request))
-    result = {"context": context_for(request), "revision": current["revision"],
-            "job": {key: value[key] for key in ("id", "label", "started_at", "finished_at", "state", "can_stop", "problem")},
-            "status": _JOB_STATES[value["state"]], "observations": _result_counts(value["result"]),
-            "original_stop": {"operation": original["operation"]} if original else None,
-            "notice": "Recorded observations describe this task's results. Business improvement needs separate evidence."}
+    try:
+        original = jobs.stop_receipt(job, None, _actor(request), context_for(request))
+    except jobs.JobRefused as exc:
+        raise HTTPException(503, str(exc)) from exc
+    result = _learning_job_projection(request, value, current["revision"], original)
     _history_job(request, job_id)
     if result["context"] != context_for(request):
         raise HTTPException(409, "Your account or workspace changed. Read current tasks again.")
     return result
 
 
+def _learning_job_projection(request, value, revision, original):
+    from .draft_api import context_for
+    status = _JOB_STATES[value["state"]]
+    notice = "Recorded observations describe this task's results. Business improvement needs separate evidence."
+    if value["state"] in {"admitted", "running", "stopping"} and not value["worker_available"]:
+        status = "Last recorded: " + status + ". Active worker unavailable on this server"
+        notice += " This is retained progress, not proof the work stopped, failed or completed. This server cannot request a stop for that worker. Nothing is resumed or repeated automatically."
+    if not value["observation_saved"]:
+        notice += " This server's current progress or result is not confirmed as durably saved. After restart, only the last confirmed observation may remain."
+    if value["retention_problem"]:
+        notice += " " + value["retention_problem"]
+    result = {"context": context_for(request), "revision": revision,
+            "job": {key: value[key] for key in ("id", "label", "started_at", "finished_at", "state", "can_stop", "problem", "worker_available", "observation_saved", "recorded_at", "result_retained")},
+            "status": status, "observations": _result_counts(value["result"]) if value["result_retained"] else [],
+            "original_stop": {"operation": original["operation"]} if original else None,
+            "notice": notice}
+    return result
+
+
 def current_learning_jobs(request):
+    from .draft_api import context_for
     require_permission(request, "view")
-    rows = [current_learning_job(request, job.id) for job in jobs.listed()
-            if job.kind in _LEARNING_KINDS and job.started_by == _actor(request)
-            and job.workspace == _workspace() and _can_see(request, job)]
+    context = context_for(request)
+    try:
+        snapshot = jobs.history_snapshot()
+    except jobs.JobRefused as exc:
+        raise HTTPException(503, str(exc)) from exc
+    rows, sources = [], []
+    for entry in snapshot["entries"]:
+        job = entry["source"]
+        if (job.kind not in _LEARNING_KINDS or job.started_by != _actor(request)
+                or job.workspace != _workspace() or not _can_see(request, job)):
+            continue
+        original = entry["stop_receipt"]
+        if original and (original.get("actor"), original.get("context")) != (_actor(request), context):
+            original = None
+        rows.append(_learning_job_projection(request, entry["job"], entry["revision"], original))
+        sources.append(job)
     require_permission(request, "view")
-    for row in rows:
-        _history_job(request, row["job"]["id"])
+    if context != context_for(request) or any(not _can_see(request, job) for job in sources):
+        raise HTTPException(409, "Your account, workspace or access changed. Read current tasks again.")
+    try:
+        unchanged = jobs.history_unchanged(snapshot)
+    except jobs.JobRefused as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if not unchanged:
+        raise HTTPException(409, "Recent tasks changed while their progress was read. Refresh to read the latest saved observations; no work was repeated.")
+    require_permission(request, "view")
+    if context != context_for(request) or any(not _can_see(request, job) for job in sources):
+        raise HTTPException(409, "Your account, workspace or access changed. Read current tasks again.")
     return {"jobs": rows, "notice": "Choose a recent learning task to read its progress." if rows else
                                     "No recent learning tasks are currently available to your account in this workspace."}
 
@@ -363,7 +420,9 @@ def reviewed_learning_stop(request, job_id, body: JobStopIn):
             receipt = jobs.cancel_reviewed(job, body.revision, body.operation, _actor(request), body.context, before_stop)
         except jobs.JobRefused as exc:
             raise HTTPException(409, str(exc)) from exc
-    return {"receipt": {"requested_at": receipt["requested_at"], "message": "The original reviewed stop was requested. Work stops at its next safe point; completed changes remain."},
+    acknowledged = receipt.get("phase") == "requested"
+    return {"receipt": {"confirmed": acknowledged, "requested_at": receipt["requested_at"], "message": "The original reviewed stop was requested and its acknowledgement is saved. Work stops at its next safe point; completed changes remain." if acknowledged else
+                        "The original stop intent is saved, but its active-worker acknowledgement is unconfirmed. No stop or work was repeated."},
             "current": current_learning_job(request, job_id)}
 
 
@@ -372,9 +431,14 @@ def original_learning_stop(request, job_id, operation):
     job = _history_job(request, job_id)
     if not re.fullmatch(r"[a-f0-9]{32}", operation):
         raise HTTPException(404, "Choose the original saved stop request.")
-    row = jobs.stop_receipt(job, operation, _actor(request), context_for(request))
-    return {"confirmed": row is not None, "current": current_learning_job(request, job_id),
-            "message": "The original reviewed stop request is recorded. No stop or work was repeated." if row else
+    try:
+        row = jobs.stop_receipt(job, operation, _actor(request), context_for(request))
+    except jobs.JobRefused as exc:
+        raise HTTPException(503, str(exc)) from exc
+    acknowledged = row is not None and row.get("phase") == "requested"
+    return {"confirmed": acknowledged, "intent_recorded": row is not None, "current": current_learning_job(request, job_id),
+            "message": "The original reviewed stop request and acknowledgement are saved. This does not establish that work stopped. No stop or work was repeated." if acknowledged else
+                       "The original stop intent is saved, but its active-worker acknowledgement is unconfirmed. Current progress does not prove that request succeeded. Nothing was repeated." if row else
                        "The original stop is unconfirmed. Current progress is shown; its state cannot prove that request succeeded. Nothing was repeated."}
 
 
@@ -400,14 +464,25 @@ async def learning_job_original_stop(request: Request, job_id: str, operation: s
 
 @router.get("/jobs/{job_id}")
 async def job_status(request: Request, job_id: str) -> dict:
+    from .draft_api import context_for
     require_permission(request, "view")
-    return {"job": _job_or_404(request, job_id).view()}
+    context = context_for(request)
+    job = _job_or_404(request, job_id)
+    result = {"job": jobs.current_view(job)}
+    require_permission(request, "view")
+    _job_or_404(request, job_id)
+    if context != context_for(request):
+        raise HTTPException(409, "Your account or workspace changed. Read current tasks again.")
+    return JSONResponse(result, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/jobs/{job_id}/stop")
 async def stop_job(request: Request, job_id: str) -> dict:
     require_permission(request, "view")
     job = _job_or_404(request, job_id)
+    if job.kind in _LEARNING_KINDS:
+        raise HTTPException(409, {"message": "Review this exact learning task before requesting a stop. Nothing was stopped by this call.",
+                                  "open_review": "/learned?learning_task=" + job.id + "#learning-job-history"})
     if not job.cancellable:
         raise HTTPException(status_code=409, detail="This task cannot be stopped part-way. Let it finish.")
     if job.active:

@@ -29,10 +29,11 @@
   }
   function days(seconds) { var d = Math.round(seconds / 86400); return d + (d === 1 ? ' day' : ' days'); }
 
+  document.addEventListener("lightwork:notice-proposal-saved", function () { load(); });
   function load() {
     return R.call('GET', API + '/records').then(function (body) {
       data = body;
-      say('');
+      if (statusEl.textContent.indexOf('Loading') === 0) say('');
       render();
     }).catch(function (f) {
       if (f && f.status === 409) { say('Choose a workspace first, then come back to this page.'); return; }
@@ -223,12 +224,13 @@
   }
 
   function reviewProposal(p, decision) {
-    R.confirm(decision === 'approved' ? 'Accept this suggested update? You must not be the person who suggested it.' : 'Reject this suggested update?', decision === 'approved' ? 'Accept' : 'Reject').then(function (ok) {
-      if (!ok) return;
-      R.call('POST', API + '/update-proposals/' + encodeURIComponent(p.proposal_id) + '/review', { decision: decision, expected_revision: p.revision, idempotency_key: R.newKey() })
-        .then(function () { say(decision === 'approved' ? 'Update accepted.' : 'Update rejected.'); return load(); })
-        .catch(function (f) { fail(f, 'review the update'); });
-    });
+    R.call('GET', '/api/v1/privacy/notice-proposals/proposal?identity=' + encodeURIComponent(p.proposal_id)).then(function (card) {
+      var message = card.notice + ' · based on version ' + card.base_version + '. Reasons: ' + card.reasons.join('; ') + '.\n' + card.references.map(function (ref) { return ref.label + (ref.version ? ' · version ' + ref.version : '') + '. ' + ref.source_name + '. ' + ref.citation_labels.join('; '); }).join('\n') + '\n' + card.notice_scope;
+      return R.confirm(message + (decision === 'approved' ? '\nAccept this recorded proposal? You must be a different person from its author.' : '\nReject this proposal?'), decision === 'approved' ? 'Accept recorded proposal' : 'Reject').then(function (ok) {
+        if (!ok) return;
+        return R.call('POST', API + '/update-proposals/' + encodeURIComponent(p.proposal_id) + '/review', {decision: decision, expected_revision: card.revision, idempotency_key: R.newKey()}).then(function () { say(decision === 'approved' ? 'Recorded proposal accepted. Nothing was published.' : 'Proposal rejected.'); return load(); });
+      });
+    }).catch(function (f) { fail(f, 'review the update'); });
   }
 
   // ---- approval rules -------------------------------------------------------
@@ -274,41 +276,8 @@
 
   document.getElementById('png-release-form').addEventListener('submit', function (ev) {
     ev.preventDefault();
-    var existing = document.getElementById('png-notice').value;
-    var newName = (document.getElementById('png-notice-name').value || '').trim();
-    if (!existing && !newName) { say('Choose a notice or give the new notice a name.'); return; }
-    var noticeId = existing || R.slug(newName, 'privacy-notice');
-    var jur = checkedValues('jurisdiction');
-    var loc = checkedValues('locale');
-    if (!jur.length) { say('Choose where the notice applies.'); return; }
-    if (!loc.length) { say('Choose at least one language.'); return; }
-    var from = R.toEpoch(document.getElementById('png-from').value);
-    var until = R.toEpoch(document.getElementById('png-until').value);
-    var keep = R.toEpoch(document.getElementById('png-keep').value);
-    if (!from || !until || !keep || until <= from || keep < until) { say('Check the dates: it must stop applying after it takes effect, and the record must be kept at least until then.'); return; }
-    var files = ['png-file-content', 'png-file-policy', 'png-file-config'].map(function (id) { return document.getElementById(id).files[0]; });
-    if (files.some(function (f) { return !f; })) { say('Choose all three files.'); return; }
-    var latest = data.releases.filter(function (r) { return r.notice_id === noticeId; }).reduce(function (n, r) { return Math.max(n, r.version); }, 0);
-    say('Saving…');
-    Promise.all(files.map(R.fingerprint)).then(function (fps) {
-      return R.call('PUT', API + '/releases/' + encodeURIComponent(noticeId) + '/versions', {
-        property_id: R.slug(document.getElementById('png-property').value, 'website'),
-        jurisdictions: jur, locales: loc,
-        content_sha256: fps[0].sha256, policy_sha256: fps[1].sha256, configuration_sha256: fps[2].sha256,
-        consent_publication_ref: R.slug(document.getElementById('png-publication').value, 'consent-release'),
-        approval_policy_id: document.getElementById('png-policy').value,
-        effective_from: from - 86399, effective_until: until, retained_until: keep,
-        update_proposal_ref: null, expected_latest_version: latest, idempotency_key: R.newKey(),
-      });
-    }).then(function () {
-      document.getElementById('png-release-panel').hidden = true;
-      document.getElementById('png-release-form').reset();
-      say('Version saved as a draft. Send it for approval when it is ready.');
-      return load();
-    }).catch(function (f) {
-      if (f && f.status === 409) { say('Someone saved another version of this notice at the same time. The list has been refreshed; try again.'); load(); return; }
-      fail(f, 'save the version');
-    });
+    if (window.LightworkPrivacyNoticeVersions) window.LightworkPrivacyNoticeVersions.save();
+    else say('The protected version controls are still loading. Nothing was saved.');
   });
 
   // ---- which version is live ------------------------------------------------

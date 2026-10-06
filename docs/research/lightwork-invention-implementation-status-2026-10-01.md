@@ -83,6 +83,16 @@ also use the same native authority in the page and Copilot, with current-state
 readback after an uncertain save. Neither addition implements the proposed
 research mechanisms or changes the status counts.
 
+The next October 5 follow-through adds ordinary self-coaching question authoring
+through the native page and typed Copilot, exact current-collection checks,
+original-operation recovery and private draft restoration. The native checker
+consumes the actual saved questions; offline answer/judge functions establish
+that connection without claiming live quality. Learning work also retains
+bounded encrypted observations and original stop acknowledgements across a
+single-host process restart. An unavailable former worker stays unresolved,
+not completed or automatically replayed. These narrow F03/F04/F05 operating
+gaps; they do not establish an entire invention or alter the status counts.
+
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
 | F01 | Partial product support | [Outcome pilots](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py#L1-L26), [outcome accounting](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/outcome_accounting.py#L1-L8), and [candidate promotion](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/candidate_promotion.py#L1-L15) cover separate stages. The source does not establish one completed customer-owned path from selected work through measured result and recovery. October 5 adds a stock installed release adapter for bounded taught-rule workflows on a single-computer installation. Its native UI and Copilot bind exact practice, owner authorization, independent review, publication, actual release-run failure checks and retained-rule restoration. Practice establishes readiness, not measured accuracy or business lift; owned, acyclic rule-only nested workflows now share the complete pinned release and restoration path; connected actions, shared-storage qualification and the general measured-result path remain open. Custom deployment composition still refuses missing adapters: [composition refuses its absence](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/candidate_promotion_composition.py#L281-L315). |

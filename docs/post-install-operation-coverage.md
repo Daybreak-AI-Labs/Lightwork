@@ -413,9 +413,11 @@ on the strength of component test counts alone.
   observations and review a cooperative stop against the exact current task.
   Interrupted stop replies recover the original request without another stop.
   The phone journey distinguishes stopping from stopped, refuses another account
-  and stale access, and clears old-account results. These are the current process's
-  bounded 40 records; a restart can lose them. Missing records never prove failure
-  or authorize an automatic retry. Stopping does not undo completed work.
+  and stale access, and clears old-account results. The October 5 follow-through
+  retains these bounded 40 observations and original stop acknowledgements in
+  protected storage across restarts, as recorded below. Missing records never
+  prove failure or authorize an automatic retry. Stopping does not undo completed
+  work.
 
 These are bounded native product journeys and installed-package checks, not
 customer-outcome evidence or completion of the 28 research hypotheses.
@@ -447,3 +449,161 @@ matches the saved mapping. An unmatched imported mapping is refused explicitly;
 no saved entries are dropped to fit the editor. Publication remains a separate
 independent decision. This does not supply licensed control text, external task
 execution or customer acceptance of those integrations.
+
+## October 5 self-coaching questions and retained learning work
+
+Learning now provides an ordinary model, question and expected-answer form.
+An installation with no question location can first use Set up learning questions
+on the same page or through Copilot. The reviewed action changes only the existing
+question-location setting through the native Settings writer, chooses Lightwork's
+managed location and keeps existing questions. It changes no learning switch,
+model, schedule or storage option, and makes no AI call. Deployment or workspace
+ownership, stale configuration and current account authority are checked again
+before writing. A retained original setup claim prevents a second setting write
+after an interrupted reply. Current readiness is shown independently; equal
+settings cannot establish the original request's outcome.
+Saved questions can be browsed in named batches, selected, corrected or retired
+through full before/after reviews. Its direct controls and three typed Copilot
+actions review the actual configured model and current shared question collection
+before adding or changing one exact question.
+The current collection, model, account and storage authority are rechecked under
+the native writer lock. Private encrypted recovery copies preserve unsaved text
+for explicit restore; restoring does not add a question or run a check. Questions
+are shared with administrators of this learning storage, and future checks can
+send them to the configured AI providers. The page states both boundaries.
+
+The authenticated 320px journeys performed native and Copilot saves, corrections
+and retirements, recovered lost replies without duplicate effects, refused
+competing changes or withdrawn sources, and restored a private draft after reload.
+Unrelated questions, extra operator fields and source provenance were preserved;
+unsupported imported rows were identified and retained. The native self-coaching
+reader and checker consumed the corrected answers and omitted retired or withdrawn
+questions, with deliberately offline answer and judge functions. A full-length
+Chinese question and expected answer passed the actual save. This proves the
+saved-question connection, not live model
+quality or an improvement in business results. Legacy imports keep unrelated
+fields while stripping imported authoring markers; a matching question from
+another operation cannot confirm the original save. Corrections and retirement
+commit the original private effect marker atomically with the collection change.
+An interrupted final receipt can read that marker even after the selected row
+has been removed; equal replacement text or absence alone cannot prove success.
+Background task refreshes also preserve another panel's selected question and
+Copilot's visible original result instead of replacing the shared context.
+
+The supported single-host SQLite learning store also passed native add, correction,
+retirement, process restart and original-effect recovery. A concrete data-loss
+defect was repaired: an unreadable database or malformed retained row previously
+looked like an empty or partial collection to a writer. Strict writer reads now
+refuse unreadable rows, duplicate metadata and unavailable storage before any
+collection is replaced. Staging and resolution preflight their live, pending and
+rejected histories. Native SQL interruption rolled back both the collection and
+its effect ledger. The existing checker retains its tolerant read behavior.
+This qualifies local SQLite, not PostgreSQL, multiple hosts or live model quality.
+
+Learning's native worker now saves admission before dispatch and retains at most
+40 encrypted observations, bounded result material and original stop receipts.
+Unavailable or corrupt retention refuses admission instead of starting untracked
+work. Saved completion, failure and cooperative stop remain distinguishable from
+an older observation whose worker is no longer available. Restart recovery never
+replays that work. An original stop intent, an acknowledged cancellation request
+and actual worker completion are separate facts; failed acknowledgement storage
+cannot become a confirmed receipt on an identical retry.
+
+Native UI and Copilot journeys exercised actual learning cycles, lost replies,
+stop acknowledgement storage failure, process termination and restart, denied
+accounts and workspaces, and explicitly admitted new work after the old process
+released its ownership. The narrow layout had no overflow. Reading 40 large
+retained observations used two native storage reads and returned a 26,947-byte
+public response without the private result text. Oversized or unreadable results
+show that their result was not retained. Same-host operating-system ownership
+locks preserve the existing three-worker limit and prevent overlapping processes
+from repeating a learning kind. This qualifies one host with shared local data;
+it does not qualify multiple hosts or automatically resume interrupted work.
+
+## October 5 notice update proposals
+
+Privacy notices now provide an ordinary update form through the native page and
+Copilot. The person selects the named latest notice, its real current consent
+publication and retained regulatory documents from independently approved
+research sources. Three file pickers calculate fingerprints privately; the
+review shows the original file names and sizes, reasons and named references.
+The native proposal retains fingerprints and references, not the files' contents.
+The page explicitly separates those records from examination of the files, a
+legal applicability decision and publication.
+
+Saving reserves the actual research and consent stores before the notice writer,
+then rechecks current authority, the latest base and source eligibility inside
+that writer. Waiting for a lock cannot bypass retention or review expiry. The
+existing direct proposal route uses the same ordered reservation. Another
+administrator accepts or rejects the proposal. An accepted proposal can then
+be selected in the existing notice-version form; original files must match and
+the current approved references, base and account are rechecked before creating
+a draft version. Creating that version does not publish it.
+
+The authenticated default-store phone journey opened Copilot's protected form,
+kept file selections through a same-account selection change, saved a proposal,
+and recovered the exact original lost response after reload. Self-acceptance
+was refused; another administrator accepted it. Matching original files created
+the separate draft version, and an interrupted version reply read its exact
+native receipt without creating another version. A changed document refused
+the reviewed save while retaining selected files. Separate original-operation
+attribution and final read permissions prevent matching unrelated records or
+revoked access from producing a confirmed result. External publication and
+legal review remain their own required decisions.
+
+## October 5 questionnaire work across panels
+
+A same-account Copilot selection now returns the exact live questionnaire form
+to its native page, with entered questions, choices, conditions and the existing
+private recovery copy intact. The form checks current source and account before
+keeping an unsubmitted review. A competing publication invalidates that review
+while preserving editable work for an explicit comparison and fresh review.
+Interrupted original saves keep their own sealed request and recover the original
+version without another save. Account changes or loss of administrator access
+clear private page details. The native 320px journey covered those transitions,
+reload and explicit draft restoration, actual lost replies, independent
+publication and real administrator demotion; it made no provider calls.
+
+## October 5 private mapping drafts
+
+Individual task-mapping choices now have encrypted private recovery copies,
+ordinary comparison and explicit restore. Restoration reads the named current
+control pages and refuses changed scopes or saved mapping revisions before
+replacing any entered work. Choosing a different mapping or reloading current
+choices asks before replacing an edited draft. A failed reload keeps the prior
+individual choices. A same-account Copilot selection keeps editable work;
+genuine account or workspace changes clear private page details.
+
+The original business-save reminder is separate from the private draft copy.
+It remains bound to its original account/workspace and can be reopened after
+switching away and back. Confirming a business save cannot falsely discard an
+older unresolved recovery save, or mark newer text as protected while a delayed
+clear is still completing. Those newer changes are saved as a new recovery copy.
+
+Native 320px journeys covered multiple evidence jobs, names and defaults,
+reload/restore, independent-tab conflicts, scope and mapping changes, failed
+reload, interrupted business replies, account switching and denied access.
+The real encrypted draft store also exercised delayed clearing with new edits
+both during initial loading and after a write, and an interrupted earlier recovery
+save. No provider calls were made. Recovery
+refuses a complete copy above 1 MiB, 20,000 objects or 25 nesting levels instead
+of dropping choices. Comparison explicitly limits its display to 20 changed
+controls and 10 evidence jobs per side; the complete copy remains retained.
+
+## October 5 exact provider-spending replays
+
+An unchanged original spending receipt now returns after full database-integrity
+verification without rewriting rows, committing or resealing the database. The
+same native writer reservation and authority lock remain required. New attempts,
+uncertain charges, changed receipts and fresh holds still persist normally; zero
+cost alone cannot trigger this shortcut. The receipt comparison captures its
+original nested values before the operation runs.
+
+A disposable native 40,000-receipt history verified fresh reserve/settlement,
+exact replay, cap and duplicate-attempt refusals, conflicting charges, uncertain
+admission and tampering with restored file metadata. Exact unchanged settlement
+replays used one full digest and no SQL writes, commits or seal writes, keeping
+the original database and seal bytes. This removes redundant replay work. Fresh
+active AI calls still verify the complete retained history; the addition is not
+a claim that arbitrary history size has constant cost or that a live financial
+integration has been qualified.

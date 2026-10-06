@@ -14,31 +14,35 @@
   var kinds = {boolean: 'Yes or no', integer: 'Whole number', single_choice: 'Choose one', multi_choice: 'Choose several'};
   var dirty = false;
   var source = null, draft = null, fields = {}, pending = null, busy = false, generation = 0, handoff = null;
-  var recoveryCopy = null;
+  var recoveryCopy = null, sourceChecked = false, requests = new Set();
   var storage = 'lightwork.questionnaire.review.v1';
   function el(tag, text, parent, cls) { var node = R.el(tag, cls || '', text); if (parent) parent.appendChild(node); return node; }
   function button(label, parent, handler) { var b = el('button', label, parent, 'btn btn--ghost'); b.type = 'button'; b.addEventListener('click', handler); return b; }
   function say(text) { status.textContent = text; }
-  function fail(error) { say(error && error.message || R.errorText(error, 'complete this questionnaire request')); }
+  function fail(error) { if (error && (error.status === 401 || error.status === 403)) { clearPrivate(); return; } say(error && error.message || R.errorText(error, 'complete this questionnaire request')); }
   function valid(started) { return started === generation && (!handoff || handoff.active()); }
   function lock(on) {
     busy = on;
     panel.querySelectorAll('input,select,textarea,button').forEach(function (control) { control.disabled = on; });
-    if (!on) { apply.disabled = !confirm.checked || !pending || pending.uncertain; prepare.disabled = !!(pending && pending.uncertain); select.disabled = !!(pending && pending.uncertain); }
+    if (!on) { apply.disabled = !sourceChecked || !confirm.checked || !pending || pending.uncertain; prepare.disabled = !sourceChecked || !!(pending && pending.uncertain); select.disabled = !!(pending && pending.uncertain); }
   }
   async function call(method, url, body) {
     var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 30000);
+    requests.add(controller);
     var options = {method: method, credentials: 'same-origin', signal: controller.signal, headers: {Accept: 'application/json'}};
     if (body !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
     try {
-      var response = await fetch(url, options), result = await response.json();
+      var response = await fetch(url, options);
+      if (response.redirected || response.status === 401 || response.status === 403) { var denied = new Error('Sign in with current access before opening private questionnaire details.'); denied.status = response.status === 403 ? 403 : 401; throw denied; }
+      var result = await response.json();
       if (!response.ok) { var error = new Error(window.mvPlainDetail ? window.mvPlainDetail(result.detail) || 'This request could not be completed.' : 'This request could not be completed.'); error.status = response.status; throw error; }
       return result;
     } catch (error) {
       if (error && error.status) throw error;
       throw new Error(controller.signal.aborted ? 'This check timed out. Keep your draft and check the original save before another attempt.' : 'The reply could not be read. Keep your draft and check the original save before another attempt.');
-    } finally { clearTimeout(timer); }
+    } finally { requests.delete(controller); clearTimeout(timer); }
   }
+  function cancelRequests() { requests.forEach(function (controller) { controller.abort(); }); requests.clear(); }
   function recoveryReady() {
     if (recoveryCopy || !window.mvDraftRecovery) return;
     recoveryCopy = window.mvDraftRecovery.create({host: document.getElementById('cqb-draft'), key: 'compliance-questionnaire-designer',
@@ -179,13 +183,13 @@
     if (!valid(started)) return;
     var saved;
     try { saved = JSON.parse(sessionStorage.getItem(storage) || 'null'); } catch (_) { saved = null; }
-    dirty = false; source = body; draft = body.design; select.value = body.source;
+    dirty = false; source = body; draft = body.design; select.value = body.source; sourceChecked = true;
     if (saved) pending = {token: saved.token, uncertain: true};
     render(); recoveryReady();
     document.getElementById("cqb-update-source").hidden = !source.source;
     document.getElementById("cqb-latest").hidden = true;
     if (saved) {
-      if (saved.context !== source.context) { work.textContent = ''; select.disabled = true; prepare.disabled = true; say('An original save belongs to another account or workspace. Return to that account before checking it.'); return; }
+      if (saved.context !== source.context) { clearPrivate(); say('An original save belongs to another account or workspace. Return to that account before checking it.'); return; }
       pending = {token: saved.token, uncertain: true}; recover.hidden = false; prepare.disabled = true; select.disabled = true;
       say('A previous save needs confirmation. Check its original result before creating another version.');
     }
@@ -211,8 +215,8 @@
     try {
       var fresh = await call('GET', API + '/source?identity=' + encodeURIComponent(source.source));
       if (!valid(started)) return;
-      if (fresh.context !== original) throw new Error('Your account or workspace changed. Private details were cleared; return to the original account before continuing.');
-      dropReview(); source.source_revision = fresh.source_revision; source.source_version = fresh.source_version;
+      if (fresh.context !== original) { clearPrivate(); return; }
+      dropReview(); source.source_revision = fresh.source_revision; source.source_version = fresh.source_version; sourceChecked = true;
       var current = document.getElementById('cqb-latest-preview'); current.replaceChildren();
       el('p', fresh.design.name + ' · version ' + fresh.source_version, current);
       el('p', 'Your draft has been kept. Changes from this current version are not merged automatically. Compare all questions and rules below before preparing your new version. Existing versions and assessments will remain unchanged.', current, 'muted');
@@ -225,7 +229,7 @@
   select.addEventListener('change', async function () { if (busy || pending && pending.uncertain) return; var selected = select.value, previous = source && source.source || ''; if (dirty && !(await R.confirm('Change the starting questionnaire? The current draft will be replaced. Its private recovery copy is kept until you save or discard it.', 'Change questionnaire'))) { select.value = previous; return; } var started = generation; lock(true); try { await loadSource(selected, started); } catch (error) { if (valid(started)) fail(error); } finally { if (valid(started)) lock(false); } });
   work.addEventListener('input', function () { dirty = true; dropReview(); if (recoveryCopy) document.getElementById('cqb-draft').dispatchEvent(new Event('input', {bubbles: true})); });
   prepare.addEventListener('click', async function () {
-    if (busy || !source || pending && pending.uncertain) return;
+    if (busy || !sourceChecked || !source || pending && pending.uncertain) return;
     var started = generation; read(); lock(true);
     try {
       var body = await call('POST', API + '/review', {context: source.context, source: source.source, source_revision: source.source_revision, design: draft});
@@ -234,7 +238,7 @@
     } catch (error) { if (valid(started)) fail(error); }
     finally { if (valid(started)) lock(false); }
   });
-  confirm.addEventListener('change', function () { apply.disabled = !confirm.checked || busy || !pending || pending.uncertain; });
+  confirm.addEventListener('change', function () { apply.disabled = !sourceChecked || !confirm.checked || busy || !pending || pending.uncertain; });
   document.getElementById('cqb-edit').addEventListener('click', function () { if (busy || pending && pending.uncertain) return; dropReview(); work.scrollIntoView({block: 'start'}); });
   function accepted(body) {
     dirty = false; pending = null; keepPending(); reviewPanel.hidden = true; recover.hidden = true; say(body.message);
@@ -243,7 +247,7 @@
     if (handoff) finish({status: 'accepted', confirmed: true, result: body.result});
   }
   apply.addEventListener('click', async function () {
-    if (busy || !pending || !confirm.checked || pending.uncertain) return;
+    if (busy || !sourceChecked || !pending || !confirm.checked || pending.uncertain) return;
     var started = generation; pending.uncertain = true; keepPending(); lock(true);
     try { var body = await call('POST', API + '/apply', {token: pending.token, confirmed: true}); if (valid(started)) accepted(body); }
     catch (error) { if (valid(started)) { reviewPanel.hidden = true; recover.hidden = false; say('The save response is not confirmed. Check the original save before another attempt. ' + R.errorText(error, 'confirm the saved version')); } }
@@ -258,7 +262,52 @@
   });
   function finish(result) { var current = handoff; handoff = null; if (!current) return; current.parent.insertBefore(panel, current.next && current.next.parentNode === current.parent ? current.next : null); panel.hidden = true; current.resolve(result); }
   document.getElementById('cqb-close').addEventListener('click', function () { if (busy) return; if (handoff) finish(pending && pending.uncertain ? {status: 'unconfirmed'} : null); else panel.hidden = true; });
-  document.addEventListener('lightwork:copilot-context-changed', function () { generation++; if (recoveryCopy) recoveryCopy.dispose(); recoveryCopy = null; document.getElementById('cqb-draft').replaceChildren(); document.getElementById('cqb-latest-preview').replaceChildren(); document.getElementById('cqb-latest').hidden = true; work.textContent = ''; preview.textContent = ''; reviewPanel.hidden = true; source = null; draft = null; busy = false; say('Your account or selection changed. Private questionnaire details were cleared. Return to the original account to check a pending save.'); if (handoff) finish({status: 'unconfirmed'}); });
+  function clearPrivate() {
+    generation++; cancelRequests();
+    if (recoveryCopy) recoveryCopy.dispose(); recoveryCopy = null;
+    document.getElementById('cqb-draft').replaceChildren(); document.getElementById('cqb-latest-preview').replaceChildren(); document.getElementById('cqb-latest').hidden = true;
+    work.replaceChildren(); preview.replaceChildren(); select.replaceChildren(); document.getElementById('cqb-notice').textContent = '';
+    reviewPanel.hidden = true; recover.hidden = true; confirm.checked = false;
+    source = null; draft = null; fields = {}; pending = null; sourceChecked = false; dirty = false; lock(false);
+    // Keep the sealed original request in this tab for its original account.
+    say('Your account, workspace or access changed. Private questionnaire details were cleared. Return to the original account to check a pending save.');
+    if (handoff) finish({status: 'unconfirmed'});
+  }
+  async function checkSelection() {
+    if (!source) return;
+    var original = source, started = ++generation; cancelRequests();
+    if (handoff && !handoff.active()) { finish(pending && pending.uncertain ? {status: 'unconfirmed'} : null); panel.hidden = false; }
+    sourceChecked = false; lock(true); say('Checking your current account and starting version. Your draft is kept.');
+    try {
+      var fresh = await call('GET', API + '/source?identity=' + encodeURIComponent(original.source));
+      if (!valid(started)) return;
+      if (fresh.context !== original.context) { clearPrivate(); return; }
+      recoveryReady();
+      if (fresh.source !== original.source || fresh.source_revision !== original.source_revision || fresh.source_version !== original.source_version) {
+        dropReview();
+        say('The starting questionnaire changed. Your editable draft is kept. Review the current starting version before preparing another save.');
+      } else { sourceChecked = true; say('Your current account and starting version are checked. Your draft and recovery copy are kept.'); }
+      if (pending && pending.uncertain) { reviewPanel.hidden = true; recover.hidden = false; say('Your draft and original request are kept. Check the original save before another attempt.'); }
+    } catch (error) {
+      if (!valid(started)) return;
+      if (error.status === 401 || error.status === 403) { clearPrivate(); return; }
+      // A missing/replaced source may still have an accepted historical receipt.
+      // Check the current account before leaving its private draft visible.
+      if (error.status === 404 || error.status === 409) {
+        try { var scope = await call('GET', API + '/catalog'); if (!valid(started)) return; if (scope.context !== original.context) { clearPrivate(); return; } }
+        catch (denied) { if (!valid(started)) return; if (denied.status === 401 || denied.status === 403) { clearPrivate(); return; } }
+      }
+      if (!valid(started)) return;
+      say('Your draft is kept, but current access and the starting version could not be confirmed. Saving is paused. Check the current details before continuing.');
+      button('Check current account and starting version', status, checkSelection);
+      if (pending && pending.uncertain) { reviewPanel.hidden = true; recover.hidden = false; }
+    } finally { if (valid(started)) lock(false); }
+  }
+  document.addEventListener('lightwork:copilot-context-changed', function (event) { if (event.detail && event.detail.reason === 'selection') checkSelection(); else clearPrivate(); });
+  document.addEventListener('lightwork:account-context-changed', clearPrivate);
+  document.addEventListener('lightwork:workspace-changed', clearPrivate);
+  window.addEventListener('lightwork:context-changed', clearPrivate);
+  window.addEventListener('pagehide', function () { generation++; cancelRequests(); });
   window.LightworkComplianceQuestionnaire = {open: open, openCreate: function (options) {
     if (busy || handoff || !options || typeof options.active !== 'function' || !options.active()) return Promise.reject(new Error('The questionnaire form is unavailable.'));
     return new Promise(function (resolve, reject) { handoff = {parent: panel.parentNode, next: panel.nextSibling, resolve: resolve, active: options.active}; options.host.appendChild(panel); open('', options.context).catch(function (error) { finish({status: 'unconfirmed'}); reject(error); }); });

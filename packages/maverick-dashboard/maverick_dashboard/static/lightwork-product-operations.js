@@ -150,6 +150,27 @@
           else { var mappingLink = node('a', mappingLabel, mappingDestination); mappingLink.href = '/compliance/scope-actions/mapping'; mappingLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'privacy_notice_proposal_form') {
+          var noticeProposal = entry[1], noticeStarted = generation;
+          if (!noticeProposal || Array.isArray(noticeProposal) || Object.keys(noticeProposal).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(noticeProposal.context || '')) return;
+          var noticeDestination = node('dd', undefined, list), noticeForm = window.LightworkPrivacyNoticeProposals;
+          if (noticeForm && typeof noticeForm.open === 'function') button('Prepare a notice update', noticeDestination, async function (event) {
+            if (!active(noticeStarted) || busy) return;
+            event.currentTarget.disabled = true;
+            try {
+              var opened = await noticeForm.open(noticeProposal.context);
+              if (!active(noticeStarted)) return;
+              status.textContent = opened ? 'The protected notice-update form is open.' :
+                'This form could not be opened. Check current access on the privacy-notices page.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) {
+              if (active(noticeStarted)) status.textContent = 'This form could not be opened. Check current access on the privacy-notices page.';
+            } finally { if (active(noticeStarted)) event.currentTarget.disabled = false; }
+          });
+          else { var noticeLink = node('a', 'Prepare a notice update', noticeDestination); noticeLink.href = '/privacy/notice-governance#notice-update-proposal'; noticeLink.className = 'btn btn--ghost'; }
+          return;
+        }
         if (entry[0] === 'installed_practice_environment') {
           var environment = entry[1], environmentStarted = generation;
           if (!environment || Array.isArray(environment) || Object.keys(environment).join(',') !== 'context' ||
@@ -668,7 +689,7 @@
   window.addEventListener('pagehide', function () { generation += 1; cancelRequests(); });
   document.addEventListener('lightwork:copilot-selection', function (event) {
     generation += 1; cancelRequests(); overrideSelection = event.detail && event.detail.selection || null; catalog = null; selected = null; clear(formHost); clear(buttons);
-    document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {detail: {reason: 'selection'}}));
     if (!panel.hidden) refresh();
   });
   if (['/approvals', '/oversight'].includes(window.location.pathname)) window.addEventListener('hashchange', function () {

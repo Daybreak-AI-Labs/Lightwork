@@ -83,6 +83,7 @@
         <label for="png-policy">Approval rule
           <select id="png-policy" class="select" required></select>
         </label>
+        <label>Accepted update (optional)<select class="select" id="png-accepted-proposal"><option value="">Create without a suggested update</option></select></label>
         <label for="png-publication">Consent banner release it goes with
           <input id="png-publication" class="input" maxlength="80" required placeholder="For example: Spring 2026 banner">
         </label>
@@ -117,6 +118,8 @@
           <input id="png-file-config" type="file" class="input" required>
         </label>
       </div>
+      <p class="muted" id="png-accepted-status" role="status"></p>
+      <button type="button" class="btn btn--ghost" id="png-version-readback" hidden>Check original version save</button>
       <div style="display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.75rem;">
         <button type="submit" class="btn btn--primary">Save version</button>
         <button type="button" class="btn btn--ghost" id="png-release-cancel">Cancel</button>
@@ -148,8 +151,9 @@
     <p id="png-eff-result" role="status" aria-live="polite"></p>
   </div>
 
+  {% include "_privacy_notice_proposals.html" %}
   <div class="section-head"><h2>Suggested updates</h2></div>
-  <p class="muted">Changes suggested because a privacy law changed. A second person reviews each one.</p>
+  <p class="muted">Recorded fingerprints and research references for an independent decision. Original files are not retained here; acceptance does not publish a notice or establish legal applicability.</p>
   <div class="panel" id="png-proposals"><p class="muted">Loading…</p></div>
 
   <div class="section-head"><h2>Approval rules</h2>
@@ -387,6 +391,7 @@
 </details>
 <script src="/static/lightwork-record-workflows.js" defer></script>
 <script src="/static/lightwork-privacy-notice-governance.js" defer></script>
+<script src="/static/lightwork-privacy-notice-proposals.js" defer></script>
 {% if can_admin %}
 <script>
 (function () {

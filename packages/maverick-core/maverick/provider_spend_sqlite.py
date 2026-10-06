@@ -370,7 +370,8 @@ def mutate(legacy: Path, period: str, provider: str, operation, cap, *,
                 cap._validate_receipts(total, before)
             else:
                 total, before = _bucket(connection, period, provider, cap)
-            receipts = {key: dict(value) for key, value in before.items()}
+            original_receipts = json.dumps(before, allow_nan=False)
+            receipts = json.loads(original_receipts)
             if attempt_claim is not None:
                 key = cap._operation_attempt_key(
                     str(attempt_claim["scope_sha256"]),
@@ -394,6 +395,13 @@ def mutate(legacy: Path, period: str, provider: str, operation, cap, *,
             if set(before) - set(receipts):
                 # A normal mutation must never silently discard charge evidence.
                 raise cap.ProviderAccountingUnavailable
+            if (attempt_claim is None and new_total == total
+                    and json.dumps(receipts, allow_nan=False) == original_receipts):
+                # Exact replay still verified the whole seal and original rows
+                # under the authority lock and native writer reservation. No
+                # counter, receipt or attempt changed: keep their durable bytes.
+                connection.rollback()
+                return result
             if attempt_claim is not None:
                 connection.execute(
                     "INSERT INTO attempts VALUES(?, ?, ?, ?, ?)",

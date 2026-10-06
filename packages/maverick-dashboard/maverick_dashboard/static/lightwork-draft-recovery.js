@@ -167,6 +167,7 @@
       return words.charAt(0).toUpperCase() + words.slice(1);
     }
     function compare(saved, current) {
+      if (typeof options.compare === 'function') { contents.replaceChildren(); options.compare(contents, saved, current); return; }
       var before = flatten(saved, '', '', []), after = flatten(current, '', '', []), rows = {}, order = [];
       before.forEach(function (row) { if (!rows[row.key]) { rows[row.key] = {row:row, saved:'(empty)', current:'(empty)'}; order.push(row.key); } rows[row.key].saved = row.value; });
       after.forEach(function (row) { if (!rows[row.key]) { rows[row.key] = {row:row, saved:'(empty)', current:'(empty)'}; order.push(row.key); } rows[row.key].current = row.value; });
@@ -298,11 +299,18 @@
     var ready = initialize();
     return {ready:ready, changed:markChanged, save:saveChanged, panel:panel,
       clear:async function () {
+        var beforeClear;
+        try { beforeClear = JSON.stringify(read()); } catch (_error) { return false; }
         await ready;
-        if (running || blocked) return false;
+        if (running || blocked || pendingOperation || disposed) return false;
         root.clearTimeout(timer);
         if (!(await persist(null))) return false;
-        changed = false; lastSaved = JSON.stringify(read()); compactControls(); return true;
+        if (disposed) return true;
+        lastSaved = beforeClear;
+        try { changed = JSON.stringify(read()) !== beforeClear; } catch (_error) { changed = true; }
+        compactControls();
+        if (changed) schedule();
+        return true;
       },
       dispose:function () { disposed = true; root.clearTimeout(timer); root.removeEventListener('beforeunload', unload); options.host.removeEventListener('input', markChanged); options.host.removeEventListener('change', markChanged); }};
   }

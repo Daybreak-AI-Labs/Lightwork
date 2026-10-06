@@ -62,13 +62,13 @@ def execute(request, _selection, arguments, prepared, operation):
     _reviewed(arguments, prepared)
     result = native.reviewed_learning_stop(request, arguments["job"], native.JobStopIn(
         context=prepared["context"], revision=prepared["revision"], operation=operation, confirm=True))
-    return Outcome("confirmed", result["receipt"]["message"], _details(result["current"]))
+    return Outcome("confirmed" if result["receipt"]["confirmed"] else "unconfirmed", result["receipt"]["message"], _details(result["current"]))
 
 
 def recover(request, _selection, arguments, prepared, operation, *, read_only=False):
     _reviewed(arguments, prepared)
     row = native.original_learning_stop(request, arguments["job"], operation)
-    if not row["confirmed"] and not read_only:
+    if not row["confirmed"] and not row["intent_recorded"] and not read_only:
         return None
     return Outcome("replayed" if row["confirmed"] else "unconfirmed", row["message"], _details(row["current"]))
 

@@ -1006,7 +1006,12 @@ def _load_raw(path: str | Path) -> dict:
     """The file's raw JSON dict (tolerant: ``{}`` on any error). Writers merge
     into THIS, not the normalized :func:`load_eval_corpus` view -- rewriting the
     normalized view would silently strip operator-authored per-case fields and
-    unknown keys from the live ground-truth file."""
+    unknown keys from the live ground-truth file. World-backed writer reads are
+    strict: a partial or unavailable retained collection cannot be rewritten."""
+    kind = _world_corpus_kind(path)
+    if kind is not None:
+        from . import learning_store
+        return learning_store.load_corpus_db(kind, strict=True)
     try:
         data = json.loads(_read_json_text(path))
         if isinstance(data, dict):
@@ -1042,6 +1047,11 @@ def _add_fresh(dest_path: Path, dest_raw: dict, key: str,
 
 def _stage_locked(corpus_path: str | Path, key: str,
                   candidates: list[dict]) -> int:
+    # These histories determine duplicate/refusal decisions. Refuse unreadable
+    # native rows before touching the pending family, rather than forgetting them.
+    if _world_corpus_kind(corpus_path) is not None:
+        for path in (corpus_path, pending_corpus_path(corpus_path), rejected_corpus_path(corpus_path)):
+            _load_raw(path)
     known = {c["goal"] for c in load_eval_corpus(corpus_path).get(str(key), [])}
     known |= {c["goal"] for c in load_pending(corpus_path).get(str(key), [])}
     known |= set(load_rejected(corpus_path).get(str(key), []))
@@ -1096,6 +1106,11 @@ def resolve_pending(corpus_path: str | Path, key: str, *,
     from .file_lock import cross_process_lock
     with _corpus_lock, cross_process_lock(Path(corpus_path)), \
             _corpus_rmw_lock(corpus_path):
+        # A pending decision can write all three families. Check every retained
+        # family before the first effect; ordinary checker reads stay tolerant.
+        if _world_corpus_kind(corpus_path) is not None:
+            for path in (corpus_path, pending_corpus_path(corpus_path), rejected_corpus_path(corpus_path)):
+                _load_raw(path)
         rows = load_pending(corpus_path).get(str(key), [])
         if accept_all:
             rej_idx = {int(i) for i in (reject or [])}
@@ -1124,7 +1139,8 @@ def resolve_pending(corpus_path: str | Path, key: str, *,
         _write_corpus_file(pending_corpus_path(corpus_path), pending_raw,
                            seal=True)
         if rejected_rows:
-            rej = load_rejected(corpus_path)
+            rej = (_load_raw(rejected_corpus_path(corpus_path))
+                   if _world_corpus_kind(corpus_path) is not None else load_rejected(corpus_path))
             seen = rej.get(str(key), [])
             seen.extend(c["goal"] for c in rejected_rows
                         if c["goal"] not in set(seen))
@@ -1241,6 +1257,230 @@ def _merge_corpus_rows(dest: dict, incoming: dict) -> int:
     return added
 
 
+def _authoring_raw(corpus_path: str | Path) -> dict:
+    """Strict bounded read: an unreadable corpus must never become an empty write."""
+    kind = _world_corpus_kind(corpus_path)
+    try:
+        if kind is not None:
+            from . import learning_store
+            text = json.dumps(learning_store.load_corpus_db(kind, strict=True))
+        else:
+            from .crypto_at_rest import unseal
+            from .file_lock import _windows_extended_path
+            with Path(_windows_extended_path(corpus_path)).open("rb") as handle:
+                encoded = handle.read(8 * 1024 * 1024 + 1)
+            if len(encoded) > 8 * 1024 * 1024:
+                raise ValueError("The test-question collection is too large to change here.")
+            text = unseal(encoded).decode("utf-8")
+    except FileNotFoundError:
+        return {}
+    if len(text.encode("utf-8")) > 5 * 1024 * 1024:
+        raise ValueError("The test-question collection is too large to change here.")
+    raw = json.loads(text)
+    if not isinstance(raw, dict):
+        raise ValueError("The current test questions could not be read safely.")
+    # This also refuses non-finite numbers in existing operator-authored fields.
+    json.dumps(raw, allow_nan=False)
+    return raw
+
+
+def _corpus_revision(raw: dict) -> str:
+    return hashlib.sha256(json.dumps(raw, sort_keys=True, separators=(",", ":"),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def corpus_authoring_state(corpus_path: str | Path) -> dict:
+    """Current bounded counts and exact corpus revision, without question text."""
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        raw = _authoring_raw(corpus_path)
+        return {"revision": _corpus_revision(raw),
+                "counts": {str(key): len(value) for key, value in raw.items() if isinstance(value, list)},
+                "total_cases": sum(len(value) for value in raw.values() if isinstance(value, list))}
+
+
+def review_corpus_case(corpus_path: str | Path, key: str, goal: str,
+                       expected: str) -> dict:
+    """Review one ordinary question against the same live store the checker reads."""
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        raw = _authoring_raw(corpus_path)
+        rows = raw.get(key, [])
+        if not isinstance(rows, list):
+            raise ValueError("This model's test questions need attention before another can be added.")
+        if any(isinstance(row, Mapping) and row.get("goal") == goal for row in rows):
+            raise ValueError("This model already has that question. No duplicate was added.")
+        after = json.loads(json.dumps(raw))
+        _merge_corpus_rows(after, {key: [{"goal": goal, "expected": expected}]})
+        if len(json.dumps(after).encode()) > 5 * 1024 * 1024:
+            raise ValueError("The test-question collection is too large to change here.")
+        return {"revision": _corpus_revision(raw), "model_cases": len(rows),
+                "total_cases": sum(len(value) for value in raw.values() if isinstance(value, list))}
+
+
+def authored_corpus_case(corpus_path: str | Path, key: str, binding: str) -> dict | None:
+    """Read an exact original append marker; equal answer text is never a receipt."""
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        rows = _authoring_raw(corpus_path).get(key, [])
+        if not isinstance(rows, list):
+            raise ValueError("The current test questions could not be read safely.")
+        matches = [row for row in rows if isinstance(row, Mapping) and row.get("authoring_request") == binding]
+        if len(matches) > 1:
+            raise ValueError("The original saved question needs review. No work was repeated.")
+        return dict(matches[0]) if matches else None
+
+
+_CASE_EFFECTS = "_lightwork_case_effects_v1"
+
+
+def _case_ref(key: str, index: int, row) -> str:
+    return _corpus_revision({"model": key, "index": index, "case": row})
+
+
+def _case_view(key: str, index: int, row) -> dict:
+    supported = (isinstance(row, Mapping) and isinstance(row.get("goal"), str)
+                 and isinstance(row.get("expected"), str) and bool(row["goal"].strip())
+                 and bool(row["expected"].strip()) and len(row["goal"]) <= 4000
+                 and len(row["expected"]) <= 4000)
+    permitted = supported and case_current(row)
+    return {"value": _case_ref(key, index, row), "supported": permitted,
+            "question": row["goal"] if permitted else "Imported question needs attention" if not supported else "Question unavailable for learning",
+            "expected": row["expected"] if permitted else "",
+            "notice": "" if permitted else "This imported entry is not an ordinary question and expected answer. It remains in place." if not supported else "Current learning permission could not be verified. Retained information stays in place and is excluded from checks."}
+
+
+def browse_corpus_cases(corpus_path: str | Path, key: str, *, offset: int = 0,
+                        limit: int = 50) -> dict:
+    """Bounded current named questions; unsupported rows are counted, never dropped."""
+    from .file_lock import cross_process_lock
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("Choose a current page of test questions.")
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        raw = _authoring_raw(corpus_path)
+        rows = raw.get(key, [])
+        if not isinstance(rows, list):
+            raise ValueError("This model's imported collection is not a list of test questions. It remains unchanged.")
+        return {"revision": _corpus_revision(raw), "total": len(rows), "offset": offset,
+                "next": offset + limit if offset + limit < len(rows) else None,
+                "cases": [_case_view(key, index, rows[index]) for index in range(offset, min(len(rows), offset + limit))]}
+
+
+def _selected_case(raw: dict, key: str, reference: str):
+    rows = raw.get(key, [])
+    if isinstance(rows, list):
+        for index, row in enumerate(rows):
+            if _case_ref(key, index, row) == reference:
+                view = _case_view(key, index, row)
+                if not view["supported"]:
+                    raise ValueError(view["notice"])
+                return rows, index, row
+    raise ValueError("The selected question changed. Choose it again from the current collection.")
+
+
+def _changed_case(raw: dict, key: str, reference: str, action: str,
+                  goal: str | None, expected: str | None):
+    rows, index, row = _selected_case(raw, key, reference)
+    before = dict(row)
+    if action == "retire":
+        del rows[index]
+        after = None
+    elif action == "correct":
+        if goal == row["goal"] and expected == row["expected"]:
+            raise ValueError("Change the question or expected answer before reviewing a correction.")
+        if (not all(isinstance(value, str) and value.strip() and len(value) <= 4000 for value in (goal, expected))
+                or any(i != index and isinstance(item, Mapping) and item.get("goal") == goal for i, item in enumerate(rows))):
+            raise ValueError("Complete the question and expected answer without duplicating another saved question.")
+        rows[index] = {**row, "goal": goal, "expected": expected}
+        after = dict(rows[index])
+    else:
+        raise ValueError("Choose correction or retirement for the selected question.")
+    return before, after
+
+
+def review_corpus_change(corpus_path: str | Path, key: str, reference: str,
+                         action: str, goal: str | None = None, expected: str | None = None) -> dict:
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        raw = _authoring_raw(corpus_path)
+        revision = _corpus_revision(raw)
+        before, after = _changed_case(raw, key, reference, action, goal, expected)
+        return {"revision": revision, "before_digest": _corpus_revision(before),
+                "after_digest": _corpus_revision(after) if after is not None else None,
+                "before": {"question": before["goal"], "expected": before["expected"]},
+                "questions_before": len(raw[key]) + (1 if action == "retire" else 0)}
+
+
+def change_reviewed_corpus_case(corpus_path: str | Path, key: str, reference: str,
+                                action: str, goal: str | None, expected: str | None, *,
+                                expected_revision: str, before_digest: str, binding: str,
+                                authorize: Callable[[], None], before_write: Callable[[], None]) -> None:
+    """Commit the exact correction/removal and its secret effect receipt atomically."""
+    from .file_lock import cross_process_lock
+    if len(binding) != 64 or any(char not in "0123456789abcdef" for char in binding):
+        raise ValueError("This reviewed change could not be protected.")
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        raw = _authoring_raw(corpus_path)
+        if _corpus_revision(raw) != expected_revision:
+            raise ValueError("The test questions changed. Review the current collection before saving.")
+        before, after = _changed_case(raw, key, reference, action, goal, expected)
+        if _corpus_revision(before) != before_digest:
+            raise ValueError("The selected question changed. Review the current collection before saving.")
+        effects = raw.setdefault(_CASE_EFFECTS, {})
+        if not isinstance(effects, dict) or len(effects) >= 10000 or binding in effects:
+            raise ValueError("The test-question change history needs attention. Nothing was changed.")
+        effects[binding] = {"action": action, "model": key, "before_digest": before_digest,
+                            "after_digest": _corpus_revision(after) if after is not None else None}
+        if len(json.dumps(raw).encode()) > 5 * 1024 * 1024:
+            raise ValueError("The test-question collection is too large to change here.")
+        authorize()
+        require_cases_current([before])
+        before_write()
+        _write_corpus_file(Path(corpus_path), raw)
+
+
+def authored_corpus_effect(corpus_path: str | Path, binding: str) -> dict | None:
+    """An atomic effect marker proves a removal even when the case is now absent."""
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        effects = _authoring_raw(corpus_path).get(_CASE_EFFECTS, {})
+        if not isinstance(effects, dict):
+            raise ValueError("The original question change could not be verified.")
+        value = effects.get(binding)
+        return dict(value) if isinstance(value, Mapping) else None
+
+
+def append_reviewed_corpus_case(corpus_path: str | Path, key: str, goal: str,
+                                expected: str, *, expected_revision: str,
+                                binding: str, authorize: Callable[[], None],
+                                before_write: Callable[[], None]) -> dict:
+    """The ordinary author's bounded CAS append, through the existing native writer.
+
+    A durable request is claimed by ``before_write`` only after the exact corpus
+    and live authority were checked inside all native corpus locks. The marker
+    commits with the case, so a lost outcome can be read without repeating it.
+    """
+    from .file_lock import cross_process_lock
+    if (not all(isinstance(value, str) and value.strip() for value in (key, goal, expected))
+            or len(key) > 200 or len(goal) > 4000 or len(expected) > 4000
+            or len(binding) != 64 or any(char not in "0123456789abcdef" for char in binding)):
+        raise ValueError("Choose a model and complete a question and expected answer.")
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        raw = _authoring_raw(corpus_path)
+        if _corpus_revision(raw) != expected_revision:
+            raise ValueError("The test questions changed. Review the current collection before saving.")
+        rows = raw.get(key, [])
+        if not isinstance(rows, list) or any(isinstance(row, Mapping) and row.get("goal") == goal for row in rows):
+            raise ValueError("This model already has that question or its collection changed. No duplicate was added.")
+        _merge_corpus_rows(raw, {key: [{"goal": goal, "expected": expected, "authoring_request": binding}]})
+        if len(json.dumps(raw).encode()) > 5 * 1024 * 1024:
+            raise ValueError("The test-question collection is too large to change here.")
+        authorize()
+        before_write()
+        _write_corpus_file(Path(corpus_path), raw)
+        return {"revision": _corpus_revision(raw), "model_cases": len(raw[key])}
+
+
 def import_corpus(corpus_path: str | Path, data: dict, *,
                   replace: bool = False) -> int:
     """Write an exported (hand-edited) corpus JSON back to the LIVE corpus --
@@ -1251,6 +1491,7 @@ def import_corpus(corpus_path: str | Path, data: dict, *,
     from .file_lock import cross_process_lock
     if not isinstance(data, dict):
         raise ValueError("corpus root must be a JSON object")
+    data = _imported_corpus(data)
     with _corpus_lock, cross_process_lock(Path(corpus_path)), \
             _corpus_rmw_lock(corpus_path):
         if replace:
@@ -1262,6 +1503,18 @@ def import_corpus(corpus_path: str | Path, data: dict, *,
         return added
 
 
+def _imported_corpus(data: dict) -> dict:
+    """Ordinary import may carry extra fields, never native-save provenance.
+
+    Only a native admitted append creates ``authoring_request``. A merge keeps
+    markers already present in the live collection; replacement does not carry
+    a copied/exported marker into a new writer's work.
+    """
+    return {key: [{name: value for name, value in row.items() if name != "authoring_request"}
+                  if isinstance(row, Mapping) else row for row in rows]
+            if isinstance(rows, list) else rows for key, rows in data.items() if key != _CASE_EFFECTS}
+
+
 def preview_corpus_import(corpus_path: str | Path, data: dict, *,
                           replace: bool = False) -> dict:
     """What :func:`import_corpus` WOULD change, without writing anything: per
@@ -1270,6 +1523,7 @@ def preview_corpus_import(corpus_path: str | Path, data: dict, *,
     the import's own merge-by-goal, run on a copy."""
     if not isinstance(data, dict):
         raise ValueError("corpus root must be a JSON object")
+    data = _imported_corpus(data)
     current = _load_raw(corpus_path)
     after = json.loads(json.dumps(data if replace else current))
     added = 0 if replace else _merge_corpus_rows(after, data)

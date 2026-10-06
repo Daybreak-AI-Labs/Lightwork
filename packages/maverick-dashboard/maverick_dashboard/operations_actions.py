@@ -17,6 +17,8 @@ from . import (
     learning_actions_api,
     learning_loop_api,
     learning_ops_api,
+    learning_test_cases_api,
+    privacy_notice_proposals_api,
     research_actions_api,
     training_ops_api,
     value_proof_api,
@@ -33,6 +35,8 @@ api_router.include_router(research_actions_api.router)
 api_router.include_router(benchmark_actions_api.router)
 api_router.include_router(value_proof_api.router)
 api_router.include_router(learning_ops_api.router)
+api_router.include_router(learning_test_cases_api.router)
+api_router.include_router(privacy_notice_proposals_api.router)
 api_router.include_router(training_ops_api.router)
 api_router.include_router(workforce_ops_api.router)
 

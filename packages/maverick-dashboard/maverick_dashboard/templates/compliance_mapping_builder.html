@@ -16,6 +16,7 @@
   .cm-list{display:grid;gap:var(--space-3)}
   #cm-control-editor fieldset{min-width:0}#cm-control-editor .input{width:100%;min-width:0;max-width:100%;box-sizing:border-box}#cm-control-editor .field{margin-bottom:var(--space-3)}
   .cm-list article{padding:var(--space-3);border:1px solid var(--border);border-radius:var(--radius-card,16px)}
+  #cm-form .draft-recovery{min-width:0;overflow-wrap:anywhere}#cm-form .draft-recovery button{white-space:normal;max-width:100%}#cm-form .draft-recovery dl{display:block}#cm-form .draft-recovery dd{margin:0 0 var(--space-3)}
   .cm-confirm{display:flex!important;grid-template-columns:auto 1fr;gap:var(--space-2)!important;align-items:start}
   .cm-confirm input{margin-top:.25rem;flex:none}
   @media(max-width:900px){.cm-grid{grid-template-columns:minmax(0,1fr)}}
@@ -31,6 +32,7 @@
   <div class="cm-grid">
     <section class="panel cm-card" aria-labelledby="cm-title">
       <h2 id="cm-title">Build or revise a mapping</h2>
+      <p id="cm-private-note" class="muted">Private recovery copies protect your entered choices. Restoring checks the exact current scope and saved mapping first, then returns the choices to this editor. It never saves or approves a mapping.</p>
       <form id="cm-form" class="cm-form">
         <label>Mapping to prepare<select id="cm-target" class="input"><option value="">Create a new mapping</option></select></label>
         <label>Final scope<select id="cm-scope" class="input" required><option value="">Choose a final scope</option></select></label>

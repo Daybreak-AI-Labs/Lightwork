@@ -1072,6 +1072,7 @@ class PrivacyNoticeGovernanceStore:
         update_proposal_ref: str | None = None,
         expected_latest_version: int,
         idempotency_key: str,
+        before_write: Callable[[sqlite3.Connection, NoticeUpdateProposal | None], None] | None = None,
     ) -> NoticeRelease:
         """Append an immutable content-free notice release definition."""
 
@@ -1122,6 +1123,7 @@ class PrivacyNoticeGovernanceStore:
                 "approval policy",
             )
             policy = self._policy(policy_raw, policy_integrity)
+            proposal = None
             if proposal_ref is not None:
                 proposal_raw, proposal_digest = self._get(
                     connection,
@@ -1143,6 +1145,8 @@ class PrivacyNoticeGovernanceStore:
                     raise PrivacyNoticeConflict(
                         "approved update proposal does not match the release digests"
                     )
+            if before_write is not None:
+                before_write(connection, proposal)
             request = {
                 "action": "create_release",
                 "notice_id": notice,
@@ -2463,6 +2467,7 @@ class PrivacyNoticeGovernanceStore:
         reason_codes: Sequence[str],
         retained_until: float,
         idempotency_key: str,
+        before_write: Callable[[sqlite3.Connection, NoticeRelease], None] | None = None,
     ) -> NoticeUpdateProposal:
         """Create a human-review proposal; never infer applicability or publish."""
 
@@ -2536,7 +2541,9 @@ class PrivacyNoticeGovernanceStore:
         }
         with self._connect() as connection:
             self._begin(connection)
-            self._get_release(connection, tenant, notice, base)
+            base_release = self._get_release(connection, tenant, notice, base)
+            if before_write is not None:
+                before_write(connection, base_release)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
