@@ -2241,7 +2241,7 @@
 //     rows,                 // selector; each row has data-bulk-id and data-bulk-label
 //     noun, nouns,          // "request", "requests"
 //     filter,               // true: a filter box that matches row text
-//     actions: [{label, verb, danger, button?, title?, note?,
+//     actions: [{label, verb, danger, button?, title?, note?, preview(items)?,
 //                ask(items) -> extra | null,        // optional details first
 //                run(item, extra) -> {undo?, note?}, // one row; throw to refuse
 //                                                    // ({bulkReason} for page-written words)
@@ -2417,8 +2417,11 @@ window.mvBulk = function (opts) {
     if (busy) return;
     var items = selected().map(itemOf);
     if (!items.length) return;
+    // action.preview(items): what the change would affect, from the record (ADM-3).
+    var foresee = '';
+    if (action.preview) { try { foresee = (await action.preview(items)) || ''; } catch (_) { foresee = ''; } }
     var message = action.verb + ' ' + counted(items.length) + '? ' + joined(items.map(function (i) { return i.label; })) + '.' +
-      (action.note ? ' ' + action.note : '');
+      (foresee ? ' ' + foresee : '') + (action.note ? ' ' + action.note : '');
     var ok = window.mvConfirm ? await window.mvConfirm(message, {okText: action.verb + ' ' + counted(items.length), danger: !!action.danger})
       : window.confirm(message);
     if (!ok) return;

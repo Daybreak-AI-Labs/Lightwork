@@ -1556,6 +1556,7 @@ from .feature_actions_api import router as feature_actions_router  # noqa: E402
 from .flow_action_fields import router as flow_action_fields_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
+from .policy_preview_api import router as policy_preview_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
@@ -1573,6 +1574,7 @@ app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
 app.include_router(comments_router)
+app.include_router(policy_preview_router)
 app.include_router(system_checks_router)
 app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)

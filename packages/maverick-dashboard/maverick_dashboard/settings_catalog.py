@@ -290,7 +290,8 @@ class Setting:
     # A preview the page shows before saving (``governance_level``: the
     # settings a governance level changes; settings_governance_level.
     # ``approval_checks``: what the recorded approval checks would have
-    # needed at the chosen level; approval_threshold_preview).
+    # needed at the chosen level; approval_threshold_preview. ``retention``:
+    # what the next clean-up would delete for a keep period; policy_preview).
     preview: str = ""
 
     @property
@@ -874,27 +875,32 @@ SETTINGS: tuple[Setting, ...] = (
       "Activity record days older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older activity records will be permanently deleted at the next clean-up."),
+      warning="Older activity records will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "episodes_days", "Keep finished work records for",
       "Records of finished work older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older work records will be permanently deleted at the next clean-up."),
+      warning="Older work records will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "events_days", "Keep task progress updates for",
       "Task progress updates older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older progress updates will be permanently deleted at the next clean-up."),
+      warning="Older progress updates will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "messages_days", "Keep messages for",
       "Messages older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older messages will be permanently deleted at the next clean-up."),
+      warning="Older messages will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "usage_days", "Keep usage tallies for",
       "Daily usage tallies older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older usage tallies will be permanently deleted at the next clean-up."),
+      warning="Older usage tallies will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("durable", "enabled", "Resume tasks after a crash",
       "Save progress as tasks run so they can continue from the last step after an interruption.",
       "toggle", "Data retention", False, "maverick.config"),
@@ -3428,7 +3434,8 @@ def _assert_consistent() -> None:
         assert (s.control == "document") == bool(s.document), s.id
         assert not s.workspace_segment or s.control == "text", s.id
         assert not s.fingerprint_of or s.control == "fingerprint", s.id
-        assert not s.preview or s.control == "select", s.id
+        # A keep period previews its clean-up from the number box.
+        assert not s.preview or s.control == "select" or (s.preview == "retention" and s.control == "number"), s.id
         if s.key_kind == "entries":
             assert s.control == "table", s.id
         assert s.scale > 0, s.id

@@ -78,6 +78,10 @@ test("tool policies: block the filtered tools, a tool set by the organization is
   "https://fixture.invalid/permissions");
   const calls = [];
   w.fetch = async url => {
+    if (url.startsWith("/api/v1/policy-preview/tools")) {
+      assert.equal(url, "/api/v1/policy-preview/tools?tools=web_fetch%2Cshell");
+      return {ok: true, status: 200, headers: new w.Headers(), json: async () => ({recorded: true, calls: 42, tasks: 9, agents: 3, people: 2})};
+    }
     calls.push(url);
     if (url.endsWith("/disable")) return {ok: true, status: 204, json: async () => ({})};
     return {ok: true, status: 200, json: async () => ({tool: {name: url.split("/")[5], overlay_blocked: false, base_acl_allowed: true, usable: true, state: "ready"}})};
@@ -87,7 +91,8 @@ test("tool policies: block the filtered tools, a tool set by the organization is
   selectAll(w);
   bulkButton(w, "Block selected").click();
   await flush();
-  assert.match(w.confirms[0], /^Block 2 tools\? Web fetch and Shell\. Tasks stop using them at once\./);
+  // The confirmation previews what blocking would have stopped (ADM-3).
+  assert.match(w.confirms[0], /^Block 2 tools\? Web fetch and Shell\. In the last 30 days they were used 42 times in 9 tasks by 3 agents and specialists for 2 people\. Tasks stop using them at once\./);
   assert.deepEqual(calls, ["/api/v1/permissions/tools/web_fetch/disable"]);
   assert.match(report(w).textContent, /Block: 1 done, 1 not changed/);
   assert.match(report(w).textContent, /Shell — not changed: It is already blocked\./);

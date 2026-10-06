@@ -62,7 +62,8 @@ def test_a_policy_thread_offers_only_people_who_manage_it_and_refuses_others(env
     _as(monkeypatch, DANA)
     thread = client.get("/api/v1/comments", params={"kind": "policy", "id": "tools"}).json()
     assert thread["comments"] == [] and thread["can_comment"] is True
-    assert [p["principal"] for p in thread["people"]] == [LEE]  # admins only, never yourself
+    # People who may change tool permissions (operate), never yourself or a viewer.
+    assert [p["principal"] for p in thread["people"]] == [ANA, LEE]
     refused = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools",
                                                     "body": "@Vic please look", "mentions": [VIC]})
     assert refused.status_code == 422

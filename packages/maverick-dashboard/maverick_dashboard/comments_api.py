@@ -21,7 +21,7 @@ router = APIRouter()
 
 #: The policy pages that carry a thread: (title, page, permission to read).
 POLICIES = {
-    "tools": ("Tool permissions", "/permissions", "admin"),
+    "tools": ("Tool permissions", "/permissions", "operate"),
     "spending-limits": ("Spending limits", "/spending-limits", "admin"),
     "data-use": ("Data use rules", "/data-use", "operate"),
 }

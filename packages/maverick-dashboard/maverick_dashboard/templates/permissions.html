@@ -459,11 +459,33 @@
         }
         return {usable: usable};
       }
+      // What blocking would have stopped in the last 30 days, from the
+      // activity record (ADM-3). Report only; "" when it can't be worked out.
+      async function blockPreview(names) {
+        try {
+          const data = await window.mvFetchJSON('/api/v1/policy-preview/tools?tools=' + encodeURIComponent(names.join(',')),
+            {}, 'work out what blocking changes');
+          if (!data.recorded) return 'There is no tool use in the activity record for the last 30 days to compare with.';
+          if (!data.calls) return 'In the last 30 days ' + (names.length === 1 ? 'it was' : 'they were') + ' not used.';
+          return 'In the last 30 days ' + (names.length === 1 ? 'it was' : 'they were') + ' used ' + data.calls +
+            (data.calls === 1 ? ' time' : ' times') + ' in ' + data.tasks + (data.tasks === 1 ? ' task' : ' tasks') +
+            ' by ' + data.agents + (data.agents === 1 ? ' agent or specialist' : ' agents and specialists') +
+            ' for ' + data.people + (data.people === 1 ? ' person' : ' people') + '.';
+        } catch (_) { return ''; }
+      }
       document.querySelectorAll('button.perm-toggle').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           if (btn.disabled) return;
           const label = btn.dataset.label || btn.dataset.name;
           const action = btn.dataset.action;  // "disable" | "enable"
+          if (action === 'disable' && window.mvConfirm) {
+            btn.disabled = true;
+            const foresee = await blockPreview([btn.dataset.name]);
+            btn.disabled = false;
+            const ok = await window.mvConfirm('Block ' + label + '? ' + (foresee ? foresee + ' ' : '') +
+              'Tasks stop using it at once. Nothing changes until you confirm.', {okText: 'Block ' + label, danger: true});
+            if (!ok) { msg.style.color = 'var(--muted)'; msg.textContent = 'Nothing was changed.'; return; }
+          }
           btn.disabled = true;
           msg.style.color = 'var(--muted)';
           msg.textContent = action === 'disable'
@@ -503,7 +525,8 @@
       window.mvBulk({
         list: list, rows: 'tr[data-bulk-id]', noun: 'tool', nouns: 'tools',
         actions: [
-          {label: 'Block', verb: 'Block', danger: true, note: 'Tasks stop using them at once. You can undo this from the report.', run: change('disable')},
+          {label: 'Block', verb: 'Block', danger: true, note: 'Tasks stop using them at once. You can undo this from the report.',
+           preview: function (items) { return blockPreview(items.map(function (i) { return i.id; })); }, run: change('disable')},
           {label: 'Allow', verb: 'Allow', run: change('enable')}
         ]
       });

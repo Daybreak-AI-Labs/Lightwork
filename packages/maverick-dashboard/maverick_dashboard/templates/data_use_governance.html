@@ -219,8 +219,10 @@
         </fieldset>
         <div class="cw-actions">
           <button class="btn btn--primary" type="submit">Save as draft</button>
+          <button class="btn btn--ghost" type="button" id="dug-policy-preview">Preview what it covers</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-policy">Cancel</button>
         </div>
+        <p class="muted cw-wide" id="dug-policy-preview-result" role="status"></p>
       </fieldset>
     </form>
   </section>
@@ -759,6 +761,31 @@
     }
     $("dug-scope-assets").addEventListener("change", scopeFields);
     $("dug-new-policy").addEventListener("click", function () { openPolicy(null); });
+    function ruleDocument(form) {
+      var conditions = {};
+      CONDITIONS.forEach(function (c) { conditions[c[0]] = ticked(form, "cond_" + c[0]); });
+      conditions.label_any = ticked(form, "cond_label_any");
+      return {scope: {asset_ids: ticked(form, "scope_asset"), field_ids: ticked(form, "scope_field"), project_ids: ticked(form, "scope_project"), actions: ticked(form, "scope_action")}, conditions: conditions, controls: readControls()};
+    }
+    // What a rule would have covered in the last 30 days, from the recorded
+    // requests to use data (ADM-3). Report only; "" when it can't be worked out.
+    async function rulePreviewText(doc) {
+      try {
+        var data = await call("/policies/preview", {method: "POST", json: {document: doc}});
+        if (!data.considered) return "No requests to use data were recorded in the last 30 days, so there is nothing to compare it with.";
+        return "In the last 30 days it would have covered " + data.requests + " of " + data.considered + " requests to use data, from " +
+          data.projects + (data.projects === 1 ? " project" : " projects") + " and " + data.people + (data.people === 1 ? " person" : " people") + "." +
+          (data.conditional ? " It also depends on the reasons for using the data, which are checked when a request is decided, so it may cover fewer." : "");
+      } catch (error) { return ""; }
+    }
+    $("dug-policy-preview").addEventListener("click", async function () {
+      var out = $("dug-policy-preview-result");
+      try {
+        var text = await rulePreviewText(ruleDocument($("dug-policy")));
+        if (window.mvStatus) window.mvStatus(out, (text || "The preview could not be worked out. Try again.") + " Preview only. Nothing changes until a second administrator switches the rule on.");
+        else out.textContent = text;
+      } catch (error) { if (window.mvStatus) window.mvStatus(out, error.plain || "Check the rule's steps first.", {error: true}); }
+    });
     $("dug-policy").addEventListener("submit", async function (event) {
       event.preventDefault();
       var form = event.currentTarget, f = form.elements;
@@ -769,16 +796,15 @@
           policyId = CW.slug(f.policy_name.value, "rule");
           if (state.policies.some(function (p) { return p.policy_id === policyId; })) { say("A rule with that name already exists. Use “Change” on it instead.", true); return; }
         }
-        var conditions = {};
-        CONDITIONS.forEach(function (c) { conditions[c[0]] = ticked(form, "cond_" + c[0]); });
-        conditions.label_any = ticked(form, "cond_label_any");
-        var documentBody = {scope: {asset_ids: ticked(form, "scope_asset"), field_ids: ticked(form, "scope_field"), project_ids: ticked(form, "scope_project"), actions: ticked(form, "scope_action")}, conditions: conditions, controls: readControls()};
+        var documentBody = ruleDocument(form);
         await call("/policies/" + encodeURIComponent(policyId) + "/versions", {method: "POST", json: {version: Number(f.version.value), document: documentBody, expected_current_version: Number(f.expected_current_version.value), expected_revision: Number(f.expected_revision.value), idempotency_key: f.idempotency_key.value}});
         form.hidden = true; say("Rule saved as a draft. Ask a different administrator to switch it on."); await refresh();
       } catch (error) { sayError(error, "save the rule"); }
     });
     async function activatePolicy(policy) {
-      if (!(await CW.confirm("Switch on the rule “" + CW.human(policy.policy_id) + "”? New requests will be decided with it straight away.", "Switch on"))) return;
+      var latest = versionOf(policy.policy_id, policy.current_version);
+      var foresee = latest ? await rulePreviewText(latest.document) : "";
+      if (!(await CW.confirm("Switch on the rule “" + CW.human(policy.policy_id) + "”? " + (foresee ? foresee + " " : "") + "New requests will be decided with it straight away.", "Switch on"))) return;
       try {
         await call("/policies/" + encodeURIComponent(policy.policy_id) + "/activate", {method: "POST", json: {version: policy.current_version, reviewed_at: nowSeconds() - 1, expected_revision: policy.revision, idempotency_key: CW.reference()}});
         say("Rule switched on."); await refresh();
