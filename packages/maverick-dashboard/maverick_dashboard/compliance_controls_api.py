@@ -763,8 +763,11 @@ async def download_soc2(request: Request) -> Response:
     require_permission(request, "admin")
     from maverick.soc2 import collect_soc2_evidence
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "soc2")
     evidence = await run_in_threadpool(collect_soc2_evidence)
-    return _attachment(evidence, "lightwork-soc2-snapshot.json")
+    return report_downloads.finish(request, "soc2", context, _attachment(evidence, "lightwork-soc2-snapshot.json"))
 
 
 @router.get("/downloads/ai-bom")
@@ -772,11 +775,14 @@ async def download_ai_bom(request: Request) -> Response:
     require_permission(request, "admin")
     from maverick import ai_bom
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "ai_inventory")
     try:
         document = await run_in_threadpool(ai_bom.export_ai_bom)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail="The AI inventory is not available.") from exc
-    return _attachment(document, "lightwork-ai-inventory.cdx.json")
+    return report_downloads.finish(request, "ai_inventory", context, _attachment(document, "lightwork-ai-inventory.cdx.json"))
 
 
 def _assessment_id(value: str) -> str:
@@ -790,13 +796,16 @@ async def download_oscal(request: Request, assessment: str) -> Response:
     require_permission(request, "operate")
     from maverick import assessment_exports
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "oscal")
     try:
         document = await run_in_threadpool(
             assessment_exports.render_oscal_assessment_results, _assessment_id(assessment)
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="That assessment no longer exists.") from exc
-    return _attachment(document, "lightwork-assessment-results.oscal.json")
+    return report_downloads.finish(request, "oscal", context, _attachment(document, "lightwork-assessment-results.oscal.json"))
 
 
 @router.get("/downloads/soa")
@@ -804,13 +813,16 @@ async def download_soa(request: Request, assessment: str) -> Response:
     require_permission(request, "operate")
     from maverick import assessment_exports
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "soa")
     try:
         soa = await run_in_threadpool(
             assessment_exports.render_statement_of_applicability, _assessment_id(assessment)
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="That assessment no longer exists.") from exc
-    return Response(
+    response = Response(
         content=assessment_exports.soa_markdown(soa),
         media_type="text/markdown",
         headers={
@@ -818,6 +830,7 @@ async def download_soa(request: Request, assessment: str) -> Response:
             "Cache-Control": "no-store",
         },
     )
+    return report_downloads.finish(request, "soa", context, response)
 
 
 @router.get("/assessments")

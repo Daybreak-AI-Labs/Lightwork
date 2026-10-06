@@ -73,6 +73,8 @@ ASSETS = (
     "lightwork-applicability-regions.js",
     "lightwork-agent-override-changes.js",
     "lightwork-access-key-requests.js",
+    "lightwork-automation-imports.js",
+    "lightwork-report-downloads.js",
     "lightwork-workflow-step-checks.js",
     "lightwork-commitment-economic-alternatives.js",
     "lightwork-flow-requalification.js",

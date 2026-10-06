@@ -276,7 +276,7 @@ class JobQueue:
             return self._insert_job(c, kind, payload or {}, rid, now)
 
     def enqueue_once(self, kind: str, payload: dict, *, idempotency_key: str,
-                     run_at: float | None = None) -> int:
+                     run_at: float | None = None, effect_guard=None) -> int:
         """Atomically admit an immutable job once, including after completion.
 
         Retrying an uncertain enqueue returns its original ID. Reusing a key
@@ -297,12 +297,33 @@ class JobQueue:
                 if row["kind"] != kind or row["payload_hash"] != digest:
                     raise ValueError("job admission key is bound to different work")
                 return int(row["job_id"])
+            if effect_guard is not None:
+                effect_guard()
             job_id = self._insert_job(
                 conn, kind, payload, now if run_at is None else run_at, now)
             conn.execute(
                 "INSERT INTO job_admissions(admission_key,kind,payload_hash,job_id,created_at) "
                 "VALUES(?,?,?,?,?)", (idempotency_key, kind, digest, job_id, now))
+            if effect_guard is not None:
+                effect_guard()
             return job_id
+
+    def admission_receipt(self, kind: str, payload: dict, *, idempotency_key: str) -> int | None:
+        """Read one exact original admission, without creating or restarting work."""
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise ValueError("job admission key is required")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(encoded.encode()).hexdigest()
+        with self._conn() as connection:
+            row = connection.execute(
+                "SELECT kind,payload_hash,job_id FROM job_admissions WHERE admission_key=?",
+                (idempotency_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        if row["kind"] != kind or row["payload_hash"] != digest:
+            raise ValueError("job admission key is bound to different work")
+        return int(row["job_id"])
 
     def claim_dispatch_envelope(
         self,

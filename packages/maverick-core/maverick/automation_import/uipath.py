@@ -83,18 +83,19 @@ class UiPathImporter:
     source = "uipath"
     can_fetch_definitions = True
 
-    def __init__(self, base_url: str | None = None, token: str | None = None):
-        self.base_url = (base_url or os.environ.get("UIPATH_BASE_URL", "")).strip().rstrip("/")
-        self.token = (token or os.environ.get("UIPATH_TOKEN", "")).strip()
+    def __init__(self, base_url: str | None = None, token: str | None = None, *, request=None):
+        self.request = request
+        self.base_url = ((base_url or "") if request is not None else (base_url or os.environ.get("UIPATH_BASE_URL", ""))).strip().rstrip("/")
+        self.token = "" if request is not None else (token or os.environ.get("UIPATH_TOKEN", "")).strip()
 
     def _get(self, client, path: str):
-        return client.get(
+        return (self.request or client.get)(
             f"{self.base_url}{path}",
             headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
         )
 
     def fetch(self) -> list[dict[str, Any]]:
-        if not self.base_url or not self.token:
+        if not self.base_url or (self.request is None and not self.token):
             raise ImporterError("UiPath import requires UIPATH_BASE_URL + UIPATH_TOKEN")
         try:
             import httpx

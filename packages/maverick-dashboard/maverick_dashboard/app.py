@@ -1835,6 +1835,7 @@ from . import (  # noqa: E402
     access_key_requests_api,
     agent_override_changes_api,
     applicability_regions_api,
+    automation_imports_api,
     commitment_capability_api,
     commitment_economic_alternatives_api,
     competence_transport_api,
@@ -1847,6 +1848,7 @@ from . import (  # noqa: E402
     private_task_computation_api,
     procedure_interactions_api,
     recovery_visibility_api,
+    report_downloads_api,
     request_program_api,
     settings_catalog_requests_api,
     shared_decision_evidence_api,
@@ -1870,6 +1872,8 @@ app.include_router(operator_acquisition_api.router)
 app.include_router(governed_rule_evolution_api.router)
 app.include_router(applicability_regions_api.router)
 app.include_router(agent_override_changes_api.router, prefix="/api/v1")
+app.include_router(automation_imports_api.router)
+app.include_router(report_downloads_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
 app.include_router(workflow_step_checks.router)
@@ -5063,6 +5067,7 @@ async def consent_publishing_page(request: Request) -> HTMLResponse:
         "consent_publishing.html",
         {
             "consent_publishing_enabled": enabled,
+            "report_download_context": _conversation_context(request),
             "consent_can_admin": has_global_permission(request, "admin"),
         },
     )
@@ -8153,6 +8158,7 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
 
     view["guide_for"] = guide_for
     view["retention_fields"] = RETENTION_FIELDS
+    view["report_download_context"] = _conversation_context(request)
     view["can_admin"] = has_permission(request, "admin")
     view["can_operate"] = has_permission(request, "operate")
     view["can_global_admin"] = has_global_permission(request, "admin")

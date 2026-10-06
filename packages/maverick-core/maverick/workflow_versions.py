@@ -39,10 +39,13 @@ def _load(name):
     return value
 
 
-def _save(name, value):
+def _save(name, value, *, effect_guard=None):
     path = _path(name)
     ensure_private_directory(path.parent)
-    atomic_write_text(path, json.dumps(value, ensure_ascii=True, sort_keys=True))
+    if effect_guard is None:
+        atomic_write_text(path, json.dumps(value, ensure_ascii=True, sort_keys=True))
+    else:
+        atomic_write_text(path, json.dumps(value, ensure_ascii=True, sort_keys=True), effect_guard=effect_guard)
 
 
 def _snapshot(state, content, name):
@@ -54,7 +57,7 @@ def _snapshot(state, content, name):
     return digest
 
 
-def before_save(name, content, previous=None):
+def before_save(name, content, previous=None, *, effect_guard=None):
     """Called under the template lock before publishing the draft file.
 
     An interrupted file write can leave a prepared snapshot in history, but
@@ -71,7 +74,10 @@ def before_save(name, content, previous=None):
             state["published"] = prior
             state["events"].append({"kind": "adopted", "version": prior, "at": time.time(), "actor": "system"})
     _snapshot(state, content, name)
-    _save(name, state)
+    if effect_guard is None:
+        _save(name, state)
+    else:
+        _save(name, state, effect_guard=effect_guard)
 
 
 def _current(name, actor, *, admin=False):

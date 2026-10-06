@@ -1569,3 +1569,55 @@ controls open the native management and original forms; they do not return a
 secret through generic Copilot output. No provider or external delivery occurred.
 The native ledger refuses new changes at its 10,000-request capacity. Installed
 wheel composition is checked separately.
+
+## October 6 installed package follow-through
+
+The frozen current core, dashboard, channels and installer wheels passed fresh
+Windows/Python 3.12 and offline Linux/Docker composition. All 5,223 packaged
+source and resource comparisons passed, including 377 registered operations,
+102 original-outcome readers and 51 assets and templates. This checked the
+installed artifacts rather than importing an editable first-party checkout.
+
+Actual installed ordinary and protected Copilot journeys completed finite
+answer-region checking and routing, older task-search continuation, valid and
+damaged agent removal, and access-key issuance and separate revocation. The
+repaired text-rule journey used retained state and a separately reviewed current
+intent: full Build, owner acceptance, Save/Publish, ordinary and Copilot complete
+checks, and exact retained-release Restore preserving the saved draft. Its prior
+unknown twenty-run admission stayed unknown and spent. The new intent used
+28 actual native runs; no original was replayed or refunded.
+
+That isolated retained-state fixture preserved the exact 75-row historical
+signed prefix and verified the complete 139-row mixed-key chain without breaks.
+Its new signer came from explicit native synthetic rotation; the old private
+signer was not recovered. This proves this local retained-history transition,
+not external anchoring or immunity to an administrator rewriting all local
+trust material. Native source and narrow-screen checks accompany these installed
+journeys. No paid provider call or hosted CI run was started for this validation.
+
+## October 6 reviewed imports, report files and shared confirmation
+
+Automations has a complete file or named-account import form using the existing
+feature switches. It reviews the bounded translation, operational inputs,
+replacement targets and visual-flow limits before saving owned drafts. Imports
+neither publish workflows nor enable incoming triggers. Original outcomes keep
+per-item progress after an interrupted save and never repeat that import. A
+later schedule activation separately reviews the exact published template,
+parameters, spending/time caps, named timezone and next occurrences. Its native
+queue admission is once-only; the original reader may verify that exact
+admission without admitting another job. Live provider responses used in local
+qualification are disposable transport fixtures, not external-service acceptance.
+
+Compliance exposes the actual native auditor files through explicit download
+controls. Consent publication exposes only its public signing document. Native
+and browser checks refuse changed accounts, interrupted sign-in, stale public
+keys and invalid bounded file responses. Customers keep their entered work and
+can choose a fresh request. Copilot focuses the protected control without
+receiving report bytes or downloading automatically. A file offer proves no
+customer-side save or receipt. An unselected workspace preserves otherwise
+permitted system-level auditor exports while withholding the workspace key.
+
+The shared Copilot confirmation remains visibly disabled until its exact-review
+checkbox is selected, including after the shared form unlock. Cancellation keeps
+an entered native draft. These features use the same ordinary and typed native
+services, rather than a separate Copilot authority or mutation path.

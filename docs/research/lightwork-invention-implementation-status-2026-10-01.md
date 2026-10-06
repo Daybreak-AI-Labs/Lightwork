@@ -127,10 +127,11 @@ over authored correlated situations, and invalidates only dependent checks when
 source meaning, permission or expiry changes. All three have ordinary protected
 forms, typed Copilot operations and retained originals. The strong N05 exhaustive
 same-information acquisition comparator selected the same information in the
-executed synthetic case; no superiority is claimed. P04 projects exact actual
-paired-comparison observations separately for each immutable version pair,
-preserving contradictory and unfinished cells. It does not infer unobserved
-applicability regions. The counts distinguish these implementations from the
+executed synthetic case; no superiority is claimed. P04 now constructs checked finite answer regions for each immutable
+version pair from the complete supported native grid and explicitly permitted
+expected answers, preserving conflicting, missing and unfinished cells. It
+does not infer behavior outside the declared input domain or treat entered
+answers as independently verified business truth. The counts distinguish these implementations from the
 broader unqualified research proposals and retain every rejected result.
 
 The October 5 bounded F01/F02 native path now joins actual retained published

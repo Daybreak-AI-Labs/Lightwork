@@ -2533,10 +2533,11 @@ limits are recorded in the [operation coverage register](post-install-operation-
   `approximated` (the Orchestrator API returns no .xaml, so the process's
   internal control flow isn't visible), never a false `preserved`.
   `to_flow_with_report` returns the per-step fidelity log
-  (`preserved` / `approximated` + why), and the dashboard import can save the
-  graphs directly (`as_flows: true` on `POST /import/run`) with the fidelity
-  summary rendered per automation — an import never silently pretends to be
-  lossless.
+  (`preserved` / `approximated` + why). Automations presents the full import
+  review before saving instruction or visual drafts; the older unreviewed
+  `POST /import/run` directs customers to those controls. Imported drafts are
+  not automatically published or activated. Fidelity is shown per automation;
+  an import never silently pretends to be lossless.
   Supported n8n `$json` references normalize to flow-data paths and every
   AND/OR clause is retained. WDL `If` preserves nested AND/OR/NOT as a branch
   graph, including literal types and nested trigger fields. Unsupported
@@ -2546,6 +2547,29 @@ limits are recorded in the [operation coverage register](post-install-operation-
   bounded, secret-redacted operational inputs without silent truncation.
   WDL `Until` remains an approximation because the generated loop checks its
   exit condition before each pass; compound exit expressions require repair.
+
+- **Reviewed automation imports** use the existing automation-import and
+  Connections switches. Customers choose an exported file or their own named
+  n8n, Make, Workato or UiPath account in Automations; Power Automate uses an
+  exported file. The current account, workspace, connection revision, complete
+  bounded source, parameters and migration limits are reviewed before saving.
+  Unsupported or oversized work is refused before saving any member of the
+  batch. Lost replies read exact original outcomes without importing again.
+  Visual conversion is optional, and instruction drafts keep supported
+  nonsecret operational inputs instead of silently shortening them. Publishing
+  and activation remain separate decisions. Activation reviews the current
+  template, spending/time allowance, named timezone and next occurrences,
+  then admits the native schedule once. Copilot opens these protected forms
+  without receiving credentials or replacing an entered draft.
+
+- **Protected report downloads** provide explicit, named controls for the
+  SOC 2 snapshot, AI inventory, OSCAL assessment, statement of applicability
+  and public consent-signing key. Ordinary download actions verify the current
+  account and bounded native response before offering a file; interrupted
+  sign-in, missing records and stale signing keys remain readable errors in
+  the page. Copilot focuses the protected download control without fetching
+  report bytes or delivering private content through its answer. Offering a
+  file does not establish that the customer saved it.
 
 - **Rich human tasks** — an `approval` node carries `choices` (verdicts beyond
   approve/reject, recorded to `output` for a downstream switch), an `assignee`,

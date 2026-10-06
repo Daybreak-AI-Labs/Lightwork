@@ -163,16 +163,7 @@
       say(assessmentResult, errorText(failure, 'load the assessments'));
     });
   }
-  function download(kind) {
-    if (!assessment || !assessment.value) { say(assessmentResult, 'Choose an assessment first.'); return; }
-    var a = doc.createElement('a');
-    a.href = '/api/v1/compliance/downloads/' + kind + '?assessment=' + encodeURIComponent(assessment.value);
-    a.setAttribute('download', '');
-    doc.body.appendChild(a); a.click(); a.remove();
-    say(assessmentResult, 'Your download has started.');
-  }
-  var oscal = $('cmp-oscal'); if (oscal) oscal.addEventListener('click', function () { download('oscal'); });
-  var soa = $('cmp-soa'); if (soa) soa.addEventListener('click', function () { download('soa'); });
+  // Current-account protected file offers use lightwork-report-downloads.js.
 
   // EU AI Act self-check.
   var aiAct = $('cmp-ai-act');

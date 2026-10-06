@@ -685,4 +685,21 @@ def connection_setup_catalog() -> list[dict]:
                      "prerequisites": ("Service API address and a credential with only the permissions your task needs."
                                        if supported else "This adapter requires its dedicated administrator setup; a single saved key is insufficient."),
                      "live_provider_verified": False})
+    # Definition imports use these protected named credentials. Preserve the
+    # existing tool labels; UiPath has no generic connector catalog entry.
+    for name, label, auth, location in (
+        ("n8n", "n8n workflow import", "n8n API key", "The HTTPS address of your n8n instance"),
+        ("make", "Make workflow import", "Make API token", "The HTTPS address of your Make region, such as https://eu1.make.com"),
+        ("workato", "Workato workflow import", "Workato API token", "The HTTPS address of your Workato region"),
+        ("uipath", "UiPath workflow import", "UiPath bearer token", "The HTTPS address of your UiPath service, such as https://cloud.uipath.com"),
+    ):
+        row = next((row for row in rows if row["name"] == name), None)
+        if row is None:
+            row = {"name": name, "label": label, "live_provider_verified": False}
+            rows.append(row)
+        row.update(auth_method=auth, key_setup_supported=True,
+                   prerequisites=location + ". For workflow imports, enter the service address only, without a path or query. "
+                                 "Use access that can read the definitions you want to import. "
+                                 + ("Choose your organization and tenant separately on the workflow import page. " if name == "uipath" else "")
+                                 + "Saving does not contact the service or import or run a workflow.")
     return rows

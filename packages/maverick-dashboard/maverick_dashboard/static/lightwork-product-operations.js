@@ -58,7 +58,7 @@
   function lock(value) {
     busy = value;
     buttons.querySelectorAll('button').forEach(function (element) { element.disabled = value || element.dataset.available !== 'true'; });
-    formHost.querySelectorAll('input,select,textarea,button').forEach(function (element) { element.disabled = value; });
+    formHost.querySelectorAll('input,select,textarea,button').forEach(function (element) { element.disabled = value || Boolean(element._lightworkConsent && !element._lightworkConsent.checked); });
   }
   function errorMessage(result, fallback) {
     var detail = result && result.detail;
@@ -278,6 +278,49 @@
             finally { if (isCurrent() && regionButton.isConnected) regionButton.disabled = false; }
           });
           else { var regionLink = node('a', 'Open complete checked answer regions', regionDestination); regionLink.href = '/learning/applicability?' + new URLSearchParams({flow: regionForm.flow, original: regionForm.original}).toString() + '#apr-author-h'; regionLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'report_download') {
+          var reportForm = entry[1], reportStarted = generation, reportSelection = JSON.stringify(context());
+          if (!reportForm || Array.isArray(reportForm) || Object.keys(reportForm).sort().join(',') !== 'context,kind' ||
+              typeof reportForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(reportForm.context) ||
+              !['soc2', 'ai_inventory', 'oscal', 'soa', 'public_key'].includes(reportForm.kind)) return;
+          var reportDestination = node('dd', undefined, list), reportControls = window.LightworkReportDownloads;
+          if (reportControls && typeof reportControls.open === 'function') button('Open the protected download controls', reportDestination, async function (event) {
+            var isCurrent = function () { return active(reportStarted) && JSON.stringify(context()) === reportSelection; };
+            if (!isCurrent() || busy) return;
+            var reportButton = event.currentTarget; reportButton.disabled = true;
+            try {
+              var opened = await reportControls.open(reportForm.context, reportForm.kind, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected download control is open. Choose Download there when ready.' : 'Your current work is kept. Check access in the full download controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The download controls could not be opened. Your current work is kept.'; }
+            finally { if (isCurrent() && reportButton.isConnected) reportButton.disabled = false; }
+          });
+          else { var reportLink = node('a', 'Open the protected download controls', reportDestination); reportLink.href = reportForm.kind === 'public_key' ? '/consent/publishing#cpp-signing' : '/compliance#cmp-reports'; reportLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'automation_import_form') {
+          var importForm = entry[1], importStarted = generation, importSelection = JSON.stringify(context());
+          if (!importForm || Array.isArray(importForm) || Object.keys(importForm).sort().join(',') !== 'context,original' ||
+              typeof importForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(importForm.context) ||
+              typeof importForm.original !== 'string' || importForm.original && !/^AIR-[a-f0-9]{32}$/.test(importForm.original)) return;
+          var importDestination = node('dd', undefined, list), importControls = window.LightworkAutomationImports;
+          var importLabel = importForm.original ? 'Read the original automation import' : 'Open complete automation import controls';
+          if (importControls && typeof importControls.open === 'function') button(importLabel, importDestination, async function (event) {
+            var isCurrent = function () { return active(importStarted) && JSON.stringify(context()) === importSelection; };
+            if (!isCurrent() || busy) return;
+            var importButton = event.currentTarget; importButton.disabled = true;
+            try {
+              var opened = await importControls.open(importForm, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete protected import controls are open.' : 'Your entered import work is kept. Review current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The import controls could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && importButton.isConnected) importButton.disabled = false; }
+          });
+          else { var importLink = node('a', importLabel, importDestination); importLink.href = '/automations' + (importForm.original ? '?import_original=' + encodeURIComponent(importForm.original) : '') + '#auto-import-h'; importLink.className = 'btn btn--ghost'; }
           return;
         }
         if (entry[0] === 'access_key_form') {
@@ -1125,6 +1168,8 @@
       } finally { lock(false); }
     });
     apply.className = 'btn btn--primary';
+    apply._lightworkConsent = consent; apply.disabled = true;
+    consent.addEventListener('change', function () { apply.disabled = busy || !consent.checked; });
     button('Cancel this review', formHost, function () { clear(formHost); selected = null; status.textContent = 'Review cancelled. Nothing was submitted.'; });
   }
   window.LightworkProductOperations = {

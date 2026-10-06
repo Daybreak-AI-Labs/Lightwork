@@ -12112,222 +12112,27 @@ def event_trigger_outcomes(request: Request) -> dict:
 
 def _require_automation_import() -> None:
     from maverick.automation_import import enabled
-
     if not enabled():
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Automation import isn't enabled on this server yet — an "
-                "administrator can switch it on (enable [automation_import] "
-                "in the server configuration, or set MAVERICK_AUTOMATION_IMPORT=1)."
-            ),
-        )
+        raise HTTPException(403, "Automation import is off. An administrator can enable Automation import in All settings. Original import history remains available.")
 
 
 @router.get("/import/sources")
-async def import_sources_endpoint() -> dict:
-    """Automation platforms Lightwork can import from + each one's mode."""
-    from maverick.automation_import import available_sources, get_importer
-
-    sources = []
-    for s in available_sources():
-        imp = get_importer(s)
-        sources.append(
-            {
-                "source": s,
-                "mode": "definition-import" if imp.can_fetch_definitions else "connect-and-trigger",
-            }
-        )
-    return {"sources": sources}
+async def import_sources_endpoint(request: Request) -> dict:
+    """Current supported source modes; no environment-based readiness claims."""
+    require_permission(request, "operate")
+    from .automation_imports import catalog, native_call
+    current = native_call(lambda: catalog(request))
+    return {"sources": [{"source": row["value"], "mode": "definition-import" if row["live"] else "file-required", "requires_export": not row["live"]} for row in current["sources"]]}
 
 
 @router.post("/import/run", response_model=ImportRunOut)
-async def import_run_endpoint(  # noqa: C901 - staged importer intentionally explicit
-    request: Request, payload: ImportRunIn
-) -> ImportRunOut:
+async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportRunOut:
+    """Legacy writes must use the complete protected review and original custody."""
     require_permission(request, "operate")
     _require_automation_import()
-    from maverick.automation_import import ImporterError, get_importer, materialize, translate_all
-
-    try:  # validate the source name -> 400, not a scrubbed 500
-        get_importer(payload.source)
-    except ImporterError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if payload.as_flows:
-        _require_flows()  # importing to graphs needs the flow engine
-
-    # Definitions from the request (offline/connect) or a live fetch (env creds).
-    if payload.definitions is not None:
-        raws = _bounded_import_definitions([d for d in payload.definitions if isinstance(d, dict)])
-    else:
-        try:
-            fetched = await run_in_threadpool(get_importer(payload.source).fetch)
-        except ImporterError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        raws = _bounded_import_definitions([d for d in fetched if isinstance(d, dict)])
-
-    automations = translate_all(payload.source, raws)
-    if not automations:
-        raise HTTPException(
-            status_code=400,
-            detail=f"no importable automations found from {payload.source!r}",
-        )
-    # translate_all drops malformed/unsupported definitions (logging each). It's
-    # 1:1, so the shortfall is the count that silently failed -- surface it so a
-    # partial import doesn't read as a clean success.
-    skipped = len(raws) - len(automations)
-
-    # Validate the complete requested batch before publishing a template,
-    # arming a schedule or writing a trigger. A graph requiring manual repair
-    # must not leave a runnable approximation behind after an HTTP error.
-    prepared_graphs = []
-    for automation in automations:
-        _, body = automation.render()
-        _ensure_import_body_size(body)
-        if payload.as_flows:
-            from maverick.automation_import.to_flow import to_flow_with_report
-
-            try:
-                prepared_graphs.append(to_flow_with_report(automation))
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    # Resolve schedule activation: an explicit request field wins; when the UI
-    # omits it (None), fall back to the [automation_import] create_schedules
-    # config knob (previously a dead setting -- nothing read it). Off by default.
-    activate = payload.activate_schedules
-    if activate is None:
-        from maverick.config import get_automation_import
-
-        activate = bool(get_automation_import().get("create_schedules", False))
-    queue = None
-    if activate and not payload.dry_run:
-        from maverick.job_queue import JobQueue
-
-        queue = JobQueue()
-
-    from maverick.config import get_features
-    from maverick.paths import current_tenant_id
-
-    triggers_on = get_features().get("triggers", True)
-    from maverick_dashboard import triggers_store
-
-    # Prefer the authenticated request principal explicitly, then use the
-    # durable fallback for auth modes (for example a static dashboard token)
-    # that intentionally have no end-user subject.  Keeping the request-bound
-    # lookup here also ensures imported schedules retain the same identity as
-    # schedules authored through the regular dashboard endpoint.
-    owner = caller_principal(request) or durable_automation_owner(request)
-    user_id = execution_user_id_from_request(request)
-    channel = "api" if user_id else None
-
-    results: list[dict] = []
-    for automation_index, a in enumerate(automations):
-        res = materialize(
-            a,
-            save=not payload.dry_run,
-            queue=queue,
-            owner=owner,
-            channel=channel,
-            user_id=user_id,
-        )
-        webhook_trigger = None
-        # Wire the inbound webhook trigger when asked and the automation is
-        # webhook-triggered (the one step the CLI can't do: triggers_store is
-        # dashboard-side). Respect the [features] triggers gate -- if the
-        # operator disabled triggers, don't silently create ones that bypass
-        # that decision; import the template and say so.
-        sug = res.suggested_trigger or {}
-        want_webhook = (
-            payload.create_webhook_triggers
-            and not payload.dry_run
-            and res.created_template
-            and sug.get("kind") == "webhook"
-        )
-        if want_webhook and not triggers_on:
-            res.notes.append("webhook trigger not created: [features] triggers is off")
-        elif want_webhook:
-            # Default params for the trigger come from the recovered automation
-            # (sug["params"]); validate the template renders with them before
-            # arming so we don't create a trigger that always 400s at fire time
-            # on a required param the import couldn't supply.
-            sug_params = sug.get("params")
-            if not isinstance(sug_params, dict):
-                sug_params = {}
-            from maverick.templates import load_template
-
-            imported_template = None
-            try:
-                imported_template = load_template(res.template_name)
-                assert_template_access(request, imported_template)
-                imported_template.render_for(caller_principal(request) or "", **sug_params)
-            except (ValueError, FileNotFoundError) as e:
-                res.notes.append(
-                    f"webhook trigger not created: template needs param values "
-                    f"the import can't supply ({e}); create it in the builder"
-                )
-            else:
-                try:
-                    rec = triggers_store.set_trigger(
-                        res.template_name,
-                        res.template_name,
-                        sug_params,
-                        owner=owner,
-                        tenant=current_tenant_id() or "",
-                        template_snapshot=triggers_store.snapshot_from_template(imported_template),
-                    )
-                    webhook_trigger = rec["name"]
-                except ValueError as e:
-                    res.notes.append(f"could not create webhook trigger: {e}")
-        flow_id = None
-        fidelity: list[dict] = []
-        if payload.as_flows:
-            # Lower to a real graph too: structure preserved where the source
-            # exposes it, each step's disposition logged -- the migration is
-            # never silently lossy.
-            from maverick.flow import store as flow_store
-
-            flow_graph, fidelity = prepared_graphs[automation_index]
-            if owner:
-                flow_graph.owner = owner
-            flow_id = flow_graph.id
-            flow_errors = flow_graph.validate()
-            if flow_errors:
-                res.notes.append("flow preview was not saved: " + "; ".join(flow_errors[:5]))
-                if not payload.dry_run:
-                    flow_id = None
-            elif not payload.dry_run:
-                try:
-                    # Imports are creates, not implicit replacements. A repeated
-                    # source name must never overwrite a graph a human may have
-                    # edited since the first import.
-                    flow_store.save_flow(flow_graph, expected_version=0)
-                except flow_store.FlowVersionConflict:
-                    res.notes.append(f"flow {flow_graph.id!r} already exists; left it unchanged")
-                    flow_id = None
-        results.append(
-            {
-                "source": a.source,
-                "name": a.name,
-                "template": res.template_name,
-                "created": res.created_template,
-                "trigger": a.trigger.kind,
-                "webhook_trigger": webhook_trigger,
-                "schedule": res.schedule,
-                "tools": res.tool_hints,
-                "notes": res.notes,
-                "flow": flow_id,
-                "fidelity": fidelity,
-            }
-        )
-
-    return ImportRunOut(
-        imported=results,
-        dry_run=payload.dry_run,
-        webhook_url=_WEBHOOK_RUN_PATH,
-        secret_configured=_inbound_secret_set(),
-        skipped=skipped,
-    )
+    from .tools_ops_api import same_origin
+    same_origin(request)
+    raise HTTPException(409, "Open Import from another platform in Automations, choose your export or connected account, and review every draft before saving. No automation was imported, replaced or activated by this request.")
 
 
 # ---- automation run history (provenance): goals a schedule/trigger spawned ---

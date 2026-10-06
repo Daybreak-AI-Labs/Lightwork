@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -315,6 +316,7 @@ def save_user_template(
     expected_generation: int | None = None,
     admin_override: bool = False,
     parameter_schema: dict | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> Template:
     """Persist a user-authored (or AI-drafted) workflow as a user template.
 
@@ -411,8 +413,12 @@ def save_user_template(
         content = "---\n" + "\n".join(front) + "\n---\n" + body + "\n"
         from .workflow_versions import before_save
 
-        before_save(name, content, previous_content)
-        atomic_write_text(dest, content)
+        if effect_guard is None:
+            before_save(name, content, previous_content)
+            atomic_write_text(dest, content)
+        else:
+            before_save(name, content, previous_content, effect_guard=effect_guard)
+            atomic_write_text(dest, content, effect_guard=effect_guard)
     return Template.parse(content, name, path=dest)
 
 

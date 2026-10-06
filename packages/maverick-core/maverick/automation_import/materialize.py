@@ -11,6 +11,7 @@ imported automations appear in the Automations history automatically.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,6 +40,9 @@ def materialize(
     owner: str | None = None,
     channel: str | None = None,
     user_id: str | None = None,
+    expected_generation: int | None = None,
+    effect_guard: Callable[[], None] | None = None,
+    complete: bool = False,
 ) -> MaterializeResult:
     """Create the Template (and optionally a cron schedule) for one automation.
 
@@ -52,7 +56,7 @@ def materialize(
     from ..catalog_trust import shield_scan
     from ..templates import save_user_template
 
-    title, body = automation.render()
+    title, body = automation.render(complete=True) if complete else automation.render()
     tname = automation.template_name()
     notes: list[str] = []
 
@@ -80,6 +84,8 @@ def materialize(
             budget_wall_seconds=budget_wall_seconds,
             overwrite=overwrite,
             owner=owner,
+            expected_generation=expected_generation,
+            effect_guard=effect_guard,
         )
         created = True
 

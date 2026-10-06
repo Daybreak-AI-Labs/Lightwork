@@ -116,6 +116,7 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "governed-rule-evolution": "governed_rule_evolution_source_authority",
     "local-rule-applicability": "applicability_regions_source_authority",
     "agent-override-removal-requests": "agent_override_change_authority",
+    "automation-import-requests": "automation_import_source_authority",
     "viewpoints-requests": "viewpoints_request_source_authority",
     "settings-catalog-requests": "settings_catalog_request_authority",
     "consent-withdrawal-requests": "consent_withdrawal_request_authority",

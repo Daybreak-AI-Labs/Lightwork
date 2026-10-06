@@ -95,6 +95,26 @@ def _run_identity_kwargs(payload: dict) -> dict[str, object]:
     return run_kwargs
 
 
+def _run_budget_kwargs(payload: dict) -> dict[str, float]:
+    """Carry optional reviewed schedule ceilings through current native limits."""
+    import math
+
+    from .config import config_source_errors
+    from .runner import requested_goal_dollars, requested_goal_wall_seconds
+
+    result = {}
+    for name, resolve in (("max_dollars", requested_goal_dollars), ("max_wall_seconds", requested_goal_wall_seconds)):
+        if name not in payload:
+            continue
+        value = payload[name]
+        if type(value) not in {int, float} or not math.isfinite(value) or value < 0 or (name == "max_wall_seconds" and value == 0):
+            raise ValueError("The saved schedule's reviewed spending or time limit is invalid; no task was started.")
+        if config_source_errors(include_tenant=True):
+            raise ValueError("Current schedule spending settings are unavailable; no task was started.")
+        result[name] = resolve(value)
+    return result
+
+
 @contextmanager
 def _job_tenant_context(payload: dict):
     """Pin a durable job to its captured tenant before any work begins.
@@ -244,6 +264,7 @@ class Worker:
             # (re-executing the same world-model row). Pair with cron via
             # `maverick schedule goal "<cron>" "<prompt>"`; _maybe_rearm carries
             # the prompt forward in the payload so each occurrence is new.
+            run_budget = _run_budget_kwargs(job.payload)
             text = (job.payload.get("text") or "").strip()
             if not text:
                 raise ValueError("start_goal payload requires non-empty 'text'")
@@ -283,6 +304,7 @@ class Worker:
             status = run_goal_in_thread(
                 int(goal_id), acquire_timeout=_queue_goal_acquire_timeout(),
                 **_run_identity_kwargs(job.payload),
+                **run_budget,
             )
             if status is None:
                 if self._defer_for_concurrency_slot(job):

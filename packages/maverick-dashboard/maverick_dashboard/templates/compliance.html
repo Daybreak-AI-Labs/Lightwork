@@ -253,21 +253,22 @@
     {% include "_retention_maintenance.html" %}
   </div>
 
-  <div class="section-head"><h2>Reports for auditors</h2></div>
-  <div class="panel">
+  <div class="section-head"><h2 id="cmp-reports">Reports for auditors</h2></div>
+  <div class="panel" data-report-context="{{ report_download_context }}">
     <div class="cmp-links" style="margin-top: 0;">
       {% if can_admin %}
-      <a class="btn btn--ghost" href="/api/v1/compliance/downloads/soc2" download>Download SOC 2 snapshot</a>
-      <a class="btn btn--ghost" href="/api/v1/compliance/downloads/ai-bom" download>Download AI inventory list</a>
+      <button type="button" class="btn btn--ghost" data-report-download="soc2" data-report-status="cmp-report-result">Download SOC 2 snapshot</button>
+      <button type="button" class="btn btn--ghost" data-report-download="ai_inventory" data-report-status="cmp-report-result">Download AI inventory list</button>
       {% endif %}
     </div>
+    <p id="cmp-report-result" class="muted" role="status" aria-live="polite"></p>
     {% if can_operate %}
     <div class="cmp-row" style="margin-top: .75rem;">
       <label for="cmp-assessment">Assessment
         <select id="cmp-assessment" class="select"><option value="">Loading assessments…</option></select>
       </label>
-      <button type="button" class="btn btn--ghost" id="cmp-oscal">Download results (OSCAL)</button>
-      <button type="button" class="btn btn--ghost" id="cmp-soa">Download Statement of Applicability</button>
+      <button type="button" class="btn btn--ghost" id="cmp-oscal" data-report-download="oscal" data-report-status="cmp-assessment-result">Download results (OSCAL)</button>
+      <button type="button" class="btn btn--ghost" id="cmp-soa" data-report-download="soa" data-report-status="cmp-assessment-result">Download Statement of Applicability</button>
     </div>
     <p id="cmp-assessment-result" class="muted" role="status" aria-live="polite"></p>
     {% endif %}
@@ -300,5 +301,6 @@
   {% endif %}
   {% if compliance_tabs %}</div>{% endif %}
   <script src="/static/lightwork-compliance.js" defer></script>
+  <script src="/static/lightwork-report-downloads.js" defer></script>
   <script src="/static/lightwork-retention-maintenance.js" defer></script>
 {% endblock %}

@@ -139,19 +139,23 @@ class MakeImporter:
     source = "make"
     can_fetch_definitions = True
 
-    def __init__(self, base_url: str | None = None, token: str | None = None):
-        self.base_url = (base_url or os.environ.get("MAKE_BASE_URL", "")).strip().rstrip("/")
-        self.token = (token or os.environ.get("MAKE_TOKEN", "")).strip()
+    def __init__(self, base_url: str | None = None, token: str | None = None, *, request=None, scope: str | None = None, scope_id: int | None = None):
+        self.request = request
+        if scope is not None and (scope not in {"team", "organization"} or type(scope_id) is not int or not 1 <= scope_id <= 2**53 - 1):
+            raise ImporterError("Choose a Make team or organization and its positive account number")
+        self.scope_params = {"teamId" if scope == "team" else "organizationId": scope_id} if scope else {}
+        self.base_url = ((base_url or "") if request is not None else (base_url or os.environ.get("MAKE_BASE_URL", ""))).strip().rstrip("/")
+        self.token = "" if request is not None else (token or os.environ.get("MAKE_TOKEN", "")).strip()
 
     def _get(self, client, path: str, **kw):
-        return client.get(
+        return (self.request or client.get)(
             f"{self.base_url}{path}",
             headers={"Authorization": f"Token {self.token}", "Accept": "application/json"},
             **kw,
         )
 
     def fetch(self) -> list[dict[str, Any]]:
-        if not self.base_url or not self.token:
+        if not self.base_url or (self.request is None and not self.token):
             raise ImporterError("Make import requires MAKE_BASE_URL + MAKE_TOKEN")
         try:
             import httpx
@@ -166,7 +170,7 @@ class MakeImporter:
             # (100 pages = 10k scenarios) so a misbehaving API can't spin forever.
             for _ in range(100):
                 r = self._get(client, "/api/v2/scenarios",
-                              params={"pg[limit]": page_size, "pg[offset]": offset})
+                              params={**self.scope_params, "pg[limit]": page_size, "pg[offset]": offset})
                 r.raise_for_status()
                 scenarios = (r.json() or {}).get("scenarios") or []
                 if not scenarios:
@@ -177,7 +181,13 @@ class MakeImporter:
                         continue
                     br = self._get(client, f"/api/v2/scenarios/{sid}/blueprint")
                     br.raise_for_status()
-                    out.append(br.json() if br.content else {})
+                    blueprint = br.json() if br.content else {}
+                    if not isinstance(blueprint, dict):
+                        raise ImporterError("Make scenario did not return a complete blueprint")
+                    # The blueprint endpoint does not retain the scenario's
+                    # account identity/name. Keep its exact listing metadata.
+                    bp = _unwrap(blueprint)
+                    out.append({**bp, "id": sid, "name": sc.get("name") or bp.get("name") or "untitled Make scenario"})
                 if len(scenarios) < page_size:
                     break
                 offset += page_size
@@ -189,7 +199,7 @@ class MakeImporter:
                 r = self._get(
                     client,
                     "/api/v2/scenarios",
-                    params={"pg[limit]": 1, "pg[offset]": offset},
+                    params={**self.scope_params, "pg[limit]": 1, "pg[offset]": offset},
                 )
                 r.raise_for_status()
                 if (r.json() or {}).get("scenarios"):
