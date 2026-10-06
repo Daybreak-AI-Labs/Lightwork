@@ -89,24 +89,24 @@
   .fd-node.selected rect.card { stroke: var(--accent); stroke-width: 2.5; }
   .fd-node:focus { outline: none; }
   .fd-node:focus-visible rect.card { stroke: var(--ring); stroke-width: 3; }
-  .fd-node.start rect.card { stroke: var(--success, #16a34a); }
+  .fd-node.start rect.card { stroke: var(--success); }
   .fd-node text { font: 12px var(--font-sans); fill: var(--text); pointer-events: none; }
   .fd-node text.kind { font-weight: var(--font-bold); text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
   .fd-node .swatch { rx: 4; }
   .fd-node .port { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; cursor: crosshair; }
   .fd-edge { fill: none; stroke: var(--muted); stroke-width: 2; marker-end: url(#fd-arrow); }
-  .fd-edge.t { stroke: var(--success, #16a34a); }
-  .fd-edge.f { stroke: var(--danger, #dc2626); }
+  .fd-edge.t { stroke: var(--success); }
+  .fd-edge.f { stroke: var(--danger); }
   .fd-edge-label { font: 10px var(--font-sans); fill: var(--muted); }
-  .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
-  .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
-  .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
-  .k-switch { fill: #b45309; } .k-while { fill: #8b5cf6; } .k-wait_event { fill: #0369a1; }
-  .k-scope { fill: #4d7c0f; } .k-setvar { fill: #4f46e5; }
+  .k-agent { fill: var(--fd-kind-agent); } .k-action { fill: var(--fd-kind-action); } .k-branch { fill: var(--fd-kind-branch); }
+  .k-foreach { fill: var(--fd-kind-foreach); } .k-parallel { fill: var(--fd-kind-parallel); } .k-approval { fill: var(--fd-kind-approval); }
+  .k-delay { fill: var(--fd-kind-delay); } .k-subflow { fill: var(--fd-kind-subflow); }
+  .k-switch { fill: var(--fd-kind-switch); } .k-while { fill: var(--fd-kind-while); } .k-wait_event { fill: var(--fd-kind-wait-event); }
+  .k-scope { fill: var(--fd-kind-scope); } .k-setvar { fill: var(--fd-kind-setvar); }
   /* live run overlay */
-  .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
-  .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
-  .fd-node.run-info rect.card { stroke: #d97706; stroke-width: 2.5; }
+  .fd-node.run-ok rect.card { stroke: var(--success); stroke-width: 2.5; }
+  .fd-node.run-err rect.card { stroke: var(--danger); stroke-width: 2.5; }
+  .fd-node.run-info rect.card { stroke: var(--warn); stroke-width: 2.5; }
   .fd-node.run-active rect.card { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 5 3; }
   .fd-node .runbadge { font-size: 13px; }
   .fd__legend { font-size: var(--text-sm); color: var(--muted); display: none; gap: var(--space-3); }
@@ -161,7 +161,7 @@
   .fd__chat-log > * { flex-shrink: 0; }
   .fd__chat-msg { max-width: 92%; padding: 6px 10px; border-radius: 10px; font-size: var(--text-sm);
                   white-space: pre-wrap; word-break: break-word; }
-  .fd__chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+  .fd__chat-msg.user { align-self: flex-end; background: var(--brand); color: var(--brand-fg); }
   .fd__chat-msg.assistant { align-self: flex-start; background: var(--surface-sunken); border: 1px solid var(--border); }
   .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 var(--space-0-5); }
   .fd__chat-form { display: flex; flex-shrink: 0; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
@@ -184,7 +184,7 @@
     --glass: color-mix(in srgb, var(--panel) 68%, transparent);
     --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
     --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
-    --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
+    --glass-edge: inset 0 1px 0 0 color-mix(in srgb, white 8%, transparent);
   }
   .fd__canvas-wrap, .fd__props{
     border-color: var(--glass-border); background: var(--glass-soft);

@@ -82,6 +82,18 @@
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.20);
       --shadow-md: 0 4px 16px rgba(0,0,0,0.28);
       --shadow-lg: 0 12px 40px rgba(0,0,0,0.40);
+      /* ---- print: reports and conversations on paper look the same in
+         every theme (ink on white, one rule colour, one muted grey) ---- */
+      --print-paper: #ffffff; --print-ink: #111111; --print-ink-strong: #000000;
+      --print-muted: #555555; --print-rule: #bbbbbb; --print-border: #cccccc;
+      /* ---- workflow designer: one colour per kind of step. A categorical
+         set, the same in every theme (each is readable on light and dark
+         canvases); status colours stay --success/--danger/--warn. ---- */
+      --fd-kind-agent: #6366f1; --fd-kind-action: #0891b2; --fd-kind-branch: #d97706;
+      --fd-kind-foreach: #7c3aed; --fd-kind-parallel: #db2777; --fd-kind-approval: #16a34a;
+      --fd-kind-delay: #64748b; --fd-kind-subflow: #0d9488; --fd-kind-switch: #b45309;
+      --fd-kind-while: #8b5cf6; --fd-kind-wait-event: #0369a1; --fd-kind-scope: #4d7c0f;
+      --fd-kind-setvar: #4f46e5;
     }
     /* Core palettes. :root carries the dark values so a class-less render
        still looks right; the body always also carries body.theme-*. */

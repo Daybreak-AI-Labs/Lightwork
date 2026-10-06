@@ -8,8 +8,8 @@
   .rpt-note { color: var(--muted); font-size: var(--text-sm); }
   @media print {
     .sidebar, .topbar, nav, .rpt-actions, #mv-sidebar, header { display: none !important; }
-    .panel { break-inside: avoid; border: 1px solid #ccc; }
-    body { background: #fff; color: #000; }
+    .panel { break-inside: avoid; border: 1px solid var(--print-border); }
+    body { background: var(--print-paper); color: var(--print-ink-strong); }
   }
 </style>
 {% set status_labels = {
