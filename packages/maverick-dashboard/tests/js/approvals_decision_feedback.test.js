@@ -36,13 +36,13 @@ function fixture() {
   w.mvToast = () => {};
   w.mvErrorText = (_failure, action) => "Could not " + action + ". Try again.";
   w.setInterval = () => 1; w.clearInterval = () => {};
-  let answer;
-  w.mvForm = () => new Promise(resolve => { answer = resolve; });
+  let answer; const forms = [];
+  w.mvForm = (title, fields) => { forms.push(fields); return new Promise(resolve => { answer = resolve; }); };
   w.fetch = () => new Promise((resolve, reject) => pending.push({resolve, reject}));
   const start = queue.indexOf("  (function() {\n    const msg = document.getElementById('approval-msg')");
   w.eval(queue.slice(start, queue.indexOf("</script>", start)));
   const button = w.document.querySelector('[data-action="deny"]');
-  return {dom, w, doc: w.document, pending, button, answer: value => answer(value)};
+  return {dom, w, doc: w.document, pending, button, forms, answer: value => answer(value)};
 }
 const busyText = doc => (doc.querySelector("#approval-7 [data-approval-busy]") || {textContent: ""}).textContent;
 
@@ -65,7 +65,7 @@ test("the card says Rejecting… and the button is busy as soon as the reason is
   } finally { f.dom.window.close(); }
 });
 
-test("a failed decision clears the busy line and gives the buttons back", async () => {
+test("a failed decision replaces the busy line with the error and gives the buttons back", async () => {
   const f = fixture();
   try {
     f.button.click();
@@ -75,7 +75,8 @@ test("a failed decision clears the busy line and gives the buttons back", async 
     assert.equal(busyText(f.doc), "Rejecting…");
     f.pending[0].reject(new f.w.TypeError("Failed to fetch"));
     await flush();
-    assert.equal(busyText(f.doc), "");
+    // "Rejecting…" gives way to the error, on the card itself.
+    assert.equal(busyText(f.doc), "Could not record your decision. Try again.");
     assert.equal(f.button.disabled, false);
     assert.equal(f.button.hasAttribute("aria-busy"), false);
     assert.match(f.doc.getElementById("approval-msg").textContent, /Could not record your decision/);
@@ -92,5 +93,22 @@ test("cancelling the reason changes nothing and shows no busy line", async () =>
     assert.equal(f.pending.length, 0);
     assert.equal(busyText(f.doc), "");
     assert.equal(f.button.hasAttribute("aria-busy"), false);
+  } finally { f.dom.window.close(); }
+});
+
+test("a blocked rejection says so on the card and keeps the typed reason for the retry", async () => {
+  const f = fixture();
+  try {
+    f.button.click(); await flush();
+    assert.equal(f.forms[0][0].default || "", "");
+    f.answer({reason: "Wrong records"}); await flush();
+    f.pending[0].reject(new f.w.TypeError("Failed to fetch")); await flush();
+    const line = f.doc.querySelector("#approval-7 [data-approval-busy]");
+    assert.equal(line.textContent, "Could not record your decision. Try again.");
+    assert.equal(line.classList.contains("mv-status--error"), true);
+    assert.equal(f.doc.querySelectorAll('#approval-queue article.approval-item[data-id="7"]').length, 1, "still waiting in the queue");
+    f.button.click(); await flush();
+    assert.equal(f.forms[1][0].default, "Wrong records", "what was typed is offered again");
+    assert.equal(line.textContent, "", "a new attempt clears the old error");
   } finally { f.dom.window.close(); }
 });

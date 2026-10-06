@@ -137,3 +137,18 @@ test("an openable page is remembered for Recent pages, once, and only when asked
   assert.deepEqual(quiet.calls, []);
   quiet.dom.window.close();
 });
+
+test("a pin blocked on the way says so as an error and leaves the button and list as they were", async () => {
+  const page = sidebar({ record: false });
+  page.window.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
+  const toggle = page.doc.getElementById("page-pin-toggle");
+  toggle.click(); await page.flush(); await page.flush();
+  assert.deepEqual(page.order(), ["/goals", "/deliverables"]);
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(toggle.disabled, false);
+  assert.equal(page.toasts.length, 1);
+  assert.equal(page.toasts[0][1], true, "shown as an error");
+  assert.match(page.toasts[0][0], /pinned pages/i);
+  assert.equal(page.doc.getElementById("navpins-status").textContent, page.toasts[0][0]);
+  page.dom.window.close();
+});

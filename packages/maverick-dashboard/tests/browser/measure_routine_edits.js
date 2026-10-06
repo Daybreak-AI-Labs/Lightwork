@@ -30,17 +30,30 @@ const EDITS = [
     restored: page => page.locator('article.approval-item button.approval-btn[data-action="approve"]').count().then(n => n > 0)},
   {name: 'reject a request', path: '/approvals',
     control: 'article.approval-item:not([data-risk="high"]):not([data-risk="critical"]) button.approval-btn[data-action="deny"]',
+    // Rejecting asks for an optional reason first; the request goes when it is given.
+    confirm: async page => { await page.fill('#mv-form-fields input', 'Not needed'); await page.click('#mv-form-ok'); },
     restored: page => page.locator('article.approval-item button.approval-btn[data-action="deny"]').count().then(n => n > 0)},
   {name: 'give a person a role', path: '/users', control: '#give-role-form [type="submit"]',
-    prepare: async page => { await page.selectOption('#give-role-form select[name="role"]', {index: 1}).catch(() => {}); }},
+    prepare: async page => {
+      await page.selectOption('#give-role-form select[name="principal"]', {index: 1}).catch(() => {});
+      await page.selectOption('#give-role-form select[name="role"]', {index: 1}).catch(() => {});
+    },
+    // Kept as chosen, so the person can try again.
+    restored: page => page.locator('#give-role-form select[name="principal"]').inputValue().then(value => value !== '')},
   {name: 'turn the daily summary on or off', path: '/me', control: '#digest-form [type="submit"]',
     prepare: async page => { await page.locator('#digest-form input[name="digest_enabled"]').click(); },
     restored: page => page.locator('#digest-form input[name="digest_enabled"]').count().then(n => n > 0)},
   {name: 'change notification preferences', path: '/notifications', control: '#notification-preferences [type="submit"]',
     prepare: async page => { await page.locator('#notification-preferences input[name="quiet_enabled"]').click(); }},
-  {name: 'pin a page to the sidebar', path: '/goals', control: 'main button:has-text("Pin to sidebar")'},
-  {name: 'save the workspace spending limit', path: '/spending-limits', control: '#limit-workspace [type="submit"]',
-    prepare: async page => { await page.locator('#limit-workspace input[name="amount"]').fill('250').catch(() => {}); }},
+  {name: 'pin a page to the sidebar', path: '/goals', control: 'main button:has-text("Pin to sidebar")',
+    state: page => page.locator('#page-pin-toggle').getAttribute('aria-pressed')},
+  // The form's first submit button is Preview, which only reads.
+  {name: 'save the workspace spending limit', path: '/spending-limits', control: '#limit-workspace button[type="submit"]:not([formmethod="get"])',
+    prepare: async page => {
+      await page.check('#limit-workspace input[name="choice"][value="limit"]').catch(() => {});
+      await page.locator('#limit-workspace input[name="amount"]').fill('250').catch(() => {});
+    },
+    restored: page => page.locator('#limit-workspace input[name="amount"]').inputValue().then(value => value === '250')},
 ];
 
 async function ready(page) {
@@ -71,6 +84,7 @@ async function attempt(browser, edit, mode) {
     const control = page.locator(edit.control).first();
     if (!(await control.count())) return {mode, available: false};
     if (edit.prepare) await edit.prepare(page);
+    const before = edit.state ? await edit.state(page) : null;
     const cdp = await context.newCDPSession(page);
     if (mode !== 'server') {
       await cdp.send('Network.enable'); await cdp.send('Network.emulateNetworkConditions', SLOW_4G);
@@ -80,6 +94,7 @@ async function attempt(browser, edit, mode) {
     const answered = page.waitForResponse(response => response.request().method() !== 'GET', {timeout: 30000}).catch(() => null);
     const failed = page.waitForEvent('requestfailed', {timeout: 30000}).catch(() => null);
     await control.click();
+    if (edit.confirm) await edit.confirm(page);
     const response = mode === 'blocked' ? await failed : await answered;
     const answeredAt = Date.now();
     await page.waitForTimeout(300);
@@ -92,10 +107,10 @@ async function attempt(browser, edit, mode) {
     }
     if (mode === 'blocked') {
       await page.waitForTimeout(1500);
-      result.errorShown = await page.evaluate(() => [...document.querySelectorAll('[role="alert"], .mv-status--error, .mv-toast--error, [data-mv-loading-error]')]
+      result.errorShown = await page.evaluate(() => [...document.querySelectorAll('[role="alert"], .mv-status--error, .mv-toast--error, [data-mv-loading-error], [data-mv-error-summary]:not([hidden])')]
         .some(node => node.textContent.trim().length > 0 && node.getClientRects().length > 0));
       result.undoOffered = await page.locator('button:has-text("Undo"):visible').count() > 0;
-      result.restored = edit.restored ? await edit.restored(page) : null;
+      result.restored = edit.restored ? await edit.restored(page) : edit.state ? (await edit.state(page)) === before : null;
     }
     return result;
   } catch (error) {
