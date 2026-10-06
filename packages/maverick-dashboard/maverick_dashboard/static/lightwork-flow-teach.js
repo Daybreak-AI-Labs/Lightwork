@@ -781,7 +781,7 @@
     try { data = await api('/api/v1/flow-teach/approved'); } catch (_) { return; }
     const list = $('sg-approved');
     list.replaceChildren();
-    if (!(data.recipes || []).length) { list.append(make('li', 'muted', 'No approved recipes yet.')); return; }
+    if (!(data.recipes || []).length) { list.append(make('li', 'muted', 'No approved recipes yet. Teach a flow above and approve its recipe.')); return; }
     data.recipes.forEach(r => {
       const item = make('li', 'mv-row');
       const when = r.approved_at && typeof window.mvWhen === 'function' ? window.mvWhen(r.approved_at) : '';

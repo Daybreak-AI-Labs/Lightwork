@@ -536,6 +536,8 @@ ROWS = [('Workflow builder', 'Créateur de workflows', 'Workfloweditor', 'ワー
  ('Creating…', 'Création…', 'Wird erstellt…', '作成中…', '正在创建…'),
  ('Ready.', 'Prêt.', 'Bereit.', '準備できました。', '已就绪。'),
  ('Deleted', 'Supprimé', 'Gelöscht', '削除済み', '已删除'),
+ ('{name} deleted. Other apps can no longer start this workflow.', '{name} supprimé. Les autres applications ne peuvent plus lancer ce flux de travail.', '{name} gelöscht. Andere Apps können diesen Workflow nicht mehr starten.', '{name}を削除しました。他のアプリはこのワークフローを開始できなくなります。', '已删除{name}。其他应用无法再启动此工作流。'),
+ ('Delete this schedule? Its next run is due within a minute, so it is deleted now and can’t be brought back.', 'Supprimer cette planification ? Sa prochaine exécution a lieu dans moins d’une minute : elle est supprimée tout de suite et ne peut pas être récupérée.', 'Diesen Zeitplan löschen? Die nächste Ausführung ist in weniger als einer Minute fällig, daher wird er sofort gelöscht und kann nicht wiederhergestellt werden.', 'このスケジュールを削除しますか？次の実行が1分以内のため、すぐに削除され元に戻せません。', '删除此计划？其下次运行在一分钟内，因此会立即删除且无法恢复。'),
  ('Someone reviews', 'Une personne vérifie', 'Jemand prüft', '人がレビュー', '由人员审阅'),
  ('Someone must approve', 'Une personne doit approuver', 'Jemand muss genehmigen', '人の承認が必要', '必须由人员批准'),
  ('No check', 'Aucune vérification', 'Keine Prüfung', '確認なし', '不检查'),

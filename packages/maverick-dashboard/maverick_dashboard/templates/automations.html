@@ -414,11 +414,11 @@
   function rowWith(list, key, value) {
     return list ? Array.prototype.find.call(list.children, function (li) { return li.dataset[key] === String(value); }) || null : null;
   }
-  function deleteWithUndo(row, heading, message, url, action, reload, latest) {
+  function deleteWithUndo(row, heading, message, url, action, reload, latest, values) {
     if (row) row.hidden = true;
     refocus(heading);
     mvUndo(message, {
-      action: action, latest: latest,
+      action: action, latest: latest, values: values,
       run: function (keepalive) { return fetch(url, { method: 'DELETE', keepalive: keepalive }); },
       undo: function () { if (row) { row.hidden = false; var b = row.querySelector('button'); if (b) b.focus(); } },
       done: reload
@@ -441,8 +441,8 @@
       } catch (e) { mvFail(e, 'delete the schedule'); }
       return;
     }
-    deleteWithUndo(row, 'auto-sched-h', 'Schedule “' + name + '” deleted.', url, 'delete the schedule', loadSchedules,
-      next ? next - 15000 : undefined);
+    deleteWithUndo(row, 'auto-sched-h', 'Schedule “{name}” deleted.', url, 'delete the schedule', loadSchedules,
+      next ? next - 15000 : undefined, {name: name});
   }
 
   var trigList = document.getElementById('auto-trig-list');
@@ -485,8 +485,8 @@
   }
   function delTrigger(name) {
     deleteWithUndo(rowWith(trigList, 'trigger', name), 'auto-trig-h',
-      'Start “' + name + '” deleted. Other apps can no longer start this workflow.',
-      '/api/v1/triggers/' + encodeURIComponent(name), 'delete the start', loadTriggers);
+      'Start “{name}” deleted. Other apps can no longer start this workflow.',
+      '/api/v1/triggers/' + encodeURIComponent(name), 'delete the start', loadTriggers, undefined, {name: name});
   }
 
   // Run history (provenance): "N runs · ✓X · ✗Y · #ids" with drill-down links.
@@ -507,7 +507,7 @@
     var sum = data.summary || {}, runs = data.runs || [];
     var total = Object.keys(sum).reduce(function (a, k) { return a + sum[k]; }, 0);
     into.textContent = '';
-    if (!total) { into.textContent = 'No runs yet'; return; }
+    if (!total) { into.textContent = 'No runs yet. Runs appear here after the first scheduled or connected start.'; return; }
     var failed = (sum.failed || 0) + (sum.error || 0);
     into.appendChild(document.createTextNode(total + (total === 1 ? ' run' : ' runs')));
     if (sum.done) into.appendChild(document.createTextNode(' · ✓ ' + sum.done));
@@ -969,8 +969,8 @@
     }
     async function delEventTrigger(name) {
       deleteWithUndo(rowWith(evList, 'eventTrigger', name), 'auto-event-h',
-        'Automation “' + name + '” deleted. Lightwork stops checking for new items.',
-        '/api/v1/event-triggers/' + encodeURIComponent(name), 'delete the automation', loadEventTriggers);
+        'Automation “{name}” deleted. Lightwork stops checking for new items.',
+        '/api/v1/event-triggers/' + encodeURIComponent(name), 'delete the automation', loadEventTriggers, undefined, {name: name});
     }
     evForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();

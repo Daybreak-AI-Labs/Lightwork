@@ -474,13 +474,20 @@
       state = result; render(); say("Saved.");
     } catch (error) { say(failText(error, "save the target"), true); }
   }
-  async function remove(target) {
-    if (!(await window.mvConfirm("Stop publishing approved notices to " + window.mvHuman(target.binding_id) + "?", {okText: "Stop publishing"}))) return;
-    try {
-      var result = await call("DELETE", "/" + encodeURIComponent(target.binding_id));
-      if (result.status === 409) { say(failText({status: 409, detail: result.detail}, "remove the target"), true); return; }
-      state = result; render(); say("Removed.");
-    } catch (error) { say(failText(error, "remove the target"), true); }
+  function remove(target, row) {
+    // One action with a way back (CTL-1): publishing to this target stops
+    // when the Undo time is up.
+    if (row) row.hidden = true;
+    window.mvUndo("Stopped publishing approved notices to {target}.", { values: {target: window.mvHuman(target.binding_id)},
+      action: "remove the target",
+      run: async function () {
+        var result = await call("DELETE", "/" + encodeURIComponent(target.binding_id));
+        if (result.status === 409) throw {status: 409, detail: result.detail};
+        state = result; return {ok: true};
+      },
+      undo: function () { if (row) row.hidden = false; },
+      done: function () { render(); say("Removed."); }
+    });
   }
   function render() {
     list.textContent = "";
@@ -506,7 +513,7 @@
       if (t.removable) {
         var del = document.createElement("button"); del.type = "button"; del.className = "btn btn--danger"; del.textContent = "Remove";
         del.setAttribute("aria-label", "Remove " + window.mvHuman(t.binding_id));
-        del.addEventListener("click", function () { remove(t); }); actions.appendChild(del);
+        del.addEventListener("click", function () { remove(t, row); }); actions.appendChild(del);
       }
     });
     list.appendChild(table);

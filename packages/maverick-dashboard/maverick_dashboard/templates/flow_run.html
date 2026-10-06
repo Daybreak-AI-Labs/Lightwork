@@ -38,6 +38,10 @@
   .fr__example .fr__actions { margin-bottom: 0; }
   .fr__example .btn { white-space: normal; }
   @media (max-width: 480px) { .fr__example .fr__actions .btn { width: 100%; } }
+  .fr__feedback { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; }
+  .fr__feedback-btn { min-width: 44px; min-height: 44px; }
+  .fr__feedback-btn[aria-pressed="true"] { border-color: var(--brand-border); }
+  .fr__feedback-msg { flex-basis: 100%; }
 </style>
 
 <div class="fr">
@@ -55,6 +59,12 @@
   <div class="fr__error" id="fr-error" role="alert" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" role="status" aria-live="polite"></span>
+  <div class="fr__feedback" id="fr-feedback" data-flow-run-feedback data-run="{{ run_id }}" role="group" aria-label="{{ ut('Rate this run') }}" lang="{{ ul('Rate this run') }}" hidden>
+    <span class="fr__msg">{{ ui('Done by agents. Was it useful?') }}</span>
+    <button class="btn btn--ghost fr__feedback-btn" type="button" data-rating="up" aria-pressed="false" aria-label="{{ ut('Yes, useful') }}">👍</button>
+    <button class="btn btn--ghost fr__feedback-btn" type="button" data-rating="down" aria-pressed="false" aria-label="{{ ut('No, not useful') }}">👎</button>
+    <span class="fr__msg fr__feedback-msg" data-feedback-msg role="status" aria-live="polite"></span>
+  </div>
   {% if not request.query_params.get('approval_review') %}{% include "_workflow_explanation.html" %}{% endif %}
 
   {% if learning_example_panel %}<section class="panel fr__example" id="le-card" aria-labelledby="le-title"
@@ -537,7 +547,7 @@
     var keys = Object.keys(data || {});
     if (!keys.length) {
       var tr0 = document.createElement('tr'); var td0 = document.createElement('td'); td0.colSpan = 2; td0.className = 'muted';
-      td0.textContent = 'Nothing yet.'; tr0.appendChild(td0); body.appendChild(tr0); return;
+      td0.textContent = 'Nothing yet. Values appear here as the run produces them.'; tr0.appendChild(td0); body.appendChild(tr0); return;
     }
     keys.forEach(function (k) {
       var v = data[k], text;
@@ -554,8 +564,13 @@
       tr.appendChild(th); tr.appendChild(td); body.appendChild(tr);
     });
   }
+  var finishedSaid = false;
   function renderRun(run) {
     assignedReviewOnly = run.approval_review_only === true;
+    if (!assignedReviewOnly && !finishedSaid && ['failed', 'completed', 'rejected'].indexOf(run.status) >= 0) {
+      finishedSaid = true;  // the rating (lightwork-result-feedback.js) appears once the run is done
+      document.dispatchEvent(new CustomEvent('lightwork:flow-run-finished'));
+    }
     ['fr-owner-links', 'le-card', 'lx-card', 'fr-steps-title', 'fr-steps'].forEach(function (id) {
       var section = document.getElementById(id);
       if (section) section.hidden = assignedReviewOnly;
@@ -692,4 +707,4 @@
 })();
 </script>
 {% endblock %}
-{% block scripts_extra %}{% if not request.query_params.get('approval_review') %}{% if learning_example_panel %}<script src="/static/lightwork-learning-example.js" defer></script>{% endif %}{% if learning_capture_panel %}<script src="/static/lightwork-learning-capture.js" defer></script>{% endif %}{% endif %}{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-result-feedback.js" defer></script>{% if not request.query_params.get('approval_review') %}{% if learning_example_panel %}<script src="/static/lightwork-learning-example.js" defer></script>{% endif %}{% if learning_capture_panel %}<script src="/static/lightwork-learning-capture.js" defer></script>{% endif %}{% endif %}{% endblock %}

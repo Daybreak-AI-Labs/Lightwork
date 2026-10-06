@@ -70,10 +70,17 @@
   document.querySelectorAll("[data-xa-remove]").forEach(function (b) {
     b.addEventListener("click", async function () {
       var id = b.getAttribute("data-xa-remove");
-      if (!(await window.mvConfirm("Remove " + label(b) + "? It will stop working here. Its past work stays in your records.", { okText: "Remove agent" }))) return;
-      var out = await call("/api/v1/external-agents/" + encodeURIComponent(id), { method: "DELETE" }, "Removed.", false, "remove the agent");
-      if (out && b.hasAttribute("data-xa-go-roster")) setTimeout(function () { window.location.assign("/external-agents"); }, 350);
-      else if (out) setTimeout(function () { window.location.reload(); }, 350);
+      // One action with a way back (CTL-1): removed when the Undo time is up.
+      var row = b.hasAttribute("data-xa-go-roster") ? null : b.closest("tr, li, article");
+      if (row) row.hidden = true;
+      window.mvUndo("{name} removed. It stops working here; its past work stays in your records.", { values: {name: label(b)},
+        action: "remove the agent",
+        run: function (keepalive) { return fetch("/api/v1/external-agents/" + encodeURIComponent(id), { method: "DELETE", keepalive: keepalive, headers: { Accept: "application/json" } }); },
+        undo: function () { if (row) row.hidden = false; b.focus(); },
+        done: function () {
+          if (b.hasAttribute("data-xa-go-roster")) window.location.assign("/external-agents"); else window.location.reload();
+        }
+      });
     });
   });
 })();

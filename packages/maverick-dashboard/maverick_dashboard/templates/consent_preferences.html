@@ -330,7 +330,7 @@
       if(root.dataset.registryEnabled==="false")return;
       try{
         var posture=await call("/posture"),rows=Object.keys(posture.by_purpose||{}).map(function(k){return {purpose:k,granted:posture.by_purpose[k].granted,withdrawn:posture.by_purpose[k].withdrawn};});
-        CW.table($("cp-posture-table"),rows,{label:"Consent register",columns:[{label:"Use of data",value:function(r){return CW.human(r.purpose);}},{label:"Agreed",value:function(r){return r.granted;}},{label:"Withdrawn",value:function(r){return r.withdrawn;}}],empty:{title:"No choices in the register yet."}});
+        CW.table($("cp-posture-table"),rows,{label:"Consent register",columns:[{label:"Use of data",value:function(r){return CW.human(r.purpose);}},{label:"Agreed",value:function(r){return r.granted;}},{label:"Withdrawn",value:function(r){return r.withdrawn;}}],empty:{title:"No choices in the register yet. Choices appear here as people answer your consent requests."}});
         $("cp-posture").hidden=false;
       }catch(_error){$("cp-posture").hidden=true;}
     }

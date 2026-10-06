@@ -751,7 +751,7 @@
       ...(record.reconciliation_history || []).map(item => `${date(item.checked_at)} · Read-only Jira check: ${friendly(item.outcome)}.`),
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : "An exception was recorded (see Technical details)."),
     ];
-    show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet.");
+    show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet. They appear here when a reviewer decides.");
     reviewRefreshRequired = false;
     buttons();
     if (sameCase && !sameReview)

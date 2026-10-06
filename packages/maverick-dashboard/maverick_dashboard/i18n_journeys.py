@@ -19,9 +19,11 @@ from .i18n_journey_common import ROWS as COMMON_ROWS
 from .i18n_journey_composer_files import ROWS as COMPOSER_FILE_ROWS
 from .i18n_journey_connections import ROWS as CONNECTION_ROWS
 from .i18n_journey_conversation import ROWS as CONVERSATION_ROWS
+from .i18n_journey_coverage_gaps import ROWS as COVERAGE_GAP_ROWS
 from .i18n_journey_employee import ROWS as EMPLOYEE_ROWS
 from .i18n_journey_finder import ROWS as FINDER_ROWS
 from .i18n_journey_live_chat import ROWS as LIVE_CHAT_ROWS
+from .i18n_journey_next_steps import ROWS as NEXT_STEP_ROWS
 from .i18n_journey_preferences import ROWS as PREFERENCE_ROWS
 from .i18n_journey_receipts import ROWS as RECEIPT_ROWS
 from .i18n_journey_recovery_controls import ROWS as RECOVERY_CONTROL_ROWS
@@ -35,7 +37,7 @@ from .i18n_journey_workflow import ROWS as WORKFLOW_ROWS
 ROWS = [*FLOW_CREDENTIAL_ROWS, *BUDGET_ROWS, *COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS, *CONVERSATION_ROWS,
         *RECEIPT_ROWS, *RECOVERY_CONTROL_ROWS, *RESUME_ROWS, *SHELL_ROWS, *TASK_CONTROL_ROWS,
         *LIVE_CHAT_ROWS, *PREFERENCE_ROWS, *VOICE_CONTROL_ROWS, *COMPOSER_FILE_ROWS, *CONNECTION_ROWS,
-        *FINDER_ROWS, *AI_TRUST_ROWS]
+        *FINDER_ROWS, *AI_TRUST_ROWS, *NEXT_STEP_ROWS, *COVERAGE_GAP_ROWS]
 
 TRANSLATION_LANGS = ("fr", "de", "ja", "zh")
 # Rows are source, French, German, Japanese, Chinese. No Arabic machine completion.

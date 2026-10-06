@@ -124,18 +124,16 @@
       rm.type = 'button';
       rm.style.marginInlineStart = '6px';
       rm.setAttribute('aria-label', 'Remove ' + t.name);
-      rm.addEventListener('click', async function () {
-        var ok = window.mvConfirm && await window.mvConfirm(
-          'Remove ' + t.name + ' from your client list? Its saved address and access key are deleted. The client\'s own setup is not touched.',
-          { okText: 'Remove client' });
-        if (!ok) return;
-        rm.disabled = true;
-        fetch('/api/v1/partner/tenants/' + t.id, {method: 'DELETE'})
-          .then(function (r) {
-            $('pf-msg').textContent = r.ok ? 'Removed.' : problem(r, 'remove the client');
-            load();
-          })
-          .catch(function () { rm.disabled = false; $('pf-msg').textContent = offline('remove the client'); });
+      rm.addEventListener('click', function () {
+        // One action with a way back (CTL-1): the client leaves the list at
+        // once; its saved address and access key are deleted when Undo ends.
+        tr.hidden = true;
+        window.mvUndo('{name} removed from your client list. The client’s own setup is not touched.', { values: {name: t.name},
+          action: 'remove the client',
+          run: function (keepalive) { return fetch('/api/v1/partner/tenants/' + t.id, {method: 'DELETE', keepalive: keepalive}); },
+          undo: function () { tr.hidden = false; rm.focus(); },
+          done: function () { $('pf-msg').textContent = 'Removed.'; load(); }
+        });
       });
       act.appendChild(chk);
       act.appendChild(rm);

@@ -206,7 +206,7 @@
   function renderJobs(rows) {
     const list = byId('research-jobs');
     list.replaceChildren();
-    if (!rows.length) list.appendChild(element('li', 'No research submissions yet.'));
+    if (!rows.length) list.appendChild(element('li', 'No research submissions yet. Submissions appear here once someone sends one.'));
     rows.forEach(row => {
       const item = element('li', undefined, 'research-item');
       item.appendChild(element('strong', `Submission ${row.id}`));

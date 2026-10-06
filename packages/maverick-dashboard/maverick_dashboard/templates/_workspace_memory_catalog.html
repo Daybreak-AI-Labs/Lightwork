@@ -271,19 +271,20 @@
     publication.catch(function (e) { tplStatus.textContent = e && e.name !== 'TypeError' && e.message ? e.message : plain(e, 'save the questionnaire'); });
   });
 
-  tplRestore.addEventListener('click', async function () {
+  tplRestore.addEventListener('click', function () {
     if (!editingType) return;
-    if (!(await mvConfirm('Restore the original questionnaire? Your team’s changes are removed for new assessments; existing ones keep the version they started with.', { okText: 'Restore original' }))) return;
-    tplStatus.textContent = 'Restoring…';
-    fetch('/api/v1/assess/templates/' + encodeURIComponent(editingType) +
+    // One action with a way back (CTL-1): the team's changes are removed,
+    // for new assessments only, when the Undo time is up.
+    var url = '/api/v1/assess/templates/' + encodeURIComponent(editingType) +
           '?expected_revision=' + encodeURIComponent(editingRevision) +
-          '&expected_digest=' + encodeURIComponent(editingDigest),
-          { method: 'DELETE' })
-      .then(function (r) {
-        if (r.ok) { location.reload(); return; }
-        throw new Error(plain(r, 'restore the original'));
-      })
-      .catch(function (e) { tplStatus.textContent = e && e.name !== 'TypeError' && e.message ? e.message : plain(e, 'restore the original'); });
+          '&expected_digest=' + encodeURIComponent(editingDigest);
+    tplStatus.textContent = 'Restoring the original questionnaire. Existing assessments keep the version they started with.';
+    mvUndo('Original questionnaire restored. Your team’s changes are removed for new assessments.', {
+      action: 'restore the original',
+      run: function (keepalive) { return fetch(url, { method: 'DELETE', keepalive: keepalive }); },
+      undo: function () { tplStatus.textContent = ''; tplRestore.focus(); },
+      done: function () { location.reload(); }
+    });
   });
   // Client-side worklist filters (the shared tab bar marks the chosen one).
   var buttons = document.querySelectorAll('.pw-filters button[data-filter]');

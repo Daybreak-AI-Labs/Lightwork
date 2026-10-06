@@ -727,10 +727,21 @@ def _nav_context(request: Request) -> dict:
                                      can_open_page=can_open_page, global_admin=viewer_global_admin,
                                      personal=personal),
         "nav_go_to_keys": GO_TO_KEYS,
+        # Where a page kept out of the sidebar sits: its highlighted parent in
+        # the sidebar and the breadcrumb (ui_visibility.where).
+        "nav_where": _nav_where(request, groups, finder),
         # The navigation style ("classic" or "areas") and, in areas mode, the
         # areas and where this page sits in them.
         **area_context(request, role, finder, switched_off, viewer_global_admin),
     }
+
+
+def _nav_where(request, groups, finder):
+    from . import ui_visibility
+    try:
+        return ui_visibility.where(request.url.path, groups, finder)
+    except Exception:  # pragma: no cover -- shell rendering never fails on it
+        return None
 
 
 templates.context_processors.append(_nav_context)
@@ -956,10 +967,12 @@ def _warm_dashboard_caches() -> dict[str, float]:
     """Pay the dashboard's once-per-process first-hit costs now.
 
     Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
-    first ``/openapi.json`` 4.2 s (schema build, which also materialises
-    every lazily included route), ``builtin_domains()`` 0.78 s (2,031 pack
-    files), ``_build_shield()`` 37 ms. Each step is independent and
-    fail-open; the returned timings are for logs and tests.
+    every included route's context about 2.5 s (FastAPI 0.141 builds them
+    on the first request that routes past them), ``builtin_domains()``
+    0.78 s (2,031 pack files), ``_build_shield()`` 37 ms. Each step is
+    independent and fail-open; the returned timings are for logs and tests.
+    The OpenAPI schema (about 4.3 s, needed only by /openapi.json and the
+    guided API forms) is not built here: :func:`_build_openapi_when_idle`.
     """
     timings: dict[str, float] = {}
 
@@ -983,16 +996,70 @@ def _warm_dashboard_caches() -> dict[str, float]:
 
         builtin_domains()
 
+    def _agents() -> None:
+        # The agent roster's tool inventory (about 0.6 s cold), cached per
+        # installation configuration. Ctrl+K's first agent lookup needs it;
+        # nothing in it is about a person.
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+
+    def _routes() -> None:
+        # Request routing needs these contexts; the schema build used to be
+        # what materialised them (58edcc4b), at four seconds of extra CPU.
+        from .route_identity import iter_compatible_route_contexts
+
+        for _context in iter_compatible_route_contexts(app.routes):
+            pass
+
     def _shield() -> None:
         from maverick.orchestrator import _build_shield
 
         _build_shield()
 
-    _step("templates", _templates)
-    _step("openapi", app.openapi)
+    # The pack catalogue first: the first Ctrl+K search after start needs it,
+    # and the OpenAPI build after it is the slowest step.
     _step("domains", _domains)
+    _step("agents", _agents)
+    _step("routes", _routes)
+    _step("templates", _templates)
     _step("shield", _shield)
     return timings
+
+
+def _warm_pack_catalogue() -> None:
+    """Parse the shipped pack catalogue (2,031 files) and the roster's tool
+    inventory before hook discovery: both are person-independent and cached
+    for the process, and Ctrl+K's first agent lookup needs them."""
+    try:
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+    except Exception:  # pragma: no cover - warm-up is best-effort
+        log.debug("pack catalogue warm-up skipped", exc_info=True)
+
+
+def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0) -> bool:
+    """Build the OpenAPI schema once the dashboard has been quiet for
+    ``quiet`` seconds, so its seconds of CPU do not land on someone's first
+    searches. Ten seconds, not one or two: a person opening the dashboard
+    pauses that long only rarely while working, but often while a browser
+    starts. A request for /openapi.json before then builds it on demand, as
+    FastAPI always did. Gives up after ``limit`` seconds of steady traffic."""
+    from . import request_activity
+
+    waited = 0.0
+    while not request_activity.quiet_for(quiet):
+        if waited >= limit:
+            return False
+        sleep(0.5)
+        waited += 0.5
+    try:
+        app.openapi()
+    except Exception:  # pragma: no cover - the schema still builds on demand
+        log.debug("OpenAPI warm-up skipped", exc_info=True)
+        return False
+    return True
 
 
 def _warm_goal_runtime() -> None:
@@ -1003,6 +1070,7 @@ def _warm_goal_runtime() -> None:
     startup."""
 
     def _warm() -> None:
+        _warm_pack_catalogue()
         try:
             import asyncio as _asyncio
 
@@ -1014,6 +1082,7 @@ def _warm_goal_runtime() -> None:
         timings = _warm_dashboard_caches()
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
+        _build_openapi_when_idle()
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
 
@@ -1840,6 +1909,9 @@ from .department_team_updates_api import router as department_team_updates_route
 
 app.include_router(department_team_updates_router)
 app.include_router(answer_feedback_router)
+from .flow_run_feedback import router as flow_run_feedback_router  # noqa: E402
+
+app.include_router(flow_run_feedback_router)
 from .compliance_questionnaire_builder_api import (  # noqa: E402
     router as compliance_questionnaire_builder_router,
 )
@@ -3997,6 +4069,7 @@ async def learning_page(request: Request) -> HTMLResponse:
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
             "agent_feedback": _agent_feedback_summary(),
+            "flow_feedback": _flow_feedback_summary(),
             "learning_can_operate": has_permission(request, "operate"),
         },
     )
@@ -4011,6 +4084,25 @@ def _agent_feedback_summary() -> list[dict]:
         rows = goal_feedback_store.summary_by_agent(world=_world())
         for row in rows:
             row["title"] = agent_title(row["agent"])
+        return rows
+    except Exception:  # pragma: no cover -- the page renders without the summary
+        return []
+
+
+def _flow_feedback_summary() -> list[dict]:
+    """Useful / not useful per flow for the Learning page (flow_run_feedback.py)."""
+    try:
+        from maverick.flow import store as flow_store
+
+        from . import flow_run_feedback
+
+        rows = flow_run_feedback.summary_by_flow()
+        for row in rows:
+            try:
+                flow = flow_store.load_flow(row["flow_id"])
+            except Exception:  # noqa: BLE001 -- a removed or unreadable flow keeps its id
+                flow = None
+            row["title"] = (getattr(flow, "name", "") or row["flow_id"]) if flow else row["flow_id"]
         return rows
     except Exception:  # pragma: no cover -- the page renders without the summary
         return []
@@ -4257,6 +4349,7 @@ def _deliverable_specs() -> list[dict]:
 @app.get("/deliverables", response_class=HTMLResponse)
 def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     """Show the caller's completed work; explicit role links browse pack output."""
+    from . import auth as _auth
     from .auth import caller_suites
     from .deliverables import PAGE_SIZE, build_inbox, persona_roles_for, recent_runs_by_domain
 
@@ -4287,6 +4380,8 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
             "browse": False, "recent_results": shown, "awaiting": awaiting,
             "result_labels": {domain: spec["deliverable"] for domain, spec in gates.items()},
             "results_page": page, "results_more": len(rows) > PAGE_SIZE,
+            # Only the task owner may rate a result (answer_feedback_operations).
+            "feedback_owner": _auth.caller_principal(request) or "", "can_rate": has_permission(request, "operate"),
         })
 
     # Job-function scoping: a scoped caller's inbox lists only their
@@ -12549,6 +12644,14 @@ def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
                                                "X-Lightwork-Context": context["conversation_context"]})
 
 
+def _stop_progress(world, goal):
+    from .stop_progress import summarize
+    try:
+        return summarize(world, goal)
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        return None
+
+
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     require_permission(request, "view")
@@ -12630,6 +12733,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "can_operate": not handed_off and has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
             "handoff_closed": handed_off,
             "stop": stop,
+            "stop_progress": _stop_progress(w, g),
             "show_technical_details": show_technical,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
@@ -14773,11 +14877,14 @@ def main() -> None:
 # contexts and request-scope route objects receive the same final identity.
 _stabilize_effective_route_names(app)
 
-# Outermost (added last): every middleware and handler below it shares one
-# per-request memo for configuration-derived authorization predicates.
+# Every middleware and handler below the memo shares one per-request memo for
+# configuration-derived authorization predicates. Outside it (added last), the
+# activity count lets start-up work wait for a quiet moment.
 from ._request_memo import RequestMemoMiddleware  # noqa: E402
+from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
+app.add_middleware(RequestActivityMiddleware)
 
 
 if __name__ == "__main__":

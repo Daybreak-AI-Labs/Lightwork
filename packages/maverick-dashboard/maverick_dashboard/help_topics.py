@@ -67,8 +67,9 @@ TOPICS: tuple[Topic, ...] = (
         "Open the task from Chat or Tasks.",
         "The status at the top says whether it is working, waiting for you, or done.",
         "If it asks a question, answer in the box that appears; the task waits until you do.",
-        "To stop it, press Stop task. It stops after the step it is on.",
-    ), (("chat_goal.html", "Stop task"),)),
+        "To stop it, press Stop task. It stops after the step it is on and lists what is done and what is left.",
+        "Press Resume or Try again to carry on.",
+    ), (("chat_goal.html", "Stop task"), ("chat_goal.html", "Try again"))),
     Topic("use-result", "Use a result", "Employee", ("/deliverables",), (
         "Open the finished task.",
         "Use Copy answer or Download answer to take the result with you.",

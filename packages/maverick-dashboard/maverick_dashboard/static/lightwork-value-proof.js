@@ -161,7 +161,7 @@
     var win = $('vp-window');
     return get('/departments' + (win ? '?window=' + encodeURIComponent(win.value) : '')).then(function (d) {
       if (!d.departments.length) {
-        fill('vp-dept', el('p', 'muted', 'No department has enough tasks yet to show a trend.'));
+        fill('vp-dept', el('p', 'muted', 'No department has enough tasks yet to show a trend. It appears once a department has run several tasks.'));
         return;
       }
       fill('vp-dept', table(['Department', 'Tasks', 'Cost per task then', 'Cost per task now', 'Verdict'], d.departments.map(function (x) {

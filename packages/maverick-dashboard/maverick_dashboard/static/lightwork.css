@@ -16,7 +16,9 @@
 .settings-review { max-width: min(54rem, 95vw); max-height: 90vh; overflow: auto; }
 .settings-review pre, #settings-tools pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.cs-account .prefs__panel { bottom: 100%; top: auto; left: 0; right: auto; }
+/* The shared help and account cluster (_topbar_utilities.html) lays out as
+   part of whichever top bar holds it. */
+.topbar-utilities { display: contents; }
 
 /* The workspace line at the top of the product sidebar (base.html). */
 .active-workspace-banner { margin: 0 var(--space-3) var(--space-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -1956,10 +1958,6 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 
 /* The Help menu in the chat sidebar opens across the sidebar's width, above the row. */
 .cs-account { position: relative; }
-.cs-account .help-menu { position: static; }
-.cs-account .help-menu .help-menu__panel { left: 0; right: 0; min-width: 0; }
-.cs-account .help-menu > summary { color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
-.cs-account .help-menu > summary:hover, .cs-account .help-menu[open] > summary { color: var(--text); }
 
 /* Optional ease-of-use survey panels (lightwork-usability-survey.js). */
 .mv-survey { margin-bottom: var(--space-4); }
@@ -1988,6 +1986,11 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 .areanav ol, .areanav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
 .areanav__crumbs { font-size: var(--text-sm); color: var(--muted); }
 .areanav__crumbs li + li::before { content: "›"; margin-inline-end: var(--space-2); color: var(--muted); }
+/* Where a page kept out of the sidebar sits (_where_crumbs.html). */
+.where-crumbs { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+.where-crumbs ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.where-crumbs li + li::before { content: "›"; margin-inline-end: var(--space-2); color: var(--muted); }
+.where-crumbs [aria-current="page"] { color: var(--text); }
 .areanav__tabs, .areanav__pages { overflow-x: auto; }
 .areanav__tabs { border-bottom: 1px solid var(--border); }
 .areanav__tabs ul { flex-wrap: nowrap; }

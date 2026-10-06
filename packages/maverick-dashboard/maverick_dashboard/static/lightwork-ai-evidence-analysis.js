@@ -211,7 +211,7 @@ function renderAnalyses() {
   tbody.textContent = "";
   if (!state.analyses.length) {
     const tr = document.createElement("tr");
-    const td = cell(can.operate ? "No analyses here yet. Use Analyze a document above to start one." : "No analyses here yet.");
+    const td = cell(can.operate ? "No analyses here yet. Use Analyze a document above to start one." : "No analyses here yet. They appear here when an operator analyzes a document.");
     td.colSpan = 6;
     tr.appendChild(td);
     tbody.appendChild(tr);

@@ -734,7 +734,7 @@
     say('Copied ' + stepName(n) + ' — press Ctrl+V to paste it.');
   }
   function pasteNode() {
-    if (!clipboard) { say('Nothing copied yet.'); return; }
+    if (!clipboard) { say('Nothing copied yet. Select a step and choose Copy first.'); return; }
     pushHistory();
     var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
     flow.nodes.push(copy); selectNode(copy.id); render();
@@ -2291,16 +2291,20 @@
           copy.addEventListener('click', function () { if (window.mvCopy) window.mvCopy(address); });
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
-          rm.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove start' }))) return;
-            apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
-              .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
-              .catch(function (e) { say(failText(e, 'remove it'), true); });
+          rm.addEventListener('click', function () {
+            // One action with a way back (CTL-1): removed when Undo ends.
+            row.hidden = true;
+            window.mvUndo('“{name}” removed. The other app can no longer start this flow.', { values: {name: t.name},
+              action: 'remove it',
+              run: function (keepalive) { return apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE', keepalive: keepalive }); },
+              undo: function () { row.hidden = false; rm.focus(); },
+              done: function () { showTriggers(); }
+            });
           });
           row.appendChild(nm); row.appendChild(copy); row.appendChild(rm); wl.appendChild(row);
         });
         if (mine.length) wl.appendChild(hint('In the other app, send a web request to the copied address and include the start’s name.'));
-        else wl.appendChild(hint('None yet.'));
+        else wl.appendChild(hint('None yet. Use “Let another app start this flow” below.'));
         wl.appendChild(addButton('Let another app start this flow', function () {
           apiFetch('/api/v1/triggers', { method: 'POST', body: JSON.stringify({ flow: rootFlow.id }) })
             .then(function (r) { return r.json().catch(function () { return {}; }).then(function (jj) { return { ok: r.ok, r: r, j: jj }; }); })

@@ -34,6 +34,7 @@ ASSETS = (
     "lightwork-notification-badge.js",
     "lightwork-personal-notifications.js",
     "lightwork-digest-preview.js",
+    "lightwork-result-feedback.js",
     "lightwork-help-menu.js",
     "lightwork-settings-admin.js",
     "lightwork-tenants.js",

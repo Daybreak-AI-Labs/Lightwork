@@ -100,7 +100,7 @@
   function table(container, columns, rows, actions, empty) {
     container.textContent = '';
     if (!rows || !rows.length) {
-      var p = el('p', 'muted', (empty && empty.text) || 'Nothing here yet.');
+      var p = el('p', 'muted', (empty && empty.text) || 'Nothing here yet. Items appear here once they are added.');
       container.appendChild(p);
       if (empty && empty.action) container.appendChild(button(empty.action.label, 'primary', empty.action.run));
       return;

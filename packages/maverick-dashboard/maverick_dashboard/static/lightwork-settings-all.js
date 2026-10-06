@@ -1248,7 +1248,7 @@
   function showDocument(row, doc) {
     var text = row.querySelector('[data-document-text]');
     var items = row.querySelector('[data-document-items]');
-    if (text) text.textContent = doc ? doc.text : 'Nothing imported yet.';
+    if (text) text.textContent = doc ? doc.text : 'Nothing imported yet. Import a document below.';
     if (!items) return;
     items.textContent = '';
     ((doc && doc.items) || []).forEach(function (item) {

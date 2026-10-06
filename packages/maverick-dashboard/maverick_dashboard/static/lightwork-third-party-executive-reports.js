@@ -275,7 +275,7 @@
       if (items === null || items === undefined) {
         box.appendChild(R.el("p", "muted", "You can't see these records, or this area isn't turned on."));
       } else if (!items.length) {
-        box.appendChild(R.el("p", "muted", "None yet."));
+        box.appendChild(R.el("p", "muted", "None yet. They appear here once added."));
       } else {
         var list = R.el("div", "tper-group-list");
         items.forEach(function (item) {
@@ -429,7 +429,7 @@
         { label: "When", value: function (e) { return R.when(e.occurred_at); } },
         { label: "What happened", value: function (e) { return ACTIONS[e.action] || words(e.action); } },
         { label: "Report", value: function (e) { return byId[e.report_id] || "An earlier report"; } },
-      ], result.items || [], [], { text: "No report history yet." });
+      ], result.items || [], [], { text: "No report history yet. Each report you prepare appears here." });
       show("Report history loaded.", result);
     } catch (error) { show(messageOf(error, "load the report history")); }
   });

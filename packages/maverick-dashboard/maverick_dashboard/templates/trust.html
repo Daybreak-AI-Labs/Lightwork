@@ -314,8 +314,16 @@
   document.querySelectorAll("[data-trust-remove]").forEach(function (b) {
     b.addEventListener("click", async function () {
       var id = b.getAttribute("data-trust-remove");
-      if (!(await window.mvConfirm("Remove " + b.getAttribute("data-name") + " from the list? If blocking is on, it will be turned away.", { okText: "Remove from list" }))) return;
-      send("/api/v1/trust/agents/" + encodeURIComponent(id), { method: "DELETE" }, "Agent removed.", "remove this agent");
+      // One action with a way back (CTL-1): the row leaves at once and the
+      // removal is sent when the Undo time is up.
+      var row = b.closest("tr, li, article");
+      if (row) row.hidden = true;
+      window.mvUndo("{name} removed from the list. If blocking is on, it will be turned away.", { values: {name: b.getAttribute("data-name")},
+        action: "remove this agent",
+        run: function (keepalive) { return fetch("/api/v1/trust/agents/" + encodeURIComponent(id), { method: "DELETE", keepalive: keepalive, headers: { Accept: "application/json" } }); },
+        undo: function () { if (row) row.hidden = false; b.focus(); },
+        done: function () { reloadSoon("Agent removed."); }
+      });
     });
   });
 

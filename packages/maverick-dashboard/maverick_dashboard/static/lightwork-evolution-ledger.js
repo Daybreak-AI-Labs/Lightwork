@@ -33,7 +33,7 @@
     approval_signer_key_id_mismatch: "Signed by an unexpected key"
   };
   var LIMITS = {
-    promotion_ledger_not_present: "No adopted changes are recorded in this history yet.",
+    promotion_ledger_not_present: "No adopted changes are recorded in this history yet. Changes appear here once a suggested change is adopted.",
     promotion_ledger_is_local_not_externally_anchored: "This history is kept in this installation. A separately trusted copy is needed to detect replacement of the whole history.",
     promotion_ledger_has_no_hash_chained_journal: "These older records have no sealed history. Their current fingerprints do not establish that earlier records were unchanged.",
     promotion_ledger_is_not_durable: "This history exists only temporarily and will not survive a restart.",
@@ -214,7 +214,7 @@
       : (total === 1 ? "1 record." : total + " records.");
     renderEntries(entries);
     renderLimitations(Array.isArray(projection.limitations) ? projection.limitations : []);
-    healthDetail.textContent = sources.promotion_ledger === "available" ? "Stored history checked." : "No adopted changes are recorded in this history yet.";
+    healthDetail.textContent = sources.promotion_ledger === "available" ? "Stored history checked." : "No adopted changes are recorded in this history yet. Changes appear here once a suggested change is adopted.";
     errorEl.textContent = "";
   }
 

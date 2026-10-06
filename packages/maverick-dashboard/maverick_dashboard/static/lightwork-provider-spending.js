@@ -121,7 +121,7 @@
         ? ' This history needs a full Workspace recovery backup; the smaller checked copy is unavailable.' : '');
     message(state.available ? 'Spending is up to date.' : 'Spending records can\'t be read safely right now. Requests to providers with a limit are paused; no balance was reset.');
     if (!state.providers.length && state.available) {
-      paragraph(el('spend-balances'), 'No spending limits are set for any provider.');
+      paragraph(el('spend-balances'), 'No spending limits are set for any provider. Set one in Spending limits to stop a provider at a cap.');
       const link = document.createElement('a'); link.className = 'btn btn--primary'; link.href = '/spending-limits'; link.textContent = 'Set spending limits';
       el('spend-balances').append(link);
     }
@@ -136,7 +136,7 @@
         holds.push(choice); el('spend-hold').append(option);
       });
     });
-    if (!holds.length) paragraph(el('spend-page'), 'Nothing is waiting to be settled.');
+    if (!holds.length) paragraph(el('spend-page'), 'Nothing is waiting to be settled. Holds appear here while a task is still spending.');
     await loadReviews();
     const retained = retainedReview();
     if (retained) {

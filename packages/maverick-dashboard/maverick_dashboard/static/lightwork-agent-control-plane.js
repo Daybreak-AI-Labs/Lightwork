@@ -291,7 +291,7 @@
         if (typeof item.detail === "string" && item.detail) { text += ": " + boundedError(item.detail); }
         lines.push((when ? when + " — " : "") + text);
       });
-      if (!lines.length) { lines.push("No history has been recorded yet."); }
+      if (!lines.length) { lines.push("No history has been recorded yet. Actions on this agent appear here."); }
       return lines;
     }
     if (Array.isArray(payload.results)) {

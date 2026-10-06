@@ -97,7 +97,7 @@
     </div>
     <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approval records in print. The JSON snapshot contains all {{ b.approvals_total }} records in the exact window.</p>
     {% else %}
-    <p class="muted">No approvals in this period.</p>
+    <p class="muted">No approvals in this period. Choose a longer period to include earlier decisions.</p>
     {% endif %}
   </div>
 
@@ -157,7 +157,7 @@
     </div>
     <p class="muted">Accepted first time means approved with no follow-up questions. See the monthly trend on the <a href="/privacy/board">command center</a>.</p>
     {% else %}
-    <p class="muted">No assessments have been decided yet.</p>
+    <p class="muted">No assessments have been decided yet. Decided assessments appear here once a reviewer approves or rejects one.</p>
     {% endif %}
   </div>
 

@@ -223,7 +223,7 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted">Nobody is linked yet.</p>
+    <p class="muted">Nobody is linked yet. Create a link code below and send it to the person.</p>
     {% endif %}
     <form method="post" action="/channels/teams/link" class="ch-form">
       <label class="ch-field"><span>Teams account (Microsoft Entra object ID or sign-in address)</span>
@@ -260,7 +260,7 @@
           </form>
         </td></tr>{% endfor %}</tbody>
     </table>
-    {% else %}<p class="muted">No chat accounts are connected for tasks.</p>{% endif %}
+    {% else %}<p class="muted">No chat accounts are connected for tasks. Connect a chat app above, then test it.</p>{% endif %}
   </div>
 
   <div class="section-head"><h2 id="email-alerts">Email alerts and the daily summary</h2></div>

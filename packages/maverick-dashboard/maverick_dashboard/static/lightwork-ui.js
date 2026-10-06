@@ -120,7 +120,7 @@
       // another delete starts. Nothing is kept anywhere in the meantime, so
       // a privacy erasure is never held back by it. If the delete then fails,
       // undo() puts the item back and the failure is shown.
-      //   window.mvUndo(message, {run(keepalive) -> Promise<Response>, undo(), done(), action, seconds, latest})
+      //   window.mvUndo(message, {run(keepalive) -> Promise<Response>, undo(), done(), action, seconds, latest, values})
       var pendingUndo = null;
       function typing(target) {
         return target && target.closest && !!target.closest('input, textarea, select, [contenteditable="true"]');
@@ -131,7 +131,10 @@
         var wait = Math.max(5, Number(opts.seconds) || 10) * 1000;
         var toast = document.createElement('div');
         toast.className = 'mv-toast mv-toast--undo';
-        var words = document.createElement('span'); words.textContent = String(message);
+        // The words go through the translator like other product copy; a
+        // name in opts.values ({name}) is shown as written, never translated.
+        var words = document.createElement('span');
+        if (window.LightworkI18n) window.LightworkI18n.set(words, String(message), opts.values); else words.textContent = String(message).replace(/\{([A-Za-z0-9_]+)\}/g, function (whole, key) { return opts.values && Object.prototype.hasOwnProperty.call(opts.values, key) ? String(opts.values[key]) : whole; });
         var undoBtn = document.createElement('button'); undoBtn.type = 'button';
         undoBtn.className = 'mv-toast__undo'; undoBtn.setAttribute('aria-keyshortcuts', 'Control+Z Meta+Z');
         if (window.LightworkI18n) window.LightworkI18n.set(undoBtn, 'Undo'); else undoBtn.textContent = 'Undo';
@@ -168,7 +171,8 @@
               return 'done';
             } catch (failure) {
               if (opts.undo) opts.undo();
-              window.mvFail(failure, opts.action || 'delete it');
+              // A page that already explained the refusal marks it handled.
+              if (!(failure && failure.handled)) window.mvFail(failure, opts.action || 'delete it');
               return 'failed';
             }
           },

@@ -160,7 +160,7 @@
   function buildBuffers(data) {
     nodes = data.nodes || [];
     const edges = data.edges || [];
-    if (!nodes.length) { statusEl.textContent = "No tasks yet"; return; }
+    if (!nodes.length) { statusEl.textContent = "No tasks yet. Start a task in Chat to see its plan here."; return; }
     // Map the server's 2D layered layout onto a vertical plane:
     // rows spread on X, depth descends on Y, Z = 0 (orbit supplies the 3D).
     const xs = nodes.map((n) => n.y), ds = nodes.map((n) => n.x);

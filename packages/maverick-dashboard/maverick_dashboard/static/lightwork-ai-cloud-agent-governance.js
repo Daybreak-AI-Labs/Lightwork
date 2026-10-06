@@ -489,7 +489,7 @@
     var tbody = document.getElementById("cag-reviews");
     var reviews = body.reviews || [];
     if (!reviews.length) {
-      emptyRow(tbody, 4, "No Databricks mapping reviews yet.");
+      emptyRow(tbody, 4, "No Databricks mapping reviews yet. Reviews appear here after a mapping is checked.");
       return;
     }
     tbody.textContent = "";

@@ -540,7 +540,7 @@
       list.appendChild(make("li", "", formattedDate(item.updated_at || item.created_at) + " — " + pair[0] +
         ", " + human(item.priority) + " priority, assigned to " + personName(item.assignee_ref)));
     });
-    if (!items.length) list.appendChild(make("li", "", "No history yet."));
+    if (!items.length) list.appendChild(make("li", "", "No history yet. Changes to this task appear here."));
     document.getElementById("aet-history-panel").hidden = false;
     var heading = document.getElementById("aet-history-title");
     if (heading && typeof heading.focus === "function") heading.focus();

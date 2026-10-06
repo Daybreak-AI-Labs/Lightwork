@@ -35,16 +35,21 @@ test('Stop is offered while a task works and goes away once it has stopped on a 
   expect(errors).toEqual([]);
 });
 
-test('pressing Stop ends a working task and the sidebar says Stopped',async({page,request,context,baseURL})=>{
+test('pressing Stop once ends a working task, lists its progress and offers Try again',async({page,request,context,baseURL})=>{
   await localOnly(context,baseURL);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const {stop,recents}=await openWorkingTask(page,request);
   await expect(stop).toBeVisible();
+  await expect(stop).toHaveText('Stop task');
   await stop.click();
-  await page.locator('#mv-confirm-ok').click();
+  // One action: no confirmation dialog stands between the person and Stop.
+  await expect(page.locator('#mv-confirm-ok')).toHaveCount(0);
   await expect(page.locator('#status')).toHaveAttribute('data-status','cancelled');
   await expect(page.locator('#status')).toHaveText('Stopped');
   await expect(stop).toBeHidden();
   await expect(recents).toHaveText('Stopped');
+  await expect(page.locator('#halt-progress')).toBeVisible();
+  await expect(page.locator('#halt-progress-headline')).toHaveText(/^Stopped/);
+  await expect(page.locator('#halt-resume')).toHaveText('Try again');
   expect(errors).toEqual([]);
 });
 

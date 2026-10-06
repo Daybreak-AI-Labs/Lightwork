@@ -267,7 +267,7 @@
     var filter = document.getElementById("ga-runs-filter").value;
     var shown = runs.filter(function (run) { return !filter || run.agent_kind === filter; });
     if (!shown.length) {
-      emptyRow(tbody, 6, can.operate ? "No reviews yet. Use Start a review on one of the assistants above." : "No reviews yet.");
+      emptyRow(tbody, 6, can.operate ? "No reviews yet. Use Start a review on one of the assistants above." : "No reviews yet. They appear here when an operator starts one.");
       return;
     }
     tbody.textContent = "";

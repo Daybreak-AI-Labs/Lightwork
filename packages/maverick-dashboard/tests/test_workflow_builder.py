@@ -984,7 +984,10 @@ def test_the_two_delete_buttons_say_what_they_delete_in_every_language():
     assert "productText(rm,'Delete');" not in page and "okText: 'Delete'," not in page
     assert page.count("productText(rm,'Delete schedule');") == 1
     assert page.count("productText(rm,'Delete start');") == 1
-    assert "okText: 'Delete schedule'" in page and "okText: 'Delete start'" in page
+    # A schedule due within a minute is confirmed and deleted at once; otherwise
+    # both deletes leave the list with an Undo toast (CTL-1).
+    assert "okText: 'Delete schedule'" in page
+    assert page.count("mvUndo(") == 2 and "Other apps can no longer start this workflow." in page
     for label in ("Delete schedule", "Delete start"):
         for lang in i18n_journeys.TRANSLATION_LANGS:
             assert i18n_journeys.entry(label, lang)[1] == lang, (label, lang)

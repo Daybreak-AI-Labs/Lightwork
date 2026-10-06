@@ -485,7 +485,7 @@
     }
     if (!items.length) {
       const tr = document.createElement("tr");
-      const td = cell("Nothing has happened in the vault yet.");
+      const td = cell("Nothing has happened in the vault yet. Add a document above to start its history.");
       td.colSpan = 2;
       tr.appendChild(td);
       rows.appendChild(tr);
