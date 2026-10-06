@@ -699,7 +699,7 @@ class ServiceNowIRMAdapter:
         body["priority"] = _SERVICENOW_PRIORITY[source.severity]
         if isinstance(source, FindingSource):
             body.update({
-                "short_description": _safe_text(source.summary, "summary", 160),
+                "short_description": _safe_text(source.summary, "summary", 4_000)[:160],
                 "description": _safe_text(source.summary, "summary", 4_000),
                 "finding_type": source.finding_type,
                 "state": "open",
@@ -717,7 +717,7 @@ class ServiceNowIRMAdapter:
             })
         else:
             body.update({
-                "short_description": _safe_text(source.summary, "summary", 160),
+                "short_description": _safe_text(source.summary, "summary", 4_000)[:160],
                 "description": _safe_text(source.summary, "summary", 4_000),
                 "incident_source_id": source.incident_source_id,
                 "state": source.status,

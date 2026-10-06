@@ -11524,14 +11524,20 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
     )
 
 
-def _govern_event_source_config(request: Request, source: str, config: dict) -> dict:
+def _govern_event_source_config(request: Request, source: str, config: dict, *, review_required=False) -> dict:
     """Authorize shared host resources and confine file watches.
 
     Tenant-local OAuth providers remain tenant-admin capabilities. Sources
     which consume process credentials or local filesystem access are instead
     deployment control-plane capabilities and require a global admin.
     """
+    from maverick.automation_connected_events import SOURCES
+
     from maverick_dashboard import event_poll
+
+    if source in SOURCES:
+        from .connected_event_sources_api import call, canonical_config
+        return call(lambda: canonical_config(request, source, config, review_required=review_required))
 
     authority = event_poll.event_source_authority(source, config)
     if authority == "global_admin":
@@ -11607,13 +11613,36 @@ def list_event_triggers_endpoint(request: Request) -> dict:
     }
 
 
+def _check_connected_source_binding(request, payload, cfg, target_flow, target_flow_release, target_template):
+    from maverick.flow import store as flow_store
+    from maverick.templates import load_template
+
+    from maverick_dashboard import event_triggers_store
+
+    require_permission(request, "operate")
+    _require_event_triggers()
+    if _govern_event_source_config(request, payload.source, payload.config, review_required=True) != cfg:
+        raise HTTPException(409, "The saved source changed after review. Check it again; nothing was armed.")
+    if target_flow is not None:
+        _assert_flow_access(request, target_flow)
+        current_release = flow_store.load_published_bundle(payload.flow)
+        if current_release is None or current_release[1]["release_id"] != target_flow_release["release_id"]:
+            raise HTTPException(409, "The published workflow changed. Review its current version before creating the automation.")
+    elif target_template is not None:
+        assert_template_access(request, target_template)
+        current = event_triggers_store.snapshot_from_template(load_template(payload.template))
+        expected = event_triggers_store.snapshot_from_template(target_template)
+        if event_triggers_store.snapshot_revision(current) != event_triggers_store.snapshot_revision(expected):
+            raise HTTPException(409, "The selected task changed. Review it before creating the automation.")
+
+
 @router.post("/event-triggers", response_model=EventTriggerOut, status_code=201)
 def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
     from maverick import form_store
 
     require_permission(request, "operate")
     _require_event_triggers()
-    cfg = _govern_event_source_config(request, payload.source, payload.config)
+    cfg = _govern_event_source_config(request, payload.source, payload.config, review_required=True)
     from maverick.automation_events import EventSourceError, get_source
 
     try:
@@ -11681,6 +11710,8 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
             status_code=409, detail="an event trigger with that name already exists"
         )
     durable_owner = durable_automation_owner(request)
+    from maverick.automation_connected_events import SOURCES as connected_sources
+
     try:
         rec = event_triggers_store.set_trigger(
             default_name,
@@ -11703,6 +11734,8 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
             tenant=tenant,
             mint_public_form_token=payload.source == "form",
             expected_owner=existing.get("owner", "") if existing is not None else durable_owner,
+            create_only=payload.source in connected_sources,
+            effect_guard=(lambda: _check_connected_source_binding(request, payload, cfg, target_flow, target_flow_release, target_template)) if payload.source in connected_sources else None,
         )  # bind OAuth vault reads to this tenant
     except event_triggers_store.FormTriggerPending as e:
         raise HTTPException(
@@ -14010,41 +14043,12 @@ def validate_agent_override(request: Request, name: str, payload: AgentOverrideI
 
 @router.post("/agents/{name}/override")
 def save_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
-    """Persist a tenant override for ``name``. 403 if pack editing is disabled,
-    422 if the merged pack fails lint (the override is rejected, not written)."""
+    """Require a complete retained draft review before a live definition changes."""
     _require_pack_editing(request)
-    from maverick.domain_edit import OverrideConflict, read_override, resolved_view, write_override
-
-    try:
-        errors = _agent_autonomy_errors(name, payload)
-        errors += _agent_action_errors(name, payload)
-        if errors:
-            raise ValueError("; ".join(errors))
-        if payload.autonomy is not None and payload.expected_generation is None:
-            raise OverrideConflict("Reload the " + _kind_word(name) + " before changing independence settings.")
-        previous = read_override(name)
-        if payload.autonomy is None and "autonomy" in previous:
-            raise OverrideConflict(_this_one(name) + " has independence settings. Reload the editor before saving.")
-        before_view = resolved_view(name)
-        _require_tested_instructions(request, name, payload, before_view)
-        if payload.autonomy is not None:
-            before = (before_view or {}).get("autonomy", {}).get("pack", {})
-            after = payload.autonomy.model_dump()
-            if before != after:
-                _record_agent_autonomy_intent(request, name, before, after)
-        view = write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
-                                                       exclude={"expected_generation", *AGENT_PUBLISH_FIELDS}),
-                              expected_generation=payload.expected_generation, return_view=True)
-        _record_agent_change(request, name, before_view, view)
-        return view
-    except OverrideConflict as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=503, detail="Available actions could not be checked. Try again shortly.") from e
+    raise HTTPException(
+        status_code=409,
+        detail="Save the complete draft in Agent Factory, then review Publish. No live specialist change was made.",
+    )
 
 
 @router.post("/agents/{name}/graduate")
@@ -16373,7 +16377,7 @@ def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> G
 # domain pack with persona, tool allowlist, risk ceiling, and gated steps).
 # Drafting is one budget-capped LLM call (see maverick_dashboard.workflow_ai);
 # templates save here (writes ~/.maverick/templates/<name>.md), while a playbook
-# saves via the existing POST /agents/<name>/override (write_override).
+# is retained through specialist-drafts review/apply and published separately.
 
 _WORKFLOW_DOC_MAX_BYTES = 512_000  # ample for a spec/runbook; the model sees a truncated head
 

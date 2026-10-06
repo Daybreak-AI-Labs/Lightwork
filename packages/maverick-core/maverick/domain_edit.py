@@ -45,6 +45,7 @@ from .domain import (
     declared_prompt_gate,
     enforced_gate,
     lint_profile,
+    load_domain,
     load_domains,
     overlay_profile,
     overridden_fields,
@@ -240,13 +241,48 @@ def overlay_toml(patch: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _builtin_layout() -> tuple:
+    directory = builtin_dir()
+    files = []
+    for path in sorted(directory.glob("*.toml")):
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or _unsafe_domain_alias(info):
+            return ()
+        files.append((path.name, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns))
+    return (str(directory.resolve()), tuple(files))
+
+
+@lru_cache(maxsize=4)
+def _canonical_builtin_layout(signature: tuple) -> bool:
+    """Cache only layout evidence; every selected base is still read afresh."""
+    directory, files = signature
+    try:
+        return all(load_domain(Path(directory) / item[0]).name == Path(item[0]).stem for item in files)
+    except Exception:
+        # Discovery's permissive handling of malformed/noncanonical legacy packs
+        # remains authoritative for layouts that do not satisfy this invariant.
+        return False
+
+
+def _fresh_builtin_base(name: str) -> DomainProfile | None:
+    try:
+        signature = _builtin_layout()
+        if signature and _canonical_builtin_layout(signature) and _builtin_layout() == signature:
+            profile = load_domain(Path(signature[0]) / f"{name}.toml")
+            if profile.name == name:
+                return profile
+    except Exception:
+        pass
+    return load_domains(builtin_dir()).get(name)
+
+
 def _resolve(name: str, patch: dict) -> DomainProfile:
     """The profile a ``name``/``patch`` override resolves to (base overlaid, or
     a standalone pack when there is no base to inherit)."""
     base_name = str(patch.get("extends") or name)
     base = available_domains().get(base_name) if base_name != name else None
     if base is None:
-        base = load_domains(builtin_dir()).get(base_name)
+        base = _fresh_builtin_base(base_name)
     return overlay_profile(base, patch) if base else _coerce(name, patch)
 
 
@@ -257,7 +293,7 @@ def _base_profile(name: str, patch: dict) -> DomainProfile | None:
         base = available_domains().get(base_name)
         if base is not None:
             return base
-    return load_domains(builtin_dir()).get(base_name)
+    return _fresh_builtin_base(base_name)
 
 
 def validate_override(name: str, patch: dict) -> tuple[list[str], list[str]]:
@@ -275,6 +311,32 @@ def validate_override(name: str, patch: dict) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def preview_override(name: str, patch: dict) -> DomainProfile:
+    """Resolve the exact bounded draft without writing or changing active work."""
+    name = _validated_override_name(name)
+    if not isinstance(patch, dict) or not set(patch) <= _OVERLAYABLE | {"name", "extends"}:
+        raise ValueError("This draft contains an unsupported specialist setting.")
+    value = dict(patch)
+    value["name"] = name
+    content = overlay_toml(value)
+    if len(content.encode("utf-8")) > _MAX_OVERRIDE_BYTES:
+        raise ValueError("The complete specialist draft is too large. Nothing was shortened.")
+    # Resolve what the existing native serializer would actually publish.
+    from .domain import tomllib
+
+    parsed = tomllib.loads(content)
+    # One fresh base read per invocation. Apply exactly the same native lint
+    # and envelope checks without resolving that complete catalog three times.
+    base = _base_profile(name, parsed)
+    merged = overlay_profile(base, parsed) if base else _coerce(name, parsed)
+    errors, _ = lint_profile(merged)
+    if not _profile_field_type_errors(merged):
+        errors.extend(_envelope_errors(base, merged))
+    if errors:
+        raise ValueError("; ".join(errors))
+    return merged
+
+
 class OverrideConflict(ValueError):
     """The agent changed after the editor loaded it."""
 
@@ -285,7 +347,8 @@ def _override_generation(name: str, path: Path) -> str:
 
 
 def write_override(name: str, patch: dict, directory: str | Path | None = None, *,
-                   expected_generation: str | None = None, return_view: bool = False) -> str | dict:
+                   expected_generation: str | None = None, return_view: bool = False,
+                   effect_guard: Callable[[], None] | None = None) -> str | dict:
     """Validate then persist a tenant override for ``name``. Raises
     ``ValueError`` (with the lint errors) rather than writing an override that
     would weaken the safety envelope. Returns the path written."""
@@ -311,7 +374,9 @@ def write_override(name: str, patch: dict, directory: str | Path | None = None, 
                 raise OverrideConflict("An agent with this name already exists. Open its latest version or choose a new name.")
         elif expected_generation is not None and not hmac.compare_digest(expected_generation, _override_generation(name, path)):
             raise OverrideConflict("This agent changed after you opened it. Reload the latest version before applying your edits.")
-        atomic_write_text(path, content, mode=0o600)
+        if effect_guard is not None:
+            effect_guard()
+        atomic_write_text(path, content, mode=0o600, effect_guard=effect_guard)
         view = _resolved_view(name, directory) if return_view else None
     # The pack's capability surface may have changed. If it already has a
     # governance assessment, re-draft it so drift flips an accepted review back

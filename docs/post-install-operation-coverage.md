@@ -2114,3 +2114,25 @@ position errors open their disclosure before focus. The same form is hosted in
 local Recovery Copilot. Current context, exact source/review bindings and native
 recording/recovery writers are unchanged; collection choices do not verify
 delivery or unknown outside effects.
+
+## Visual workflow questions (UX385)
+
+Decision and repeat-while steps expose ordinary question groups. Users choose
+the information, comparison and Text, Number or Yes/No value, add or remove
+questions, and select all questions or any matching group. Every question inside
+a group must match. Existing combined conditions and quoted text containing
+“and” or “or” retain the native engine's meaning. Incomplete edits block saving
+with a readable explanation; unsupported existing expressions remain unchanged.
+Saved flows use the existing versioned flow writer and publication controls.
+This adds no separate execution engine or condition format.
+### Connected work and retained results (UX117, UX134, UX168/373, UX389)
+
+The governance screens and Copilot now review canonical saved source records before connector writeback, read the original matching receipt after later exports and retain uncertain outcomes without automatically repeating a send. Privacy request evidence distinguishes operator attestations from actual connector observations; an absent active record does not prove that retained copies were erased.
+
+Slack and Telegram can receive bounded exports and rendered HTML from the actual owned task result through the encrypted delivery journal. Original text and file chunks remain separate; a missing file receipt stays uncertain and is not automatically sent again. Teams currently shows named result availability and an available private task link because its existing channel transport cannot upload those files. Arbitrary model-supplied filesystem paths and binary document conversion are not supported by this path.
+
+Connected automations have ordinary saved-account and container choices for SharePoint files, Salesforce records, ServiceNow tickets and Teams messages. A dated source preview establishes the starting point before explicit creation. Current account grants and source revisions are checked at native reads and at the guarded registry write. Matching original creation requests preserve the existing position; changed requests cannot overwrite the same name.
+
+### Company sign-in before activation (UX075, partial)
+
+Settings has a real provider sign-in check using the saved company account details before activation, with native authorization-code exchange, PKCE, signature and nonce verification. It retains dated, account-bound results while keeping current administrator access, roles and sign-in settings. Changed settings, expired checks, invalid replies and repeated callbacks cannot claim a new verified result. A connection-only check remains separately labelled. Guided provider presets, uploaded SAML metadata and a verified local-owner activation/recovery migration remain open; this addition does not claim those are complete.

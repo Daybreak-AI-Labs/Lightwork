@@ -550,7 +550,8 @@
         if (n.kind === 'action') return (n.tool || '').replace(/_/g, ' ');
         return '';
       }
-      return (n.brief || n.prompt || n.condition || (n.tool && n.tool.replace(/_/g, ' ')) || n.name
+      var condition = n.condition && engine() && engine().conditionText ? engine().conditionText(n.condition) : '';
+      return (n.brief || n.prompt || condition || (n.tool && n.tool.replace(/_/g, ' ')) || n.name
               || (n.params && Object.keys(n.params).length ? 'Input values configured' : '') || '').toString();
     }
     function render() {

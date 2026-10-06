@@ -66,10 +66,13 @@ def register(source: str, factory: Callable[[], EventSource]) -> None:
 
 
 def available_sources() -> list[str]:
+    _register_connected_sources()
     return sorted(_SOURCES)
 
 
 def get_source(source: str) -> EventSource:
+    if source in {"sharepoint_files", "salesforce_records", "servicenow_tickets", "teams_messages"}:
+        _register_connected_sources()
     factory = _SOURCES.get(source)
     if factory is None:
         raise EventSourceError(
@@ -824,6 +827,11 @@ register("form", FormSource)
 def poll_source(source: str, config: dict, cursor: str) -> PollResult:
     """Poll one named source; raises :class:`EventSourceError` on trouble."""
     return get_source(source).poll(config or {}, cursor or "")
+
+
+def _register_connected_sources():
+    from .automation_connected_events import register_sources
+    register_sources()
 
 
 __all__ = [

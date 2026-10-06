@@ -470,6 +470,9 @@ class SourceEvidenceReceipt:
     provider_contract: str | None = None
     target_binding_sha256: str | None = None
     provider_retention_state: str | None = None
+    evidence_origin: str = "legacy_unattributed"
+    verification_basis: str = "not_established"
+    verification_summary: str = "The origin of this older evidence was not recorded. Verification is not established."
 
 
 @dataclass(frozen=True)
@@ -488,6 +491,8 @@ class CompletenessManifest:
     created_by: str
     created_at: float
     integrity_sha256: str
+    manually_attested_source_ids: tuple[str, ...] = ()
+    unattributed_source_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1049,6 +1054,35 @@ class PrivacyRightsOrchestrationStore:
         values.setdefault("provider_contract", None)
         values.setdefault("target_binding_sha256", None)
         values.setdefault("provider_retention_state", None)
+        origin = values.setdefault("evidence_origin", "legacy_unattributed")
+        if origin not in {"manual_attestation", "provider_runtime", "legacy_unattributed"}:
+            raise PrivacyRightsIntegrityError("persisted evidence origin is unsupported")
+        if origin == "manual_attestation":
+            basis = "manual_attestation"
+            summary = (
+                "A person recorded this statement and a document fingerprint. "
+                "Lightwork did not independently check the document or the connected system. "
+                "Task completion does not verify deletion or permanent removal."
+            )
+        elif origin == "provider_runtime":
+            if values.get("phase") == "verify_delete" and values.get("status") == "not_found" and values.get("record_count") == 0:
+                basis = "provider_active_record_absence"
+                summary = (
+                    "The connected system's active-record lookup returned no matching records. "
+                    "This observation does not prove permanent removal from retained copies or backups."
+                )
+            else:
+                basis = "provider_response"
+                summary = (
+                    "The governed connected-system runtime recorded this response. "
+                    "Workflow completion alone does not prove permanent removal; "
+                    "the separately recorded retention result describes what was observed."
+                )
+        else:
+            basis = "not_established"
+            summary = "The origin of this older evidence was not recorded. Verification is not established."
+        values["verification_basis"] = basis
+        values["verification_summary"] = summary
         return SourceEvidenceReceipt(**values, integrity_sha256=digest)
 
     @staticmethod
@@ -1058,6 +1092,16 @@ class PrivacyRightsOrchestrationStore:
         provider_retention_state: str | None = None,
     ) -> dict[str, object]:
         return {
+            "evidence_origin": (
+                "provider_runtime"
+                if callback.provider_operation_id is not None
+                and callback.provider_operation_sha256 is not None
+                and callback.adapter_authority_sha256 is not None
+                and callback.source_integrity_sha256 is not None
+                and callback.provider_contract is not None
+                and callback.dispatch_authorized_at is not None
+                else "manual_attestation"
+            ),
             "provider_operation_id": callback.provider_operation_id,
             "provider_operation_sha256": callback.provider_operation_sha256,
             "provider_operation_performed": callback.provider_operation_performed,
@@ -1079,6 +1123,8 @@ class PrivacyRightsOrchestrationStore:
         values["requested_rights"] = tuple(values["requested_rights"])
         values["enrolled_source_ids"] = tuple(values["enrolled_source_ids"])
         values["covered_source_ids"] = tuple(values["covered_source_ids"])
+        values["manually_attested_source_ids"] = tuple(values.get("manually_attested_source_ids", ()))
+        values["unattributed_source_ids"] = tuple(values.get("unattributed_source_ids", ()))
         values["uncovered_sources"] = tuple(
             dict(item) for item in values["uncovered_sources"]
         )
@@ -3498,7 +3544,11 @@ class PrivacyRightsOrchestrationStore:
         expected_task_revision: int,
         idempotency_key: str,
     ) -> SourceEvidenceReceipt:
-        """Append a privacy-minimised provider receipt and update its task by CAS."""
+        """Record a person's attestation and update workflow status by CAS.
+
+        A caller-supplied digest is a document fingerprint, never independent
+        provider verification. Only the governed runtime records provider origin.
+        """
 
         tenant = _tenant(tenant_id)
         case = _id(case_id, "case_id")
@@ -3589,6 +3639,7 @@ class PrivacyRightsOrchestrationStore:
                 "opaque_ref": reference,
                 "recorded_by": actor,
                 "created_at": now,
+                "evidence_origin": "manual_attestation",
             }
             evidence_digest = self._insert(
                 connection,
@@ -3636,6 +3687,8 @@ class PrivacyRightsOrchestrationStore:
                     "source_id": source,
                     "phase": phase,
                     "status": status,
+                    "evidence_origin": "manual_attestation",
+                    "independent_verification_performed": False,
                     "record_count": count,
                 },
                 now,
@@ -3699,6 +3752,8 @@ class PrivacyRightsOrchestrationStore:
             enrolled = tuple(row["source_id"] for row in sources)
             covered: list[str] = []
             uncovered: list[dict[str, str]] = []
+            manually_attested: set[str] = set()
+            unattributed: set[str] = set()
             for source in enrolled:
                 task_rows = connection.execute(
                     "SELECT * FROM rights_tasks WHERE tenant_id=? AND case_id=? "
@@ -3714,6 +3769,18 @@ class PrivacyRightsOrchestrationStore:
                     )
                     for row in task_rows
                 )
+                for task in tasks:
+                    if task.evidence_id is None:
+                        continue
+                    evidence_raw, evidence_digest = self._get(
+                        connection, "rights_evidence", tenant, "evidence_id",
+                        task.evidence_id, "source evidence",
+                    )
+                    receipt = self._evidence(evidence_raw, evidence_digest)
+                    if receipt.evidence_origin == "manual_attestation":
+                        manually_attested.add(source)
+                    elif receipt.evidence_origin == "legacy_unattributed":
+                        unattributed.add(source)
                 if all(task.state == "complete" for task in tasks):
                     covered.append(source)
                 else:
@@ -3728,9 +3795,13 @@ class PrivacyRightsOrchestrationStore:
                 "covered_source_ids": covered,
                 "uncovered_sources": uncovered,
                 "estate_completeness_claimed": False,
+                "manually_attested_source_ids": sorted(manually_attested),
+                "unattributed_source_ids": sorted(unattributed),
                 "limitation": (
                     "Coverage is limited to explicitly enrolled sources. The authority "
-                    "does not discover or infer the complete enterprise data estate."
+                    "does not discover or infer the complete enterprise data estate. "
+                    "Coverage describes workflow completion and may include manual "
+                    "attestations or older evidence of unknown origin; it does not certify deletion."
                 ),
                 "case_revision": rights_case.revision,
                 "created_by": actor,
@@ -4204,9 +4275,16 @@ class PrivacyRightsOrchestrationStore:
                 "ORDER BY evidence_id",
                 (tenant, case),
             ).fetchall()
-            evidence_payloads = [
-                self._payload(row, "source evidence") for row in evidence_rows
-            ]
+            evidence_payloads = []
+            for row in evidence_rows:
+                raw = self._payload(row, "source evidence")
+                receipt = self._evidence(raw, row["integrity_sha256"])
+                evidence_payloads.append({
+                    **raw,
+                    "evidence_origin": receipt.evidence_origin,
+                    "verification_basis": receipt.verification_basis,
+                    "verification_summary": receipt.verification_summary,
+                })
             body = {
                 "case": dict(case_raw),
                 "sources": [self._payload(row, "source") for row in source_rows],
@@ -4220,6 +4298,15 @@ class PrivacyRightsOrchestrationStore:
                     "response_delivery_performed": False,
                     "estate_completeness_claimed": False,
                     "live_provider_acceptance_verified": False,
+                    "manual_attestations_present": any(
+                        item["evidence_origin"] == "manual_attestation"
+                        for item in evidence_payloads
+                    ),
+                    "unattributed_evidence_present": any(
+                        item["evidence_origin"] == "legacy_unattributed"
+                        for item in evidence_payloads
+                    ),
+                    "deletion_certification_claimed": False,
                 },
             }
             payload = {

@@ -331,10 +331,12 @@
         <ul id="pb-lint" class="wf__lint"></ul>
       </div>
       <div class="wf__row">
-        <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="{{ ut('An administrator must check and save this draft') }}"{% endif %} lang="{{ ul('An administrator must check and save this draft') }}">{{ ui("Save playbook") }}</button>
-        <span class="wf__hint">{% if pack_editing_allowed %}{{ ui("Saved playbooks become agents on Agents.") }} <a href="/agents">{{ ui("Agents") }}</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">{{ ui("Copy the draft to send to an administrator") }}</button>{% endif %}</span>
+        <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="{{ ut('An administrator must check and save this draft') }}"{% endif %} lang="{{ ul('An administrator must check and save this draft') }}">{{ ui("Review Save draft") }}</button>
+        <span class="wf__hint">{% if pack_editing_allowed %}{{ ui("Save a retained draft, then separately review Publish in Agent Factory. Saving here does not change the agent people use.") }} <a href="/agents">{{ ui("Agent Factory") }}</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">{{ ui("Copy the draft to send to an administrator") }}</button>{% endif %}</span>
       </div>
       </form>
+      <label><input type="checkbox" id="pb-acknowledge-original"> I read any earlier unconfirmed original and acknowledge that earlier work may already exist. This is a separate new Save draft intent.</label>
+      <div id="pb-specialist-review" class="panel" aria-live="polite"></div>
     </div>
 
     <!-- saved -->
@@ -1471,6 +1473,19 @@
     pbPreview.addEventListener('input', schedulePbLint);
     pbPreview.addEventListener('change', schedulePbLint);
 
+    var pbDecisionGeneration = 0, pbDecisionReview = document.getElementById('pb-specialist-review');
+    function invalidatePbDecision(event) {
+      if (event && pbDecisionReview.contains(event.target)) return;
+      pbDecisionGeneration++; pbDecisionReview.replaceChildren();
+    }
+    pbPreview.addEventListener('input', invalidatePbDecision);
+    pbPreview.addEventListener('change', invalidatePbDecision);
+    function clearPbDecision(event) {
+      if (event && event.type === 'lightwork:copilot-context-changed' && event.detail && event.detail.reason === 'selection') return;
+      invalidatePbDecision(); pbSaveBtn.disabled = true; document.getElementById('pb-acknowledge-original').checked = false;
+    }
+    ['lightwork:account-context-changed', 'lightwork:workspace-changed', 'lightwork:authority-changed', 'lightwork:copilot-context-changed'].forEach(function (event) { document.addEventListener(event, clearPbDecision); });
+    window.addEventListener('lightwork:context-changed', clearPbDecision);
     pbSaveBtn.addEventListener('click', async function () {
       if (!PACK_EDITING) {
         setStatus('A dashboard admin must validate and save this draft.', true);
@@ -1480,28 +1495,27 @@
       var name = pbName.value.trim();
       if (!name) { setStatus('Give the agent a short name.', true); return; }
       pbSaveBtn.disabled = true;
-      setStatus('Saving the playbook…');
+      setStatus('Preparing the complete Save draft review…');
+      var current = ++pbDecisionGeneration, entered = playbookPayload(); delete entered.expected_generation;
+      var binding = JSON.stringify(entered), acknowledged = document.getElementById('pb-acknowledge-original').checked;
       try {
-        var resp = await fetch('/api/v1/agents/' + encodeURIComponent(name) + '/override', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(playbookPayload()),
+        if (!window.LWSpecialistDrafts) throw new Error('The complete draft controls are unavailable. Refresh Workflow Builder; your entered playbook is kept.');
+        await window.LWSpecialistDrafts.reviewPlaybook(pbDecisionReview, {
+          name:name, entered:entered, acknowledge_previous:acknowledged,
+          isCurrent:function () { var now = playbookPayload(); delete now.expected_generation; return current === pbDecisionGeneration && pbName.value.trim() === name && JSON.stringify(now) === binding; },
+          onSaved:function (result, handoff) {
+            setStatus('The complete draft is saved. The active agent is unchanged.');
+            var link = document.createElement('a'); link.className = 'btn btn--primary'; link.textContent = 'Open this draft in Agent Factory to review Publish';
+            link.href = '/agents?' + (handoff.newAgent ? 'new=1' : 'name=' + encodeURIComponent(name)) + '&specialist_draft=' + encodeURIComponent(result.draft || ('SPD-' + result.operation)) + '#specialist-drafts';
+            pbDecisionReview.appendChild(link);
+            if (recovery) recovery.changed();
+          }
         });
-        var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { setStatus(detailText(data, resp.status, 'save the playbook'), true); return; }
-        if (data.name !== name || !/^[0-9a-f]{64}$/.test(data.generation || '')) {
-          setStatus('The saved agent could not be confirmed. Your edits were kept; reload before another save.', true); return;
-        }
-        pbEditingName = name; pbEditGeneration = data.generation;
-        if (recovery) recovery.changed();
-        setStatus('');
-        var warns = data.warnings || [];
-        productText(savedMsg,'Saved {name} as an agent playbook. Steps: {count}.',{name:data.name || name,count:localizedNumber((data.workflow || []).length)});
-        if(warns.length)appendSource(savedMsg,warns[0]);
-        showSaved('/agents', 'Open Agents');
+        if (current === pbDecisionGeneration) setStatus('Read every setting below. Nothing is saved until you confirm this review.');
       } catch (e) {
-        setStatus('Could not save the playbook. Try again.', true);
+        if (current === pbDecisionGeneration) setStatus(e.message || 'The review could not be confirmed. Your entered playbook is kept.', true);
       } finally {
-        pbSaveBtn.disabled = !PACK_EDITING;
+        if (current === pbDecisionGeneration) pbSaveBtn.disabled = !PACK_EDITING;
       }
     });
 
@@ -1744,7 +1758,7 @@
     renderExamples();
 
     // Deep-links from the Templates / Agents pages:
-    //   ?edit_agent=<name> -> rehydrate the PLAYBOOK editor; Save overwrites.
+    //   ?edit_agent=<name> -> rehydrate the PLAYBOOK editor; Save retains a draft.
     //   ?edit=<name>       -> rehydrate the TEMPLATE editor; Save overwrites.
     //   ?template=<name>   -> jump to automating it (schedule / webhook trigger).
     var PB_EDIT = {{ edit_agent_prefill | tojson }};
@@ -1756,7 +1770,7 @@
       pbEditPreserve = PB_EDIT.preserve || null;
       pbEditingName = PB_EDIT.name; pbEditGeneration = PB_EDIT.generation;
       renderPlaybook(PB_EDIT);
-      setStatus('Editing agent {name}. Change the persona, tools or steps, then save to overwrite.',false,{name:PB_EDIT.name});
+      setStatus('Editing agent {name}. Change the instructions, actions or steps, then review Save draft. Publish is a separate decision in Agent Factory.',false,{name:PB_EDIT.name});
     } else if (PB_EDIT_DENIED) {
       // The server deliberately withheld the existing pack from page data.
       setStatus('Editing agent {name} requires a dashboard administrator. You can still draft an unsaved first pass.',true,{name:PB_EDIT_DENIED});

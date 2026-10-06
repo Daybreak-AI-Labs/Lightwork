@@ -147,6 +147,7 @@ from .route_identity import (
 )
 from .settings_experience import router as settings_experience_router
 from .settings_runtime_status import router as settings_runtime_router
+from .specialist_drafts_api import router as specialist_drafts_router
 from .static_asset_versioning import AssetVersionExtension, cache_response
 from .task_diagnostics import router as task_diagnostics_router
 from .task_handoffs_api import router as task_handoffs_router
@@ -1629,6 +1630,7 @@ app.include_router(record_search_router)
 app.include_router(conversation_inbox_router)
 app.include_router(chat_message_actions_router, prefix="/api/v1")
 app.include_router(workspace_erasure_router)
+app.include_router(specialist_drafts_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
@@ -2172,6 +2174,11 @@ app.include_router(ekko_router)
 # flow isn't fully configured, so including the router unconditionally is inert
 # off by default. See maverick_dashboard.oidc_login.
 app.include_router(oidc_login_router)
+from .company_signin_tests import router as company_signin_tests_router  # noqa: E402
+from .connected_event_sources_api import router as connected_event_sources_router  # noqa: E402
+
+app.include_router(company_signin_tests_router)
+app.include_router(connected_event_sources_router, prefix="/api/v1")
 # Email invite links (/auth/invite/{token}): single-use onboarding links an
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
@@ -13648,6 +13655,8 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-thread-history.js")
 @app.get("/static/lightwork-employee-companion.css")
 @app.get("/static/lightwork-product-operations.js")
+@app.get("/static/lightwork-specialist-drafts.js")
+@app.get("/static/lightwork-connected-event-sources.js")
 @app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-shortcuts.js")
 @app.get("/static/lightwork-pins.js")

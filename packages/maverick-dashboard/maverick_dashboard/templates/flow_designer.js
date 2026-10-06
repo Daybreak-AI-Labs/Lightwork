@@ -1348,50 +1348,99 @@
   }
   function jsonOr(v) { try { return v && (typeof v === 'object') ? JSON.stringify(v, null, 2) : (v || ''); } catch (e) { return ''; } }
 
-  // ---- structured condition builder (key / op / value) with a raw fallback ----
-  // Grammar lives in FDCore (the unit-tested shared module) -- no copy here.
+  // Ordinary grouped questions use the exact native condition grammar.
   var COND_OPS = FDCore.COND_OPS;
-  var COND_RE = FDCore.COND_RE;
   var OP_WORDS = { '==': 'is', '!=': 'is not', '>': 'is more than', '<': 'is less than',
     '>=': 'is at least', '<=': 'is at most', 'contains': 'contains' };
   function conditionText(c) {
-    var m = COND_RE.exec(c || '');
-    if (!m || / (and|or) /.test(c)) return String(c || '');
-    return human(m[1]) + ' ' + (OP_WORDS[m[2]] || m[2]) + ' ' + m[3];
+    if (!c) return '';
+    try {
+      return FDCore.parseCondition(c).map(function (group) {
+        return group.map(function (question) {
+          return human(question.key) + ' ' + (question.op === 'truthy' ? 'is yes or non-empty' :
+            (OP_WORDS[question.op] || question.op) + ' ' + (question.kind === 'boolean' ? (question.value === 'true' ? 'Yes' : 'No') : question.value));
+        }).join(' and ');
+      }).join(' — or — ');
+    } catch (_) { return 'Saved question — open its settings to review editing options'; }
   }
   function conditionField(n, label) {
     var wrap = document.createElement('div'); wrap.className = 'field';
     var l = document.createElement('div'); l.className = 'fd__label'; l.textContent = label;
     var conditionLabelId = 'fd-condition-label-' + (++fieldSeq);
     l.id = conditionLabelId; wrap.appendChild(l);
-    var complex = / (and|or) /.test(n.condition || '') || (!COND_RE.test(n.condition || '') && !!(n.condition || '').trim());
-    if (complex) {
-      // A combined question written earlier (several parts): keep it, shown in
-      // words, with a way to start over using the builder.
-      var shownText = document.createElement('p'); shownText.className = 'fd__empty'; shownText.textContent = n.condition;
-      wrap.appendChild(shownText);
-      wrap.appendChild(addButton('Replace with a simple question', function () { n.condition = ''; renderProps(); render(); }));
+    var groups;
+    try { groups = n._conditionQuestions || FDCore.parseCondition(n.condition); }
+    catch (error) {
+      wrap.appendChild(hint(error.message));
+      wrap.appendChild(addButton('Replace with new questions', function () {
+        n.condition = ''; delete n._conditionQuestions; delete n._conditionProblem; renderProps(); render();
+      }));
       return wrap;
     }
-    var m = COND_RE.exec(n.condition || '');
-    var cur = { key: m ? m[1] : '', op: m ? m[2] : '==', value: m ? m[3] : '' };
-    function commit() { n.condition = cur.key ? (cur.key + ' ' + cur.op + ' ' + (cur.value || '')).trim() : ''; render(); }
-    var row = document.createElement('div'); row.className = 'fd__pair';
-    var keySel = select(cur.key, keyChoices(n, cur.key, 'Choose information…'), function (v) { cur.key = v; commit(); });
-    keySel.setAttribute('aria-label', label + ': information to check');
-    var opSel = select(cur.op, COND_OPS.map(function (o) { return { v: o, t: OP_WORDS[o] || o }; }), function (v) { cur.op = v; commit(); });
-    opSel.setAttribute('aria-label', label + ': comparison');
-    var valIn = input(cur.value, function (v) { cur.value = v; commit(); }, 'Value');
-    valIn.setAttribute('aria-label', label + ': value');
-    row.appendChild(keySel); row.appendChild(opSel); row.appendChild(valIn);
-    wrap.appendChild(row);
+    var mode = groups.length > 1 ? 'any' : 'all';
+    var editor = document.createElement('div'); editor.className = 'fd__condition-groups'; wrap.appendChild(editor);
+    var notice = document.createElement('p'); notice.className = 'muted'; notice.setAttribute('role', 'status'); wrap.appendChild(notice);
+    function blank() { return {key: '', op: '==', kind: 'text', value: ''}; }
+    function commit() {
+      n._conditionQuestions = groups;
+      try { n.condition = FDCore.conditionQuestions(groups); delete n._conditionProblem; notice.textContent = ''; }
+      catch (error) { n._conditionProblem = error.message; notice.textContent = error.message + ' Finish these questions before saving.'; }
+      render();
+    }
+    function draw() {
+      editor.replaceChildren();
+      var match = select(mode, [{v: 'all', t: 'Match all of these questions'}, {v: 'any', t: 'Match any of these groups'}], function (value) {
+        mode = value;
+        if (mode === 'all') groups = [groups.flat()];
+        else if (groups.length === 1) groups = groups[0].map(function (question) { return [question]; });
+        commit(); draw();
+      });
+      match.setAttribute('aria-label', label + ': which questions must match'); editor.appendChild(match);
+      groups.forEach(function (group, groupIndex) {
+        var section = document.createElement('fieldset'); section.className = 'fd__condition-group'; section.style.minWidth = '0';
+        var legend = document.createElement('legend'); legend.textContent = mode === 'all' ? 'Every question must match' : 'Group ' + (groupIndex + 1) + ' — every question must match';
+        section.appendChild(legend); editor.appendChild(section);
+        group.forEach(function (question, questionIndex) {
+          var row = document.createElement('div'); row.className = 'fd__pair'; row.style.flexWrap = 'wrap';
+          row.dataset.conditionQuestion = String(groupIndex + 1) + '-' + String(questionIndex + 1);
+          var name = label + ', group ' + (groupIndex + 1) + ', question ' + (questionIndex + 1);
+          var keySel = select(question.key, keyChoices(n, question.key, 'Choose information…'), function (value) { question.key = value; commit(); });
+          keySel.setAttribute('aria-label', name + ': information to check'); row.appendChild(keySel);
+          var opSel = select(question.op, COND_OPS.map(function (operator) { return {v: operator, t: OP_WORDS[operator] || operator}; }).concat([{v: 'truthy', t: 'is yes or non-empty'}]), function (value) { question.op = value; commit(); draw(); });
+          opSel.setAttribute('aria-label', name + ': comparison'); row.appendChild(opSel);
+          if (question.op !== 'truthy') {
+            var kindSel = select(question.kind, [{v: 'text', t: 'Text'}, {v: 'number', t: 'Number'}, {v: 'boolean', t: 'Yes or No'}], function (value) {
+              question.kind = value; delete question.literal; if (value === 'boolean') question.value = 'true'; commit(); draw();
+            });
+            kindSel.setAttribute('aria-label', name + ': value type'); row.appendChild(kindSel);
+            var valueInput = question.kind === 'boolean'
+              ? select(question.value, [{v: 'true', t: 'Yes'}, {v: 'false', t: 'No'}], function (value) { question.value = value; delete question.literal; commit(); })
+              : input(question.value, function (value) { question.value = value; delete question.literal; commit(); }, question.kind === 'number' ? 'Number to compare' : 'Text to compare');
+            valueInput.setAttribute('aria-label', name + ': value'); row.appendChild(valueInput);
+          }
+          var remove = addButton('Remove question', function () {
+            group.splice(questionIndex, 1); if (!group.length) groups.splice(groupIndex, 1); if (!groups.length) groups = [[blank()]]; commit(); draw();
+          });
+          remove.setAttribute('aria-label', name + ': remove question'); row.appendChild(remove); section.appendChild(row);
+        });
+        var add = addButton('Add question to this group', function () { group.push(blank()); commit(); draw(); });
+        add.disabled = groups.reduce(function (count, item) { return count + item.length; }, 0) >= 64; section.appendChild(add);
+      });
+      if (mode === 'any') {
+        var addGroup = addButton('Add another matching group', function () { groups.push([blank()]); commit(); draw(); });
+        addGroup.disabled = groups.length >= 32 || groups.reduce(function (count, item) { return count + item.length; }, 0) >= 64; editor.appendChild(addGroup);
+      }
+    }
+    draw();
+    if (n._conditionProblem) notice.textContent = n._conditionProblem + ' Finish these questions before saving.';
+    wrap.appendChild(hint('Groups give you alternative paths. Within a group, every question must match. Zero, No and empty text do not match “is yes or non-empty”.'));
     if (!availableKeys(n.id).length) wrap.appendChild(hint('Name an earlier step’s result, or add a question asked at start, to choose it here.'));
     return wrap;
   }
 
   // ---- serialize / api ----
   function commitRawFields() {
-    return FDCore.commitRawParams(rootFlow).concat(FDActionFields.check(rootFlow));
+    return FDCore.commitRawParams(rootFlow).concat(FDActionFields.check(rootFlow), FDCore.conditionProblems(rootFlow));
   }
   var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
@@ -2860,7 +2909,8 @@
     move: moveStep,
     add: addStepAtEnd,
     selected: function () { return selected; },
-    kindLabel: kindLabel
+    kindLabel: kindLabel,
+    conditionText: conditionText
   };
   var _render = render;
   render = function () { _render(); if (window.__fdStepsRefresh) window.__fdStepsRefresh(); };

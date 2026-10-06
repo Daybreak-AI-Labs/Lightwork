@@ -269,85 +269,18 @@ async def media_release_references(request: Request) -> dict[str, Any]:
     return {"references": rows, "count": len(rows)}
 
 
-def _finding_sources(officer: Any) -> list[dict[str, Any]]:
-    rows = []
-    for finding in officer.findings():
-        rows.append(
-            {
-                "label": str(finding.get("summary") or ""),
-                "asset_id": finding["asset_id"],
-                "source": {
-                    "source_kind": "finding",
-                    "source_id": finding["id"],
-                    "asset_id": finding["asset_id"],
-                    "severity": finding["severity"],
-                    "summary": finding["summary"],
-                    # Findings are derived, not stored: each exact content
-                    # fingerprint is its own first version.  A changed finding
-                    # reuses the ID with a new fingerprint, which the outbound
-                    # sync refuses as a conflict for a person to resolve.
-                    "source_revision": 1,
-                    "source_digest": finding["finding_sha256"],
-                    "finding_type": finding["finding_type"],
-                },
-            }
-        )
-    return rows
-
-
-def _acceptance_sources(officer: Any) -> list[dict[str, Any]]:
-    rows = []
-    for finding in officer.findings():
-        record = officer.current_risk_acceptance(finding)
-        if not isinstance(record, Mapping):
-            continue
-        rows.append(
-            {
-                "label": f"Accepted risk: {finding.get('summary') or ''}",
-                "asset_id": record["asset_id"],
-                "source": {
-                    "source_kind": "risk_acceptance",
-                    "source_id": record["id"],
-                    "asset_id": record["asset_id"],
-                    "severity": record["severity"],
-                    "summary": str(finding.get("summary") or "Accepted risk"),
-                    "source_revision": _revision(record),
-                    "source_digest": _record_digest(record),
-                    "finding_id": record["finding_id"],
-                    "rationale": record["rationale"],
-                    "reviewer": record["reviewer"],
-                    "decided_at": float(record["decided_at"]),
-                    "expires_at": float(record["expires_at"]),
-                    "acceptance_status": record["status"],
-                },
-            }
-        )
-    return rows
-
-
-def _incident_sources(officer: Any) -> list[dict[str, Any]]:
-    rows = []
-    for record in officer.list_incidents():
-        rows.append(
-            {
-                "label": str(record.get("summary") or ""),
-                "asset_id": record["asset_id"],
-                "source": {
-                    "source_kind": "ai_incident",
-                    "source_id": record["id"],
-                    "asset_id": record["asset_id"],
-                    "severity": record["severity"],
-                    "summary": record["summary"],
-                    "source_revision": _revision(record),
-                    "source_digest": _record_digest(record),
-                    "incident_source_id": record["source_id"],
-                    "incident_status": record["status"],
-                    "occurred_at": float(record["occurred_at"]),
-                    "resolution": str(record.get("resolution") or ""),
-                },
-            }
-        )
-    return rows
+def _grc_source_choices(officer: Any, kind: str) -> list[dict[str, Any]]:
+    if kind == "ai_incident":
+        records = [(record, record.get("summary") or "AI incident") for record in officer.list_incidents()]
+    else:
+        records = []
+        for finding in officer.findings():
+            record = finding if kind == "finding" else officer.current_risk_acceptance(finding)
+            if record is not None:
+                records.append((record, finding.get("summary") or "Finding"))
+    return [{"label": str(label), "asset_id": record["asset_id"], "severity": record["severity"],
+             "source": {"source_kind": kind, "source_id": record["id"]}}
+            for record, label in records]
 
 
 @router.get("/grc-sources")
@@ -360,12 +293,7 @@ async def grc_outbound_sources(
     require_permission(request, "operate")
     _require_active_tenant()
     officer = _module("model_risk_assurance", "model_risk_assurance")
-    build = {
-        "finding": _finding_sources,
-        "risk_acceptance": _acceptance_sources,
-        "ai_incident": _incident_sources,
-    }[source_kind]
-    sources = await _call(build, officer)
+    sources = await _call(_grc_source_choices, officer, source_kind)
     return {"source_kind": source_kind, "sources": sources[:500], "count": len(sources)}
 
 

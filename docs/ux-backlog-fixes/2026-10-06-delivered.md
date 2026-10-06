@@ -1,0 +1,15 @@
+# Product changes delivered on October 6
+
+This maps the current delivery batch to the original `claude/ux-backlog-status` `NOT_DONE.md`, rather than replacing that backlog with a new checklist. Ordinary customer controls and their current boundaries are listed below. The detailed native journeys used isolated local transports, not customer or paid-provider accounts. No hosted CI was used.
+
+| Original item | Working product change | Customer control and boundary |
+| --- | --- | --- |
+| UX-117 | Writeback derives its full review from the saved Lightwork finding, acceptance or incident. Original matching receipts remain readable after later exports. | Governance and Copilot; current source/account checks precede the connector write. Uncertain receipts remain uncertain instead of silently repeating a create. |
+| UX-134 | Manual privacy evidence is explicitly an operator attestation, separate from connector observations. | Privacy request source tasks, saved originals and exports; absence of an active record does not claim destruction of retained copies. |
+| UX-368/369/370 | Complete specialist drafts have a test conversation, saved question sets, separate Save draft and Publish, retained complete versions and reviewed Restore. | Agent Factory, Workflow Builder and Copilot. Tests require a configured model and enforce their reviewed spending limits. Publishing requires current acceptance or a separately recorded reason. |
+| UX-385 | Visual questions support All/Any groups, text, numbers and Yes/No without editing an expression. | Workflow Designer; saving and reloading use the same native execution semantics. Unsupported old expressions are kept until explicitly replaced; incomplete edits block save/run/publish. |
+| UX-044/389 | Connected starts use saved accounts and named SharePoint, Salesforce, ServiceNow and Teams sources. | Automations and Copilot; dated source preview, explicit creation, bounded complete reads, original creation recovery and preserved source position. A preview does not confirm future delivery. |
+| UX-168/373 | Owned task answers can produce encrypted text and rich HTML file replies with the original chat thread. | Slack and Telegram. Uncertain file sends are not automatically repeated. Teams supplies named result availability and a configured private task link; its existing transport cannot upload the files. This path does not convert arbitrary content into PDF/DOCX or attach model-supplied filesystem paths. |
+| UX-075, partial | A real company account sign-in can be checked against saved details before activation. The result is dated and account-bound. | Settings and Copilot. Native signature, nonce, state, replay and current-setting checks preserve the owner's session, roles and disabled sign-in. Provider presets, uploaded SAML metadata, and verified activation/recovery migration remain open. |
+
+The original backlog still includes work outside this batch. The 28-item research register also retains its distinct research dispositions; these customer features do not turn a bounded pilot or a rejected experiment into a completed invention, measured business outcome or acquisition valuation.

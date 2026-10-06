@@ -13,6 +13,82 @@
   // public address the identity provider must return to after sign-in.
   var signInGuide = document.getElementById('settings-signin-guide');
   if (signInGuide) {
+    var signInGeneration = 0;
+    var signInAccessGeneration = 0;
+    var signInTry = signInGuide.querySelector('[data-signin-try]');
+    var signInProvider = signInGuide.querySelector('[data-signin-provider-link]');
+    var signInRefresh = signInGuide.querySelector('[data-signin-refresh]');
+    var signInResults = signInGuide.querySelector('[data-signin-results]');
+    var signInHistory = signInGuide.querySelector('[data-signin-history]');
+    async function refreshSignInResults() {
+      var generation = ++signInGeneration;
+      signInHistory.replaceChildren();
+      signInRefresh.disabled = true;
+      signInResults.textContent = 'Reading saved sign-in results…';
+      try {
+        var response = await fetch('/api/v1/settings/sign-in-tests', {credentials: 'same-origin', cache: 'no-store'});
+        var value = await response.json();
+        if (generation !== signInGeneration) return;
+        if (!response.ok || value.context !== root.dataset.requestContext || !Array.isArray(value.checks)) throw new Error('unavailable');
+        signInResults.textContent = value.checks.length ? 'Saved provider sign-in checks. Current sign-in and administrator access were kept.' : 'No verified provider sign-in is saved for your current account and workspace.';
+        if (new URLSearchParams(location.search).get('signin_test') === 'unconfirmed') {
+          signInResults.textContent = 'The latest attempt was not confirmed. Nothing was enabled. Check the saved details before starting a separate attempt.';
+        }
+        value.checks.forEach(function (check) {
+          var item = document.createElement('li');
+          item.textContent = new Date(check.checked_at * 1000).toLocaleString() + ' · ' + check.provider + ' · ' + check.account + ' · ' + (check.current ? 'Matches current saved details' : 'Saved details have changed; check them again');
+          signInHistory.appendChild(item);
+        });
+      } catch (_) {
+        if (generation === signInGeneration) signInResults.textContent = 'The saved sign-in results could not be checked. Nothing was enabled.';
+      } finally {
+        if (generation === signInGeneration) signInRefresh.disabled = false;
+      }
+    }
+    function clearSignInResults() {
+      signInGeneration += 1;
+      signInAccessGeneration += 1;
+      signInTry.disabled = true;
+      signInProvider.hidden = true;
+      signInProvider.removeAttribute('href');
+      signInHistory.replaceChildren();
+      signInResults.textContent = 'Your account or workspace changed. Reload Settings before reading private sign-in results.';
+      signInRefresh.disabled = true;
+    }
+    signInTry.addEventListener('click', async function () {
+      var access = signInAccessGeneration;
+      var providerTab = window.open('about:blank', '_blank');
+      if (providerTab) providerTab.opener = null;
+      signInTry.disabled = true;
+      signInProvider.hidden = true;
+      signInProvider.removeAttribute('href');
+      signInResults.textContent = 'Preparing a sign-in against your saved provider details…';
+      try {
+        var response = await fetch('/api/v1/settings/sign-in-tests/start', {method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json'}});
+        var value = await response.json();
+        if (access !== signInAccessGeneration) throw new Error('changed');
+        if (!response.ok || value.context !== root.dataset.requestContext || typeof value.authorization_url !== 'string') throw new Error('unavailable');
+        var provider = new URL(value.authorization_url);
+        if (provider.protocol !== 'https:') throw new Error('unavailable');
+        if (providerTab && !providerTab.closed) {
+          providerTab.location.href = provider.href;
+          signInResults.textContent = 'Continue in your provider tab. Your current Lightwork access is kept.';
+        } else {
+          signInProvider.href = provider.href;
+          signInProvider.hidden = false;
+          signInResults.textContent = 'Your browser blocked the new tab. Choose Continue to your sign-in provider to complete this check.';
+        }
+      } catch (_) {
+        if (providerTab && !providerTab.closed) providerTab.close();
+        if (access === signInAccessGeneration) signInResults.textContent = 'The sign-in check could not start. Save and check the provider details first. Nothing was enabled.';
+      } finally {
+        if (access === signInAccessGeneration) signInTry.disabled = false;
+      }
+    });
+    signInRefresh.addEventListener('click', refreshSignInResults);
+    document.addEventListener('lightwork:copilot-context-changed', clearSignInResults);
+    window.addEventListener('lightwork:draft-context-changed', clearSignInResults);
+    refreshSignInResults();
     var secureSignInAddress = window.location.protocol === 'https:';
     var signInAddresses = {
       oidc: window.location.origin + '/auth/callback',

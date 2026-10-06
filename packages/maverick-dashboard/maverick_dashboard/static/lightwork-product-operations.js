@@ -56,6 +56,8 @@
       try { return {kind: 'flow', id: decodeURIComponent(flow[1])}; } catch (_) { return {}; }
     }
     var query = new URLSearchParams(window.location.search);
+    var specialist = query.get('name');
+    if (window.location.pathname === '/agents' && specialist && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(specialist)) return {name: specialist};
     var learningPass = query.get('learning_pass');
     if (window.location.pathname === '/learned' && learningPass && /^[a-f0-9]{32}$/.test(learningPass))
       return {kind: 'learning_pass', operation: learningPass};
@@ -145,6 +147,18 @@
       var entries = Object.entries(item);
       if (entries.length > maximumEntries) omitted(target);
       entries.slice(0, maximumEntries).forEach(function (entry) {
+        if (entry[0] === 'specialist_draft_author') {
+          var specialistAuthor = entry[1];
+          if (!specialistAuthor || Array.isArray(specialistAuthor) || Object.keys(specialistAuthor).sort().join(',') !== 'binding,context,name' ||
+              !/^[a-f0-9]{64}$/.test(specialistAuthor.context || '') || !/^[a-f0-9]{64}$/.test(specialistAuthor.binding || '') ||
+              !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(specialistAuthor.name || '')) return;
+          var specialistControl = window.LWSpecialistDrafts;
+          protectedControls(node('dd', undefined, list), 'Open complete specialist draft controls',
+            '/agents?name=' + encodeURIComponent(specialistAuthor.name) + '#specialist-drafts',
+            specialistControl && typeof specialistControl.openAuthor === 'function'
+              ? function (isCurrent) { return specialistControl.openAuthor(specialistAuthor, {isCurrent: isCurrent}); } : null);
+          return;
+        }
         if (entry[0] === 'outcome_pilot_form') {
           var pilotForm = entry[1];
           if (!pilotForm || Array.isArray(pilotForm) || Object.keys(pilotForm).sort().join(',') !== 'action,case,context,pilot' ||
@@ -1208,6 +1222,9 @@
               : item.id === 'workspaces.erase'
                 ? !!(window.LWWorkspaceErasure && window.LWWorkspaceErasure.renderReview &&
                      window.LWWorkspaceErasure.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('specialists.drafts.')
+                ? !!(window.LWSpecialistDrafts && window.LWSpecialistDrafts.renderReview &&
+                     window.LWSpecialistDrafts.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)
