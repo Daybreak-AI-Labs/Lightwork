@@ -1298,7 +1298,9 @@
         catch (failure) { testsStatus.textContent = window.mvErrorText ? window.mvErrorText(failure, 'read the saved test results') : 'The saved test results could not be read.'; }
       }
       if (testsStatus && !creating) {
-        refreshTests();
+        // The shared fetch helper loads after this page script.
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshTests);
+        else refreshTests();
         document.getElementById('f-persona').addEventListener('input', () => {
           clearTimeout(testsTimer); testsTimer = setTimeout(refreshTests, 600);
         });

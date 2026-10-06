@@ -50,7 +50,9 @@
     rows.forEach(function (item) {
       var row = body2.insertRow();
       cell(row, window.mvTimeAbsolute ? window.mvTimeAbsolute(item.at) : String(item.at));
-      cell(row, item.kind === 'tool' ? 'Use ' + String(item.name).replace(/_/g, ' ') : item.name);
+      var action = String(item.name).replace(/_/g, ' ');
+      cell(row, item.kind === 'tool' ? 'Use ' + action : item.kind === 'refused' ? 'Use ' + action + ' (not approved)'
+        : item.kind === 'webhook' ? 'Send the ' + action + ' event to another app' : item.name);
       var task = document.createElement('td');
       if (item.goal_id) { var link = document.createElement('a'); link.href = '/chat/goal/' + encodeURIComponent(item.goal_id); link.textContent = 'Practice task ' + item.goal_id; task.appendChild(link); }
       else task.textContent = '—';

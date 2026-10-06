@@ -3629,11 +3629,29 @@ class Agent:
                 )
             raise
 
-    def _practice_denial(self, name: str, args: dict) -> str | None:
-        """Record, instead of run, a tool that leaves the practice workspace."""
+    async def _practice_denial(self, name: str, args: dict) -> str | None:
+        """Record, instead of run, a tool that leaves the practice workspace.
+
+        The approval a live run would need is still asked for (in the
+        practice Approvals page), so people practise the decision too; the
+        tool never runs whatever the answer."""
         from . import practice
         if not practice.active() or practice.tool_allowed(name):
             return None
+        from .safety.consent import require_consent
+        from .safety.tool_risk import tool_risk
+        try:
+            verdict = await asyncio.to_thread(
+                require_consent, name, risk=tool_risk(name), provenance="practice", consult_ledger=False,
+                detail=(f"Practice mode: {self.name} wants to use {name}. Deciding lets you practise "
+                        "this approval; the action does not run either way."))
+            granted = bool(verdict.granted)
+        except Exception:  # an unavailable approval is a refusal, as in live work
+            granted = False
+        if not granted:
+            practice.record("refused", name, _audit_summary(args), goal_id=self.ctx.goal_id)
+            return (f"Practice mode: {name} was not approved, so it did not run. Nothing was sent, "
+                    "paid or changed outside practice.")
         return practice.record("tool", name, _audit_summary(args), goal_id=self.ctx.goal_id)
 
     async def _run_tool(self, name: str, args: dict) -> str:
@@ -3732,7 +3750,7 @@ class Agent:
         # had its say, a tool that would reach outside the practice workspace
         # is recorded in the practice outbox instead of running.
         if ((d := await self._ifc_denial(name, args)) is not None
-                or (d := self._practice_denial(name, args)) is not None):
+                or (d := await self._practice_denial(name, args)) is not None):
             return _NotExecutedToolResult(d)
 
         # PreToolUse hooks: any registered hook can BLOCK the call by

@@ -1,6 +1,7 @@
 """Practice mode keeps practised work apart and lets nothing leave Lightwork (ONB-4)."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -44,22 +45,45 @@ def test_practised_tasks_use_a_separate_world_database(home, monkeypatch):
         assert world_model.default_db_path() == home / "custom.practice.db"
 
 
-def test_only_local_reads_and_coordination_run_in_practice(home):
-    from maverick import practice
+def _deny(name, args):
     from maverick.agent import Agent
 
-    fake = SimpleNamespace(ctx=SimpleNamespace(goal_id=7))
-    assert Agent._practice_denial(fake, "send_email", {"to": "pat@example.com"}) is None  # live: no gate
+    fake = SimpleNamespace(name="Finance specialist", ctx=SimpleNamespace(goal_id=7))
+    return asyncio.run(Agent._practice_denial(fake, name, args))
+
+
+def test_only_local_reads_and_coordination_run_in_practice(home, monkeypatch):
+    from maverick import practice
+    from maverick.safety import consent
+
+    asked = []
+    monkeypatch.setattr(consent, "require_consent", lambda action, **kw: asked.append((action, kw)) or
+                        SimpleNamespace(granted=True))
+    assert _deny("send_email", {"to": "pat@example.com"}) is None  # live: no gate
     with practice.scope():
         for tool in ("read_file", "list_dir", "ask_user", "spawn_subagent"):
-            assert Agent._practice_denial(fake, tool, {}) is None
+            assert _deny(tool, {}) is None
         for tool in ("send_email", "slack", "send_payment", "shell", "http_fetch", "web_search",
                      "write_file", "gl_read_journal", "some_new_connector"):
-            refusal = Agent._practice_denial(fake, tool, {"to": "pat@example.com"})
+            refusal = _deny(tool, {"to": "pat@example.com"})
             assert refusal and "did not run" in refusal and "Nothing was sent" in refusal
     held = practice.outbox()
     assert [row["name"] for row in held][:2] == ["some_new_connector", "gl_read_journal"]
     assert all(row["goal_id"] == 7 and row["kind"] == "tool" for row in held)
+    # The approval a live run would need is still practised, never skipped.
+    assert asked[0][0] == "send_email" and asked[0][1]["provenance"] == "practice"
+    assert "does not run either way" in asked[0][1]["detail"]
+
+
+def test_a_refused_practice_approval_still_runs_nothing(home, monkeypatch):
+    from maverick import practice
+    from maverick.safety import consent
+
+    monkeypatch.setattr(consent, "require_consent", lambda action, **kw: SimpleNamespace(granted=False))
+    with practice.scope():
+        refusal = _deny("send_payment", {"amount": 900})
+    assert "was not approved" in refusal and "did not run" in refusal
+    assert practice.outbox()[0]["kind"] == "refused"
 
 
 def test_alerts_email_webhooks_and_approval_cards_are_recorded_not_sent(home, monkeypatch):
