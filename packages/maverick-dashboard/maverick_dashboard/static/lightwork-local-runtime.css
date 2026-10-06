@@ -10,13 +10,13 @@
 .la-form .input { width: 100%; min-width: 0; }
 .la-check { display: flex; align-items: flex-start; gap: var(--space-3); line-height: 1.5; }
 .la-check input { flex: 0 0 auto; margin-top: .25em; }
-.la-help { line-height: 1.65; font-size: var(--font-sm); }
+.la-help { line-height: 1.65; font-size: var(--text-sm); }
 .la-notice { border: 1px solid var(--glass-border); padding: var(--space-4); border-radius: var(--radius-md); background: var(--glass-soft); line-height: 1.65; }
 .la-status, .la-shell p { overflow-wrap: anywhere; }
 .la-history { margin-top: var(--space-5); }
 .la-requests { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
 .la-requests .btn { width: 100%; text-align: left; white-space: normal; }
-.la-dialog { width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; box-sizing: border-box; color: var(--text); border: 1px solid var(--glass-border); border-radius: var(--radius-xl); padding: var(--space-6); background: var(--glass-panel-solid, var(--panel)); box-shadow: var(--glass-shadow); }
+.la-dialog { width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; box-sizing: border-box; color: var(--text); border: 1px solid var(--glass-border); border-radius: var(--radius-lg); padding: var(--space-6); background: var(--glass-panel-solid, var(--panel)); box-shadow: var(--glass-shadow); }
 .la-dialog::backdrop { background: rgb(0 0 0 / .5); }
 .la-dialog h2 { margin-top: 0; }
 .la-dialog p { line-height: 1.65; }

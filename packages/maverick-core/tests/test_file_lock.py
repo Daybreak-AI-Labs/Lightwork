@@ -311,6 +311,18 @@ def test_ensure_private_file_does_not_reharden_already_private_file(
     assert path.read_text(encoding="utf-8") == "private"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode fast path")
+def test_ensure_private_file_leaves_an_already_private_posix_file_unchanged(tmp_path):
+    """Re-applying the same mode still moves ctime, which reads as a change."""
+    path = tmp_path / "already-private.txt"
+    atomic_create_text(path, "private")
+    before = path.stat()
+    ensure_private_file(path)
+    after = path.stat()
+    assert after.st_ctime_ns == before.st_ctime_ns
+    assert private_path_is_restricted(path)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
 def test_ensure_private_file_rejects_aba_swap_during_private_fast_path(
     tmp_path, monkeypatch,

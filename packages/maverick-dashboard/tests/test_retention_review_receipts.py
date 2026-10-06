@@ -96,7 +96,9 @@ def test_revocation_at_fence_blocks_effect(isolated, monkeypatch):
     def authorize():
         nonlocal checks
         checks += 1
-        if checks == 3:
+        # Checks: after reading, before recording acceptance, before the step,
+        # and at the deletion fence itself. Revoke at the fence.
+        if checks == 4:
             raise HTTPException(403, "Role removed")
     with pytest.raises(HTTPException):
         retention_runs.apply(review["id"], "user:admin", confirm_holds=True, retry=False, authorize=authorize)

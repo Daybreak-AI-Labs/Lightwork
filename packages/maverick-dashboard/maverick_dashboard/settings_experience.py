@@ -105,7 +105,7 @@ def review(request: Request, body: page.CatalogUpdate):
                 'source': page._resolve(setting, layers)['source'], 'resulting_source': resulting_source,
                 'scope': 'Organization / installation', 'restart': setting.restart,
                 'affected': 'Authorized workspaces inheriting this organization setting',
-                'module': setting.group,
+                'module': setting.group, 'area': setting.group,
                 'automatic': requested is None,
                 **_impact(setting),
             })

@@ -38,6 +38,7 @@
       // that can only answer "not ready".
       if (!button || button.disabled) return;
       button.disabled = true; message.textContent = 'Creating the sample workspace and starting the task…';
+      var opening = false;
       try {
         var response = await fetch('/api/v1/first-outcome/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({department:select.value})});
         var result = null;
@@ -49,9 +50,11 @@
         }
         if (!response.ok || !result || !result.href) throw plainError(errText(response, 'start the sample task'));
         message.textContent = 'The sample task is running. Its result will wait in ' + result.lands_in + '. Opening it…';
-        window.location.assign(result.href);
+        opening = true; window.location.assign(result.href);
       } catch (error) { message.textContent = error && error.plain ? error.message : errText(error, 'start the sample task'); }
-      finally { button.disabled = false; }
+      // The task has started: keep the button off while its page opens, so a
+      // second click cannot start the sample again.
+      finally { if (!opening) button.disabled = false; }
     });
   }
   var download = document.getElementById('setup-download');

@@ -49,7 +49,7 @@ enable = true
     monkeypatch.setattr(
         finance_api,
         "require_permission",
-        lambda _request, permission: permission_calls.append(("tenant", permission)),
+        lambda _request, permission, **_scope: permission_calls.append(("tenant", permission)),
     )
     monkeypatch.setattr(
         finance_api,

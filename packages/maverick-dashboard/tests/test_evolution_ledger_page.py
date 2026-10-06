@@ -85,8 +85,10 @@ def test_nav_registry_and_copilot_use_the_audit_only_page_context() -> None:
     assert entry["in_nav"] is True
     context = context_for_page(page.PAGE_PATH)
     assert context.title == "Learning history"
-    assert "cannot start learning" in " ".join(context.boundaries).lower()
-    assert "human approval" in " ".join(context.boundaries).lower()
+    boundaries = " ".join(context.boundaries).lower()
+    # The guide changes nothing, and an adoption is not proof of better results.
+    assert "page guide is read-only" in boundaries
+    assert "does not establish that it improved results" in boundaries
 
 
 def test_client_is_bounded_and_uses_safe_dom_only() -> None:

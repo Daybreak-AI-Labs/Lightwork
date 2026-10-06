@@ -78,6 +78,11 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(api, "_principal", lambda _request, _tenant: "grc-principal")
     monkeypatch.setattr(api, "require_permission", lambda *_: None)
     monkeypatch.setattr(api, "require_global_permission", lambda *_: None)
+    # Draft saves bind the workspace's studio settings; this workspace has them on.
+    from maverick_dashboard import no_code_grc_studio_composition as composition
+    enabled_settings = composition.grc_studio_settings(
+        {"tech_risk_compliance": {"enable": True, "grc_studio": {"enable": True}}})
+    monkeypatch.setattr(composition, "settings_for_tenant", lambda _tenant: enabled_settings)
 
     def factory(*, tenant_id: str, principal_ref: str, request: Request):
         state.factory_calls.append((tenant_id, principal_ref, request))
@@ -96,7 +101,8 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return await call_next(request)
 
     app.include_router(api.create_no_code_grc_studio_router(dependencies), prefix="/api/v1")
-    return TestClient(app), state
+    # Studio changes must come from the page itself (same-origin check).
+    return TestClient(app, headers={"Origin": "http://testserver"}), state
 
 
 def test_status_is_store_free_and_honest(environment) -> None:

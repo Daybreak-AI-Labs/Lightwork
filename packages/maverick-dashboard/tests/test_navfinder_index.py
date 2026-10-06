@@ -20,7 +20,6 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 
 # Reachable in-page / by URL, deliberately off the rail, previously unsearchable.
 FOLDED = (
-    "/fleets",
     "/third-party/intelligence",
     "/third-party/lifecycle",
     "/third-party/collaboration",
@@ -87,7 +86,7 @@ def test_finder_pages_applies_the_same_rbac_and_overrides_as_nav_groups(monkeypa
     assert "/fleets" in _hrefs(ui_visibility.finder_pages("operator"))
     ui_visibility.set_visibility("/fleets", "operator", False)
     assert "/fleets" not in _hrefs(ui_visibility.finder_pages("operator"))
-    assert "/fleets" in _hrefs(ui_visibility.finder_pages("admin"))
+    assert "/security/soc" in _hrefs(ui_visibility.finder_pages("admin"))
     # Lockout guard: the store refuses to hide /settings from admins, and the
     # finder keeps it regardless.
     with pytest.raises(ValueError):

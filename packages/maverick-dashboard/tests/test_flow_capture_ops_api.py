@@ -267,8 +267,10 @@ def test_fresh_runs_are_captured_reviewed_granted_and_learned_from(harness):
 
 def test_review_without_training_permission_cannot_be_learned_or_signed(harness):
     _lineage_flags(harness)
-    run = _keep_as_example(harness, 0, allow_learning=False)
-    other = _keep_as_example(harness, 1)
+    # A learning decision needs the run's procedure to still be current, so
+    # the run granted later is the one saved under the current procedure.
+    other = _keep_as_example(harness, 0)
+    run = _keep_as_example(harness, 1, allow_learning=False)
     path = f"/api/v1/flows/{run.flow_id}/teach"
     listed = {row["run_id"]: row for row in harness.client.get(path + "/examples").json()["runs"]}
     assert listed[run.run_id]["status"] == "accepted"

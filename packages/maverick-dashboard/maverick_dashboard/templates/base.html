@@ -18,6 +18,8 @@
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
+  {% set _session = page_session(request) if request is defined and page_session is defined else none %}
+  {% include "_session_meta.html" %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   {#- One stylesheet holds the whole shell (a phone pays one round trip before
       the first paint). The Copilot and its native controls never take part in
@@ -197,6 +199,7 @@
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-practice.js') }}" defer></script>
   {% if usage_measures_on %}<script src="{{ asset('lightwork-usage-measures.js') }}"></script>{% endif %}
+  {% if _session %}<script src="{{ asset('lightwork-session.js') }}" defer></script>{% endif %}
   {% if usability_survey_on %}<script src="{{ asset('lightwork-usability-survey.js') }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>

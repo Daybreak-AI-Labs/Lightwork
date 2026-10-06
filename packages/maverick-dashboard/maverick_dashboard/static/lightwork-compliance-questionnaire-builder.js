@@ -18,7 +18,7 @@
   var storage = 'lightwork.questionnaire.review.v1';
   function el(tag, text, parent, cls) { var node = R.el(tag, cls || '', text); if (parent) parent.appendChild(node); return node; }
   function button(label, parent, handler) { var b = el('button', label, parent, 'btn btn--ghost'); b.type = 'button'; b.addEventListener('click', handler); return b; }
-  function say(text) { status.textContent = text; }
+  function say(text) { window.mvStatus ? window.mvStatus(status, text) : (status.textContent = text); }
   function fail(error) { if (error && (error.status === 401 || error.status === 403)) { clearPrivate(); return; } say(error && error.message || R.errorText(error, 'complete this questionnaire request')); }
   function valid(started) { return started === generation && (!handoff || handoff.active()); }
   function lock(on) {

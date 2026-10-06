@@ -50,4 +50,6 @@ def test_a_short_list_has_no_show_more(client):
     _seed(7)
     page = client.get("/goals")
     assert len(re.findall(r'<div class="g-row" id="\d+"', page.text)) == 7
-    assert 'id="run-more"' not in page.text
+    # The button stays in place for search paging but is hidden here.
+    more = re.search(r'<button id="run-more"[^>]*>', page.text).group(0)
+    assert re.search(r"\shidden>$", more), more

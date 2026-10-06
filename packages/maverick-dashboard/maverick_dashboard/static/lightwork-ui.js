@@ -1186,10 +1186,16 @@
       const errBox = document.getElementById('goal-error');
       if (!form || !errBox) return;
       const btn = form.querySelector('button[type="submit"]');
-      let authoringPending = false;
+      let authoringPending = false, startPending = false, unlockStart = null;
+      // Back from the task page (a restored page): the form works again.
+      window.addEventListener('pageshow', function (event) {
+        if (event.persisted && unlockStart) unlockStart();
+      });
       form.addEventListener('submit', async function(ev) {
         ev.preventDefault();
-        if (authoringPending) return;
+        // One submit makes one task: a second click or Enter while the first
+        // is on its way is ignored, not sent again.
+        if (authoringPending || startPending) return;
         errBox.style.display = 'none';
         const kindEl = form.querySelector('[name="authoring_kind"]');
         const kind = kindEl ? kindEl.value : 'goal';
@@ -1260,16 +1266,26 @@
           }
         }
         if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+        startPending = true;
         const submittedForm = new FormData(form);
         const submittedControls = Array.from(form.querySelectorAll('input,textarea,select')).map(function (control) {
           const wasDisabled = control.disabled; control.disabled = true; return [control,wasDisabled];
         });
+        unlockStart = function () {
+          unlockStart = null; startPending = false;
+          submittedControls.forEach(function (item) { item[0].disabled = item[1]; });
+          if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        };
         try {
           const resp = await fetch(form.action, { method: 'POST', body: submittedForm });
-          if (resp.redirected && resp.ok && new URL(resp.url).pathname.startsWith('/chat/goal/')) {
+          // The server answers a started task with a redirect to its page. If
+          // that page was still being set up (a retryable 409 or 503), the
+          // task did start: open it, never "Could not start" and a second try.
+          if (resp.redirected && new URL(resp.url).pathname.startsWith('/chat/goal/') &&
+              (resp.ok || resp.status === 409 || resp.status === 503)) {
             if (form.mvRecovery) await form.mvRecovery.clear();
             window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: form, recoveryCleared: true}}));
-            window.location.href = resp.url; return;
+            startPending = 'opening'; window.location.href = resp.url; return;
           }
           if (resp.ok && !resp.redirected) {
             if (form.mvRecovery) await form.mvRecovery.clear();
@@ -1304,8 +1320,8 @@
           errBox.textContent = 'Lightwork is not responding. Check your connection and try again.';
           errBox.style.display = 'block';
         } finally {
-          submittedControls.forEach(function (item) { item[0].disabled = item[1]; });
-          if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+          // While the task page opens, the form stays locked.
+          if (startPending !== 'opening' && unlockStart) unlockStart();
         }
       });
     })();

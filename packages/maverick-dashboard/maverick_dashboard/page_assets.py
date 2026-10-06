@@ -25,6 +25,8 @@ ASSETS = (
     "lightwork-devices.js",
     "lightwork-read-aloud.js",
     "lightwork-run-status.js",
+    "lightwork-session.js",
+    "lightwork-approvals-count.js",
     "lightwork-theme-preview.js",
     "lightwork-i18n.js",
     "lightwork-model-guidance.js",

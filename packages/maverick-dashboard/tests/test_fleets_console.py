@@ -128,8 +128,8 @@ def test_governance_hold_gets_source_label_on_approvals(monkeypatch, tmp_path):
     # and the spoofed ordinary hold does not create a second Art-14 badge.
     assert text.count("Required human oversight (EU AI Act)") == 1
     assert text.count('class="muted">An agent asked for permission</span>') == 1
-    # Both holds still render in the queue.
-    assert "Shell" in text
+    # Both holds still render in the queue (shell reads as its plain step words).
+    assert "Run a command" in text
     assert "Rm rf" in text
 
 

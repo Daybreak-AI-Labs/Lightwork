@@ -1,43 +1,6 @@
-Administration
-	AI on this computer
-	Sign-in and work protection
-	Permissions
-	Connections
-	Document vault
-	Workspace recovery
-	Settings
-	Employee companions
-	Users
-	Sessions
-	Spending limits
-	Workspaces
-	Choose a workspace
-Insights
-	Approval challenges
-	Instructions used in real work
-	Content access
-	Workflow readiness
-	Overview
-	Ekko
-	Oversight
-	Discovery
-	Branches
-	Spend
-	Savings
-	Autonomous shoring
-	Billing
-	Providers
-	Flow results
-	Knowledge
-	Learning
-	Learned
-	Video walkthroughs
-	Facts
-	3D plan view
-	Your budget
-	Compare cost records
-	Provider spending
 Work
+	Shared decision reviews
+	Private task calculations
 	My data
 	Your account
 	Your preferences
@@ -74,6 +37,55 @@ Work
 	Project workspaces
 	Your paired devices
 	Permission requests
+Insights
+	Recheck affected rules
+	Find missing distinctions
+	Check local rules together
+	Prepare an answer for this request
+	Checked answer regions
+	Rewrite and check local rules
+	Plan teaching questions
+	Understand a missing reply
+	Share and qualify local rule structures
+	Share preparation safely
+	Approval challenges
+	Instructions used in real work
+	Content access
+	Workflow readiness
+	Overview
+	Ekko
+	Oversight
+	Discovery
+	Branches
+	Spend
+	Savings
+	Autonomous shoring
+	Billing
+	Providers
+	Flow results
+	Knowledge
+	Learning
+	Learned
+	Video walkthroughs
+	Facts
+	3D plan view
+	Your budget
+	Compare cost records
+	Provider spending
+Administration
+	AI on this computer
+	Sign-in and work protection
+	Permissions
+	Connections
+	Document vault
+	Workspace recovery
+	Settings
+	Employee companions
+	Users
+	Sessions
+	Spending limits
+	Workspaces
+	Choose a workspace
 Governance
 	Autonomous compliance
 	Approvals
@@ -90,7 +102,7 @@ Governance
 	Safety
 	Assessments
 	Compliance
-	No-code GRC studio
+	Compliance studio
 	Policy links
 	Find which controls apply
 	Turn scope into tasks

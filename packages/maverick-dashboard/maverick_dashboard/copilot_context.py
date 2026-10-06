@@ -2096,7 +2096,7 @@ def context_for_page(page: object) -> CopilotPageContext:
             path=path, title="Build a task mapping",
             summary="Choose a final compliance scope and define the control and evidence tasks it needs.",
             capabilities=("Review named final scopes and their controls.", "Prepare a task mapping and request a separate person's approval."),
-            boundaries=("Only an approved mapping can support a task plan.", "This page records your team's choices; it does not supply licensed framework text."),
+            boundaries=("Only an approved mapping can support a task plan.", "This page records your team's choices; it does not supply licensed framework text.", _READ_ONLY_BOUNDARY),
             next_steps=("Choose a final scope, then the work status, responsible role and evidence cadence.", "Review the exact mapping and ask another authorized person to approve it."),
             suggested_questions=("Which controls need tasks?", "How do I prepare this scope's mapping?"),
         )
@@ -2105,7 +2105,7 @@ def context_for_page(page: object) -> CopilotPageContext:
             path=path, title="AI on this computer",
             summary="Choose an installed model program and an existing local model, then review starting or stopping it.",
             capabilities=("Review local model setup and current service state.", "Prepare supported setup, start and stop actions with original-result readback."),
-            boundaries=("A model loading on this computer may need time and memory.", "A running service or connection check does not establish answer quality."),
+            boundaries=("A model loading on this computer may need time and memory.", "A running service or connection check does not establish answer quality.", _READ_ONLY_BOUNDARY),
             next_steps=("Choose a supported program and an existing model in the setup form.", "Review each action and read its original request if the response is interrupted."),
             suggested_questions=("Is the local AI service responding?", "How do I start the selected model?"),
         )
@@ -2114,7 +2114,7 @@ def context_for_page(page: object) -> CopilotPageContext:
             path=path, title="Sign-in and work protection",
             summary="Review how people sign in and how automated work is contained on this installation.",
             capabilities=("Review current sign-in and work-protection policies.", "Prepare and confirm supported policy changes through the same native controls."),
-            boundaries=("Only an installation administrator may change these policies.", "A connection check does not confirm that someone successfully signed in."),
+            boundaries=("Only an installation administrator may change these policies.", "A connection check does not confirm that someone successfully signed in.", _READ_ONLY_BOUNDARY),
             next_steps=("Choose sign-in or work protection, review current settings and their source.", "Review each exact change and read its original saved result after an interruption."),
             suggested_questions=("How is work protected?", "Which sign-in settings need attention?"),
         )

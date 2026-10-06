@@ -46,9 +46,6 @@ _DEFINITION = re.compile(
 # The local fetch-and-read wrappers still allowed, each because moving it onto
 # mvFetchJSON would change what the page does:
 _KEPT_WRAPPERS = {
-    # Tells a saved change (200) from one queued for approval (202), and
-    # mvFetchJSON returns only the body.
-    ("lightwork-settings-all.js", "send"),
     # Also runs on the recovery page, whose shell has no lightwork-ui.js.
     ("lightwork-provider-spending.js", "request"),
     # Checks the page's access token on both sides of the request and of the
@@ -71,6 +68,38 @@ _KEPT_WRAPPERS = {
     # before it counts, in the page's own words.
     ("lightwork-local-runtime.js", "call"),
     ("lightwork-retention-maintenance.js", "call"),
+    # From the owner's later commits on #2529 (learning, competence, private
+    # rules, viewpoints, plugin practice, questionnaires, notices, imports,
+    # tool removal, team updates, answer feedback). Every one shows the
+    # server's own sentence as written, with the page's own fallback for a
+    # reply that carries none (mvFetchJSON filters it through mvPlainDetail
+    # and falls back to mvErrorText). Most also do what mvFetchJSON cannot:
+    # a 409 whose sentence says the account or workspace changed clears the
+    # page's private values (onAccess covers 401/403 only), a reply's context
+    # is compared with the page's before it counts, and a timeout or
+    # unreadable reply says the original outcome is unknown and that nothing
+    # repeats. Kept until mvFetchJSON grows these, then moved together.
+    ("lightwork-answer-panel.js", "request"),
+    ("lightwork-automation-imports.js", "request"),
+    ("lightwork-competence-transport.js", "request"),
+    ("lightwork-compliance-questionnaire-builder.js", "call"),
+    ("lightwork-department-team-updates.js", "request"),
+    ("lightwork-generated-tool-removal.js", "request"),
+    ("lightwork-learning-distinctions.js", "request"),
+    ("lightwork-learning-holdout-setup.js", "request"),
+    ("lightwork-learning-jobs.js", "request"),
+    ("lightwork-learning-passes.js", "request"),
+    ("lightwork-learning-pending-cases.js", "request"),
+    ("lightwork-learning-test-cases.js", "request"),
+    ("lightwork-model-answer-scoring.js", "request"),
+    ("lightwork-plugin-practice.js", "call"),
+    ("lightwork-plugin-practice.js", "checkResult"),
+    ("lightwork-privacy-notice-proposals.js", "call"),
+    ("lightwork-procedure-interactions.js", "request"),
+    ("lightwork-reward-model-training.js", "request"),
+    ("lightwork-viewpoints.js", "request"),
+    ("lightwork-work-restructuring.js", "request"),
+    ("lightwork-workflow-step-checks.js", "request"),
 }
 
 # Status-line setters that still write the text themselves, each named with

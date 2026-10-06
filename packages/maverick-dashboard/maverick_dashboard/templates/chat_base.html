@@ -16,6 +16,8 @@
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
+  {% set _session = page_session(request) if request is defined and page_session is defined else none %}
+  {% include "_session_meta.html" %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   {#- One shell stylesheet; the Copilot scripts deferred first (see base.html). -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
@@ -382,6 +384,7 @@
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-practice.js') }}" defer></script>
   {% if usage_measures_on %}<script src="{{ asset('lightwork-usage-measures.js') }}"></script>{% endif %}
+  {% if _session %}<script src="{{ asset('lightwork-session.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
   <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
   <script src="{{ asset('lightwork-pins.js') }}" defer></script>

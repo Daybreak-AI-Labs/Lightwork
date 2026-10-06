@@ -12,7 +12,7 @@
   var key = 'lightwork:settings-original:' + expected, pending = '';
   try { pending = sessionStorage.getItem(key) || ''; } catch (_) { /* Server history also retains the original. */ }
   if (!/^[a-f0-9]{32}$/.test(pending)) pending = '';
-  function say(text) { status.textContent = text; }
+  function say(text) { window.mvStatus ? window.mvStatus(status, text) : (status.textContent = text); }
   function clear() {
     current = false; generation += 1; choice.replaceChildren(new Option('Reload Settings to use this account', '')); read.disabled = true;
     pending = ''; previous.disabled = next.disabled = refresh.disabled = true; page.textContent = '';

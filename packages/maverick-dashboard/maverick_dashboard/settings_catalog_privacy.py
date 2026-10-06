@@ -1114,7 +1114,7 @@ def _deadline_alert_rows(S) -> tuple:
           choices=(("immediate", "One message per deadline"), ("digest", "One summary per person"))),
         S(_DA, "poll_seconds", "Check deadlines every",
           "How often the workspace's deadlines are checked.",
-          "number", _P, 15, _DA_READER, subgroup=_DA_SUB, minimum=1, maximum=1440,
+          "number", _P, 15 * _MINUTE, _DA_READER, subgroup=_DA_SUB, minimum=1, maximum=1440,
           integer=True, scale=_MINUTE, unit="minutes"),
         S(_DA, "quiet_hours", "Quiet hours",
           "A daily window, in the server's local time, during which non-urgent alerts wait "

@@ -283,6 +283,9 @@ templates.env.filters["identity"] = _idfmt.humanize_principal
 templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
+from .approval_labels import action_label as _approval_action_label  # noqa: E402
+
+templates.env.globals["approval_action_label"] = _approval_action_label
 # One run-status vocabulary for the chat badge, composer and recents.
 from maverick.channel_approvals import spending_text as _approval_spending  # noqa: E402
 
@@ -2178,8 +2181,14 @@ from .invite_routes import router as invite_router  # noqa: E402
 # [dashboard] api_keys (404 when off).
 app.include_router(api_keys_router)
 from .local_owner_routes import router as local_owner_router  # noqa: E402
+from .session_expiry import page_session as _page_session  # noqa: E402
+from .session_expiry import router as session_expiry_router  # noqa: E402
 
 app.include_router(local_owner_router)
+app.include_router(session_expiry_router)
+# The page shell's sign-in timer (lightwork-session.js): when this browser's
+# sign-in ends and how to stay signed in. None when nobody is signed in.
+templates.env.globals["page_session"] = _page_session
 
 app.include_router(invite_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
@@ -3172,6 +3181,11 @@ def _not_found_page(request: Request):
 def _task_limit_error(status, detail, headers, title, message):
     if status == 400 and (headers or {}).get("X-Lightwork-Task-Settings") == "agent.max_steps":
         return "Review the task limit", detail, "task_steps"
+    if status == 409 and isinstance(detail, dict) and detail.get("retryable") is True:
+        # Still changing (a task that has just started): the page reloads
+        # itself in a moment instead of asking the person to try again.
+        return ("Still getting this ready",
+                "This page is still being set up. It refreshes by itself in a moment.", "retry")
     return title, message, ""
 
 
@@ -3229,7 +3243,12 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         # The owner and invited colleagues both sign in on that page.
         if ((local_owner_claimed() or passphrase_sign_in())
                 and request.url.path not in {"/auth/local-owner", "/auth/local-login"}):
-            return RedirectResponse("/auth/local-login", status_code=302)
+            # Back to this page after signing in again (the sign-in keeps
+            # only a local path; see local_owner_routes).
+            from urllib.parse import quote
+
+            return_to = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            return RedirectResponse(f"/auth/local-login?return_to={quote(return_to, safe='')}", status_code=302)
     if _wants_html(request):
         status = int(exc.status_code)
         title, message = {
@@ -12771,9 +12790,9 @@ def _chat_history_download_states(request: Request, w, turns) -> dict:
 @app.get("/chat/goal/{goal_id}/answer-panel", response_class=HTMLResponse)
 def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
     """Current authorized saved result, actions, release gate and artifact versions."""
-    from .answer_projection import projection
+    from .answer_projection import projection, settled
 
-    context = projection(request, _world(), goal_id)
+    context = settled(lambda: projection(request, _world(), goal_id))
     return templates.TemplateResponse(request, "_chat_answer_panel.html", context,
                                       headers={"Cache-Control": "no-store, private",
                                                "X-Lightwork-Context": context["conversation_context"]})
@@ -12789,6 +12808,13 @@ def _stop_progress(world, goal):
 
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
+    """A task's page; built again when the task changed while it was read."""
+    from .answer_projection import settled
+
+    return settled(lambda: _chat_goal_page(request, goal_id))
+
+
+def _chat_goal_page(request: Request, goal_id: int) -> HTMLResponse:
     require_permission(request, "view")
     original_context = _conversation_context(request)
     w = _world()

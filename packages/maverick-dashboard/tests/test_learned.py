@@ -106,7 +106,9 @@ def test_learned_page_renders_empty(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/learned").text
     assert "Nothing learned yet" in text and "Turn on self-learning" in text
-    assert "No tools written yet" in text
+    assert "Checking your retained tools" in text and 'id="generated-tools"' in text
+    listing = _client().get("/api/v1/generated-tool-removals").json()
+    assert listing["choices"] == []
     assert "No shared lessons are currently available" in text
     # Reached from the Learning page (one nav entry per job: /learned left the
     # sidebar; the link lives on /learning).
@@ -418,24 +420,36 @@ def test_generated_tools_list_renders(monkeypatch, tmp_path):
     _owned_source(gen / "send_sms.py", "# tool\n")
     (gen / ".staging_x.py").write_text("# hidden\n", encoding="utf-8")
     text = _client().get("/learned").text
-    assert 'data-name="send_sms.py"' in text and "Send sms" in text
+    assert "Stop tools Lightwork wrote" in text and ".staging_x.py" not in text
+    # The page reads the owned tools from the removal listing.
+    labels = [row["label"] for row in _client().get("/api/v1/generated-tool-removals").json()["choices"]]
     # Dot/underscore-prefixed staging files are not listed.
-    assert ".staging_x.py" not in text
+    assert labels == ["send sms"]
     # API shape mirrors the page.
     body = _client().get("/api/v1/learned").json()
     assert "send_sms.py" in body["generated_tools"]
+
+
+def _remove(client, label, *, step="apply"):
+    """Stop and remove one owned tool through the page's reviewed path."""
+    base = "/api/v1/generated-tool-removals"
+    listing = client.get(base)
+    if listing.status_code != 200:
+        return listing
+    body = listing.json()
+    key = next((row["value"] for row in body["choices"] if row["label"] == label), "0" * 64)
+    review = client.post(base + "/review", json={"tool": key, "action": "remove", "context": body["context"]})
+    if review.status_code != 200 or step == "review":
+        return review
+    return client.post(base + "/apply", json={"token": review.json()["token"], "confirmed": True})
 
 
 def test_delete_removes_only_named_file(monkeypatch, tmp_path):
     _ledger, gen = _isolate(monkeypatch, tmp_path)
     _owned_source(gen / "bad.py", "# bad\n")
     _owned_source(gen / "good.py", "# good\n")
-    client = _client()
-    r = client.request(
-        "DELETE", "/api/v1/generated-tools/bad.py",
-        headers={"Origin": "http://testserver"},
-    )
-    assert r.status_code == 204
+    r = _remove(_client(), "bad")
+    assert r.status_code == 200 and r.json()["confirmed"] is True
     assert not (gen / "bad.py").exists()
     assert (gen / "good.py").exists()
 
@@ -458,13 +472,9 @@ def test_delete_revokes_digest_and_records_tombstone(monkeypatch, tmp_path):
         "maverick.audit.audit_event",
         lambda kind, **payload: events.append((kind, payload)) or True,
     )
-    response = _client().request(
-        "DELETE",
-        "/api/v1/generated-tools/bad.py",
-        headers={"Origin": "http://testserver"},
-    )
+    response = _remove(_client(), "bad")
 
-    assert response.status_code == 204
+    assert response.status_code == 200 and response.json()["confirmed"] is True
     assert not target.exists()
     assert not consent._check_ledger("register-generated-tool", scope)
     records = [
@@ -499,24 +509,17 @@ def test_delete_audit_failure_keeps_source_but_revokes_authority(
     consent.grant_persistent("register-generated-tool", scope=scope)
     monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: False)
 
-    response = _client().request(
-        "DELETE",
-        "/api/v1/generated-tools/bad.py",
-        headers={"Origin": "http://testserver"},
-    )
+    response = _remove(_client(), "bad")
 
-    assert response.status_code == 503
+    # The original stays unconfirmed rather than claiming a removal.
+    assert response.status_code == 200 and response.json()["confirmed"] is False
     assert target.exists()
     assert not consent._check_ledger("register-generated-tool", scope)
 
 
 def test_delete_missing_file_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    client = _client()
-    r = client.request(
-        "DELETE", "/api/v1/generated-tools/nope.py",
-        headers={"Origin": "http://testserver"},
-    )
+    r = _remove(_client(), "nope", step="review")
     assert r.status_code == 404
 
 
@@ -526,21 +529,19 @@ def test_delete_rejects_traversal(monkeypatch, tmp_path):
     secret = tmp_path / "secret.py"
     secret.write_text("# do not delete\n", encoding="utf-8")
     client = _client()
-    # Names that reach the handler are rejected with 400; names whose
-    # decoded path contains a separator (../, subdir/) never route to it
-    # and 404 — either way the target is refused, never deleted.
-    for name in ("foo.txt", "x.py.bak"):
+    context = client.get("/api/v1/generated-tool-removals").json()["context"]
+    # The review accepts only an owned tool's digest key, never a file name.
+    for name in ("foo.txt", "x.py.bak", "..", "../secret.py", "subdir/x.py", "secret.py"):
+        r = client.post("/api/v1/generated-tool-removals/review",
+                        json={"tool": name, "action": "remove", "context": context})
+        assert r.status_code == 422, name
+    # The older name-based control refuses every name without removing anything.
+    for name in ("foo.txt", "x.py.bak", "..", "..%2Fsecret.py", "subdir%2Fx.py"):
         r = client.request(
             "DELETE", f"/api/v1/generated-tools/{name}",
             headers={"Origin": "http://testserver"},
         )
-        assert r.status_code == 400, name
-    for name in ("..", "..%2Fsecret.py", "subdir%2Fx.py"):
-        r = client.request(
-            "DELETE", f"/api/v1/generated-tools/{name}",
-            headers={"Origin": "http://testserver"},
-        )
-        assert r.status_code in (400, 404), name
+        assert r.status_code in (404, 409), name
     # The out-of-dir target survived every attempt.
     assert secret.exists()
 

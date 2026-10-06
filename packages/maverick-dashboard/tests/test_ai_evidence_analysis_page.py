@@ -73,7 +73,7 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
     assert "The text read from them is not stored either" in response.text
     assert "a different, authorized person" in response.text
     assert "/api/v1/ai-evidence-analysis" in response.text
-    assert "recent questions may be" in response.text
+    assert "recent guide questions" in response.text
     assert "Do not include document text, passwords," in response.text
     assert 'aria-describedby="mv-copilot-egress"' in response.text
 

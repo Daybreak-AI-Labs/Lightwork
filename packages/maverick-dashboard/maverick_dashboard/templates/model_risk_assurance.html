@@ -1459,12 +1459,14 @@ window.mraFailure = response => {
   const BLAST_KINDS = new Set(["tool", "mcp_server", "endpoint", "data_endpoint", "data_path", "knowledge_source", "model"]);
   if (topology) {
     const agentSelect = topology.elements.agent_name;
-    call("/agent-topology/agents").then(body => {
+    const loadAgents = () => call("/agent-topology/agents").then(body => {
       agentSelect.replaceChildren();
       const names = Array.isArray(body.items) ? body.items : [];
       if (!names.length) agentSelect.appendChild(new Option("No agents set up yet", ""));
       names.forEach(name => agentSelect.appendChild(new Option(human(name), name)));
     }).catch(error => { agentSelect.replaceChildren(new Option("Agents could not be loaded", "")); status("agent-topology-status", window.mraPlain(error, "load the agents")); });
+    // As above: wait for the shell's helpers, or this whole script stops here.
+    if (window.mvFetchJSON) loadAgents(); else document.addEventListener("DOMContentLoaded", loadAgents);
     const showBlast = async node => {
       try {
         const blast = await call("/agent-topology/blast-radius/" + encodeURIComponent(node.kind) + "/" + encodeURIComponent(node.name));

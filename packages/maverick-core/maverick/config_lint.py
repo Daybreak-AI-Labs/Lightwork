@@ -42,6 +42,7 @@ from urllib.parse import urlparse
 # those are the ones where an unknown key is a useful signal.
 KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "instruction_capture": {"enable"},
+    "approval_challenges": {"enable"},
     # --- fixed-key sections (unknown keys are flagged) ---
     "deployment": {"type", "allow_multiple_control_planes"},
     "personalization": {"locked_fields", "defaults"},

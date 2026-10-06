@@ -54,7 +54,9 @@ def _render_content(template_name, **context):
 def test_users_hero_keeps_emphasis_and_escapes_dynamic_role(default_role):
     body = _render_content(
         "users.html", default_role=default_role, users=[], bootstrap_admins=[],
-        people_labels={}, role_labels={}, role_permissions={}, global_admin=False,
+        # The installation administrator's lede names the starting role.
+        people_labels={}, role_labels={}, role_permissions={}, global_admin=True,
+        workspace_role_options=[], first_login=None,
     )
     assert 'id="page-hero-title">Users</h1>' in body
     assert "&amp;amp;" not in body

@@ -28,6 +28,18 @@ def _isolate(tmp_path, monkeypatch):
     return consequence
 
 
+def _rate(gid, body):
+    """Give feedback the way the answer page does: on the reviewed answer."""
+    from uuid import uuid4
+
+    review = client.get(f"/api/v1/goals/{gid}/answer-feedback")
+    if review.status_code != 200:
+        return review
+    return client.post(f"/api/v1/goals/{gid}/feedback", json={
+        **body, "revision": review.json()["revision"],
+        "expected_context": review.json()["context"], "operation_id": uuid4().hex})
+
+
 class TestFeedbackGroundsLearning:
     def test_thumbs_up_records_reward_1(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
@@ -35,8 +47,10 @@ class TestFeedbackGroundsLearning:
         w = _world(tmp_path, monkeypatch)
         gid = w.create_goal("Draft the memo", "")
         eid = w.start_episode(gid)
+        # Feedback grounds only the completed run that produced the answer.
+        w.end_episode(eid, "the memo", "success")
         w.set_goal_status(gid, "done", result="the memo")
-        r = client.post(f"/api/v1/goals/{gid}/feedback", json={"rating": "up"})
+        r = _rate(gid, {"rating": "up"})
         assert r.status_code == 200
         assert r.json()["feedback"]["rating"] == "up"
         assert consequence.resolve(gid, eid) == 1.0
@@ -47,8 +61,10 @@ class TestFeedbackGroundsLearning:
         w = _world(tmp_path, monkeypatch)
         gid = w.create_goal("Draft the memo", "")
         eid = w.start_episode(gid)
+        # Feedback grounds only the completed run that produced the answer.
+        w.end_episode(eid, "the memo", "success")
         w.set_goal_status(gid, "done", result="the memo")
-        r = client.post(f"/api/v1/goals/{gid}/feedback", json={"rating": "down"})
+        r = _rate(gid, {"rating": "down"})
         assert r.status_code == 200
         assert consequence.resolve(gid, eid) == 0.0
 
@@ -58,7 +74,7 @@ class TestFeedbackGroundsLearning:
         gid = w.create_goal("Draft the memo", "")
         w.start_episode(gid)
         w.set_goal_status(gid, "done", result="the memo")
-        client.post(f"/api/v1/goals/{gid}/feedback", json={"rating": "up"})
+        _rate(gid, {"rating": "up"})
         got = client.get(f"/api/v1/goals/{gid}/feedback").json()
         assert got["feedback"]["rating"] == "up"
 
@@ -66,13 +82,13 @@ class TestFeedbackGroundsLearning:
         _isolate(tmp_path, monkeypatch)
         w = _world(tmp_path, monkeypatch)
         gid = w.create_goal("x", "")
-        r = client.post(f"/api/v1/goals/{gid}/feedback", json={"rating": "meh"})
+        r = _rate(gid, {"rating": "meh"})
         assert r.status_code == 422
 
     def test_feedback_on_missing_goal_is_404(self, tmp_path, monkeypatch):
         _isolate(tmp_path, monkeypatch)
         _world(tmp_path, monkeypatch)
-        r = client.post("/api/v1/goals/999999/feedback", json={"rating": "up"})
+        r = _rate(999999, {"rating": "up"})
         assert r.status_code == 404
 
     def test_no_grounding_when_consequence_disabled(self, tmp_path, monkeypatch):
@@ -81,8 +97,10 @@ class TestFeedbackGroundsLearning:
         w = _world(tmp_path, monkeypatch)
         gid = w.create_goal("Draft the memo", "")
         eid = w.start_episode(gid)
+        # Feedback grounds only the completed run that produced the answer.
+        w.end_episode(eid, "the memo", "success")
         w.set_goal_status(gid, "done", result="the memo")
-        r = client.post(f"/api/v1/goals/{gid}/feedback", json={"rating": "up"})
+        r = _rate(gid, {"rating": "up"})
         assert r.status_code == 200                      # feedback still persists...
         assert consequence.resolve(gid, eid) is None     # ...but nothing is grounded
 

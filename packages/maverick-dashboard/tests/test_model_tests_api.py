@@ -78,7 +78,8 @@ def test_copilot_recovers_exact_native_unknown_receipt_without_regeneration(ui):
     row = review(ui)
     ui.client.post("/api/v1/models/tests/" + row["id"] + "/execute", json={"context": CONTEXT, "confirmed": True})
     result = copilot.recover_test(object(), {}, {}, {"check_id": row["id"]}, "b" * 32)
-    assert result.status == "replayed" and result.details["check"]["state"] == "unknown"
+    # An unknown original outcome is read back as unconfirmed, never re-sent.
+    assert result.status == "unconfirmed" and result.details["check"]["state"] == "unknown"
     assert ui.calls == [row["id"]]
     ui.state["admin"] = False
     with pytest.raises(HTTPException):

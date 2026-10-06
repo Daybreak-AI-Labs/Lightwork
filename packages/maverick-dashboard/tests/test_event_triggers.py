@@ -373,6 +373,7 @@ def test_worker_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_DREAMING", "0")
     monkeypatch.setenv("MAVERICK_DATA_ENGINE", "0")
     monkeypatch.setenv("MAVERICK_FLOWS", "0")
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")         # nightly self-coaching also uses it
     _reset_aq(monkeypatch, aq)
     assert aq.start() is False                                # nothing on -> no worker
 

@@ -572,6 +572,7 @@ def clash_review(request: Request, body: ClashIn):
     from maverick import crypto_at_rest
 
     from . import learning_conflicts as checks
+    require_global_permission(request, "admin")
     if body.context is None or body.token is not None or body.confirmed:
         raise HTTPException(422, "Open the current guidance and review this meaning check first.")
     prepared = checks.prepare(request, body.model_id, context=body.context)
@@ -588,6 +589,7 @@ def clash_check(request: Request, body: ClashIn) -> dict:
     from maverick import crypto_at_rest
 
     from . import learning_conflicts as checks
+    require_global_permission(request, "admin")
     if not body.confirmed or not body.token or not body.context:
         raise HTTPException(422, "Review the exact guidance and spending settings, then confirm in the Learned page. No AI call was made.")
     try:

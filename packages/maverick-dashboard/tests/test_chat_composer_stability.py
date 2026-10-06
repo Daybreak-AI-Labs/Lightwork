@@ -45,18 +45,21 @@ def _sign_in(monkeypatch, role):
 
 
 def _assert_composer_wrapped(body, form_marker):
-    """Wrapper, then the panel placeholder, the composer and the note, in order."""
+    """Wrapper, then the panel placeholder (holding the note), then the composer."""
     host = body.index("data-draft-host")
     panel = body.index("data-draft-panel")
     form = body.index(form_marker)
     note = body.index("data-draft-note")
-    assert host < panel < form < note
+    # Chat's dock starts recovery as one compact row: the note sits inside the
+    # placeholder's disclosure, exactly as the live compact panel holds it
+    # (lightwork-draft-recovery.js, options.compact).
+    assert host < panel < note < form
     # The placeholder starts in the live panel's first state and takes no
     # focus or clicks while it waits to be replaced.
     placeholder = body[panel:form]
-    assert "Checking for a recovery copy" in placeholder
-    assert "Manage recovery storage" in placeholder
-    assert re.search(r'<section class="draft-recovery" data-draft-panel inert>', body)
+    assert '<details class="draft-recovery__compact">' in placeholder
+    assert "Checking draft recovery…" in placeholder
+    assert re.search(r'<section class="draft-recovery" data-draft-panel inert[ >]', body)
     # Both notes are rendered; the second only takes its space until restore.
     block = body[note:]
     assert "Recovery copies keep unsent text." in block

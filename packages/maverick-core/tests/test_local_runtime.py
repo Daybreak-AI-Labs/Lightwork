@@ -404,3 +404,13 @@ def test_cli_plan_without_model_is_polite():
     res = CliRunner().invoke(main, ["local-runtime", "plan"])
     assert res.exit_code != 0
     assert "model" in res.output
+
+
+def test_every_knob_has_its_named_environment_override(monkeypatch):
+    from maverick import local_runtime
+
+    assert set(local_runtime.ENV_VARS) == set(local_runtime.DEFAULTS)
+    for key, name in local_runtime.ENV_VARS.items():
+        assert name == "MAVERICK_LOCAL_RUNTIME_" + key.upper()
+    monkeypatch.setenv("MAVERICK_LOCAL_RUNTIME_PORT", "9123")
+    assert local_runtime.load_local_runtime({})["port"] == 9123

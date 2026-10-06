@@ -42,9 +42,9 @@ def _lock_held_during(monkeypatch, call) -> bool:
         record_lock_state()
         return real_load()
 
-    def probing_write(data):
+    def probing_write(data, **kwargs):
         record_lock_state()
-        return real_write(data)
+        return real_write(data, **kwargs)
 
     monkeypatch.setattr(settings_store, "_load_overlay_for_update", probing_load)
     monkeypatch.setattr(settings_store, "_write", probing_write)

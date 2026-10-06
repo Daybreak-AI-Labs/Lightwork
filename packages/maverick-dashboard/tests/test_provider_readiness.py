@@ -97,7 +97,8 @@ def test_key_saved_but_never_tested_needs_test(workspace, monkeypatch):
     assert openai["status_label"] == "Key saved, not tested yet"
     assert openai["last_test"]["status"] == "never"
     assert readiness["verdict"] == "needs_test"
-    assert readiness["verdict_label"] == "Key saved, not tested yet"
+    # The workspace verdict covers keyless providers too, so it says "set up".
+    assert readiness["verdict_label"] == "Set up, not tested yet"
     assert readiness["next_action"] == {"label": "Test the connection", "href": "/providers"}
     assert readiness["summary"] == "1 set up · 0 connected"
     # A key that was never tested is never called "connected".
