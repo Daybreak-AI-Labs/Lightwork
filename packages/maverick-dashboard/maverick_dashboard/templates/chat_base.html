@@ -380,6 +380,7 @@
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-practice.js') }}" defer></script>
+  {% if usage_measures_on %}<script src="{{ asset('lightwork-usage-measures.js') }}"></script>{% endif %}
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
   <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
   <script src="{{ asset('lightwork-pins.js') }}" defer></script>

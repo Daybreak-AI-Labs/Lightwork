@@ -180,6 +180,9 @@ def answer_facts(world, goal, withheld: frozenset[str] = frozenset(), *, request
         run, events = None, []
         label = None
     check = verification(events, withheld) if run else {"state": "not_recorded", "label": LABELS["not_recorded"], "reason": NO_RECORD}
+    if request is not None:
+        from .usage_measures_api import note_first_result
+        note_first_result(request, fresh)
     return {"answer_check": check, "answer_agent": label, "answer_fallback": used_backup_model(events) if run else False}
 
 

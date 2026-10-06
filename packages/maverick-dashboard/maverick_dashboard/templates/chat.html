@@ -275,10 +275,19 @@
     var field = document.querySelector('form.composer [name="title"]');
     var hint = document.getElementById('composer-hint');
     if (!field) return;
-    var lastExample = '';
+    var lastExample = '', used = '';
+    var measure = function (item, event) { if (typeof window.mvSuggestion === 'function') window.mvSuggestion('chat-example', item, event); };
+    var examples = Array.prototype.map.call(document.querySelectorAll('.cs-example'), function (b) { return (b.textContent || '').trim(); });
+    var showAll = function () { examples.forEach(function (text) { measure(text, 'shown'); }); };
+    // The measuring script loads after this page script.
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showAll); else showAll();
+    if (field.form) field.form.addEventListener('submit', function () {
+      examples.forEach(function (text) { if (text !== used) measure(text, 'dismissed'); });
+    });
     document.querySelectorAll('.cs-example').forEach(function (button) {
       button.addEventListener('click', function () {
         var text = (button.textContent || '').trim();
+        if (!used) { used = text; measure(text, 'accepted'); }
         if (field.value.trim() && field.value.trim() !== lastExample) {
           if (hint) chatCopy(hint, 'Your message is kept. Clear it first to use an example.');
           field.focus();

@@ -6859,6 +6859,26 @@ def pick_usability_survey() -> dict[str, Any]:
     return {"usability_survey": True}
 
 
+def pick_usage_measures() -> dict[str, Any]:
+    """Optional, name-free usage measures. OFF by default.
+
+    When on, Lightwork counts whether new people see a finished result of
+    their own task in their first session, and how often AI suggestions are
+    shown, used or dismissed. People and suggestions are kept only as one-way
+    codes and nothing is sent anywhere. Written under ``[analytics]`` as
+    ``usage_measures``.
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: count, without names, whether new people get a first result "
+        "in their first session and how often AI suggestions are used or dismissed. "
+        "Counts stay on this server. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Count first results and AI suggestions, without names?", default=False):
+        return {}
+    return {"usage_measures": True}
+
+
 def pick_persona() -> dict[str, str]:
     """Agent identity: name + voice."""
     if not _q_confirm(
@@ -11382,7 +11402,7 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     _announce()
     analytics = state.get("analytics")
     if analytics is None:
-        analytics = {**pick_analytics(), **pick_usability_survey()}
+        analytics = {**pick_analytics(), **pick_usability_survey(), **pick_usage_measures()}
         state["analytics"] = analytics
         _save_partial(state)
 

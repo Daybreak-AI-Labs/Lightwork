@@ -832,6 +832,11 @@ SETTINGS: tuple[Setting, ...] = (
       "server, are reported by the role people choose, never by name, and are never sent anywhere. "
       "Results are on People > Ease-of-use results.",
       "toggle", "Privacy", False, "maverick.usability_survey"),
+    S("analytics", "usage_measures", "Count first results and AI suggestions, without names",
+      "Count whether new people see a finished result of their own task in their first session, and how often "
+      "AI suggestions are shown, used or dismissed. People and suggestions are kept only as one-way codes, and "
+      "nothing is sent anywhere. Results are on People > Ease-of-use results.",
+      "toggle", "Privacy", False, "maverick.usage_measures"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,

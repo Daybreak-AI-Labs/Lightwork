@@ -36,6 +36,7 @@ ASSETS = (
     "lightwork-digest-preview.js",
     "lightwork-help-menu.js",
     "lightwork-practice.js",
+    "lightwork-usage-measures.js",
     "lightwork-settings-admin.js",
     "lightwork-tenants.js",
     "lightwork-typeahead.js",

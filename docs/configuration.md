@@ -927,6 +927,7 @@ enable = true                 # offer practice mode: a separate practice workspa
 [analytics]
 task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)
 usability_survey = false      # optional ease-of-use survey (SUS + one question after top tasks); answers stay local
+usage_measures = false        # optional name-free counts: first result in the first session, AI suggestions used or dismissed
 
 [env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered
 enable = true
