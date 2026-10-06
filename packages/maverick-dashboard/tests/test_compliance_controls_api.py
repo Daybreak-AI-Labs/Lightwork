@@ -126,12 +126,15 @@ def test_retention_periods_save_and_apply(monkeypatch):
 
     def enforce(**kwargs):
         calls.append(kwargs)
+        if kwargs.get("dry_run"):
+            # The preview binds the exact eligible records the deletion may remove.
+            kwargs["_review_binding"].update(records="reviewed-messages")
         return {"messages": {"deleted": 4}, "marker": {"messages_deleted": 4}}
 
     monkeypatch.setattr(retention, "enforce", enforce)
     review = _retention_review()
     applied = client.post("/api/v1/compliance/retention/apply", json=review).json()
-    assert applied["removed"] == 4 and "4 old record" in applied["message"]
+    assert applied["removed"] == 4 and "4 removals were confirmed" in applied["message"]
     assert calls[0]["dry_run"] is True and not calls[1].get("dry_run")
     assert calls[0]["now"] == calls[1]["now"]  # deletion uses the reviewed cutoff
     assert calls[1]["config"] == {"messages_days": 365}
@@ -296,7 +299,11 @@ def test_protection_and_retention_changes_are_recorded_with_who_made_them(monkey
     assert client.post("/api/v1/compliance/switches/anonymous_logs").status_code == 200
     assert client.post("/api/v1/compliance/retention", json={"audit_days": 30}).status_code == 200
     import maverick.audit.retention as retention
-    monkeypatch.setattr(retention, "enforce", lambda **_: {"audit": {"deleted": 0}})
+    def enforce(**kwargs):
+        if kwargs.get("dry_run"):
+            kwargs["_review_binding"].update(records="reviewed-audit")
+        return {"audit": {"deleted": 0}}
+    monkeypatch.setattr(retention, "enforce", enforce)
     response = client.post("/api/v1/compliance/retention/apply", json=_retention_review())
     assert response.status_code == 200, response.text
     assert response.json()["applied"] is True
