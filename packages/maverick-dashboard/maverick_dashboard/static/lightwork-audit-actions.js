@@ -9,7 +9,7 @@
   var loadingText = message.textContent;
   var current = null, busy = false, account = '', epoch = 0;
   function el(tag, text, css) { var e = document.createElement(tag); if (text) e.textContent = text; if (css) e.className = css; return e; }
-  function say(text) { message.textContent = text; }
+  function say(text) { window.mvStatus ? window.mvStatus(message, text) : (message.textContent = text); }
   function lock(value) {
     busy = value;
     root.querySelectorAll('button').forEach(function (b) { b.disabled = value; });

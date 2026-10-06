@@ -112,8 +112,7 @@
   // ---- the timer -----------------------------------------------------------
   async function current() {
     try {
-      var r = await fetch('/auth/session/status', {credentials: 'same-origin', cache: 'no-store'});
-      var d = await r.json();
+      var d = await window.mvFetchJSON('/auth/session/status', {cache: 'no-store', timeout: 15000}, 'check your sign-in');
       if (!d || d.signed_in !== true) return 0;
       skew = (d.now || Date.now() / 1000) - Date.now() / 1000;
       return d.expires_at;
@@ -128,9 +127,9 @@
   async function stay() {
     if (!renews) { snapshot(); window.location.assign(signInUrl()); return; }
     try {
-      var r = await fetch('/auth/session/renew', {method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json'}});
-      var d = await r.json().catch(function () { return {}; });
-      if (r.ok && d.expires_at) {
+      // A company sign-in answers 409 here: it signs in again below instead.
+      var d = await window.mvFetchJSON('/auth/session/renew', {method: 'POST', timeout: 15000}, 'keep you signed in');
+      if (d && d.expires_at) {
         ends = d.expires_at; warned = false; schedule();
         if (window.mvToast) window.mvToast(t('You are still signed in.'), {quiet: true});
         return;

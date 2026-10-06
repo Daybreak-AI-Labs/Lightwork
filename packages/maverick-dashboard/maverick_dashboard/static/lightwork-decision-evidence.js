@@ -13,7 +13,7 @@
   let context = root.dataset.context, current = null, model = null, draft = null, busy = false, epoch = 0, pending = null;
   const storage = 'lightwork-decision-original';
   try { pending = JSON.parse(sessionStorage.getItem(storage)); } catch (_) {}
-  function say(text) { $('status').textContent = text; }
+  function say(text) { var line = $('status'); window.mvStatus ? window.mvStatus(line, text) : (line.textContent = text); }
   function remember() { try { if (pending) sessionStorage.setItem(storage, JSON.stringify(pending)); else sessionStorage.removeItem(storage); } catch (_) {} }
   function clearPrivate() { epoch++; current = null; model = null; draft = null; context = ''; pending = null; remember(); ['saved','author','results','sources','observations','review','state-table'].forEach(id => $(id).replaceChildren()); ['current','editor','review'].forEach(id => $(id).hidden = true); }
   async function api(path, body) {

@@ -8,6 +8,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM, VirtualConsole } = require("jsdom");
+const { shell } = require("./_shell");
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-session.js"), "utf8");
 const settle = async () => { for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r)); };
@@ -45,6 +46,7 @@ function page({ endsIn = 600, renew = "renew", status, renewReply, storage, conf
     throw new Error("unexpected " + url);
   };
   if (storage) w.sessionStorage.setItem(storage.key, JSON.stringify(storage.value));
+  shell(w);   // the shell's mvFetchJSON, as on every signed-in page
   w.eval(source);
   async function advanceTo(seconds) {
     clock = (T0 + seconds) * 1000;
