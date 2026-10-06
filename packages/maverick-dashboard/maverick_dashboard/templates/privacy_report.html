@@ -26,7 +26,7 @@
   <h1 class="page-title">Privacy program report</h1>
   <p class="page-subtitle">Every number below is counted from your own records. These are assessments,
     vendor data agreements (DPAs), AI systems, the record of processing (GDPR Article 30),
-    data-subject requests and breaches. Generated {{ r.generated }}.</p>
+    data-subject requests and breaches. Generated {{ r.generated_at | datetime('absolute') }}.</p>
   <div class="rpt-actions">
     <button class="btn btn--primary" id="rpt-print" type="button">Print or save as PDF</button>
     <a class="btn btn--ghost" href="/api/v1/privacy/report" download="privacy-program-report.json">Download data</a>

@@ -23,7 +23,7 @@
   {% from "_hero.html" import hero %}
   {{ hero('Governance', 'Audit binder',
           lede='A printable evidence pack of approvals, assessments and records for the selected period, ready to hand to an auditor.') }}
-  <p class="muted">Covers the last {{ days }} days · made {{ generated }}. The privacy and finance sections show how things stand today.</p>
+  <p class="muted">Covers the last {{ days }} days · made {{ b.generated_at | datetime('absolute') }}. The privacy and finance sections show how things stand today.</p>
   <div class="bnd-actions">
     <button class="btn btn--primary" id="binder-print" type="button">Print or save as PDF</button>
     <button class="btn btn--ghost" id="binder-json" type="button">Download evidence file (for auditors)</button>
@@ -52,7 +52,7 @@
       <tbody>
         {% for f in b.chain.files %}
         <tr>
-          <td>{{ f.day }}</td>
+          <td>{{ f.day | datetime('date') }}</td>
           <td>{{ f.events }}</td>
           <td><span class="badge {{ 'done' if f.verdict == 'verified' else 'blocked' if f.verdict == 'broken' else 'warn' }}">{{ chain_words.get(f.verdict) or (f.verdict | humanize) }}</span></td>
           <td>{% if f.breaks %}{{ f.breaks | length }} entr{{ 'y' if f.breaks | length == 1 else 'ies' }} changed or could not be confirmed{% else %}None{% endif %}</td>

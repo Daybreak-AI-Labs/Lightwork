@@ -72,7 +72,7 @@
         var body = t.querySelector('tbody');
         data.tasks.forEach(function (d) {
           var tr = el('tr');
-          [d.day, d.finished, d.stopped].forEach(function (v) { tr.appendChild(el('td', null, String(v))); });
+          [(window.mvDateAbsolute && window.mvDateAbsolute(d.day)) || d.day, d.finished, d.stopped].forEach(function (v) { tr.appendChild(el('td', null, String(v))); });
           var cell = el('td', null, String(d.finished + d.stopped) + ' '); cell.appendChild(bar(d.finished + d.stopped, max)); tr.appendChild(cell);
           body.appendChild(tr);
         });
