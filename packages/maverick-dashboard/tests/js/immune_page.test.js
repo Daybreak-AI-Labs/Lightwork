@@ -30,8 +30,8 @@ const SUMMARY = {
 };
 const CHOICES = { canaries: false, twin_record: true, decision_classes: ["wire_funds"], recorded_goals: [{ id: 7, title: "Pay March invoices", status: "done" }], people: [{ value: "user:amy", label: "Amy" }] };
 
-async function fixture({ confirm = true } = {}) {
-  const dom = new JSDOM(html, { url: "https://lightwork.example/immune", runScripts: "outside-only" });
+async function fixture({ confirm = true, down = false, markup = html } = {}) {
+  const dom = new JSDOM(markup, { url: "https://lightwork.example/immune", runScripts: "outside-only" });
   const { window } = dom;
   const calls = [];
   const confirms = [];
@@ -41,6 +41,7 @@ async function fixture({ confirm = true } = {}) {
   window.mvToast = () => {};
   window.fetch = async (url, options = {}) => {
     calls.push({ url, ...options });
+    if (down && url.endsWith("/summary")) return json({ detail: "unavailable" }, 503);
     if (url.endsWith("/summary")) return json(SUMMARY);
     if (url.endsWith("/choices")) return json(CHOICES);
     if (url.endsWith("/settings")) return json({ canaries: true, twin_record: true });
@@ -95,4 +96,16 @@ test("a drill result posts the chosen person, kind and result", async (t) => {
   form.dispatchEvent(new ui.window.Event("submit", { cancelable: true })); await ui.settle();
   const call = ui.calls.find((c) => c.url.endsWith("/immune/drills"));
   assert.deepEqual(JSON.parse(call.body), { person: "user:amy", decision_class: "wire_funds", passed: false });
+});
+
+test("a summary that cannot load leaves no table on Loading", async (t) => {
+  const loading = html.replace(/<tbody id="(ic-[a-z-]+)"><\/tbody>/g, '<tbody id="$1"><tr><td colspan="5">Loading.</td></tr></tbody>');
+  const ui = await fixture({ down: true, markup: loading });
+  t.after(() => ui.window.close());
+  const bodies = [...ui.doc.querySelectorAll("tbody")];
+  assert.ok(bodies.length >= 6);
+  for (const body of bodies) {
+    assert.doesNotMatch(body.textContent, /Loading/);
+    assert.match(body.textContent, /Could not be loaded\. Reload the page to try again\./);
+  }
 });

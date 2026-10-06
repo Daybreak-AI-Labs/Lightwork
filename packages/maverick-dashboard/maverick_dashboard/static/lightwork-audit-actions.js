@@ -6,6 +6,7 @@
   var reviewPanel = document.getElementById('audit-maintenance-review');
   var saved = document.getElementById('audit-maintenance-saved');
   var message = document.getElementById('audit-maintenance-message');
+  var loadingText = message.textContent;
   var current = null, busy = false, account = '', epoch = 0;
   function el(tag, text, css) { var e = document.createElement(tag); if (text) e.textContent = text; if (css) e.className = css; return e; }
   function say(text) { message.textContent = text; }
@@ -110,7 +111,10 @@
       saved.appendChild(el('p', 'Uncertain earlier copy of ' + row.day + ' · ' + location + ' · attempted ' + new Date(row.attempted_at).toLocaleString() + '. ' + row.meaning));
     });
     var separate = document.getElementById('audit-maintenance-separate'); if (separate) separate.hidden = !value.separate_copy_available;
-    if (!value.reviews.length) saved.appendChild(el('p', 'No maintenance reviews have been saved for this account and workspace.', 'muted'));
+    // Loaded: the first-load line goes; a message from an action stays.
+    if (message.textContent === loadingText) say('');
+    if (!value.reviews.length) saved.appendChild(window.mvEmpty('No maintenance reviews saved yet',
+      'Encryption and storage-copy reviews you start above are kept here for this account and workspace.', null, {compact: true}));
     value.reviews.forEach(function (row) {
       var line = el('div', '', 'aud-actions');
       line.appendChild(el('span', (row.action === 'seal' ? 'Encryption' : 'Storage copy') + ' · ' + date(row.recorded_at) + ' · ' + state(row.state)));

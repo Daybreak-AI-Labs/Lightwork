@@ -568,11 +568,13 @@
         readinessDetail.textContent = "AI system tasks are turned off. Ask an administrator to turn them on.";
         setMark("Off", "failed");
         listStatus.textContent = "Tasks appear here once AI system tasks are turned on.";
+        inventoryStatus.textContent = "AI systems can be chosen once AI system tasks are turned on.";
       } else {
         readiness.textContent = "Setup not finished";
         readinessDetail.textContent = "AI system tasks are turned on, but setup isn't finished. Ask an administrator to complete it.";
         setMark("Not ready", "failed");
         listStatus.textContent = "Tasks appear here once an administrator finishes the setup.";
+        inventoryStatus.textContent = "AI systems can be chosen once an administrator finishes the setup.";
       }
     } catch (error) {
       readiness.textContent = "Unavailable";
@@ -581,6 +583,7 @@
       // The list never started; say so instead of "Loading tasks…".
       listStatus.textContent = typeof window.mvErrorText === "function"
         ? window.mvErrorText(error, "load the tasks") : "Couldn't load the tasks. Choose Check again.";
+      inventoryStatus.textContent = "AI systems could not be checked. Choose Check again above to retry.";
     }
   }
   async function refreshRetention() {

@@ -249,14 +249,25 @@
     if (out) { say("Check started. Results appear under Past re-runs when it finishes."); }
   }
 
+  // A table whose data never arrived says so instead of "Loading." forever.
+  function settleLoading(message) {
+    Array.prototype.forEach.call(root.querySelectorAll("tbody"), function (body) {
+      if (body.textContent.trim() !== "Loading.") { return; }
+      var cell = body.querySelector("td");
+      if (cell) { cell.textContent = message; }
+    });
+  }
+
   async function loadAll(keepStatus) {
     try {
       renderSummary(await window.mvFetchJSON(root.dataset.apiUrl, {}, "load the safety summary"));
       try { choices = await window.mvFetchJSON("/api/v1/immune/choices"); renderChoices(); } catch (e) { /* choices stay as they were */ }
+      settleLoading("Not available right now. Reload the page to try again.");
       if (!keepStatus) { say("Up to date."); }
     } catch (error) {
       say("");
       fail(error.message);
+      settleLoading("Could not be loaded. Reload the page to try again.");
     }
   }
 

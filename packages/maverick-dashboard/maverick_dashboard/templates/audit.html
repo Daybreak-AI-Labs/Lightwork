@@ -408,15 +408,20 @@
       } finally { refresh.disabled = false; }
     }
     refresh.addEventListener('click', loadCustody);
-    loadCustody();
-    call('GET', '/api/v1/audit/actions', null, 'load the options').then(function (d) {
-      if (!d) { result.textContent = ''; return; }
-      var fwd = $('aud-forward');
-      if (fwd) fwd.hidden = !d.security_system_connected;
-      if (!d.download_allowed) {
-        Array.prototype.forEach.call($('aud-format').options, function (o) { if (o.value !== 'csv') o.disabled = true; });
-      }
-    });
+    function start() {
+      loadCustody();
+      call('GET', '/api/v1/audit/actions', null, 'load the options').then(function (d) {
+        if (!d) { result.textContent = ''; return; }
+        var fwd = $('aud-forward');
+        if (fwd) fwd.hidden = !d.security_system_connected;
+        if (!d.download_allowed) {
+          Array.prototype.forEach.call($('aud-format').options, function (o) { if (o.value !== 'csv') o.disabled = true; });
+        }
+      });
+    }
+    // The shell's helpers (lightwork-ui.js) load after the page content; start
+    // once they are there, or a failed read leaves "Checking…" on the page.
+    if (window.mvFetchJSON) start(); else document.addEventListener('DOMContentLoaded', start);
   })();
   </script>
 {% endblock %}

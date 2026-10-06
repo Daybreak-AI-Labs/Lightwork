@@ -100,7 +100,7 @@
 
     <section class="panel" aria-labelledby="aet-create-title">
       <div class="section-head"><h2 id="aet-create-title">New task</h2></div>
-      <p class="muted" id="aet-inventory-status" role="status" aria-live="polite">Checking available AI systems…</p>
+      <p class="muted" id="aet-inventory-status" role="status" aria-live="polite">{{ "Checking available AI systems…" if task_module_enabled else "AI systems can be chosen once AI system tasks are turned on." }}</p>
       <a id="aet-inventory-link" href="/security/assurance" hidden>Open AI inventory</a>
       <form class="aet-form" id="aet-create-form" autocomplete="off" novalidate>
         <fieldset id="aet-create-controls"{% if not task_can_operate %} disabled aria-disabled="true"{% endif %}>
