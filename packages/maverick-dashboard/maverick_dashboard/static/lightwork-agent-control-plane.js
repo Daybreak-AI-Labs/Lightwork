@@ -962,6 +962,11 @@
 
   function renderRow(row) {
     var tr = document.createElement("tr");
+    if (canOperate && !row.contained) {
+      tr.dataset.bulkId = row.principal;
+      tr.dataset.bulkLabel = displayName(row);
+      tr.dataset.bulkPaused = row.revoked ? "true" : "false";
+    }
     var principal = document.createElement("th");
     principal.scope = "row";
     principal.textContent = displayName(row);
@@ -1184,6 +1189,65 @@
     rosterNext.disabled = payload.has_more !== true || rosterNextOffset === null;
     restoreRosterFocus(focus);
     updateRuntimeControls();
+    refreshBulk();
+  }
+
+  // Pause or resume many agents and people at once (ADM-7): filter the list,
+  // select all matching, one confirmation states the count, and the report
+  // undoes each change (resume undoes a pause and pause undoes a resume).
+  var bulk = null;
+  function bulkChange(verb) {
+    return async function (item, extra) {
+      if (!controlPlaneReady) {
+        throw { bulkReason: "Lightwork has not confirmed the current state of your agents yet. Refresh and try again." };
+      }
+      var paused = item.row.dataset.bulkPaused === "true";
+      if (verb === "suspend" && paused) { throw { bulkReason: "It is already paused." }; }
+      if (verb === "resume" && !paused) { throw { bulkReason: "It is not paused." }; }
+      async function send(how, reason) {
+        var body = { principal: item.id };
+        if (reason) { body.reason = reason; }
+        var result;
+        try {
+          result = await request("/principals/" + how, { method: "POST", body: JSON.stringify(body) });
+        } catch (error) {
+          throw { bulkReason: (error && error.message) || "It could not be changed." };
+        }
+        if (!result || result.ok !== true) {
+          throw { bulkReason: (result && typeof result.detail === "string" && result.detail) || "Lightwork could not confirm the change." };
+        }
+        item.row.dataset.bulkPaused = how === "suspend" ? "true" : "false";
+      }
+      await send(verb, extra.reason);
+      return {
+        note: verb === "suspend" ? "paused" : "resumed",
+        undo: function () {
+          return verb === "suspend" ? send("resume") : send("suspend", "Undo of a resume made from the agent list");
+        }
+      };
+    };
+  }
+  function refreshBulk() {
+    if (!canOperate || typeof window.mvBulk !== "function") { return; }
+    if (bulk) { bulk.refresh(); return; }
+    if (!rows.querySelector("tr[data-bulk-id]")) { return; }
+    bulk = window.mvBulk({
+      list: rows, rows: "tr[data-bulk-id]", noun: "agent or person", nouns: "agents and people", filter: true,
+      actions: [
+        { label: "Pause", verb: "Pause", danger: true,
+          ask: async function () {
+            if (typeof window.mvForm !== "function") { return null; }
+            var values = await window.mvForm("Pause the selected agents and people", [{
+              key: "reason", label: "Reason", type: "text", required: true,
+              placeholder: "Why is this needed?", help: "The reason is saved in each one's history."
+            }], { okText: "Pause them" });
+            var reason = values ? String(values.reason || "").trim().slice(0, 500) : "";
+            return reason ? { reason: reason } : null;
+          },
+          run: bulkChange("suspend"), after: function () { refresh(); } },
+        { label: "Resume", verb: "Resume", run: bulkChange("resume"), after: function () { refresh(); } }
+      ]
+    });
   }
 
   function renderRosterError(error) {

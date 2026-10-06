@@ -249,15 +249,18 @@
     <p class="muted" role="status">
       Showing {{ perm.tool_page.returned }} of {{ perm.tool_page.filtered_total }} matching tools
       ({{ perm.tool_page.catalog_total }} in the catalog).
+      {% if permissions_can_manage_tools and perm.tool_page.filtered_total > perm.tool_page.returned and perm.tool_page.filtered_total <= 100 %}
+      <a href="/permissions?q={{ perm.tool_page.query | urlencode }}&amp;state={{ perm.tool_page.state }}&amp;per_page=100">Show all {{ perm.tool_page.filtered_total }} matching tools on one page</a> to change them together.
+      {% endif %}
     </p>
     {% if perm.tools %}
       <p class="muted">An allowed tool may still need its AI service, a saved connection or
         another feature turned on. Open "Details" on a tool to see what has been checked.</p>
       <table>
         <thead><tr><th scope="col">Tool</th><th scope="col">Status</th><th scope="col">Access</th></tr></thead>
-        <tbody>
+        <tbody id="perm-tool-rows">
         {% for t in perm.tools %}
-          <tr data-tool-name="{{ t.name }}" data-tool-usable="{{ 'true' if t.usable else 'false' }}"
+          <tr data-tool-name="{{ t.name }}"{% if permissions_can_manage_tools and (t.overlay_blocked or t.base_acl_allowed) %} data-bulk-id="{{ t.name }}" data-bulk-label="{{ t.name | humanize }}"{% endif %} data-tool-usable="{{ 'true' if t.usable else 'false' }}"
               data-provider-state="{{ t.prerequisites.provider.status }}"
               data-connection-state="{{ t.prerequisites.connection.status }}"
               data-feature-policy-state="{{ t.prerequisites.feature_policy.status }}"
@@ -390,11 +393,76 @@
   <script>
     (function() {
       const msg = document.getElementById('perm-msg');
+      function bad() { return new Error('Could not confirm the updated tool permissions. Reload this page before retrying.'); }
+      // One tool's change, shared by its own button and by the bulk bar: the
+      // request, the check of what the server says is now in force, and the
+      // row's badges and button. Throws when the change was not confirmed.
+      async function toggle(btn, action) {
+        const name = btn.dataset.name;
+        const label = btn.dataset.label || name;
+        const r = await fetch('/api/v1/permissions/tools/' + encodeURIComponent(name) + '/' + action, {
+          method: 'POST',
+        });
+        const result = r.status === 204 ? {} : await r.json().catch(function() {
+          if (r.ok) throw bad();
+          return {};
+        });
+        if (!r.ok) throw r;
+        const effective = result && result.tool || {};
+        if ((action === 'disable' && r.status !== 204) ||
+            (action === 'enable' && (effective.name !== name || effective.overlay_blocked !== false ||
+              typeof effective.base_acl_allowed !== 'boolean' || typeof effective.usable !== 'boolean' ||
+              typeof effective.state !== 'string'))) {
+          throw bad();
+        }
+        const row = btn.closest('tr');
+        const baseAllowed = action === 'disable'
+          ? row && row.dataset.baseAclState === 'ready'
+          : effective.base_acl_allowed === true;
+        const usable = action === 'enable' && effective.usable === true;
+        if (row) {
+          const baseBadge = row.querySelector('.perm-base-acl');
+          const overrideBadge = row.querySelector('.perm-override');
+          const overallBadge = row.querySelector('.perm-overall');
+          if (action === 'enable' && baseBadge) {
+            baseBadge.className = 'badge perm-base-acl ' + (baseAllowed ? 'active' : 'blocked');
+            baseBadge.textContent = baseAllowed ? 'Ready' : 'Blocked';
+          }
+          if (overrideBadge) {
+            overrideBadge.className = 'badge perm-override ' + (action === 'disable' ? 'blocked' : 'active');
+            overrideBadge.textContent = action === 'disable' ? 'Blocked' : 'Ready';
+          }
+          if (overallBadge) {
+            overallBadge.className = 'badge perm-overall ' + (usable ? 'active' : (effective.state === 'readiness_unknown' && action === 'enable' ? '' : 'blocked'));
+            overallBadge.textContent = usable
+              ? 'Ready to use'
+              : (effective.state === 'readiness_unknown' && action === 'enable' ? 'Not checked yet' : 'Blocked');
+          }
+          row.dataset.toolUsable = usable ? 'true' : 'false';
+          row.dataset.baseAclState = baseAllowed ? 'ready' : 'blocked';
+        }
+        if (action === 'disable') {
+          btn.dataset.action = 'enable';
+          btn.textContent = 'Allow';
+          btn.setAttribute('aria-label', 'Allow the ' + label + ' tool');
+          btn.disabled = false;
+        } else if (baseAllowed) {
+          btn.dataset.action = 'disable';
+          btn.textContent = 'Block';
+          btn.setAttribute('aria-label', 'Block the ' + label + ' tool');
+          btn.disabled = false;
+        } else {
+          btn.removeAttribute('data-action');
+          btn.textContent = 'Set by your organization';
+          btn.setAttribute('aria-label', label + ' is set by your organization');
+          btn.disabled = true;
+        }
+        return {usable: usable};
+      }
       document.querySelectorAll('button.perm-toggle').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           if (btn.disabled) return;
-          const name = btn.dataset.name;
-          const label = btn.dataset.label || name;
+          const label = btn.dataset.label || btn.dataset.name;
           const action = btn.dataset.action;  // "disable" | "enable"
           btn.disabled = true;
           msg.style.color = 'var(--muted)';
@@ -402,79 +470,42 @@
             ? 'Blocking ' + label + '…'
             : 'Allowing ' + label + '…';
           try {
-            const r = await fetch('/api/v1/permissions/tools/' + encodeURIComponent(name) + '/' + action, {
-              method: 'POST',
-            });
-            const result = r.status === 204 ? {} : await r.json().catch(function() {
-              if (r.ok) throw new Error('Could not confirm the updated tool permissions. Reload this page before retrying.');
-              return {};
-            });
-            if (r.ok) {
-              const effective = result && result.tool || {};
-              if ((action === 'disable' && r.status !== 204) ||
-                  (action === 'enable' && (effective.name !== name || effective.overlay_blocked !== false ||
-                    typeof effective.base_acl_allowed !== 'boolean' || typeof effective.usable !== 'boolean' ||
-                    typeof effective.state !== 'string'))) {
-                throw new Error('Could not confirm the updated tool permissions. Reload this page before retrying.');
-              }
-              const row = btn.closest('tr');
-              const baseAllowed = action === 'disable'
-                ? row && row.dataset.baseAclState === 'ready'
-                : effective.base_acl_allowed === true;
-              const usable = action === 'enable' && effective.usable === true;
-              msg.style.color = 'var(--accent)';
-              msg.textContent = action === 'disable'
-                ? label + ' is now blocked. Tasks can no longer use it.'
-                : label + ' is allowed again.' +
-                  (usable ? ' It is ready to use.' : ' Its setup has not been checked yet.');
-              if (row) {
-                const baseBadge = row.querySelector('.perm-base-acl');
-                const overrideBadge = row.querySelector('.perm-override');
-                const overallBadge = row.querySelector('.perm-overall');
-                if (action === 'enable' && baseBadge) {
-                  baseBadge.className = 'badge perm-base-acl ' + (baseAllowed ? 'active' : 'blocked');
-                  baseBadge.textContent = baseAllowed ? 'Ready' : 'Blocked';
-                }
-                if (overrideBadge) {
-                  overrideBadge.className = 'badge perm-override ' + (action === 'disable' ? 'blocked' : 'active');
-                  overrideBadge.textContent = action === 'disable' ? 'Blocked' : 'Ready';
-                }
-                if (overallBadge) {
-                  overallBadge.className = 'badge perm-overall ' + (usable ? 'active' : (effective.state === 'readiness_unknown' && action === 'enable' ? '' : 'blocked'));
-                  overallBadge.textContent = usable
-                    ? 'Ready to use'
-                    : (effective.state === 'readiness_unknown' && action === 'enable' ? 'Not checked yet' : 'Blocked');
-                }
-                row.dataset.toolUsable = usable ? 'true' : 'false';
-                row.dataset.baseAclState = baseAllowed ? 'ready' : 'blocked';
-              }
-              if (action === 'disable') {
-                btn.dataset.action = 'enable';
-                btn.textContent = 'Allow';
-                btn.setAttribute('aria-label', 'Allow the ' + label + ' tool');
-                btn.disabled = false;
-              } else if (baseAllowed) {
-                btn.dataset.action = 'disable';
-                btn.textContent = 'Block';
-                btn.setAttribute('aria-label', 'Block the ' + label + ' tool');
-                btn.disabled = false;
-              } else {
-                btn.removeAttribute('data-action');
-                btn.textContent = 'Set by your organization';
-                btn.setAttribute('aria-label', label + ' is set by your organization');
-                btn.disabled = true;
-              }
-            } else {
-              btn.disabled = false;
-              msg.style.color = 'var(--danger)';
-              msg.textContent = typeof mvErrorText === 'function' ? mvErrorText(r, 'change this tool') : 'Could not change this tool. Please try again.';
-            }
+            const done = await toggle(btn, action);
+            msg.style.color = 'var(--accent)';
+            msg.textContent = action === 'disable'
+              ? label + ' is now blocked. Tasks can no longer use it.'
+              : label + ' is allowed again.' +
+                (done.usable ? ' It is ready to use.' : ' Its setup has not been checked yet.');
           } catch (e) {
             btn.disabled = false;
             msg.style.color = 'var(--danger)';
-            msg.textContent = e.message || 'Could not reach the server. Reload this page before retrying.';
+            msg.textContent = typeof e.status === 'number' && typeof mvErrorText === 'function'
+              ? mvErrorText(e, 'change this tool')
+              : (e.message || 'Could not reach the server. Reload this page before retrying.');
           }
         });
+      });
+      // Block or allow many tools at once (ADM-7): the filter above picks the
+      // matching tools, the bar selects them all, one confirmation states the
+      // count, and the report can undo every change.
+      const list = document.getElementById('perm-tool-rows');
+      if (!list || !window.mvBulk || !list.querySelector('tr[data-bulk-id]')) return;
+      function change(action) {
+        return async function (item) {
+          const btn = item.row.querySelector('button.perm-toggle');
+          if (!btn || btn.dataset.action !== action) {
+            throw {status: 409, detail: action === 'disable' ? 'It is already blocked.' : 'It is already allowed or set by your organization.'};
+          }
+          await toggle(btn, action);
+          return {undo: async function () { await toggle(btn, action === 'disable' ? 'enable' : 'disable'); }};
+        };
+      }
+      window.mvBulk({
+        list: list, rows: 'tr[data-bulk-id]', noun: 'tool', nouns: 'tools',
+        actions: [
+          {label: 'Block', verb: 'Block', danger: true, note: 'Tasks stop using them at once. You can undo this from the report.', run: change('disable')},
+          {label: 'Allow', verb: 'Allow', run: change('enable')}
+        ]
       });
     })();
   </script>

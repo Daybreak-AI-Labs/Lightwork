@@ -4771,6 +4771,11 @@ async def privacy_page(request: Request) -> HTMLResponse:
     records, estate = await run_in_threadpool(_privacy_page_data)
     ctx["records"] = records
     ctx["estate"] = estate
+    if records.get("dsar"):
+        from . import people_directory
+
+        # Who a request can be assigned to: people who may work privacy requests.
+        ctx["dsar_assignees"] = await run_in_threadpool(people_directory.candidates, "operate")
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 

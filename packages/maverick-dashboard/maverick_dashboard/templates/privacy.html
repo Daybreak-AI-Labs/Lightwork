@@ -706,11 +706,11 @@
       <table>
         <thead><tr><th scope="col">Person</th>
           <th scope="col">Asked for</th><th scope="col">Where from</th><th scope="col">Law</th>
-          <th scope="col">Status</th>
+          <th scope="col">Status</th><th scope="col">Assigned to</th>
           <th scope="col">Deadline</th><th scope="col">Actions</th></tr></thead>
-        <tbody>
+        <tbody id="pw-dsar-rows">
           {% for r in records.dsar %}
-          <tr>
+          <tr data-bulk-id="{{ r.id }}" data-bulk-label="{{ r.subject_id }} ({{ r.id }})" data-acknowledged="{{ 'yes' if r.acknowledged_at else 'no' }}" data-status="{{ r.status }}">
             <td><a href="/privacy/dsar/{{ r.id }}">{{ r.subject_id }}</a>{% if r.intake %}<br><span class="muted" style="font-size:var(--text-xs);" title="Matched: {{ r.intake.signals | join('; ') }}">Opened from a message</span>{% endif %}</td>
             <td>{{ {'access': 'A copy of their data', 'portability': 'Portable copy', 'erasure': 'Delete their data', 'correction': 'Correct their data', 'opt_out': 'Opt out of sale or sharing', 'limit_sensitive': 'Limit sensitive data use', 'objection': 'Stop a use', 'restriction': 'Restrict use', 'withdraw_consent': 'Withdraw consent'}.get(r.kind, (r.kind or '') | replace('_', ' ') | capitalize) }}</td>
             <td>{{ {'public_form': 'From your website', 'message': 'From a message', 'dashboard': 'Entered here'}.get(r.source, 'Entered here') }}
@@ -729,6 +729,7 @@
                 <br><span class="badge warn">Saved export needs cleanup</span>
               {% endif %}
             </td>
+            <td class="pw-dsar-assignee">{% if r.assignee %}{{ r.assignee | identity }}{% else %}<span class="muted">Not assigned</span>{% endif %}</td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
               {% if r.response_pending %}
                 {% if not r.overdue %}{{ r.days_left }} day{{ '' if r.days_left == 1 else 's' }} left{% else %}{{ r.days_left | abs }} day{{ '' if (r.days_left | abs) == 1 else 's' }} overdue{% endif %}
@@ -754,6 +755,7 @@
         </tbody>
       </table>
       </div>
+      <script type="application/json" id="pw-dsar-assignees">{{ (dsar_assignees or []) | tojson }}</script>
       <div id="pe-worksheet-result"></div>
       <div id="pw-fulfill-out" role="status" aria-live="polite" style="font-size:var(--text-sm);"></div>
       <p class="muted" style="font-size:var(--text-xs);">&ldquo;Gather their data&rdquo; collects
@@ -2132,6 +2134,57 @@
       });
     });
   });
+
+  // Many requests at once (ADM-7): filter, select all matching, then assign
+  // them to one person (undo puts each back with its earlier assignee) or
+  // record that receipt was confirmed to each requester.
+  (function () {
+    var list = document.getElementById('pw-dsar-rows');
+    if (!list || !window.mvBulk) return;
+    var people = [];
+    try { people = JSON.parse(document.getElementById('pw-dsar-assignees').textContent || '[]'); } catch (_) { people = []; }
+    function assigneeCell(row, principal) {
+      var cell = row.querySelector('.pw-dsar-assignee');
+      if (!cell) return;
+      var person = people.find(function (p) { return p.principal === principal; });
+      cell.textContent = principal ? (person ? person.label : principal.replace(/^user:/, '')) : 'Not assigned';
+    }
+    async function assign(item, principal) {
+      var record = await mvFetchJSON('/api/v1/privacy/dsar/' + encodeURIComponent(item.id) + '/assign',
+        {method: 'POST', body: {assignee: principal}}, 'assign the request');
+      assigneeCell(item.row, record.assignee || '');
+      return record;
+    }
+    window.mvBulk({
+      list: list, rows: 'tr[data-bulk-id]', noun: 'request', nouns: 'requests', filter: true,
+      actions: [
+        {label: 'Assign', verb: 'Assign',
+         ask: async function () {
+           if (!window.mvForm) return null;
+           var answers = await window.mvForm('Assign the selected requests', [
+             {key: 'assignee', label: 'Who works on them?', type: 'select',
+              options: [{value: '', label: 'Nobody (not assigned)'}].concat(people.map(function (p) { return {value: p.principal, label: p.label}; })),
+              help: 'Only people who may work privacy requests are listed.'}], {okText: 'Assign requests'});
+           return answers === null ? null : {assignee: String((answers && answers.assignee) || '')};
+         },
+         run: async function (item, extra) {
+           var record = await assign(item, extra.assignee);
+           var before = record.previous_assignee || '';
+           return {note: extra.assignee ? 'assigned' : 'unassigned',
+                   undo: async function () { await assign(item, before); }};
+         }},
+        {label: 'Confirm receipt', verb: 'Confirm receipt for', button: 'Confirm receipt for selected', title: 'Receipt confirmed',
+         run: async function (item) {
+           if (item.row.dataset.acknowledged === 'yes') throw {status: 409, detail: 'Receipt was already confirmed.'};
+           if (item.row.dataset.status === 'closed') throw {status: 409, detail: 'The request is closed.'};
+           await mvFetchJSON('/api/v1/privacy/dsar/' + encodeURIComponent(item.id) + '/acknowledge',
+             {method: 'POST'}, 'confirm receipt');
+           item.row.dataset.acknowledged = 'yes';
+           return {note: 'receipt confirmed'};
+         }}
+      ]
+    });
+  })();
 
   // Incident register: record the notification decision (with its reason) / close.
   // A transient rejection never destroys the reason: it is kept as a draft and

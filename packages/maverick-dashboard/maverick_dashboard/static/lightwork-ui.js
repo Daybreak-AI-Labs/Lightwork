@@ -2231,6 +2231,220 @@
       });
     })();
 
+// Bulk work on an admin list (ADM-7): filter the list, select every matching
+// row, act on all of them after one confirmation that states the count, then
+// read a change report row by row and undo it when each change can be undone.
+// All controls are native checkboxes, inputs and buttons, so it works by
+// keyboard; Ctrl+A (Cmd+A) inside the list selects every matching row.
+//   var bulk = window.mvBulk({
+//     list,                 // the element holding the rows
+//     rows,                 // selector; each row has data-bulk-id and data-bulk-label
+//     noun, nouns,          // "request", "requests"
+//     filter,               // true: a filter box that matches row text
+//     actions: [{label, verb, danger, button?, title?, note?,
+//                ask(items) -> extra | null,        // optional details first
+//                run(item, extra) -> {undo?, note?}, // one row; throw to refuse
+//                                                    // ({bulkReason} for page-written words)
+//                after(report)}]                     // optional page update
+//   });
+//   bulk.refresh()          // after the page renders its rows again
+window.mvBulk = function (opts) {
+  'use strict';
+  var list = opts.list;
+  if (!list) return null;
+  var noun = opts.noun || 'item', nouns = opts.nouns || noun + 's';
+  var uid = 'mv-bulk-' + Math.random().toString(36).slice(2, 8);
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function counted(n) { return n + ' ' + (n === 1 ? noun : nouns); }
+  function joined(names) {
+    var shown = names.slice(0, 10);
+    var more = names.length - shown.length;
+    if (more > 0) return shown.join(', ') + ' and ' + more + ' more';
+    if (shown.length < 2) return shown.join('');
+    return shown.slice(0, -1).join(', ') + ' and ' + shown[shown.length - 1];
+  }
+  var bar = el('div', 'mv-bulk');
+  bar.setAttribute('role', 'region');
+  bar.setAttribute('aria-label', 'Change several ' + nouns + ' at once');
+  var filterInput = null;
+  if (opts.filter === true) {
+    var filterLabel = el('label', 'mv-bulk__filter', 'Filter ' + nouns + ' ');
+    filterInput = el('input', 'input');
+    filterInput.type = 'search'; filterInput.autocomplete = 'off';
+    filterLabel.appendChild(filterInput);
+    bar.appendChild(filterLabel);
+  }
+  var allLabel = el('label', 'mv-bulk__all');
+  var allBox = el('input'); allBox.type = 'checkbox';
+  var allText = el('span');
+  allLabel.append(allBox, document.createTextNode(' '), allText);
+  var countLine = el('span', 'mv-bulk__count muted');
+  countLine.setAttribute('role', 'status'); countLine.setAttribute('aria-live', 'polite');
+  bar.append(allLabel, countLine);
+  var buttons = (opts.actions || []).map(function (action) {
+    var b = el('button', action.danger ? 'btn btn--danger' : 'btn', action.button || action.label + ' selected');
+    b.type = 'button';
+    b.addEventListener('click', function () { act(action); });
+    bar.appendChild(b);
+    return b;
+  });
+  var clear = el('button', 'btn btn--ghost', 'Clear selection'); clear.type = 'button';
+  bar.appendChild(clear);
+  var report = el('section', 'mv-bulk__report panel');
+  report.tabIndex = -1; report.hidden = true;
+  report.setAttribute('role', 'region'); report.setAttribute('aria-label', 'What changed');
+  var anchor = opts.before || (list.closest('table') || list);
+  anchor.parentNode.insertBefore(bar, anchor);
+  anchor.parentNode.insertBefore(report, anchor);
+
+  function rows() { return Array.prototype.slice.call(list.querySelectorAll(opts.rows)); }
+  function pickOf(row) { return row.querySelector('input[data-bulk-pick]'); }
+  function matching() { return rows().filter(function (row) { return !row.hidden; }); }
+  function selected() { return matching().filter(function (row) { var p = pickOf(row); return p && p.checked; }); }
+  function itemOf(row) { return {id: row.getAttribute('data-bulk-id'), label: row.getAttribute('data-bulk-label') || row.getAttribute('data-bulk-id'), row: row}; }
+  function sync() {
+    var shown = matching(), chosen = selected().length;
+    allText.textContent = 'Select all ' + shown.length + ' matching';
+    allBox.checked = shown.length > 0 && chosen === shown.length;
+    allBox.indeterminate = chosen > 0 && chosen < shown.length;
+    allBox.disabled = !shown.length;
+    countLine.textContent = chosen + ' selected';
+    buttons.forEach(function (b) { b.disabled = busy || !chosen; });
+    clear.disabled = !chosen;
+  }
+  function decorate() {
+    var table = list.closest('table');
+    var head = table && table.querySelector('thead tr');
+    if (head && !head.querySelector('th[data-bulk-head]')) {
+      var th = el('th', '', 'Select'); th.scope = 'col'; th.setAttribute('data-bulk-head', '');
+      head.insertBefore(th, head.firstChild);
+    }
+    rows().forEach(function (row, index) {
+      if (pickOf(row)) return;
+      var item = itemOf(row);
+      var box = el('input'); box.type = 'checkbox'; box.setAttribute('data-bulk-pick', '');
+      box.id = uid + '-' + index + '-' + String(item.id).replace(/[^A-Za-z0-9_-]/g, '');
+      var label = el('label', 'sr-only', 'Select ' + item.label); label.htmlFor = box.id;
+      box.addEventListener('change', sync);
+      if (row.tagName === 'TR') {
+        var cell = el('td', 'mv-bulk__cell'); cell.append(box, label);
+        row.insertBefore(cell, row.firstChild);
+      } else {
+        var wrap = el('div', 'mv-bulk__pick'); wrap.append(box, label);
+        row.insertBefore(wrap, row.firstChild);
+      }
+    });
+    sync();
+  }
+  function applyFilter() {
+    var words = filterInput ? filterInput.value.trim().toLowerCase() : '';
+    rows().forEach(function (row) {
+      var text = (row.getAttribute('data-bulk-label') + ' ' + row.textContent).toLowerCase();
+      row.hidden = !!words && text.indexOf(words) === -1;
+      // Nothing out of view stays selected: a bulk change only reaches what the person can see.
+      if (row.hidden && pickOf(row)) pickOf(row).checked = false;
+    });
+    sync();
+  }
+  if (filterInput) filterInput.addEventListener('input', applyFilter);
+  allBox.addEventListener('change', function () {
+    var on = allBox.checked;
+    matching().forEach(function (row) { var p = pickOf(row); if (p) p.checked = on; });
+    sync();
+  });
+  clear.addEventListener('click', function () {
+    rows().forEach(function (row) { var p = pickOf(row); if (p) p.checked = false; });
+    sync(); allBox.focus();
+  });
+  list.addEventListener('keydown', function (event) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || String(event.key).toLowerCase() !== 'a') return;
+    var t = event.target;
+    if (t && t.closest && t.closest('input:not([type="checkbox"]), textarea, select, [contenteditable="true"]')) return;
+    event.preventDefault();
+    matching().forEach(function (row) { var p = pickOf(row); if (p) p.checked = true; });
+    sync();
+  });
+  var busy = false;
+  function failureText(failure, action) {
+    // A page that already wrote the reason for people passes it as bulkReason.
+    if (failure && typeof failure.bulkReason === 'string' && failure.bulkReason) return failure.bulkReason;
+    var plain = failure && typeof window.mvPlainDetail === 'function' ? window.mvPlainDetail(failure.detail) : '';
+    if (plain) return plain;
+    var text = window.mvErrorText ? window.mvErrorText(failure, action) : 'It could not be changed.';
+    return text.replace(/^Could not [^.]*\.\s*/, '') || text;
+  }
+  function showReport(action, results, undone) {
+    report.replaceChildren();
+    var done = results.filter(function (r) { return r.ok; });
+    var refused = results.length - done.length;
+    var title = undone != null ? 'Undone: ' + undone
+      : (action.title || action.verb) + ': ' + done.length + ' done' + (refused ? ', ' + refused + ' not changed' : '');
+    report.appendChild(el('h3', 'mv-bulk__title', title));
+    var ul = el('ul', 'mv-bulk__lines');
+    results.forEach(function (r) {
+      ul.appendChild(el('li', '', r.item.label + ' — ' + (r.ok ? (r.note || 'done') : 'not changed: ' + r.reason)));
+    });
+    report.appendChild(ul);
+    var undoable = done.filter(function (r) { return typeof r.undo === 'function'; });
+    if (undone == null && done.length && undoable.length === done.length) {
+      var undo = el('button', 'btn', 'Undo these changes'); undo.type = 'button';
+      undo.addEventListener('click', async function () {
+        undo.disabled = true;
+        var back = 0, failed = [];
+        for (var i = 0; i < undoable.length; i++) {
+          try { await undoable[i].undo(); back += 1; }
+          catch (failure) { failed.push(undoable[i].item.label + ': ' + failureText(failure, 'undo it')); }
+        }
+        showReport(action, results, back);
+        if (failed.length) report.appendChild(el('p', 'mv-bulk__failed', 'Not undone: ' + failed.join('; ')));
+        if (action.after) action.after({action: action, results: results, undone: back});
+        report.focus();
+      });
+      report.appendChild(undo);
+    }
+    var close = el('button', 'btn btn--ghost', 'Close report'); close.type = 'button';
+    close.addEventListener('click', function () { report.hidden = true; allBox.focus(); });
+    report.appendChild(close);
+    report.hidden = false;
+    report.focus();
+  }
+  async function act(action) {
+    if (busy) return;
+    var items = selected().map(itemOf);
+    if (!items.length) return;
+    var message = action.verb + ' ' + counted(items.length) + '? ' + joined(items.map(function (i) { return i.label; })) + '.' +
+      (action.note ? ' ' + action.note : '');
+    var ok = window.mvConfirm ? await window.mvConfirm(message, {okText: action.verb + ' ' + counted(items.length), danger: !!action.danger})
+      : window.confirm(message);
+    if (!ok) return;
+    var extra = {};
+    if (action.ask) { extra = await action.ask(items); if (extra == null) return; }
+    busy = true; sync();
+    countLine.textContent = action.verb + ': working on ' + counted(items.length) + '…';
+    var results = [];
+    for (var i = 0; i < items.length; i++) {
+      try {
+        var outcome = (await action.run(items[i], extra)) || {};
+        results.push({item: items[i], ok: true, undo: outcome.undo, note: outcome.note});
+        var pick = pickOf(items[i].row); if (pick) pick.checked = false;
+      } catch (failure) {
+        results.push({item: items[i], ok: false, reason: failureText(failure, action.verb.toLowerCase() + ' it')});
+      }
+    }
+    busy = false; sync();
+    showReport(action, results, null);
+    if (action.after) action.after({action: action, results: results});
+  }
+  decorate();
+  if (filterInput) applyFilter();
+  return {refresh: function () { decorate(); if (filterInput) applyFilter(); }, bar: bar, report: report, selected: function () { return selected().map(itemOf); }};
+};
+
 // Request references and idempotency keys are protocol plumbing, not something
 // a person should type. Inputs marked data-auto-reference are hidden by their
 // pages and filled here: one fresh reference per operation, kept unchanged
