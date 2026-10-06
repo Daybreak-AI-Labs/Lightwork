@@ -54,6 +54,35 @@ def current_configuration():
     return cfg
 
 
+def _account_label(principal):
+    value = principal.claims.get("name")
+    if not isinstance(value, str) or not value.strip() or len(value) > 120 or any(ord(char) < 32 for char in value):
+        return "Verified company account"
+    return value.strip()
+
+
+def verified_people(request):
+    """Current, owned, audited sign-in evidence for the ordinary role picker."""
+    current = authority(request)
+    key = configuration_key(load_oidc_config())
+    rows = STORE.list(limit=101)
+    if len(rows) > 100:
+        raise HTTPException(409, "The retained company sign-in checks exceed the supported bound.")
+    people = {}
+    for row in sorted(rows, key=lambda item: item["checked_at"]):
+        if row.get("protocol") == "saml":
+            continue
+        age = time.time() - row["checked_at"]
+        if (row.get("actor") == auth.caller_principal(request)
+                and row.get("owner") == context_for(request) and row.get("configuration") == key
+                and not row.get("_audit_pending") and 0 <= age < TTL):
+            people["user:" + row["account"]] = str(row.get("account_label") or "Verified company account") + " (verified company sign-in)"
+    authority(request, current)
+    from .company_saml_setup import verified_people as saml_people
+    people.update(saml_people(request))
+    return people
+
+
 @router.get("")
 def status(request: Request):
     current = authority(request)
@@ -63,8 +92,9 @@ def status(request: Request):
     if len(rows) > 100:
         raise HTTPException(409, "The retained sign-in checks exceed this view's supported limit. No results were silently omitted.")
     selected = [{"checked_at": row["checked_at"], "provider": row["provider"], "current": row["configuration"] == key,
-                 "account": row["account"], "scope": "A provider sign-in was verified. Sign-in requirements and administrator access were not changed."}
-                for row in rows if row.get("actor") == actor and row.get("owner") == owner and not row.get("_audit_pending")]
+                 "account": row.get("account_label", "Verified company account"), "scope": "A provider sign-in was verified. Sign-in requirements and administrator access were not changed."}
+                for row in rows if row.get("protocol") != "saml" and row.get("actor") == actor
+                and row.get("owner") == owner and not row.get("_audit_pending")]
     selected.sort(key=lambda row: row["checked_at"], reverse=True)
     authority(request, current)
     return JSONResponse({"checks": selected, "context": current}, headers={"Cache-Control": "private, no-store"})
@@ -133,7 +163,8 @@ async def finish(request: Request):
         if require_mfa() and not claims_prove_mfa(principal.claims):
             return response
         row = STORE.create({"id": "CST-" + digest(transaction["jti"])[:32], "actor": transaction["actor"], "owner": transaction["owner"], "configuration": transaction["configuration"],
-            "checked_at": time.time(), "provider": principal.issuer, "account": principal.sub},
+            "checked_at": time.time(), "provider": principal.issuer, "account": principal.sub,
+            "account_label": _account_label(principal)},
             action="company_signin_test_verified", actor=transaction["actor"],
             max_records=100, effect_guard=guard)
         guard()

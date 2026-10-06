@@ -206,6 +206,16 @@ def _inventory(request):
     from .personal_shared_inventory import inventory as shared_inventory
     stores.extend(shared_inventory(request, actor))
     try:
+        from .personal_alert_tests import owned_inventory
+
+        private_tests = owned_inventory(actor)
+        stores.append({"name": "Original private notification test receipts", "state": "retained", "inventory": private_tests,
+                       "count": private_tests["count"], "use": "Content-free send outcomes and duplicate protection; acceptance does not mean seen.",
+                       "action": private_tests["retained"], "href": "/notifications#private-alert-test-title"})
+    except Exception:
+        stores.append({"name": "Original private notification test receipts", "state": "unavailable",
+                       "action": "The exact owned receipt inventory could not be read; no zero count or erasure is claimed."})
+    try:
         from maverick.ux_store import shared
         navigation = shared().owned_navigation_inventory(actor)
         stores.append({"name": "Saved dashboard views and pinned tasks", "state": "available", "inventory": navigation,
@@ -285,12 +295,12 @@ def _inventory(request):
     try:
         from maverick.conversation_inbox import owned_inventory as inbox_inventory
         queued = inbox_inventory(actor)
-        stores.append({"name": "Queued conversation messages and files", "state": "available", "count": len(queued),
+        stores.append({"name": "Queued messages, human exchanges and on-duty names", "state": "available", "count": len(queued),
                        "blocked": sum(bool(item["inflight"]) for item in queued),
-                       "use": "Encrypted queued message bodies, file bytes and original per-operation receipts; consuming or dispatching work must be reconciled before erasure.",
-                       "action": "Download Queued conversation work above or select it below for reviewed erasure; submitted task records stay separate."})
+                       "use": "Encrypted queued messages and files, reviewed human exchanges, on-duty names and original receipts. Active or uncertain work must settle before erasure; minimized operation barriers remain.",
+                       "action": "Download Conversation work above or select it below for reviewed erasure. Active human sharing must end first; submitted tasks and minimized original receipts stay separate."})
     except Exception:
-        stores.append({"name": "Queued conversation messages and files", "state": "unavailable", "action": "Its exact inventory could not be confirmed; no zero count is claimed."})
+        stores.append({"name": "Queued messages, human exchanges and on-duty names", "state": "unavailable", "action": "Its exact inventory could not be confirmed; no zero count is claimed."})
     return {"context": context_for(request), "holds": holds, "scopes": scopes, "conversations": conversations,
             "tasks": tasks, "tasks_truncated": len(goals) > 5000, "stores": stores,
             "limits": "Links authorize this personal-data view, not task mutation. Copies, shared packets, external systems and prior trained derivatives are separate; nothing here claims they are deleted."}

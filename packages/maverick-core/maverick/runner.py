@@ -480,7 +480,13 @@ def run_goal_in_thread(
         from .chat_message_actions import runtime_limits, runtime_scope
         alternative, max_dollars, max_wall_seconds, max_depth, capability = runtime_limits(
             world, goal, max_dollars, max_wall_seconds, max_depth, capability)
+        from .goal_mutations import GoalMutationConflict
+        from .human_conversation_handoffs import require_ai_open
         from .task_handoffs import closure
+        try:
+            require_ai_open(world, goal_id)
+        except GoalMutationConflict:
+            return "blocked"
         if closure(world, goal_id):
             return "blocked"
         principal_matches = _runner_principal_binding(world, goal, execution_principal)

@@ -83,18 +83,23 @@ def _local(request: Request, *, mutate=False):
 def sign_in_available_for(cfg: dict, *, bootstrap: bool = False) -> bool:
     """Whether this configuration still permits the loopback owner login.
 
-    Only disabled OIDC details are stageable. A nonempty SAML or proxy table
-    changes the identity boundary, so it must not be counted as recovery.
+    Explicitly disabled OIDC/SAML details are stageable. Active or malformed
+    enterprise identity policy never counts as owner-passphrase recovery.
     """
     auth_table = cfg.get("auth")
     if "auth" in cfg and not isinstance(auth_table, dict):
         return False
     if auth_table:
-        if (bootstrap or set(auth_table) != {"oidc"}
-                or not isinstance(auth_table["oidc"], dict)):
+        if bootstrap or not set(auth_table) <= {"oidc", "saml"}:
+            return False
+        saml_table = auth_table.get("saml")
+        if saml_table is not None and (not isinstance(saml_table, dict) or saml_table.get("enabled") is not False):
+            return False
+        oidc_table = auth_table.get("oidc", {})
+        if not isinstance(oidc_table, dict):
             return False
         enabled = config.env_flag("MAVERICK_OIDC_ENABLED")
-        oidc_enabled = enabled if enabled is not None else bool(auth_table["oidc"].get("enabled", False))
+        oidc_enabled = enabled if enabled is not None else bool(oidc_table.get("enabled", False))
         if oidc_enabled:
             return False
     dashboard = cfg.get("dashboard") or {}
@@ -231,3 +236,37 @@ def login(request: Request, *, email: str, password: str):
         row.update(failures=0, locked_until=0)
         _write(row)
         return _finish(row, request)
+
+
+def verify_recovery(request: Request, *, email: str, password: str):
+    """Verify the existing owner for one restricted operation; mint no session.
+
+    The caller must enforce its prospective managed policy. This primitive
+    never enrolls an owner, completes pending enrollment or restores a role.
+    """
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.oidc import VerifiedPrincipal
+
+    from . import auth, rbac
+
+    _local(request, mutate=True)
+    email, password = _credentials(email, password)
+    with authority_effect_fence(), _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        row = _read()
+        if row is None or row["status"] != "ready":
+            raise HTTPException(409, "Complete this computer's owner setup before using restricted recovery.")
+        if row["locked_until"] > time.time():
+            raise HTTPException(429, "Wait one minute before trying the owner passphrase again.")
+        match = hmac.compare_digest(_password(password, row["salt"]), row["password_hash"])
+        if not match or email != row["email"]:
+            row["failures"] = min(5, row["failures"] + 1)
+            row["locked_until"] = time.time() + 60 if row["failures"] == 5 else 0
+            _write(row)
+            raise HTTPException(401, "The email or passphrase was not accepted.")
+        role = rbac.get_stored_role("user:" + row["email"])
+        if role is None or "admin" not in rbac.permissions_for(role):
+            raise HTTPException(403, "The original owner's current role cannot manage installation sign-in.")
+        auth._enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
+        row.update(failures=0, locked_until=0)
+        _write(row)
+        return row

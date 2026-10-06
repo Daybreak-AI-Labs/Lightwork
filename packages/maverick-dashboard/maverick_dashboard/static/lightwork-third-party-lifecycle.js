@@ -301,11 +301,12 @@
   function newAssessment() {
     var approved = state.templates.filter(function (t) { return t.state === "approved"; });
     if (!approved.length) { say("A different administrator needs to approve a questionnaire first. Open Users to invite a reviewer."); return; }
-    var vendorOpts = state.vendors.length ? state.vendors.concat([{ value: "", label: "Another vendor (type the name below)" }]) : [{ value: "", label: "Type the vendor's name below" }];
+    if (!state.vendors.length) { say('Register this vendor in Privacy first, then return to assess the same registered identity.'); return; }
+    var vendorOpts = state.vendors;
+    var selectedVendor = new URLSearchParams(window.location.search).get('registered_vendor');
     var answererOpts = [{ value: "vendor", label: "The vendor, through an invitation link" }].concat(peopleOptions());
     R.form("New assessment", [
-      { key: "vendor", label: "Vendor", type: "select", default: vendorOpts[0].value, options: vendorOpts },
-      { key: "vendor_name", label: "Vendor name (if not in the list)" },
+      { key: "vendor", label: "Registered vendor", type: "select", default: vendorOpts.some(function (row) { return row.value === selectedVendor; }) ? selectedVendor : vendorOpts[0].value, options: vendorOpts },
       { key: "template", label: "Questionnaire", type: "select", required: true, default: approved[0].template_id + "@" + approved[0].version,
         options: approved.map(function (t) { return { value: t.template_id + "@" + t.version, label: words(t.title_ref) + " (version " + t.version + ")" }; }) },
       { key: "owner", label: "Owner", type: "select", default: state.me, options: peopleOptions() },
@@ -313,8 +314,8 @@
       { key: "keep", label: "Keep records for", type: "select", default: "2555", options: options(KEEP) },
     ], "Start assessment").then(function (v) {
       if (!v) { return; }
-      var vendorRef = v.vendor || (v.vendor_name ? ref(v.vendor_name, "vendor.") : "");
-      if (!vendorRef) { say("Choose the vendor or type its name."); return; }
+      var vendorRef = v.vendor;
+      if (!state.vendors.some(function (row) { return row.value === vendorRef; })) { say("Choose the actual registered vendor."); return; }
       var parts = v.template.split("@");
       var template = state.templates.filter(function (t) { return t.template_id === parts[0] && String(t.version) === parts[1]; })[0];
       var respondent = v.answerer === "vendor" ? ("vendor-contact." + vendorRef).slice(0, 128) : v.answerer;
@@ -417,6 +418,7 @@
       { label: "What they're connected to", value: function (l) { return (l.dependencies || []).map(function (d) { return words(d.reference); }).join(", ") || "Nothing recorded"; } },
       { label: "Updated", value: function (l) { return R.when(l.updated_at); } },
     ], state.lifecycles, [
+      { label: "Open registered vendor", when: function (l) { return /^VMR-[a-f0-9]{24}$/.test(l.vendor_ref); }, run: function (l) { window.location.href = '/privacy/vendors/' + encodeURIComponent(l.vendor_ref) + '#vendor-profile'; } },
       { label: "Mark active", kind: "primary", when: function (l) { return l.stage === "onboarding" || (l.stage === "suspended" && canAdmin); }, run: function (l) { transition(l, "active"); } },
       { label: "Suspend", kind: "danger", when: function (l) { return canAdmin && (l.stage === "active" || l.stage === "onboarding"); }, run: function (l) { transition(l, "suspended"); } },
       { label: "Start offboarding", kind: "danger", when: function (l) { return canAdmin && state.namedSignin && !l.offboarding_plan_id && (l.stage === "active" || l.stage === "suspended"); }, run: beginOffboarding },
@@ -424,6 +426,7 @@
     ], { text: "No vendors are being tracked yet.", action: { label: "Start tracking a vendor", run: newLifecycle } });
   }
   function transition(l, target) {
+    if (target === 'active' && /^VMR-[a-f0-9]{24}$/.test(l.vendor_ref)) { window.location.href = '/privacy/vendors/' + encodeURIComponent(l.vendor_ref) + '#vendor-profile'; return; }
     var text = target === "suspended" ? "Suspend " + vendorName(l.vendor_ref) + "? Mark them as not allowed to work with you until reactivated." : "Mark " + vendorName(l.vendor_ref) + " as active?";
     R.form(target === "suspended" ? "Suspend vendor" : "Mark vendor active", [{ key: "reason", label: "Reason", required: true, placeholder: target === "suspended" ? "For example: Security incident under review" : "For example: Review complete" }], target === "suspended" ? "Suspend" : "Mark active").then(function (v) {
       if (!v) { return; }
@@ -435,18 +438,19 @@
     }).catch(fail("update the vendor"));
   }
   function newLifecycle() {
-    var vendorOpts = state.vendors.length ? state.vendors.concat([{ value: "", label: "Another vendor (type the name below)" }]) : [{ value: "", label: "Type the vendor's name below" }];
+    if (!state.vendors.length) { say('Register this vendor in Privacy first, then track the same registered identity.'); return; }
+    var vendorOpts = state.vendors;
+    var selectedVendor = new URLSearchParams(window.location.search).get('registered_vendor');
     R.form("Start tracking a vendor", [
-      { key: "vendor", label: "Vendor", type: "select", default: vendorOpts[0].value, options: vendorOpts },
-      { key: "vendor_name", label: "Vendor name (if not in the list)" },
+      { key: "vendor", label: "Registered vendor", type: "select", default: vendorOpts.some(function (row) { return row.value === selectedVendor; }) ? selectedVendor : vendorOpts[0].value, options: vendorOpts },
       { key: "owner", label: "Owner", type: "select", default: state.me, options: peopleOptions() },
       { key: "deps", label: "What they're connected to (separate with commas)", placeholder: "For example: Payroll system, Customer data" },
       { key: "dep_kind", label: "Those are mostly", type: "select", default: "system", options: options(DEP_KINDS) },
       { key: "keep", label: "Keep records for", type: "select", default: "2555", options: options(KEEP) },
     ], "Start tracking").then(function (v) {
       if (!v) { return; }
-      var vendorRef = v.vendor || (v.vendor_name ? ref(v.vendor_name, "vendor.") : "");
-      if (!vendorRef) { say("Choose the vendor or type its name."); return; }
+      var vendorRef = v.vendor;
+      if (!state.vendors.some(function (row) { return row.value === vendorRef; })) { say("Choose the actual registered vendor."); return; }
       var names = String(v.deps || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
       // Each connection is recorded with the fingerprint of what was written here.
       return Promise.all(names.map(function (name, i) {

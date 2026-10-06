@@ -171,6 +171,7 @@ class VendorIn(_StrictModel):
     data_access_level: DataAccessLevel
     expected_revision: int = Field(default=0, ge=0, le=2**31 - 1)
     idempotency_key: IdempotencyKey
+    register_vendor_id: OpaqueId | None = None
 
 
 class RelationshipIn(_StrictModel):
@@ -828,6 +829,8 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
         require_permission(request, "operate")
         ops, tenant, store = authority(request)
         actor = _principal(request, tenant)
+        from .vendor_profile import effect_guard
+        guard = effect_guard(request, tenant, actor, family="intelligence")
         return _jsonable(
             await call(
                 ops,
@@ -836,6 +839,7 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
                 vendor_id=vendor_id,
                 owner_ref=actor,
                 actor_ref=actor,
+                effect_guard=guard,
                 **body.model_dump(),
             )
         )

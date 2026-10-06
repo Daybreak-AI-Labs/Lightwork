@@ -13,6 +13,7 @@
   const scalar = ['mode','timezone','digest_time','quiet_start','quiet_end'];
   const checks = ['quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   function clearPrivate() {
+    document.dispatchEvent(new CustomEvent('lightwork:personal-notifications-cleared'));
     items.replaceChildren(); form.reset(); form.hidden = true;
     ['notification-project-watches','notification-mutes','personal-external-links','personal-delivery-receipts'].forEach(function (id) { document.getElementById(id).replaceChildren(); });
     taskSelect.replaceChildren(); snapshot = null; editSnapshot = null; mutes = {}; agentMutes = {}; dirty = false;
@@ -93,6 +94,7 @@
       throw new Error('Your account or workspace changed. Reload this page before continuing.');
     }
     snapshot = state;
+    document.dispatchEvent(new CustomEvent('lightwork:personal-notifications-state', {detail: state}));
     form.hidden = false;
     const delivery = state.private_delivery || {note:'Private delivery is unavailable. Refresh the page and try again.', channels:[]};
     document.getElementById('personal-external-status').textContent = delivery.note + ' Service acceptance does not mean a message was seen.';

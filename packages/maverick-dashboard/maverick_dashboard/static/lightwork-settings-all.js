@@ -287,6 +287,7 @@
 
   // ---- writing a control from the server's state ---------------------------
   function apply(row, data) {
+    delete row.dataset.companySigninDefault;
     var control = row.dataset.control;
     var input = row.querySelector('[data-input]');
     if (control === 'toggle' && input) input.checked = data.value === true;
@@ -376,6 +377,13 @@
   }
 
   // ---- saving --------------------------------------------------------------
+  function valueChange(row) {
+    var defaults = ['auth.oidc.authorization_endpoint', 'auth.oidc.token_endpoint', 'auth.oidc.jwks_uri', 'auth.oidc.end_session_endpoint'];
+    if (row.dataset.companySigninDefault === '1' && defaults.indexOf(row.dataset.settingId) !== -1 && read(row) === '') {
+      return {id: row.dataset.settingId, reset: true};
+    }
+    return {id: row.dataset.settingId, value: read(row)};
+  }
   // ---- "Test connection" / "Check this location" ------------------------------
   function checkValue(row) {
     var control = row.dataset.control;
@@ -471,7 +479,7 @@
 
   function saveRows(list) {
     var pending = list.filter(function (row) { return editable(row) && changed(row); });
-    var changes = pending.map(function (row) { return {id: row.dataset.settingId, value: read(row)}; });
+    var changes = pending.map(valueChange);
     if (!pending.length) {
       list.forEach(function (row) { if (editable(row)) say(row, ''); });
       announce('There are no changes to save in this group.');
@@ -487,7 +495,7 @@
     if (target.hasAttribute('data-save') && row) {
       var needsNew = row.dataset.control === 'secret' || row.dataset.control === 'document';
       var single = needsNew && !changed(row)
-        ? [] : [{id: row.dataset.settingId, value: read(row)}];
+        ? [] : [valueChange(row)];
       if (!single.length) {
         say(row, row.dataset.control === 'document' ? 'Choose the file to import first.'
           : 'Choose Replace and enter a value first.');
@@ -571,6 +579,19 @@
       var ok = await window.mvConfirm('Put every setting in ' + name + ' back to its product default? Deployment-locked rows are excluded.', {okText: 'Review product defaults'});
       if (!ok) return;
       await commit(list.map(function (r) { return {id: r.dataset.settingId, reset: true}; }), list, 'reset the settings');
+    } else if (target.hasAttribute('data-signin-key-create') && row) {
+      if (row.dataset.settingId !== 'auth.oidc.session_secret' || !editable(row) || root.dataset.saving === '1' || target.disabled) return;
+      var keyInput = row.querySelector('[data-input]');
+      if (!keyInput || keyInput.value.trim()) { say(row, 'Your entered key has been kept. Clear that draft before creating a different one.'); return; }
+      try {
+        var randomKey = window.crypto.getRandomValues(new Uint8Array(32));
+        keyInput.value = Array.from(randomKey, function (byte) { return byte.toString(16).padStart(2, '0'); }).join('');
+        randomKey.fill(0);
+        keyInput.hidden = false;
+        keyInput.dispatchEvent(new Event('input', {bubbles: true}));
+        say(row, 'A secure sign-in key is ready as an unsaved draft. Review Save setting before it changes sign-in.');
+        keyInput.focus();
+      } catch (_) { say(row, 'A secure key could not be created. Nothing was saved.'); }
     } else if (target.hasAttribute('data-secret-replace') && row) {
       var input = row.querySelector('[data-input]');
       if (input) { input.hidden = false; input.focus(); }
@@ -1651,14 +1672,16 @@
       if (offer) offer.hidden = true;
     }
   }
-  async function fetchRows(query) {
+  async function fetchRows(query, beforeInsert) {
     if (fetched[query]) return true;
     try {
       var response = await window.fetch(ROWS + '?' + query, {
         cache: 'no-store', credentials: 'same-origin', headers: {Accept: 'text/html'}
       });
       if (!response.ok) throw response;
-      insertRows(new window.DOMParser().parseFromString(await response.text(), 'text/html'));
+      var text = await response.text();
+      if (beforeInsert && !await beforeInsert()) return false;
+      insertRows(new window.DOMParser().parseFromString(text, 'text/html'));
       fetched[query] = true;
       return true;
     } catch (failure) {
@@ -1666,12 +1689,12 @@
       return false;
     }
   }
-  async function loadGroup(slug) {
+  async function loadGroup(slug, beforeInsert) {
     var group = section(slug);
     if (!group || complete(group)) return !!group;
     var offer = group.querySelector('[data-load-group]');
     if (offer) offer.setAttribute('aria-busy', 'true');
-    var ok = await fetchRows('group=' + encodeURIComponent(slug));
+    var ok = await fetchRows('group=' + encodeURIComponent(slug), beforeInsert);
     if (offer) offer.removeAttribute('aria-busy');
     return ok;
   }
@@ -1724,6 +1747,49 @@
   var changedOnly = document.getElementById('settings-all-changed');
   var status = document.getElementById('settings-all-filter-status');
   var empty = document.getElementById('settings-all-empty');
+  window.stageCompanySigninDraft = async function (values, expectedContext, isCurrent) {
+    var ids = ['issuer', 'client_id', 'audience', 'redirect_uri', 'authorization_endpoint', 'token_endpoint', 'jwks_uri', 'end_session_endpoint']
+      .map(function (name) { return 'auth.oidc.' + name; });
+    if (!values || Object.keys(values).length !== ids.length || ids.some(function (id) {
+      return typeof values[id] !== 'string' || values[id].length > 300;
+    }) || !/^[a-f0-9]{64}$/.test(expectedContext || '') || root.dataset.saving === '1') return false;
+    var ticket = lazySelectGeneration, controller = new AbortController();
+    var deadline = setTimeout(function () { controller.abort(); }, 20000);
+    async function current() {
+      var response = await fetch('/api/v1/settings/sign-in-migration/context', {credentials: 'same-origin',
+        cache: 'no-store', redirect: 'error', signal: controller.signal, headers: {Accept: 'application/json'}});
+      if (!(response.headers.get('content-type') || '').startsWith('application/json')) return false;
+      var text = await response.text(); if (text.length > 4096) return false;
+      return response.ok && JSON.parse(text).context === expectedContext && ticket === lazySelectGeneration
+        && (!isCurrent || isCurrent()) && root.dataset.saving !== '1';
+    }
+    try {
+      if (!await current() || !await loadGroup('people-access', current) || !await current()) return false;
+      var selectedRows = ids.map(rowById);
+      if (selectedRows.some(function (row) { return !row || !row.isConnected || !editable(row)
+        || changed(row) || row.dataset.control !== 'text' || row.querySelector('[data-segment-at]'); })) {
+        announce('Provider fields contain entered work or are controlled by installation policy. Keep that work; review or cancel it before preparing a preset.');
+        return false;
+      }
+      selectedRows.forEach(function (row) {
+        var input = row.querySelector('[data-input]'); input.value = values[row.dataset.settingId];
+        row.dataset.companySigninDefault = input.value === '' ? '1' : '0';
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        say(row, input.value === '' ? 'Unsaved preset: use the provider\'s published details by restoring this field to its product default. Review and save explicitly.'
+          : 'Unsaved provider preset. Review and save this choice explicitly.');
+      });
+      if (search) search.value = ''; if (groupPick) groupPick.value = 'people-access';
+      if (changedOnly) changedOnly.checked = false;
+      var group = section('people-access'), part = group.querySelector('[data-subgroup-pick]');
+      if (part) part.value = selectedRows[0].dataset.subgroup;
+      updateFilter(); selectedRows[0].scrollIntoView({block: 'start'});
+      selectedRows[0].querySelector('[data-input]').focus({preventScroll: true});
+      return true;
+    } catch (_) {
+      announce('Current provider controls could not be checked. Your entered work was kept; reload the current controls before using a preset.');
+      return false;
+    } finally { clearTimeout(deadline); }
+  };
   window.LightworkInstalledPracticeEnvironment = {open: async function (context) {
     if (!/^[a-f0-9]{64}$/.test(context || '') || root.dataset.saving === '1') return false;
     var ticket = lazySelectGeneration, controller = new AbortController();

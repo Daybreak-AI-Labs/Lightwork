@@ -415,7 +415,8 @@ class Server:
             return identity_refusal
         try:
             proof_reply = prove_channel_command(msg.text, channel=msg.channel or "unknown", user_id=memory_user_id,
-                                                sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256)
+                                                sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256,
+                                                private_destination=getattr(msg, "_verified_private_destination", None))
         except Exception:
             log.warning("Personal identity proof unavailable")
             if msg.text.startswith("LIGHTWORK LINK"):

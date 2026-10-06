@@ -52,6 +52,7 @@ _WORK_REF = re.compile(
     r"([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})/candidates\Z"
 )
 _CORRECTION_REF = re.compile(r"catalog:knowledge-correction/(knowledge-req-[0-9a-f]{40})\Z")
+_REMOTE_REF = re.compile(r"catalog:remote-knowledge/(KNS-[a-f0-9]{32})/([a-f0-9]{32})\Z")
 _MAX_SOURCE_BYTES = 256 * 1024
 _PROJECTION_SCHEMA = "lightwork.knowledge-source-projection.v1"
 _CORRECTION_SCHEMA = "lightwork.knowledge-correction-source.v1"
@@ -397,6 +398,7 @@ def inspect_existing_source(
     work_discovery_factory: Callable[[str, str, str], Any] | None = None,
     correction_store: GovernedRecordStore | None = None,
     include_retrieval_chunks: bool = False,
+    remote_authority: KnowledgeActorAuthority | None = None,
 ) -> dict:
     """Return the exact content commitment and safe preview for registration."""
 
@@ -404,6 +406,35 @@ def inspect_existing_source(
     if not isinstance(source_ref, str):
         raise KnowledgeProjectionUnavailable("source reference must be text")
     with tenant_scope(tenant=canonical):
+        remote = _REMOTE_REF.fullmatch(source_ref)
+        if remote:
+            from .knowledge_sources import exact_source_snapshot
+            opened = None
+            base = knowledge_base
+            if base is None:
+                if knowledge_base_factory is not None:
+                    base = knowledge_base_factory(canonical)
+                else:
+                    from .knowledge_admin import open_knowledge_base
+                    base = open_knowledge_base(tenant=canonical, require_existing=True)
+                opened = base
+            if base is None:
+                raise KnowledgeProjectionUnavailable("remote Knowledge content is unavailable")
+            try:
+                record = exact_source_snapshot(canonical, remote[1], remote[2], knowledge_base=base, authority=remote_authority)
+            except Exception as exc:
+                raise KnowledgeProjectionUnavailable("the exact remote source or its current account rights are unavailable") from exc
+            finally:
+                if opened is not None:
+                    opened.close()
+            summary = _bounded_summary("\n\n".join(chunk["text"] for item in record["items"] for chunk in item["document"]["chunks"]))
+            payload = _payload("remote_knowledge", f"{remote[1]}/{remote[2]}", record)
+            inspected = {"source_ref": source_ref, "content_sha256": _commitment(payload), "title": _bounded_title(record["name"]),
+                         "summary": summary, "claim_state": "inferred", "observed_at": record["observed_at"], "verified_at": None,
+                         "projection_schema": _PROJECTION_SCHEMA, "summary_truncated": len(summary.encode()) < record["text_bytes"]}
+            if include_retrieval_chunks:
+                inspected["retrieval_chunks"] = tuple(chunk["text"] for item in record["items"] for chunk in item["document"]["chunks"])
+            return inspected
         match = _NODE_REF.fullmatch(source_ref)
         claim_state = "verified"
         if match:
@@ -523,6 +554,7 @@ class ExistingKnowledgeContentProjector:
         tenant: str,
         reference: ResearchAssetRef,
         admission: DatasetAdmission,
+        authority: KnowledgeActorAuthority | None = None,
     ) -> KnowledgeDocument:
         inspected = inspect_existing_source(
             tenant,
@@ -532,6 +564,7 @@ class ExistingKnowledgeContentProjector:
             work_discovery_factory=self.work_discovery_factory,
             correction_store=self.correction_store,
             include_retrieval_chunks=True,
+            remote_authority=authority,
         )
         if not hmac.compare_digest(inspected["content_sha256"], admission.content_sha256):
             raise KnowledgeProjectionUnavailable(
@@ -557,7 +590,7 @@ class ExistingKnowledgeContentProjector:
         admission: DatasetAdmission,
     ) -> KnowledgeDocument | None:
         if admission.source_ref.startswith(
-            ("catalog:vector-knowledge/", "catalog:work-discovery/")
+            ("catalog:vector-knowledge/", "catalog:work-discovery/", "catalog:remote-knowledge/")
         ):
             raise KnowledgeProjectionUnavailable(
                 "this source requires exact actor, action, and purpose context"
@@ -593,7 +626,14 @@ class ExistingKnowledgeContentProjector:
                 raise KnowledgeProjectionUnavailable(
                     "work-discovery consent does not grant training use"
                 )
-        return self._resolve(canonical, reference, admission)
+        vector = _VECTOR_REF.fullmatch(admission.source_ref)
+        if vector and vector[1].startswith("remote-"):
+            from .knowledge_sources import require_remote_document_authority
+            try:
+                require_remote_document_authority(canonical, vector[1], vector[2], authority)
+            except Exception as exc:
+                raise KnowledgeProjectionUnavailable("current remote source account and snapshot rights are required") from exc
+        return self._resolve(canonical, reference, admission, authority)
 
 
 __all__ = [

@@ -27,6 +27,7 @@ EXCEPTIONS = [
     {"store": "workspace_gallery_curation", "state": "retained", "reason": "Gallery curation is a separate workspace record. Erasing an account's saved views and task pins does not delete featured task content or curator history."},
     {"store": "task_feedback_and_trace_annotations", "state": "retained", "reason": "Task verdicts and trace annotations are separate workspace records; conversation deletion does not erase them. Historical deployment-wide feedback and legacy UX files lack reliable workspace lineage and are unavailable to normal reads; they require a separate records-custodian review, not automatic reassignment."},
     {"store": "fact_operation_receipts", "state": "retained", "reason": "Shared fact action receipts retain the actor, review digest and outcome only, without fact names or values. These replay barriers are not automatically erased or expired; removal could let an old create action recreate deleted data."},
+    {"store": "private_notification_test_receipts", "state": "retained", "reason": "Original private test receipts retain the actor, destination reference, review digest and service outcome without task content. They remain separate from ordinary alert-history erasure so an interrupted test cannot be silently sent again.", "href": "/notifications#private-alert-test-title"},
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
     {"store": "local_selected_result_bundles", "state": "retained", "reason": "Captured local copies and review receipts are separate from their original tasks. My data lists currently readable owned copies. Revoking future access does not delete saved or downloaded copies.", "href": "/deliverable-bundles"},
     {"store": "local_responsibility_handoffs", "state": "retained", "reason": "Offer and acceptance evidence remains separate. Withdraw outstanding offers in Handoffs; an accepted recipient's independent task is not yours to erase.", "href": "/task-handoffs"},
@@ -102,7 +103,7 @@ def _preview_owned_account(kind, actor):
         target["records"] = owned_inventory(actor)
         target["count"] = len(target["records"])
         if any(item["inflight"] for item in target["records"]):
-            raise ValueError("Some queued conversation work is consuming or dispatching. Reconcile it before reviewing erasure.")
+            raise ValueError("Some queued or human conversation work is active or unconfirmed. Settle queued work and finish human sharing before reviewing erasure.")
     elif kind == "generated_tools":
         from maverick.personal_learning import reviewed_targets
         target["records"] = reviewed_targets(actor)
@@ -238,7 +239,7 @@ def _erase_owned_account(row, target):
         for item in target["records"]:
             result = erase_owned(actor, item["id"], item["revision"], _digest([row["id"], kind, item["id"]])[:32], actor=row["reviewer"])
             if result["status"] not in {"confirmed", "replayed"}:
-                raise ValueError("Queued conversation erasure receipt is unconfirmed.")
+                raise ValueError("Conversation-work erasure receipt is unconfirmed.")
         return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free operation tombstones, generation barriers, submitted tasks and accounting/audit receipts remain separately retained."}
     if kind == "generated_tools":
         from maverick.personal_learning import erase_reviewed

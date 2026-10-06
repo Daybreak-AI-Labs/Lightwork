@@ -368,6 +368,24 @@
           else { var healthLink = node('a', 'Open installation health checks', healthDestination); healthLink.href = '/help#installation-health'; healthLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'company_saml_setup') {
+          var samlForm = entry[1], samlControl = window.LightworkCompanySamlSetup;
+          if (!samlForm || Array.isArray(samlForm) || Object.keys(samlForm).sort().join(',') !== 'context,original' ||
+              typeof samlForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(samlForm.context) || typeof samlForm.original !== 'boolean') return;
+          protectedControls(node('dd', undefined, list), 'Open complete single sign-on setup',
+            '/settings/all#company-saml-setup', samlControl && typeof samlControl.open === 'function'
+              ? function (isCurrent) { return samlControl.open(samlForm.context, samlForm.original, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'company_signin_migration') {
+          var signinForm = entry[1], signinControl = window.LightworkCompanySigninMigration;
+          if (!signinForm || Array.isArray(signinForm) || Object.keys(signinForm).sort().join(',') !== 'context,original' ||
+              typeof signinForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(signinForm.context) || typeof signinForm.original !== 'boolean') return;
+          protectedControls(node('dd', undefined, list), 'Open reviewed company sign-in controls',
+            '/settings/all#company-signin-migration', signinControl && typeof signinControl.open === 'function'
+              ? function (isCurrent) { return signinControl.open(signinForm.context, signinForm.original, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'settings_catalog_form') {
           var catalogForm = entry[1], catalogStarted = generation, catalogSelection = JSON.stringify(context());
           if (!catalogForm || Array.isArray(catalogForm) || Object.keys(catalogForm).sort().join(',') !== 'context,original' ||
@@ -1173,6 +1191,23 @@
       (item.fields || []).forEach(function (spec) { var setup = createField(spec, form, controls); if (setup) dependents.push(setup); });
       dependents.forEach(function (setup) { setup(); });
       var submit = node('button', item.confirmation_required ? 'Review change' : 'Check current status', form); submit.type = 'submit'; submit.className = 'btn btn--primary';
+      if (item.id === 'specialists.drafts.save' && controls.name) {
+        var initialSpecialist = controls.name(), specialistChoice = form.elements.namedItem('name');
+        var selectionNote = node('p', undefined, form), reloadSpecialist = button('Load selected specialist’s current fields', form, async function () {
+          if (busy || controls.name() === initialSpecialist) return;
+          overrideSelection = Object.assign({}, context(), {name: controls.name()});
+          generation += 1; cancelRequests(); catalog = null; selected = null; clear(buttons);
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {detail: {reason: 'selection'}}));
+          await openOperation(item.id);
+        });
+        reloadSpecialist.hidden = true;
+        specialistChoice.addEventListener('change', function () {
+          var changed = controls.name() !== initialSpecialist;
+          specialistChoice.setCustomValidity(changed ? 'Load the selected specialist’s current fields before reviewing this draft.' : '');
+          selectionNote.textContent = changed ? 'Your entered work is kept below. Loading this specialist replaces these fields with its current settings; returning to the previous choice keeps your edits.' : '';
+          reloadSpecialist.hidden = !changed; submit.disabled = busy || changed;
+        });
+      }
       form.addEventListener('submit', async function (event) {
         event.preventDefault(); if (busy || !form.reportValidity()) return;
         var args = {}; Object.keys(controls).forEach(function (key) { args[key] = controls[key](); });
@@ -1225,6 +1260,9 @@
               : item.id.startsWith('specialists.drafts.')
                 ? !!(window.LWSpecialistDrafts && window.LWSpecialistDrafts.renderReview &&
                      window.LWSpecialistDrafts.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('conversations.human.')
+                ? !!(window.LWHumanConversations && window.LWHumanConversations.renderReview &&
+                     window.LWHumanConversations.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)

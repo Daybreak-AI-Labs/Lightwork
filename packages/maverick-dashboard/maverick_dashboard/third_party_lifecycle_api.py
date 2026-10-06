@@ -155,6 +155,8 @@ class LifecycleCreateIn(_StrictModel):
 
 
 class LifecycleTransitionIn(RevisionIn):
+    assessment_id: OpaqueId | None = None
+    assessment_revision: int | None = Field(default=None, ge=1)
     target_stage: Literal["active", "suspended"]
     reason_code: OpaqueId
 
@@ -512,8 +514,11 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
     ):
         require_permission(request, "operate")
         ops, tenant, _principal_ref, store = authority(request)
+        from .vendor_profile import effect_guard, registered_vendor
+        registered_vendor(tenant, body.vendor_ref)
         return _jsonable(
-            await call(ops, store.create_assessment, tenant, assessment_id, **body.model_dump())
+            await call(ops, store.create_assessment, tenant, assessment_id, **body.model_dump(),
+                effect_guard=effect_guard(request, tenant, _principal_ref, family="lifecycle"))
         )
 
     @router.get("/assessments/{assessment_id}")
@@ -565,8 +570,11 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
     async def create_lifecycle(request: Request, lifecycle_id: ObjectPath, body: LifecycleCreateIn):
         require_permission(request, "operate")
         ops, tenant, _principal_ref, store = authority(request)
+        from .vendor_profile import effect_guard, registered_vendor
+        registered_vendor(tenant, body.vendor_ref)
         return _jsonable(
-            await call(ops, store.create_lifecycle, tenant, lifecycle_id, **body.model_dump())
+            await call(ops, store.create_lifecycle, tenant, lifecycle_id, **body.model_dump(),
+                effect_guard=effect_guard(request, tenant, _principal_ref, family="lifecycle"))
         )
 
     @router.get("/lifecycles/{lifecycle_id}")
@@ -586,8 +594,10 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
         ops, tenant, _principal_ref, store = authority(request)
         payload = body.model_dump()
         target = payload.pop("target_stage")
+        from .vendor_profile import effect_guard
         return _jsonable(
-            await call(ops, store.transition_lifecycle, tenant, lifecycle_id, target, **payload)
+            await call(ops, store.transition_lifecycle, tenant, lifecycle_id, target, **payload,
+                effect_guard=effect_guard(request, tenant, _principal_ref, family="lifecycle", admin=target == "suspended"))
         )
 
     @router.post("/lifecycles/{lifecycle_id}/offboarding/{plan_id}")

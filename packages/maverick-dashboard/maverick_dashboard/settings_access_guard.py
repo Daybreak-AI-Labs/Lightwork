@@ -171,6 +171,8 @@ def _oidc(cfg: dict) -> dict:
 def _saml(cfg: dict, oidc_secret: str) -> tuple[bool, bool]:
     auth = cfg.get("auth") if isinstance(cfg.get("auth"), dict) else {}
     raw = auth.get("saml") if isinstance(auth, dict) else None
+    if isinstance(raw, dict) and raw.get("enabled") is False:
+        return False, False
     policy = bool(raw) if isinstance(raw, dict) else raw is not None
     table = raw if isinstance(raw, dict) else {}
     login = bool(str(table.get("sp_entity_id") or "").strip()
@@ -425,6 +427,11 @@ def _way_back(request, route: str, principal: str | None, after_cfg: dict, after
     if _owner_can_return(request, principal, after_cfg, after):
         return ("You will be signed out and will need to sign in again with the owner "
                 "account's email and passphrase.")
+    from .company_signin_migration import guarded_transition
+
+    migration = guarded_transition(request, after_cfg)
+    if migration:
+        return migration
     proven, failure = _proven_sign_in(after, values)
     if proven:
         if not (principal and _stays_admin(principal, after)) and not _someone_is_admin(after):

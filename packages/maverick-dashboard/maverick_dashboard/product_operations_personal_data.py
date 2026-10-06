@@ -129,7 +129,7 @@ def _fields(state, action, requests):
     if action == "export_scope":
         return _scope_fields(state)
     if action == "export_account":
-        return [_field("store", "Owned account store", "select", choices=_choices((("model_test_history", "Model-test history"), ("conversation_inbox", "Queued conversation messages and files"), ("saved_views_and_pins", "Saved views and task pins"))))]
+        return [_field("store", "Owned account store", "select", choices=_choices((("model_test_history", "Model-test history"), ("conversation_inbox", "Queued messages and human exchanges"), ("saved_views_and_pins", "Saved views and task pins"))))]
     return []
 
 
@@ -185,7 +185,7 @@ def _deletion_scope(record):
               "notification_receipts": "Notification delivery history", "diagnostic_reports": "Personal diagnostic reports",
               "activation_drafts": "Private activation drafts", "project_defaults": "Personal project defaults",
               "model_test_history": "Personal model-check history", "generated_tools": "Currently authorized learned tools",
-              "conversation_inbox": "Queued conversation messages and files", "saved_views_and_pins": "Saved views and task pins"}
+              "conversation_inbox": "Queued messages and human exchanges", "saved_views_and_pins": "Saved views and task pins"}
     targets = []
     for target in record["targets"]:
         kind = target["store"]

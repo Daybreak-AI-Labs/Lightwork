@@ -4443,6 +4443,12 @@ class Agent:
         goal_id = getattr(self.ctx, "goal_id", None)
         if goal_id is None:
             return False
+        from .goal_mutations import GoalMutationConflict
+        from .human_conversation_handoffs import require_ai_open
+        try:
+            require_ai_open(self.ctx.world, goal_id)
+        except GoalMutationConflict:
+            return True
         try:
             goal = self.ctx.world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run

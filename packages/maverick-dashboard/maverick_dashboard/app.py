@@ -79,6 +79,7 @@ from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
     BOARD_SCOPE_DETAIL,
     PUBLIC_STATIC_PATHS,
+    SELF_AUTH_SIGNIN_RECOVERY_PATHS,
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
@@ -629,6 +630,7 @@ def _account_pages_unavailable(request: Request) -> set[str]:
     from . import (
         device_pairing_api,
         employee_activation,
+        human_conversation_handoffs,
         permission_requests_api,
         personal_notifications_api,
     )
@@ -637,7 +639,8 @@ def _account_pages_unavailable(request: Request) -> set[str]:
     for path, admit in (("/access-requests", permission_requests_api.authority),
                         ("/devices", device_pairing_api._principal),
                         ("/get-started/employee", employee_activation.actor),
-                        ("/notifications", personal_notifications_api.page_authority)):
+                        ("/notifications", personal_notifications_api.page_authority),
+                        ("/human-conversations", human_conversation_handoffs.authority)):
         try:
             admit(request)
         except Exception:  # a refused or unreadable check hides the link
@@ -1219,6 +1222,8 @@ async def _lifespan(app: FastAPI):
             log.warning("Personal notification observer did not start (%s)", type(exc).__name__)
         from .conversation_inbox_scheduler import start_conversation_inbox_scheduler
         await run_in_threadpool(start_conversation_inbox_scheduler)
+        from .knowledge_sources_scheduler import start_knowledge_sources_scheduler
+        await run_in_threadpool(start_knowledge_sources_scheduler)
         _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
@@ -1958,6 +1963,12 @@ from .research_api import router as research_router  # noqa: E402
 app.include_router(research_router)
 app.include_router(research_page_router)
 app.include_router(knowledge_access_router)
+from .knowledge_sources_api import router as knowledge_sources_router  # noqa: E402
+
+app.include_router(knowledge_sources_router, prefix="/api/v1")
+from .vendor_profile_api import router as vendor_profile_router  # noqa: E402
+
+app.include_router(vendor_profile_router, prefix="/api/v1")
 from .answer_feedback_operations import router as answer_feedback_router  # noqa: E402
 from .department_team_updates_api import router as department_team_updates_router  # noqa: E402
 
@@ -2181,7 +2192,56 @@ from .company_signin_tests import router as company_signin_tests_router  # noqa:
 from .connected_event_sources_api import router as connected_event_sources_router  # noqa: E402
 
 app.include_router(company_signin_tests_router)
+from .company_signin_migration_api import router as company_signin_migration_router  # noqa: E402
+
+app.include_router(company_signin_migration_router)
+from .company_saml_setup_api import recovery_router as company_saml_recovery_router  # noqa: E402
+from .company_saml_setup_api import router as company_saml_setup_router  # noqa: E402
+
+app.include_router(company_saml_setup_router)
+app.include_router(company_saml_recovery_router)
+
+
+@app.get("/auth/company-signin-recovery", response_class=HTMLResponse)
+def company_signin_recovery_page(request: Request):
+    from .company_signin_migration import recovery_page_allowed
+
+    recovery_page_allowed(request)
+    response = templates.TemplateResponse(request, "company_signin_recovery.html", {})
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
+
+
+@app.get("/auth/company-saml-recovery", response_class=HTMLResponse)
+def company_saml_recovery_page(request: Request):
+    from .company_signin_migration import recovery_page_allowed
+
+    recovery_page_allowed(request)
+    return templates.TemplateResponse(request, "company_saml_recovery.html", {},
+                                      headers={"Cache-Control": "private, no-store", "Referrer-Policy": "same-origin"})
+
+
 app.include_router(connected_event_sources_router, prefix="/api/v1")
+from .personal_alert_tests import router as personal_alert_tests_router  # noqa: E402
+
+app.include_router(personal_alert_tests_router)
+from .human_conversation_handoffs_api import (  # noqa: E402
+    router as human_conversation_handoffs_router,
+)
+
+app.include_router(human_conversation_handoffs_router)
+
+
+@app.get("/human-conversations", response_class=HTMLResponse)
+def human_conversations_page(request: Request):
+    from .human_conversation_handoffs import authority
+
+    _actor, context = authority(request)
+    return templates.TemplateResponse(request, "human_conversation_handoffs.html", {"human_conversation_context": context},
+                                      headers={"Cache-Control": "private, no-store"})
+
+
 # Email invite links (/auth/invite/{token}): single-use onboarding links an
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
@@ -2412,6 +2472,7 @@ _AUTH_EXEMPT = {
     # the dashboard bearer / same-origin checks (external senders have
     # neither), so it must bypass the centralized middleware.
     *SELF_AUTH_WEBHOOK_PATHS,
+    *SELF_AUTH_SIGNIN_RECOVERY_PATHS,
     # The exact HMAC webhook paths are shared with the global dependency. A
     # future /webhook/* route is authenticated by default until explicitly
     # added to that reviewed set.
@@ -13682,7 +13743,13 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-employee-companion.css")
 @app.get("/static/lightwork-product-operations.js")
 @app.get("/static/lightwork-specialist-drafts.js")
+@app.get("/static/lightwork-company-signin-migration.js")
+@app.get("/static/lightwork-company-saml-setup.js")
 @app.get("/static/lightwork-connected-event-sources.js")
+@app.get("/static/lightwork-knowledge-sources.js")
+@app.get("/static/lightwork-personal-alert-tests.js")
+@app.get("/static/lightwork-human-conversation-handoffs.js")
+@app.get("/static/lightwork-vendor-profile.js")
 @app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-shortcuts.js")
 @app.get("/static/lightwork-pins.js")

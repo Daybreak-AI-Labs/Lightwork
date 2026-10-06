@@ -23,6 +23,7 @@
   var form = document.getElementById("tpc-create-form");
   var filters = document.getElementById("tpc-filter-form");
   var S = { records: [], vendors: [], people: [] };
+  var profileVendor = '', profileSelectionApplied = false;
 
   var STATUS = {
     draft: "Draft", negotiation: "In negotiation", active: "Active", suspended: "Suspended", expired: "Expired",
@@ -100,6 +101,7 @@
   function personRef(principal) { return String(principal || "").replace(/@/g, ".at.").slice(0, 128); }
   function personName(refValue) {
     var p = S.people.filter(function (x) { return personRef(x.value) === refValue; })[0];
+    if (!p && /^(?:contract|tpc|tpl|tpi)-principal-[a-f0-9]+$/.test(String(refValue || ""))) { return "Recorded owner"; }
     return p ? p.label : words(String(refValue || "").replace(/^user:/, "").replace(/\.at\./, "@"));
   }
   function vendorName(id) { var v = S.vendors.filter(function (x) { return x.vendor_id === id; })[0]; return v ? v.display_label : "A vendor"; }
@@ -137,6 +139,13 @@
       fill(F("vendor_id"), vendorOptions, false);
       fill(F("owner_ref"), peopleOptions, false);
       fill(F("business_owner_ref"), peopleOptions, false);
+      if (!profileSelectionApplied) {
+        var query = new URLSearchParams(global.location.search);
+        var actual = S.vendors.find(function (v) { return query.get('registered_vendor') === v.register_vendor_id || query.get('vendor_id') === v.vendor_id; });
+        if (actual) { profileVendor = actual.vendor_id; filters.elements.namedItem('vendor_id').value = profileVendor; F('vendor_id').value = profileVendor; }
+        else if (query.get('registered_vendor') || query.get('vendor_id')) { say(listStatus, 'This vendor has no currently usable linked Intelligence identity. Open its registered vendor profile before choosing a contract identity.'); }
+        profileSelectionApplied = true;
+      }
     });
   }
   function refreshStatus() {
@@ -339,6 +348,7 @@
     if (!S.vendors.length) { say(formStatus, "Add the vendor on the Third-party Intelligence page first; contracts are linked to those vendors."); }
     F("record_kind").disabled = !!r;
     F("vendor_id").disabled = !!r;
+    if (!r && profileVendor && S.vendors.some(function (v) { return v.vendor_id === profileVendor; })) { F('vendor_id').value = profileVendor; }
     document.getElementById("tpc-editor-title").textContent = r ? "Edit " + words(r.title_ref) : "Add a contract or engagement";
     if (r) {
       var l = r.lifecycle || {};
