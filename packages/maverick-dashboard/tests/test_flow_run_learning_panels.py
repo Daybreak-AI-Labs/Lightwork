@@ -40,7 +40,10 @@ def test_local_no_sign_in_hides_inaccessible_learning_panels(page):
 
 
 def test_signed_in_viewer_sees_only_enabled_learning_controls(page):
-    off = page(signed_in=True, capture=False)
-    assert 'id="le-card"' in off and 'id="lx-card"' not in off
-    on = page(signed_in=True, capture=True)
-    assert 'id="le-card"' in on and 'id="lx-card"' in on
+    # The keep-as-example panel always explains its current state; its
+    # enrolment controls stay hidden until the run's status says it can be kept.
+    for capture in (False, True):
+        html = page(signed_in=True, capture=capture)
+        assert 'id="le-card"' in html and 'id="lx-card"' in html
+        assert '<div id="lx-enroll" hidden>' in html
+        assert "Checking whether this run can be an example" in html
