@@ -2337,3 +2337,53 @@ window.mvReveal = function (element, options) {
   if (!element.matches('input, button, select, textarea, a[href], [tabindex]')) element.tabIndex = -1;
   element.focus({preventScroll: true});
 };
+
+// The Copilot's scripts (lightwork-product-operations.js, then
+// lightwork-copilot.js) are not part of the page's first download: on a slow
+// phone link they took bandwidth from the stylesheet and the first paint.
+// They load once the page is idle, or at once when someone opens the Copilot
+// first (its button, or any [data-copilot-toggle]); that open waits for them
+// and then happens. A selection a page makes meanwhile is kept for them in
+// window.LightworkCopilotEarlySelection.
+(function () {
+  'use strict';
+  var fab = document.getElementById('mv-copilot-fab');
+  if (!fab || !fab.dataset.copilotSrc || !fab.dataset.operationsSrc) return;
+  var state = 'idle', pending = null;
+  document.addEventListener('lightwork:copilot-selection', function (event) {
+    window.LightworkCopilotEarlySelection = event.detail || null;
+  });
+  function ready() {
+    state = 'ready'; fab.removeAttribute('aria-busy');
+    if (pending) { var opener = pending; pending = null; opener.click(); }
+  }
+  function loaded() { return state === 'ready' || fab.dataset.copilotReady === 'true'; }
+  function load() {
+    if (state !== 'idle' || loaded()) return;
+    state = 'loading';
+    var scripts = [fab.dataset.operationsSrc, fab.dataset.copilotSrc].map(function (src) {
+      var script = document.createElement('script');
+      script.src = src; script.async = false;   // in order, like the deferred tags they replace
+      document.head.appendChild(script);
+      return script;
+    });
+    var last = scripts[scripts.length - 1];
+    last.addEventListener('load', ready);
+    last.addEventListener('error', function () { state = 'idle'; pending = null; fab.removeAttribute('aria-busy'); });
+  }
+  window.mvLoadCopilot = load;
+  document.addEventListener('click', function (event) {
+    if (loaded()) return;
+    var target = event.target instanceof Element ? event.target : null;
+    var opener = target && target.closest('#mv-copilot-fab, [data-copilot-toggle]');
+    if (!opener) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    pending = opener; fab.setAttribute('aria-busy', 'true');
+    load();
+  }, true);
+  function whenIdle() {
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(load, {timeout: 3000});
+    else setTimeout(load, 1500);
+  }
+  if (document.readyState === 'complete') whenIdle(); else window.addEventListener('load', whenIdle, {once: true});
+})();

@@ -21,17 +21,15 @@
   <title>{% block title %}Lightwork{% endblock %}</title>
   {#- One stylesheet holds the whole shell (a phone pays one round trip before
       the first paint). The Copilot and its native controls never take part in
-      the first paint: deferred, and first among deferred scripts, so page
-      scripts still find them ready. -#}
+      the first paint: lightwork-ui.js loads them when the page is idle, or
+      when the Copilot is first opened (that press is kept, see _copilot.html). -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
   {#- The two parser-blocking scripts at the end of the page are requested
-      next, so a slow phone link carries them before the font and the
-      deferred scripts (test_shell_first_paint). -#}
+      next, so a slow phone link carries them before the font
+      (test_shell_first_paint). -#}
   <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
   {% include "_journey_i18n.html" %}
   <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
-  <script src="{{ asset('lightwork-product-operations.js') }}" defer></script>
-  <script src="{{ asset('lightwork-copilot.js') }}" defer></script>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
     /* Operator-defined themes ([dashboard] themes in config.toml). Values

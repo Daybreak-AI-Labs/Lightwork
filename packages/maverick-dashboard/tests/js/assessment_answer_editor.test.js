@@ -35,7 +35,7 @@ function fixture() {
 }
 const record = () => ({ id: "record", revision: 1, status: "pending_review", question_text: { first: { text: "Has this been checked?" }, second: { text: "Is there supporting evidence?" } }, answers: {}, followups: [] });
 function editor(rec = record()) {
-  const ui = fixture(), source = fs.readFileSync(path.join(templates, "_assessment_review.html"), "utf8");
+  const ui = fixture(), source = fs.readFileSync(path.join(templates, "../static/lightwork-assessment-review.js"), "utf8");
   vm.runInContext(source.slice(source.indexOf("    function renderAnswerEditor("), source.indexOf("    const RISK_RANK")), ui.context);
   ui.context.renderAnswerEditor(rec);
   ui.form = ui.context.body.children[0].children.find(child => child.tag === "form");
@@ -88,7 +88,7 @@ test("a delayed answer response cannot repaint a different assessment", async ()
 });
 
 test("unsaved questionnaire changes cannot be mistaken for the answers being approved", async () => {
-  const ui = editor(), source = fs.readFileSync(path.join(templates, "_assessment_review.html"), "utf8");
+  const ui = editor(), source = fs.readFileSync(path.join(templates, "../static/lightwork-assessment-review.js"), "utf8");
   vm.runInContext(source.slice(source.indexOf("    async function decide("), source.indexOf("    approveBtn.addEventListener(")), ui.context);
   ui.get("arv-answer-value").value = "yes"; ui.get("arv-answer-value").listeners.input();
   await ui.context.decide("approved");
@@ -131,7 +131,7 @@ test("the page header's Start an assessment opens the intake form", () => {
 });
 
 test("risk summary distinguishes empty, unresolved and complete questionnaires without claiming zero risks are controlled", () => {
-  const source = fs.readFileSync(path.join(templates, "_assessment_review.html"), "utf8");
+  const source = fs.readFileSync(path.join(templates, "../static/lightwork-assessment-review.js"), "utf8");
   for (const state of ["empty", "unknown", "complete"]) {
     const ui = fixture();
     ui.context.currentQuestions = {}; ui.context.riskEl = ui.get("arv-risk");
@@ -157,7 +157,7 @@ test("risk summary distinguishes empty, unresolved and complete questionnaires w
 });
 
 test("approving an incomplete questionnaire requires explicit acknowledgment and keeps canceled work unchanged", async () => {
-  const ui = fixture(), confirmations = [], source = fs.readFileSync(path.join(templates, "_assessment_review.html"), "utf8");
+  const ui = fixture(), confirmations = [], source = fs.readFileSync(path.join(templates, "../static/lightwork-assessment-review.js"), "utf8");
   ui.context.currentCompletion = { answered: 0, total: 2, incomplete: true };
   ui.context.mvConfirm = async message => { confirmations.push(message); return false; };
   vm.runInContext(source.slice(source.indexOf("    async function decide("), source.indexOf("    approveBtn.addEventListener(")), ui.context);
@@ -167,7 +167,7 @@ test("approving an incomplete questionnaire requires explicit acknowledgment and
 });
 
 test("incomplete approval acknowledgment cannot transfer to a different assessment opened while it is pending", async () => {
-  const ui = fixture(), source = fs.readFileSync(path.join(templates, "_assessment_review.html"), "utf8");
+  const ui = fixture(), source = fs.readFileSync(path.join(templates, "../static/lightwork-assessment-review.js"), "utf8");
   ui.context.currentCompletion = { answered: 0, total: 2, incomplete: true };
   ui.context.mvConfirm = async () => { ui.context.currentId = "another-record"; ui.context.viewGeneration++; return true; };
   vm.runInContext(source.slice(source.indexOf("    async function decide("), source.indexOf("    approveBtn.addEventListener(")), ui.context);

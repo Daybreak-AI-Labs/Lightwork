@@ -394,11 +394,14 @@
     note.textContent = 'The selected work changed. Earlier questions and drafts were cleared.';
     if (controller()) controller().invalidate();
   });
-  document.addEventListener('lightwork:copilot-selection', function (event) {
-    var value = event.detail && event.detail.selection;
+  function selectFrom(detail) {
+    var value = detail && detail.selection;
     var id = value && value.kind === 'goal' && (value.goal_id || value.id);
     selectedGoalId = Number.isSafeInteger(id) && id > 0 ? id : null;
-  });
+  }
+  document.addEventListener('lightwork:copilot-selection', function (event) { selectFrom(event.detail); });
+  // Loaded after the page (lightwork-ui.js): start from a selection the page made meanwhile.
+  if (window.LightworkCopilotEarlySelection) selectFrom(window.LightworkCopilotEarlySelection);
   function liveReadQuestion(message) {
     var normalized = message.toLowerCase().trim().replace(/[?!. ]+$/, '').replace(/\s+/g, ' ');
     return /^(?:what (?:needs|requires) (?:my |your )?approval|(?:show(?: me)?|list) (?:my )?(?:pending )?approvals|do i have (?:any )?(?:pending )?approvals)(?: please)?$/.test(normalized) ||
@@ -445,6 +448,7 @@
   }
 
   fab.addEventListener("click", function () { panel.hidden ? open() : close(); });
+  fab.dataset.copilotReady = "true";   // lightwork-ui.js stops holding its clicks
   pageTriggers.forEach(function (trigger) {
     trigger.addEventListener("click", function () {
       if (document.body.classList.contains("cs-drawer-open")) {

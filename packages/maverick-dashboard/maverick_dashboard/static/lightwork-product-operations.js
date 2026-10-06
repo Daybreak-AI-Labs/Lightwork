@@ -8,6 +8,9 @@
   if (!panel || !host || !status || !buttons || !formHost) return;
   var root = '/api/v1/copilot/product-operations', generation = 0, busy = false, catalog = null, selected = null;
   var uncertainty = '', overrideSelection = null, pendingRequests = new Set();
+  // Loaded after the page (lightwork-ui.js): start from a selection the page made meanwhile.
+  var early = window.LightworkCopilotEarlySelection;
+  if (early && early.selection) overrideSelection = early.selection;
   function cancelRequests() { pendingRequests.forEach(function (controller) { controller.abort(); }); pendingRequests.clear(); }
   function node(tag, text, parent) { var element = document.createElement(tag); if (text !== undefined) element.textContent = String(text); if (parent) parent.appendChild(element); return element; }
   function clear(element) { element.replaceChildren(); }

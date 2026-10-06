@@ -211,7 +211,9 @@
   // (complete text behind a toggle — the real review home is the shared
   // pop-out), and Review leads the decision row.
   (function() {
-    if (!window.mvAssessmentReview) return;
+    // The pop-out's code (lightwork-assessment-review.js) is deferred: shape
+    // the rows now, before the first paint, and open it on a later click.
+    if (!document.getElementById('arv-dialog')) return;
     function el(tag, cls, text) {
       const n = document.createElement(tag);
       if (cls) n.className = cls;
@@ -240,7 +242,7 @@
       const cell = item.querySelector('.approval-actions');
       const btn = el('button', 'btn approval-review', 'Review assessment');
       btn.type = 'button';
-      btn.addEventListener('click', function () { window.mvAssessmentReview.open(assessmentId); });
+      btn.addEventListener('click', function () { if (window.mvAssessmentReview) window.mvAssessmentReview.open(assessmentId); });
       cell.insertBefore(btn, cell.firstChild);
       item.dataset.assessment = assessmentId;
     });
