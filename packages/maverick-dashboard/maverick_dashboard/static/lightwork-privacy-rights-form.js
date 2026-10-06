@@ -103,7 +103,7 @@
           // until the Undo time is up, then the form is deleted.
           var card = del.closest('.panel');
           if (card) card.hidden = true;
-          window.mvUndo('Form for ' + p.name + ' deleted. Its page stops working.', {
+          window.mvUndo('Form for {name} deleted. Its page stops working.', { values: {name: p.name},
             action: 'delete the property',
             run: function (keepalive) { return fetch(BASE + '/properties/' + encodeURIComponent(p.slug), { method: 'DELETE', keepalive: keepalive, headers: { Accept: 'application/json' } }); },
             undo: function () { if (card) card.hidden = false; del.focus(); },

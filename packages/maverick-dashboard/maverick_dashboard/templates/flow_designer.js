@@ -2294,7 +2294,7 @@
           rm.addEventListener('click', function () {
             // One action with a way back (CTL-1): removed when Undo ends.
             row.hidden = true;
-            window.mvUndo('“' + t.name + '” removed. The other app can no longer start this flow.', {
+            window.mvUndo('“{name}” removed. The other app can no longer start this flow.', { values: {name: t.name},
               action: 'remove it',
               run: function (keepalive) { return apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE', keepalive: keepalive }); },
               undo: function () { row.hidden = false; rm.focus(); },

@@ -135,3 +135,22 @@ test("the most common deletes use the undo window instead of a question", () => 
   assert.match(skills, /window\.mvUndo\('Skill “' \+ label \+ '” removed\./);
   assert.doesNotMatch(skills, /mvConfirm\('Remove the skill/);
 });
+
+test("the toast's words go through the translator, and the name stays as written", async () => {
+  const dom = new JSDOM(`<script type="application/json" id="lightwork-i18n-data">${JSON.stringify({language: "fr", locale: "fr", catalog: {
+      'Team "{name}" removed. Past tasks stay in your task list.': {text: "Équipe « {name} » retirée. Les tâches passées restent dans votre liste.", lang: "fr"},
+      "Undo": {text: "Annuler", lang: "fr"}, "Restored.": {text: "Rétabli.", lang: "fr"}}})}</script>
+    <div id="mv-toasts"></div><div id="mv-toasts-alert"></div>`, {url: "https://lightwork.test/fleets", runScripts: "outside-only"});
+  const w = dom.window;
+  w.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  w.eval(fs.readFileSync(path.join(root, "static/lightwork-i18n.js"), "utf8"));
+  w.eval(source);
+  w.mvUndo('Team "{name}" removed. Past tasks stay in your task list.', {values: {name: "<b>Ops</b>"}, run: async () => ({ok: true})});
+  const shown = w.document.querySelector(".mv-toast--undo");
+  assert.match(shown.textContent, /^Équipe « <b>Ops<\/b> » retirée\. Les tâches passées restent dans votre liste\. Annuler$/);
+  assert.equal(shown.querySelector("bdi[data-user-content]").textContent, "<b>Ops</b>", "the name is text, never markup");
+  shown.querySelector("button").click();
+  await flush();
+  assert.match(w.document.getElementById("mv-toasts").textContent, /Rétabli\./);
+  w.close();
+});

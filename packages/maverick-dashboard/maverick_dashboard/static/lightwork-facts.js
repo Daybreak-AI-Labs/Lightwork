@@ -158,7 +158,7 @@
       // the Undo time is up. This is not erasure; history follows retention.
       var url = '/api/v1/facts/' + encodeURIComponent(key) + '?' + new URLSearchParams({expected_revision:row.dataset.revision,context:context});
       row.hidden = true;
-      window.mvUndo('"' + key + '" removed from new recall. Recorded versions follow workspace retention; this is not erasure.', {
+      window.mvUndo('“{key}” removed from new recall. Recorded versions follow workspace retention; this is not erasure.', { values: {key: key},
         action: 'remove the fact',
         run: async function (keepalive) { await request(url, {method:'DELETE', keepalive:keepalive}); return {ok:true}; },
         undo: function () { row.hidden = false; button.focus(); },

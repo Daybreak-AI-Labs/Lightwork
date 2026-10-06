@@ -318,7 +318,7 @@
       // removal is sent when the Undo time is up.
       var row = b.closest("tr, li, article");
       if (row) row.hidden = true;
-      window.mvUndo(b.getAttribute("data-name") + " removed from the list. If blocking is on, it will be turned away.", {
+      window.mvUndo("{name} removed from the list. If blocking is on, it will be turned away.", { values: {name: b.getAttribute("data-name")},
         action: "remove this agent",
         run: function (keepalive) { return fetch("/api/v1/trust/agents/" + encodeURIComponent(id), { method: "DELETE", keepalive: keepalive, headers: { Accept: "application/json" } }); },
         undo: function () { if (row) row.hidden = false; b.focus(); },

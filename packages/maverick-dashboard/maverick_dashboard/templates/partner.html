@@ -128,7 +128,7 @@
         // One action with a way back (CTL-1): the client leaves the list at
         // once; its saved address and access key are deleted when Undo ends.
         tr.hidden = true;
-        window.mvUndo(t.name + ' removed from your client list. The client\'s own setup is not touched.', {
+        window.mvUndo('{name} removed from your client list. The client’s own setup is not touched.', { values: {name: t.name},
           action: 'remove the client',
           run: function (keepalive) { return fetch('/api/v1/partner/tenants/' + t.id, {method: 'DELETE', keepalive: keepalive}); },
           undo: function () { tr.hidden = false; rm.focus(); },

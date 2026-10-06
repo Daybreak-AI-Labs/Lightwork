@@ -364,7 +364,7 @@
       // is deleted, at the revision shown, when the Undo time is up.
       var button = this;
       detailCard.hidden = true;
-      mvUndo('Assessment for ' + a.subject + ' deleted.', {
+      mvUndo('Assessment for {subject} deleted.', { values: {subject: a.subject},
         action: 'delete the assessment',
         run: function (keepalive) {
           return jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)

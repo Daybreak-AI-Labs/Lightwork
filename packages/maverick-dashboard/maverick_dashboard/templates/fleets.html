@@ -316,7 +316,7 @@
           // once and is deleted when the Undo time is up.
           const row = btn.closest('.panel');
           if (row) row.hidden = true;
-          mvUndo('Team "' + label + '" removed. Past tasks stay in your task list.', {
+          mvUndo('Team “{name}” removed. Past tasks stay in your task list.', { values: {name: label},
             action: 'remove the team',
             run: function (keepalive) { return fetch('/api/v1/fleets/' + encodeURIComponent(btn.dataset.fleet), { method: 'DELETE', keepalive: keepalive }); },
             undo: function () { if (row) row.hidden = false; btn.focus(); },

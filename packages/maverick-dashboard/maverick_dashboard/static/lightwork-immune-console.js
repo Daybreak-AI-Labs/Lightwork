@@ -237,7 +237,7 @@
     var pick = document.querySelector('.ic-pick[value="' + String(Number(g.id)) + '"]');
     var row = pick ? pick.closest("tr") : null;
     if (row) { row.hidden = true; }
-    window.mvUndo("Recording for “" + g.title + "” deleted. Past re-run results are kept.", {
+    window.mvUndo("Recording for “{title}” deleted. Past re-run results are kept.", { values: {title: g.title},
       action: "delete the recording",
       run: function (keepalive) { return fetch("/api/v1/immune/twin/" + encodeURIComponent(g.id), { method: "DELETE", keepalive: keepalive, headers: { Accept: "application/json" } }); },
       undo: function () { if (row) { row.hidden = false; } },

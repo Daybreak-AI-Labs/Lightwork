@@ -478,7 +478,7 @@
     // One action with a way back (CTL-1): publishing to this target stops
     // when the Undo time is up.
     if (row) row.hidden = true;
-    window.mvUndo("Stopped publishing approved notices to " + window.mvHuman(target.binding_id) + ".", {
+    window.mvUndo("Stopped publishing approved notices to {target}.", { values: {target: window.mvHuman(target.binding_id)},
       action: "remove the target",
       run: async function () {
         var result = await call("DELETE", "/" + encodeURIComponent(target.binding_id));
