@@ -30,7 +30,9 @@ def _money(value: float) -> str:
     return f"${value:,.2f}"
 
 
-def _practice_world():
+def practice_world():
+    """The practice world database, or ``None`` when nothing was practised
+    (it is never created by reading) or practice is unavailable."""
     from . import practice
     from .world_model import default_db_path, open_world
 
@@ -52,7 +54,7 @@ def summary(owner: str | None = None, *, since: float | None = None, until: floa
     if practice.active():
         return None
     try:
-        world = _practice_world()
+        world = practice_world()
         if world is None:
             return None
         midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
@@ -128,4 +130,5 @@ def export_row(line: dict | None, width: int) -> list[str] | None:
     return (row + [""] * width)[:width]
 
 
-__all__ = ["NOT_COUNTED", "export_row", "label", "month_bounds", "period_bounds", "provider_share", "summary", "window"]
+__all__ = ["NOT_COUNTED", "export_row", "label", "month_bounds", "period_bounds", "practice_world", "provider_share",
+           "summary", "window"]

@@ -64,6 +64,8 @@
       list(targets[3],data.active_goals.slice(0,12).map(function(row){return {label:row.title,href:'/chat/goal/'+row.id,detail:'In progress'};}),'No active permitted tasks.');
       node('p',data.oversight_notice,targets[4]);if(data.totals.pending>data.requests.length)node('p','Showing recent requests. Open Approvals to review the full readable queue.',targets[4]);if(data.totals.stop_requests>data.stop_requests.length)node('p','Showing recent stop records. Open the original task to review its stop request.',targets[4]);
     }
+    // Practice AI calls cost real provider money: their own line, never in the totals above.
+    if (data.practice) { var practiceLine=node('p',data.practice.text,targets[4]);practiceLine.className='practice-cost';practiceLine.setAttribute('data-practice-cost',''); }
     status.textContent='Checked '+new Date(data.generated_at*1000).toLocaleString()+'. '+data.scope_notice;
   }
   async function load() {
