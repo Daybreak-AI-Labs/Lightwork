@@ -43,7 +43,10 @@ def test_accepted_api_start_reconciles_without_provider_and_without_second_dispa
     monkeypatch.setattr(api, "require_provider_or_400", lambda: pytest.fail("receipt read must not require a provider"))
     receipt = client.get("/api/v1/goal-submissions/receipt", headers=headers)
     assert receipt.status_code == 200 and receipt.headers["cache-control"] == "no-store"
-    assert receipt.json() == {"state": "accepted", "submission_state": "dispatching", "goal": {
+    body = receipt.json()
+    # The receipt also names the limits the accepted task runs under.
+    assert set(body.pop("limits")) == {"max_depth", "max_dollars", "max_wall_seconds"}
+    assert body == {"state": "accepted", "submission_state": "dispatching", "goal": {
         "id": goal_id, "status": "pending"}, "replayed": True, "execution_confirmed": False}
     assert len(runs) == len(world.list_goals()) == 1
 
