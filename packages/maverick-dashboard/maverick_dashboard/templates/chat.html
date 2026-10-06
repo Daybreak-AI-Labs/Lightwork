@@ -122,7 +122,10 @@
 {% block dock %}
 {% from "_composer_recovery.html" import composer_recovery with context %}
 {% call composer_recovery(can_create_goal and draft_recovery_context) %}
-<form method="post" action="/chat/send" data-product-validation class="composer cs-anim" enctype="multipart/form-data">
+{% from "_form_field.html" import error_summary %}
+<form method="post" action="/chat/send" data-product-validation data-mv-validate class="composer cs-anim" enctype="multipart/form-data">
+  {# CTL-3: the shared form-field pattern -- the problem next to its field and in a summary that takes focus. #}
+  {{ error_summary('composer-errors') }}
   <input type="hidden" name="composer_mode" value="message">
   <input type="hidden" name="connection_references" value="[]">
   <input type="hidden" name="submission_key" value="{{ submission_key }}" />
@@ -134,7 +137,7 @@
     rows="2"
     placeholder="{{ ut('Message Lightwork…') }}"
     aria-label="{{ ut('Describe a task for Lightwork to do') }}"
-    required
+    required data-error-required="{{ ut('Describe the task first, for example: Summarise this week’s open invoices.') }}"
     {% if not compose_form %}autofocus{% endif %}
   >{{ prefill_title or '' }}</textarea>
   <details{% if prefill_description %} open{% endif %}>

@@ -334,6 +334,10 @@
       return;
     }
     if (root.dataset.saving === '1') return;
+    // Reset and inherit replace what was typed, so only a save of values is checked.
+    var problems = changes.some(function (c) { return 'value' in c; }) ? cellProblems(busyRows) : [];
+    if (problems.length) { showCellProblems(problems); return; }
+    clearCellProblems();
     var revision = busyRows.length ? busyRows[0].dataset.revision : '';
     var disabled = [];
     root.dataset.saving = '1';
@@ -999,7 +1003,80 @@
     }
     input.setAttribute('data-cell-input', '');
     input.setAttribute('aria-label', column.label + ' ' + where + (column.unit ? ' (' + column.unit + ')' : ''));
+    input.setAttribute('data-cell-label', '\u201c' + column.label + '\u201d ' + where);
+    if (column.required && /^(select|pick|number|path|program)$|^$/.test(kind || '') && input.type !== 'checkbox') input.required = true;
+    if (kind === 'number' && column.integer) input.step = '1';
     td.appendChild(input);
+  }
+  // CTL-3: a value in a table that can't be saved (missing, out of range, not
+  // a whole number) is named next to its row and in a summary at the top that
+  // takes focus; the page title starts with "Error: " while it remains, and
+  // nothing typed is cleared.
+  var ERROR_PREFIX = 'Error: ';
+  function cellMessage(c) {
+    var label = c.getAttribute('data-cell-label') || c.getAttribute('aria-label') || 'this value';
+    var v = c.validity || {};
+    if (v.valueMissing) return (c.tagName === 'SELECT' ? 'Choose ' : 'Fill in ') + label + '.';
+    if (v.badInput) return 'Enter ' + label + ' as a number.';
+    if ((v.rangeUnderflow || v.rangeOverflow) && c.min && c.max) return 'Enter ' + label + ' from ' + c.min + ' to ' + c.max + '.';
+    if (v.rangeUnderflow) return 'Enter ' + label + ' of at least ' + c.min + '.';
+    if (v.rangeOverflow) return 'Enter ' + label + ' of no more than ' + c.max + '.';
+    if (v.stepMismatch) return 'Enter a whole number for ' + label + '.';
+    return 'Check ' + label + '.';
+  }
+  function cellProblems(list) {
+    var found = [];
+    list.forEach(function (row) {
+      row.querySelectorAll('[data-cell-input]').forEach(function (c) {
+        if (c.disabled || !c.checkValidity || c.checkValidity()) return;
+        found.push({row: row, control: c, message: cellMessage(c)});
+      });
+    });
+    return found;
+  }
+  var cellIds = 0;
+  function clearCellProblems() {
+    var box = document.getElementById('settings-all-errors');
+    if (box) { box.hidden = true; box.replaceChildren(); }
+    root.querySelectorAll('[data-cell-input][aria-invalid="true"]').forEach(function (c) { c.removeAttribute('aria-invalid'); });
+    if (document.title.indexOf(ERROR_PREFIX) === 0) document.title = document.title.slice(ERROR_PREFIX.length);
+  }
+  function showCellProblems(found) {
+    clearCellProblems();
+    var box = document.getElementById('settings-all-errors');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'settings-all-errors'; box.className = 'mv-error-summary'; box.tabIndex = -1;
+      box.setAttribute('data-mv-error-summary', ''); box.setAttribute('aria-labelledby', 'settings-all-errors-title');
+      var groups = document.getElementById('settings-all-groups');
+      if (groups && groups.parentNode) groups.parentNode.insertBefore(box, groups); else root.insertBefore(box, root.firstChild);
+    }
+    var title = document.createElement('h2');
+    title.className = 'mv-error-summary__title'; title.id = 'settings-all-errors-title'; title.textContent = 'There is a problem';
+    var list = document.createElement('ul');
+    list.className = 'mv-error-summary__list';
+    var byRow = [];
+    found.forEach(function (problem) {
+      var c = problem.control;
+      if (!c.id) { cellIds += 1; c.id = 'settings-all-cell-' + cellIds; }
+      c.setAttribute('aria-invalid', 'true');
+      var status = problem.row.querySelector('[data-row-status]');
+      if (status) {
+        if (!status.id) { cellIds += 1; status.id = 'settings-all-row-status-' + cellIds; }
+        var described = (c.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+        if (described.indexOf(status.id) < 0) c.setAttribute('aria-describedby', described.concat(status.id).join(' '));
+      }
+      var entry = byRow.filter(function (item) { return item.row === problem.row; })[0];
+      if (entry) entry.messages.push(problem.message); else byRow.push({row: problem.row, messages: [problem.message]});
+      var item = document.createElement('li'), link = document.createElement('a');
+      link.href = '#' + c.id; link.textContent = problem.message;
+      item.appendChild(link); list.appendChild(item);
+    });
+    byRow.forEach(function (entry) { say(entry.row, entry.messages.join(' ') + ' Nothing was saved.'); });
+    box.replaceChildren(title, list);
+    box.hidden = false;
+    if (document.title.indexOf(ERROR_PREFIX) !== 0) document.title = ERROR_PREFIX + document.title;
+    box.focus();
   }
   function addGridRow(row, entry) {
     var state = gridState(row);

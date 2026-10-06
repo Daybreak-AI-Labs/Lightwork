@@ -225,3 +225,168 @@ test("Agent Factory: saving without a name or instructions points to each field 
   assert.deepEqual(calls, [], "Check settings also waits for the missing answers");
   w.close();
 });
+
+// The real form markup from a template, with the Jinja reduced to what the browser sees.
+function formFrom(name, id) {
+  const source = template(name), start = source.indexOf(`<form id="${id}"`) >= 0 ? source.indexOf(`<form id="${id}"`)
+    : source.search(new RegExp(`<form[^>]*id="${id}"`));
+  assert.ok(start >= 0, `${name} has no form #${id}`);
+  return source.slice(start, source.indexOf("</form>", start) + "</form>".length)
+    .replace(/\{\{\s*error_summary\('([^']+)'\)\s*\}\}/g, '<div class="mv-error-summary" id="$1" data-mv-error-summary tabindex="-1" hidden></div>')
+    .replace(/\s*lang="\{\{[^}]*\}\}"/g, "")
+    .replace(/\{\{\s*u[it]\((['"])(.*?)\1\)\s*\}\}/g, "$2")
+    .replace(/\{#[\s\S]*?#\}/g, "").replace(/\{%[\s\S]*?%\}/g, "").replace(/\{\{[\s\S]*?\}\}/g, "");
+}
+const focusId = doc => doc.activeElement && doc.activeElement.id;
+
+test("Vendor onboarding: a new request with missing answers points to each one and keeps the vendor name", () => {
+  const w = page("https://lightwork.test/vendor-onboarding", formFrom("vendor_onboarding.html", "vo-intake"), []);
+  const doc = w.document, form = doc.getElementById("vo-intake");
+  let sent = 0;
+  form.addEventListener("submit", event => { event.preventDefault(); sent += 1; });
+  doc.getElementById("vo-vendor").value = "Acme Analytics";
+  form.requestSubmit();
+  assert.equal(sent, 0);
+  assert.deepEqual(summaryLinks(doc), [
+    ["#vo-project", "Enter the Jira project's short name, for example VEND."],
+    ["#vo-purpose", "Say what you plan to use this vendor for, in a sentence or two."],
+    ["#vo-due", "Choose the date you need the review by."]]);
+  assert.equal(focusId(doc), "vo-intake-errors");
+  assert.match(doc.title, /^Error: /);
+  assert.equal(doc.getElementById("vo-project").getAttribute("aria-invalid"), "true");
+  assert.equal(doc.getElementById("vo-vendor").value, "Acme Analytics");
+  w.close();
+});
+
+test("Vendor setup: saving without an owner or Jira connection says which is missing", () => {
+  const w = page("https://lightwork.test/vendor-onboarding", formFrom("vendor_onboarding.html", "vs-form"), []);
+  const doc = w.document, form = doc.getElementById("vs-form");
+  form.querySelectorAll("select, input, button").forEach(control => { control.disabled = false; });
+  form.addEventListener("submit", event => event.preventDefault());
+  form.requestSubmit();
+  assert.deepEqual(summaryLinks(doc), [
+    ["#vs-resource-owner", "Choose who owns vendor reviews in this workspace."],
+    ["#vs-ticket", "Choose the Jira connection that vendor tickets are created in."]]);
+  assert.equal(focusId(doc), "vs-form-errors");
+  w.close();
+});
+
+test("Privacy request form setup: missing and badly formed answers are explained next to each field", () => {
+  const w = page("https://lightwork.test/privacy/rights-form", formFrom("privacy_rights_form.html", "prf-property-form"), []);
+  const doc = w.document, form = doc.getElementById("prf-property-form");
+  let sent = 0;
+  form.addEventListener("submit", event => { event.preventDefault(); sent += 1; });
+  form.requestSubmit();
+  assert.deepEqual(summaryLinks(doc).map(([href]) => href), ["#prf-slug", "#prf-name", "#prf-organisation", "#prf-contact-email"]);
+  assert.equal(summaryLinks(doc)[0][1], "Enter a link name, for example shop.");
+  assert.equal(focusId(doc), "prf-property-errors");
+  doc.getElementById("prf-slug").value = "Shop!";
+  doc.getElementById("prf-name").value = "Acme Shop";
+  doc.getElementById("prf-organisation").value = "Acme Ltd";
+  doc.getElementById("prf-contact-email").value = "privacy";
+  form.requestSubmit();
+  assert.deepEqual(summaryLinks(doc), [
+    ["#prf-slug", "Use 2 to 48 lowercase letters, digits and hyphens, starting with a letter or digit, for example acme-shop."],
+    ["#prf-contact-email", "Enter an email address like privacy@example.com."]]);
+  assert.equal(doc.getElementById("prf-name").value, "Acme Shop");
+  assert.equal(sent, 0);
+  w.close();
+});
+
+test("Privacy request email templates: an empty subject or message is caught before saving", () => {
+  const w = page("https://lightwork.test/privacy/rights-form", formFrom("privacy_rights_form.html", "prf-template-form"), []);
+  const doc = w.document, form = doc.getElementById("prf-template-form");
+  form.addEventListener("submit", event => event.preventDefault());
+  form.requestSubmit();
+  assert.deepEqual(summaryLinks(doc).map(([href]) => href), ["#prf-subject", "#prf-body"]);
+  assert.equal(focusId(doc), "prf-template-errors");
+  w.close();
+});
+
+test("Workflow builder: the template and playbook editors use the shared pattern before saving", () => {
+  const body = formFrom("workflow_builder.html", "wf-template-form") + formFrom("workflow_builder.html", "pb-form");
+  const w = page("https://lightwork.test/workflow-builder", body, []);
+  const doc = w.document;
+  doc.getElementById("wf-steps").value = "1. Gather the news";
+  doc.getElementById("wf-budget").value = "-1";
+  assert.equal(w.mvFieldErrors.validate(doc.getElementById("wf-template-form")), false);
+  assert.deepEqual(summaryLinks(doc), [
+    ["#wf-title", "Give the workflow a title, for example Weekly competitor summary."],
+    ["#wf-budget", "Enter a spending limit of $0 or more with at most two decimal places, or leave it empty for no limit."]]);
+  assert.equal(focusId(doc), "wf-template-errors");
+  assert.equal(doc.getElementById("wf-steps").value, "1. Gather the news");
+  assert.equal(w.mvFieldErrors.validate(doc.getElementById("pb-form")), false);
+  assert.equal(focusId(doc), "pb-form-errors");
+  // Each Save checks its editor before anything is collected or sent.
+  const source = template("workflow_builder.html");
+  const save = source.slice(source.indexOf("saveBtn.addEventListener('click'"));
+  assert.ok(save.indexOf("formReady(document.getElementById('wf-template-form'))") < save.indexOf("collectTemplate()"));
+  const pbSave = source.slice(source.indexOf("pbSaveBtn.addEventListener('click'"));
+  assert.ok(pbSave.indexOf("formReady(document.getElementById('pb-form'))") < pbSave.indexOf("fetch("));
+  w.close();
+});
+
+test("Chat composer: starting with no task points to the task box and keeps the added details", () => {
+  const body = `<form method="post" action="/chat/send" data-product-validation data-mv-validate class="composer">
+      <div class="mv-error-summary" id="composer-errors" data-mv-error-summary tabindex="-1" hidden></div>
+      <fieldset class="composer__controls"><legend>Start governed AI work</legend>
+      <textarea name="title" id="composer-title" aria-label="Describe a task for Lightwork to do" required
+        data-error-required="Describe the task first, for example: Summarise this week’s open invoices."></textarea>
+      <details><summary>Add details</summary><textarea name="description" aria-label="Extra details for the agent (optional)"></textarea></details>
+      <button type="submit" id="send-btn">Start task</button></fieldset></form>`;
+  const w = page("https://lightwork.test/chat", body, []);
+  const doc = w.document, form = doc.querySelector("form.composer");
+  assert.ok(template("chat.html").includes('data-product-validation data-mv-validate class="composer'), "chat.html uses the pattern");
+  let sent = 0;
+  form.addEventListener("submit", event => { event.preventDefault(); sent += 1; });
+  form.querySelector('[name="description"]').value = "Only the EU entities";
+  form.requestSubmit();
+  assert.equal(sent, 0);
+  assert.deepEqual(summaryLinks(doc), [["#composer-title", "Describe the task first, for example: Summarise this week’s open invoices."]]);
+  assert.equal(focusId(doc), "composer-errors");
+  assert.equal(form.querySelector('[name="description"]').value, "Only the EU entities");
+  w.close();
+});
+
+test("Public privacy request: a missing or wrong email and quick-check answer are listed, focused and kept", async () => {
+  const strings = fs.readFileSync(path.join(root, "rights_form_strings.py"), "utf8");
+  const EN = {};
+  for (const m of strings.matchAll(/^\s*"(\w+)":\s*"((?:[^"\\]|\\.)*)",\s*$/gm)) EN[m[1]] = JSON.parse(`"${m[2]}"`);
+  const source = template("rights_form.html")
+    .replace(/\{% for j in form\.jurisdictions %\}[\s\S]*?\{% endfor %\}/, '<option value="eu_gdpr" data-rights="access,deletion" selected>EU</option>')
+    .replace(/\{% for key, label in form\.request_type_labels\.items\(\) %\}[\s\S]*?\{% endfor %\}/, '<option value="access">Access</option>')
+    .replace(/\{\{\s*rf\.(\w+)\s*\|\s*tojson\s*\}\}/g, (_m, k) => JSON.stringify(EN[k] || ""))
+    .replace(/\{\{\s*rf\.(\w+)[^}]*\}\}/g, (_m, k) => EN[k] || "")
+    .replace(/\{\{\s*form\.challenge\.token\s*\}\}/g, "tok").replace(/\{\{\s*form\.max_message_chars\s*\}\}/g, "2000")
+    .replace(/\{#[\s\S]*?#\}/g, "").replace(/\{%[\s\S]*?%\}/g, "").replace(/\{\{[\s\S]*?\}\}/g, "");
+  const formMarkup = source.slice(source.indexOf('<form id="rf-form"'), source.indexOf("</form>") + 7);
+  const script = source.slice(source.indexOf("'use strict';"), source.lastIndexOf("})();"));
+  const dom = new JSDOM(`<title>Privacy request · Acme Ltd</title><section class="panel rf-wrap" data-api="/api/v1/public/rights/shop/requests">${formMarkup}</section>`,
+    {url: "https://acme.example/rights/shop", runScripts: "outside-only"});
+  const w = dom.window, doc = w.document, calls = [];
+  w.fetch = async (url, init) => { calls.push([url, JSON.parse(init.body)]); return {status: 202, json: async () => ({message: "Check your email."})}; };
+  w.eval("(function () {" + script + "})();");
+  const form = doc.getElementById("rf-form");
+  form.dispatchEvent(new w.Event("submit", {cancelable: true}));
+  const links = () => [...doc.querySelectorAll("#rf-errors:not([hidden]) a")].map(a => [a.getAttribute("href"), a.textContent]);
+  assert.deepEqual(links(), [["#rf-email", EN.error_email_missing], ["#rf-answer", EN.error_answer_missing]]);
+  assert.equal(doc.activeElement.id, "rf-errors");
+  assert.equal(doc.title, "Error: Privacy request · Acme Ltd");
+  assert.equal(doc.getElementById("rf-email").getAttribute("aria-invalid"), "true");
+  assert.match(doc.getElementById("rf-email").getAttribute("aria-describedby"), /^rf-email-error /);
+  assert.deepEqual(calls, []);
+  doc.getElementById("rf-email").value = "pat";
+  doc.getElementById("rf-answer").value = "5";
+  doc.getElementById("rf-name").value = "Pat";
+  form.dispatchEvent(new w.Event("submit", {cancelable: true}));
+  assert.deepEqual(links(), [["#rf-email", EN.error_email_format]]);
+  assert.equal(doc.getElementById("rf-name").value, "Pat");
+  doc.getElementById("rf-email").value = "pat@example.com";
+  form.dispatchEvent(new w.Event("submit", {cancelable: true}));
+  await tick();
+  assert.equal(doc.getElementById("rf-errors").hidden, true);
+  assert.equal(doc.title, "Privacy request · Acme Ltd");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].email, "pat@example.com");
+  w.close();
+});
