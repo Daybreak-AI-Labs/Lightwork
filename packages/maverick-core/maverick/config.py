@@ -1134,6 +1134,11 @@ def get_features() -> dict:
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
         "commitment_viability": cfg.get("commitment_viability", False) is True,
         "commitment_capability_learning": cfg.get("commitment_capability_learning", False) is True,
+        "semantic_rule_reuse": cfg.get("semantic_rule_reuse", False) is True,
+        "recovery_visibility": cfg.get("recovery_visibility", False) is True,
+        "private_task_computation": cfg.get("private_task_computation", False) is True,
+        "portable_competence": cfg.get("portable_competence", False) is True,
+        "work_restructuring": cfg.get("work_restructuring", False) is True,
         "shared_decision_evidence": cfg.get("shared_decision_evidence", False) is True,
         "employee_companions": (
             not config_source_errors() and cfg.get("employee_companions", False) is True

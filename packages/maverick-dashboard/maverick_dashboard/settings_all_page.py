@@ -112,6 +112,7 @@ def _revision(layers: dict[str, Any] | None = None) -> str:
     names.update(name for provider in settings_store.PROVIDERS for name in provider.get("env", ()))
     names.update(config.PROVIDER_KEY_ENV_VARS)
     names.update(config.PROVIDER_BASE_URL_ENV_VARS)
+    names.update(f"{name.upper()}_{row[2].upper()}" for name, row in catalog.CHANNEL_ALLOWLISTS.items())
     names.update(name for name in os.environ if name.startswith("MAVERICK_"))
     # Variable references may be chosen by the installer rather than named in
     # the catalog. Bind their values without ever sending those values out.
@@ -168,6 +169,35 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
     provider = _resolve_provider_field(setting, layers)
     if provider is not None:
         return provider
+    if setting.section.startswith("channels."):
+        name = setting.section.removeprefix("channels.")
+        access = catalog.CHANNEL_ALLOWLISTS.get(name)
+        if access and setting.key == access[2]:
+            # The adapters use a server list only when NO configured list is
+            # present. An explicit [] must remain authoritative and deny all.
+            from maverick.config_resets import apply_to_base
+            from maverick_channels.base import normalize_allowlist
+
+            layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
+            paths = [setting.path]
+            if name == "teams":
+                paths.append((*setting.path[:-1], "allowed_user_ids"))
+            for path in paths:
+                for layer, source in (("tenant", "deployment"), ("operator", "deployment"),
+                                      ("here", "here"), ("base", "installer")):
+                    present, value = catalog.lookup(layers[layer], path)
+                    if present and value is not None:
+                        if not isinstance(value, (list, tuple, set)):
+                            return {"source": source, "locked": True, "value": None, "known": False}
+                        return {"source": source, "locked": source == "deployment",
+                                "value": sorted(normalize_allowlist(value, "")), "known": True}
+            environment = f"{name.upper()}_{setting.key.upper()}"
+            people = sorted(normalize_allowlist(None, environment))
+            if people:
+                return {"source": "deployment", "locked": False,
+                        "source_text": "Set when this Lightwork process starts · save here to replace it",
+                        "value": people, "known": True}
+            return {"source": "default", "locked": False, "value": [], "known": True}
     if _env_locked(setting):
         return {"source": "deployment", "locked": True, "value": None, "known": False}
     if setting.control == "table":
@@ -1302,6 +1332,13 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 writes[marker] = reset_spec(setting)
                 writes[setting.path] = None
                 new = default
+            elif (setting.section.startswith("channels.")
+                    and (access := catalog.CHANNEL_ALLOWLISTS.get(setting.section.removeprefix("channels.")))
+                    and setting.key == access[2]):
+                # Product-default access is nobody, including where a server
+                # environment would otherwise supply a fallback list.
+                writes[setting.path] = []
+                new = []
             elif default is None and base_present:
                 writes[marker] = reset_spec(setting)
                 writes[setting.path] = None

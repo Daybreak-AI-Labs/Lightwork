@@ -1117,3 +1117,96 @@ editable. Save creates an editable draft only. Independent review, approval,
 publication and applying to connected destinations remain separate native
 actions; these checks do not qualify customer evidence acquisition or destination
 delivery.
+
+## October 6 complete local rule behavior and protected work grouping
+
+Recheck changed rules can now compare every declared input of eligible saved
+Yes/No or bounded integer rules before reusing an original case result. The
+ordinary setting and explicit review choice leave this extra calculation off
+by default. Complete typed inputs, outputs and write locations must match;
+current case permission, source policy, included workflows and full independent
+comparison remain mandatory. Unsupported rules take the ordinary rerun. All
+finite checks and both comparison paths share the existing fifteen-second and
+step allowance. Five-state native rules with fourteen and twenty-three retained
+procedures produced identical complete behavior: keeping evidence used seven
+native steps, and the changed-rule recheck used six including the full comparison.
+This records complete bounded behavior, not an efficiency or research advantage.
+Actual interrupted-reply recovery and exact retries performed no additional
+calculation. Refresh preserves the selected case and option; cancelling or
+superseding a protected Copilot handoff preserves the earlier form.
+
+Share preparation safely has ordinary per-case confidentiality and deadline
+choices plus the same protected Copilot form. Two to eight different retained
+cases from one published supported local workflow keep their full inputs and
+results separate. Only exact preparation within an explicitly identical group
+can be shared. Every case also receives its own unchanged complete native run;
+preparation, intermediate custody, source checks and comparisons share one
+allowance. A three-case native journey grouped two cases while keeping the third
+separate, used five grouped computations, and matched ordinary invariant-safe
+batching. Lost replies, withdrawal, final writer expiry, disabled history and
+foreign ownership were exercised. These controls do not cover connected effects,
+approvals, general learned transformations or measured customer savings.
+
+## October 6 portable rule structure and private task answers
+
+Share rule structure exports only approved anonymous operations and typed
+parameter relationships from supported actual retained rule evidence. The
+file chooser binds the receiving person's published target and two to eight
+original cases. Qualification searches every supported adapter, checks the full
+finite target domain and separately reruns each original native case. A qualified
+unpublished answer runs through the unchanged executor under current source and
+permission checks. The local cross-owner journey covered share, download,
+qualification, native and Copilot execution, original recovery and withdrawal.
+Unresolved alternatives and no-fit cases remain unresolved. Source names,
+literal values, thresholds and private cases are excluded from the released file.
+This is equality of the fixed released structural projection, not general
+privacy, cross-installation qualification or superior transfer learning.
+
+Private task checks use an actual owned local task attachment and ordinary
+field/condition controls. The complete reviewed condition set compiles to a
+reduced local decision structure and is checked against direct and indexed
+references over every declared combination. Current inherited source analysis,
+export and purpose rights remain necessary; unknown source policy refuses use.
+Separate release permits only the fixed approved answer bytes. Six fields,
+eight conditions and 65,536 states bound the calculation. Physical-source
+lifetime accounting survives copies, removal and uncertain effects; an
+acknowledgement ends waiting without confirming or refunding the attempt.
+The native page and protected Copilot author the full supported condition set.
+Actual run/release lost replies and retained originals do not recalculate or
+release again. Fixed answer projection does not establish timing, existence or
+cumulative-query privacy.
+
+## October 6 fictional recovery practices and complete channel access
+
+Recovery visibility practices enumerate the complete declared local fictional
+sign-off histories through native votes and activity acknowledgements in fresh
+isolated databases. The native result retained ten reachable situations,
+thirty-one actual local replays and 136 allowance-charged operations. The shortest
+paired histories used two interactions; an additional original local activity
+acknowledgement separated their different obligations. An independent exhaustive
+forty-five-pair comparison matched. UI and Copilot exercise the same complete
+review, original reader and feature setting. Lost replies, a final receipt-write
+gap, actual permission loss/restoration, policy changes, Budget refusal and
+final writer expiry were exercised without repeating an uncertain practice.
+A pending activity record remains unconfirmed; these fictional local checks do
+not attest remote delivery or identify another person's original operation.
+
+Channels and All settings now distinguish an explicit empty people list from
+using the inherited list. Saving nobody keeps the channel closed, including when
+installer, environment or legacy settings contain other people. Teams receives
+the resolved empty set directly. The complete review includes inherited origin
+and current effective access. Native Save/Clear, protected Copilot, typed All
+settings, stale selections, lost replies, final writer expiry, current permission
+loss and 320px layouts were exercised. Unknown channel writes retain their
+metadata and block replay; current-state inspection does not invent an original
+receipt. Connected delivery and remote service restarts remain separate.
+
+The native feature links open the actual Features controls in Settings. The five
+new settings require literal true and have installer questions. Disabled original
+history stays readable under current authorization. Workspace recovery treats
+their custody namespaces as authority-bearing rather than reviving old grants.
+
+Three stale learned-store callers in scheduled skill retirement, hindsight and
+signed operating-record export now resolve the active tenant's actual store,
+preserving explicit custom retirement locations. They no longer import a removed
+process-wide constant or silently omit the tenant's learned skills from export.

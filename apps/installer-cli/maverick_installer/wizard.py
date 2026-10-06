@@ -5183,6 +5183,24 @@ def pick_advanced() -> dict[str, Any]:
             "trust decision for all local workspaces; ordinary updates do not need it.",
             default=False,
         ),
+        "allow_work_restructuring": _q_confirm(
+            "Enable share preparation safely? Check exact shared preparation across permitted original local cases, with separate complete results and deadlines.",
+            default=False,
+        ),
+        "allow_portable_competence": _q_confirm(
+            "Enable share and qualify local rule structures? Release only reviewed anonymous local rule structures. Qualify them against a target workflow and its own permitted cases before any local use.",
+            default=False,
+        ),
+        "allow_private_task_computation": _q_confirm(
+            "Enable private task calculations? Check a bounded rule using a permitted task attachment and release only a separately approved fixed answer. Original data stays private.",
+            default=False,
+        ),
+        "allow_recovery_visibility": _q_confirm(
+            "Enable missing-reply practice? Practice with fictional sign-offs to see when identical visible status hides different original outcomes. No live approval or connected service is used.", default=False,
+        ),
+        "allow_semantic_rule_reuse": _q_confirm(
+            "Enable complete rule-behavior evidence reuse? Check every supported input for a local Yes/No or bounded whole-number rule before reusing prior evidence across a rewrite. All checks count toward the reviewed work allowance.", default=False,
+        ),
         "allow_commitment_capability_learning": _q_confirm(
             "Enable local additional-work qualification from reported capacity, possible additions and scoped trial results? "
             "Accepted commitments stay protected. This does not verify supplier stock or reserve resources.",
@@ -9064,6 +9082,16 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("outcome_measurement = true")
     if advanced.get("allow_commitment_viability") is True:
         _feature_locks.append("commitment_viability = true")
+    if advanced.get("allow_work_restructuring") is True:
+        _feature_locks.append("work_restructuring = true")
+    if advanced.get("allow_portable_competence") is True:
+        _feature_locks.append("portable_competence = true")
+    if advanced.get("allow_private_task_computation") is True:
+        _feature_locks.append("private_task_computation = true")
+    if advanced.get("allow_recovery_visibility") is True:
+        _feature_locks.append("recovery_visibility = true")
+    if advanced.get("allow_semantic_rule_reuse") is True:
+        _feature_locks.append("semantic_rule_reuse = true")
     if advanced.get("allow_commitment_capability_learning") is True:
         _feature_locks.append("commitment_capability_learning = true")
     if advanced.get("allow_shared_decision_evidence") is True:

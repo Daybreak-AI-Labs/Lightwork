@@ -903,9 +903,9 @@ def retire_stale_skills(
     Reversible by moving the file back. Returns the retired skill names.
     """
     from .skill import stats as skill_stats
-    from .skill.distillation_local import _STORE
+    from .skill.distillation_local import _default_store
     default_store = store is None
-    store_dir = Path(store) if store is not None else _STORE
+    store_dir = Path(store) if store is not None else _default_store()
     if not store_dir.is_dir():
         return []
     reasons: dict[str, str] = {}

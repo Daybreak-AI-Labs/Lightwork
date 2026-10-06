@@ -78,6 +78,46 @@ here.
   choices. Independent review, approval, publication and connected-destination
   delivery remain separate operations.
 
+- **Share preparation safely** — guided per-case confidentiality groups and
+  deadlines allow eligible preparation to be shared across two to eight permitted
+  original local-rule cases. Each case also receives a separate complete native
+  run. Work, source checks and receipts share one allowance. Ordinary controls
+  and Copilot preserve case choices and original outcomes; disabled operation
+  retains authorized history. This does not move connected effects or approvals.
+
+- **Share and qualify local rule structures** — export reviewed anonymous
+  operations, input types and repeated-value relationships without source names,
+  literal thresholds or private cases. Import through a file chooser, automatically
+  search target bindings, qualify against target-owned cases and the complete
+  declared finite input domain, then run the qualified local rule in its owned
+  receipt. Qualification does not create or publish an independent workflow.
+
+- **Reuse complete rule-behavior evidence** — optional complete native evaluation
+  of every declared eligible input allows prior case output to be reused across
+  a rule rewrite with identical typed behavior. Both the finite checks and a
+  separate complete workflow comparison count toward the existing work allowance.
+  Current case, source, policy and reuse permission remain mandatory. Unsupported
+  or ambiguous rules use ordinary checking; no research or speed advantage is
+  implied by finite-function equivalence.
+
+- **Private task calculations** — choose an owned native task attachment, enter
+  ordinary bounded conditions, review a local calculation and separately approve
+  its fixed outward answer. Current analysis/export purpose and inherited source
+  permissions remain mandatory. Exact originals, spent uses and one allowed
+  release follow the physical source across copies and removal; uncertain work
+  never repeats automatically. Private names, rows and traces stay local.
+
+- **Understand a missing reply** — use isolated fictional native sign-offs to
+  enumerate the complete declared bounded situations, find shortest histories
+  with identical visible status but different original obligations, and identify
+  a permitted observation that separates them. Original-result readback cannot
+  rerun the practice. This changes no live approval and establishes no remote
+  delivery guarantee or advantage over the matched exhaustive comparison.
+
+These five capabilities are separate, default-off feature choices in ordinary
+Settings and the installation wizard. Their local native qualification and
+limits are recorded in the [operation coverage register](post-install-operation-coverage.md).
+
 - **Run a learned workflow from Copilot** — on a saved workflow's designer page,
   the closed catalog checks the published release and opens the same labelled
   input form as Run. The form pins that release; the native run endpoint rechecks

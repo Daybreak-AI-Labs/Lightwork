@@ -110,6 +110,31 @@
       var entries = Object.entries(item);
       if (entries.length > maximumEntries) omitted(target);
       entries.slice(0, maximumEntries).forEach(function (entry) {
+        if (entry[0] === 'channels_people') {
+          var channelPeople = entry[1], channelStarted = generation, channelSelection = JSON.stringify(context());
+          if (!channelPeople || Array.isArray(channelPeople) || Object.keys(channelPeople).sort().join(',') !== 'channel,context' ||
+              typeof channelPeople.context !== 'string' || !/^[a-f0-9]{64}$/.test(channelPeople.context) ||
+              !['telegram','discord','slack','whatsapp_cloud','sms','email','mattermost','teams'].includes(channelPeople.channel)) return;
+          var channelDestination = node('dd', undefined, list), channelForm = window.LightworkChannelPeople;
+          if (channelForm && typeof channelForm.open === 'function') button('Review who may message Lightwork', channelDestination, async function (event) {
+            var isCurrent = function () { return active(channelStarted) && JSON.stringify(context()) === channelSelection; };
+            if (!isCurrent() || busy) return;
+            var channelButton = event.currentTarget; channelButton.disabled = true;
+            try {
+              var opened = await channelForm.open(channelPeople.context, channelPeople.channel, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected current and replacement lists are open.' : 'The current form or access changed. Review Channels before saving.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The access controls could not be opened. Check the current list in Channels.'; }
+            finally { if (isCurrent() && channelButton.isConnected) channelButton.disabled = false; }
+          });
+          else {
+            var channelLink = node('a', 'Review who may message Lightwork', channelDestination);
+            channelLink.href = '/channels#channel-' + channelPeople.channel;
+            channelLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
         if (entry[0] === 'commitment_capability_author') {
           var capabilityAuthor = entry[1], capabilityStarted = generation, capabilitySelection = JSON.stringify(context());
           if (!capabilityAuthor || Array.isArray(capabilityAuthor) || Object.keys(capabilityAuthor).sort().join(',') !== 'context,parent,parent_binding' ||
@@ -133,6 +158,83 @@
             capabilityLink.href = '/commitment-reviews?review=' + encodeURIComponent(capabilityAuthor.parent) + '#ccl-author';
             capabilityLink.className = 'btn btn--ghost';
           }
+          return;
+        }
+        if (entry[0] === 'portable_rule_form' || entry[0] === 'work_grouping_form') {
+          var localForm = entry[1], localStarted = generation, localSelection = JSON.stringify(context());
+          var portable = entry[0] === 'portable_rule_form';
+          if (!localForm || Array.isArray(localForm) || Object.keys(localForm).sort().join(',') !== (portable ? 'context,flow,view' : 'context,flow') ||
+              typeof localForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(localForm.context) ||
+              typeof localForm.flow !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(localForm.flow) ||
+              (portable && localForm.view !== 'qualify')) return;
+          var localDestination = node('dd', undefined, list);
+          var localControl = portable ? window.LightworkPortableRules : window.LightworkWorkGrouping;
+          var localLabel = portable ? 'Open complete target qualification controls' : 'Open separate case groups and deadlines';
+          if (localControl && typeof localControl.open === 'function') button(localLabel, localDestination, async function (event) {
+            var isCurrent = function () { return active(localStarted) && JSON.stringify(context()) === localSelection; };
+            if (!isCurrent() || busy) return;
+            var localButton = event.currentTarget; localButton.disabled = true;
+            try {
+              var opened = await localControl.open(localForm, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete protected controls are open.' : 'Your current work is kept. Review the current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The controls could not be opened. Your current work is kept.'; }
+            finally { if (isCurrent() && localButton.isConnected) localButton.disabled = false; }
+          });
+          else {
+            var localLink = node('a', localLabel, localDestination);
+            localLink.href = (portable ? '/learning/portable-rules?view=qualify&flow=' : '/learning/work-restructuring?flow=') + encodeURIComponent(localForm.flow);
+            localLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
+        if (entry[0] === 'private_task_computation_author') {
+          var privateAuthor = entry[1], privateStarted = generation, privateSelection = JSON.stringify(context());
+          if (!privateAuthor || Array.isArray(privateAuthor) || Object.keys(privateAuthor).sort().join(',') !== 'binding,context,id' ||
+              typeof privateAuthor.context !== 'string' || !/^[a-f0-9]{64}$/.test(privateAuthor.context) ||
+              !((privateAuthor.id === null && privateAuthor.binding === null) ||
+                (typeof privateAuthor.id === 'string' && /^PTC-[a-f0-9]{32}$/.test(privateAuthor.id) &&
+                 typeof privateAuthor.binding === 'string' && /^[a-f0-9]{64}$/.test(privateAuthor.binding)))) return;
+          var privateDestination = node('dd', undefined, list), privateControl = window.LWPrivateTaskComputation;
+          var privateLabel = privateAuthor.id ? 'Open all private calculation choices' : 'Open the complete private calculation form';
+          if (privateControl && typeof privateControl.openAuthor === 'function') button(privateLabel, privateDestination, async function (event) {
+            var isCurrent = function () { return active(privateStarted) && JSON.stringify(context()) === privateSelection; };
+            if (!isCurrent() || busy) return;
+            var privateButton = event.currentTarget; privateButton.disabled = true;
+            try {
+              var opened = await privateControl.openAuthor(privateAuthor, {isCurrent: isCurrent});
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete protected form is open.' : 'Your current draft is kept. Review the current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The form could not be opened. Your current draft is kept.'; }
+            finally { if (isCurrent() && privateButton.isConnected) privateButton.disabled = false; }
+          });
+          else {
+            var privateLink = node('a', privateLabel, privateDestination);
+            privateLink.href = '/private-task-computation' + (privateAuthor.id ? '?check=' + encodeURIComponent(privateAuthor.id) : '') + '#ptc-author';
+            privateLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
+        if (entry[0] === 'recovery_visibility_form') {
+          var visibilityForm = entry[1], visibilityStarted = generation, visibilitySelection = JSON.stringify(context());
+          if (!visibilityForm || Array.isArray(visibilityForm) || Object.keys(visibilityForm).join(',') !== 'context' ||
+              typeof visibilityForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(visibilityForm.context)) return;
+          var visibilityDestination = node('dd', undefined, list), visibilityControl = window.LightworkRecoveryVisibility;
+          if (visibilityControl && typeof visibilityControl.open === 'function') button('Open complete local practice controls', visibilityDestination, async function (event) {
+            var isCurrent = function () { return active(visibilityStarted) && JSON.stringify(context()) === visibilitySelection; };
+            if (!isCurrent() || busy) return;
+            var visibilityButton = event.currentTarget; visibilityButton.disabled = true;
+            try {
+              var opened = await visibilityControl.open(visibilityForm.context, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected practice controls are open.' : 'Your current work is kept. Review the current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The practice controls could not be opened. Your current work is kept.'; }
+            finally { if (isCurrent() && visibilityButton.isConnected) visibilityButton.disabled = false; }
+          });
+          else { var visibilityLink = node('a', 'Open complete local practice controls', visibilityDestination); visibilityLink.href = '/learning/recovery-visibility'; visibilityLink.className = 'btn btn--ghost'; }
           return;
         }
         if (entry[0] === 'grc_draft_form') {
@@ -711,6 +813,9 @@
               : item.id.startsWith('commitments.capability.')
                 ? !!(window.LWCommitmentCapability && window.LWCommitmentCapability.renderReview &&
                      window.LWCommitmentCapability.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('tasks.private_check.')
+                ? !!(window.LWPrivateTaskComputation && window.LWPrivateTaskComputation.renderReview &&
+                     window.LWPrivateTaskComputation.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)

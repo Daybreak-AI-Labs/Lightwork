@@ -71,6 +71,7 @@
   window.mvSettingsGroupFor = function (hash) {
     var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};
     var name = String(hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
+    if (/^feature-[a-z][a-z0-9_]*$/.test(name)) return 'controls';
     if (Object.prototype.hasOwnProperty.call(aliases, name)) name = aliases[name];
     return ['general', 'models', 'integrations', 'controls', 'access', 'maintenance'].indexOf(name) === -1 ? '' : name;
   };

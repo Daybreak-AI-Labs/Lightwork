@@ -133,6 +133,11 @@ FEATURE_DEFAULTS = {
     "outcome_measurement": False,
     "commitment_viability": False,
     "commitment_capability_learning": False,
+    "semantic_rule_reuse": False,
+    "recovery_visibility": False,
+    "private_task_computation": False,
+    "portable_competence": False,
+    "work_restructuring": False,
     "shared_decision_evidence": False,
     "copilot_operations": False,
     "guided_onboarding": True,
@@ -201,6 +206,11 @@ FEATURE_INFO = {
     "task_handoffs": "Offer a named colleague an unstarted continuation with selected evidence and a spending ceiling; acceptance closes the original conversation to new execution.",
     "outcome_measurement": "Plan a paired workflow pilot, record observed baseline and review effort, and compare current accepted outcomes. Unmeasured costs and unreviewed work remain explicit.",
     "commitment_viability": "Review two accepted orders against the capacity and stock your team reports. Explore expiring options and record observed contention with owner review. This pilot does not connect to a supplier or reserve stock.",
+    "work_restructuring": "Check exact shared preparation across permitted original local cases, with separate complete results and deadlines.",
+    "portable_competence": "Release only reviewed anonymous local rule structures. Qualify them against a target workflow and its own permitted cases before any local use.",
+    "private_task_computation": "Check a bounded rule using a permitted task attachment and release only a separately approved fixed answer. Original data stays private.",
+    "recovery_visibility": "Practice with fictional sign-offs to see when identical visible status hides different original outcomes. No live approval or connected service is used.",
+    "semantic_rule_reuse": "Check every supported input for a local Yes/No or bounded whole-number rule before reusing prior evidence across a rewrite. All checks count toward the reviewed work allowance.",
     "commitment_capability_learning": "Compare additional offers and reported resource additions while protecting accepted work. Record attributed trial results or check one owned published local rule. This local pilot does not verify physical availability, reserve stock or establish future revenue.",
     "shared_decision_evidence": "Review which reported information can support several choices. Share only named facts with named cases, set freshness and question limits, and keep uncertain choices visible. Reports are not independently verified and this review does not carry out a business choice.",
     "guided_onboarding": "Offer a guided path to a reviewed deliverable, privacy assessment, or accepted vendor case. Task creation alone never establishes success.",
@@ -441,7 +451,8 @@ for _channel_spec in CHANNELS:
         _channel_spec["fields"].append({
             "key": _key, "label": "Who can message Lightwork", "type": "list",
             "help": f"Add each permitted {_item.lower()} on its own line. Example: {_hint}. "
-                    "Leave this blank to use a list supplied by your server; with no list, nobody can message Lightwork.",
+                    "Saving a blank list stops everyone from messaging Lightwork through this app. "
+                    "Use All settings to restore an inherited list instead.",
             "env": f"{_channel_spec['name'].upper()}_{_key.upper()}",
         })
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
@@ -766,7 +777,7 @@ def _dump(data: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _write(data: dict) -> None:
+def _write(data: dict, *, before_effect=None) -> None:
     # Unique temp + os.replace (0600): the fixed ".toml.tmp" collided between two
     # concurrent workers. RMW serialization is in the mutators via _locked().
     from maverick.file_lock import atomic_write_text
@@ -785,6 +796,8 @@ def _write(data: dict) -> None:
     change = current_write()
     if change is not None:
         change.prepare(_load_overlay_for_update(), data)
+    if before_effect is not None:
+        before_effect()
     atomic_write_text(config.dashboard_overrides_path(), text)
     if change is not None and not change.deferred:
         change.complete()
@@ -2398,7 +2411,7 @@ def set_value_assumptions(*, hourly_rate: float | None = None,
         _write(data)
 
 
-def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
+def set_channel(name: str, enabled: bool, values: dict | None = None, *, before_write=None) -> None:
     """Enable/disable a channel and set its credentials in the overlay. A blank
     field value is left unchanged (so toggling enabled never wipes a secret you
     can't see). Writes [channels.<name>] to dashboard-config.toml, which
@@ -2410,6 +2423,8 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
     values = values or {}
     with _locked():
         data = _load_overlay_for_update()
+        if before_write is not None:
+            before_write()
         ccfg = data.setdefault("channels", {}).setdefault(name, {})
         ccfg["enabled"] = bool(enabled)
         for field in spec["fields"]:
@@ -2432,10 +2447,9 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
                         raise ValueError(f"Enter {error}")
                     if person not in people:
                         people.append(person)
-                if people:
-                    ccfg[key] = people
-                else:
-                    ccfg.pop(key, None)
+                # An explicit empty list denies everyone. Removing this key
+                # instead would silently restore installer/server access.
+                ccfg[key] = people
                 continue
             if val in (None, ""):
                 continue  # blank -> keep the stored value (don't wipe a hidden secret)
@@ -2454,7 +2468,7 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
                 ccfg[key] = str(val).lower()
             else:
                 ccfg[key] = str(val)
-        _write(data)
+        _write(data, before_effect=before_write)
 
 
 def _channel_server_address(label: str, value: object) -> str:
@@ -2472,14 +2486,16 @@ def _channel_server_address(label: str, value: object) -> str:
     return text
 
 
-def clear_channel(name: str) -> None:
+def clear_channel(name: str, *, before_write=None) -> None:
     """Remove a channel's overlay table entirely (reverts to config.toml/env)."""
     if name not in _CHANNELS_BY_NAME:
         raise ValueError("unknown channel")
     with _locked():
         data = _load_overlay_for_update()
+        if before_write is not None:
+            before_write()
         (data.get("channels") or {}).pop(name, None)
-        _write(data)
+        _write(data, before_effect=before_write)
 
 
 def _raw_config_providers() -> dict:
@@ -2599,6 +2615,11 @@ def channels_state() -> list[dict]:
     overlay = load_overlay()
     ov_ch = overlay.get("channels") or {}
     raw_ch = _raw_config_channels()
+    from . import settings_all_page as page
+    from .integration_readiness import require_readable_config
+
+    effective = require_readable_config().get("channels") or {}
+    layers = page._sources()
     out = []
     for spec in CHANNELS:
         name = spec["name"]
@@ -2612,6 +2633,27 @@ def channels_state() -> list[dict]:
             configured = v not in (None, "", [])
             # A value set on the server (environment) wins over this page.
             from_server = bool(f.get("env") and os.environ.get(f["env"], "").strip())
+            people_source = ""
+            people_locked = False
+            if f.get("type") == "list":
+                from maverick_channels.base import normalize_allowlist
+
+                from .settings_catalog import BY_ID, lookup
+
+                setting = BY_ID[f"channels.{name}.{f['key']}"]
+                current = (effective.get(name) or {}).get(f["key"])
+                if name == "teams" and f["key"] not in (effective.get(name) or {}):
+                    current = (effective.get(name) or {}).get("allowed_user_ids")
+                if current is not None and not isinstance(current, (list, tuple, set)):
+                    raise ValueError("The permitted-people list could not be read safely.")
+                v = sorted(normalize_allowlist(current, f["env"]))
+                configured = bool(v)
+                from_server = current is None and from_server
+                resolved = page._resolve(setting, layers)
+                people_source = resolved.get("source_text") or page.SOURCE_TEXT[resolved["source"]]
+                people_locked = resolved["locked"] or lookup(layers["tenant"], setting.path)[0]
+                if people_locked:
+                    people_source = "Set by your server's deployment settings"
             fields.append({
                 "key": f["key"], "label": f["label"],
                 "secret": bool(f.get("secret")), "type": f.get("type", "text"),
@@ -2622,6 +2664,8 @@ def channels_state() -> list[dict]:
                 "hint": ("on the server" if from_server else
                          _mask(v) if (configured and f.get("secret")) else ""),
                 "configured": configured or from_server,
+                "people": v if f.get("type") == "list" else [],
+                "people_source": people_source, "people_locked": people_locked,
             })
         out.append({
             "name": name, "label": spec["label"],

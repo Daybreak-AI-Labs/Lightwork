@@ -1139,19 +1139,19 @@ def _channel_settings() -> tuple[Setting, ...]:
         noun = "callers" if key == "allowed_callers" else "people"
         access_help = (
             "Only numbers in the effective caller list can start work through calls. "
-            "Enter each number with + and its country code. If this list is blank, "
-            "a server-provided list may apply. With no effective list, incoming calls "
+            "Enter each number with + and its country code. Saving a blank list "
+            "denies everyone; use the inherited-value control to restore an inherited list. With no permitted callers, incoming calls "
             "cannot start work. Caller ID alone does not verify a person; sensitive "
             "actions still need approval."
             if name == "voice" else
             f"Only {noun} listed here can give agents work through {label}. When the "
-            "list is empty, the list set on your server applies; with no list at all, "
-            "nobody can."
+            "list is empty and saved here, nobody can. Use the inherited-value control to restore an "
+            "inherited installer or server list instead."
         )
         out.append(S(section, key, f"Who may use {label}",
                      access_help,
                      "list", default=[], weaker="grow", item_label=item, item_hint=hint,
-                     pattern=pattern, item_error=error, empty_unset=True, max_items=200,
+                     pattern=pattern, item_error=error, empty_unset=False, max_items=200,
                      max_length=300,
                      warning=f"More people will be able to give agents work through {label}.",
                      aliases=f"{name} allow list allowed senders", **common))

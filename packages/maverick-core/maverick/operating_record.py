@@ -215,8 +215,8 @@ def export_capsule(
         from . import dreaming
         learned["insights"] = [i.to_dict() for i in dreaming.load_insights()]
         learned["rehearsals"] = dreaming.load_rehearsals()
-        from .skill.distillation_local import _STORE
-        skills_dir = dreaming._tenant_path("learned-skills", _STORE)
+        from .skill.distillation_local import _default_store
+        skills_dir = _default_store()
         learned["skills"] = {
             p.stem: p.read_text(encoding="utf-8")
             for p in (sorted(Path(skills_dir).glob("*.md"))

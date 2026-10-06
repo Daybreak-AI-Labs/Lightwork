@@ -437,7 +437,7 @@ def channel_config(cfg: dict | None = None) -> dict:
         "app_password": str(password or ""),
         "tenant_id": str(cfg.get("tenant_id") or os.environ.get("TEAMS_TENANT_ID") or "").strip().lower(),
         "allowed_tenants": normalize_allowlist(cfg.get("allowed_tenants"), "TEAMS_ALLOWED_TENANTS"),
-        "allowed_users": normalize_allowlist(cfg.get("allowed_users") or cfg.get("allowed_user_ids"),
+        "allowed_users": normalize_allowlist(cfg.get("allowed_users") if "allowed_users" in cfg else cfg.get("allowed_user_ids"),
                                              "TEAMS_ALLOWED_USERS"),
         "approvals_enabled": flag(cfg.get("approvals_enabled")),
         "port": int(cfg.get("port") or DEFAULT_PORT),

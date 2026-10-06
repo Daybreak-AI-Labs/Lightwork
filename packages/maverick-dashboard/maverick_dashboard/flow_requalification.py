@@ -6,6 +6,7 @@ import secrets
 import time
 
 from fastapi import HTTPException, Response
+from maverick import config
 from maverick.authority_effects import authority_effect_fence
 from maverick.budget import Budget
 from maverick.candidate_promotion import (
@@ -73,7 +74,7 @@ def listing(request, flow_id=""):
     flows = store.list_flow_summaries(owner=owner, bounded=True)
     if len(flows) > 100:
         raise HTTPException(409, "Choose this workflow from its saved page; the bounded picker supports one hundred workflows.")
-    result = {"context": context, "flows": [{"value": row["id"], "label": row["name"]} for row in flows], "notice": NOTICE}
+    result = {"semantic_reuse_available": config.get_features().get("semantic_rule_reuse") is True, "context": context, "flows": [{"value": row["id"], "label": row["name"]} for row in flows], "notice": NOTICE}
     if flow_id:
         current, qualified, left, right = _current(request, flow_id)
         _tenant, _owner, _context, candidate, baseline, publication, _root, bundle = current
@@ -102,8 +103,13 @@ def _owned(request, identifier):
     return row
 
 
-def _material(request, kind, flow_id, run_id="", evidence_id=""):
+def _material(request, kind, flow_id, run_id="", evidence_id="", *, semantic_reuse=False):
     tenant, owner, context = authority(request)
+    if type(semantic_reuse) is not bool:
+        raise HTTPException(422, "Choose whether to check complete supported rule behavior.")
+    if semantic_reuse:
+        if kind == "withdraw" or config.get_features().get("semantic_rule_reuse") is not True:
+            raise HTTPException(409, "Complete rule-behavior reuse is off or unavailable for withdrawal. Your original evidence is retained.")
     current, qualified, left, right = _current(request, flow_id)
     _tenant, _owner, _context, candidate, baseline, publication, root, bundle = current
     source = None
@@ -127,7 +133,8 @@ def _material(request, kind, flow_id, run_id="", evidence_id=""):
         "root": root, "bundle": bundle, "version": candidate.version, "flow_revision": candidate.revision,
         "candidate_manifest": qualified["manifest"], "baseline": publication, "case": source,
         "evidence": evidence_id, "evidence_revision": None if kind == "retain" else evidence["revision"],
-        "policy": _policy(request), "components": left if kind == "retain" else right, "case_use": kind != "withdraw"}
+        "policy": _policy(request), "components": left if kind == "retain" else right, "case_use": kind != "withdraw",
+        **({"semantic_reuse": True} if semantic_reuse else {})}
 
 
 def _display(value):
@@ -160,6 +167,7 @@ def _source_review(flow, manifest, label):
                     bounds = "Whole number from " + str(declaration["min"]) + " to " + str(declaration["max"]) if kind == "integer" else "Text up to " + str(declaration["max_length"]) + " characters" if kind == "string" else "Yes or no"
                     fields.append(name.replace("_", " ") + ": " + bounds)
                 rows.append({"label": title + " · named inputs", "after": "\n".join(fields)})
+                rows.append({"label": title + " · fixed comparison values", "after": _display(artifact["spec"].get("constants", [])) or "No fixed comparison values"})
                 rows.append({"label": title + " · taught examples", "after": "\n\n".join("Input values:\n" + _display(item["inputs"]) + "\nExpected answer: " + _display(item["output"]) for item in artifact["examples"])})
             elif node.kind == "setvar":
                 rows.append({"label": title + " · business values", "after": _display(node.assignments)})
@@ -176,16 +184,18 @@ def _source_review(flow, manifest, label):
     return rows
 
 
-def prepare(request, kind, flow_id, run_id="", evidence_id="", *, context=None):
+def prepare(request, kind, flow_id, run_id="", evidence_id="", *, context=None, semantic_reuse=False):
     authority(request, context)
     if kind not in {"retain", "recheck", "withdraw"}:
         raise HTTPException(422, "Choose a supported rule-check action.")
     with authority_effect_fence(), store._definitions_lock():
-        value = _material(request, kind, flow_id, run_id, evidence_id)
+        value = _material(request, kind, flow_id, run_id, evidence_id, semantic_reuse=semantic_reuse)
         value["deadline"] = time.time() + 600
         changes = [{"label": "Workflow", "after": value["name"]}, {"label": "Published rules", "after": "Saved version " + str(value["baseline"]["definition_version"])},
             {"label": "Proposed saved rules", "after": "Saved version " + str(value["version"])},
             {"label": "Action", "after": "Retain a complete component check" if kind == "retain" else "Recheck affected components and independently rerun the complete rules" if kind == "recheck" else "Stop future reuse of this component evidence"}]
+        if semantic_reuse:
+            changes.append({"label": "Complete supported rule behavior", "after": "For eligible Yes/No or bounded whole-number rules, check every declared input combination (at most sixty-four per step). Complete matching behavior may reuse the prior known-case output even when its rule text changed. All checks and the separate complete workflow run count toward the existing fifteen-second and step allowance. Other steps use ordinary exact-source checks. No business action or future correctness is inferred."})
         if value["case"]:
             changes.extend({"label": "Original case · " + key.replace("_", " "), "after": _display(item)} for key, item in value["case"]["inputs"].items())
         changes.extend({"label": "Component " + str(index + 1), "after": item["label"] + " · reads " + (", ".join(name.replace("_", " ") for name in item["reads"]) or "fixed values")}
@@ -205,7 +215,7 @@ def _guard(request, value, *, deadline=True):
     authority(request, value["context"])
     if deadline and time.time() >= value["deadline"]:
         raise HTTPException(409, "This review expired before admission. Review current rules and case permission again.")
-    fresh = _material(request, value["kind"], value["flow_id"], (value["case"] or {}).get("run_id", ""), value["evidence"])
+    fresh = _material(request, value["kind"], value["flow_id"], (value["case"] or {}).get("run_id", ""), value["evidence"], semantic_reuse=value.get("semantic_reuse", False))
     if fresh != {key: item for key, item in value.items() if key != "deadline"}:
         raise HTTPException(409, "The workflow, included rules, original case, policy or case-use permission changed. Review current choices again.")
 
@@ -249,7 +259,7 @@ def apply(request, value, operation):
             def guard():
                 _guard(request, value)
             selective = engine.evaluate(flow, manifest, value["case"]["inputs"], resolve=_resolver(manifest),
-                guard=guard, budget=budget, original=identifier, evidence=cached)
+                guard=guard, budget=budget, original=identifier, evidence=cached, semantic_reuse=value.get("semantic_reuse", False))
             complete = engine.complete(flow, value["case"]["inputs"], resolve=_resolver(manifest), guard=guard, budget=budget, original=identifier)
             agreement = (selective["status"] == complete["status"] == runner.STATUS_COMPLETED
                 and engine.digest(selective["data"]) == engine.digest(complete["data"]))
@@ -275,7 +285,7 @@ def original(request, identifier):
     result = row.get("result") or {}
     current = False
     try:
-        _guard(request, {key: row[key] for key in ("kind", "flow_id", "name", "tenant", "owner", "context", "root", "bundle", "version", "flow_revision", "candidate_manifest", "baseline", "case", "evidence", "evidence_revision", "policy", "components", "case_use", "deadline")}, deadline=False)
+        _guard(request, {key: row[key] for key in ("kind", "flow_id", "name", "tenant", "owner", "context", "root", "bundle", "version", "flow_revision", "candidate_manifest", "baseline", "case", "evidence", "evidence_revision", "policy", "components", "case_use", "deadline") } | ({"semantic_reuse": True} if row.get("semantic_reuse") is True else {}), deadline=False)
         current = row.get("reuse_allowed") is True if row["kind"] == "retain" else True
     except (HTTPException, ValueError, CandidatePromotionConflict, CandidatePromotionDenied, CandidatePromotionUnavailable, store.FlowSnapshotError):
         current = False

@@ -36,6 +36,11 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
         "signing_identity_transition": False, "copilot_operations": False,
         "commitment_viability": False, "shared_decision_evidence": False,
         "commitment_capability_learning": False,
+        "semantic_rule_reuse": False,
+        "recovery_visibility": False,
+        "private_task_computation": False,
+        "portable_competence": False,
+        "work_restructuring": False,
     }
 
 
@@ -67,6 +72,11 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "signing_identity_transition": False, "copilot_operations": True,
         "commitment_viability": False, "shared_decision_evidence": False,
         "commitment_capability_learning": False,
+        "semantic_rule_reuse": False,
+        "recovery_visibility": False,
+        "private_task_computation": False,
+        "portable_competence": False,
+        "work_restructuring": False,
     }
 
 

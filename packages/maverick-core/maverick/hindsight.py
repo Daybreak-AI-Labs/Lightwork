@@ -100,11 +100,11 @@ def _store_paths(directory: Path | str | None) -> dict[str, Path]:
     """
     if directory is None:
         from . import dreaming, reflexion
-        from .skill.distillation_local import _STORE
+        from .skill.distillation_local import _default_store
         return {
             "reflexions": reflexion.default_path(),
             "insights": Path(dreaming.insights_path()),
-            "skills": Path(dreaming._tenant_path("learned-skills", _STORE)),
+            "skills": _default_store(),
         }
     d = Path(directory)
     return {

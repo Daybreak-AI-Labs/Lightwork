@@ -1019,7 +1019,7 @@ def _wire_teams(server, cfg):
         app_password=settings["app_password"],
         tenant_id=settings["tenant_id"] or None,
         allowed_tenants=settings["allowed_tenants"] or None,
-        allowed_user_ids=settings["allowed_users"] or None,
+        allowed_user_ids=settings["allowed_users"],
         # [channels.teams] approvals_enabled: approval cards in Teams, decided
         # through the dashboard's own decision path.
         approvals_enabled=settings["approvals_enabled"],

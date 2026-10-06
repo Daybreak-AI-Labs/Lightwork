@@ -34,7 +34,7 @@ from typing import Any
 
 VERDICT_LABELS = {
     "ready": "Connected",
-    "needs_test": "Key saved, not tested yet",
+    "needs_test": "Set up, not tested yet",
     "not_ready": "Not connected",
 }
 VERDICT_BADGE_CLASS = {"ready": "ok", "needs_test": "warn", "not_ready": "blocked"}

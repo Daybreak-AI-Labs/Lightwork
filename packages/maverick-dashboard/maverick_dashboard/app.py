@@ -1833,17 +1833,25 @@ app.include_router(learning_example_decisions_router, prefix="/api/v1")
 
 from . import (  # noqa: E402
     commitment_capability_api,
+    competence_transport_api,
     flow_requalification_api,
     grc_draft_changes_api,
     learning_distinctions_api,
+    private_task_computation_api,
+    recovery_visibility_api,
     shared_decision_evidence_api,
+    work_restructuring_api,
 )
 
 app.include_router(shared_decision_evidence_api.router)
 app.include_router(flow_requalification_api.router)
 app.include_router(learning_distinctions_api.router)
 app.include_router(commitment_capability_api.router)
+app.include_router(competence_transport_api.router)
 app.include_router(grc_draft_changes_api.router, prefix="/api/v1")
+app.include_router(work_restructuring_api.router)
+app.include_router(private_task_computation_api.router)
+app.include_router(recovery_visibility_api.router)
 from .plugin_practice_forms_api import router as plugin_practice_forms_router  # noqa: E402
 
 app.include_router(plugin_practice_forms_router)
@@ -9681,8 +9689,85 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
     return _render_channels_page(request, saved=saved)
 
 
+def _channel_form_context(request: Request) -> str:
+    from maverick.paths import current_tenant_id_strict
+
+    from .api_flow_operator_review import _workspace_authority
+    from .draft_api import context_for
+
+    require_global_permission(request, "admin")
+    actor = caller_principal(request) or "local administrator"
+    tenant = current_tenant_id_strict()
+    workspace = _workspace_authority(request, actor, tenant) if tenant else "local"
+    return hashlib.sha256(json.dumps([context_for(request), workspace]).encode()).hexdigest()
+
+
+def _channel_form_review(request: Request) -> str:
+    from maverick.crypto_at_rest import deployment_key_scope, is_sealed_str, seal_to_str
+
+    from .settings_all_page import _revision
+
+    with deployment_key_scope():
+        token = seal_to_str(json.dumps({"purpose": "channel-settings-review-v1", "context": _channel_form_context(request),
+                                       "revision": _revision(), "deadline": time.time() + 600}))
+    if not is_sealed_str(token):
+        raise HTTPException(503, "The current settings comparison could not be protected. Refresh Channels after protected storage is restored.")
+    return token
+
+
+def _require_channel_review(request: Request, token: str) -> None:
+    """Recheck the protected full source comparison after native writer waits."""
+    from maverick.crypto_at_rest import deployment_key_scope, is_sealed_str, unseal_from_str
+
+    from . import settings_all_page as page
+    from .integration_readiness import require_readable_config
+
+    require_global_permission(request, "admin")
+    require_readable_config()
+    try:
+        if len(token) > 4000 or not is_sealed_str(token):
+            raise ValueError("protected review required")
+        with deployment_key_scope():
+            review = json.loads(unseal_from_str(token))
+        if (set(review) != {"purpose", "context", "revision", "deadline"}
+                or review["purpose"] != "channel-settings-review-v1"):
+            raise ValueError("unsupported review")
+    except Exception as exc:
+        raise HTTPException(409, "Refresh the current comparison before saving. Your draft is kept.") from exc
+    if not hmac.compare_digest(str(review["context"]), _channel_form_context(request)):
+        raise HTTPException(409, {"message": "Your account or workspace changed. Reload Channels before editing.",
+                                  "context_changed": True})
+    if (type(review["deadline"]) not in (int, float) or not math.isfinite(review["deadline"])
+            or not time.time() < review["deadline"] <= time.time() + 600
+            or not hmac.compare_digest(str(review["revision"]), page._revision())):
+        raise HTTPException(409, "Saved settings changed or this comparison expired. Refresh the current comparison; your draft is kept.")
+
+
+def _channel_removal_people(name: str) -> dict:
+    from copy import deepcopy
+
+    from . import settings_all_page as page
+    from .settings_catalog import BY_ID, CHANNEL_ALLOWLISTS
+
+    access = CHANNEL_ALLOWLISTS.get(name)
+    if not access:
+        return {}
+    setting = BY_ID[f"channels.{name}.{access[2]}"]
+    layers = page._sources()
+    before = page._resolve(setting, layers)
+    inherited = deepcopy(layers)
+    (inherited["here"].get("channels") or {}).pop(name, None)
+    after = page._resolve(setting, inherited)
+    if not before["known"] or not after["known"]:
+        raise HTTPException(503, "The complete current and inherited people lists cannot be read. No saved settings were removed.")
+    return {"before": before["value"], "after": after["value"],
+            "before_source": before.get("source_text", page.SOURCE_TEXT[before["source"]]),
+            "after_source": after.get("source_text", page.SOURCE_TEXT[after["source"]])}
+
+
 def _render_channels_page(request: Request, *, saved: str = "",
-                          issued_code: str = "") -> HTMLResponse:
+                          issued_code: str = "", draft: dict | None = None,
+                          error: str = "", status_code: int = 200) -> HTMLResponse:
     """Channels: manage the common ones (enable + credentials) from the form
     sections, plus a read-only, secret-redacted view of everything configured.
     Saved to the dashboard overlay; a running chat service must restart to
@@ -9776,12 +9861,22 @@ def _render_channels_page(request: Request, *, saved: str = "",
     except Exception:
         channel_runtime = None
     for channel in managed:
+        if channel.get("dashboard_set"):
+            channel["removal_people"] = _channel_removal_people(channel["name"])
         for field in channel["fields"]:
             label, help_text, advanced = plain_labels.CHANNEL_FIELDS.get(
-                (channel["name"], field["key"]), (field["label"], "", False))
+                (channel["name"], field["key"]), (field["label"], field.get("help", ""), False))
             field.update(label=label, help=help_text, advanced=advanced)
         channel["help_link"] = plain_labels.CHANNEL_HELP_LINKS.get(channel["name"], "")
     managed_names = {channel["name"] for channel in managed}
+    if draft:
+        for channel in managed:
+            if channel["name"] != draft.get("channel"):
+                continue
+            channel["enabled"] = bool(draft.get("enabled"))
+            for field in channel["fields"]:
+                if not field["secret"] and field["key"] in draft:
+                    field["value"] = str(draft[field["key"]])[:60600]
     return templates.TemplateResponse(
         request,
         "channels.html",
@@ -9795,7 +9890,11 @@ def _render_channels_page(request: Request, *, saved: str = "",
             "channel_runtime": channel_runtime,
             **teams_links_api.page_context(issued_code),
             "mail_configured": _mail_configured(),
+            "channel_context": _channel_form_context(request),
+            "channel_review": _channel_form_review(request),
+            "channel_error": error,
         },
+        status_code=status_code, headers={"Cache-Control": "private, no-store"},
     )
 
 
@@ -9810,7 +9909,7 @@ def _mail_configured() -> bool:
 
 
 @app.post("/channels/save")
-async def channels_save(request: Request) -> RedirectResponse:
+async def channels_save(request: Request) -> Response:
     """Enable/disable a channel and set its credentials from the form. Stored in
     the dashboard overlay (dashboard-config.toml), never config.toml; blank
     fields keep the current value so a toggle never wipes a hidden secret."""
@@ -9821,8 +9920,24 @@ async def channels_save(request: Request) -> RedirectResponse:
     form = await request.form()
     name = (form.get("channel") or "").strip()
     enabled = form.get("enabled") is not None  # checkbox present == on
-    values = {k: v for k, v in form.items() if k not in ("channel", "enabled")}
+    values = {k: v for k, v in form.items()
+              if k not in ("channel", "enabled", "review_token", "confirm_people")}
     from .settings_audit import bind_setting_write
+
+    def guard() -> None:
+        from . import settings_all_page as page
+        from .settings_catalog import BY_ID, CHANNEL_ALLOWLISTS, coerce
+
+        _require_channel_review(request, str(form.get("review_token") or ""))
+        access = CHANNEL_ALLOWLISTS.get(name)
+        if access and access[2] in values:
+            setting = BY_ID[f"channels.{name}.{access[2]}"]
+            resolved = page._resolve(setting, page._sources())
+            after = coerce(setting, re.split(r"[,\r\n]+", str(values[access[2]])))
+            if not resolved["known"] or resolved["locked"]:
+                raise HTTPException(409, "Your server's deployment settings own this people list. No channel settings were changed.")
+            if sorted(after) != sorted(resolved["value"]) and form.get("confirm_people") != "yes":
+                raise HTTPException(422, "Review who may message Lightwork before and after this change, then tick the confirmation. Your draft is kept.")
 
     def _audit_channel(data: dict) -> dict:
         channels = data.get("channels") or {}
@@ -9834,43 +9949,83 @@ async def channels_save(request: Request) -> RedirectResponse:
         }
 
     try:
-        with bind_setting_write(request, section="channels", key=name,
-                                project=_audit_channel):
-            settings_store.set_channel(name, enabled, values)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        def save() -> None:
+            with bind_setting_write(request, section="channels", key=name,
+                                    project=_audit_channel, confirmed=form.get("confirm_people") == "yes"):
+                settings_store.set_channel(name, enabled, values, before_write=guard)
+
+        await run_in_threadpool(save)
+    except (ValueError, HTTPException, OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
+        status = exc.status_code if isinstance(exc, HTTPException) else 400 if isinstance(exc, ValueError) else 503
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc) if status == 400 else "The save could not be confirmed. Review current settings before making another change."
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"detail": detail, "uncertain": status >= 500}, status_code=status,
+                                headers={"Cache-Control": "private, no-store"})
+        if status in {400, 422}:
+            return _render_channels_page(request, draft={**values, "channel": name, "enabled": enabled},
+                                         error=str(detail), status_code=status)
+        raise HTTPException(status, detail) from exc
     from .audit_actions_api import _audit_event
 
     # Only which fields changed is recorded, never their values.
     _audit_event(request, "channel_saved", channel=name, enabled=enabled,
                  fields=sorted(k for k, v in values.items() if str(v).strip()))
+    if "application/json" in request.headers.get("accept", ""):
+        require_global_permission(request, "admin")
+        current = next(item for item in settings_store.channels_state() if item["name"] == name)
+        return JSONResponse({"saved": True, "context": _channel_form_context(request),
+                             "review_token": _channel_form_review(request),
+                             "people": next((field["people"] for field in current["fields"] if field["type"] == "list"), []),
+                             "people_source": next((field["people_source"] for field in current["fields"] if field["type"] == "list"), ""),
+                             "message": "Chat app settings saved. Apply the change to the chat service before testing delivery."},
+                            headers={"Cache-Control": "private, no-store"})
     return RedirectResponse("/channels?saved=save", status_code=303)
 
 
 @app.post("/channels/clear")
-def channels_clear(request: Request, channel: str = Form(...)) -> RedirectResponse:
-    """Remove a channel's dashboard overlay (reverts to config.toml / env)."""
+def channels_clear(request: Request, channel: str = Form(...), review_token: str = Form(""),
+                   confirm_people: str = Form("")) -> Response:
+    """Remove only saved overrides after complete inherited-access review."""
     _require_same_origin(request)
     require_global_permission(request, "admin")
-    from maverick_dashboard import settings_store
-
+    from . import settings_store
     from .settings_audit import bind_setting_write
 
+    name = (channel or "").strip()
+
+    def guard() -> None:
+        _channel_removal_people(name)
+        _require_channel_review(request, review_token)
+        if confirm_people != "yes":
+            raise HTTPException(422, "Review the complete current and inherited people lists, then tick the confirmation. No saved settings were removed.")
+
     try:
-        name = (channel or "").strip()
-        with bind_setting_write(request, section="channels", key=name,
+        with bind_setting_write(request, section="channels", key=name, confirmed=confirm_people == "yes",
                                 project=lambda d: {
                                     "enabled": ((d.get("channels") or {}).get(name) or {}).get("enabled"),
                                     "fields_set": sorted(k for k, v in
                                                          ((d.get("channels") or {}).get(name) or {}).items()
                                                          if k != "enabled" and v),
                                 }):
-            settings_store.clear_channel(name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+            settings_store.clear_channel(name, before_write=guard)
+    except (ValueError, HTTPException, OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
+        status = exc.status_code if isinstance(exc, HTTPException) else 400 if isinstance(exc, ValueError) else 503
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc) if status == 400 else "The removal could not be confirmed. Review current settings before making another change."
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"detail": detail, "uncertain": status >= 500}, status_code=status,
+                                headers={"Cache-Control": "private, no-store"})
+        raise HTTPException(status, detail) from exc
     from .audit_actions_api import _audit_event
 
-    _audit_event(request, "channel_settings_removed", channel=(channel or "").strip())
+    _audit_event(request, "channel_settings_removed", channel=name)
+    if "application/json" in request.headers.get("accept", ""):
+        current = _channel_removal_people(name)
+        return JSONResponse({"saved": True, "removed": True, "context": _channel_form_context(request),
+                             "review_token": _channel_form_review(request),
+                             "people": current.get("before", []),
+                             "people_source": current.get("before_source", ""),
+                             "message": "Settings saved here were removed. Installer or server settings apply again; this does not prove the app disconnected. Apply the change to the chat service before testing delivery."},
+                            headers={"Cache-Control": "private, no-store"})
     return RedirectResponse("/channels?saved=clear", status_code=303)
 
 

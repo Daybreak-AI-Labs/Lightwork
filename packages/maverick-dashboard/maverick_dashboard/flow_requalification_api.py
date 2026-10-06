@@ -23,6 +23,7 @@ class ReviewIn(BaseModel):
     flow: str = Field(min_length=1, max_length=128)
     practice: str = Field(default="", max_length=128)
     evidence: str = Field(default="", max_length=64)
+    semantic_reuse: bool = False
 
 
 class ApplyIn(BaseModel):
@@ -67,7 +68,7 @@ def original(request: Request, identifier: str):
 
 @router.post(native.API + "/review")
 def review(request: Request, body: ReviewIn):
-    prepared, changes = release._native_call(lambda: native.prepare(request, body.kind, body.flow, body.practice, body.evidence, context=body.context))
+    prepared, changes = release._native_call(lambda: native.prepare(request, body.kind, body.flow, body.practice, body.evidence, context=body.context, semantic_reuse=body.semantic_reuse))
     operation = native.operation()
     token = crypto_at_rest.seal_to_str(json.dumps({"purpose": PURPOSE, "prepared": prepared, "operation": operation}, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
     if not crypto_at_rest.is_sealed_str(token) or len(token) > 120000:

@@ -246,6 +246,24 @@ The September 27 invention lab remains outside this Git checkout at `C:/Users/Cs
 - `parallel-tracks/PRIVATE_REASONING_CANDIDATE.md`: private-computation proposal and release limitations.
 - `parallel-tracks/OUTSIDE_ORCHESTRATION_CANDIDATE.md`: decision-before-reconciliation proposal and rejected computational claim.
 
+## October 6 native follow-through: finite evidence and local portability
+
+P08, P10, P13, N03 and N04 now have bounded native product paths, ordinary
+controls and authorized Copilot handoffs. Their specific implementations and
+remaining research boundaries are in the [implementation inventory](lightwork-invention-implementation-status-2026-10-01.md).
+These additions do not reverse any parked result or establish a new algorithm,
+customer lift, independent custody or an acquisition price.
+
+P10's actual native journey compared two complete generated rule spaces with
+fourteen and twenty-three programs. Both agreed on all five declared whole-number
+inputs. Retaining evidence cost seven native steps; the changed rule used six
+steps including full-domain evaluation and the separate complete comparison,
+and reused the prior known-case output. An accepted lost reply, page reload,
+original read and exact duplicate token caused no further calculation. Disabling
+the capability refused new reviews while preserving confirmed historical
+metadata and withholding private case values. This is a usable exact finite
+comparison, with no measured advantage over ordinary indexed finite functions.
+
 ## Change record
 
 - October 1, 2026: created the cumulative register with six product foundations, sixteen earlier research directions, and six new candidates. Preserved the previous three learning proposals and the archived unfavorable results. Added explicit relationships between related candidates, comparison obligations, customer journeys, and rejection criteria. No invention result or implementation is claimed by creating this record.

@@ -12,7 +12,7 @@ import json
 import re
 import time
 
-from . import learned_operator, runner
+from . import learned_operator, runner, semantic_rule_evidence
 from .ir import Flow
 
 
@@ -83,7 +83,7 @@ def plan(flow, manifest, resolve):
     return result
 
 
-def evaluate(flow, manifest, inputs, *, resolve, guard, budget, original, evidence=None):
+def evaluate(flow, manifest, inputs, *, resolve, guard, budget, original, evidence=None, semantic_reuse=False):
     """Run actual native components, or reuse one exact independently valid result."""
     components = plan(flow, manifest, resolve)
     data, results = copy.deepcopy(inputs), []
@@ -102,11 +102,15 @@ def evaluate(flow, manifest, inputs, *, resolve, guard, budget, original, eviden
         guard()
         dependencies = {name: {"present": name in data, "value": copy.deepcopy(data.get(name))} for name in component["reads"]}
         old = prior.get(component["id"])
+        semantic = semantic_rule_evidence.behavior(flow, component, guard=guard, budget=budget,
+            observe=observe, original=original) if semantic_reuse else None
+        same_behavior = bool(old and semantic_rule_evidence.matches(old.get("semantic"), semantic))
         reusable = bool(old and old["status"] == runner.STATUS_COMPLETED
-            and old["source"] == component["source"] and old["inputs"] == dependencies)
+            and (old["source"] == component["source"] or same_behavior) and digest(old["inputs"]) == digest(dependencies))
         if reusable:
             data.update(copy.deepcopy(old["outputs"]))
-            status, reason = runner.STATUS_COMPLETED, "Exact component, inputs and current source permission match"
+            status = runner.STATUS_COMPLETED
+            reason = "Complete supported input behavior and current case permission match" if same_behavior and old["source"] != component["source"] else "Exact component, inputs and current source permission match"
         else:
             node = copy.deepcopy(flow.nodes[component["id"]])
             node.next = None
@@ -122,7 +126,7 @@ def evaluate(flow, manifest, inputs, *, resolve, guard, budget, original, eviden
         if len(json.dumps(outputs, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 16384:
             raise ValueError("A component result exceeds the bounded selective evidence size. Use a complete workflow comparison.")
         results.append({**component, "inputs": dependencies, "outputs": outputs, "status": status,
-                        "reused": reusable, "reason": reason})
+                        "reused": reusable, "reason": reason, **({"semantic": semantic} if semantic is not None else {})})
         if status != runner.STATUS_COMPLETED:
             return {"status": status, "data": data, "components": results, "native_steps": native_steps[0],
                     "elapsed_ms": (time.perf_counter() - started) * 1000}

@@ -10,8 +10,9 @@
     <label>Saved workflow<select name="flow" class="input" required><option value="">Choose a workflow</option></select></label>
     <p id="rq-versions" class="muted"></p><div id="rq-components"></div>
     <label>Original real case<select name="practice" class="input"><option value="">Choose a real run</option></select></label>
-    <button id="rq-retain" class="btn btn--primary" type="button">Review and retain component evidence</button>
-    <label>Retained component evidence<select name="evidence" class="input"><option value="">Choose prior evidence</option></select></label>
+    <label id="rq-semantic-choice" hidden><span><input type="checkbox" name="semantic_reuse"> Check every supported input before reusing changed rule evidence</span><span class="muted">Useful when a rule was rewritten without changing its answers. Uses extra local calculation time, and always keeps the separate complete comparison.</span></label>
+    <button id="rq-retain" class="btn btn--primary" type="button">Review and keep original case evidence</button>
+    <label>Original case evidence available for reuse<select name="evidence" class="input"><option value="">Choose prior evidence</option></select></label>
     <button id="rq-recheck" class="btn btn--primary" type="button">Review affected checks</button>
     <button id="rq-withdraw" class="btn btn--ghost" type="button">Review withdrawal of evidence reuse</button>
     <button id="rq-refresh" class="btn btn--ghost" type="button">Refresh current choices</button>
