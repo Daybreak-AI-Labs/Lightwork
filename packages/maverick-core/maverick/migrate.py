@@ -50,6 +50,10 @@ KNOWN_SECTIONS = frozenset({
     # [consent_publication_signing] keyring: the consent publication signing
     # key made on the Banner and Preference Center page (sealed).
     "consent_publication_signing",
+    # [approval_challenges] enable / [instruction_capture] enable: fictional
+    # approval practices and per-task instruction records (Settings > All
+    # settings, Memory & learning).
+    "approval_challenges", "instruction_capture",
     "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment", "device_pairing", "personalization", "copilot", "settings", "_dashboard_resets", "mobile_offline", "workflows",

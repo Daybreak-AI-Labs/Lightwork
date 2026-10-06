@@ -951,7 +951,8 @@ def _switches(S) -> tuple:
         S("agent", "max_steps", "Most steps an agent may take",
           "Stop an agent after this many steps on one task. Leave empty for no step limit; "
           "the spending and time limits still apply.", "number", "AI models", None,
-          "maverick.agent", subgroup="How agents work", minimum=1, maximum=10000,
+          # Read by maverick.config.get_agent_max_steps, which every agent calls.
+          "maverick.config", subgroup="How agents work", minimum=1, maximum=10000,
           integer=True, unit="steps", none_text="No step limit", env=("MAVERICK_MAX_STEPS",),
           weaker="higher", warning="Agents will be able to take more steps on one task."),
         S("agent", "parallel_tools", "Run independent actions at the same time",
