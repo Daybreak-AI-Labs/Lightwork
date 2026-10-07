@@ -258,7 +258,7 @@ def test_provider_email_is_from_current_signed_login_not_historical_alias():
     assert "idp_email" not in session_claims({"idp_email": "right@example.com"}, None, via="invite")
 
 
-def test_bind_failure_explains_a_replacement_link_is_needed(monkeypatch, tmp_path):
+def _failed_acceptance(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from maverick.tenant import registry
     from maverick_dashboard import invite_routes, invites, rbac
@@ -269,9 +269,24 @@ def test_bind_failure_explains_a_replacement_link_is_needed(monkeypatch, tmp_pat
     monkeypatch.setattr(invite_routes, "_bind_role", lambda *_: (_ for _ in ()).throw(ValueError("store failed")))
     response = _accept(client, f"/auth/invite/{token}")
     assert response.status_code == 503
-    assert "new invitation link" in response.text
     assert invites.peek_invite(token) is None
     assert rbac.get_tenant_role("acme", "user:new@example.com") is None
+    return " ".join(response.text.split())
+
+
+def test_bind_failure_with_a_saved_passphrase_points_to_the_users_page(monkeypatch, tmp_path):
+    """The passphrase is saved before the access, and an invitation for that
+    email is refused as an existing account, so a replacement link would not help."""
+    text = _failed_acceptance(monkeypatch, tmp_path)
+    assert "Users page" in text and "passphrase you chose" in text
+    assert "new invitation link" not in text
+
+
+def test_bind_failure_without_passphrases_explains_a_replacement_link_is_needed(monkeypatch, tmp_path):
+    from maverick_dashboard import local_passphrases
+
+    monkeypatch.setattr(local_passphrases, "available", lambda: False)
+    assert "new invitation link" in _failed_acceptance(monkeypatch, tmp_path)
 
 
 def test_saml_only_deployment_does_not_accept_invite_as_local_login(monkeypatch, tmp_path):
@@ -384,7 +399,9 @@ def test_scoped_admin_cannot_invite_an_existing_member_to_take_over_their_accoun
         "_expected_tenant": "acme", "tenant": "acme", "email": "member@example.com", "role": "viewer",
     })
     assert refused.status_code == 409, refused.text
-    assert "already has a sign-in" in refused.text
+    # A workspace administrator is not told why: the same words for everyone.
+    assert "could not be created for that email address" in refused.text
+    assert "already has a sign-in" not in refused.text
     assert "/auth/invite/inv_" not in refused.text
     assert len(invites.list_invites()) == pending
     assert credential() == before
@@ -394,3 +411,92 @@ def test_scoped_admin_cannot_invite_an_existing_member_to_take_over_their_accoun
         "_expected_tenant": "acme", "tenant": "acme", "email": "newcomer@example.com", "role": "viewer",
     })
     assert minted.status_code == 200, minted.text
+
+
+def _invite_attempt(client, email, *, background=False):
+    headers = {"Accept": "application/json"} if background else {}
+    return client.post("/users/workspace-invite", headers=headers, data={
+        "_expected_tenant": "acme", "tenant": "acme", "email": email, "role": "viewer"})
+
+
+def _message(response):
+    detail = response.json()["detail"]
+    return detail["message"] if isinstance(detail, dict) else detail
+
+
+def test_a_workspace_admin_cannot_tell_who_has_an_account_or_where(monkeypatch, tmp_path):
+    """Every reason an invitation cannot be made reads the same to a workspace
+    administrator: a passphrase account, a member of another workspace, a role
+    holder, an installation administrator and the owner are indistinguishable."""
+    client = _client(monkeypatch, tmp_path)
+    from maverick.tenant import registry
+    from maverick_dashboard import invites, local_passphrases, rbac
+
+    registry.create_tenant("acme", display_name="Acme")
+    registry.create_tenant("beta", display_name="Beta")
+    _inv, token = invites.create_invite("colleague@example.com", "operator",
+                                        created_by="local-admin", tenant="beta")
+    assert _accept(_invitee(client), f"/auth/invite/{token}", follow_redirects=False).status_code == 303
+    rbac.set_tenant_role("beta", "user:member@example.com", "viewer")
+    rbac.set_role("user:roleholder@example.com", "viewer")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root@example.com")
+    monkeypatch.setattr(local_passphrases, "owner_of", lambda email: email == "owner@example.com")
+    _as_workspace_admin(client)
+
+    existing = ["colleague@example.com", "member@example.com", "roleholder@example.com",
+                "root@example.com", "owner@example.com"]
+    answers = [_invite_attempt(client, email) for email in existing]
+    assert {r.status_code for r in answers} == {409}
+    messages = {_message(r) for r in answers}
+    assert messages == {local_passphrases.NOT_INVITABLE}     # one message for every reason
+    for word in ("beta", "Beta", "passphrase", "already", "sign-in"):
+        assert word not in local_passphrases.NOT_INVITABLE
+    # The page script gets one business error, with its own code.
+    background = _invite_attempt(client, "member@example.com", background=True)
+    assert background.status_code == 409 and background.json()["detail"]["code"] == "invite_not_created"
+    # An address nobody knows gets a link, which is the one difference that remains.
+    fresh = _invite_attempt(client, "nobody@example.com")
+    assert fresh.status_code == 200 and "/auth/invite/" in fresh.text
+
+
+def test_an_installation_admin_is_told_why_an_invitation_cannot_be_made(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from maverick.tenant import registry
+    from maverick_dashboard import local_passphrases, rbac
+
+    registry.create_tenant("acme", display_name="Acme")
+    rbac.set_role("user:roleholder@example.com", "viewer")
+    _as_global_admin(client)
+    refused = _invite_attempt(client, "roleholder@example.com")
+    assert refused.status_code == 409
+    assert _message(refused) == local_passphrases.ACCOUNT_EXISTS
+    background = _invite_attempt(client, "roleholder@example.com", background=True)
+    assert background.json()["detail"]["code"] == "invite_existing_account"
+
+
+def test_a_workspace_admin_cannot_test_a_list_of_addresses(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from maverick.tenant import registry
+    from maverick_dashboard import invites, rbac
+
+    monkeypatch.setattr(invites, "ISSUE_ATTEMPTS", 3)
+    registry.create_tenant("acme", display_name="Acme")
+    rbac.set_role("user:roleholder@example.com", "viewer")
+    _as_workspace_admin(client)
+
+    assert _invite_attempt(client, "roleholder@example.com").status_code == 409
+    assert _invite_attempt(client, "one@example.com").status_code == 200
+    assert _invite_attempt(client, "two@example.com").status_code == 200
+    limited = _invite_attempt(client, "three@example.com")
+    assert limited.status_code == 429, limited.text
+    assert limited.headers["Retry-After"] == "600"
+    assert "Wait a few minutes" in _message(limited)
+    # A known address and an unknown one now get the same answer.
+    assert _invite_attempt(client, "roleholder@example.com").status_code == 429
+    assert not any(inv.email == "three@example.com" for inv in invites.list_invites())
+    assert _invite_attempt(client, "four@example.com", background=True).json()["detail"]["code"] == "invite_rate_limited"
+
+    # Installation administrators already see the whole roster, so they are not limited.
+    _as_global_admin(client)
+    for number in range(6):
+        assert _invite_attempt(client, f"bulk{number}@example.com").status_code == 200

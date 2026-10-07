@@ -54,28 +54,73 @@ class ExistingAccountError(ValueError):
     """A local invitation would take over an identity that already exists here."""
 
 
+class InviteRateLimited(RuntimeError):
+    """A workspace administrator has made too many invitations in a short time."""
+
+
+# A workspace administrator is told only that an invitation could not be made,
+# but an invitation that works and one that does not still differ. This keeps
+# that difference from being used to test a list of addresses: every attempt
+# counts, a refused one included, per administrator and per process.
+ISSUE_ATTEMPTS = 20
+ISSUE_WINDOW_SECONDS = 600.0
+TOO_MANY_INVITATIONS = ("You have made many invitations in a short time. Wait a few minutes, "
+                        "then try again.")
+_ISSUE_LIMIT = None
+
+
+def _limit_scoped_issuance(issuer: str) -> None:
+    global _ISSUE_LIMIT
+    from maverick.public_rights_form import SlidingWindowLimit
+
+    if _ISSUE_LIMIT is None:
+        _ISSUE_LIMIT = SlidingWindowLimit(ISSUE_WINDOW_SECONDS)
+    if not _ISSUE_LIMIT.hit(f"workspace-invite:{issuer or 'unknown'}", ISSUE_ATTEMPTS, time.time()):
+        raise InviteRateLimited(TOO_MANY_INVITATIONS)
+
+
+def reset_issue_limit() -> None:
+    """Tests only."""
+    if _ISSUE_LIMIT is not None:
+        _ISSUE_LIMIT.reset()
+
+
 def existing_local_account(email: str) -> bool:
     """Whether accepting a local invitation for ``email`` would take over an
-    existing identity: a colleague passphrase (or one being reset), the
-    installation owner, a configured bootstrap admin, a stored role or any
-    workspace membership.
+    existing identity: any identity source that already knows ``user:<email>``.
 
     Accepting a local invitation sets a passphrase and signs in as
-    ``user:<email>``, so any of these would let whoever holds the link become
-    that person. Unreadable state counts as existing (fail closed).
+    ``user:<email>``, so whoever holds the link would become that person. The
+    sources are the colleague passphrase (or one being reset), the installation
+    owner, a configured bootstrap admin, a stored role, any workspace
+    membership, an explicit department grant, and the SCIM roster: a user the
+    IdP has bound to this principal (active, deactivated or retired) or a role
+    that its groups confer. A workspace invitation writes no installation role,
+    so a role a SCIM group confers would otherwise pass straight to the invited
+    session.
+
+    The SCIM binding is the same strict one that grants access (the IdP's
+    ``externalId`` or the record id); a user known only by name or email carries
+    no access and is invited as usual. Unreadable state counts as existing
+    (fail closed). It is checked when the invitation is made and again when it
+    is redeemed.
     """
-    from . import local_passphrases, passphrase_resets, rbac
+    from maverick.suite_grants import get_grant, is_admin_principal
+
+    from . import auth, local_passphrases, passphrase_resets, rbac, scim_groups
 
     email = (email or "").strip().lower()
     principal = "user:" + email
     try:
-        from maverick.suite_grants import is_admin_principal
-
         return bool(local_passphrases.has_account(email) or local_passphrases.owner_of(email)
                     or passphrase_resets.pending_for(email)
                     or is_admin_principal(principal)
                     or rbac.get_stored_role(principal) is not None
-                    or rbac.has_tenant_membership(principal))
+                    or rbac.has_tenant_membership(principal)
+                    or get_grant(principal) is not None
+                    or scim_groups.active_for_principal(principal) is not None
+                    # Not the default: a SCIM group role, or an unreadable source (None).
+                    or auth.global_role_for_principal(principal) != rbac.default_role())
     except Exception:
         return True
 
@@ -307,6 +352,8 @@ def create_invite(email: str, role: str, *, created_by: str,
     tenant = (tenant or "").strip()
     if len(tenant) > 128 or (workspace_admin_invite and not tenant):
         raise ValueError("invalid workspace")
+    if workspace_admin_invite:
+        _limit_scoped_issuance(created_by)
     if local_login_mode() and existing_local_account(email):
         from .local_passphrases import ACCOUNT_EXISTS
 

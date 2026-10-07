@@ -537,7 +537,7 @@ def test_an_expired_reset_link_is_refused_and_the_owner_can_reset_again(workspac
     assert COLLEAGUE not in accounts
     # The person is still listed, so the owner can send a new link.
     page = re.sub(r"\s+", " ", workspace.get("/users").text)
-    assert "Waiting to choose a new passphrase" in page
+    assert "Waiting to choose a passphrase" in page
     fresh = _reset_link(_reset(workspace))
     assert _accept(_remote(), fresh, OTHER).status_code == 200
     assert _accept(_remote(), link, GOOD).status_code == 410  # the old link stays dead
@@ -572,6 +572,121 @@ def test_a_reset_link_is_refused_after_the_account_changes(workspace, tmp_path, 
     elif change == "workspace":
         rbac.remove_tenant_role("client-a", principal)
     assert _accept(_remote(), link, OTHER).status_code == 410
+
+
+def test_a_reset_the_activity_log_refuses_changes_nothing(workspace, tmp_path, monkeypatch):
+    import maverick.audit as audit
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import passphrase_resets
+
+    signed_in = _colleague_with_session(workspace)
+    before = _passphrase_row(tmp_path)
+    real = audit.audit_event
+
+    def refuse(kind, **fields):
+        if fields.get("action") == "passphrase_reset_issued":
+            raise AuditRefused("custody unavailable")
+        return real(kind, **fields)
+
+    monkeypatch.setattr(audit, "audit_event", refuse)
+    refused = _reset(workspace)
+    assert refused.status_code == 503 and "activity log refused" in refused.text
+    # The refusal is true: the person is not locked out and no link exists.
+    assert _passphrase_row(tmp_path) == before
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+    assert not passphrase_resets.pending_for(COLLEAGUE)
+    assert signed_in.get("/api/v1/features/modules").status_code == 200
+    assert _sign_in(_remote(), password=GOOD).status_code == 303
+
+    monkeypatch.setattr(audit, "audit_event", real)         # the log recovers
+    assert _reset_link(_reset(workspace))
+    assert _sign_in(_remote(), password=GOOD).status_code == 401
+
+
+# -- authority the identity provider's groups confer is part of the account ----
+
+_SCIM_TOKEN = "scim-secret-token-xyz"  # pragma: allowlist secret
+
+
+def _idp(monkeypatch, *, roles=None, suites=None):
+    """The identity provider as its own caller (no browser session), with a
+    group -> role / department mapping."""
+    from maverick_dashboard import scim_groups
+    from maverick_dashboard.app import app
+
+    monkeypatch.setenv("MAVERICK_SCIM_TOKEN", _SCIM_TOKEN)
+    tables = {"group_roles": roles or {}, "group_suites": suites or {}}
+    monkeypatch.setattr(scim_groups, "_config_table", lambda key: tables.get(key, {}))
+    idp = TestClient(app, headers={"Origin": "http://testserver"})
+    headers = {"Authorization": f"Bearer {_SCIM_TOKEN}"}
+
+    def push(email, group):
+        user = idp.post("/scim/v2/Users", headers=headers, json={
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": email,
+            "externalId": email, "emails": [{"value": email, "primary": True}], "active": True})
+        assert user.status_code == 201, user.text
+        made = idp.post("/scim/v2/Groups", headers=headers, json={
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "displayName": group,
+            "members": [{"value": user.json()["id"]}]})
+        assert made.status_code == 201, made.text
+
+    return push
+
+
+def _workspace_member_only(owner):
+    """Sam signs in with a passphrase and holds a workspace membership, no installation role."""
+    from maverick.tenant import registry
+    from maverick_dashboard import auth, rbac
+
+    assert _accept(_remote(), _invite(owner)).status_code == 303
+    principal = "user:" + COLLEAGUE
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", principal, "viewer")
+    rbac.remove_user(principal)
+    assert auth.global_role_for_principal(principal) == "operator"   # the default: nothing is conferred
+    return principal
+
+
+def test_a_reset_link_is_refused_after_the_idp_gives_the_person_a_group_role(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import auth
+
+    principal = _workspace_member_only(workspace)
+    link = _reset_link(_reset(workspace))
+    audits = _audits(monkeypatch)
+    _idp(monkeypatch, roles={"Admins": "admin"})(COLLEAGUE, "Admins")   # the IdP promotes them
+    assert auth.global_role_for_principal(principal) == "admin"
+
+    refused = _accept(_remote(), link, OTHER)
+    assert refused.status_code == 409
+    assert "changed after the reset" in refused.text and "no passphrase was saved" in refused.text
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE not in accounts
+    assert any(row.get("action") == "passphrase_reset_refused" and row.get("reason") == "account_changed"
+               for row in audits)
+    assert _accept(_remote(), link, OTHER).status_code == 410            # used up
+
+
+def test_a_reset_link_is_refused_after_the_idp_gives_the_person_group_departments(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import suite_grants
+
+    _workspace_member_only(workspace)
+    link = _reset_link(_reset(workspace))
+    suite = sorted(suite_grants.known_suites())[0]
+    _idp(monkeypatch, suites={"Finance": [suite]})(COLLEAGUE, "Finance")
+    assert suite_grants.granted_suites("user:" + COLLEAGUE) == frozenset({suite})
+
+    assert _accept(_remote(), link, OTHER).status_code == 409
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE not in accounts
+
+
+def test_a_reset_link_still_works_when_the_idp_changes_someone_else(workspace, tmp_path, monkeypatch):
+    _workspace_member_only(workspace)
+    link = _reset_link(_reset(workspace))
+    _idp(monkeypatch, roles={"Admins": "admin"})("someone.else@example.test", "Admins")
+    assert _accept(_remote(), link, OTHER).status_code == 200
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE in accounts
 
 
 def test_the_owner_cannot_be_reset_this_way(workspace, tmp_path):
@@ -662,3 +777,150 @@ def test_a_person_waiting_for_a_new_passphrase_cannot_be_invited(workspace):
     rbac.remove_user("user:" + COLLEAGUE)
     assert invites.existing_local_account(COLLEAGUE) is True
     assert workspace.post("/users/invite", data={"email": COLLEAGUE, "role": "viewer"}).status_code == 409
+
+
+# -- a person with access but no passphrase gets a first link ------------------
+#
+# An invitation never replaces what already exists, so a role assigned on the
+# Users page, a workspace membership or a place in [dashboard] admins can be
+# neither invited nor reset. The owner and installation administrators give them
+# a first link by the same route, with the same checks.
+
+PRE = "preassigned@example.test"
+
+
+def test_a_role_holder_with_no_passphrase_gets_a_first_link_from_the_owner(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:" + PRE, "operator")
+    assert workspace.post("/users/invite", data={"email": PRE, "role": "viewer"}).status_code == 409
+    page = re.sub(r"\s+", " ", workspace.get("/users").text)
+    assert PRE in page and "Has access but no passphrase yet" in page
+    assert f"Create a sign-in link for {PRE}?" in page and 'data-users-ok="Create link"' in page
+    audits = _audits(monkeypatch)
+
+    made = _reset(workspace, email=PRE)
+    link = _reset_link(made)
+    text = re.sub(r"\s+", " ", made.text)
+    assert f"Sign-in link for {PRE}" in text and "They have access but no passphrase yet" in text
+    issued = [row for row in audits if row.get("action") == "passphrase_reset_issued"]
+    assert len(issued) == 1 and issued[0]["email"] == PRE
+    assert issued[0]["passphrase_removed"] is False and issued[0]["first_passphrase"] is True
+
+    opened = re.sub(r"\s+", " ", _remote().get(link).text)
+    assert "Choose a passphrase" in opened and "so you can choose a passphrase" in opened
+    assert "was reset" not in opened and "old passphrase" not in opened
+    assert _accept(_remote(), link, GOOD).status_code == 200
+    assert rbac.get_stored_role("user:" + PRE) == "operator"               # access is unchanged
+    _later(monkeypatch)                                                    # after the link's revocation epoch
+    browser = _remote()
+    assert _sign_in(browser, email=PRE).status_code == 303
+    assert browser.get("/api/v1/features/modules").status_code == 200
+    assert _accept(_remote(), link, OTHER).status_code == 410              # works once
+    assert any(row.get("action") == "passphrase_reset_completed" and row.get("email") == PRE for row in audits)
+    after = re.sub(r"\s+", " ", workspace.get("/users").text)
+    assert f"Reset the passphrase for {PRE}?" in after                      # now an ordinary account
+    assert f"Create a sign-in link for {PRE}?" not in after
+
+
+def test_a_workspace_member_with_no_passphrase_signs_in_after_a_first_link(workspace, tmp_path):
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac
+
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", "user:member@example.test", "viewer")
+    link = _reset_link(_reset(workspace, email="member@example.test"))
+    assert _accept(_remote(), link, GOOD).status_code == 200
+    assert _passphrase_row(tmp_path, "member@example.test")["tenant"] == "acme"
+    assert rbac.get_stored_role("user:member@example.test") is None
+    assert _sign_in(_remote(), email="member@example.test").status_code == 303
+
+
+def test_a_configured_admin_with_no_passphrase_gets_a_first_link_only_from_the_owner(
+        workspace, tmp_path, monkeypatch):
+    assert _accept(_remote(), _invite(workspace, email="ia@example.test", role="admin")).status_code == 303
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:ia@example.test,user:cto@example.test")
+    installer = _remote()
+    assert _sign_in(installer, email="ia@example.test").status_code == 303
+    page = installer.get("/users").text
+    assert 'name="email" value="cto@example.test"' not in page
+    refused = _reset(installer, email="cto@example.test")
+    assert refused.status_code == 403
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+
+    link = _reset_link(_reset(workspace, email="cto@example.test"))
+    assert _accept(_remote(), link, GOOD).status_code == 200
+    assert _sign_in(_remote(), email="cto@example.test").status_code == 303
+
+
+def test_a_person_with_no_access_and_no_passphrase_gets_nothing(workspace, tmp_path):
+    for email in ("stranger@example.test", "not-an-email", ""):
+        refused = _reset(workspace, email=email)
+        assert refused.status_code in (404, 422), refused.text
+    refused = _reset(workspace, email="stranger@example.test")
+    assert refused.status_code == 404 and "no passphrase and no access" in refused.text
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+    assert not (tmp_path / "dashboard-passphrases.json").exists()
+
+
+def test_a_first_link_needs_the_same_authority_confirmation_and_second_factor(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import rbac, step_up
+
+    rbac.set_role("user:" + PRE, "operator")
+    assert _accept(_remote(), _invite(workspace, email="boss@example.test", role="admin")).status_code == 303
+    boss = _remote()
+    assert _sign_in(boss, email="boss@example.test").status_code == 303
+    assert _reset(boss, email=PRE).status_code == 403                      # an Admin-role holder is not enough
+    assert _reset(workspace, email=PRE, confirm="").status_code == 422
+    monkeypatch.setattr(step_up, "applies", lambda request: True)
+    stepped = _reset(workspace, email=PRE)
+    assert stepped.status_code == 403 and step_up.STEP_UP_MESSAGE in stepped.text
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+
+
+def test_a_first_link_is_refused_after_the_account_changes(workspace, tmp_path):
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:" + PRE, "operator")
+    link = _reset_link(_reset(workspace, email=PRE))
+    rbac.set_role("user:" + PRE, "admin")
+    refused = _accept(_remote(), link, GOOD)
+    assert refused.status_code == 409 and "changed after the reset" in refused.text
+    assert not (tmp_path / "dashboard-passphrases.json").exists()
+
+
+def test_a_first_link_that_expired_can_be_replaced(workspace, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick_dashboard import passphrase_resets, rbac
+
+    rbac.set_role("user:" + PRE, "operator")
+    link = _reset_link(_reset(workspace, email=PRE))
+    later = time.time() + passphrase_resets.RESET_TTL_SECONDS + 1
+    monkeypatch.setattr(passphrase_resets, "time", SimpleNamespace(time=lambda: later))
+    assert _accept(_remote(), link, GOOD).status_code == 410
+    page = re.sub(r"\s+", " ", workspace.get("/users").text)
+    assert "Waiting to choose a passphrase" in page
+    again = _reset(workspace, email=PRE)
+    fresh = _reset_link(again)
+    assert "Sign-in link for" in again.text                                 # still a first link
+    assert _accept(_remote(), fresh, GOOD).status_code == 200
+    assert _sign_in(_remote(), email=PRE).status_code == 303
+
+
+def test_the_pages_that_followed_a_failed_acceptance_no_longer_ask_for_a_replacement_invitation(
+        workspace, monkeypatch):
+    """The passphrase is already saved when the access save fails, and a
+    replacement invitation for that email is refused, so the copy must not send
+    people to one."""
+    from maverick_dashboard import invite_routes
+
+    def broken(principal, inv):
+        raise RuntimeError("the role list could not be saved")
+
+    monkeypatch.setattr(invite_routes, "_bind_role", broken)
+    page = _accept(_remote(), _invite(workspace))
+    assert page.status_code == 503
+    text = re.sub(r"\s+", " ", page.text)
+    assert "Users page" in text and "passphrase you chose" in text
+    assert "new invitation link" not in text and "replacement invitation" not in text

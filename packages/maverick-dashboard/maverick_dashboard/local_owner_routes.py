@@ -12,8 +12,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from . import local_owner, local_passphrases
+from .rbac import ROSTER_RECOVERY, RosterMissingError
 
 router = APIRouter()
+
+ROSTER_MISSING = f"Sign-in is unavailable because the role list is missing. {ROSTER_RECOVERY}"
 
 
 def _form(request: Request, *, setup: bool, message="", status=200):
@@ -142,6 +145,8 @@ async def _submit(request, *, setup):
         return response
     except (UnicodeError, ValueError):
         return _form(request, setup=setup, message="Check the submitted form values.", status=422)
+    except RosterMissingError:
+        return _form(request, setup=setup, message=ROSTER_MISSING, status=503)
     except Exception:
         if not setup and colleagues:
             return _form(request, setup=False, message=local_passphrases.UNAVAILABLE, status=503)

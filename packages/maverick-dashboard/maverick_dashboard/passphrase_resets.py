@@ -11,14 +11,16 @@ applies, a same-origin form post and an explicit confirmation.
 
 What a reset does, in this order:
 
-1. records a one-time link (only a SHA-256 of its token is stored) bound to
+1. checks the request, then writes an audit row naming who reset whom. If the
+   activity log refuses it, nothing has changed: the passphrase and every
+   session stay as they were and no link exists;
+2. records a one-time link (only a SHA-256 of its token is stored) bound to
    that exact account: its installation role, workspace memberships,
-   department access and administrator status;
-2. removes the colleague's passphrase, so it no longer signs in;
-3. ends every session they hold: the Sessions record and the revocation
-   epoch, which also stops older cookies and bearers;
-4. writes an audit row naming who reset whom. If the activity log refuses
-   it, the link is never shown.
+   department access and administrator status, including any the identity
+   provider's groups confer;
+3. removes the colleague's passphrase, so it no longer signs in;
+4. ends every session they hold: the Sessions record and the revocation
+   epoch, which also stops older cookies and bearers.
 
 The link (``/auth/invite/reset/<token>``, under the same token-is-the-
 credential exemption as invitation links) works once, for one hour, and only
@@ -26,6 +28,13 @@ sets a passphrase for that account. It mints no session, cannot change a role
 or membership, and is refused, and used up, if the account changed since the
 reset or its issuer no longer holds that authority. Completing it is audited
 before the passphrase is saved. The person signs in normally afterwards.
+
+A person who has access here but no passphrase (a role assigned on the Users
+page, a workspace membership, or a place in ``[dashboard] admins``) cannot be
+invited, because an invitation never replaces what already exists, and has
+nothing to reset. The same people may give them a first-passphrase link, by the
+same route, step-up, audit row and account binding; the only difference is
+that there is no passphrase to remove.
 
 Store: ``~/.maverick/dashboard-passphrase-resets.json`` (0600). Any
 unreadable or malformed store fails closed. Each new reset replaces the
@@ -64,7 +73,8 @@ ONLY_OWNER = ("Only the installation owner or an installation administrator set 
 OWNER_REFUSED = ("The installation owner's passphrase cannot be reset here. The owner signs in "
                  "on the computer running Lightwork and uses owner recovery there.")
 ADMIN_REFUSED = "Only the installation owner can reset an installation administrator's passphrase."
-NO_PASSPHRASE = "This person does not sign in with a passphrase here, so there is nothing to reset."
+NO_PASSPHRASE = ("This person has no passphrase and no access here, so there is nothing to reset or "
+                 "give. Invite them from the Users page instead.")
 UNAVAILABLE = "Passphrase resets are unavailable right now. Ask your administrator to check Lightwork."
 CHANGED = ("The access of this account, or of the person who reset it, changed after the reset, so "
            "this link no longer works. Ask the installation owner to reset your passphrase again.")
@@ -86,7 +96,8 @@ def _valid(key: object, row: object) -> bool:
     if not isinstance(key, str) or len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
         return False
     if not isinstance(row, dict) or set(row) != {
-            "email", "tenant", "binding", "created_by", "created_at", "expires_at", "used_at", "outcome"}:
+            "email", "tenant", "binding", "created_by", "created_at", "expires_at", "used_at", "outcome",
+            "first"}:
         return False
     return (isinstance(row["email"], str) and "@" in row["email"] and len(row["email"]) <= 320
             and row["email"] == row["email"].strip().lower()
@@ -96,6 +107,7 @@ def _valid(key: object, row: object) -> bool:
             and len(row["created_by"]) <= 1024
             and _number(row["created_at"]) and _number(row["expires_at"])
             and (row["used_at"] is None or _number(row["used_at"]))
+            and isinstance(row["first"], bool)
             and row["outcome"] in {"", "set", "refused"}
             and (row["outcome"] == "") == (row["used_at"] is None))
 
@@ -140,17 +152,26 @@ def _locked(*, fence: bool = True):
 
 
 def _binding(email: str) -> str:
-    """A fingerprint of what the account may do. A link stops working once it changes."""
-    from maverick.suite_grants import get_grant, is_admin_principal
+    """A fingerprint of what the account may do. A link stops working once it changes.
 
-    from . import rbac
+    It covers stored and derived authority alike: the role and departments the
+    person actually holds (so an IdP group that grants either changes it), and
+    whether the IdP has bound them at all, as well as the stored role,
+    memberships and explicit department grant."""
+    from maverick.suite_grants import get_grant, granted_suites, is_admin_principal
+
+    from . import auth, rbac, scim_groups
 
     principal = "user:" + email
     try:
         grant = get_grant(principal)
+        effective = granted_suites(principal)  # explicit, then IdP groups, then the default
         state = {"role": rbac.get_stored_role(principal),
+                 "effective_role": auth.global_role_for_principal(principal),
+                 "idp_record": scim_groups.active_for_principal(principal),
                  "workspaces": rbac.tenant_memberships(principal),
                  "departments": None if grant is None else sorted(grant),
+                 "effective_departments": None if effective is None else sorted(effective),
                  "installation_admin": is_admin_principal(principal),
                  "owner": local_passphrases.owner_of(email)}
     except HTTPException:
@@ -224,15 +245,63 @@ def pending_for(email: str) -> bool:
         return _unresolved(_read(), (email or "").strip().lower())
 
 
+def _emails_with_access() -> set[str]:
+    """Everyone who holds access here under their own email: an installation
+    role, a workspace membership or a place in ``[dashboard] admins``."""
+    from maverick.suite_grants import admin_principals
+
+    from . import rbac
+
+    try:
+        principals = set(rbac.list_users()) | rbac.tenant_member_principals() | set(admin_principals())
+    except rbac.RbacStoreError as exc:  # a lost or damaged role list: offer nothing
+        raise HTTPException(503, UNAVAILABLE) from exc
+    emails = {principal.removeprefix("user:") for principal in principals if principal.startswith("user:")}
+    return {email for email in emails if _is_email(email)}
+
+
+def _is_email(email: str) -> bool:
+    return (0 < len(email) <= 320 and "@" in email and email == email.strip().lower()
+            and not any(c.isspace() for c in email))
+
+
 def accounts(caller: str) -> list[dict]:
-    """The people whose passphrase ``caller`` may reset: [{email, waiting}], sorted."""
+    """The people ``caller`` may give a passphrase link, sorted:
+    ``[{email, has_passphrase, waiting, first}]``.
+
+    ``has_passphrase`` people can be reset. ``waiting`` people were reset (or
+    given a first link) and have not yet chosen one. ``first`` people have
+    access but have never had a passphrase."""
     with _locked(fence=False):
         resets = _read()
     current = set(local_passphrases.emails())
     waiting = {row["email"] for row in resets.values() if row["outcome"] != "set"} - current
+    first = _emails_with_access() - current - waiting
     owner, authority = _owner_principal(), _authority(caller)
-    return [{"email": email, "waiting": email in waiting} for email in sorted(current | waiting)
+    return [{"email": email, "has_passphrase": email in current, "waiting": email in waiting,
+             "first": email in first}
+            for email in sorted(current | waiting | first)
             if "user:" + email != owner and _allowed(authority, email)]
+
+
+def _first_passphrase_tenant(email: str) -> str | None:
+    """The workspace to remember for a first passphrase, or None when the
+    person has no access to give one to. Installation access needs none; a
+    person with workspace roles only signs in through their first workspace."""
+    from maverick.suite_grants import is_admin_principal
+
+    from . import rbac
+
+    principal = "user:" + email
+    try:
+        stored = rbac.get_stored_role(principal)
+        memberships = rbac.tenant_memberships(principal)
+        administrator = is_admin_principal(principal)
+    except Exception as exc:  # unreadable access state: change nothing
+        raise HTTPException(503, UNAVAILABLE) from exc
+    if stored is None and not memberships and not administrator:
+        return None
+    return "" if stored is not None or not memberships else next(iter(memberships))
 
 
 def _prune(resets: dict[str, dict], now: float) -> None:
@@ -242,14 +311,16 @@ def _prune(resets: dict[str, dict], now: float) -> None:
 
 
 def issue(request: Request, email: str) -> tuple[str, dict]:
-    """Reset ``email``'s passphrase and return ``(token, record)``; see the module note."""
+    """Reset ``email``'s passphrase, or give a person who has none a first link.
+
+    Returns ``(token, record)``; see the module note."""
     from . import session_registry
     from .audit_actions_api import _audit_event
     from .session_revocation import RevocationStoreError, revoke_principal
 
     caller = actor(request)
     email = (email or "").strip().lower()
-    if not email or len(email) > 320:
+    if not _is_email(email):
         raise HTTPException(404, NO_PASSPHRASE)
     token = _PREFIX + secrets.token_urlsafe(32)
     with _locked():
@@ -261,23 +332,34 @@ def issue(request: Request, email: str) -> tuple[str, dict]:
         resets = _read()
         now = time.time()
         record = {"email": email, "tenant": "", "binding": _binding(email), "created_by": caller,
-                  "created_at": now, "expires_at": now + RESET_TTL_SECONDS, "used_at": None, "outcome": ""}
+                  "created_at": now, "expires_at": now + RESET_TTL_SECONDS, "used_at": None, "outcome": "",
+                  "first": False}
 
         def save_link(row: dict | None) -> None:
             earlier = [key for key, item in resets.items() if item["email"] == email]
-            if row is None and not _unresolved(resets, email):
-                raise HTTPException(404, NO_PASSPHRASE)
+            waiting = _unresolved(resets, email)
             if row is not None:
                 record["tenant"] = row["tenant"]
-            else:  # the passphrase went with an earlier reset: keep its workspace
-                record["tenant"] = max((resets[key] for key in earlier),
-                                       key=lambda item: item["created_at"])["tenant"]
+            elif waiting:  # the passphrase went with an earlier reset: keep its workspace
+                latest = max((resets[key] for key in earlier), key=lambda item: item["created_at"])
+                record["tenant"], record["first"] = latest["tenant"], latest["first"]
+            else:  # access but no passphrase: a first link, if there is access to give one to
+                tenant = _first_passphrase_tenant(email)
+                if tenant is None:
+                    raise HTTPException(404, NO_PASSPHRASE)
+                record["tenant"], record["first"] = tenant, True
             for key in earlier:  # the earlier link stops working
                 del resets[key]
             _prune(resets, now)
             if len(resets) >= _MAX_RECORDS:
                 raise HTTPException(409, "Too many passphrase resets are waiting. Try again later.")
             resets[_digest(token)] = record
+            # The row comes before anything is saved or removed (complete() does
+            # the same): a refusal leaves the person signed in with their
+            # passphrase, and nobody can be locked out without a record of who did it.
+            _audit_event(request, "passphrase_reset_issued", principal="user:" + email, email=email,
+                         reset_by=caller, expires_at=record["expires_at"],
+                         passphrase_removed=row is not None, first_passphrase=record["first"])
             _write(resets)
 
         local_passphrases.revoke(email, before_commit=save_link)
@@ -290,8 +372,6 @@ def issue(request: Request, email: str) -> tuple[str, dict]:
         except (RevocationStoreError, session_registry.SessionStoreError) as exc:
             raise HTTPException(503, "The session record cannot be read right now. "
                                      "Reset the passphrase again in a moment.") from exc
-    _audit_event(request, "passphrase_reset_issued", principal=principal, email=email,
-                 reset_by=caller, expires_at=record["expires_at"])
     return token, dict(record)
 
 
@@ -372,7 +452,8 @@ def _page(request: Request, state: str, *, status: int = 200, record: dict | Non
     reset = None
     if record is not None:
         reset = {"email": record["email"], "reset_by": _reset_by(record["created_by"]),
-                 "created_at": record["created_at"], "expires_at": record["expires_at"]}
+                 "created_at": record["created_at"], "expires_at": record["expires_at"],
+                 "first": record["first"]}
     response = templates.TemplateResponse(
         request, "passphrase_reset.html", {"state": state, "reset": reset, "message": message},
         status_code=status)

@@ -1256,7 +1256,7 @@ def users_page(request: Request) -> HTMLResponse:
         auth.require_global_permission(request, "admin")
         return _app().templates.TemplateResponse(request, "error.html", {
             "status": 503, "title": "The role list is missing",
-            "message": ("Roles were assigned on this installation, but the role list is missing, so "
+            "message": ("Lightwork recorded a role list on this installation, but it is missing, so "
                         "nobody's stored role is used and no access is granted from it. Restore "
                         "dashboard-users.json (and dashboard-tenant-roles.json) from a backup, or "
                         "start a new, empty role list and assign roles again."),
@@ -1285,7 +1285,8 @@ def users_roster_reset(request: Request, confirm: str = Form("")) -> RedirectRes
 
 @router.post("/users/passphrase-reset", response_class=HTMLResponse)
 def users_passphrase_reset(request: Request, email: str = Form(...), confirm: str = Form("")) -> HTMLResponse:
-    """Reset a colleague's forgotten passphrase and show its one-time link ONCE.
+    """Reset a colleague's forgotten passphrase, or give a person with access but no
+    passphrase a first link, and show its one-time link ONCE.
 
     Only the installation owner or a configured installation administrator;
     never a workspace administrator (see :mod:`passphrase_resets`)."""
@@ -1304,6 +1305,7 @@ def users_passphrase_reset(request: Request, email: str = Form(...), confirm: st
     return _app().templates.TemplateResponse(request, "users.html", {
         **_users_context(request), "passphrase_reset_link": link,
         "passphrase_reset_email": record["email"], "passphrase_reset_expires_at": record["expires_at"],
+        "passphrase_reset_first": record["first"],
     }, headers={"Cache-Control": "private, no-store"})
 
 
@@ -1447,17 +1449,33 @@ def users_delete_custom_role(
     return RedirectResponse("/users?saved=role_deleted", status_code=303)
 
 
-def _existing_account_refusal(request: Request, email: str, **payload) -> HTTPException:
-    """An invitation for someone who can already sign in: recorded and refused."""
-    from .local_passphrases import ACCOUNT_EXISTS
+def _existing_account_refusal(request: Request, email: str, *, scoped: bool = False,
+                              **payload) -> HTTPException:
+    """An invitation for someone who can already sign in: recorded and refused.
+
+    An installation administrator can already see every account, so they are told
+    why. A workspace administrator is told only that the invitation could not be
+    made: the same words whichever store matched and whether the person belongs
+    to another workspace, so the refusal cannot be used to look people up.
+    """
+    from .local_passphrases import ACCOUNT_EXISTS, NOT_INVITABLE
     from .product_errors import background_save, product_error
 
     _admin_audit(request, "invite_refused", email=(email or "").strip().lower(),
                  reason="existing_local_account", **payload)
+    message = NOT_INVITABLE if scoped else ACCOUNT_EXISTS
     if background_save(request):
-        return product_error(409, "invite_existing_account", ACCOUNT_EXISTS,
-                             field_errors={"email": ACCOUNT_EXISTS})
-    return HTTPException(status_code=409, detail=ACCOUNT_EXISTS)
+        return product_error(409, "invite_not_created" if scoped else "invite_existing_account",
+                             message, field_errors={"email": message})
+    return HTTPException(status_code=409, detail=message)
+
+
+def _invite_rate_refusal(request: Request, exc: Exception) -> HTTPException:
+    from .product_errors import background_save, product_error
+
+    if background_save(request):
+        return product_error(429, "invite_rate_limited", str(exc))
+    return HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "600"})
 
 
 def _invite_refusal(reason: str) -> HTTPException:
@@ -1596,7 +1614,10 @@ def users_workspace_invite(
                 ttl_hours=ttl, before_effect=guard,
             )
         except invites.ExistingAccountError as exc:
-            raise _existing_account_refusal(request, email, workspace=tenant) from exc
+            raise _existing_account_refusal(request, email, scoped=not installation_admin,
+                                            workspace=tenant) from exc
+        except invites.InviteRateLimited as exc:
+            raise _invite_rate_refusal(request, exc) from exc
         except ValueError as exc:
             from .product_errors import background_save
             if background_save(request):

@@ -7,16 +7,22 @@
 {% block content %}
 <div class="panel own">
   {% if state == 'form' %}
+  {% if reset.first %}
+  <h1 class="page-title">Choose a passphrase</h1>
+  <p class="own__lede">{{ reset.reset_by | capitalize }} gave {{ reset.email }} this link
+    on {{ reset.created_at | datetime('absolute') }} so you can choose a passphrase for signing in.</p>
+  {% else %}
   <h1 class="page-title">Choose a new passphrase</h1>
   <p class="own__lede">Your passphrase for {{ reset.email }} was reset by {{ reset.reset_by }}
     on {{ reset.created_at | datetime('absolute') }}. Your old passphrase no longer works and you were signed out everywhere.</p>
+  {% endif %}
   {% if message %}<p class="own__alert" role="alert">{{ message }}</p>{% endif %}
-  <p>Choose a new passphrase, then sign in with your email and the new passphrase. This link works once and
+  <p>Choose a {{ '' if reset.first else 'new ' }}passphrase, then sign in with your email and {{ 'that passphrase' if reset.first else 'the new passphrase' }}. This link works once and
     expires {{ reset.expires_at | datetime('absolute') }}. It does not change your access.</p>
   <form method="post" data-draft-recovery="off" id="owner-form" novalidate>
     <label class="own__field"><span>Email address</span>
       <input class="input" type="email" id="reset-email" autocomplete="username" value="{{ reset.email }}" readonly aria-describedby="reset-email-help">
-      <span class="own__hint" id="reset-email-help">The account whose passphrase was reset. You sign in with it.</span>
+      <span class="own__hint" id="reset-email-help">The account this link is for. You sign in with it.</span>
     </label>
     {{ passphrase(new=True) }}
     <div class="own__actions">

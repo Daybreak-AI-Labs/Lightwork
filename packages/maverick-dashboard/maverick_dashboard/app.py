@@ -3581,12 +3581,11 @@ from .rbac import RbacStoreError as _RbacStoreError  # noqa: E402
 @app.exception_handler(_RbacStoreError)
 async def rbac_store_exception_handler(request: Request, exc: _RbacStoreError):
     """Unreadable or missing role policy is a plain refusal, never a grant or 500."""
-    from .rbac import RosterMissingError
+    from .rbac import ROSTER_RECOVERY, RosterMissingError
 
     log.error("dashboard role policy is unavailable on %s: %s", request.url.path, exc)
     detail = ("Access roles cannot be read, so nothing was changed and no access was granted. "
-              + ("The role list is missing. An installation administrator can restore it from a "
-                 "backup or start a new role list on the Users page."
+              + (f"The role list is missing. {ROSTER_RECOVERY}"
                  if isinstance(exc, RosterMissingError)
                  else "Ask an administrator to restore or repair the role list."))
     if _wants_html(request):
