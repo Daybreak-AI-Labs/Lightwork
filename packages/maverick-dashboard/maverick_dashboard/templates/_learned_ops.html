@@ -34,13 +34,14 @@
     {% include "_learning_test_cases.html" %}
     {% include "_learning_pending_cases.html" %}
     <div class="lpo-row">
-      <label for="lpo-harvest-mode">New test cases from past work</label>
+      <label for="lpo-harvest-mode">Find examples in legacy shared work</label>
       <select id="lpo-harvest-mode" class="select">
         <option value="propose" selected>Suggest them for review first</option>
         <option value="auto">Add them straight away</option>
       </select>
-      <button type="button" class="btn btn--ghost" id="lpo-harvest">Find new test cases</button>
+      <button type="button" class="btn btn--ghost" id="lpo-harvest">Find shared-work examples</button>
     </div>
+    <p class="muted">This automatic search only considers legacy work with no named owner. To teach from your own work, choose <a href="#learning-task-examples">Use one of my completed tasks</a> above and review its complete source and learning use.</p>
     <div class="lpo-row">
       <button type="button" class="btn btn--ghost" id="lpo-export">Download the test cases</button>
     </div>

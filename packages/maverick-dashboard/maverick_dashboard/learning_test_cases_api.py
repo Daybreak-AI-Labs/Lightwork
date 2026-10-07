@@ -1,6 +1,7 @@
 """Ordinary reviewed questions in the existing shared self-coaching corpus."""
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -49,6 +50,7 @@ class CaseIn(BaseModel):
 class ReviewIn(CaseIn):
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
     revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_reference: str = Field(default="", max_length=65536)
 
 
 class SelectedIn(BaseModel):
@@ -282,7 +284,9 @@ def save_setup(request, prepared, operation):
         return setup_original(request, operation, prepared=prepared)
 
 
-def prepare_case(request, values, *, context=None, revision=None):
+def prepare_case(request, values, *, context=None, revision=None, source_reference=""):
+    from . import learning_task_examples as examples
+
     body = CaseIn.model_validate(values)
     state = current(request)
     _authority(request, context or state["context"], write=True)
@@ -301,12 +305,19 @@ def prepare_case(request, values, *, context=None, revision=None):
     checked = current(request)
     if checked["revision"] != state["revision"]:
         raise HTTPException(409, "The test questions changed during review. Refresh before saving.")
-    return {"context": scope["context"], "source": scope["source"], "corpus_revision": reviewed["revision"],
+    prepared = {"context": scope["context"], "source": scope["source"], "corpus_revision": reviewed["revision"],
             "models": scope["models"], "case": body.model_dump(), "model_label": model_label(body.model),
             "questions_before": reviewed["model_cases"], "total_before": reviewed["total_cases"]}
+    if source_reference:
+        selected = examples.reviewed_source(request, source_reference, scope["context"])
+        prepared.update(task_source=selected["source"], task_review={key: selected[key] for key in ("title", "question", "answer")},
+                        source_expires=selected["expires"])
+    return prepared
 
 
 def changes(prepared):
+    from .learning_task_examples import USE
+
     if prepared.get("action"):
         before = prepared["before"]
         return [{"label": "Model", "after": prepared["model_label"]},
@@ -315,7 +326,12 @@ def changes(prepared):
                 {"label": "Other saved information", "after": "Original learning permissions and other information stay with a corrected question. Unrelated questions and past check results remain unchanged."},
                 {"label": "Who can use it", "after": SCOPE},
                 {"label": "Effect", "after": "Correct only this exact question. No check runs." if prepared["action"] == "correct" else "Remove only this exact question from the collection used by future checks. Its original saved receipts remain available. No check runs."}]
-    return [{"label": "Model", "after": prepared["model_label"]},
+    source = prepared.get("task_review")
+    source_rows = ([{"label": "Completed task", "after": source["title"]},
+                    {"label": "Full task text", "after": source["question"]},
+                    {"label": "Full recorded answer", "after": source["answer"]},
+                    {"label": "Permission for this task", "after": USE}] if source else [])
+    return source_rows + [{"label": "Model", "after": prepared["model_label"]},
             {"label": "Question", "after": prepared["case"]["question"]},
             {"label": "Expected answer", "after": prepared["case"]["expected"]},
             {"label": "Questions for this model", "before": prepared["questions_before"], "after": prepared["questions_before"] + 1},
@@ -338,8 +354,21 @@ def _owned(request, operation):
     row = _store().get(_request_id(operation))
     if row and (row.get("context") != context or row.get("actor") != native._actor(request)):
         raise HTTPException(404, "This original question-saving request is not available to this account.")
+    if row and row.get("protected_prepared"):
+        try:
+            row["prepared"] = json.loads(crypto_at_rest.unseal_bound(base64.b64decode(row["protected_prepared"], validate=True), row["id"]))
+        except Exception as exc:
+            raise HTTPException(503, "This original request's private review could not be opened. Its outcome remains unconfirmed; nothing was repeated.") from exc
     _authority(request, context)
     return row
+
+
+def _protected_prepared(prepared, operation):
+    binding = prepared.get("task_source") or prepared.get("before", {}).get("task_source")
+    if not binding:
+        return {"prepared": prepared}
+    payload = base64.b64encode(crypto_at_rest.seal_bound(json.dumps(prepared, ensure_ascii=False).encode(), _request_id(operation))).decode()
+    return {"prepared": {"task_source": binding}, "protected_prepared": payload}
 
 
 def _project(request, row):
@@ -363,11 +392,24 @@ def _project(request, row):
         # Retain the original receipt; a changed/unavailable current source never authorizes replay.
         current_state = "The current collection could not be matched to this original request. Nothing was repeated."
     _authority(request, row["context"])
-    return {"operation": row["id"][4:], "context": row["context"], "confirmed": confirmed,
+    value = {"operation": row["id"][4:], "context": row["context"], "confirmed": confirmed,
             "message": "The original question was saved. No duplicate was added and no check was run." if confirmed else
                        "The original save is unconfirmed. Read the current collection before deciding what to do next; nothing is repeated automatically.",
             "model": row["prepared"]["model_label"], "question": row["prepared"]["case"]["question"],
             "expected": row["prepared"]["case"]["expected"], "recorded_at": row["created_at"], "current": current_state, "scope": SCOPE}
+    return _source_projection(request, row["prepared"], value)
+
+
+def _source_projection(request, prepared, value):
+    from .learning_task_examples import case_access
+
+    binding = prepared.get("task_source") or prepared.get("before", {}).get("task_source")
+    if binding and not case_access(request, {"task_source": binding}):
+        value.pop("question", None)
+        value.pop("expected", None)
+        value.pop("before", None)
+        value["current"] = "The original recorded outcome is retained, but the source or its current permission is unavailable. Private question and answer text is withheld. Nothing was repeated."
+    return value
 
 
 def original_request(request, operation):
@@ -397,6 +439,10 @@ def save_case(request, prepared, operation):
             scope = _scope(request, context, write=True)
             if scope["source"] != prepared["source"] or scope["models"] != prepared["models"] or case.model not in scope["models"]:
                 raise HTTPException(409, "Learning storage or the available models changed. Review again before saving.")
+            if prepared.get("task_source"):
+                from .learning_task_examples import case_access
+                if not case_access(request, prepared) or time.time() >= prepared["source_expires"]:
+                    raise HTTPException(409, "The selected task, permission or review deadline changed. Review the current source again. Nothing was added.")
         authorize()
         store = _store()
         claim = None
@@ -408,12 +454,13 @@ def save_case(request, prepared, operation):
             native._record(request, "self_harness_case_append", phase="prepared", operation=operation,
                            reviewed_revision=prepared["corpus_revision"], model_sha256=digest(case.model))
             claim = store.create({"id": _request_id(operation), "context": context, "actor": actor,
-                                  "binding": binding, "request_digest": request_digest, "prepared": prepared, "state": "writing"},
+                                  "binding": binding, "request_digest": request_digest, **_protected_prepared(prepared, operation), "state": "writing"},
                                  action="learning.case.prepare", actor=actor, max_records=10000)
         try:
             scope = _scope(request, context, write=True)
+            options = {"task_source": prepared["task_source"]} if prepared.get("task_source") else {}
             corpus.append_reviewed_corpus_case(scope["path"], case.model, case.question, case.expected,
-                expected_revision=prepared["corpus_revision"], binding=binding, authorize=authorize, before_write=claim_request)
+                expected_revision=prepared["corpus_revision"], binding=binding, authorize=authorize, before_write=claim_request, **options)
             store.update(claim["id"], lambda row: row.update(state="saved"), expected_revision=claim["revision"],
                          action="learning.case.saved", actor=actor)
         except Exception as exc:
@@ -432,11 +479,13 @@ def save_case(request, prepared, operation):
 
 
 def browse(request, model, *, offset=0):
+    from .learning_task_examples import case_access
+
     scope = _scope(request)
     if model not in scope["models"]:
         raise HTTPException(409, "Choose a currently available model.")
     try:
-        page = corpus.browse_corpus_cases(scope["path"], model, offset=offset)
+        page = corpus.browse_corpus_cases(scope["path"], model, offset=offset, authorize=lambda row: case_access(request, row))
     except ValueError as exc:
         if str(exc).startswith("This model's imported collection"):
             raise HTTPException(409, str(exc)) from exc
@@ -448,10 +497,12 @@ def browse(request, model, *, offset=0):
 
 
 def selected_case(request, model, reference):
+    from .learning_task_examples import case_access
+
     scope = _scope(request)
     if model not in scope["models"]:
         raise HTTPException(409, "Choose a currently available model.")
-    value = _call(lambda: corpus.review_corpus_change(scope["path"], model, reference, "retire"))
+    value = _call(lambda: corpus.review_corpus_change(scope["path"], model, reference, "retire", authorize=lambda row: case_access(request, row)))
     if _scope(request, scope["context"]) != scope:
         raise HTTPException(409, "Your access, models or learning storage changed. Refresh current questions.")
     return {"context": scope["context"], "model": model, "reference": reference, "model_label": model_label(model),
@@ -459,13 +510,15 @@ def selected_case(request, model, reference):
 
 
 def prepare_change(request, values, action, *, context=None, revision=None):
+    from .learning_task_examples import case_access
+
     body = (CorrectionIn if action == "correct" else SelectedIn).model_validate(values)
     state = current(request)
     scope = _scope(request, context or state["context"], write=True)
     if revision is not None and state["revision"] != revision or body.model not in scope["models"]:
         raise HTTPException(409, "The collection or available models changed. Refresh and select the question again.")
     reviewed = _call(lambda: corpus.review_corpus_change(scope["path"], body.model, body.reference, action,
-                    getattr(body, "question", None), getattr(body, "expected", None)))
+                    getattr(body, "question", None), getattr(body, "expected", None), authorize=lambda row: case_access(request, row)))
     if current(request)["revision"] != state["revision"]:
         raise HTTPException(409, "The questions changed during review. Select the current question again.")
     return {"action": action, "context": scope["context"], "source": scope["source"], "models": scope["models"],
@@ -494,11 +547,12 @@ def _change_project(request, row):
     except (HTTPException, ValueError, OSError):
         observation = "Current learning storage could not be checked. The original recorded outcome is kept; nothing was repeated."
     _authority(request, row["context"])
-    return {"operation": row["id"][4:], "context": row["context"], "confirmed": confirmed,
+    value = {"operation": row["id"][4:], "context": row["context"], "confirmed": confirmed,
             "action": prepared["action"], "message": ("The original question correction was saved." if prepared["action"] == "correct" else "The original question retirement was saved.") + " No change was repeated and no check was run." if confirmed else
                        "The original change is unconfirmed. Read the current collection before deciding what to do next; nothing is repeated automatically.",
             "model": prepared["model_label"], "question": prepared["case"]["question"], "expected": prepared["case"]["expected"],
             "before": prepared["before"], "current": observation, "recorded_at": row["created_at"], "scope": SCOPE}
+    return _source_projection(request, prepared, value)
 
 
 def save_change(request, prepared, operation):
@@ -516,6 +570,10 @@ def save_change(request, prepared, operation):
             scope = _scope(request, context, write=True)
             if scope["source"] != prepared["source"] or scope["models"] != prepared["models"] or prepared["case"]["model"] not in scope["models"]:
                 raise HTTPException(409, "Learning storage or models changed. Review the current question again.")
+            if prepared["before"].get("task_source"):
+                from .learning_task_examples import case_access
+                if not case_access(request, prepared["before"]):
+                    raise HTTPException(409, "The task source or permission changed. Its private question cannot be changed here.")
         authorize()
         binding, store, claim = secrets.token_hex(32), _store(), None
         def claim_request():
@@ -523,7 +581,7 @@ def save_change(request, prepared, operation):
             native._record(request, "self_harness_case_" + prepared["action"], phase="prepared", operation=operation,
                            reviewed_revision=prepared["corpus_revision"], model_sha256=digest(prepared["case"]["model"]))
             claim = store.create({"id": _request_id(operation), "context": context, "actor": actor, "binding": binding,
-                                  "request_digest": request_digest, "prepared": prepared, "state": "writing"},
+                                  "request_digest": request_digest, **_protected_prepared(prepared, operation), "state": "writing"},
                                  action="learning.case.prepare", actor=actor, max_records=10000)
         try:
             scope, case = _scope(request, context, write=True), prepared["case"]
@@ -561,6 +619,18 @@ def recovery_context(request: Request):
     return _response({"context": _authority(request)})
 
 
+@router.get("/task-sources")
+def task_sources(request: Request, offset: int = Query(0, ge=0, le=1000000)):
+    from .learning_task_examples import catalog
+    return _response(catalog(request, offset=offset))
+
+
+@router.get("/task-source")
+def task_source(request: Request, goal: int = Query(ge=1), context: str = Query(pattern=r"^[a-f0-9]{64}$")):
+    from .learning_task_examples import selected
+    return _response(selected(request, goal, context))
+
+
 @router.get("/cases")
 def cases(request: Request, model: str = Query(min_length=1, max_length=200), offset: int = Query(0, ge=0, le=1000000)):
     return _response(browse(request, model, offset=offset))
@@ -593,7 +663,8 @@ def setup_review(request: Request, body: SetupIn):
 
 @router.post("/review")
 def review(request: Request, body: ReviewIn):
-    prepared = prepare_case(request, {key: getattr(body, key) for key in ("model", "question", "expected")}, context=body.context, revision=body.revision)
+    prepared = prepare_case(request, {key: getattr(body, key) for key in ("model", "question", "expected")}, context=body.context,
+                            revision=body.revision, source_reference=body.source_reference)
     material = {"purpose": PURPOSE, "prepared": prepared, "operation": secrets.token_hex(16), "expires": time.time() + TTL}
     token = crypto_at_rest.seal_to_str(json.dumps(material, allow_nan=False, ensure_ascii=False, separators=(",", ":")))
     if not crypto_at_rest.is_sealed_str(token) or len(token) > 262144:

@@ -292,6 +292,10 @@ async def check_log(request: Request, body: CheckIn) -> dict:
         paths = [p for p in sorted(audit_dir.glob("*.ndjson")) if p.name != "anchors.ndjson"] \
             if audit_dir.exists() else []
         paths = [p for p in paths if (not since or p.stem >= since) and (not until or p.stem <= until)]
+        if len(paths) > 400:
+            raise HTTPException(status_code=422, detail=(
+                "Choose a smaller date range. Up to four hundred recorded days can be checked at once; "
+                "split this range into separate checks."))
         problems: list[str] = []
         unsigned = 0
         for path in paths[-400:]:

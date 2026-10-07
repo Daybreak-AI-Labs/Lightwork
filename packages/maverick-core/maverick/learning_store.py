@@ -603,12 +603,20 @@ def load_corpus_db(kind: str, *, strict: bool = False) -> dict:
     return out
 
 
-def write_corpus_db(kind: str, data: dict) -> None:
+def write_corpus_db(kind: str, data: dict, *, effect_guard=None) -> None:
     """Whole-family replace for ``kind``, mirroring the file store's atomic
     rewrite. For ``"live"``, non-list top-level values are preserved under the
     ``extra`` kind so operator annotations survive the round-trip."""
     with _conn() as c:
+        if effect_guard is not None:
+            if isinstance(c, sqlite3.Connection):
+                c.execute("BEGIN IMMEDIATE")
+            else:
+                _exec(c, "LOCK TABLE harness_corpus IN ROW EXCLUSIVE MODE")
+            effect_guard()
         _write_corpus_family(c, kind, data)
+        if effect_guard is not None:
+            effect_guard()
 
 
 def _write_corpus_family(c, kind: str, data: dict) -> None:

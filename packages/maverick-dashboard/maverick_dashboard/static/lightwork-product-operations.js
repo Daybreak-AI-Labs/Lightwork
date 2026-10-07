@@ -240,6 +240,17 @@
               ? function (isCurrent) { return exceptionControls.openReview({}, {isCurrent: isCurrent, context: exceptionContext}); } : null);
           return;
         }
+        if (entry[0] === 'learning_task_question_review') {
+          var taskQuestionReview = entry[1], taskQuestionControls = window.LightworkLearningQuestions;
+          if (!taskQuestionReview || Array.isArray(taskQuestionReview) ||
+              Object.keys(taskQuestionReview).sort().join(',') !== 'context,scope' ||
+              taskQuestionReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(taskQuestionReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review a question from your completed work',
+            '/learned#learning-test-questions',
+            taskQuestionControls && typeof taskQuestionControls.openTaskReview === 'function'
+              ? function (isCurrent) { return taskQuestionControls.openTaskReview(taskQuestionReview.context, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'mail_connection_review') {
           var mailReview = entry[1], mailControls = window.LightworkConnectionSetup;
           if (!mailReview || Array.isArray(mailReview) ||
