@@ -1347,7 +1347,7 @@ def test_pick_notifications_writes_the_keys_the_kernel_reads(monkeypatch):
     cfg, _ = wizard.pick_notifications()
     assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts", "delivery_receipts": True,
                    "personal_alerts": True, "personal_critical_bypass": True, "personal_background": True,
-                   "metric_alerts": True, "personal_external": True, "personal_dashboard_url": "my-alerts"}
+                   "personal_external": True, "personal_dashboard_url": "my-alerts", "metric_alerts": True}
     for choice, key in (("slack     - incoming webhook", "slack_webhook"),
                         ("discord   - webhook URL", "discord_webhook")):
         monkeypatch.setattr(wizard, "_q_select", lambda *_a, choice=choice, **_k: choice)
