@@ -28,7 +28,8 @@ from .plain_labels import CAPABILITY_LABELS, capability_label, model_label
 
 PAGE = "/learning#lo-factory"
 TTL = 600
-KINDS = {"compare": "factory_guidance_check", "adopt": "factory_guidance_adopt"}
+KINDS = {"compare": "factory_guidance_check", "adopt": "factory_guidance_adopt", "restore": "factory_guidance_restore"}
+RESTORE_NOTICE = "Restores earlier guidance for future agent building only. It does not change saved or running agents, grant actions or call an AI service. Later guidance is never overwritten. A separate review is required before any restoration or receipt completion."
 NOTICE = ("This compares unsaved agent setups built with current guidance and with one selected addition. "
           "The local check only asks whether the expected tool remains allowed after normal safety checks. "
           "The recurring problem and expected tool are reported premises, not independently verified business facts. "
@@ -48,7 +49,7 @@ class CompareIn(BaseModel):
     authorize_input_use: bool
 
 
-def authority(request, context=None, *, write=False):
+def authority(request, context=None, *, write=False, restoring=False):
     from . import learning_ops_api as native
     auth.require_global_permission(request, "admin")
     auth.require_page_permission(request, "/learning")
@@ -59,8 +60,9 @@ def authority(request, context=None, *, write=False):
     if write:
         from .app import _require_same_origin
         _require_same_origin(request)
-        native._factory_on()
-        native._halt_preflight("factory-learning")
+        if not restoring:
+            native._factory_on()
+            native._halt_preflight("factory-learning")
         if config.config_source_errors(include_tenant=True):
             raise HTTPException(503, "Current learning settings are unavailable. No new check or adoption was admitted.")
     return current
@@ -140,7 +142,7 @@ def history(request):
     """Recent original choices need no current AI connection or source body."""
     from . import learning_ops_api as native
     context = authority(request)
-    rows = [{"value": job.result["operation"], "label": ("Agent-building comparison" if job.kind == KINDS["compare"] else "Agent-building adoption") + " / " + time.strftime("%b %d, %H:%M", time.localtime(job.started_at))}
+    rows = [{"value": job.result["operation"], "label": {"factory_guidance_check": "Agent-building comparison", "factory_guidance_adopt": "Agent-building adoption", "factory_guidance_restore": "Earlier guidance restoration"}[job.kind] + " / " + time.strftime("%b %d, %H:%M", time.localtime(job.started_at))}
             for job in jobs.listed() if job.kind in KINDS.values() and job.started_by == native._actor(request)
             and job.workspace == native._workspace() and isinstance(job.result, dict) and job.result.get("operation")]
     authority(request, context)
@@ -231,7 +233,14 @@ def review_rows(prepared):
 
 
 def review(request, action, values):
-    prepared = prepare_compare(request, values) if action == "compare" else prepare_adopt(request, values["operation"])
+    if action == "compare":
+        prepared = prepare_compare(request, values)
+    elif action == "adopt":
+        prepared = prepare_adopt(request, values["operation"])
+    elif action == "restore":
+        prepared = prepare_restore(request, values)
+    else:
+        raise HTTPException(422, "Choose a supported guidance decision.")
     expires = time.time() + TTL
     from . import learning_ops_api as native
     operation = secrets.token_hex(16)
@@ -241,7 +250,8 @@ def review(request, action, values):
     if not crypto_at_rest.is_sealed_str(token):
         raise HTTPException(503, "The complete private review could not be protected. Nothing was admitted.")
     return {"token": token, "operation": operation, "expires": expires, "action": action,
-            "context": prepared["body"]["context"], "changes": review_rows(prepared), "notice": NOTICE}
+            "context": prepared["body"]["context"], "changes": restore_rows(prepared) if action == "restore" else review_rows(prepared),
+            "notice": RESTORE_NOTICE if action == "restore" else NOTICE}
 
 
 def _open(request, token):
@@ -254,7 +264,7 @@ def _open(request, token):
             raise ValueError
     except Exception as exc:
         raise HTTPException(409, "This protected review is unavailable. Read its original result before a new decision.") from exc
-    authority(request, envelope["prepared"]["body"]["context"], write=True)
+    authority(request, envelope["prepared"]["body"]["context"], write=True, restoring=envelope["prepared"]["action"] == "restore")
     if (envelope["actor"], envelope["workspace"]) != (native._actor(request), native._workspace()):
         raise HTTPException(404, "This review is unavailable to the current account.")
     return envelope
@@ -276,6 +286,11 @@ def original(request, operation):
     context = authority(request)
     job = _job(request, operation)
     if job is None:
+        restored = _restore_receipt(request, operation)
+        if restored is not None:
+            authority(request, context)
+            return {"operation": operation, "confirmed": True, "state": "done", "source_visible": False,
+                    "result": restored, "message": "The original restoration receipt is confirmed. Its complete review is no longer in recent task history. Nothing was repeated."}
         historical = _adoption_receipt(request, operation)
         if historical is not None:
             authority(request, context)
@@ -285,6 +300,8 @@ def original(request, operation):
                     "message": "The original adoption decision is retained. Its complete comparison is no longer in recent task history. Nothing was repeated." if historical.state in {"committed", "aborted"} else "The original adoption remains unconfirmed. Nothing was repeated."}
         return {"operation": operation, "confirmed": False, "message": "The original task is not currently retained. This does not mean it failed. Nothing was repeated."}
     view = jobs.current_view(job)
+    if job.kind == KINDS["restore"]:
+        return _restore_original(request, operation, view)
     result = copy.deepcopy(view.get("result") or {})
     complete = job._durable and view["result_retained"] and result.get("complete") is True and job.state == "done"
     if job.kind == KINDS["compare"]:
@@ -329,6 +346,114 @@ def _adoption_receipt(request, operation):
     if tx is not None and (tx.record.provenance.get("factory_actor"), tx.record.provenance.get("factory_workspace"), tx.record.provenance.get("factory_operation")) != (native._actor(request), native._workspace(), operation):
         raise HTTPException(404, "This original adoption receipt is unavailable to the current account.")
     return tx
+
+
+
+class RestoreIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    adoption: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+def _restore_plan(request, adoption=None):
+    from . import learning_ops_api as native
+    return factory.restoration_plan(actor=native._actor(request), workspace=native._workspace(), adoption=adoption)
+
+
+def restore_options(request):
+    context = authority(request)
+    try:
+        plan = _restore_plan(request)
+        choices = [{"value": plan["adoption"], "label": "Your most recent guidance change / " + time.strftime("%b %d, %H:%M", time.localtime(plan["adopted_at"]))}]
+        notice = RESTORE_NOTICE
+    except (OSError, RuntimeError, ValueError) as exc:
+        choices = []
+        notice = "Current guidance history could not be read. Nothing was restored." if isinstance(exc, OSError) else str(exc)
+    authority(request, context)
+    return {"context": context, "choices": choices, "notice": notice, "requests": history(request)["requests"]}
+
+
+def prepare_restore(request, values):
+    body = RestoreIn.model_validate(values)
+    context = authority(request, write=True, restoring=True)
+    try:
+        plan = _restore_plan(request, body.adoption)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(409, "Current guidance could not be verified. Nothing was restored." if isinstance(exc, OSError) else str(exc)) from exc
+    prepared = {"action": "restore", "body": {"context": context, "dollars": 0, "seconds": 15}, "plan": plan}
+    _bounded(prepared)
+    _restore_guard(request, prepared, float("inf"))
+    return prepared
+
+
+def _restore_guard(request, prepared, expires, budget=None):
+    with auth.fresh_configuration():
+        authority(request, prepared["body"]["context"], write=True, restoring=True)
+        if budget is not None:
+            budget.check()
+        if time.time() >= expires:
+            raise HTTPException(409, "This restoration review expired. Read the original before a separate current review.")
+
+
+def _guidance_text(values):
+    text = "\n\n".join(values) or "No adopted agent-building guidance."
+    return re.sub(r"(['`])([A-Za-z0-9_.:-]{1,256})\1", lambda match: _action_name(match.group(2)), text).replace("packs ", "agents ")
+
+
+def restore_rows(prepared):
+    plan = prepared["plan"]
+    return [{"label": "Meaning and limits", "after": RESTORE_NOTICE},
+            {"label": "Complete agent-building guidance", "before": _guidance_text(plan["current"]), "after": _guidance_text(plan["earlier"])},
+            {"label": "What this decision does", "after": "Restores the exact earlier guidance and records this separate decision." if plan["mode"] == "restore" else "The earlier guidance is already present. This records a separately reviewed restoration receipt without rewriting guidance. It does not confirm any earlier uncertain attempt."},
+            {"label": "Limits", "after": "No AI calls or spending. Up to 15 seconds of local verification and recording."},
+            {"label": "Future work", "after": "Future agent building uses the earlier guidance when relevant. Existing saved and running agents keep their own setup, approval and safety requirements."},
+            {"label": "Changes during the wait", "after": "Current account, workspace and administrator authority are checked again at the protected write. Any later guidance change refuses this restoration."},
+            {"label": "Interrupted reply", "after": "Read this exact original decision. It is never repeated automatically. If guidance was restored but its receipt is missing, a new explicit review can complete the receipt without rewriting guidance."}]
+
+
+def _restore_receipt(request, operation):
+    from . import learning_ops_api as native
+    try:
+        return factory.restoration_receipt(actor=native._actor(request), workspace=native._workspace(), operation=operation)
+    except PermissionError as exc:
+        raise HTTPException(404, "This original restoration is unavailable to the current account.") from exc
+
+
+def _restore_original(request, operation, view):
+    context = authority(request)
+    receipt = _restore_receipt(request, operation)
+    prepared = (view.get("result") or {}).get("prepared")
+    safe = dict(receipt or {})
+    private = False
+    if prepared:
+        try:
+            _restore_guard(request, prepared, float("inf"))
+            path = factory.corrections_path()
+            _, state = _artifact()
+            current = factory._artifact_revision(path, state).to_dict()
+            private = current in [prepared["plan"]["artifact"], prepared["plan"]["before"]]
+            if private:
+                safe["restoration_rows"] = restore_rows(prepared)
+        except (HTTPException, OSError, RuntimeError, ValueError):
+            private = False
+    authority(request, context)
+    return {"operation": operation, "confirmed": receipt is not None and receipt["complete"], "state": view["state"],
+            "message": ("The separate restoration receipt is confirmed. Earlier guidance was already present; nothing was rewritten and no earlier uncertain attempt was confirmed."
+                        if receipt and receipt["mode"] == "acknowledge" else
+                        "Earlier guidance restored; the original receipt is confirmed. Nothing was repeated." if receipt else
+                        "This restoration remains unconfirmed. Earlier guidance may already be present; read the original before a separately reviewed receipt completion. Nothing was repeated."),
+            "result": safe, "source_visible": private,
+            "job": {key: view[key] for key in ("state", "can_stop", "problem", "worker_available", "observation_saved", "retention_problem")},
+            "task_href": "/learned?learning_task=" + operation[:16] + "#learning-job-history"}
+
+
+def _run_restore(request, prepared, operation, expires, budget):
+    from . import learning_ops_api as native
+    with authority_effect_fence():
+        _restore_guard(request, prepared, expires, budget)
+        result = factory.restore_reviewed_correction(actor=native._actor(request), workspace=native._workspace(),
+            adoption=prepared["plan"]["adoption"], operation=operation, expected_plan=prepared["plan"],
+            effect_guard=lambda: _restore_guard(request, prepared, expires, budget))
+        return {"operation": operation, "binding": digest(prepared), "original_until": expires, "prepared": prepared, **result}
 
 
 def _proposal(client, prepared, case, system, budget, guard):
@@ -440,22 +565,34 @@ def apply(request, token, *, confirmed):
     envelope = _open(request, token)
     prepared, operation, expires = envelope["prepared"], envelope["operation"], envelope["expires"]
     existing = _job(request, operation)
-    if existing is not None or prepared["action"] == "adopt" and _adoption_receipt(request, operation) is not None:
+    if (existing is not None or prepared["action"] == "adopt" and _adoption_receipt(request, operation) is not None
+            or prepared["action"] == "restore" and _restore_receipt(request, operation) is not None):
         return original(request, operation)
     if time.time() >= expires:
         raise HTTPException(409, "This review expired. No new work was admitted; prepare a fresh review.")
     from . import learning_ops_api as native
-    budget = native._budget("eval")
+    if prepared["action"] == "restore":
+        from maverick.budget import Budget
+        budget = Budget(max_dollars=0, max_wall_seconds=15, max_tool_calls=0)
+    else:
+        budget = native._budget("eval")
     budget.max_dollars = min(budget.max_dollars if budget.max_dollars is not None else math.inf, prepared["body"]["dollars"])
     budget.max_wall_seconds = min(budget.max_wall_seconds if budget.max_wall_seconds is not None else math.inf, prepared["body"]["seconds"])
     budget.max_tool_calls = 0
     with authority_effect_fence():
-        _guard(request, prepared, expires, budget)
+        if prepared["action"] == "restore":
+            _restore_guard(request, prepared, expires, budget)
+            if prepare_restore(request, {"adoption": prepared["plan"]["adoption"]}) != prepared:
+                raise HTTPException(409, "The restoration changed. Review current guidance again.")
+        else:
+            _guard(request, prepared, expires, budget)
         if prepared["action"] == "adopt" and prepare_adopt(request, prepared["comparison"]) != prepared:
             raise HTTPException(409, "The exact comparison or adoption checks changed. Review it again.")
         def run(job):
             if prepared["action"] == "compare":
                 return _comparison(request, prepared, operation, expires, job, budget)
+            if prepared["action"] == "restore":
+                return _run_restore(request, prepared, operation, expires, budget)
             with authority_effect_fence():
                 _guard(request, prepared, expires, budget)
                 correction = factory.ProposerCorrection(**{key: prepared["correction"][key] for key in ("scope", "signal", "detail", "support", "guidance")})
@@ -467,7 +604,7 @@ def apply(request, token, *, confirmed):
                 _bounded(result)
                 return result
         try:
-            jobs.start(KINDS[prepared["action"]], "Compare agent-building guidance" if prepared["action"] == "compare" else "Adopt reviewed agent-building guidance", run,
+            jobs.start(KINDS[prepared["action"]], {"compare": "Compare agent-building guidance", "adopt": "Adopt reviewed agent-building guidance", "restore": "Restore earlier agent-building guidance"}[prepared["action"]], run,
                 started_by=native._actor(request), workspace=native._workspace(), cancellable=prepared["action"] == "compare",
                 on_cancel=lambda: setattr(budget, "max_dollars", 0), requested_id=operation[:16],
                 initial_result={"operation": operation, "binding": digest(prepared), "original_until": expires, "prepared": prepared, "complete": False},

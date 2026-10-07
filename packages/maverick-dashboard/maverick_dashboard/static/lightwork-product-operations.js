@@ -228,6 +228,18 @@
               ? function (isCurrent) { return evidenceControls.openReview({}, {isCurrent: isCurrent, context: evidenceContext}); } : null);
           return;
         }
+        if (entry[0] === 'policy_exception_review') {
+          var exceptionReview = entry[1], exceptionControls = window.LightworkPolicyExceptions;
+          var exceptionContext = catalog && catalog.context;
+          if (!exceptionReview || Array.isArray(exceptionReview) ||
+              Object.keys(exceptionReview).join(',') !== 'scope' || exceptionReview.scope !== 'current_page' ||
+              typeof exceptionContext !== 'string' || !/^[a-f0-9]{64}$/.test(exceptionContext)) return;
+          protectedControls(node('dd', undefined, list), 'Review AI-use exceptions and safeguards',
+            '/security/assurance#ai-policy-exception-request',
+            exceptionControls && typeof exceptionControls.openReview === 'function'
+              ? function (isCurrent) { return exceptionControls.openReview({}, {isCurrent: isCurrent, context: exceptionContext}); } : null);
+          return;
+        }
         if (entry[0] === 'factory_guidance_author') {
           var factoryAuthor = entry[1], factoryControls = window.LWFactoryGuidance;
           var factoryContext = catalog && catalog.context;
@@ -1354,7 +1366,7 @@
               : item.id === 'learning.run_joint_rules'
                 ? !!(window.LightworkJointRules && window.LightworkJointRules.renderReview &&
                      window.LightworkJointRules.renderReview(formHost, review.changes) === true)
-              : ['learning.factory_guidance_check', 'learning.factory_guidance_adopt'].includes(item.id)
+              : ['learning.factory_guidance_check', 'learning.factory_guidance_adopt', 'learning.factory_guidance_restore'].includes(item.id)
                 ? !!(window.LWFactoryGuidance && window.LWFactoryGuidance.renderReview &&
                      window.LWFactoryGuidance.renderReview(formHost, review.changes) === true)
               : ['learning.pilot_prepare_task', 'learning.pilot_freeze_plan', 'learning.pilot_observe', 'learning.pilot_independent_review'].includes(item.id)

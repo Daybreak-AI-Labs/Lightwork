@@ -1473,11 +1473,18 @@
     return (hour % 12 || 12) + (mm === '00' ? '' : ':' + mm) + (hour < 12 ? ' am' : ' pm');
   }
   function ordinalWords(n) { n = Number(n); var t = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (t[(v - 20) % 10] || t[v] || t[0]); }
+  var SCHEDULE_HOURS = [1, 2, 3, 4, 6, 8, 12];
+  function scheduleHours(hour) {
+    if (hour === '*') return 1;
+    var match = /^\*\/(\d+)$/.exec(hour);
+    return match && SCHEDULE_HOURS.indexOf(Number(match[1])) >= 0 ? Number(match[1]) : null;
+  }
   function scheduleWords(cron) {
     var f = String(cron || '').trim().split(/\s+/);
     if (f.length !== 5) return 'a custom timetable';
     var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
-    if (/^\d+$/.test(mi) && hr === '*' && dom === '*' && mon === '*' && dow === '*') return 'every hour at ' + ('0' + mi).slice(-2) + ' minutes past';
+    var every = scheduleHours(hr);
+    if (/^\d+$/.test(mi) && every && dom === '*' && mon === '*' && dow === '*') return (every === 1 ? 'every hour' : 'every ' + every + ' hours') + ' at ' + Number(mi) + (Number(mi) === 1 ? ' minute past' : ' minutes past');
     if (!/^\d+$/.test(mi) || !/^\d+$/.test(hr) || mon !== '*') return 'a custom timetable';
     var at = ' at ' + clockWords(hr, mi);
     if (dom === '*' && dow === '*') return 'every day' + at;
@@ -1492,14 +1499,15 @@
     if (!cron || !String(cron).trim()) return { freq: '' };
     if (f.length !== 5) return { freq: 'custom' };
     var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
-    if (mon !== '*' || !/^\d+$/.test(mi)) return { freq: 'custom' };
-    if (hr === '*' && dom === '*' && dow === '*') return { freq: 'hourly', minute: mi };
-    if (!/^\d+$/.test(hr)) return { freq: 'custom' };
+    if (mon !== '*' || !/^\d+$/.test(mi) || Number(mi) > 59) return { freq: 'custom' };
+    var every = scheduleHours(hr);
+    if (every && dom === '*' && dow === '*') return { freq: 'hourly', minute: mi, every: every };
+    if (!/^\d+$/.test(hr) || Number(hr) > 23) return { freq: 'custom' };
     var time = ('0' + hr).slice(-2) + ':' + ('0' + mi).slice(-2);
     if (dom === '*' && dow === '*') return { freq: 'daily', time: time };
     if (dom === '*' && dow === '1-5') return { freq: 'weekdays', time: time };
     if (dom === '*' && /^[0-7](,[0-7])*$/.test(dow)) return { freq: 'weekly', time: time, days: dow.split(',').map(function (d) { return String(Number(d) % 7); }) };
-    if (/^\d+$/.test(dom) && Number(dom) >= 1 && Number(dom) <= 28 && dow === '*') return { freq: 'monthly', time: time, dom: dom };
+    if (/^\d+$/.test(dom) && Number(dom) >= 1 && Number(dom) <= 31 && dow === '*') return { freq: 'monthly', time: time, dom: dom };
     return { freq: 'custom' };
   }
   function buildSchedule() {
@@ -1508,7 +1516,10 @@
     var hr = String(Number(time[0]) || 0), mi = String(Number(time[1]) || 0);
     if (freq === '') return '';
     if (freq === 'custom') return ((schedEl('fd-schedule') || {}).value || '').trim();
-    if (freq === 'hourly') return String(Number((schedEl('fd-sched-minute') || {}).value) || 0) + ' * * * *';
+    if (freq === 'hourly') {
+      var every = Number((schedEl('fd-sched-every') || {}).value) || 1;
+      return String(Number((schedEl('fd-sched-minute') || {}).value) || 0) + ' ' + (every === 1 ? '*' : '*/' + every) + ' * * *';
+    }
     if (freq === 'daily') return mi + ' ' + hr + ' * * *';
     if (freq === 'weekdays') return mi + ' ' + hr + ' * * 1-5';
     if (freq === 'weekly') {
@@ -1522,12 +1533,21 @@
   function showScheduleParts() {
     var freq = (schedEl('fd-sched-freq') || {}).value || '';
     var rows = { 'fd-sched-days': freq === 'weekly', 'fd-sched-dom-row': freq === 'monthly',
-      'fd-sched-minute-row': freq === 'hourly',
+      'fd-sched-minute-row': freq === 'hourly', 'fd-sched-every-row': freq === 'hourly',
       'fd-sched-time-row': ['daily', 'weekdays', 'weekly', 'monthly'].indexOf(freq) >= 0,
       'fd-sched-tz-row': freq !== '' };
     Object.keys(rows).forEach(function (id) { var e = schedEl(id); if (e) e.hidden = !rows[id]; });
     var words = schedEl('fd-sched-words'), cron = ((schedEl('fd-schedule') || {}).value || '').trim();
     if (words) words.textContent = cron ? 'Runs ' + scheduleWords(cron) + '. Publish to turn schedule changes on.' : 'Runs only when started by hand or by another app.';
+    var note = schedEl('fd-sched-note');
+    if (note) {
+      var parsed = parseSchedule(cron);
+      note.textContent = parsed.freq === 'monthly' && Number(parsed.dom) > 28
+        ? 'Months without this date are skipped. Choose a day from 1 to 28 if it must run every month.'
+        : parsed.freq === 'hourly'
+          ? 'Uses clock times in the selected time zone, starting at midnight. Clock changes may skip or repeat a run.' : '';
+      note.hidden = !note.textContent;
+    }
   }
   function syncScheduleControls() {
     var schedule = schedEl('fd-schedule'), freqSel = schedEl('fd-sched-freq');
@@ -1536,6 +1556,7 @@
     var customOpt = freqSel.querySelector ? freqSel.querySelector('option[value="custom"]') : null;
     if (customOpt) customOpt.hidden = parsed.freq !== 'custom';
     freqSel.value = parsed.freq;
+    if (parsed.every != null && schedEl('fd-sched-every')) schedEl('fd-sched-every').value = String(parsed.every);
     if (parsed.time && schedEl('fd-sched-time')) schedEl('fd-sched-time').value = parsed.time;
     if (parsed.minute != null && schedEl('fd-sched-minute')) schedEl('fd-sched-minute').value = String(Number(parsed.minute));
     if (parsed.dom && schedEl('fd-sched-dom')) schedEl('fd-sched-dom').value = String(Number(parsed.dom));
@@ -1546,7 +1567,10 @@
   }
   function chooseSchedule() {
     var schedule = schedEl('fd-schedule');
-    if ((schedEl('fd-sched-freq') || {}).value !== 'custom') schedule.value = buildSchedule();
+    if ((schedEl('fd-sched-freq') || {}).value !== 'custom') {
+      var next = buildSchedule();
+      if (schedule.value !== next) { pushHistory(); schedule.value = next; }
+    }
     var tz = schedEl('fd-tz');
     if (tz && !tz.value && schedule.value) { try { tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* keep UTC */ } }
     showScheduleParts();
@@ -2691,7 +2715,7 @@
   document.getElementById('fd-nl').addEventListener('input', function () {
     document.getElementById('fd-draft-retry').hidden = true;
   });
-  ['fd-sched-freq', 'fd-sched-time', 'fd-sched-dom', 'fd-sched-minute'].forEach(function (id) {
+  ['fd-sched-freq', 'fd-sched-time', 'fd-sched-dom', 'fd-sched-minute', 'fd-sched-every'].forEach(function (id) {
     var e = document.getElementById(id); if (e) e.addEventListener('change', chooseSchedule);
   });
   Array.prototype.forEach.call(document.querySelectorAll('#fd-sched-days input[type=checkbox]'), function (c) {

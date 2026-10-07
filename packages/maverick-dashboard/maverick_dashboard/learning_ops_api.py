@@ -208,7 +208,7 @@ def start_job(request: Request, kind: str, label: str, fn, *, needs_global: bool
 def _can_see(request: Request, job: jobs.Job) -> bool:
     if job.kind in _LEARNING_KINDS and (job.started_by != _actor(request) or job.workspace != _workspace()):
         return False
-    if job.kind in {"factory_guidance_check", "factory_guidance_adopt"}:
+    if job.kind in {"factory_guidance_check", "factory_guidance_adopt", "factory_guidance_restore"}:
         from . import factory_guidance
         try:
             factory_guidance.authority(request)
@@ -221,7 +221,7 @@ def _can_see(request: Request, job: jobs.Job) -> bool:
 
 def _job_view(request: Request, job: jobs.Job) -> dict:
     view = jobs.current_view(job)
-    if job.kind in {"factory_guidance_check", "factory_guidance_adopt"}:
+    if job.kind in {"factory_guidance_check", "factory_guidance_adopt", "factory_guidance_restore"}:
         from . import factory_guidance
         # The ordinary task endpoints must never bypass current source access.
         original = factory_guidance.original(request, (job.result or {}).get("operation", ""))
@@ -302,7 +302,7 @@ def _job_or_404(request: Request, job_id: str) -> jobs.Job:
 
 
 _LEARNING_KINDS = {"self_harness_run", "self_harness_corpus_quality", "self_harness_clash",
-                   "self_harness_transfer", "flywheel", "self_modify_run", "factory_guidance_check", "factory_guidance_adopt"}
+                   "self_harness_transfer", "flywheel", "self_modify_run", "factory_guidance_check", "factory_guidance_adopt", "factory_guidance_restore"}
 _JOB_STATES = {"running": "Working", "stopping": "Stopping at the next safe point",
                "done": "Finished", "stopped": "Stopped early", "failed": "Stopped with a problem",
                "admitted": "Start admitted; worker start not yet recorded", "not_started": "Not started by this server"}
@@ -822,7 +822,7 @@ async def original_flywheel(request: Request, operation: str):
 
 class FactoryReviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    action: Literal["compare", "adopt"]
+    action: Literal["compare", "adopt", "restore"]
     values: dict = Field(max_length=16)
 
 
@@ -836,6 +836,12 @@ class FactoryApplyIn(BaseModel):
 async def factory_catalog(request: Request, min_support: int = Query(3, ge=2, le=1000)):
     from . import factory_guidance as guided
     return await run_in_threadpool(guided.catalog, request, min_support)
+
+
+@router.get("/factory/restore-options")
+async def factory_restore_options(request: Request):
+    from . import factory_guidance as guided
+    return await run_in_threadpool(guided.restore_options, request)
 
 
 @router.post("/factory/review")

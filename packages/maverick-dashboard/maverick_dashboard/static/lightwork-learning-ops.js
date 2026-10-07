@@ -46,23 +46,27 @@
   }
 
   // ---- complete factory comparison and separately reviewed adoption ------------
-  var fa = $('lo-factory'), faCurrent = null, faReview = null, faOriginal = '', faResult = null;
+  var fa = $('lo-factory'), faCurrent = null, faRestore = null, faReview = null, faOriginal = '', faResult = null;
   var faBusy = false, faGeneration = 0, faHeld = false, faPoll = null, faRequests = new Set();
   function faSay(text) { $('lo-fa-status').textContent = text; }
   function faSync() {
     if (!$('lo-fa-form')) return;
     $('lo-fa-preview').disabled = faBusy;
     $('lo-fa-compare').disabled = faBusy || faHeld || faResult?.job?.worker_available || !faCurrent?.enabled || !$('lo-fa-suggestion').value || !$('lo-fa-consent').checked;
-    $('lo-fa-apply').disabled = faBusy || faHeld || faResult?.job?.worker_available || !faReview || !$('lo-fa-reviewed').checked;
+    $('lo-fa-apply').disabled = faBusy || faHeld && faReview?.action!=='restore' || faResult?.job?.worker_available || !faReview || !$('lo-fa-reviewed').checked;
     $('lo-fa-read').disabled = faBusy || !faOriginal;
     $('lo-fa-adopt').disabled = faBusy || faHeld || faResult?.job?.worker_available || !faCurrent?.enabled || !faResult?.confirmed || !faResult?.source_visible || !faResult?.result?.pairs;
     $('lo-fa-original').disabled = faBusy;
+    $('lo-fa-restore-refresh').disabled = faBusy;
+    $('lo-fa-restore-choice').disabled = faBusy;
+    $('lo-fa-restore').disabled = faBusy || faResult?.job?.worker_available || !$('lo-fa-restore-choice').value;
   }
   function faInvalidate() {
-    faGeneration++; clearTimeout(faPoll); faRequests.forEach(function(controller){controller.abort();});faRequests.clear(); faCurrent = faReview = faResult = null; faOriginal = ''; faHeld = false; faBusy = false;
+    faGeneration++; clearTimeout(faPoll); faRequests.forEach(function(controller){controller.abort();});faRequests.clear(); faCurrent = faRestore = faReview = faResult = null; faOriginal = ''; faHeld = false; faBusy = false;
     ['lo-fa-out','lo-fa-review-rows','lo-fa-requests'].forEach(function(id){$(id)?.replaceChildren();});
     $('lo-fa-form')?.reset(); $('lo-fa-suggestion')?.replaceChildren(new Option('Choose current guidance',''));
     $('lo-fa-original')?.replaceChildren(new Option('Choose a recorded decision',''));
+    $('lo-fa-restore-choice')?.replaceChildren(new Option('Choose a guidance change to undo',''));$('lo-fa-restore-notice').textContent='';
     if ($('lo-fa-review')) $('lo-fa-review').hidden = true;
     faSay('Your account or workspace changed. Refresh current suggestions.'); faSync();
   }
@@ -74,7 +78,7 @@
       var value;try{value=JSON.parse(text);}catch(_){value={};}
       if(response.redirected||[401,403].includes(response.status)){faInvalidate();throw Error('Your current permission is unavailable. Ask an administrator.');}
       if(!response.ok)throw Error(typeof value.detail==='string'?value.detail:'The original reply is unavailable. Read the recorded result before a separate decision.');
-      if(!options.copilot&&faCurrent&&value.context&&faCurrent.context!==value.context){faInvalidate();throw Error('Your account or workspace changed. Refresh current choices.');}
+      if(!options.copilot&&(faCurrent||faRestore)&&value.context&&(faCurrent||faRestore).context!==value.context){faInvalidate();throw Error('Your account or workspace changed. Refresh current choices.');}
       return value;
     }catch(error){if(error.name==='AbortError')throw Error('The reply did not arrive within 30 seconds. Read the original result before another decision.');throw error;}
     finally{clearTimeout(timer);faRequests.delete(controller);}
@@ -85,12 +89,12 @@
     changes.forEach(function(row){var keys=Object.keys(row||{}).sort().join('|');
       if(!['after|label','after|before|label'].includes(keys)||typeof row.label!=='string'||typeof row.after!=='string'||('before'in row&&typeof row.before!=='string'))throw Error('A complete readable review row is missing. Nothing can be confirmed.');
       var box=el('section'),heading=el('h4',null,row.label);box.append(heading);
-      if('before'in row){var before=el('p',null,'Current guidance result: '+row.before);before.style.whiteSpace='pre-wrap';box.append(before);}
-      var after=el('p',null,('before'in row?'Proposed guidance result: ':'')+row.after);after.style.whiteSpace='pre-wrap';after.style.overflowWrap='anywhere';box.append(after);container.append(box);
+      if('before'in row){var before=el('p',null,'Current: '+row.before);before.style.whiteSpace='pre-wrap';box.append(before);}
+      var after=el('p',null,('before'in row?'Proposed: ':'')+row.after);after.style.whiteSpace='pre-wrap';after.style.overflowWrap='anywhere';box.append(after);container.append(box);
     });return true;
   }
   function faChanged() { faReview=null;$('lo-fa-review').hidden=true;$('lo-fa-reviewed').checked=false;faSync(); }
-  function faStamp(){return JSON.stringify(Array.from($('lo-fa-form').elements).filter(function(input){return ['INPUT','SELECT','TEXTAREA'].includes(input.tagName);}).map(function(input){return [input.id,input.value,input.checked];}));}
+  function faStamp(){return JSON.stringify(Array.from($('lo-fa-form').elements).filter(function(input){return ['INPUT','SELECT','TEXTAREA'].includes(input.tagName);}).map(function(input){return [input.id,input.value,input.checked];}).concat([['restoration',$('lo-fa-restore-choice').value]]));}
   function faSelectSuggestion(retain) {
     var item=faCurrent?.corrections.find(function(row){return row.key===$('lo-fa-suggestion').value;});
     var chosen=retain?Array.from($('lo-fa-requests').querySelectorAll('input:checked')).map(function(input){return input.value;}):[];
@@ -114,25 +118,38 @@
     finally{if(started===faGeneration){faBusy=false;faSync();}}
   }
   function faShow(value){faResult=value;faSay(value.message);var nodes=[];
-    var labels={baseline_score:'Current guidance tool-check score',candidate_score:'Proposed guidance tool-check score',samples:'Complete paired requests',effect_ci_low:'Conservative difference estimate',adopted:'Guidance adopted'};
+    var labels={baseline_score:'Current guidance tool-check score',candidate_score:'Proposed guidance tool-check score',samples:'Complete paired requests',effect_ci_low:'Conservative difference estimate',adopted:'Guidance adopted',restored:'Earlier guidance restored'};
     Object.keys(labels).forEach(function(key){if(value.result&&key in value.result)nodes.push(el('p',null,labels[key]+': '+(typeof value.result[key]==='boolean'?(value.result[key]?'Yes':'No'):String(value.result[key]))));});
     if(value.result?.pairs){var rows=value.result.comparison_rows||value.result.pairs.map(function(pair,index){return {label:'Request '+(index+1)+': '+pair.request.replace(/_/g,' '),before:faCapabilities(pair.baseline),after:faCapabilities(pair.candidate)};});var box=el('div');faRenderReview(box,rows);nodes.push(box);}
+    if(value.result?.restoration_rows){var restoration=el('div');faRenderReview(restoration,value.result.restoration_rows);nodes.push(restoration);}
     if(value.job?.problem)nodes.push(el('p',null,value.job.problem));
-    nodes.push(el('p','muted','These local checks show whether the expected action remains allowed in an unsaved setup. Reported requests and expected actions do not establish overall quality, business value or independently measured improvement.'));
+    if(!value.result?.restored&&!value.result?.restoration_rows)nodes.push(el('p','muted','These local checks show whether the expected action remains allowed in an unsaved setup. Reported requests and expected actions do not establish overall quality, business value or independently measured improvement.'));
     if(value.task_href){var link=el('a','btn btn--ghost','Read current progress and stop controls');link.href=value.task_href;nodes.push(link);}fill('lo-fa-out',nodes);faHeld=!value.confirmed;faSync();
   }
   function faCapabilities(value){var names={code_exec:'Run code',shell:'Run a command in the protected work area',browser:'Browse websites',computer:'Control a desktop',clipboard:'Use the clipboard',read_file:'Read a workspace file',write_file:'Create or replace a workspace file',delete_file:'Delete a file',edit_file:'Edit a file',web_search:'Search the web'};function name(key){return names[key]||(window.mvHuman?window.mvHuman(key):key.replace(/_/g,' '));}return 'Expected action: '+(value.passed?'Allowed':'Not allowed')+'\nAllowed actions: '+value.allowed_tools.map(name).join(', ')+'\nActions it cannot use: '+value.denied_tools.map(name).join(', ')+'\nMaximum risk: '+value.maximum_risk;}
-  function faRemember(){try{sessionStorage.setItem('lightwork.factory.original.'+faCurrent.context,faOriginal);}catch(_){} }
+  function faRemember(){try{sessionStorage.setItem('lightwork.factory.original.'+(faCurrent||faRestore).context,faOriginal);}catch(_){} }
   async function faRead(){if(faBusy||!faOriginal)return;clearTimeout(faPoll);var started=++faGeneration,operation=faOriginal;faBusy=true;faReview=null;$('lo-fa-review').hidden=true;$('lo-fa-reviewed').checked=false;faSync();
     try{var value=await faRequest('/original/'+encodeURIComponent(operation));if(started!==faGeneration||operation!==faOriginal)return;faShow(value);if(value.job?.worker_available)faPoll=setTimeout(faRead,2000);}
     catch(error){if(started===faGeneration){faSay(error.message);$('lo-fa-out').replaceChildren();faResult=null;}}
     finally{if(started===faGeneration){faBusy=false;faSync();}}
   }
-  async function faPrepare(action,values){if(faBusy||faHeld)return;var started=++faGeneration,entered=faStamp();clearTimeout(faPoll);faBusy=true;faReview=null;$('lo-fa-reviewed').checked=false;faSync();
+  async function faPrepare(action,values){if(faBusy||faHeld&&action!=='restore')return;var started=++faGeneration,entered=faStamp();clearTimeout(faPoll);faBusy=true;faReview=null;$('lo-fa-reviewed').checked=false;faSync();
     try{var value=await faRequest('/review',{action:action,values:values});if(started!==faGeneration)return;if(entered!==faStamp()){faSay('Your entered work changed. Review it again before continuing.');return;}
-      if(value.context!==faCurrent.context){faInvalidate();return;}faRenderReview($('lo-fa-review-rows'),value.changes);faReview=value;$('lo-fa-review').hidden=false;
-      $('lo-fa-apply').textContent=action==='adopt'?'Adopt this reviewed guidance':'Start this reviewed comparison';$('lo-fa-review').focus();faSay('Review every complete request, expected result and consequence. Nothing has started.');
+      if(value.context!==(faCurrent||faRestore)?.context){faInvalidate();return;}faRenderReview($('lo-fa-review-rows'),value.changes);faReview=value;$('lo-fa-review').hidden=false;
+      $('lo-fa-apply').textContent=action==='restore'?'Restore this reviewed guidance':action==='adopt'?'Adopt this reviewed guidance':'Start this reviewed comparison';$('lo-fa-review').focus();faSay('Review every complete request, expected result and consequence. Nothing has started.');
     }catch(error){if(started===faGeneration)faSay(error.message);}finally{if(started===faGeneration){faBusy=false;faSync();}}
+  }
+  async function faLoadRestores(){
+    if(faBusy)return false;var generation=++faGeneration;faBusy=true;faSync();
+    try{var value=await faRequest('/restore-options');if(generation!==faGeneration)return false;
+      var selected=$('lo-fa-restore-choice').value;faRestore=value;
+      options($('lo-fa-restore-choice'),[{value:'',label:'Choose a guidance change to undo'}].concat(value.choices),selected);
+      $('lo-fa-restore-notice').textContent=value.notice;
+      options($('lo-fa-original'),[{value:'',label:'Choose a recorded decision'}].concat(value.requests),faOriginal);
+      if(faOriginal&&!value.requests.some(function(row){return row.value===faOriginal;})){$('lo-fa-original').append(new Option('Original awaiting readback',faOriginal));$('lo-fa-original').value=faOriginal;}
+      if(faReview?.action==='restore')faChanged();return true;
+    }catch(error){if(generation===faGeneration)$('lo-fa-restore-notice').textContent=error.message;return false;}
+    finally{if(generation===faGeneration){faBusy=false;faSync();}}
   }
   async function faOpenAuthor(_details,options){options=options||{};if(typeof options.isCurrent==='function'&&!options.isCurrent())return false;
     if(!fa||!$('lo-fa-form')||faBusy||typeof options.isCurrent!=='function'||!options.isCurrent()||!/^[a-f0-9]{64}$/.test(options.context||''))return false;
@@ -155,13 +172,16 @@
       faPrepare('compare',{context:faCurrent.context,revision:faCurrent.revision,min_support:Number($('lo-fa-support').value),correction:$('lo-fa-suggestion').value,
         packs:Array.from($('lo-fa-requests').querySelectorAll('input:checked')).map(function(input){return input.value;}),dollars:Number($('lo-fa-dollars').value),seconds:Number($('lo-fa-seconds').value),authorize_input_use:$('lo-fa-consent').checked});});
     $('lo-fa-reviewed').addEventListener('change',faSync);$('lo-fa-dismiss').addEventListener('click',faChanged);
-    $('lo-fa-apply').addEventListener('click',async function(){if(faBusy||faHeld||!faReview||!$('lo-fa-reviewed').checked)return;
+    $('lo-fa-apply').addEventListener('click',async function(){if(faBusy||faHeld&&faReview?.action!=='restore'||!faReview||!$('lo-fa-reviewed').checked)return;
       var review=faReview,started=++faGeneration;faReview=null;faBusy=true;faHeld=true;faOriginal=review.operation;faRemember();$('lo-fa-original').append(new Option('Original reviewed decision',faOriginal));$('lo-fa-original').value=faOriginal;
       $('lo-fa-review').hidden=true;$('lo-fa-reviewed').checked=false;faSync();
       try{var value=await faRequest('/apply',{token:review.token,confirmed:true});if(started===faGeneration)faShow(value);}
       catch(error){if(started===faGeneration)faSay(error.message+' Read the original result. This decision will not be submitted again automatically.');}
       finally{if(started===faGeneration){faBusy=false;faSync();faRead();}}});
     $('lo-fa-original').addEventListener('change',function(){faGeneration++;clearTimeout(faPoll);faOriginal=$('lo-fa-original').value;faResult=null;faHeld=false;faChanged();$('lo-fa-out').replaceChildren();if(faOriginal)faRemember();faRead();});
+    $('lo-fa-restore-refresh').addEventListener('click',faLoadRestores);
+    $('lo-fa-restore-choice').addEventListener('change',faChanged);
+    $('lo-fa-restore').addEventListener('click',function(){faPrepare('restore',{adoption:$('lo-fa-restore-choice').value});});
     $('lo-fa-read').addEventListener('click',faRead);$('lo-fa-adopt').addEventListener('click',function(){faPrepare('adopt',{operation:faOriginal});});
     $('lo-fa-import').addEventListener('click',async function(){if(faBusy)return;var generation=++faGeneration,body=await fileBody($('lo-fa-file'),'Choose an existing report first.');if(!body||generation!==faGeneration)return;
       try{var value=await faRequest('/report',body,{raw:true});if(generation!==faGeneration)return;
@@ -170,7 +190,7 @@
     document.addEventListener('lightwork:workspace-changed',faInvalidate);document.addEventListener('lightwork:account-context-changed',faInvalidate);
     window.addEventListener('lightwork:context-changed',function(event){if(event.detail?.reason!=='selection')faInvalidate();});document.addEventListener('lightwork:copilot-context-changed',function(event){if(event.detail?.reason!=='selection')faInvalidate();});
     window.addEventListener('pagehide',function(){faGeneration++;clearTimeout(faPoll);faRequests.forEach(function(controller){controller.abort();});faRequests.clear();});
-    faLoad(false).then(function(ok){if(!ok)return;var requested=new URLSearchParams(location.search).get('factory_original');try{faOriginal=requested||sessionStorage.getItem('lightwork.factory.original.'+faCurrent.context)||'';}catch(_){faOriginal=requested||'';}if(/^[a-f0-9]{32}$/.test(faOriginal)){$('lo-fa-original').append(new Option('Original retained decision',faOriginal));$('lo-fa-original').value=faOriginal;faRead();}else faOriginal='';faSync();});
+    faLoad(false).then(faLoadRestores).then(function(ok){if(!ok&&!faCurrent)return;var requested=new URLSearchParams(location.search).get('factory_original');try{faOriginal=requested||sessionStorage.getItem('lightwork.factory.original.'+(faCurrent||faRestore).context)||'';}catch(_){faOriginal=requested||'';}if(/^[a-f0-9]{32}$/.test(faOriginal)){$('lo-fa-original').append(new Option('Original retained decision',faOriginal));$('lo-fa-original').value=faOriginal;faRead();}else faOriginal='';faSync();});
   }
 
   // ---- practise changes to its own code -------------------------------------------

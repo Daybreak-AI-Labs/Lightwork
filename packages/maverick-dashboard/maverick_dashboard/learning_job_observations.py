@@ -173,7 +173,7 @@ def unchanged(version):
 
 
 def _retirable(value):
-    if value.get("kind") in {"factory_guidance_check", "factory_guidance_adopt"}:
+    if value.get("kind") in {"factory_guidance_check", "factory_guidance_adopt", "factory_guidance_restore"}:
         import math
         result = value.get("result")
         until = result.get("original_until") if isinstance(result, dict) else None

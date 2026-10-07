@@ -65,11 +65,27 @@ def adopt_prepare(request, _selection, arguments):
     return Preview(native.NOTICE, changes=row["changes"], native=row)
 
 
+class RestoreIn(StrictInput):
+    adoption: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+def restore_state(request, _selection):
+    row = native.restore_options(request)
+    return Snapshot(digest(row), "Your most recent agent-building guidance change", native.RESTORE_NOTICE,
+                    fields=[{"name": "adoption", "label": "Guidance change to undo", "kind": "select", "required": True, "choices": row["choices"]}],
+                    blocked=row["notice"] if not row["choices"] else "")
+
+
+def restore_prepare(request, _selection, arguments):
+    row = native.review(request, "restore", arguments)
+    return Preview(native.RESTORE_NOTICE, changes=row["changes"], native=row)
+
+
 def outcome(row):
     details = {"Original request": row["message"], "Meaning and limits": native.NOTICE}
     result = row.get("result", {})
     for key, label in {"samples": "Complete paired requests", "baseline_score": "Current guidance tool-check score",
-                       "candidate_score": "Suggested guidance tool-check score", "effect_ci_low": "Conservative difference estimate", "adopted": "Guidance adopted"}.items():
+                       "candidate_score": "Suggested guidance tool-check score", "effect_ci_low": "Conservative difference estimate", "adopted": "Guidance adopted", "restored": "Earlier guidance restored"}.items():
         if key in result:
             details[label] = result[key]
     if row.get("job", {}).get("problem"):
@@ -104,5 +120,7 @@ def entries():
                     snapshot=state, prepare=compare_prepare, **writes, **common),
             Adapter("learning.factory_guidance_adopt", "Adopt checked agent-building guidance", input_model=OriginalIn,
                     snapshot=original_state, prepare=adopt_prepare, **writes, **common),
+            Adapter("learning.factory_guidance_restore", "Restore earlier agent-building guidance", input_model=RestoreIn,
+                    snapshot=restore_state, prepare=restore_prepare, **writes, **common),
             Adapter("learning.factory_guidance_original", "Read original agent-building result", input_model=OriginalIn,
                     snapshot=original_state, prepare=original_prepare, **common))

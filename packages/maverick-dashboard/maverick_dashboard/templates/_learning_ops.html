@@ -54,12 +54,20 @@
     </form>
     <div id="lo-fa-review" hidden tabindex="-1">
       <h4>Review the complete decision</h4><div id="lo-fa-review-rows"></div>
-      <label><input type="checkbox" id="lo-fa-reviewed"> I reviewed every request, expected result, spending limit and consequence.</label>
+      <label><input type="checkbox" id="lo-fa-reviewed"> I reviewed the complete changes, limits and consequences.</label>
       <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fa-apply" disabled>Start this reviewed comparison</button><button type="button" class="btn btn--ghost" id="lo-fa-dismiss">Keep current guidance</button></div>
     </div>
     <div class="lo-form">
-      <label for="lo-fa-original">Original comparison or adoption</label><select id="lo-fa-original" class="select"><option value="">Choose a recorded decision</option></select>
+      <label for="lo-fa-original">Original comparison, adoption or restoration</label><select id="lo-fa-original" class="select"><option value="">Choose a recorded decision</option></select>
       <div class="lrn__actions"><button type="button" class="btn btn--ghost" id="lo-fa-read" disabled>Read original result</button><button type="button" class="btn btn--primary" id="lo-fa-adopt" disabled>Review adoption of this checked guidance</button></div>
+    </div>
+    <div class="lo-form" id="lo-fa-restore-form">
+      <h4>Restore earlier agent-building guidance</h4>
+      <p class="muted">Restore its exact earlier guidance for future agent building. Saved and running agents keep their own setup. No AI is called. Later guidance cannot be overwritten.</p>
+      <button type="button" class="btn btn--ghost" id="lo-fa-restore-refresh">Read current restoration choices</button>
+      <label for="lo-fa-restore-choice">Your most recent guidance change</label><select id="lo-fa-restore-choice" class="select"><option value="">Choose a guidance change to undo</option></select>
+      <p class="muted" id="lo-fa-restore-notice" role="status"></p>
+      <button type="button" class="btn btn--primary" id="lo-fa-restore" disabled>Review restoring earlier guidance</button>
     </div>
     <details><summary>Inspect an existing comparison report</summary>
       <p class="muted">An optional imported report keeps its separate source limits. It cannot be treated as a native factory check.</p>

@@ -16,7 +16,9 @@ from functools import lru_cache
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
+from . import product_operations_policy_exceptions as policy_exceptions
 from .auth import require_global_permission, require_permission
 from .model_risk_api import (
     _call,
@@ -32,6 +34,18 @@ from .model_risk_api import (
 router = APIRouter(prefix="/assurance/pickers", tags=["model-risk-assurance"])
 
 _STORE_METADATA = frozenset({"revision", "created_at", "updated_at", "_audit_pending"})
+
+
+@router.get("/policy-exceptions")
+async def policy_exception_choices(request: Request) -> dict[str, Any]:
+    return await run_in_threadpool(policy_exceptions.catalog, request)
+
+
+@router.post("/policy-exceptions/original")
+async def policy_exception_original(
+    request: Request, body: policy_exceptions.OriginalInput,
+) -> dict[str, Any]:
+    return await run_in_threadpool(policy_exceptions.original, request, body)
 
 
 def _record_digest(record: Mapping[str, Any]) -> str:

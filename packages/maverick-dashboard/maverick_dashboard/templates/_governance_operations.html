@@ -1,10 +1,14 @@
 {% macro asset_options(placeholder='Choose an AI system') %}<option value="">{{ placeholder }}</option>{% for a in model_risk_assets %}<option value="{{ a.asset_id }}" data-revision="{{ a.revision }}" data-digest="{{ a.version_digest }}" data-version="{{ (a.metadata or {}).get('version') or ('Recorded version ' ~ a.revision) }}">{{ a.display_name or 'Unnamed AI system' }}</option>{% endfor %}{% endmacro %}
 {% macro version_select(label, kind, empty='Latest version') %}<label>{{ label }}<select class="select" name="version" data-version-options="{{ kind }}"><option value="">{{ empty }}</option></select></label>{% endmacro %}
-<style>
+<style nonce="{{ csp_style_nonce }}">
   .assurance-form fieldset { border:1px solid var(--border); border-radius:var(--radius-md, 8px); padding:var(--space-3); margin:0; min-width:0; }
   .assurance-form legend { font-weight: var(--font-semibold); padding:0 var(--space-1); }
   .assurance-checks { display:flex; flex-wrap:wrap; gap:var(--space-2) var(--space-4); }
   .assurance-checks label { display:inline-flex; gap:var(--space-1); align-items:center; }
+  #policy-exception-controls { display:grid; gap:var(--space-2); }
+  #policy-exception-controls label { display:flex; flex-direction:row; gap:var(--space-2); align-items:flex-start; overflow-wrap:anywhere; }
+  .policy-exception-dialog { box-sizing:border-box; width:min(40rem,calc(100vw - 2rem)); max-height:calc(100vh - 2rem); overflow:auto; overflow-wrap:anywhere; }
+  .policy-exception-dialog button { margin:var(--space-2); white-space:normal; }
 </style>
 <section class="panel" id="governance-operations-panel"
          data-governance-admin="{{ 'true' if gateway_admin else 'false' }}">
@@ -312,26 +316,30 @@
           <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Turn on this version</button><span id="ai-policy-activate-status" role="status" aria-live="polite"></span></div>
         </form>
         <form id="ai-policy-exception-request" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="policy">Choose rules in the table above.</p>
-          <label>Short name for the exception<input class="input" name="exception_key" required maxlength="128" placeholder="for example: holiday support pilot"></label>
+          <label>Exception name<input class="input" name="exception_key" required maxlength="65" placeholder="For example: Holiday support pilot"></label>
+          <label>AI-use rules<select class="select" id="policy-exception-policy" required><option value="">Loading rules currently in use…</option></select></label>
           <input type="hidden" name="policy_id" data-pick="policy" data-pick-required>
           <input type="hidden" name="policy_version" data-pick="policy" data-pick-required>
           <label>Ends on<input class="input" name="expires_at" type="datetime-local" required></label>
           <div class="assurance-form__wide" data-structured="exception-scope"></div>
           <label class="assurance-form__wide">Reason<textarea class="textarea" name="reason" required maxlength="2000" rows="3"></textarea></label>
-          <label class="assurance-form__wide">Other safeguards in place (short names, separated by commas)<input class="input" name="compensating_control_ids" required maxlength="4096" placeholder="manual review, traffic cap"></label>
-          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Request the exception</button><span id="ai-policy-exception-request-status" role="status" aria-live="polite"></span></div>
+          <fieldset class="assurance-form__wide"><legend>Other safeguards to rely on</legend><p class="assurance-muted">Choose recorded safeguards by name. Their recorded status and owner are shown; selecting one does not establish that it is in place.</p><div id="policy-exception-controls">Loading safeguards…</div><a href="/security">Manage safeguards in Security</a></fieldset>
+          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Review exception request</button><span id="ai-policy-exception-request-status" role="status" aria-live="polite"></span></div>
         </form>
         <form id="ai-policy-exception-approve" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="exception">Choose an exception in the table above.</p>
           <input type="hidden" name="exception_key" data-pick="exception" data-pick-required>
           <input type="hidden" name="expected_revision" data-pick="exception" data-pick-required>
-          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Approve</button><span id="ai-policy-exception-approve-status" role="status" aria-live="polite"></span></div>
+          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Review approval</button><span id="ai-policy-exception-approve-status" role="status" aria-live="polite"></span></div>
         </form>
         <form id="ai-policy-exception-close" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="exception">Choose an exception in the table above.</p>
           <input type="hidden" name="exception_key" data-pick="exception" data-pick-required>
           <input type="hidden" name="expected_revision" data-pick="exception" data-pick-required>
           <label class="assurance-form__wide">Closure reason<textarea class="textarea" name="reason" required maxlength="1000" rows="2"></textarea></label>
-          <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Close exception</button><span id="ai-policy-exception-close-status" role="status" aria-live="polite"></span></div>
+          <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Review closure</button><span id="ai-policy-exception-close-status" role="status" aria-live="polite"></span></div>
         </form>
+        <div class="assurance-actions"><button class="btn btn--ghost" id="policy-exception-refresh" type="button">Refresh exception choices</button><button class="btn btn--ghost" id="policy-exception-original" type="button" hidden>Read original exception result</button><button class="btn btn--ghost" id="policy-exception-new" type="button" hidden>Start a different action</button></div>
+        <p id="policy-exception-status" class="assurance-muted" role="status" aria-live="polite"></p>
+        <div id="policy-exception-result" class="assurance-table" role="region" aria-label="Original exception result"></div>
         <form id="ai-policy-evaluate" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="evaluation">Optional: choose a saved check above to replace it.</p>
           <label>Short name for this check<input class="input" data-pick-fill="evaluation" name="evaluation_key" required maxlength="128" placeholder="for example: support assistant review"></label>
           <input type="hidden" name="expected_revision" data-pick="evaluation" value="0">
@@ -1171,6 +1179,7 @@
 </section>
 
 <script src="/static/lightwork-assurance-forms.js"></script>
+<script src="/static/lightwork-policy-exceptions.js"></script>
 <script>
 (() => {
   "use strict";
@@ -1852,6 +1861,7 @@
     if (exceptionScope && inUse) {
       exceptionScope.child("statement_ids").setOptions((inUse.statements || []).map(statement => [statement.statement_id, String(statement.text || statement.statement_id).slice(0, 140)]));
     }
+    if (window.LightworkPolicyExceptions) window.LightworkPolicyExceptions.choosePolicy(item.policy_id);
     if (announce && policyVersionStatements && latest) {
       policyVersionStatements.load(latest.statements || []);
       const form = byId("ai-policy-version");
@@ -1889,11 +1899,11 @@
       if (!policies.length) emptyRow(policyTarget, 4, "No AI use rules yet. An administrator can create them under “Create and manage rules”.");
       clear(exceptionTarget);
       exceptions.forEach(item => tableRow(exceptionTarget, [
-        words(item.exception_key),
+        window.LightworkPolicyExceptions.name(item),
         `${policiesById.has(item.policy_id) ? policyTitle(policiesById.get(item.policy_id)) : words(item.policy_id)}, version ${asText(item.policy_version)}`,
         words(item.status),
         displayTime(item.expires_at)
-      ], {kind: "exception", key: item.exception_key, label: words(item.exception_key),
+      ], {kind: "exception", key: item.exception_key, label: window.LightworkPolicyExceptions.name(item),
           fields: {exception_key: item.exception_key, expected_revision: item.revision, record_kind: "exceptions", record_key: item.exception_key}}));
       if (!exceptions.length) emptyRow(exceptionTarget, 5, "No exceptions have been requested.");
       clear(evaluationTarget);
@@ -2008,52 +2018,11 @@
       delete policyActivate.dataset.confirmationPending;
     }
   });
-  const policyExceptionRequest = byId("ai-policy-exception-request");
-  if (policyExceptionRequest) policyExceptionRequest.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(policyExceptionRequest, "ai-policy-exception-request-status", "Requesting the exception…", async () => {
-      const fields = formBody(policyExceptionRequest);
-      const scope = await collectSlot("exception-scope");
-      const result = await sendJson("/ai-policy-management/exceptions", "POST", {
-        exception_key: shortName(fields.get("exception_key")),
-        policy_id: fields.get("policy_id"),
-        policy_version: Number(fields.get("policy_version")),
-        scope,
-        reason: fields.get("reason"),
-        compensating_control_ids: splitTokens(fields.get("compensating_control_ids")).map(item => shortName(item)),
-        expires_at: unixTime(fields.get("expires_at"))
-      });
-      showProjection("ai-policy-record-result", result);
-      setStatus("ai-policy-exception-request-status", "Exception requested. It has no effect until a different person approves it.");
-      await loadPolicyManagement();
-    });
-  });
-  const policyExceptionApprove = byId("ai-policy-exception-approve");
-  if (policyExceptionApprove) policyExceptionApprove.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(policyExceptionApprove, "ai-policy-exception-approve-status", "Recording your approval…", async () => {
-      const fields = formBody(policyExceptionApprove); const key = String(fields.get("exception_key") || "").trim();
-      const result = await sendJson(`/ai-policy-management/exceptions/${encodeURIComponent(key)}/approve`, "POST", {
-        expected_revision: Number(fields.get("expected_revision"))
-      });
-      showProjection("ai-policy-record-result", result);
-      setStatus("ai-policy-exception-approve-status", "Approved. The exception still only covers what it lists, until its end date.");
-      await loadPolicyManagement();
-    });
-  });
-  const policyExceptionClose = byId("ai-policy-exception-close");
-  if (policyExceptionClose) policyExceptionClose.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(policyExceptionClose, "ai-policy-exception-close-status", "Closing the exception…", async () => {
-      const fields = formBody(policyExceptionClose); const key = String(fields.get("exception_key") || "").trim();
-      const result = await sendJson(`/ai-policy-management/exceptions/${encodeURIComponent(key)}/close`, "POST", {
-        expected_revision: Number(fields.get("expected_revision")),
-        reason: fields.get("reason")
-      });
-      showProjection("ai-policy-record-result", result);
-      setStatus("ai-policy-exception-close-status", "Exception closed. Check affected uses again before relying on an older result.");
-      await loadPolicyManagement();
-    });
+  if (window.LightworkPolicyExceptions && exceptionScope) window.LightworkPolicyExceptions.mount({
+    scope: exceptionScope,
+    collectScope: () => collectSlot("exception-scope"),
+    write: (path, body) => sendJson(path, "POST", body),
+    reload: loadPolicyManagement
   });
   const policyEvaluate = byId("ai-policy-evaluate");
   if (policyEvaluate) policyEvaluate.addEventListener("submit", event => {

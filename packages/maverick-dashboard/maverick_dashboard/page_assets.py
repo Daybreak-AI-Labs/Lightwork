@@ -105,6 +105,7 @@ ASSETS = (
     "lightwork-usability-survey.js",
     "lightwork-web-vitals.js",
     "lightwork-assessment-review.js",
+    "lightwork-policy-exceptions.js",
 )
 # Page stylesheets served next to their scripts (the shell itself is one
 # stylesheet, lightwork.css; its translation rules live there).

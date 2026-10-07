@@ -333,7 +333,7 @@ _OPERATIONAL_GUIDES = (
      "Review answer checking", "Read my selected original lesson test"),
     ("/learning", "Learning", "Review what Lightwork has learned, preview changes and inspect saved points.",
      "Turn learning parts on or off, review recent work and compare guidance for building new agents.",
-     "Open Learning systems to check setup. For agent-building guidance, select a recurring tool problem, review the complete requests and limits, then inspect the comparison before separately reviewing adoption.",
+     "Open Learning systems to check setup. For agent-building guidance, select a recurring tool problem, review the complete requests and limits, then inspect the comparison before separately reviewing adoption. To undo the latest guidance change, choose Restore, review the saved change and its original guidance, and confirm. Restoring an older change is blocked if guidance has changed since.",
      "Comparisons leave existing agents unchanged. Adoption affects future agent setup only; a tool-selection check does not establish answer quality or business improvement.",
      "What has Lightwork learned?", "Improve how new agents are built"),
     # Administration
@@ -1885,6 +1885,7 @@ _CONTEXTS = tuple(
                 "Operate the voluntary aggregate benchmark exchange and AI discovery sensor control plane.",
                 "Inspect read-only identity and data-governance connectors and C2PA media-provenance evidence.",
                 "Prepare and reconcile semantic GRC writeback through enrolled outbound authority.",
+                "Review an AI-use exception with named safeguards, request independent approval, close it and read its retained result.",
             ),
             boundaries=(
                 "AI literacy, intake, cost, policy, risk, and guardrail records are local decision support, not legal conclusions.",
@@ -1895,12 +1896,14 @@ _CONTEXTS = tuple(
             ),
             next_steps=(
                 "Open only the module needed and load its current readiness, authority, and evidence state.",
+                "For a policy exception, choose current rules and named safeguards, review the complete request and ask a different administrator to approve it.",
                 "For literacy, Article 73, intake, cost, policy, risk, guardrails, explanations, insurance, conformity, or packages, verify the exact revision and required human decision.",
                 "For benchmarks and discovery sensors, verify contribution consent, privacy review, completeness limits, key custody, and recovery before operation.",
                 "For identity connectors, C2PA, and GRC writeback, reconcile live external state before accepting an outcome.",
             ),
             suggested_questions=(
                 "Which assurance module should I use?",
+                "How do I request an AI use exception?",
                 "Which modules require external reconciliation?",
                 "What does this workspace not prove?",
             ),
