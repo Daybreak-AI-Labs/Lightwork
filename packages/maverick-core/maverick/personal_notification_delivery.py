@@ -344,6 +344,8 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
     items = [item for item in items if not item.get("seen_at")]
     day = datetime.fromtimestamp(now, timezone.utc).astimezone(ZoneInfo(preferences["timezone"])).date().isoformat()
     links = [link for link in linked_channels(principal) if link["id"] in preferences["external_links"]]
+    from .personal_push_devices import active as private_destinations
+    links.extend(private_destinations(principal, now=now))
     # Oldest attempted destination first, so one slow person cannot monopolize
     # the observer and multiple selected destinations make bounded progress.
     links.sort(key=lambda link: max((row["at"] for row in DeliveryStore(principal, link).recent()), default=0))
@@ -378,13 +380,17 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
                 # The caller's authority fence excludes local revocation across
                 # final identity/config checks and this bounded external effect.
                 _settings()
-                current = next((value for value in linked_channels(principal) if value["id"] == link["id"]), None)
-                if current != link:
-                    raise Refused
-                if buttons and link["channel"] == "slack":
-                    reference = send_private(link, text, buttons)
+                if link["channel"] == "private-topic":
+                    from .personal_push_devices import send as send_destination
+                    reference = send_destination(principal, link["destination"], text)
                 else:
-                    reference = send_private(link, text)
+                    current = next((value for value in linked_channels(principal) if value["id"] == link["id"]), None)
+                    if current != link:
+                        raise Refused
+                    if buttons and link["channel"] == "slack":
+                        reference = send_private(link, text, buttons)
+                    else:
+                        reference = send_private(link, text)
             except (Refused, ValueError):
                 store.finish(ident, "failed", "Not accepted. Review the linked identity, channel access and bot configuration. No automatic retry.")
             except Exception:

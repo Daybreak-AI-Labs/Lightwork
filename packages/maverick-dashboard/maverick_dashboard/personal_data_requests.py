@@ -21,13 +21,14 @@ from .draft_store import DraftStore
 
 STORE = GovernedRecordStore("personal_data_requests", "PDR", "personal_data_request")
 KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
-         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins", "comments", "policy_suggestions"}
+         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "private_notification_destinations", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins", "comments", "policy_suggestions"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
     {"store": "workspace_gallery_curation", "state": "retained", "reason": "Gallery curation is a separate workspace record. Erasing an account's saved views and task pins does not delete featured task content or curator history."},
     {"store": "task_feedback_and_trace_annotations", "state": "retained", "reason": "Task verdicts and trace annotations are separate workspace records; conversation deletion does not erase them. Historical deployment-wide feedback and legacy UX files lack reliable workspace lineage and are unavailable to normal reads; they require a separate records-custodian review, not automatic reassignment."},
     {"store": "fact_operation_receipts", "state": "retained", "reason": "Shared fact action receipts retain the actor, review digest and outcome only, without fact names or values. These replay barriers are not automatically erased or expired; removal could let an old create action recreate deleted data."},
     {"store": "private_notification_test_receipts", "state": "retained", "reason": "Original private test receipts retain the actor, destination reference, review digest and service outcome without task content. They remain separate from ordinary alert-history erasure so an interrupted test cannot be silently sent again.", "href": "/notifications#private-alert-test-title"},
+    {"store": "private_destination_originals_and_replay_barriers", "state": "retained", "reason": "Private destination setup erasure removes names, topics and tokens and stops future use. Content-free original outcomes, owner and destination references, review digests and route hashes remain to prevent repeated sends; the provider account and delivery receipts are separate.", "href": "/notifications#private-device-setup"},
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
     {"store": "local_selected_result_bundles", "state": "retained", "reason": "Captured local copies and review receipts are separate from their original tasks. My data lists currently readable owned copies. Revoking future access does not delete saved or downloaded copies.", "href": "/deliverable-bundles"},
     {"store": "local_responsibility_handoffs", "state": "retained", "reason": "Offer and acceptance evidence remains separate. Withdraw outstanding offers in Handoffs; an accepted recipient's independent task is not yours to erase.", "href": "/task-handoffs"},
@@ -114,6 +115,11 @@ def _preview_owned_account(kind, actor):
         target["count"] = target["inventory"]["count"]
         if target["inventory"]["blocked"]:
             raise ValueError("Some model test outcomes are active or uncertain. Reconcile them before reviewing erasure.")
+    elif kind == "private_notification_destinations":
+        from maverick.personal_push_devices import owned_inventory
+        inventory = owned_inventory(actor)
+        target.update(records=inventory["records"], count=inventory["count"],
+                      use="Pause and withdraw your exact saved destinations, removing names, topics and tokens; content-free original barriers, delivery receipts and the provider account are separate.")
     return target
 
 def preview(actor, channel, user_id, selected, world):
@@ -162,7 +168,7 @@ def preview(actor, channel, user_id, selected, world):
             target["records"] = owned_activation_inventory(actor, world=world)
             if any(record["blocked"] for record in target["records"]):
                 raise ValueError("Some activation drafts have active or uncertain task work. Reconcile them before reviewing draft erasure.")
-        elif kind in {"conversation_inbox", "generated_tools", "model_test_history", "saved_views_and_pins"}:
+        elif kind in {"conversation_inbox", "generated_tools", "model_test_history", "saved_views_and_pins", "private_notification_destinations"}:
             target.update(_preview_owned_account(kind, actor))
         elif kind == "project_defaults":
             from maverick.project_workspaces import owned_defaults_inventory
@@ -229,8 +235,18 @@ def _erase_conversations(world, row, target):
 
 
 
-def _erase_owned_account(row, target):
+def _erase_owned_account(row, target, *, authorize=None):
     kind, actor = target["store"], row["owner"]
+    if kind == "private_notification_destinations":
+        from maverick.personal_push_devices import erase_owned
+        def guard():
+            if authorize is None:
+                raise ValueError("Current independent review authority is required.")
+            authorize()
+            personal_memory.require_scope(actor, row["channel"], row["user_id"])
+            if preservation_snapshot()["blocked"]:
+                raise ValueError("A current preservation obligation prevents this erasure.")
+        return {"state": "purged", "result": erase_owned(actor, target["records"], actor=row["reviewer"], effect_guard=guard)}
     if kind == "saved_views_and_pins":
         from maverick.ux_store import shared
         return shared().erase_owned_navigation(actor, expected_version=target["inventory"]["version"])
@@ -263,7 +279,7 @@ def _erase_collaboration(kind, actor):
             "retained": "Other people's comments, including ones that mention you, are theirs and remain."}
 
 
-def _erase_target(world, row, target):
+def _erase_target(world, row, target, *, authorize=None):
     kind, actor = target["store"], row["owner"]
     channel, user_id = row["channel"], row["user_id"]
     if kind == "conversation_history":
@@ -307,8 +323,8 @@ def _erase_target(world, row, target):
             if result["status"] == "unconfirmed":
                 raise ValueError("Activation erasure receipt is not confirmed.")
         return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free erasure tombstones, task/admission history, audit evidence and separately created owned workflows remain."}
-    if kind in {"conversation_inbox", "generated_tools", "model_test_history", "saved_views_and_pins"}:
-        return _erase_owned_account(row, target)
+    if kind in {"conversation_inbox", "generated_tools", "model_test_history", "saved_views_and_pins", "private_notification_destinations"}:
+        return _erase_owned_account(row, target, authorize=authorize)
     if kind == "project_defaults":
         from maverick.project_workspaces import erase_owned_defaults
         for item in target["records"]:
@@ -357,7 +373,7 @@ def apply(identifier, revision, reviewer, authorize, world, *, external_holds_cl
                 break
             row = _checkpoint(row, reviewer, lambda record, index=index: record["targets"][index].update(state="dispatching"))
             try:
-                outcome = _erase_target(world, row, target)
+                outcome = _erase_target(world, row, target, authorize=authorize)
             except Exception:
                 outcome = {"state": "unconfirmed", "message": "This store may be partly changed. Inspect it before preparing a new request; no successful deletion is claimed."}
             row = _checkpoint(row, reviewer, lambda record, index=index, outcome=outcome: record["targets"][index].update(outcome))

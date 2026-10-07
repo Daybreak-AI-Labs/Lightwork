@@ -62,7 +62,9 @@ def observe(principal: str) -> bool:
                 allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass") is True,
                 enrolled_at=status(principal)["enrolled_at"])
             observed(principal)
-            if (config.load_config().get("notifications") or {}).get("personal_external") is True and choice["external_links"]:
+            from maverick.personal_push_devices import active as private_destinations
+            if ((config.load_config().get("notifications") or {}).get("personal_external") is True
+                    and (choice["external_links"] or private_destinations(principal))):
                 from maverick.personal_notification_delivery import dispatch
                 dispatch(principal, inbox, choice)
         finally:

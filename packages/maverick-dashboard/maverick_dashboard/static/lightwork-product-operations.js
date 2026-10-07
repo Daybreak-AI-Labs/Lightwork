@@ -318,6 +318,41 @@
               ? function (isCurrent) { return researchExecutionControls.openReview({}, {isCurrent: isCurrent, context: researchExecutionReview.context}); } : null);
           return;
         }
+        if (entry[0] === 'personal_push_setup') {
+          var privatePushSetup = entry[1], privatePushControls = window.LightworkPersonalPush;
+          if (!privatePushSetup || Array.isArray(privatePushSetup) ||
+              Object.keys(privatePushSetup).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(privatePushSetup.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open private notification setup',
+            '/notifications#private-device-setup',
+            privatePushControls && typeof privatePushControls.openReview === 'function'
+              ? function (isCurrent) { return privatePushControls.openReview(privatePushSetup.context, {isCurrent: isCurrent}); } : null);
+          return;
+        }
+        if (entry[0] === 'report_starting_point') {
+          var reportStartingPoint = entry[1], reportStartingControls = window.LightworkExecutiveReports;
+          if (!reportStartingPoint || Array.isArray(reportStartingPoint) ||
+              Object.keys(reportStartingPoint).sort().join(',') !== 'context,report,revision' ||
+              !/^[a-f0-9]{64}$/.test(reportStartingPoint.context || '') ||
+              !/^[a-f0-9]{64}$/.test(reportStartingPoint.revision || '') ||
+              !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(reportStartingPoint.report || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review saved report choices',
+            '/third-party/executive-reports#tper-editor',
+            reportStartingControls && typeof reportStartingControls.openStartingPoint === 'function'
+              ? function (isCurrent) { return reportStartingControls.openStartingPoint(reportStartingPoint.context, reportStartingPoint.report, reportStartingPoint.revision, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'product_tour_review') {
+          var productTourReview = entry[1], productTourControls = window.LightworkProductTour;
+          if (!productTourReview || Array.isArray(productTourReview) ||
+              Object.keys(productTourReview).sort().join(',') !== 'context,scope' ||
+              productTourReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(productTourReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Take a quick tour of this page',
+            '/start#product-tour',
+            productTourControls && typeof productTourControls.openReview === 'function'
+              ? function (isCurrent) { return productTourControls.openReview({}, {isCurrent: isCurrent, context: productTourReview.context}); } : null);
+          return;
+        }
         if (entry[0] === 'runtime_enforcement_form') {
           var safeguardReview = entry[1], safeguardControls = window.LightworkRuntimeEnforcement;
           if (!safeguardReview || Array.isArray(safeguardReview) ||

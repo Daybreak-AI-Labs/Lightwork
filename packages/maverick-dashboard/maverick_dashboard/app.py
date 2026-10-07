@@ -2072,6 +2072,8 @@ from .privacy_discovery_data_use_api import (  # noqa: E402
 app.include_router(privacy_discovery_data_use_router, prefix="/api/v1")
 from .consent_delivery_managed_api import router as consent_delivery_managed_router  # noqa: E402
 from .dsar_handling_api import router as dsar_handling_router  # noqa: E402
+from .personal_push_devices_api import router as personal_push_devices_router  # noqa: E402
+from .product_tour import router as product_tour_router  # noqa: E402
 from .runtime_enforcement_api import router as runtime_enforcement_router  # noqa: E402
 from .voice_receiver_api import router as voice_receiver_router  # noqa: E402
 
@@ -2079,6 +2081,8 @@ app.include_router(dsar_handling_router)
 app.include_router(runtime_enforcement_router, prefix="/api/v1")
 app.include_router(consent_delivery_managed_router, prefix="/api/v1")
 app.include_router(voice_receiver_router)
+app.include_router(personal_push_devices_router)
+app.include_router(product_tour_router)
 app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
@@ -13817,6 +13821,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-connected-event-sources.js")
 @app.get("/static/lightwork-knowledge-sources.js")
 @app.get("/static/lightwork-personal-alert-tests.js")
+@app.get("/static/lightwork-personal-push-devices.js")
 @app.get("/static/lightwork-human-conversation-handoffs.js")
 @app.get("/static/lightwork-vendor-profile.js")
 @app.get("/static/lightwork-channel-message-tests.js")
@@ -13844,6 +13849,8 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-guided-actions.js")
 @app.get("/static/lightwork-ai-business-intake.js")
 @app.get("/static/lightwork-guided-actions.css")
+@app.get("/static/lightwork-product-tour.css")
+@app.get("/static/lightwork-product-tour.js")
 @app.get("/static/lightwork-draft-recovery.js")
 @app.get("/static/lightwork-support.js")
 @app.get("/static/lightwork-support.css")
