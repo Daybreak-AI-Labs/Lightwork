@@ -76,7 +76,12 @@ def _smtp(cfg: dict[str, Any]):
         smtp.starttls(context=context)
     else:
         smtp = smtplib.SMTP_SSL(host, port, timeout=_TIMEOUT, context=context)
-    smtp.login(str(cfg.get("smtp_user") or ""), str(cfg.get("smtp_password") or ""))
+    from maverick.microsoft_mail import authenticate_smtp
+    try:
+        authenticate_smtp(smtp, cfg)
+    except Exception:
+        smtp.close()
+        raise
     return smtp
 
 
@@ -90,14 +95,16 @@ def _check_email(cfg: dict[str, Any]) -> tuple[bool, str]:
         str(cfg.get("imap_host") or ""), ssl_context=ssl.create_default_context(),
         timeout=_TIMEOUT,
     ) as inbox:
-        result, _ = inbox.login(str(cfg.get("imap_user") or ""),
-                                str(cfg.get("imap_password") or ""))
+        from maverick.microsoft_mail import authenticate_imap, mail_effect
+        result, _ = authenticate_imap(inbox, cfg)
         if result != "OK":
             return False, "the incoming mail server refused the saved details"
-        result, _ = inbox.select("INBOX", readonly=True)
+        with mail_effect(cfg):
+            result, _ = inbox.select("INBOX", readonly=True)
         if result != "OK":
             return False, "the incoming mailbox could not be opened"
-        _kind, validity = inbox.response("UIDVALIDITY")
+        with mail_effect(cfg):
+            _kind, validity = inbox.response("UIDVALIDITY")
         if not validity or not validity[0] or not validity[0].decode("ascii", "ignore").isdigit():
             return False, "the incoming mailbox did not confirm its identity"
     smtp = _smtp(cfg)
@@ -174,7 +181,10 @@ def send_test(name: str, cfg: dict[str, Any], to: str) -> tuple[bool, str]:
                 message["To"] = to
                 message["Subject"] = "Lightwork test message"
                 message.set_content(TEST_TEXT)
-                refused = smtp.send_message(message)
+                from maverick.microsoft_mail import mail_effect
+
+                with mail_effect(cfg):
+                    refused = smtp.send_message(message)
             finally:
                 smtp.quit()
             ok = not refused

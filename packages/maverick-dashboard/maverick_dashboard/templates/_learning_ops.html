@@ -32,22 +32,48 @@
 
   <div class="panel" id="lo-factory">
     <h3 class="lrn__section-h" id="lo-fa-h">Improve how new agents are built</h3>
-    <p class="lrn__section-sub">Finds problems that keep showing up when new agents are set up, and suggests
-      guidance for building the next ones. Adoption requires paired comparison results that pass the recorded
-      improvement checks. Review where the results came from before applying them.</p>
+    <p class="lrn__section-sub">Choose a recurring setup problem, compare current and proposed guidance on the same named requests,
+      then separately review whether to adopt it. The check asks whether an expected tool remains allowed after safety checks.
+      It does not prove overall answer quality, business improvement or that a connected action works.</p>
     {% if learning_can_manage %}
     <div class="lrn__actions">
       <label for="lo-fa-support">Only problems seen in at least</label>
       <select id="lo-fa-support" class="select">
         <option value="2">2 agents</option><option value="3" selected>3 agents</option><option value="5">5 agents</option>
       </select>
-      <button type="button" class="btn btn--ghost" id="lo-fa-preview">Show what it would change</button>
+      <button type="button" class="btn btn--ghost" id="lo-fa-preview">Refresh current suggestions</button>
     </div>
-    <div class="lrn__actions">
-      <label for="lo-fa-file">Paired comparison results file</label>
-      <input type="file" id="lo-fa-file" class="input" accept=".json,application/json">
-      <button type="button" class="btn btn--primary" id="lo-fa-adopt">Adopt reviewed guidance</button>
+    <form id="lo-fa-form" class="lo-form">
+      <label for="lo-fa-suggestion">Suggested change</label><select id="lo-fa-suggestion" class="select"><option value="">Choose current guidance</option></select>
+      <p id="lo-fa-suggestion-help" class="muted"></p>
+      <fieldset class="lo-fa-requests"><legend>Reported agent requests to compare</legend><div id="lo-fa-requests"></div></fieldset>
+      <label for="lo-fa-dollars">Maximum AI spending in dollars</label><input id="lo-fa-dollars" class="input" type="number" min="0" max="5" step="0.01" value="0.50" required>
+      <label for="lo-fa-seconds">Maximum time</label><select id="lo-fa-seconds" class="select"><option value="60">1 minute</option><option value="120" selected>2 minutes</option><option value="300">5 minutes</option></select>
+      <label><input id="lo-fa-consent" type="checkbox"> I allow the complete selected descriptions and goals to be sent to the displayed AI service for this comparison. The expected tool is my reported check.</label>
+      <button type="submit" id="lo-fa-compare" class="btn btn--primary" disabled>Review this comparison</button>
+    </form>
+    <div id="lo-fa-review" hidden tabindex="-1">
+      <h4>Review the complete decision</h4><div id="lo-fa-review-rows"></div>
+      <label><input type="checkbox" id="lo-fa-reviewed"> I reviewed the complete changes, limits and consequences.</label>
+      <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fa-apply" disabled>Start this reviewed comparison</button><button type="button" class="btn btn--ghost" id="lo-fa-dismiss">Keep current guidance</button></div>
     </div>
+    <div class="lo-form">
+      <label for="lo-fa-original">Original comparison, adoption or restoration</label><select id="lo-fa-original" class="select"><option value="">Choose a recorded decision</option></select>
+      <div class="lrn__actions"><button type="button" class="btn btn--ghost" id="lo-fa-read" disabled>Read original result</button><button type="button" class="btn btn--primary" id="lo-fa-adopt" disabled>Review adoption of this checked guidance</button></div>
+    </div>
+    <div class="lo-form" id="lo-fa-restore-form">
+      <h4>Restore earlier agent-building guidance</h4>
+      <p class="muted">Restore its exact earlier guidance for future agent building. Saved and running agents keep their own setup. No AI is called. Later guidance cannot be overwritten.</p>
+      <button type="button" class="btn btn--ghost" id="lo-fa-restore-refresh">Read current restoration choices</button>
+      <label for="lo-fa-restore-choice">Your most recent guidance change</label><select id="lo-fa-restore-choice" class="select"><option value="">Choose a guidance change to undo</option></select>
+      <p class="muted" id="lo-fa-restore-notice" role="status"></p>
+      <button type="button" class="btn btn--primary" id="lo-fa-restore" disabled>Review restoring earlier guidance</button>
+    </div>
+    <details><summary>Inspect an existing comparison report</summary>
+      <p class="muted">An optional imported report keeps its separate source limits. It cannot be treated as a native factory check.</p>
+      <label for="lo-fa-file">Existing paired comparison report</label><input type="file" id="lo-fa-file" class="input" accept=".json,application/json">
+      <button type="button" class="btn btn--ghost" id="lo-fa-import">Inspect existing report</button>
+    </details>
     {% endif %}
     <p class="muted" id="lo-fa-status" role="status" aria-live="polite"></p>
     <div id="lo-fa-out"></div>
@@ -191,6 +217,10 @@
   .lo-form { display: grid; gap: var(--space-2); max-width: 42rem; margin-top: var(--space-3); }
   .lo-fieldset { border: 0; padding: 0; margin: 0 0 var(--space-2); display: flex; gap: var(--space-3); flex-wrap: wrap; }
   .lo table { width: 100%; }
+  .lo-fa-requests { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
+  #lo-fa-requests { display: grid; gap: var(--space-2); }
+  #lo-fa-review { margin-top: var(--space-3); }
+  #lo-fa-review-rows section { margin: var(--space-3) 0; overflow-wrap: anywhere; }
 </style>
 <script src="/static/lightwork-ops-jobs.js" defer></script>
 <script src="/static/lightwork-learning-ops.js" defer></script>

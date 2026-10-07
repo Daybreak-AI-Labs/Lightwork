@@ -2279,7 +2279,8 @@ class PromotionLedger:
             self._transactions = transactions
             return records.get(record_id)
 
-    def mark_rolled_back(self, record_id: str, *, at: float) -> bool:
+    def mark_rolled_back(self, record_id: str, *, at: float, effect_guard=None,
+                         rollback_metadata: Mapping[str, Any] | None = None) -> bool:
         """Append a rollback event; never report success without its receipt."""
         try:
             with self._locked():
@@ -2287,8 +2288,13 @@ class PromotionLedger:
                 rec = records.get(record_id)
                 if rec is None or rec.rolled_back:
                     return False
+                provenance = dict(rec.provenance)
+                if rollback_metadata is not None:
+                    provenance["rollback_receipt"] = _receipt_provenance(rollback_metadata)
+                    provenance = _receipt_provenance(provenance)
                 updated = PromotionRecord(
-                    **{**rec.to_dict(), "rolled_back": True, "rolled_back_at": at})
+                    **{**rec.to_dict(), "rolled_back": True, "rolled_back_at": at,
+                       "provenance": provenance})
                 if self.path is not None:
                     if not has_journal:
                         head = self._migrate_legacy_locked(records)
@@ -2298,12 +2304,19 @@ class PromotionLedger:
                         occurred_at=at,
                     )
                     event = self._event("rollback", head, record_id=record_id,
-                                        rolled_back_at=at, audit=audit_receipt)
-                    self._append_events_locked((event,))
+                                        rolled_back_at=at, audit=audit_receipt,
+                                        **({"rollback_metadata": provenance["rollback_receipt"]}
+                                           if rollback_metadata is not None else {}))
+                    if effect_guard is None:
+                        self._append_events_locked((event,))
+                    else:
+                        self._append_events_locked((event,), effect_guard=effect_guard)
                     self._audit_pending[audit_receipt["event_id"]] = audit_receipt
                     records[record_id] = updated
                     self._sync_projection_after_journal_locked(records)
                 else:
+                    if effect_guard is not None:
+                        effect_guard()
                     records[record_id] = updated
                     audit_receipt = _promotion_audit_envelope(
                         updated,
@@ -2574,9 +2587,16 @@ class PromotionLedger:
         except (TypeError, ValueError) as exc:
             raise PromotionLedgerError(
                 f"promotion ledger journal event {line_number} has an invalid rollback time") from exc
+        provenance = dict(rec.provenance)
+        if "rollback_metadata" in event:
+            try:
+                provenance["rollback_receipt"] = _receipt_provenance(event["rollback_metadata"])
+                provenance = _receipt_provenance(provenance)
+            except (TypeError, ValueError) as exc:
+                raise PromotionLedgerError("invalid rollback receipt metadata") from exc
         records[record_id] = PromotionRecord(
             **{**rec.to_dict(), "rolled_back": True,
-               "rolled_back_at": rolled_back_at})
+               "rolled_back_at": rolled_back_at, "provenance": provenance})
 
     def _event(self, kind: str, previous: str | None, **payload: Any) -> dict[str, Any]:
         event = {
@@ -2637,7 +2657,8 @@ class PromotionLedger:
         except OSError as exc:
             raise PromotionLedgerError("cannot create promotion ledger journal") from exc
 
-    def _append_events_locked(self, events: tuple[dict[str, Any], ...] | list[dict[str, Any]]) -> str:
+    def _append_events_locked(self, events: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+                              *, effect_guard=None) -> str:
         if not events:
             raise PromotionLedgerError("cannot commit an empty promotion journal transaction")
         self._ensure_journal_locked()
@@ -2645,6 +2666,8 @@ class PromotionLedger:
         try:
             payload = "".join(_canonical_json(event) + "\n" for event in events)
             with journal.open("a", encoding="utf-8", newline="\n") as stream:
+                if effect_guard is not None:
+                    effect_guard()
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())

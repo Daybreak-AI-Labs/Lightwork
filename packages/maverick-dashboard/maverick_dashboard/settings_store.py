@@ -324,6 +324,8 @@ CHANNELS: list[dict] = [
         {"key": "port", "label": "Webhook port", "secret": False, "type": "int"},
     ]},
     {"name": "email", "label": "Email (IMAP/SMTP)", "fields": [
+        {"key": "email_auth", "label": "Email sign-in", "secret": False},
+        {"key": "oauth_account", "label": "Connected Microsoft mailbox", "secret": False},
         {"key": "imap_host", "label": "IMAP host", "secret": False},
         {"key": "trusted_authserv_id", "label": "Incoming mail server identity", "secret": False},
         {"key": "imap_user", "label": "IMAP user", "secret": False},
@@ -2318,7 +2320,25 @@ def set_value_assumptions(*, hourly_rate: float | None = None,
         _write(data)
 
 
-def set_channel(name: str, enabled: bool, values: dict | None = None, *, before_write=None) -> None:
+def _review_email_channel(ccfg, *, enabled, actor):
+    from maverick import microsoft_mail
+    mode = ccfg.get("email_auth", "password")
+    if mode not in {"password", "microsoft"}:
+        raise ValueError("Choose password sign-in or a connected Microsoft mailbox.")
+    if mode == "microsoft" and enabled:
+        try:
+            ccfg.update(microsoft_mail.bind_account(ccfg.get("oauth_account"), actor=actor))
+        except PermissionError as exc:
+            raise ValueError(str(exc)) from exc
+        problem = microsoft_mail.configuration_problem(ccfg)
+        if problem:
+            raise ValueError(problem)
+    elif mode == "password":
+        for key in ("oauth_account", "oauth_tenant", "oauth_principal"):
+            ccfg.pop(key, None)
+
+
+def set_channel(name: str, enabled: bool, values: dict | None = None, *, before_write=None, actor=None) -> None:
     """Enable/disable a channel and set its credentials in the overlay. A blank
     field value is left unchanged (so toggling enabled never wipes a secret you
     can't see). Writes [channels.<name>] to dashboard-config.toml, which
@@ -2375,7 +2395,13 @@ def set_channel(name: str, enabled: bool, values: dict | None = None, *, before_
                 ccfg[key] = str(val).lower()
             else:
                 ccfg[key] = str(val)
-        _write(data, before_effect=before_write)
+        def reviewed_write():
+            if before_write is not None:
+                before_write()
+            if name == "email":
+                _review_email_channel(ccfg, enabled=enabled, actor=actor)
+        reviewed_write()
+        _write(data, before_effect=reviewed_write)
 
 
 def _channel_server_address(label: str, value: object) -> str:

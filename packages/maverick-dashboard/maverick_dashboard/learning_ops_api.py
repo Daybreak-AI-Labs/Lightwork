@@ -208,9 +208,25 @@ def start_job(request: Request, kind: str, label: str, fn, *, needs_global: bool
 def _can_see(request: Request, job: jobs.Job) -> bool:
     if job.kind in _LEARNING_KINDS and (job.started_by != _actor(request) or job.workspace != _workspace()):
         return False
+    if job.kind in {"factory_guidance_check", "factory_guidance_adopt", "factory_guidance_restore"}:
+        from . import factory_guidance
+        try:
+            factory_guidance.authority(request)
+        except HTTPException:
+            return False
     if job.needs_global:
         return has_global_permission(request, "admin")
     return has_permission(request, "admin") and job.workspace == _workspace()
+
+
+def _job_view(request: Request, job: jobs.Job) -> dict:
+    view = jobs.current_view(job)
+    if job.kind in {"factory_guidance_check", "factory_guidance_adopt", "factory_guidance_restore"}:
+        from . import factory_guidance
+        # The ordinary task endpoints must never bypass current source access.
+        original = factory_guidance.original(request, (job.result or {}).get("operation", ""))
+        view["result"] = {key: value for key, value in original.get("result", {}).items() if key != "prepared"}
+    return view
 
 
 def _choice(value, allowed) -> None:
@@ -265,7 +281,7 @@ async def list_jobs(request: Request) -> dict:
     context = context_for(request)
     try:
         owned = [j for j in jobs.listed() if _can_see(request, j)][:20]
-        result = {"jobs": [jobs.current_view(j) for j in owned]}
+        result = {"jobs": [_job_view(request, j) for j in owned]}
     except jobs.JobRefused as exc:
         raise HTTPException(503, str(exc)) from exc
     require_permission(request, "view")
@@ -286,7 +302,7 @@ def _job_or_404(request: Request, job_id: str) -> jobs.Job:
 
 
 _LEARNING_KINDS = {"self_harness_run", "self_harness_corpus_quality", "self_harness_clash",
-                   "self_harness_transfer", "flywheel", "self_modify_run"}
+                   "self_harness_transfer", "flywheel", "self_modify_run", "factory_guidance_check", "factory_guidance_adopt", "factory_guidance_restore"}
 _JOB_STATES = {"running": "Working", "stopping": "Stopping at the next safe point",
                "done": "Finished", "stopped": "Stopped early", "failed": "Stopped with a problem",
                "admitted": "Start admitted; worker start not yet recorded", "not_started": "Not started by this server"}
@@ -478,7 +494,7 @@ async def job_status(request: Request, job_id: str) -> dict:
     require_permission(request, "view")
     context = context_for(request)
     job = _job_or_404(request, job_id)
-    result = {"job": jobs.current_view(job)}
+    result = {"job": _job_view(request, job)}
     require_permission(request, "view")
     _job_or_404(request, job_id)
     if context != context_for(request):
@@ -804,6 +820,47 @@ async def original_flywheel(request: Request, operation: str):
 
 # ---- improving how new agents are built (factory-learn) ----------------------------
 
+class FactoryReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: Literal["compare", "adopt", "restore"]
+    values: dict = Field(max_length=16)
+
+
+class FactoryApplyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str = Field(min_length=1, max_length=200000)
+    confirmed: Literal[True]
+
+
+@router.get("/factory/catalog")
+async def factory_catalog(request: Request, min_support: int = Query(3, ge=2, le=1000)):
+    from . import factory_guidance as guided
+    return await run_in_threadpool(guided.catalog, request, min_support)
+
+
+@router.get("/factory/restore-options")
+async def factory_restore_options(request: Request):
+    from . import factory_guidance as guided
+    return await run_in_threadpool(guided.restore_options, request)
+
+
+@router.post("/factory/review")
+async def factory_review(request: Request, body: FactoryReviewIn):
+    from . import factory_guidance as guided
+    return await run_in_threadpool(guided.review, request, body.action, body.values)
+
+
+@router.post("/factory/apply")
+async def factory_apply(request: Request, body: FactoryApplyIn):
+    from . import factory_guidance as guided
+    return await run_in_threadpool(lambda: guided.apply(request, body.token, confirmed=body.confirmed))
+
+
+@router.get("/factory/original/{operation}")
+async def factory_original(request: Request, operation: str):
+    from . import factory_guidance as guided
+    return await run_in_threadpool(guided.original, request, operation)
+
 def _factory_on() -> None:
     from maverick import factory_learning
     if not factory_learning.enabled():
@@ -823,34 +880,39 @@ async def factory_preview(request: Request, min_support: int = 3) -> dict:
                              "area": _clip(str(c.scope).replace("_", " "), 80)} for c in rows[:50]]}
 
 
-@router.post("/factory/promote")
-async def factory_promote(request: Request, min_support: int = 3,
-                          confirm: bool = Query(default=False)) -> dict:
-    require_global_permission(request, "admin")
-    _choice(min_support, (2, 3, 5))
-    if not confirm:
-        raise HTTPException(status_code=422, detail="Confirm the change first.")
+@router.post("/factory/report")
+async def factory_report(request: Request) -> dict:
+    from . import factory_guidance as guided
+    guided.authority(request)
     from maverick import factory_learning
-    from maverick.learning_guard import Halted
-    _factory_on()
     raw = await _upload(request, _EVIDENCE_LIMIT)
-    _halt_preflight("factory-learning")
-    await run_in_threadpool(lambda: _record(request, "factory_learning_promote", min_support=min_support))
-
-    def _do() -> list:
+    def inspect():
         with tempfile.TemporaryDirectory(prefix="lw-factory-") as folder:
             path = Path(folder) / "evidence.json"
             path.write_bytes(raw)
             scorer = factory_learning.load_measured_evidence(path)
-        return factory_learning.review_and_promote(min_support=min_support, scorer=scorer)
+        if len(scorer.rows) > 100:
+            raise ValueError("complete report too large")
+        rows = [{"label": "Meaning of this supplied report", "after": "Reported paired scores only. File integrity does not verify its answers, source permission, model execution, causal improvement or business value. No guidance is adopted by inspecting it."}]
+        rows.extend({"label": "Reported comparison " + str(i + 1), "after": "Guidance: " + factory_learning._guidance_for(*key.split("|")[1:], key.split("|")[0]) +
+                     "\nCurrent score: " + str(value.baseline_score) + "\nProposed score: " + str(value.candidate_score) + "\nPaired requests: " + str(value.samples) +
+                     "\nConservative difference estimate: " + str(value.effect_ci_low)} for i, (key, value) in enumerate(scorer.rows.items()))
+        return rows
     try:
-        promoted = await run_in_threadpool(_do)
-    except Halted as exc:
-        raise HTTPException(status_code=409, detail=_HALTED) from exc
+        rows = await run_in_threadpool(inspect)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=(
-            "That results file cannot be used: it must be a complete, unchanged version 2 results file.")) from exc
-    return {"adopted": len(promoted or [])}
+            "That report cannot be completely inspected. Choose an unchanged supported paired report with at most 100 guidance comparisons.")) from exc
+    guided.authority(request)
+    return {"rows": rows}
+
+
+@router.post("/factory/promote")
+async def factory_promote(request: Request, min_support: int = 3,
+                          confirm: bool = Query(default=False)) -> dict:
+    from . import factory_guidance as guided
+    guided.authority(request, write=True)
+    raise HTTPException(409, "Open Improve how new agents are built on Learning. Choose one suggestion, review a complete comparison, then separately review Adopt. This old shortcut does not change guidance.")
 
 
 # ---- experimental self-modification (self-modify) ------------------------------------

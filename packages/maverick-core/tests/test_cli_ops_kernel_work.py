@@ -50,7 +50,7 @@ def test_timetable_cron(repeat, kwargs, expected):
 
 @pytest.mark.parametrize("repeat, kwargs", [
     ("yearly", {}), ("daily", {"at": "9:00"}), ("daily", {"at": "24:00"}), ("weekly", {"days": []}),
-    ("weekly", {"days": [7]}), ("monthly", {"day_of_month": 29}), ("hourly", {"every_hours": 13}),
+    ("weekly", {"days": [7]}), ("monthly", {"day_of_month": 32}), ("hourly", {"every_hours": 13}),
 ])
 def test_timetable_cron_refuses_bad_choices(repeat, kwargs):
     from maverick.scheduler import CronError, timetable_cron

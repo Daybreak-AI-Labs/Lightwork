@@ -434,34 +434,39 @@ def mutate(legacy: Path, period: str, provider: str, operation, cap, *,
             connection.close()
 
 
+def _read_complete(connection: sqlite3.Connection, cap) -> dict:
+    """Read and validate every retained row from the caller's one snapshot."""
+    data: dict = {}
+    for period, provider, total in connection.execute("SELECT period, provider, dollars FROM totals"):
+        data.setdefault(period, {})[provider] = total
+    metadata: dict = {}
+    for period, provider, request_id, payload in connection.execute(
+        "SELECT period, provider, request_id, payload FROM receipts"
+    ):
+        metadata.setdefault(period, {}).setdefault(provider, {})[request_id] = json.loads(payload)
+    if metadata:
+        data[cap._RECEIPTS] = metadata
+    attempts = {
+        key: {"metadata_sha256": digest, "provider": provider,
+              "period": period, "request_id": request_id}
+        for key, digest, provider, period, request_id in connection.execute(
+            "SELECT attempt_key, metadata_sha256, provider, period, request_id FROM attempts"
+        )
+    }
+    if attempts:
+        data[cap._ATTEMPT_INDEX] = attempts
+    # Export/recovery must fail closed if a row is corrupt or missing.
+    cap._validate_ledger(data)
+    return data
+
+
 @_authority_read
 def load(legacy: Path, cap) -> dict:
-    database = ensure(legacy, cap)
-    connection = _connect(database)
+    connection = _connect(ensure(legacy, cap))
     try:
         connection.execute("BEGIN")
-        data: dict = {}
-        for period, provider, total in connection.execute("SELECT period, provider, dollars FROM totals"):
-            data.setdefault(period, {})[provider] = total
-        metadata: dict = {}
-        for period, provider, request_id, payload in connection.execute(
-            "SELECT period, provider, request_id, payload FROM receipts"
-        ):
-            metadata.setdefault(period, {}).setdefault(provider, {})[request_id] = json.loads(payload)
-        if metadata:
-            data[cap._RECEIPTS] = metadata
-        attempts = {
-            key: {"metadata_sha256": digest, "provider": provider,
-                  "period": period, "request_id": request_id}
-            for key, digest, provider, period, request_id in connection.execute(
-                "SELECT attempt_key, metadata_sha256, provider, period, request_id FROM attempts"
-            )
-        }
-        if attempts:
-            data[cap._ATTEMPT_INDEX] = attempts
+        data = _read_complete(connection, cap)
         connection.commit()
-        # Export/recovery must fail closed if a row is corrupt or missing.
-        cap._validate_ledger(data)
         return data
     finally:
         connection.close()
@@ -488,17 +493,22 @@ def replace(legacy: Path, data: dict, cap) -> None:
 @_authority_read
 def health(legacy: Path, cap) -> dict:
     database = ensure(legacy, cap)
-    # The compact checked copy is JSON, whose size can differ substantially
-    # from SQLite's page allocation. Measure the actual encoded ledger.
-    encoded_ledger_bytes = len(json.dumps(load(legacy, cap), allow_nan=False).encode("utf-8"))
     connection = _connect(database)
     try:
+        connection.execute("BEGIN")
+        # The same sealed read snapshot supplies both complete recovery data
+        # and health counters. Opening a second connection here rehashed all
+        # settled history without strengthening that snapshot's custody.
+        data = _read_complete(connection, cap)
+        # JSON copy size can differ substantially from SQLite page allocation.
+        encoded_ledger_bytes = len(json.dumps(data, allow_nan=False).encode("utf-8"))
         integrity = connection.execute("PRAGMA quick_check").fetchone() == ("ok",)
         receipt_count = int(connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0])
         attempt_count = int(connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0])
         unresolved = int(connection.execute(
             "SELECT COUNT(*) FROM receipts WHERE state != 'settled'"
         ).fetchone()[0])
+        connection.commit()
         return {"format": "indexed", "available": integrity, "receipt_count": receipt_count,
                 "attempt_count": attempt_count, "unresolved_count": unresolved,
                 "bytes": database.stat().st_size,

@@ -574,6 +574,7 @@ def judge_evaluator_identity(model_spec: str, *, samples: int,
         "framings": (_STRICT_JUDGE_FRAMINGS if strict else _JUDGE_FRAMINGS),
         "strict_field_chars": _STRICT_JUDGE_FIELD_CHARS if strict else None,
         "expected_hint_withheld": bool(strict),
+        "calibration_target": "response-correctness-probability-v2",
     }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -604,7 +605,8 @@ def _strict_judge_payload_safe(goal: str, output: str, expected: str) -> bool:
 def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8,
               samples: int = 1, strict: bool = False,
               evaluator_id: str | None = None,
-              work_item_id: str | None = None) -> Callable[[str, str, str], bool]:
+              work_item_id: str | None = None,
+              verdict_observer=None) -> Callable[[str, str, str], bool]:
     """An LLM-as-judge ``judge_fn`` for :func:`corpus_ab_scorers`: ask the model
     whether the OUTPUT accomplished the GOAL (yes/no). The model is NOT hard-coded
     (kernel rule 2). Falls open to :func:`_heuristic_judge` on any provider error
@@ -703,9 +705,17 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
             _judge.degraded += 1
             return _heuristic_judge(goal, output, expected)
         verdict = yes > no
-        _note_judge_verdict(goal, output, expected, verdict,
-                            confidence=max(yes, no) / (yes + no),
-                            evaluator_id=bound_evaluator_id)
+        confidence = max(yes, no) / (yes + no)
+        if verdict_observer is not None:
+            # An explicit calibration caller supplies independently labelled
+            # current cases. Never save an abstention or partially parsed vote
+            # as clean checker evidence, or duplicate the ordinary telemetry.
+            if yes + no == n:
+                verdict_observer(verdict, confidence, bound_evaluator_id)
+        elif not strict or yes + no == n:
+            _note_judge_verdict(goal, output, expected, verdict,
+                                confidence=confidence,
+                                evaluator_id=bound_evaluator_id)
         return verdict
     # Fail-open degradation counter (provider errors swallowed into abstains);
     # corpus_ab_scorers reads it to mark a score dirty for memoizing callers.
@@ -720,10 +730,11 @@ def _note_judge_verdict(goal: str, output: str, expected: str, verdict: bool, *,
     ``[self_harness] calibrate_judge``) -- so ``calibration.learning_frozen``
     can detect THIS loop's judge drifting, not only the coding verifier's.
 
-    Ground truth is the corpus's operator-authored ``expected`` label, checked
-    by the same deterministic heuristic the judge falls back to: ``correct`` is
-    whether the LLM's verdict AGREES with that label. ``confidence`` is the
-    self-consistency vote share (1.0 for a single-call judge). An UNLABELED
+    Ground truth approximates response correctness against the corpus's
+    operator-authored ``expected`` hint, using the deterministic reference
+    check. It is not an independently verified business outcome. Calibration
+    consumes probability that the response is correct, so a negative verdict
+    uses one minus the majority vote share. An UNLABELED
     case -- e.g. a metamorphic paraphrase judged under ``judge_unknown`` with an
     empty hint -- carries no ground truth and is skipped, as is a tie (the
     caller never gets here on one). Best-effort; never perturbs an evaluation."""
@@ -734,10 +745,11 @@ def _note_judge_verdict(goal: str, output: str, expected: str, verdict: bool, *,
         if not settings().get("calibrate_judge"):
             return
         from .self_improvement_runner import collect_calibration
-        correct = _heuristic_judge(goal, output, expected) == bool(verdict)
+        correct = _heuristic_judge(goal, output, expected)
+        answer_confidence = float(confidence) if verdict else 1 - float(confidence)
         # The [self_harness] knob IS the gate for this source; don't also
         # require the coding-mode collection toggle.
-        collect_calibration(float(confidence), correct,
+        collect_calibration(answer_confidence, correct,
                             source="self_harness_judge",
                             evaluator_id=evaluator_id,
                             enabled_fn=lambda: True)

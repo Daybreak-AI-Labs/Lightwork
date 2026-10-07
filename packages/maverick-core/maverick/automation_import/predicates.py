@@ -24,6 +24,10 @@ _WDL_OPS = {
     "equals": "==", "notEquals": "!=", "greater": ">", "greaterOrEquals": ">=",
     "less": "<", "lessOrEquals": "<=", "contains": "contains",
 }
+_MAKE_OPS = {
+    "equal": "==", "notequal": "!=", "greater": ">", "greaterorequal": ">=",
+    "less": "<", "lessorequal": "<=", "contain": "contains", "contains": "contains",
+}
 
 
 def repair(reason: str) -> ValueError:
@@ -144,6 +148,60 @@ def n8n_predicate(node: dict) -> Predicate:
     if combination not in ("and", "or", "all", "any"):
         raise repair("unsupported n8n boolean combination")
     return Predicate("and" if combination in ("and", "all") else "or", children=tuple(result))
+
+
+def make_predicate(route: dict) -> Predicate | None:
+    """Retain Make's complete OR-of-AND route filter using native branches."""
+    if "filter" not in route:
+        return None  # An explicitly unfiltered route runs unconditionally.
+    filt = route["filter"]
+    if not isinstance(filt, dict) or set(filt) - {"name", "conditions"}:
+        raise repair("malformed or unsupported Make filter")
+    groups = filt.get("conditions")
+    if not isinstance(groups, list) or not 1 <= len(groups) <= 128:
+        raise repair("Make filter needs between 1 and 128 condition groups")
+    result, count = [], 0
+    for group in groups:
+        if not isinstance(group, list) or not group:
+            raise repair("Make condition group is empty or malformed")
+        count += len(group)
+        if count > 256:
+            raise repair("Make filter exceeds 256 comparisons")
+        clauses = []
+        for clause in group:
+            if not isinstance(clause, dict) or set(clause) != {"a", "o", "b"}:
+                raise repair("malformed or unsupported Make comparison")
+            left, operator, right = clause["a"], clause["o"], clause["b"]
+            if not isinstance(left, str) or not isinstance(operator, str):
+                raise repair("Make comparison needs a data field and supported operator")
+            left = _path(left.strip())
+            family, separator, op = operator.lower().partition(":")
+            if not separator or op not in _MAKE_OPS:
+                raise repair("unsupported Make comparison operator")
+            if family == "number" and op not in {"contain", "contains"}:
+                if isinstance(right, str):
+                    right = right.strip()
+                    if (len(right) > 512 or not re.fullmatch(r"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", right)
+                            or not math.isfinite(float(right))):
+                        raise repair("Make number must be a finite literal")
+                    literal = right
+                elif type(right) in {int, float}:
+                    literal = _literal(right)
+                else:
+                    raise repair("Make number must be a finite literal")
+            elif family == "text" and op in {"equal", "notequal", "contain", "contains"} and isinstance(right, str):
+                literal = _literal(right)
+            elif family == "boolean" and op in {"equal", "notequal"}:
+                if isinstance(right, str) and right.lower() in {"true", "false"}:
+                    right = right.lower() == "true"
+                if type(right) is not bool:
+                    raise repair("Make boolean must be true or false")
+                literal = _literal(right)
+            else:
+                raise repair("unsupported Make comparison type or operator")
+            clauses.append(Predicate("atom", f"{left} {_MAKE_OPS[op]} {literal}"))
+        result.append(Predicate("and", children=tuple(clauses)))
+    return Predicate("or", children=tuple(result))
 
 
 def _split_args(text: str) -> list[str]:

@@ -55,9 +55,9 @@
      account sign-in section appear once it is on. #}
   {% from "_module_gate.html" import module_gate %}
   {{ module_gate('connections', 'Connections',
-                 detail='A connection is how a workflow uses another service: either paste a key the service gave you (key-based), or sign in to the account so access renews itself (sign-in-based: Google Drive, Google Cloud Storage and Jira Cloud).') }}
+                 detail='A connection is how Lightwork uses another service: either paste a key the service gave you, or sign in to the account so access renews itself. Account sign-in supports Google Drive, Google Cloud Storage, Jira Cloud and Microsoft 365 email.') }}
   {% else %}
-  <p class="cx__sub">Two kinds of connection: <strong>key-based</strong>, where you paste a key the service gave you, and <strong>sign-in-based</strong>, where you sign in to the account so access renews itself (Google Drive, Google Cloud Storage and Jira Cloud).</p>
+  <p class="cx__sub">Connect a service with a <strong>key</strong> it gave you, or use <strong>account sign-in</strong> so access renews itself. Account sign-in supports Google Drive, Google Cloud Storage, Jira Cloud and Microsoft 365 email.</p>
   {% include "_connection_setup.html" %}
   {% include "_account_inventory.html" %}
   {% if can_manage_keys %}<div class="section-head"><h2>Add a connection with a key</h2></div>{% endif %}

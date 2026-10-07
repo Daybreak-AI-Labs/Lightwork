@@ -16,6 +16,8 @@
   .auto__new { margin-top: var(--space-4); }
   .auto__new summary { cursor: pointer; font-weight: var(--font-semibold, 600); }
   .auto__new form { display: grid; gap: var(--space-3); margin-top: var(--space-3); max-width: 40rem; }
+  .auto__review dd { margin-inline-start: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow-y: auto; }
+  .auto__original .btn, .auto__review .btn { max-width: 100%; white-space: normal; }
   .auto__field { display: grid; gap: var(--space-1); }
   .auto__what, .auto__days { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
   .auto__what label, .auto__days label { display: inline-flex; gap: var(--space-1); align-items: center; }
@@ -58,6 +60,14 @@
 
 <div class="auto">
   {% include "_account_inventory.html" %}
+  <section class="auto__section panel auto__original" id="auto-create-original" hidden aria-labelledby="auto-create-original-h">
+    <h2 id="auto-create-original-h">Check the original schedule creation</h2>
+    <p id="auto-create-original-message" role="status" aria-live="polite"></p>
+    <button class="btn btn--ghost" id="auto-create-original-read" type="button">Check original request</button>
+    <button class="btn btn--ghost" id="auto-create-original-next" type="button" hidden>Review a separate schedule</button>
+    <button class="btn btn--ghost" id="auto-create-original-clear" type="button">I checked current schedules</button>
+    <p class="auto__hint">This checks the exact earlier creation. It does not run work, create another schedule or prove that a scheduled task finished.</p>
+  </section>
   {% if scheduling_enabled %}
   <section class="auto__section panel" id="auto-sched-section" aria-labelledby="auto-sched-h">
     <div class="section-head">
@@ -125,8 +135,9 @@
         <div class="auto__field" id="auto-new-dom-wrap" hidden>
           <label for="auto-new-dom">Day of the month</label>
           <select id="auto-new-dom" class="select">
-            {% for d in range(1, 29) %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+            {% for d in range(1, 32) %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
           </select>
+          <p class="auto__hint">For the 29th, 30th or 31st, months without that date are skipped. The run is not moved to another day.</p>
         </div>
         <div class="auto__field" id="auto-new-every-wrap" hidden>
           <label for="auto-new-every">Every</label>
@@ -147,6 +158,13 @@
         </details>
         <p class="auto__hint" id="auto-new-preview" role="status" aria-live="polite"></p>
         <button class="btn" type="submit" id="auto-new-save">Create schedule</button>
+        <section class="panel auto__review" id="auto-new-review" hidden aria-labelledby="auto-new-review-h">
+          <h3 id="auto-new-review-h">Review this schedule</h3>
+          <dl id="auto-new-review-values"></dl>
+          <p id="auto-new-review-notice"></p>
+          <button class="btn btn--primary" id="auto-new-confirm" type="button">Create reviewed schedule</button>
+          <button class="btn btn--ghost" id="auto-new-cancel" type="button">Cancel review</button>
+        </section>
       </form>
     </details>
   </section>
@@ -1486,4 +1504,5 @@
 </script>
 <script src="/static/lightwork-schedule-picker.js" defer></script>
 <script src="/static/lightwork-schedule-management.js" defer></script>
+<script src="/static/lightwork-schedule-setup.js" defer></script>
 {% endblock %}

@@ -228,6 +228,76 @@
               ? function (isCurrent) { return evidenceControls.openReview({}, {isCurrent: isCurrent, context: evidenceContext}); } : null);
           return;
         }
+        if (entry[0] === 'policy_exception_review') {
+          var exceptionReview = entry[1], exceptionControls = window.LightworkPolicyExceptions;
+          var exceptionContext = catalog && catalog.context;
+          if (!exceptionReview || Array.isArray(exceptionReview) ||
+              Object.keys(exceptionReview).join(',') !== 'scope' || exceptionReview.scope !== 'current_page' ||
+              typeof exceptionContext !== 'string' || !/^[a-f0-9]{64}$/.test(exceptionContext)) return;
+          protectedControls(node('dd', undefined, list), 'Review AI-use exceptions and safeguards',
+            '/security/assurance#ai-policy-exception-request',
+            exceptionControls && typeof exceptionControls.openReview === 'function'
+              ? function (isCurrent) { return exceptionControls.openReview({}, {isCurrent: isCurrent, context: exceptionContext}); } : null);
+          return;
+        }
+        if (entry[0] === 'mail_connection_review') {
+          var mailReview = entry[1], mailControls = window.LightworkConnectionSetup;
+          if (!mailReview || Array.isArray(mailReview) ||
+              Object.keys(mailReview).sort().join(',') !== 'scope,workspace_context' ||
+              mailReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(mailReview.workspace_context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review Microsoft 365 account setup',
+            '/connections#connection-setup',
+            mailControls && typeof mailControls.openReview === 'function'
+              ? function (isCurrent) { return mailControls.openReview({profile: 'microsoft-mail'}, {isCurrent: isCurrent, context: mailReview.workspace_context}); } : null);
+          return;
+        }
+        if (entry[0] === 'schedule_creation_original') {
+          var scheduleOriginal = entry[1], scheduleOriginalControls = window.LightworkScheduleCreation;
+          if (!scheduleOriginal || Array.isArray(scheduleOriginal) ||
+              Object.keys(scheduleOriginal).sort().join(',') !== 'context,scope' ||
+              scheduleOriginal.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(scheduleOriginal.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Check the original schedule result',
+            '/automations#auto-create-original',
+            scheduleOriginalControls && typeof scheduleOriginalControls.openOriginal === 'function'
+              ? function (isCurrent) { return scheduleOriginalControls.openOriginal(scheduleOriginal.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'schedule_creation_review') {
+          var scheduleReview = entry[1], scheduleControls = window.LightworkScheduleSetup;
+          var scheduleContext = catalog && catalog.context;
+          if (!scheduleReview || Array.isArray(scheduleReview) ||
+              Object.keys(scheduleReview).join(',') !== 'scope' || scheduleReview.scope !== 'current_page' ||
+              typeof scheduleContext !== 'string' || !/^[a-f0-9]{64}$/.test(scheduleContext)) return;
+          protectedControls(node('dd', undefined, list), 'Choose work and review its schedule',
+            '/automations#auto-new-sched',
+            scheduleControls && typeof scheduleControls.openReview === 'function'
+              ? function (isCurrent) { return scheduleControls.openReview({}, {isCurrent: isCurrent, context: scheduleContext}); } : null);
+          return;
+        }
+        if (entry[0] === 'factory_guidance_author') {
+          var factoryAuthor = entry[1], factoryControls = window.LWFactoryGuidance;
+          var factoryContext = catalog && catalog.context;
+          if (!factoryAuthor || Array.isArray(factoryAuthor) ||
+              Object.keys(factoryAuthor).join(',') !== 'scope' || factoryAuthor.scope !== 'current_page' ||
+              typeof factoryContext !== 'string' || !/^[a-f0-9]{64}$/.test(factoryContext)) return;
+          protectedControls(node('dd', undefined, list), 'Review how new agents are built',
+            '/learning#lo-factory',
+            factoryControls && typeof factoryControls.openAuthor === 'function'
+              ? function (isCurrent) { return factoryControls.openAuthor({}, {isCurrent: isCurrent, context: factoryContext}); } : null);
+          return;
+        }
+        if (entry[0] === 'calibration_review') {
+          var calibrationReview = entry[1], calibrationControls = window.LightworkLearningCalibration;
+          var calibrationContext = catalog && catalog.context;
+          if (!calibrationReview || Array.isArray(calibrationReview) ||
+              Object.keys(calibrationReview).join(',') !== 'scope' || calibrationReview.scope !== 'current_page' ||
+              typeof calibrationContext !== 'string' || !/^[a-f0-9]{64}$/.test(calibrationContext)) return;
+          protectedControls(node('dd', undefined, list), 'Review answer checking',
+            '/learned#learning-calibration',
+            calibrationControls && typeof calibrationControls.openReview === 'function'
+              ? function (isCurrent) { return calibrationControls.openReview({}, {isCurrent: isCurrent, context: calibrationContext}); } : null);
+          return;
+        }
         if (entry[0] === 'learning_transfer_form') {
           var transferForm = entry[1], transferControls = window.LightworkLearningTransfers;
           if (!transferForm || Array.isArray(transferForm) ||
@@ -1330,6 +1400,9 @@
               : item.id === 'learning.run_joint_rules'
                 ? !!(window.LightworkJointRules && window.LightworkJointRules.renderReview &&
                      window.LightworkJointRules.renderReview(formHost, review.changes) === true)
+              : ['learning.factory_guidance_check', 'learning.factory_guidance_adopt', 'learning.factory_guidance_restore'].includes(item.id)
+                ? !!(window.LWFactoryGuidance && window.LWFactoryGuidance.renderReview &&
+                     window.LWFactoryGuidance.renderReview(formHost, review.changes) === true)
               : ['learning.pilot_prepare_task', 'learning.pilot_freeze_plan', 'learning.pilot_observe', 'learning.pilot_independent_review'].includes(item.id)
                 ? !!(window.LightworkOutcomePilots && window.LightworkOutcomePilots.renderReview &&
                      window.LightworkOutcomePilots.renderReview(formHost, review.changes) === true)

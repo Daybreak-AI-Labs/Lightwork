@@ -134,7 +134,8 @@
         {% if goal.result %}<div class="answer-actions" role="group" aria-label="{{ ut('Answer actions') }}">
           <button id="copy-result" class="btn btn--ghost" type="button">{{ ui('Copy answer') }}</button>
           <button id="print-result" class="btn btn--ghost" type="button">{{ ui('Print conversation') }}</button>
-          {% if can_download_chat_answer %}<a id="download-result" class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/download.md" download="lightwork-answer-{{ goal.id }}.md">{{ ui('Download answer') }}</a>{% endif %}
+          {% if can_download_chat_answer %}<a id="download-word-result" class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/download.docx" download="lightwork-answer-{{ goal.id }}.docx">{{ ui('Download Word document') }}</a>
+          <a id="download-result" class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/download.md" download="lightwork-answer-{{ goal.id }}.md">{{ ui('Download Markdown') }}</a>{% endif %}
           <button id="read-aloud" class="btn btn--ghost" type="button"
                   data-voice-only="{{ '1' if voice_only else '0' }}"
                   aria-label="{{ ut('Read the result aloud') }}" aria-pressed="false" lang="{{ ul('Read the result aloud') }}">🔊 {{ ui("Read aloud") }}</button>
@@ -143,6 +144,7 @@
         </div>
         <textarea id="saved-answer-source" class="input" rows="8" style="width:100%" readonly hidden aria-label="{{ ut('Saved answer text to copy') }}">{{ chat_answer_text }}</textarea>
         <span id="answer-action-msg" class="muted" role="status" aria-live="polite"></span>
+        {% if can_download_chat_answer %}<p class="muted">{{ ui('Word keeps your answer editable with headings and lists. Complex layouts remain as text; Markdown keeps the original formatting.') }}</p>{% endif %}
         {% if chat_answer_download_note %}<p class="muted">{{ chat_answer_download_note }}</p>{% endif %}{% endif %}
         {% if can_operate %}
         <div id="edit-box" style="display:none; margin-top: var(--space-3);">

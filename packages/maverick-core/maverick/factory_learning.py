@@ -278,7 +278,7 @@ def _maybe_rotate(path: Path) -> None:
         pass
 
 
-def load_outcomes(*, path: Path | None = None) -> list[FactoryOutcome]:
+def load_outcomes(*, path: Path | None = None, strict: bool = False) -> list[FactoryOutcome]:
     path = path if path is not None else outcomes_path()
     if not path.exists():
         return []
@@ -290,6 +290,8 @@ def load_outcomes(*, path: Path | None = None) -> list[FactoryOutcome]:
             try:
                 d = json.loads(raw)
                 if not isinstance(d, dict):  # a bare int/str/array/null line
+                    if strict:
+                        raise ValueError("factory outcome record is invalid")
                     continue
                 entry = _validated_outcome(
                     ts=d.get("ts"), pack=d.get("pack"), suite=d.get("suite"),
@@ -297,9 +299,15 @@ def load_outcomes(*, path: Path | None = None) -> list[FactoryOutcome]:
                 )
                 if entry is not None:
                     out.append(entry)
+                elif strict:
+                    raise ValueError("factory outcome record is invalid")
             except (json.JSONDecodeError, TypeError, ValueError):
+                if strict:
+                    raise
                 continue
     except (OSError, RuntimeError):
+        if strict:
+            raise
         return []
     return out
 
@@ -935,13 +943,22 @@ def _next_artifact(
 
 def _cas_install_locked(
     path: Path, *, before: _CorrectionArtifact, after: _CorrectionArtifact,
+    effect_guard=None,
 ) -> _CorrectionArtifact:
     current = _load_correction_artifact(path, strict=True)
     if _artifact_revision(path, current) != _artifact_revision(path, before):
         raise RuntimeError("correction artifact changed before CAS apply")
     if after.raw is None:  # pragma: no cover - next artifacts always have bytes
         raise RuntimeError("correction artifact after-state has no bytes")
-    atomic_write_bytes(path, after.raw, mode=0o600)
+    def guard():
+        if effect_guard is not None:
+            effect_guard()
+        if _artifact_revision(path, _load_correction_artifact(path, strict=True)) != _artifact_revision(path, before):
+            raise RuntimeError("correction artifact changed before physical apply")
+    if effect_guard is None:
+        atomic_write_bytes(path, after.raw, mode=0o600)
+    else:
+        atomic_write_bytes(path, after.raw, mode=0o600, effect_guard=guard)
     observed = _load_correction_artifact(path, strict=True)
     if _artifact_revision(path, observed) != _artifact_revision(path, after):
         raise RuntimeError("correction artifact readback differs from prepared intent")
@@ -950,14 +967,23 @@ def _cas_install_locked(
 
 def _cas_restore_locked(
     path: Path, *, before: _CorrectionArtifact, after: _CorrectionArtifact,
+    effect_guard=None,
 ) -> bool:
     current = _load_correction_artifact(path, strict=True)
     if _artifact_revision(path, current) != _artifact_revision(path, after):
         return False
+    def guard():
+        if effect_guard is not None:
+            effect_guard()
+        if _artifact_revision(path, _load_correction_artifact(path, strict=True)) != _artifact_revision(path, after):
+            raise RuntimeError("guidance changed before physical restoration")
     if before.raw is None:
+        guard()
         path.unlink()
-    else:
+    elif effect_guard is None:
         atomic_write_bytes(path, before.raw, mode=0o600)
+    else:
+        atomic_write_bytes(path, before.raw, mode=0o600, effect_guard=guard)
     restored = _load_correction_artifact(path, strict=True)
     return _artifact_revision(path, restored) == _artifact_revision(path, before)
 
@@ -1071,6 +1097,7 @@ def _abort_failed_apply_locked(
 def _promote_one_locked(
     controller, path: Path, state: _CorrectionArtifact,
     correction: ProposerCorrection, evidence: FactoryEvidenceResult, si,
+    *, effect_guard=None, operation=None, provenance=None, strict=False,
 ) -> tuple[_CorrectionArtifact, str]:
     before = state
     after = _next_artifact(before, correction, evidence)
@@ -1079,9 +1106,18 @@ def _promote_one_locked(
     candidate = _factory_candidate(
         correction, evidence, before_revision=before_revision,
         after_revision=after_revision, si=si)
+    if provenance is not None:
+        candidate.provenance.update(provenance)
+    if operation is not None:
+        candidate.id = "factory:" + operation
+        candidate.provenance["factory_restore_before"] = _protected_preimage(before)
+        si._receipt_provenance(candidate.provenance)
+    if effect_guard is not None:
+        effect_guard()
     check_learning_halt("factory_learning", "promotion")
     preparation = controller.prepare_promotion(
-        candidate, before=before_revision, after=after_revision)
+        candidate, before=before_revision, after=after_revision,
+        **({"transaction_id": "factory:" + operation} if operation is not None else {}))
     if not preparation.ok:
         return state, "skipped"
     if preparation.committed:
@@ -1093,13 +1129,15 @@ def _promote_one_locked(
         return state, "stop"
     try:
         check_learning_halt("factory_learning", "apply")
+        if effect_guard is not None:
+            effect_guard()
         authorization = controller.authorize_prepared(
             preparation,
             artifact=before_revision,
         )
         if not authorization.ok:
             return state, "skipped"
-        observed = _cas_install_locked(path, before=before, after=after)
+        observed = _cas_install_locked(path, before=before, after=after, effect_guard=effect_guard)
     except Halted:
         # PREPARE is durable, so a HALT that lands at the final apply boundary
         # must close that transaction while the exact before revision is still
@@ -1120,7 +1158,11 @@ def _promote_one_locked(
         )
         recovered = _abort_failed_apply_locked(
             controller, preparation, path, before=before, after=after)
+        if strict:
+            raise
         return (before, "skipped") if recovered else (state, "stop")
+    if effect_guard is not None:
+        effect_guard()
     verdict = controller.commit_prepared(
         preparation, artifact=_artifact_revision(path, observed))
     if not verdict.ok:
@@ -1128,6 +1170,164 @@ def _promote_one_locked(
         # COMMIT; reverting could contradict a commit whose ACK alone was lost.
         return observed, "stop"
     return observed, "promoted"
+
+
+def promote_reviewed_correction(
+    correction: ProposerCorrection, evidence: FactoryEvidenceResult, *,
+    expected_sha256: str, operation: str, provenance: dict, effect_guard,
+) -> dict:
+    """One selected correction through the unchanged governed promotion writer.
+
+    The request's callback checks current authority/source at the physical
+    artifact replacement. Historical receipt reads never call this function.
+    """
+    from . import self_improvement as si
+    if not re.fullmatch(r"[a-f0-9]{32}", operation):
+        raise ValueError("invalid reviewed factory operation")
+    if not enabled():
+        raise ValueError("factory learning is disabled")
+    path = corrections_path()
+    with _lock, cross_process_lock(path, strict=True):
+        effect_guard()
+        controller = si.shared()
+        if controller.ledger.transaction("factory:" + operation) is not None:
+            raise RuntimeError("read the original reviewed factory transaction")
+        state = _recover_artifact_locked(controller, path, si)
+        if _artifact_revision(path, state).sha256 != expected_sha256:
+            raise RuntimeError("reviewed factory guidance changed")
+        if correction.key() in state.entries:
+            raise ValueError("this correction is already adopted")
+        state, disposition = _promote_one_locked(
+            controller, path, state, correction, evidence, si,
+            effect_guard=effect_guard, operation=operation, provenance=provenance, strict=True)
+        transaction = controller.ledger.transaction("factory:" + operation)
+        return {"adopted": disposition == "promoted", "disposition": disposition,
+                "transaction": transaction.id if transaction else None,
+                "transaction_state": transaction.state if transaction else None}
+
+
+
+def _protected_preimage(state):
+    from . import crypto_at_rest
+    if state.raw is None:
+        return {"absent": True}
+    # The selected addition is absent before adoption. Removing that one entry
+    # reproduces a canonical previous edition without retaining lifetime copies.
+    if state.version.startswith("v2:") and state.raw == _serialize_correction_artifact(state.entries, generation=state.generation):
+        return {"canonical": True}
+    if len(state.raw) > 16000:
+        raise ValueError("The complete earlier guidance exceeds protected restoration retention. Nothing was adopted.")
+    sealed = crypto_at_rest.seal_to_str(state.raw.decode("utf-8"))
+    if not crypto_at_rest.is_sealed_str(sealed):
+        raise ValueError("Earlier guidance could not be protected for restoration. Nothing was adopted.")
+    return {"sealed": sealed}
+
+
+def _restore_before(path, transaction, current):
+    from . import crypto_at_rest
+    value = transaction.record.provenance.get("factory_restore_before")
+    if isinstance(value, dict) and set(value) == {"sealed"} and crypto_at_rest.is_sealed_str(value["sealed"]):
+        raw = crypto_at_rest.unseal_from_str(value["sealed"]).encode("utf-8")
+        if len(raw) > 16000:
+            raise ValueError("The complete earlier guidance exceeds its protected retention bound.")
+    elif transaction.before.version == "absent:0":
+        raw = None
+    elif _artifact_revision(path, current) == transaction.before:
+        raw = current.raw
+    elif transaction.before.version.startswith("v2:"):
+        entries = dict(current.entries)
+        key = transaction.record.provenance.get("correction_key")
+        if key not in entries:
+            raise ValueError("The exact earlier guidance is unavailable.")
+        entries.pop(key)
+        generation = int(transaction.before.version[3:])
+        raw = _serialize_correction_artifact(entries, generation=generation)
+    else:
+        raise ValueError("The exact earlier guidance was not retained for this older adoption. It cannot be safely restored here.")
+    entries, generation, version = _parse_correction_artifact(raw, strict=True)
+    before = _CorrectionArtifact(entries, generation, raw, version)
+    if _artifact_revision(path, before) != transaction.before:
+        raise ValueError("The exact earlier guidance could not be verified. Nothing can be restored.")
+    return before
+
+
+def _restoration_plan_locked(controller, path, *, actor, workspace, adoption=None):
+    current = _load_correction_artifact(path, strict=True)
+    revision = _artifact_revision(path, current)
+    if controller.ledger.in_doubt(artifact_identity=revision.identity):
+        raise RuntimeError("An earlier guidance adoption is still unconfirmed. Read its original before restoring.")
+    owned = [tx for tx in controller.ledger.transactions(artifact_identity=revision.identity, state="committed")
+             if not tx.record.rolled_back and
+             (tx.record.provenance.get("factory_actor"), tx.record.provenance.get("factory_workspace")) == (actor, workspace)]
+    if not owned:
+        raise ValueError("No active successful guidance adoption owned by this account is available to restore.")
+    tx = owned[-1]
+    if adoption is not None and tx.record.provenance.get("factory_operation") != adoption:
+        raise RuntimeError("The latest owned guidance adoption changed. Review current guidance again.")
+    if revision not in {tx.after, tx.before}:
+        raise RuntimeError("Guidance changed after this adoption. Restoring it would overwrite later work, so nothing can be restored.")
+    before = _restore_before(path, tx, current)
+    return tx, before, current, "restore" if revision == tx.after else "acknowledge"
+
+
+def restoration_plan(*, actor, workspace, adoption=None):
+    """Pure exact-current preview; never repairs, restores or appends a receipt."""
+    from . import self_improvement as si
+    path = corrections_path()
+    with _lock, cross_process_lock(path, strict=True):
+        tx, before, current, mode = _restoration_plan_locked(si.shared(), path, actor=actor, workspace=workspace, adoption=adoption)
+        return _restoration_summary(path, tx, before, current, mode)
+
+
+def _restoration_summary(path, tx, before, current, mode):
+    return {"adoption": tx.record.provenance["factory_operation"], "transaction": tx.id,
+            "artifact": _artifact_revision(path, current).to_dict(), "before": tx.before.to_dict(),
+            "mode": mode, "adopted_at": tx.record.promoted_at,
+            "current": [_entry_correction(current.entries[key]).guidance for key in sorted(current.entries)],
+            "earlier": [_entry_correction(before.entries[key]).guidance for key in sorted(before.entries)]}
+
+
+def restore_reviewed_correction(*, actor, workspace, adoption, operation, expected_plan, effect_guard):
+    """Restore one exact latest owned artifact and durably record its new decision.
+
+    A failure between byte replacement and receipt leaves the original unconfirmed.
+    A separately reviewed acknowledgement can append the receipt without rewriting.
+    """
+    from . import self_improvement as si
+    if not re.fullmatch(r"[a-f0-9]{32}", operation):
+        raise ValueError("invalid reviewed restoration operation")
+    path = corrections_path()
+    with _lock, cross_process_lock(path, strict=True):
+        effect_guard()
+        controller = si.shared()
+        tx, before, current, mode = _restoration_plan_locked(controller, path, actor=actor, workspace=workspace, adoption=adoption)
+        plan = _restoration_summary(path, tx, before, current, mode)
+        if plan != expected_plan:
+            raise RuntimeError("The reviewed restoration changed. Nothing new was restored.")
+        if mode == "restore" and not _cas_restore_locked(path, before=before, after=current, effect_guard=effect_guard):
+            raise RuntimeError("The guidance restoration is unconfirmed. Read its original before another decision.")
+        def guard_receipt():
+            effect_guard()
+            if _artifact_revision(path, _load_correction_artifact(path, strict=True)) != tx.before:
+                raise RuntimeError("Restored guidance changed before its receipt. The original remains unconfirmed.")
+        metadata = {"factory_restore_operation": operation, "factory_actor": actor,
+                    "factory_workspace": workspace, "factory_adoption": adoption, "mode": mode}
+        if not controller.ledger.mark_rolled_back(tx.record.id, at=time.time(), effect_guard=guard_receipt, rollback_metadata=metadata):
+            raise RuntimeError("The original restoration receipt is unconfirmed. Nothing will be repeated automatically.")
+        controller._flush_audit_outbox()
+        return {"restored": True, "complete": True, "mode": mode}
+
+
+def restoration_receipt(*, actor, workspace, operation):
+    """Metadata-only pure original read, independent of recent task retention."""
+    from . import self_improvement as si
+    for record in si.shared().ledger.all():
+        value = record.provenance.get("rollback_receipt")
+        if isinstance(value, dict) and value.get("factory_restore_operation") == operation:
+            if (value.get("factory_actor"), value.get("factory_workspace")) != (actor, workspace):
+                raise PermissionError("This original restoration belongs to another account or workspace.")
+            return {"restored": record.rolled_back, "complete": record.rolled_back, "mode": value["mode"]}
+    return None
 
 
 def review_and_promote(

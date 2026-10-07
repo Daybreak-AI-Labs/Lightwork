@@ -71,6 +71,7 @@ ASSETS = (
     "lightwork-manual-skill-removal.js",
     "lightwork-learning-passes.js",
     "lightwork-learning-transfers.js",
+    "lightwork-learning-calibration.js",
     "lightwork-audit-actions.js",
     "lightwork-decision-evidence.js",
     "lightwork-commitment-capability.js",
@@ -104,6 +105,8 @@ ASSETS = (
     "lightwork-usability-survey.js",
     "lightwork-web-vitals.js",
     "lightwork-assessment-review.js",
+    "lightwork-policy-exceptions.js",
+    "lightwork-schedule-setup.js",
 )
 # Page stylesheets served next to their scripts (the shell itself is one
 # stylesheet, lightwork.css; its translation rules live there).

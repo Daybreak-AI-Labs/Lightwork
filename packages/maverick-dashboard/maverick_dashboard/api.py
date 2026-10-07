@@ -11383,11 +11383,11 @@ async def list_schedules(request: Request) -> dict:
             "context": context_for(request)}
 
 
-@router.post("/schedules", response_model=ScheduleOut, status_code=201)
-async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
+def _prepare_schedule(request: Request, payload: ScheduleIn, *, schedule_id: str | None = None) -> dict:
+    """Resolve the native immutable work and authority for one schedule."""
     require_permission(request, "operate")
     _require_scheduling()
-    from maverick.scheduler import CronError, next_run, schedule_cron
+    from maverick.scheduler import CronError, next_run
 
     cron = (payload.cron or "").strip()
     tz = (payload.tz or "").strip()
@@ -11434,7 +11434,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     # Automations page can group this schedule's run history.
     from uuid import uuid4
 
-    schedule_id = uuid4().hex
+    schedule_id = schedule_id or uuid4().hex
     job_payload = {"text": text, "title": title, "__cron__": cron, "schedule_id": schedule_id}
     if payload.template:
         job_payload["template_name"] = tpl.name
@@ -11453,6 +11453,18 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     if user_id:
         job_payload["channel"] = "api"
         job_payload["user_id"] = user_id
+    return job_payload
+
+
+@router.post("/schedules", response_model=ScheduleOut, status_code=201)
+async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
+    from maverick.scheduler import schedule_cron
+
+    job_payload = _prepare_schedule(request, payload)
+    cron = job_payload["__cron__"]
+    tz = str(job_payload.get("__tz__") or "")
+    title = job_payload["title"]
+    schedule_id = job_payload["schedule_id"]
 
     from maverick.job_queue import JobQueue
 

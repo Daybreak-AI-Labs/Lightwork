@@ -217,6 +217,8 @@ def agent_role_help(role: object) -> str:
 # Chat-app setup fields: (label, help, advanced). Advanced fields sit in a
 # collapsed "Advanced settings" section with sensible defaults.
 CHANNEL_FIELDS = {
+    ("email", "email_auth"): ("How email signs in", "Microsoft accounts use protected account sign-in. Other mail services can keep their password setup.", False),
+    ("email", "oauth_account"): ("Connected Microsoft mailbox", "Connect your mailbox on Connections, then choose it here. A reconnected account must be chosen and saved again.", False),
     ("telegram", "bot_token"): ("Bot token", "From BotFather in Telegram after you create a bot.", False),
     ("discord", "bot_token"): ("Bot token", "From the Discord Developer Portal, under your app's Bot page.", False),
     ("slack", "app_token"): ("App token (starts with xapp-)", "From your Slack app's Basic Information page, under App-Level Tokens.", False),

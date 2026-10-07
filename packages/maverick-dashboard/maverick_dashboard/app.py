@@ -2016,6 +2016,7 @@ from . import (  # noqa: E402
     generated_tool_removal_api,
     governed_rule_evolution_api,
     grc_draft_changes_api,
+    learning_calibration_api,
     learning_distinctions_api,
     learning_transfers_api,
     operator_acquisition_api,
@@ -2033,6 +2034,7 @@ from . import (  # noqa: E402
 app.include_router(shared_decision_evidence_api.router)
 app.include_router(flow_requalification_api.router)
 app.include_router(learning_distinctions_api.router)
+app.include_router(learning_calibration_api.router)
 app.include_router(learning_transfers_api.router)
 app.include_router(commitment_capability_api.router)
 app.include_router(commitment_economic_alternatives_api.router)
@@ -2049,6 +2051,9 @@ app.include_router(applicability_regions_api.router)
 app.include_router(agent_override_changes_api.router, prefix="/api/v1")
 app.include_router(automation_imports_api.router)
 app.include_router(report_downloads_api.router)
+from .chat_answer_exports_api import router as chat_answer_exports_router  # noqa: E402
+
+app.include_router(chat_answer_exports_router)
 app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
@@ -10136,6 +10141,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
     sections, plus a read-only, secret-redacted view of everything configured.
     Saved to the dashboard overlay; a running chat service must restart to
     pick up changed connection details."""
+    from maverick import microsoft_mail
     require_global_permission(request, "admin")
     sensitive_markers = (
         "token",
@@ -10257,6 +10263,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
             "channel_context": _channel_form_context(request),
             "channel_review": _channel_form_review(request),
             "channel_error": error,
+            "email_oauth_choices": microsoft_mail.choices(caller_principal(request)),
         },
         status_code=status_code, headers={"Cache-Control": "private, no-store"},
     )
@@ -10316,7 +10323,7 @@ async def channels_save(request: Request) -> Response:
         def save() -> None:
             with bind_setting_write(request, section="channels", key=name,
                                     project=_audit_channel, confirmed=form.get("confirm_people") == "yes"):
-                settings_store.set_channel(name, enabled, values, before_write=guard)
+                settings_store.set_channel(name, enabled, values, before_write=guard, actor=caller_principal(request))
 
         await run_in_threadpool(save)
     except (ValueError, HTTPException, OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
@@ -10337,7 +10344,13 @@ async def channels_save(request: Request) -> Response:
     if "application/json" in request.headers.get("accept", ""):
         require_global_permission(request, "admin")
         current = next(item for item in settings_store.channels_state() if item["name"] == name)
+        from .integration_readiness import channel_readiness, require_readable_config
+
+        channel_config = (require_readable_config().get("channels") or {}).get(name) or {}
+        readiness = channel_readiness(name, channel_config)
+        readiness_html = str(templates.get_template("_integration_readiness.html").module.integration_readiness(readiness))
         return JSONResponse({"saved": True, "context": _channel_form_context(request),
+                             "enabled": bool(channel_config.get("enabled")), "readiness_html": readiness_html,
                              "review_token": _channel_form_review(request),
                              "people": next((field["people"] for field in current["fields"] if field["type"] == "list"), []),
                              "people_source": next((field["people_source"] for field in current["fields"] if field["type"] == "list"), ""),
