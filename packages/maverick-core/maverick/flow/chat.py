@@ -72,7 +72,8 @@ Patch ops (use ONLY these):
 - {"op":"add_node","node":{<a node object>},"after":"<existing node id>"}   (omit "after" to add unlinked)
 - {"op":"remove_node","id":"<node id>"}
 - {"op":"set_field","id":"<node id>","field":"<node field>","value":<new value>}
-- {"op":"set_flow_field","field":"name|start|notify|max_seconds|max_dollars|schedule|timezone|max_concurrent|inputs","value":<new value>}
+- {"op":"set_flow_field","field":"name|start|notify|notify_on|max_seconds|max_dollars|schedule|timezone|max_concurrent|inputs","value":<new value>}
+  notify enables alerts. notify_on is "all" (approval, problems and completion) or "problems" (failed, spending-limited or uncertain runs only).
 - {"op":"rewire","id":"<node id>","field":"next|if_true|if_false|on_error|on_expire","to":"<node id or null>"}
 
 Node objects use the flow schema below. New node ids must be short unique slugs not already in the flow.

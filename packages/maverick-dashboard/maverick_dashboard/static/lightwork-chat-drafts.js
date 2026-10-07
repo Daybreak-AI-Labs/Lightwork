@@ -17,7 +17,7 @@
     document.querySelectorAll('form[action="/chat/send"], #answer-form').forEach(function (form) {
       if (form.dataset.draftReady) return;
       form.dataset.draftReady = 'true';
-      var fields = Array.from(form.querySelectorAll('[name="title"], [name="description"], [name="message"], [name="connection_references"]'));
+      var fields = Array.from(form.querySelectorAll('[name="title"], [name="description"], [name="message"], [name="connection_references"], [name="task_model"], [name="task_effort"]'));
       var sent = false;
       function read() {
         var value = {};
@@ -33,7 +33,15 @@
           compact: true, information: note,
           key: 'chat-composer:' + new URL(form.action).pathname, read: read,
           restore: function (draft) {
-            fields.forEach(function (field) { if(field.name==="connection_references")field.value="[]"; if (typeof draft[field.name] === 'string') field.value = draft[field.name]; });
+            fields.forEach(function (field) {
+              if(field.name==="connection_references")field.value="[]";
+              if (typeof draft[field.name] !== 'string') return;
+              if (field.tagName === 'SELECT' && draft[field.name] && !Array.from(field.options).some(function (item) { return item.value === draft[field.name]; })) {
+                var option = document.createElement('option'); option.value = draft[field.name]; option.textContent = 'Restored choice — check availability'; field.append(option);
+              }
+              field.value = draft[field.name];
+            });
+            form.dispatchEvent(new Event('lightwork:task-model-restored'));
             showNote(note, 'restored');
             sent = false;
           }});

@@ -4491,6 +4491,16 @@ def pick_sign_in_security(sso_enabled: bool) -> dict[str, Any]:
         "default.[/dim]"
     )
     result: dict[str, Any] = {}
+    if _q_confirm("Set browser sign-in time limits? You can change them later in Settings.", default=False):
+        result["idle_minutes"] = max(0, min(1440, _safe_int(
+            _q_text("  Sign out inactive browsers after (minutes, zero turns the limit off)", default="30"),
+            default=30,
+        )))
+        if sso_enabled:
+            result["company_hours"] = max(0, min(168, _safe_int(
+                _q_text("  Maximum company sign-in length (hours, zero keeps the existing limit)", default="8"),
+                default=8,
+            )))
     if sso_enabled and _q_confirm(
         "Require sign-in with a second factor?", default=False
     ):
@@ -9876,6 +9886,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append('# sp_cert_file = ""   # to sign AuthnRequests / decrypt')
         lines.append('# sp_key_file = ""')
     security = advanced.get("sign_in_security") or {}
+    if isinstance(security, dict) and any(key in security for key in ("company_hours", "idle_minutes")):
+        lines.append("")
+        lines.append("[auth.sessions]")
+        for key in ("company_hours", "idle_minutes"):
+            if key in security:
+                _emit_kv(lines, key, int(security[key]))
     if isinstance(security, dict) and security.get("require"):
         # Second factor at sign-in + step-up for sensitive actions. Read by
         # maverick.config.get_auth_mfa (the dashboard's mfa_policy).

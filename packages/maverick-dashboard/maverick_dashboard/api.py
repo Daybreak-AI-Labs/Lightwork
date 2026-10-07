@@ -1691,6 +1691,15 @@ def _create_goal(
     """Native launch authority shared with reviewed Copilot task starts."""
     require_permission(request, "operate")
     _check_effect_guard(effect_guard)
+    from .task_model_selection_api import effect_guard as model_effect_guard
+    from .task_model_selection_api import selection as model_selection
+    task_selection = model_selection(request, payload.task_model, payload.task_effort, payload.task_model_context,
+                                     request_identity=idempotency_key)
+    original_guard = effect_guard
+    def current_start_guard():
+        _check_effect_guard(original_guard)
+        model_effect_guard(request, task_selection, payload.task_model_context)()
+    effect_guard = current_start_guard
     require_provider_or_400()
     # Shared sliding-window cap across /chat/send + this route, so a
     # runaway loop can't spawn unbounded (paid) goals.
@@ -1756,6 +1765,7 @@ def _create_goal(
         receipt = reserve_api(w, key=idem_key, owner=caller_principal(request) or "",
             payload=payload, title=title, description=description, domain=domain,
             connection_references=connection_refs,
+            task_selection=task_selection,
             caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth},
             **({"effect_guard": effect_guard} if effect_guard is not None else {}))
         goal_id = receipt["goal_id"]

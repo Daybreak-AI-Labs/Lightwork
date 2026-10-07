@@ -7,7 +7,7 @@
   const coverage = document.getElementById("ac-coverage"), previous = document.getElementById("ac-previous");
   const next = document.getElementById("ac-next"), page = document.getElementById("ac-page");
   let model = null, offset = 0, busy = false, generation = 0, expired = false;
-  const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",signoff:"Result approvals",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
+  const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",evidence_source_approval:"Evidence source approvals",signoff:"Result approvals",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
   const ACTIONS = {"jira.create":"Create a Jira issue"};
   const OBSERVATIONS = {
     execution_attempt: { recorded: "Lightwork recorded the attempt" },
@@ -133,7 +133,7 @@
     summary.textContent = `${model.counts.unread} unread · ${model.counts.overdue} overdue · ${model.counts.snoozed} snoozed`;
     model.coverage.forEach(source => {
       // A module that is turned off is not a load error.
-      if (source.status !== "current" && source.status !== "disabled") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? "include only the most recent 2,000 source records. Open the full module for older records." : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
+      if (source.status !== "current" && source.status !== "disabled") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? (source.kind === "evidence_source_approval" ? "cover only the first 64 saved source setups. Open Continuous evidence to review the current sources." : "include only the most recent 2,000 source records. Open the full module for older records.") : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
     });
     if (!model.items.length) {
       const partial = model.coverage.some(source=>source.status !== "current" && source.status !== "disabled");
@@ -250,5 +250,17 @@
   previous.addEventListener("click", ()=>{if (!busy) {offset=Math.max(0,offset-50); load();}});
   next.addEventListener("click", ()=>{if (!busy && model && model.has_more) {offset+=50; load();}});
   window.addEventListener("pageshow", event=>{if (event.persisted) {++generation; model=null; list.replaceChildren(); busy=false; load();}});
+  window.LightworkActionCenter = Object.freeze({
+    async open(expectedContext, isCurrent) {
+      const current = () => !expired && typeof isCurrent === "function" && isCurrent() &&
+        /^[a-f0-9]{64}$/.test(expectedContext) && root.dataset.context === expectedContext;
+      if (!current() || busy) throw new Error("Your account or selection changed. Open the current Action Center again.");
+      await load();
+      if (!current() || !model || model.context !== expectedContext)
+        throw new Error("The current list could not be opened. Your filters were kept; refresh Action Center.");
+      root.scrollIntoView({block:"start"}); form.elements.kind.focus();
+      return true;
+    }
+  });
   load();
 })();

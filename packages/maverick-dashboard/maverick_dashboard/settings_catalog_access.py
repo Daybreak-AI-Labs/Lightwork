@@ -308,6 +308,20 @@ def _sign_in_security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "number", grp, 30, "maverick_dashboard.session_registry", subgroup=sec,
           minimum=1, maximum=3650, integer=True, unit="days",
           aliases="sessions retention"),
+        S("auth.sessions", "company_hours", "Maximum company sign-in length",
+          "Shorten company sign-ins to this many hours. Zero keeps the existing sign-in limit. "
+          "A sign-in that already ends sooner still ends sooner. Changes also apply to current sessions.",
+          "number", grp, 0, "maverick_dashboard.session_policy", subgroup=sec,
+          minimum=0, maximum=168, integer=True, unit="hours", weaker="change",
+          warning="The maximum time people can stay signed in may change.",
+          aliases="company session lifetime sso timeout"),
+        S("auth.sessions", "idle_minutes", "Sign out inactive browsers after",
+          "End a browser sign-in after this many minutes without clicks, typing or scrolling. "
+          "Automatic page refreshes do not count. Zero turns this limit off. Current sessions follow the new limit.",
+          "number", grp, 0, "maverick_dashboard.session_policy", subgroup=sec,
+          minimum=0, maximum=1440, integer=True, unit="minutes", weaker="change",
+          warning="The time an inactive browser can stay signed in may change.",
+          aliases="idle session inactivity timeout sign out"),
     )
 
 

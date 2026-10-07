@@ -1,5 +1,48 @@
 # Post-install operation coverage
 
+October 7 discovery follow-through: Data discovery offers a reviewed update from
+one independently approved report to a named existing dataset. The ordinary form
+and Copilot preserve the selected report and dataset, show current and proposed
+observed categories, and require a separate confirmation. Business purpose is
+unchanged. Current source, approval, target edition, owner, workspace and deadline
+are rechecked at native writer boundaries. An actual saved update recovered its
+original after an interrupted reply with one application and one target revision.
+A source pause refused a new application, including after a SQLite writer wait.
+Source withdrawal permits only a minimal original status with no findings;
+admitted unconfirmed attempts remain retained without automatic replay. Choices
+are explicitly bounded to the latest fifty scans and first five hundred datasets.
+This uses synthetic local reports, not a live external scan or provider acceptance.
+
+October 7 Chat and attention follow-through: ordinary Chat offers an installed,
+ready model and supported thinking depth for one task. The exact selection reaches
+native admission, the normal runner, queued messages, saved drafts, retries and
+Copilot's complete task review. It changes no workspace defaults. Specialist
+settings, approved backups, required approvals and spending limits still apply.
+Missing readiness, unsupported depth, changed review or withdrawn access refuse
+new work. Native admissions and routing used no live model completion. Attention
+now opens pending continuous-evidence sources through their complete existing
+independent review, retaining the selected item and filters. Current role changes
+clear private items. This is evidence-source coverage, not every governance
+family. Workflow alerts retain a native Problems only choice through ordinary
+Save and Publish; failures, spending limits and uncertain outcomes qualify,
+while completion and approval waits do not. Ordinary narrow-layout reviews and
+native alert selection were exercised without delivering an external message.
+
+October 7 sign-in limits follow-through: Settings > All settings and its existing
+reviewed Copilot operations now expose company sign-in length and browser
+inactivity, with an installer setup choice. Defaults preserve existing behavior;
+the configured company limit can shorten an original sign-in, never extend it.
+Current own-session checks apply the latest installation policy. Explicit browser
+activity extends only the inactivity deadline; background refresh/status requests
+do not. An observed expired session is retained as ended and cannot be revived by
+later activity or relaxing the policy. Sign-in warnings and renewal show the
+effective deadline. Signed native HTTP exercised an active session, unchanged
+background reads, explicit activity, expired activity refusal, current company
+limits, cross-origin refusal, wrong-subject refusal and legacy-cookie refusal
+when inactivity tracking is required. This uses controlled isolated session
+timestamps; it does not qualify a real identity-provider sign-in or browser event
+delivery. Existing All settings authority, review and audit remain the writer.
+
 ## October 6 product completion batch
 
 | Customer operation | Complete controls | Result and boundary |

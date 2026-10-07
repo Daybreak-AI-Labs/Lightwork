@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
-_SESSION_TTL = 8 * 60 * 60  # 8h, matching the OIDC browser session
+_SESSION_TTL = 8 * 60 * 60  # Existing sign-in ceiling; current policy may shorten it.
 _TX_TTL = 10 * 60
 TX_COOKIE = "mvk_saml_tx"
 _MAX_ACS_BODY_BYTES = 1024 * 1024
@@ -761,10 +761,12 @@ async def saml_acs(request: Request):
         ))
     try:
         from .oidc_login import mint_browser_session
+        from .session_policy import company_ttl
 
+        ttl = company_ttl(_SESSION_TTL)
         cookie = mint_browser_session(
             request, sub=identity.name_id, secret=secret, via="session", mfa=mfa,
-            ttl=_SESSION_TTL,
+            ttl=ttl,
             extra={"idp_email": _saml_invite_email(identity)},
         )
     except SamlUnavailable as e:
@@ -786,7 +788,7 @@ async def saml_acs(request: Request):
         response,
         SESSION_COOKIE,
         cookie,
-        max_age=_SESSION_TTL,
+        max_age=ttl,
         secure=_cookie_secure(request),
     )
     return response

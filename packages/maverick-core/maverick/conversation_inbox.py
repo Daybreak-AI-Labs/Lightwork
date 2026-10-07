@@ -183,7 +183,7 @@ class ConversationInbox:
         return saved
 
     def submit(self, goal_id, *, operation_id, mode, text, files=(), item_id=None,
-               expected_revision=None, keep_files=(), independent_context="none", expected_generation=0, expected_snapshot=""):
+               expected_revision=None, keep_files=(), independent_context="none", expected_generation=0, expected_snapshot="", task_selection=None):
         goal, root = self.target(goal_id)
         limits = policy()
         if not limits["enabled"] or mode not in limits["modes"]:
@@ -195,10 +195,16 @@ class ConversationInbox:
             raise ValueError("Choose no context or a reviewed conversation snapshot")
         record, value = self._read(root)
         old = next((row for row in value["items"] if row["id"] == item_id), None)
+        from .task_model_selection import validate as validate_model
+        task_selection = validate_model(task_selection if task_selection is not None else (old or {}).get("task_model_selection"))
+        if mode == "guidance" and task_selection is not None:
+            raise ValueError("Guidance cannot change the running task's AI model. Choose the model for a new task instead.")
         args = {"goal_id": goal_id, "mode": mode, "text": text, "files": [public_file(row) for row in files],
                 "item_id": item_id, "expected_revision": expected_revision, "keep_files": list(keep_files),
                 "independent_context": independent_context, "expected_generation": expected_generation, "expected_snapshot": expected_snapshot}
         fingerprint = digest(args)
+        if task_selection is not None:
+            fingerprint = digest([args, task_selection])
         prior = value["operations"].get(operation_id)
         if prior:
             if prior["fingerprint"] != fingerprint:
@@ -239,7 +245,8 @@ class ConversationInbox:
                 "state": "needs_decision" if mode == "guidance" else "queued", "message": "Saved durably; not yet executed.",
                 "goal_id": None, "acknowledgement": None, "independent_context": independent_context,
                 "delivery_token": secrets.token_hex(16),
-                "snapshot": snapshot if mode == "independent" and independent_context == "conversation_snapshot" else None}
+                "snapshot": snapshot if mode == "independent" and independent_context == "conversation_snapshot" else None,
+                **({"task_model_selection": task_selection} if task_selection is not None else {})}
         if old:
             value["items"][value["items"].index(old)] = item
         else:

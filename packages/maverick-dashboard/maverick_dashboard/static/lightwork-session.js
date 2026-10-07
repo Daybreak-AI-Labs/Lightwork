@@ -26,9 +26,11 @@
   var signIn = meta('lightwork-session-sign-in') || '/auth/local-login';
   var renews = meta('lightwork-session-renew') === 'renew';
   var ends = parseInt(meta('lightwork-session-expires'), 10) || 0;
+  var idleMinutes = parseInt(meta('lightwork-session-idle-minutes'), 10) || 0;
+  var activityAt = 0, activityPending = null, statusTimer = null;
   // Server clock minus this computer's, so a wrong local clock never warns early or late.
   var skew = (parseInt(meta('lightwork-session-now'), 10) || Date.now() / 1000) - Date.now() / 1000;
-  var timer = null, warned = false, notice = null;
+  var timer = null, warned = false, asking = false, notice = null;
 
   function now() { return Date.now() / 1000 + skew; }
   function signInUrl() {
@@ -103,6 +105,7 @@
   }
   function ended() {
     clearTimeout(timer);
+    clearInterval(statusTimer);
     var kept = snapshot();
     say(t(kept ? 'Your sign-in has ended. What you typed on this page is kept. Sign in again to come back here and carry on.'
       : 'Your sign-in has ended. Sign in again to come back to this page.'), true);
@@ -115,16 +118,35 @@
       var d = await window.mvFetchJSON('/auth/session/status', {cache: 'no-store', timeout: 15000}, 'check your sign-in');
       if (!d || d.signed_in !== true) return 0;
       skew = (d.now || Date.now() / 1000) - Date.now() / 1000;
+      idleMinutes = d.idle_minutes || 0;
       return d.expires_at;
     } catch (_) { return ends; }   // offline: keep the time the page was given
   }
   function schedule() {
     clearTimeout(timer);
     var left = ends - now();
-    var wait = (warned ? left : left - WARN_SECONDS) * 1000;
+    var wait = (warned ? left : left - warningSeconds()) * 1000;
     timer = setTimeout(check, Math.max(0, Math.min(wait, LONGEST_WAIT)));
   }
+  function warningSeconds() { return idleMinutes ? Math.min(WARN_SECONDS, idleMinutes * 15) : WARN_SECONDS; }
+  async function activity(force) {
+    if (activityPending) return activityPending;
+    if (!ends || !idleMinutes || (!force && Date.now() - activityAt < Math.min(60000, idleMinutes * 15000))) return false;
+    activityAt = Date.now();
+    activityPending = (async function () {
+      try {
+        var d = await window.mvFetchJSON('/auth/session/activity', {method: 'POST', timeout: 15000}, 'keep your active sign-in current');
+        if (!d || !d.expires_at) return false;
+        skew = (d.now || Date.now() / 1000) - Date.now() / 1000;
+        ends = d.expires_at; warned = false; schedule();
+        return true;
+      } catch (_) { return false; } // Failed activity never invents a later expiry.
+      finally { activityPending = null; }
+    }());
+    return activityPending;
+  }
   async function stay() {
+    if (idleMinutes && await activity(true) && ends - now() > warningSeconds() + 1) return;
     if (!renews) { snapshot(); window.location.assign(signInUrl()); return; }
     try {
       // A company sign-in answers 409 here: it signs in again below instead.
@@ -141,18 +163,35 @@
     ends = await current();
     var left = ends - now();
     if (!ends || left <= 0) { ended(); return; }
-    if (left > WARN_SECONDS + 5) { warned = false; schedule(); return; }   // kept going elsewhere
-    if (warned) { schedule(); return; }
+    if (left > warningSeconds() + 5) { warned = false; schedule(); return; }   // kept going elsewhere
+    if (warned || asking) { warned = true; schedule(); return; }
     warned = true; schedule();
     var minutes = Math.max(1, Math.round(left / 60));
     var message = (minutes === 1 ? t('Your sign-in ends in about 1 minute.')
       : t('Your sign-in ends in about {minutes} minutes.', {minutes: minutes})) + ' ' +
       t('Stay signed in to keep working. What you typed stays on this page either way.');
-    var ok = window.mvConfirm ? await window.mvConfirm(message, {okText: 'Stay signed in', cancelText: 'Not now'}) : false;
+    asking = true;
+    var ok = false;
+    try { ok = window.mvConfirm ? await window.mvConfirm(message, {okText: 'Stay signed in', cancelText: 'Not now'}) : false; }
+    finally { asking = false; }
     if (ok) await stay();
   }
 
   restore();
-  if (ends) schedule();
+  if (ends) {
+    schedule();
+    ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (name) {
+      document.addEventListener(name, function (event) {
+        if (event.isTrusted && !document.hidden) activity(false);
+      }, {passive: true});
+    });
+    // Current policy and other tabs may change the end time; reading never counts as activity.
+    statusTimer = setInterval(async function () {
+      if (document.hidden) return;
+      var previous = ends; ends = await current();
+      if (!ends || ends <= now()) { ended(); return; }
+      if (ends !== previous) { warned = false; schedule(); }
+    }, 60000);
+  }
   window.LightworkSession = {check: check, snapshot: snapshot, restore: restore};
 }());

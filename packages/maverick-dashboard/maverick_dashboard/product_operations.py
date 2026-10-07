@@ -165,6 +165,7 @@ def _adapter_modules():
     # every advertised native capability statically reachable and mandatory.
     from . import (
         product_operations_access_keys,
+        product_operations_action_center,
         product_operations_activation,
         product_operations_agent_overrides,
         product_operations_answer_feedback,
@@ -252,6 +253,7 @@ def _adapter_modules():
         product_operations_plugins,
         product_operations_policy_exceptions,
         product_operations_preferences,
+        product_operations_privacy_data_use_bridge,
         product_operations_privacy_discovery,
         product_operations_privacy_notice_proposals,
         product_operations_private_task_computation,
@@ -342,6 +344,7 @@ def _adapter_modules():
         product_operations_grc_outbound,
         product_operations_knowledge,
         product_operations_learning_cases,
+        product_operations_action_center,
         product_operations_learning_conflicts,
         product_operations_learning_distinctions,
         product_operations_learning_holdout_setup,
@@ -365,6 +368,7 @@ def _adapter_modules():
         product_operations_plugin_environment,
         product_operations_privacy_notice_proposals,
         product_operations_privacy_discovery,
+        product_operations_privacy_data_use_bridge,
         product_operations_plugins,
         product_operations_projects,
         product_operations_stop,

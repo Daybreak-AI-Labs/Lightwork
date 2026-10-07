@@ -1313,6 +1313,13 @@ def _notify_flow(flow, run) -> None:
         STATUS_INDETERMINATE,
         STATUS_PAUSED_APPROVAL,
     )
+    choice = getattr(flow, "notify_on", "all")
+    if not isinstance(choice, str) or choice not in {"all", "problems"}:
+        return
+    if choice == "problems" and run.status not in {
+        STATUS_FAILED, STATUS_BUDGET_LIMITED, STATUS_INDETERMINATE,
+    }:
+        return
     name = flow.name or flow.id
     if run.status == STATUS_PAUSED_APPROVAL:
         body, prio = _approval_body(name, run), "high"

@@ -417,6 +417,7 @@ class Flow:
     learned_recipe: dict | None = None  # reviewed action dataflow; exact generated graph
     recipe_lineage: dict | None = None  # admitted signed evidence; never caller run data
     recipe_teaching: dict | None = None  # explicit native human teaching, not general guard bypass
+    notify_on: str = "all"           # all opted-in events, or problems only
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -429,6 +430,7 @@ class Flow:
         return {
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "revision": self.revision, "notify": self.notify,
+            "notify_on": self.notify_on,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
             "schedule": self.schedule, "timezone": self.timezone, "owner": self.owner,
             "max_concurrent": self.max_concurrent, "inputs": self.inputs,
@@ -443,6 +445,9 @@ class Flow:
 
     @staticmethod
     def from_dict(d: dict) -> Flow:
+        notify_on = d.get("notify_on", "all")
+        if not isinstance(notify_on, str) or notify_on not in {"all", "problems"}:
+            raise ValueError("Choose alerts for all updates or problems only.")
         nodes = [FlowNode.from_dict(n) for n in (d.get("nodes") or [])]
         return Flow(
             id=str(d.get("id", "")), name=str(d.get("name", "")),
@@ -451,6 +456,7 @@ class Flow:
             version=int(d.get("version", 1) or 1),
             revision=str(d.get("revision", "") or ""),
             notify=bool(d.get("notify", False)),
+            notify_on=notify_on,
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
             max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
             schedule=str(d.get("schedule", "")), timezone=str(d.get("timezone", "")),
@@ -507,6 +513,8 @@ class Flow:
     def validate(self, *, _inherited_approval: bool = False) -> list[str]:
         """Structural problems (empty list = valid). Not an execution check."""
         errs: list[str] = []
+        if not isinstance(self.notify_on, str) or self.notify_on not in {"all", "problems"}:
+            errs.append("Choose alerts for all updates or problems only.")
         if self.recipe_lineage is not None and self.learned_recipe is None:
             errs.append("recipe lineage requires its complete parent recipe")
         if self.recipe_teaching is not None and self.learned_recipe is None:

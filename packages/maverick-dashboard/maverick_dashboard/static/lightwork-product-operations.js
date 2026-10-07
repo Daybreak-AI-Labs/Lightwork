@@ -263,6 +263,28 @@
               ? function (isCurrent) { return questionCheckControls.open(questionCheckReview.context, isCurrent); } : null);
           return;
         }
+        if (entry[0] === 'action_center_form') {
+          var attentionReview = entry[1], attentionControls = window.LightworkActionCenter;
+          if (!attentionReview || Array.isArray(attentionReview) ||
+              Object.keys(attentionReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(attentionReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open current decisions needing attention',
+            '/action-center#ac-items',
+            attentionControls && typeof attentionControls.open === 'function'
+              ? function (isCurrent) { return attentionControls.open(attentionReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'privacy_data_use_bridge_form') {
+          var discoveryUseReview = entry[1], discoveryUseControls = window.LightworkDiscoveryDataUse;
+          if (!discoveryUseReview || Array.isArray(discoveryUseReview) ||
+              Object.keys(discoveryUseReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(discoveryUseReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review findings for a saved dataset',
+            '/privacy/data-discovery#pddb-root',
+            discoveryUseControls && typeof discoveryUseControls.openReview === 'function'
+              ? function (isCurrent) { return discoveryUseControls.openReview(discoveryUseReview.context, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'learning_task_question_review') {
           var taskQuestionReview = entry[1], taskQuestionControls = window.LightworkLearningQuestions;
           if (!taskQuestionReview || Array.isArray(taskQuestionReview) ||

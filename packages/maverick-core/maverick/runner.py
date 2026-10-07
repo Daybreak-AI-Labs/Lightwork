@@ -528,14 +528,18 @@ def run_goal_in_thread(
         admission = _allowance_admission(world, goal_id, budget)
         if admission is not None:
             return admission
-        llm = LLM()
+        from .task_model_selection import run_scope as task_model_scope
+        # Validate retained choices before provider/sandbox construction. The
+        # same scope is reinstated below for every normal team role on resume.
+        with task_model_scope(world, goal_id):
+            llm = LLM()
         sandbox = build_sandbox()
         # Trace pinning: stamp the run with the workspace's git state so the
         # trace/replay ties to an exact commit. Best-effort, never blocks.
         from .trace_pin import pin_trace
         pin_trace(world, goal_id)
         try:
-            with run_scope(director), runtime_scope(world, goal_id, alternative):
+            with run_scope(director), runtime_scope(world, goal_id, alternative), task_model_scope(world, goal_id):
                 run_goal_sync(
                     llm, world, budget,
                     goal_id, sandbox=sandbox, max_depth=max_depth,

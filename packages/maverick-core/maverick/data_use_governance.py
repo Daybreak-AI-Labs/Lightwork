@@ -1212,6 +1212,7 @@ class DataUseGovernanceStore:
         fresh_until: float,
         expected_revision: int,
         idempotency_key: str,
+        before_write: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Record one independently supplied, reviewed decision context."""
 
@@ -1249,6 +1250,8 @@ class DataUseGovernanceStore:
         }
 
         def mutate(conn: sqlite3.Connection, now: float) -> dict[str, Any]:
+            if before_write is not None:
+                before_write()
             if observed > now:
                 raise DataUseValidationError("observed_at cannot be in the future")
             if fresh <= now:

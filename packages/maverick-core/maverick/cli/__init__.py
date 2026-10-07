@@ -2984,7 +2984,6 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
                 err=True,
             )
         sys.exit(2)
-    import uvicorn
     if recovery_mode:
         from maverick_dashboard.recovery_mode import configure
         configure(fastapi_app, host=host)
@@ -2995,26 +2994,8 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
         proxy_kwargs = uvicorn_launch_kwargs()
     except Exception:  # pragma: no cover - never block startup on a config read
         proxy_kwargs = {}
-    config = uvicorn.Config(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
-    if config.reload or config.workers > 1:
-        # uvicorn.run's own refusal for an app object (one control plane per data root).
-        logging.getLogger("uvicorn.error").warning(
-            "You must pass the application as an import string to enable 'reload' or 'workers'.")
-        sys.exit(3)
-    server = uvicorn.Server(config)
-    from maverick_dashboard.dashboard_restart import RESTART_EXIT_CODE, register_server, requested
-    # Settings > Maintenance can ask a supervised copy (systemd, a container
-    # engine, Kubernetes) to restart: the server stops gracefully and this
-    # command exits with a failure code so the supervisor starts it again.
-    register_server(fastapi_app, server)
-    try:
-        server.run()
-    except KeyboardInterrupt:
-        pass
-    if not server.started:
-        sys.exit(3)
-    if requested():
-        sys.exit(RESTART_EXIT_CODE)
+    from maverick_dashboard._server import run_dashboard_server
+    run_dashboard_server(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
 
 
 @main.command()

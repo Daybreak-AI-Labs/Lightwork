@@ -7,6 +7,7 @@ from maverick.runner import (
     configured_goal_ceiling_dollars,
     configured_goal_ceiling_wall_seconds,
 )
+from maverick.task_model_selection import EFFORT_LABELS
 from pydantic import Field
 
 from . import api, auth, task_search
@@ -27,6 +28,8 @@ class StartInput(StrictInput):
     max_dollars: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     max_wall_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     max_depth: int | None = Field(default=None, ge=1, le=10)
+    task_model: str = Field(default="", max_length=128)
+    task_effort: str = Field(default="", max_length=8)
 
 
 def find_snapshot(request, selection):
@@ -89,6 +92,8 @@ def _policy():
 
 def start_snapshot(request, selection):
     auth.require_permission(request, "operate")
+    from .task_model_selection_api import choices
+    models = choices(request)
     policy = _policy()
     steps = policy["agent_step_limit"]
     blocked = "" if steps["ready"] else steps["reason"]
@@ -102,7 +107,7 @@ def start_snapshot(request, selection):
                 raise
             blocked = "Set up an available AI provider before starting a task."
     return Snapshot(digest({"context": context_for(request), "policy": policy,
-                            "provider_ready": provider_ready}),
+                            "provider_ready": provider_ready, "models": models}),
         "Current task limits and AI connection",
         "Start one new task under current workspace limits. Acceptance starts work; it does not mean the task is complete.",
         {"Most steps for each agent": steps["max_steps"] if steps["ready"] and steps["max_steps"] else
@@ -116,6 +121,11 @@ def start_snapshot(request, selection):
                              "href": steps["settings"]["href"] if not steps["ready"] else "/start"}},
         [{"name": "title", "label": "Task", "kind": "text", "required": True, "max_length": 200},
          {"name": "description", "label": "Instructions (optional)", "kind": "textarea", "max_length": 12000},
+         {"name": "task_model", "label": "AI model for this task", "kind": "select", "value": "",
+          "choices": [{"value": "", "label": "Use workspace settings"}, *models]},
+         {"name": "task_effort", "label": "Thinking depth (supported models only)", "kind": "select", "value": "",
+          "choices": [{"value": "", "label": "Use the model’s usual thinking depth"},
+                      *({"value": value, "label": label} for value, label in EFFORT_LABELS.items())]},
          {"name": "max_dollars", "label": "Maximum dollars (blank uses workspace limit)", "kind": "number"},
          {"name": "max_wall_seconds", "label": "Maximum seconds (blank uses workspace limit)", "kind": "number"},
          {"name": "max_depth", "label": "Levels of helpers", "kind": "select", "value": None,
@@ -133,6 +143,11 @@ def start_prepare(request, selection, arguments):
     # Validate against the native launch schema before sealing the review.
     payload = GoalIn(**{**arguments, "title": title})
     policy = _policy()
+    from .task_model_selection_api import choices
+    from .task_model_selection_api import selection as model_selection
+    model_context = context_for(request)
+    chosen = model_selection(request, arguments["task_model"], arguments["task_effort"], model_context)
+    model_label = next((row["label"] for row in choices(request) if chosen and row["value"] == chosen["model"]), "Use workspace settings")
     # This reviewed Copilot action enters the same native goal endpoint. Show
     # the limits that endpoint will actually dispatch, including REST safety
     # ceilings on a legacy installation whose general task defaults are off.
@@ -140,12 +155,15 @@ def start_prepare(request, selection, arguments):
     return Preview("Start one new task. Its accepted receipt confirms admission, not completion or external delivery.",
         [{"label": "Task", "after": title},
          {"label": "Instructions", "after": arguments["description"]},
+         {"label": "AI model", "after": model_label},
+         {"label": "Thinking depth", "after": EFFORT_LABELS.get(arguments["task_effort"], "Use the model’s usual thinking depth")},
+         {"label": "AI team", "after": "This choice is for this task. Some specialists have their own AI settings. Workspace-approved backups keep their existing rules."},
          {"label": "Maximum dollars", "after": effective["max_dollars"]},
          {"label": "Maximum seconds", "after": effective["max_wall_seconds"]},
          {"label": "Levels of helpers", "after": effective["max_depth"]},
          {"label": "Most steps for each agent", "after": policy["agent_step_limit"]["max_steps"] or "No step limit"},
          {"label": "External effects", "after": "Work may use authorized tools; review task progress and any approvals."}],
-        {"policy": policy, "effective": effective})
+        {"policy": policy, "effective": effective, "model_context": model_context})
 
 
 def _receipt_outcome(goal, *, replayed, background=None):
@@ -178,7 +196,7 @@ def start_execute(request, selection, arguments, prepared, operation_id, *, effe
     if _policy() != prepared["policy"]:
         raise HTTPException(409, "Task limits changed. Review the current limits before starting.")
     background, response = BackgroundTasks(), Response()
-    goal = api._create_goal(request, GoalIn(**{**arguments, "title": arguments["title"].strip()}),
+    goal = api._create_goal(request, GoalIn(**{**arguments, "title": arguments["title"].strip(), "task_model_context": prepared["model_context"]}),
                             background, response, idempotency_key=operation_id, **({"effect_guard": effect_guard} if effect_guard is not None else {}))
     return _receipt_outcome(goal, replayed=response.headers.get("Idempotency-Replayed") == "true",
                             background=background)

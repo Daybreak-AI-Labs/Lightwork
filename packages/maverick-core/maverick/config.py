@@ -1335,16 +1335,27 @@ def get_ip_allowlist() -> dict:
 
 
 def get_auth_sessions() -> dict:
-    """``[auth.sessions]``: how long ended sign-in sessions stay listed."""
-    cfg = (load_config().get("auth") or {}).get("sessions") or {}
+    """Installation-wide browser limits and ended-session retention."""
+    if config_source_errors(include_tenant=False):
+        raise ValueError("Sign-in settings cannot be read.")
+    authentication = load_global_config().get("auth", {})
+    if not isinstance(authentication, dict):
+        raise ValueError("Sign-in settings must contain named choices.")
+    cfg = authentication.get("sessions", {})
     if not isinstance(cfg, dict):
-        cfg = {}
+        raise ValueError("Sign-in settings must contain named choices.")
     raw = cfg.get("retention_days", 30)
     try:
         days = int(raw) if not isinstance(raw, bool) else 30
     except (TypeError, ValueError):
         days = 30
-    return {"retention_days": max(1, min(days, 3650))}
+    limits = {}
+    for name, maximum in (("company_hours", 168), ("idle_minutes", 1440)):
+        value = cfg.get(name, 0)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+            raise ValueError(f"auth.sessions.{name} must be an integer from zero to {maximum}")
+        limits[name] = value
+    return {"retention_days": max(1, min(days, 3650)), **limits}
 
 
 def get_skills() -> dict:

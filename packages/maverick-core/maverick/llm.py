@@ -529,6 +529,10 @@ def _explicit_model_for_role(
     preflight.  Normal runtime resolution leaves it unset and therefore uses
     the canonical active-tenant configuration loader.
     """
+    from .task_model_selection import current_model
+    task_model = current_model()
+    if task_model:
+        return require_model_allowed(task_model)
     override = os.environ.get(f"MAVERICK_MODEL_OVERRIDE_{role.upper()}")
     if override:
         return override
