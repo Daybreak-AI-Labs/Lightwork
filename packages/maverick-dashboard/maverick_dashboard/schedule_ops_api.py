@@ -56,7 +56,7 @@ class TimetableIn(BaseModel):
     repeat: Literal["hourly", "daily", "weekdays", "weekly", "monthly"] = "daily"
     at: str = Field("09:00", pattern=r"^\d{2}:\d{2}$")
     days: list[int] = Field(default_factory=list, max_length=7)
-    day_of_month: int = Field(1, ge=1, le=28)
+    day_of_month: int = Field(1, ge=1, le=31)
     every_hours: int = Field(1, ge=1, le=12)
     zone: str = Field("UTC", min_length=1, max_length=MAX_ZONE)
     # Technical details only: a custom five-part timetable, checked on the server.

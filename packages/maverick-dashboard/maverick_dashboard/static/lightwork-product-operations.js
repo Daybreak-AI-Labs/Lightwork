@@ -240,6 +240,18 @@
               ? function (isCurrent) { return exceptionControls.openReview({}, {isCurrent: isCurrent, context: exceptionContext}); } : null);
           return;
         }
+        if (entry[0] === 'schedule_creation_review') {
+          var scheduleReview = entry[1], scheduleControls = window.LightworkScheduleSetup;
+          var scheduleContext = catalog && catalog.context;
+          if (!scheduleReview || Array.isArray(scheduleReview) ||
+              Object.keys(scheduleReview).join(',') !== 'scope' || scheduleReview.scope !== 'current_page' ||
+              typeof scheduleContext !== 'string' || !/^[a-f0-9]{64}$/.test(scheduleContext)) return;
+          protectedControls(node('dd', undefined, list), 'Choose work and review its schedule',
+            '/automations#auto-new-sched',
+            scheduleControls && typeof scheduleControls.openReview === 'function'
+              ? function (isCurrent) { return scheduleControls.openReview({}, {isCurrent: isCurrent, context: scheduleContext}); } : null);
+          return;
+        }
         if (entry[0] === 'factory_guidance_author') {
           var factoryAuthor = entry[1], factoryControls = window.LWFactoryGuidance;
           var factoryContext = catalog && catalog.context;

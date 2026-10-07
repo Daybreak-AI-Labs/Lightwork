@@ -207,8 +207,8 @@ _OPERATIONAL_GUIDES = (
      "Where are my finished results?", "How do I download an answer?"),
     ("/automations", "Automations", "Manage schedules, connected-service starts, new-item starts and recent flow runs.",
      "Create a schedule or event automation when its source, flow and required access are ready.",
-     "Open Schedules for timed work, or Starts when new items arrive to choose a saved SharePoint, Salesforce, ServiceNow or Teams account, review its dated source snapshot and explicitly arm the selected work.",
-     "A source preview confirms its observed starting point; saving does not confirm future delivery. Read an original creation result without recreating or polling the source.",
+     "Open the complete schedule form to choose work, repeat pattern, time and time zone, then check its next runs before choosing Create schedule. For new-item starts, choose a saved SharePoint, Salesforce, ServiceNow or Teams account, review its dated source snapshot and separately arm the selected work.",
+     "Opening controls starts nothing. Months without a chosen 29th, 30th or 31st are skipped. A source preview records its observed starting point; saving does not confirm future delivery. Connected-source originals can be read without recreating or polling. If a schedule creation reply is interrupted, check the saved schedules before creating it again.",
      "How do I schedule a workflow?", "Where can I check recent runs?"),
     # Insights
     ("/overview", "Overview", "See recorded task momentum, current task states, recent work and department activity.",
