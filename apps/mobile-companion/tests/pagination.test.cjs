@@ -6,8 +6,8 @@ const goals = count => Array.from({length: count}, (_, index) => ({
   id: count - index, title: `Task ${count - index}`, status: 'active', result: null,
 }));
 
-async function fixture(initial = goals(125), {replayEffects = false} = {}) {
-  let stored = initial, app, settings = connection, handler, opened;
+async function fixture(initial = goals(125), {replayEffects = false, handler: first} = {}) {
+  let stored = initial, app, settings = connection, handler = first, opened;
   const calls = [], timers = new Map(), deadlines = new Map();
   let nextDeadline = 0;
   // Like /api/v1/goals: pages by scanned rows, then hides rows the reader may
@@ -302,17 +302,74 @@ test('a page that hides every row it scanned still leads to the older tasks', as
   } finally { await f.close(); }
 });
 
-for (const [name, continuation] of [['missing', {hasMore: true, nextBeforeId: null}], ['not moving down', {hasMore: true, nextBeforeId: 200}]]) {
-  test(`a continuation that is ${name} fails visibly instead of looping or stopping`, async () => {
-    const f = await fixture();
-    try {
-      f.handle(() => ({goals: goals(125).slice(0, 50), ...continuation}));
-      await f.tick();
-      assert.match(text(f.app), /ask your administrator to update the dashboard/);
-      assert.ok(f.calls.length <= 3);
-    } finally { await f.close(); }
-  });
-}
+// A dashboard from before ID cursors sends Pagination-Has-More and
+// Pagination-Next-Offset but no Pagination-Next-Before-Id, and ignores before_id.
+const olderDashboard = rows => request => ({goals: rows.slice(0, 50), hasMore: rows.length > 50, nextBeforeId: null});
+test('an older dashboard that sends Has-More without a cursor still shows its tasks', async () => {
+  const sent = [];
+  const f = await fixture(goals(60), {handler: request => { sent.push(request.before); return olderDashboard(goals(60))(request); }});
+  try {
+    assert.deepEqual(f.ids(), goals(60).slice(0, 50).map(row => row.id), 'the rows already read are shown');
+    assert.doesNotMatch(text(f.app), /ask your administrator to update the dashboard/);
+    assert.ok(button(f.app, 'Load older tasks'), 'more remain, so the way to ask for them stays');
+    assert.deepEqual(sent, [undefined], 'the first page is enough; no cursor is needed to show it');
+  } finally { await f.close(); }
+});
+
+test('an older dashboard that ignores the cursor fails only when older tasks are asked for', async () => {
+  const f = await fixture(goals(60), {handler: olderDashboard(goals(60))});
+  try {
+    assert.equal(f.ids().length, 50);
+    await f.more();
+    assert.match(text(f.app), /ask your administrator to update the dashboard/);
+  } finally { await f.close(); }
+});
+
+test('an older dashboard with fewer than a page of tasks says there are no more', async () => {
+  const f = await fixture(goals(7), {handler: olderDashboard(goals(7))});
+  try {
+    assert.equal(f.ids().length, 7);
+    assert.equal(button(f.app, 'Load older tasks'), undefined);
+  } finally { await f.close(); }
+});
+
+test('an empty page that says more remain but not where fails visibly', async () => {
+  const sent = [];
+  const f = await fixture(goals(125), {handler: request => { sent.push(request.before); return {goals: [], hasMore: true, nextBeforeId: null}; }});
+  try {
+    assert.match(text(f.app), /ask your administrator to update the dashboard/);
+    assert.equal(sent.length, 1);
+  } finally { await f.close(); }
+});
+
+test('a continuation that does not move down the list fails visibly', async () => {
+  const f = await fixture();
+  try {
+    f.handle(() => ({goals: goals(125).slice(0, 50), hasMore: true, nextBeforeId: 200}));
+    await f.tick();
+    assert.match(text(f.app), /ask your administrator to update the dashboard/);
+    assert.ok(f.calls.length <= 3);
+  } finally { await f.close(); }
+});
+
+test('a continuation equal to the cursor just requested stops the read instead of looping', async () => {
+  // The first read (nothing shown yet) gets a short page, 20 of its scanned rows
+  // being hidden, so it continues below row 76. The next reply is empty and
+  // points at 76 again: the same request would be sent for ever. It must fail
+  // on that first repeat; the handler ends the loop after 6 only so that a
+  // broken guard fails this test instead of hanging it.
+  const sent = [];
+  const f = await fixture(goals(125), {handler: request => {
+    sent.push(request.before);
+    if (request.before === undefined) return {goals: goals(125).slice(0, 30), hasMore: true, nextBeforeId: 76};
+    if (sent.length > 6) return {goals: [], hasMore: false, nextBeforeId: null};
+    return {goals: [], hasMore: true, nextBeforeId: request.before};
+  }});
+  try {
+    assert.match(text(f.app), /ask your administrator to update the dashboard/);
+    assert.deepEqual(sent, [undefined, 76], 'the repeated cursor is refused on its first repeat');
+  } finally { await f.close(); }
+});
 
 test('a long run of hidden rows is paged through to the tasks below it', async () => {
   // The cursor moves down on every page, so the read always ends.

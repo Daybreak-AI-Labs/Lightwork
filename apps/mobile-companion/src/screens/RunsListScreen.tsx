@@ -42,11 +42,13 @@ async function readTaskWindow(settings: Settings, signal: AbortSignal, status: s
       rows.push(row);
       if (below) addedBelow++;
     }
-    // An older dashboard sends no continuation: a full page then means more,
-    // continuing below its last row.
+    // A dashboard from before ID cursors sends no Pagination-Next-Before-Id (it
+    // may still send Has-More and Next-Offset, or nothing at all): a full page
+    // then means more, continuing below the last row read. An empty page gives
+    // that cursor nothing to stand on, so a continuation is truly missing.
     const more = reply.hasMore ?? page.length >= 50;
     if (!more) return {rows, hasMore: false};
-    const cursor = reply.hasMore === null ? previous : reply.nextBeforeId;
+    const cursor = reply.nextBeforeId ?? (page.length ? previous : null);
     if (cursor === null || !Number.isSafeInteger(cursor) || cursor <= 0 || cursor > previous || cursor >= (before ?? Infinity)) {
       throw new ApiError(UNREADABLE, undefined, 'protocol');
     }
