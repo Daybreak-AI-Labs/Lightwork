@@ -1,5 +1,12 @@
 # Product changes delivered on October 6
 
+Learning shorthand follow-through: the reviewed sample and counting method are
+captured before each ordinary confirmation. Changed choices or an account/
+workspace event refuse the request and preserve entered work. Unchanged review
+uses the same captured body. The finite production request builders qualified
+three refusals without admitting work or making a provider call; this is a UI
+continuity repair, not measured shorthand improvement or an original-ID closure.
+
 UX644, connected-service portion: ordinary complete editing and typed Copilot
 retain named configured services through reviewed Save, separate publication
 and exact Original. Real specialist construction binds exact current connected

@@ -1,5 +1,14 @@
 # Post-install operation coverage
 
+October 7 shorthand review follow-through: learning and measurement capture
+the sample count and counting method before confirmation. A changed count,
+method, account or workspace event invalidates the open review while keeping
+the entered choices. Token-code learning checks both confirmation waits;
+unchanged confirmation submits the exact captured body. The finite production
+request-builder qualification passed all three refusal paths with no native
+write or provider call. It does not extend native admission or demonstrate
+token savings on customer work.
+
 October 7 UX644 connected services: the complete specialist editor and typed
 Copilot can select named configured services, review the complete definition,
 save it and publish it separately. New specialist bindings use only the exact

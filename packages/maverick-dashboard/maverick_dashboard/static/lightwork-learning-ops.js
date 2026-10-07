@@ -530,24 +530,40 @@
       fill('lo-cd-state', el('p', null, await J.problem(failure, 'load the shorthand')));
     });
   }
+  var codecGeneration = 0;
   function codecBody() { return { how_many: Number($('lo-cd-count').value), exact: $('lo-cd-exact').value === '1' }; }
+  function codecChanged(event) { if (event.detail?.reason !== 'selection') codecGeneration++; }
+  ['lo-cd-count', 'lo-cd-exact'].forEach(function (id) {
+    $(id).addEventListener('input', codecChanged); $(id).addEventListener('change', codecChanged);
+  });
+  ['lightwork:workspace-changed', 'lightwork:account-context-changed', 'lightwork:copilot-context-changed'].forEach(function (name) { document.addEventListener(name, codecChanged); });
+  window.addEventListener('lightwork:context-changed', codecChanged);
+  function codecCurrent(body, generation) {
+    if (generation === codecGeneration && JSON.stringify(body) === JSON.stringify(codecBody())) return true;
+    window.mvToast('Your choices, account or workspace changed while the review was open. Nothing was started. Review your current choices again.', { error: true });
+    return false;
+  }
   async function exactOk(body) {
     return !body.exact || window.mvConfirm('Ask your connected Anthropic service to estimate token counts? Recent messages between agents are sent to it. This does not generate an answer or establish the cost of future work.',
       { okText: 'Use provider count' });
   }
   J.wire($('lo-cd-learn'), async function () {
-    if (!(await window.mvConfirm('Relearn the shorthand from recent messages between agents? The new codes replace the old ones.',
+    var body = codecBody(), generation = codecGeneration;
+    if (!(await window.mvConfirm('Relearn the shorthand from up to ' + body.how_many + ' recent messages between agents? The new codes replace the old ones.',
       { okText: 'Relearn' }))) return null;
-    return { url: TO + '/codec/shorthand/learn', init: { method: 'POST', json: codecBody() } };
+    if (!codecCurrent(body, generation)) return null;
+    return { url: TO + '/codec/shorthand/learn', init: { method: 'POST', json: body } };
   }, ui('lo-cd', 'relearn the shorthand', function (d) {
     return [el('p', null, 'Learned ' + plural(d.codes, 'code') + ' from ' + plural(d.messages, 'message') + '. Messages would be ' + d.smaller_pct + '% shorter.'),
       d.phrases.length ? list(d.phrases) : null];
   }, loadCodec));
   J.wire($('lo-cd-tokens'), async function () {
-    var body = codecBody();
+    var body = codecBody(), generation = codecGeneration;
     if (!(await exactOk(body))) return null;
-    if (!(await window.mvConfirm('Learn token-saving codes from recent messages and keep them? They replace the current ones.',
+    if (!codecCurrent(body, generation)) return null;
+    if (!(await window.mvConfirm('Learn token-saving codes from up to ' + body.how_many + ' recent messages and keep them? They replace the current ones.',
       { okText: 'Learn codes' }))) return null;
+    if (!codecCurrent(body, generation)) return null;
     return { url: TO + '/codec/token-codes/learn', init: { method: 'POST', json: body } };
   }, ui('lo-cd', 'learn token-saving codes', function (d) {
     if (!d.learned) return el('p', null, d.why);
@@ -555,8 +571,9 @@
       d.saved_pct + '% of tokens.');
   }, loadCodec));
   J.wire($('lo-cd-measure'), async function () {
-    var body = codecBody();
+    var body = codecBody(), generation = codecGeneration;
     if (!(await exactOk(body))) return null;
+    if (!codecCurrent(body, generation)) return null;
     return { url: TO + '/codec/measure', init: { method: 'POST', json: body } };
   }, ui('lo-cd', 'measure the savings', function (d) {
     if (!d.measured) return el('p', null, d.why);
