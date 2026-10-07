@@ -50,7 +50,7 @@
       <label for="lo-fa-dollars">Maximum AI spending in dollars</label><input id="lo-fa-dollars" class="input" type="number" min="0" max="5" step="0.01" value="0.50" required>
       <label for="lo-fa-seconds">Maximum time</label><select id="lo-fa-seconds" class="select"><option value="60">1 minute</option><option value="120" selected>2 minutes</option><option value="300">5 minutes</option></select>
       <label><input id="lo-fa-consent" type="checkbox"> I allow the complete selected descriptions and goals to be sent to the displayed AI service for this comparison. The expected tool is my reported check.</label>
-      <button type="submit" id="lo-fa-compare" class="btn btn--primary" disabled>Review this comparison</button>
+      <button type="submit" id="lo-fa-compare" class="btn" disabled>Review this comparison</button>
     </form>
     <div id="lo-fa-review" hidden tabindex="-1">
       <h4>Review the complete decision</h4><div id="lo-fa-review-rows"></div>
@@ -59,7 +59,7 @@
     </div>
     <div class="lo-form">
       <label for="lo-fa-original">Original comparison, adoption or restoration</label><select id="lo-fa-original" class="select"><option value="">Choose a recorded decision</option></select>
-      <div class="lrn__actions"><button type="button" class="btn btn--ghost" id="lo-fa-read" disabled>Read original result</button><button type="button" class="btn btn--primary" id="lo-fa-adopt" disabled>Review adoption of this checked guidance</button></div>
+      <div class="lrn__actions"><button type="button" class="btn btn--ghost" id="lo-fa-read" disabled>Read original result</button><button type="button" class="btn" id="lo-fa-adopt" disabled>Review adoption of this checked guidance</button></div>
     </div>
     <div class="lo-form" id="lo-fa-restore-form">
       <h4>Restore earlier agent-building guidance</h4>
@@ -67,7 +67,7 @@
       <button type="button" class="btn btn--ghost" id="lo-fa-restore-refresh">Read current restoration choices</button>
       <label for="lo-fa-restore-choice">Your most recent guidance change</label><select id="lo-fa-restore-choice" class="select"><option value="">Choose a guidance change to undo</option></select>
       <p class="muted" id="lo-fa-restore-notice" role="status"></p>
-      <button type="button" class="btn btn--primary" id="lo-fa-restore" disabled>Review restoring earlier guidance</button>
+      <button type="button" class="btn" id="lo-fa-restore" disabled>Review restoring earlier guidance</button>
     </div>
     <details><summary>Inspect an existing comparison report</summary>
       <p class="muted">An optional imported report keeps its separate source limits. It cannot be treated as a native factory check.</p>
