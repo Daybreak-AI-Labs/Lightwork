@@ -335,13 +335,24 @@ def test_expiry_on_access_strips_ciphertext_and_keeps_digest_tombstone(native):
 
 def test_historical_source_edit_keeps_original_evidence_attribution(native):
     selected, source, run, row = ready(native)
+    # Accepted while current; a later edit of the procedure must not rewrite
+    # the retained evidence (and a learning decision after an edit is refused).
+    _accept(selected, source, run, row)
     changed = store.load_flow(source.id)
     changed.nodes["update"].params["quantity"] = 88
     store.save_flow(changed)
-    _accept(selected, source, run, row)
     bundle = selected.export(_context(), source.id, run.run_id)
     assert bundle["provenance"]["source_current"] is False
     assert bundle["episode"]["steps"][1]["arguments"]["quantity"] == 3
+
+
+def test_learning_decision_after_a_procedure_edit_is_refused(native):
+    selected, source, run, row = ready(native)
+    changed = store.load_flow(source.id)
+    changed.nodes["update"].params["quantity"] = 88
+    store.save_flow(changed)
+    with pytest.raises(review.ActionEpisodeConflict, match="reviewed procedure changed"):
+        _accept(selected, source, run, row)
 
 
 @pytest.mark.parametrize("change", ["owner", "recreate"])
