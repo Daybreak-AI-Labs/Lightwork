@@ -2025,6 +2025,7 @@ class ThirdPartyExecutiveReportStore:
         idempotency_key: str,
         expected_absent_revision: int = 0,
         report_id: str | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> ExecutiveReportRecord | ExecutiveReportTombstone:
         actor = self._principal()
         selected_snapshot = snapshot.normalized(max_sources=self._config.max_sources)
@@ -2052,6 +2053,8 @@ class ThirdPartyExecutiveReportStore:
         idem = _idempotency_sha256(idempotency_key)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            if effect_guard is not None:
+                effect_guard()
             replay = self._operation(connection, idem, request_sha)
             if replay is not None:
                 report = self._row_record(connection, _id(replay["report_id"], "report_id"))
@@ -2138,8 +2141,34 @@ class ThirdPartyExecutiveReportStore:
                 },
                 occurred_at=now,
             )
+            result = self._row_record(connection, identifier)
+            if effect_guard is not None:
+                effect_guard()
             connection.commit()
-            return self._row_record(connection, identifier)
+            return result
+
+    def creation_original(self, *, idempotency_key: str, report_id: str,
+                         caller_role: str) -> Mapping[str, object] | None:
+        """Read one native creation operation, without collecting or writing again."""
+        actor = self._principal()
+        identifier = _id(report_id, "report_id")
+        idem = _idempotency_sha256(idempotency_key)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM executive_report_operations WHERE idempotency_sha256=?", (idem,)
+            ).fetchone()
+            if row is None:
+                return None
+            operation = self._operation_from_row(row)
+            if operation["operation_type"] != "create_report" or operation["report_id"] != identifier:
+                raise ThirdPartyExecutiveReportConflict("executive_report_idempotency_conflict")
+            record = self._row_record(connection, identifier)
+            if not self._access_allowed(record.role_view, caller_role):
+                raise ThirdPartyExecutiveReportPermissionDenied("executive_report_role_mismatch")
+            if isinstance(record, ExecutiveReportRecord) and record.created_by_ref != actor:
+                raise ThirdPartyExecutiveReportPermissionDenied("executive_report_principal_changed")
+            return {"report_id": identifier, "state": record.state,
+                    "artifact_available": record.artifact_available}
 
     def get_report(
         self,

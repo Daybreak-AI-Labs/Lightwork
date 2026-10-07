@@ -28,6 +28,12 @@ def refresh_explicit_api_key(request) -> None:
                     for name in ("api_key_id", "api_key_permissions", "api_key_scopes"))
     if claims.get("via") != "api_key" and not key_state:
         return
+    if (claims.get("via") == "scheduled_report"
+            and getattr(state, "_scheduled_report_key_authority", None) is not None):
+        from .executive_report_schedules import refresh_background_key
+
+        refresh_background_key(request)
+        return
 
     def refuse():
         if state is not None:
