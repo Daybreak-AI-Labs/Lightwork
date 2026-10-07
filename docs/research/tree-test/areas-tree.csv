@@ -16,6 +16,7 @@ Work,Tasks,Task handoffs,/task-handoffs
 Work,Tasks,Task map,/graph-editor
 Work,Tasks,3D plan view,/plan-tree-3d
 Work,Tasks,My background work,/my-work
+Work,Business details,,/work-details
 Work,Approvals,Approvals,/approvals
 Work,Approvals,Action Center,/action-center
 Work,Results,Results,/deliverables

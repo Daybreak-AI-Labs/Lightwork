@@ -17,6 +17,7 @@ Work
 	Chat
 	My companion
 	Tasks
+	Business details
 	Task builder
 	Task map
 	Projects
