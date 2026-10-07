@@ -127,6 +127,7 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "commitment-economic-alternatives": "commitment_economic_alternatives_source_authority",
     "local-rule-requalification": "rule_requalification_authority",
     "learning-case-requests": "learning_case_write_authority",
+    "learning-case-import-requests": "learning_case_import_authority",
     "learning-case-setup-requests": "learning_case_setup_authority",
     # Reviewed imports of saved learning test cases (like learning-case-requests).
     "learning-case-import-requests": "learning_case_import_authority",

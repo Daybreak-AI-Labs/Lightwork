@@ -176,7 +176,7 @@
     }
   },
   "counts": {
-    "governed": 136,
+    "governed": 137,
     "artifact": 55,
     "a2a": 4,
     "preferences": 8,
@@ -186,7 +186,7 @@
     "read_projection": 24,
     "coordinator": 1,
     "audit": 26,
-    "transient": 26,
+    "transient": 25,
     "business_records": 22,
     "execution": 45,
     "recovery": 12,
@@ -24400,11 +24400,13 @@
     },
     {
       "path": "packages/maverick-dashboard/maverick_dashboard/learning_ops_api.py",
-      "contract": "transient",
+      "contract": "governed",
       "owner": "packages/maverick-dashboard/maverick_dashboard/learning_ops_api.py",
-      "purpose": "Learning operations; an uploaded factory evidence file is written to a private temporary folder for one review pass and removed with it.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "purpose": "Learning operations; reviewed test-case import requests are governed records, and an uploaded factory evidence file is written to a private temporary folder for one review pass and removed with it.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); test-case import request store classified in the October 7 Python 3.10 sweep",
       "governed_namespaces": [
         {
           "namespace": "learning-case-import-requests",
@@ -24416,8 +24418,14 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 582,
-          "function": "_do",
+          "line": 763,
+          "function": "_import_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-case-import-requests', 'LCI', 'learning_case_import_request')"
+        },
+        {
+          "line": 1111,
+          "function": "inspect",
           "kind": "write_bytes",
           "expression": "path.write_bytes(raw)"
         },
