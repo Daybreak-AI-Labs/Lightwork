@@ -885,6 +885,8 @@ def test_api_context_validation_and_rendered_page(records, monkeypatch):
 def test_observation_api_refuses_pending_manifest_before_mutating_pilot(records, monkeypatch):
     monkeypatch.setattr(api, "context_for", lambda request: "alice")
     monkeypatch.setattr(api, "require_permission", lambda *args: None)
+    # Observations are recorded by the pilot's own account.
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     monkeypatch.setattr(api, "_resolver", lambda request: lambda kind, reference: records[reference])
     record = pilots.create(
         plan(), context="alice", actor="user:alice",
@@ -949,8 +951,16 @@ def test_create_api_exact_retry_repairs_interrupted_all_case_admission(records, 
     assert accounting_bridge.default_service.portfolio_report()["admitted"] == 2
 
     monkeypatch.setattr(accounting_bridge, "_admit", original)
+    # An exact retry is a read of the original request, never a second
+    # admission: while the original is unconfirmed it says so and repeats nothing.
+    unconfirmed = client.post("/api/v1/outcome-pilots", json=plan())
+    assert unconfirmed.status_code == 503
+    assert accounting_bridge.default_service.portfolio_report()["admitted"] == 2
+    # Opening the pilot's report repairs the interrupted all-case admission
+    # inside the app; the exact retry then confirms the same original pilot.
+    assert client.get("/api/v1/outcome-pilots/" + pending[0]["id"]).status_code == 200
     recovered = client.post("/api/v1/outcome-pilots", json=plan())
-    assert recovered.status_code == 200
+    assert recovered.status_code == 200, recovered.text
     saved = pilots.get(recovered.json()["id"], "alice")
     assert saved["admission_manifest"]["status"] == "complete"
     assert saved["admission_manifest"]["admitted_count"] == 4
