@@ -452,10 +452,10 @@ def test_research_page_asset_and_visible_navigation_are_customer_reachable(clien
     page = customer.get("/research")
     assert page.status_code == 200, page.text
     assert 'id="research-lab"' in page.text
-    assert 'src="/static/lightwork-research.js"' in page.text
-    assert 'src="/static/lightwork-research-workspace.js"' in page.text
-    assert 'src="/static/lightwork-candidate-promotions.js"' in page.text
-    assert 'src="/static/lightwork-research-plain.js"' in page.text
+    assert 'src="/static/lightwork-research.js?v=' in page.text  # served with a cache-busting version
+    assert 'src="/static/lightwork-research-workspace.js?v=' in page.text  # served with a cache-busting version
+    assert 'src="/static/lightwork-candidate-promotions.js?v=' in page.text  # served with a cache-busting version
+    assert 'src="/static/lightwork-research-plain.js?v=' in page.text  # served with a cache-busting version
     from test_support.plain_language import developer_terms, visible_text
     assert developer_terms(page.text) == []
     text = visible_text(page.text)
