@@ -43,6 +43,7 @@ from urllib.parse import urlparse
 KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "instruction_capture": {"enable"},
     "approval_challenges": {"enable"},
+    "image_edit": {"inpaint_model", "variation_model", "upscale_model"},
     # --- fixed-key sections (unknown keys are flagged) ---
     "deployment": {"type", "allow_multiple_control_planes"},
     "personalization": {"locked_fields", "defaults"},
@@ -4804,6 +4805,22 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
     return findings
 
 
+def _lint_image_edit_models(cfg: dict) -> list[Finding]:
+    from .image_edit_models import validate_model
+
+    table = cfg.get("image_edit", {})
+    if not isinstance(table, dict):
+        return [Finding("image_edit", None, "error", "Image model settings must be a table.")]
+    findings: list[Finding] = []
+    for key in KNOWN_SCHEMA["image_edit"]:
+        if key in table:
+            try:
+                validate_model(table[key])
+            except ValueError as exc:
+                findings.append(Finding("image_edit", key, "error", str(exc)))
+    return findings
+
+
 def lint_config(cfg: dict) -> list[Finding]:
     """Validate a loaded config dict and return findings (possibly empty).
 
@@ -4997,6 +5014,7 @@ def lint_config(cfg: dict) -> list[Finding]:
                 )
             )
 
+    findings.extend(_lint_image_edit_models(cfg))
     findings.extend(_lint_governance_nested_tables(cfg))
     findings.extend(_lint_inline_secrets(cfg))
     findings.extend(_lint_group_mappings(cfg))

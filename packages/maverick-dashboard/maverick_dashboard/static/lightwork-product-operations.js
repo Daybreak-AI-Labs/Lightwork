@@ -340,6 +340,42 @@
               ? function (isCurrent) { return privatePushControls.openReview(privatePushSetup.context, {isCurrent: isCurrent}); } : null);
           return;
         }
+        if (entry[0] === 'instruction_suggestion_form') {
+          var instructionSuggestionForm = entry[1], instructionSuggestionControls = window.LightworkLearningInstructions;
+          if (!instructionSuggestionForm || Array.isArray(instructionSuggestionForm) ||
+              Object.keys(instructionSuggestionForm).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(instructionSuggestionForm.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open the instruction suggestion form',
+            '/learned#llp-propose-box',
+            instructionSuggestionControls && typeof instructionSuggestionControls.openSuggestion === 'function'
+              ? function (isCurrent) { return instructionSuggestionControls.openSuggestion(instructionSuggestionForm.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'ekko_recording_review') {
+          var ekkoRecordingReview = entry[1], ekkoRecordingControls = window.LightworkEkkoRecording;
+          if (!ekkoRecordingReview || Array.isArray(ekkoRecordingReview) ||
+              Object.keys(ekkoRecordingReview).sort().join(',') !== 'context,scope' ||
+              ekkoRecordingReview.scope !== 'current_page' ||
+              !/^[a-f0-9]{64}$/.test(ekkoRecordingReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review activity recording permissions',
+            '/ekko#ekko-recording',
+            ekkoRecordingControls && typeof ekkoRecordingControls.openReview === 'function'
+              ? function (isCurrent) { return ekkoRecordingControls.openReview({}, {context: ekkoRecordingReview.context, isCurrent: isCurrent}); } : null);
+          return;
+        }
+        if (entry[0] === 'agent_activity_form') {
+          var agentActivityForm = entry[1], agentActivityControls = window.LightworkAgentActivity;
+          if (!agentActivityForm || Array.isArray(agentActivityForm) ||
+              Object.keys(agentActivityForm).sort().join(',') !== 'context,name,revision' ||
+              !/^[a-f0-9]{64}$/.test(agentActivityForm.context || '') ||
+              !/^[a-f0-9]{64}$/.test(agentActivityForm.revision || '') ||
+              !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(agentActivityForm.name || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open this specialist’s recent work',
+            '/agents?name=' + encodeURIComponent(agentActivityForm.name) + '#agent-recent-work',
+            agentActivityControls && typeof agentActivityControls.open === 'function'
+              ? function (isCurrent) { return agentActivityControls.open(agentActivityForm.context, agentActivityForm.name, agentActivityForm.revision, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'work_record_details_review') {
           var workDetailsReview = entry[1], workDetailsControls = window.LightworkWorkRecordDetails;
           if (!workDetailsReview || Array.isArray(workDetailsReview) ||

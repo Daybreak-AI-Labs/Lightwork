@@ -136,7 +136,6 @@ def browser_catalog_asset(lang):
 
 
 def context(request, lang):
-    catalog = browser_catalog(lang)
     metadata = {"language": lang, "locale": locale_for(request, lang),
                 "review_status": "source" if lang == "en" else "community_seed" if lang == "ar" else "draft_partial"}
     # English is the source language and its catalog is identity (the
@@ -145,6 +144,6 @@ def context(request, lang):
     return {"ui": lambda source, /, **values: region(source, lang, **values),
             "ut": lambda source, /, **values: text(source, lang, **values),
             "ul": lambda source: entry(source, lang)[1],
-            "journey_i18n": {**metadata, "catalog": catalog},
+            "journey_i18n": metadata,
             "journey_i18n_bootstrap": metadata,
             "journey_i18n_asset": asset}

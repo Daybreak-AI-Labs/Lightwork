@@ -14,6 +14,7 @@ operator has actually enabled, not the full catalog.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .domain import SUITE_PREFIXES, DomainProfile, enabled_domains, suites_for_domain
@@ -284,6 +285,17 @@ def department_entitled(key: str, *, tenant: str | None = None) -> bool:
     from .billing import feature_allowed
     return (feature_allowed(DEPARTMENTS_FEATURE, tenant=tenant)
             or feature_allowed(f"department:{key}", tenant=tenant))
+
+
+def department_entitlements(keys: Iterable[str], *, tenant: str | None = None) -> dict[str, bool]:
+    """Current catalog availability from one plan read, without caching authority."""
+    from .billing import feature_availability
+
+    requested = tuple(keys)
+    available = feature_availability(
+        (DEPARTMENTS_FEATURE, *(f"department:{key}" for key in requested)), tenant=tenant,
+    )
+    return {key: available[DEPARTMENTS_FEATURE] or available[f"department:{key}"] for key in requested}
 
 
 def _owner_slug(owner: str) -> str:

@@ -1,5 +1,71 @@
 # Product changes delivered on October 6
 
+F04/F05 instruction suggestion follow-through: Learned preserves every field of
+a newer suggestion entered while a previous save is pending. Enter and overlapping
+submissions cannot duplicate that admission; a reply resets only the unchanged
+submitted form. Copilot opens the complete ordinary form and focuses Short title,
+without submitting or applying anything. One real native proposal and approval,
+delayed reply, subsequent list refresh, protected handoff and genuine current
+session refusal passed. Private material clears after access withdrawal. No AI
+call or answer-quality improvement is claimed.
+
+UX665: All settings > AI models > Images and the installer provide repainting,
+variation and enlargement model choices. Existing complete Review, Save,
+Original and protected Copilot controls preserve a newer draft. Actual image
+operations consume the current saved values with unchanged defaults and existing
+deployment precedence; unsafe or unreadable settings refuse before prediction.
+The same bounded portable name validation and exact configuration schema apply
+throughout. Native saved-value consumption, generated configuration, ordinary
+controls and genuine access withdrawal passed without a provider call. A
+responsive DOM check establishes width, not phone visual or live image quality.
+
+UX671: Ekko's ordinary explicit recorder now selects the installed Windows,
+Mac or local Linux X11 backend. Fixed app maps preserve the content-free capture
+boundary. Linux desktop reads are isolated and bounded; Wayland, remote and
+headless desktops refuse. Current consent, enrollment, owner, lease, audit and
+Pause/Stop remain required. Constructor waits recheck current permission and
+the exact enrollment before background admission. Protected Copilot opens the
+same permission controls with entered choices intact. Unknown Start or job
+outcomes stay unconfirmed and are not retried automatically or reported as zero;
+the current native watching state provides recovery controls. Local native
+Windows and platform-library/timeout contracts passed; physical Mac/Linux and
+compiled-installer acceptance remain separately unverified.
+
+UX666: Agent Factory now offers named recent tasks, current stopped/waiting/working
+and finished counts, readable recovery reasons, recorded run costs and a creation
+trend for 7, 30 or 90 days. The newest-50 limit and unavailable costs are explicit;
+completion and approval do not establish accuracy or business value. The compact
+ordinary view and protected Copilot opener preserve specialist editor drafts.
+Actual current-owner/source checks refused changed records and other accounts;
+signed access withdrawal cleared private results and locked the reader at 320
+pixels. No AI or external send was needed to qualify this native reader.
+
+UX696: specialist step controls include the current step name and position,
+preserve intentional focus and announce structural changes. Boundary moves are
+disabled. Add, Move and Remove now invalidate an obsolete complete review and
+activate the existing unsaved-draft Load warning. Initial display and exact
+saved-profile loading produce no false structural edit. An actual ordinary
+Review, Cancel, one Save draft and guarded Load preserved every native field and
+step order without a provider call or publication. This also repairs the concrete
+draft-loss risk found while fixing the original accessibility item.
+
+October 7 continued delivery: UX690 removes the unused encrypted-message search
+indexes through an exact schema-49 upgrade on both supported backends, preserving
+authoritative messages, turns, native search and tenant policies. SQLite reopening
+does not recreate its historical index. Versions 1–48 remain immutable; extra or
+altered destructive SQL refuses. Native SQLite and cached PostgreSQL upgrade,
+history, append, search and isolation checks passed. The [offline upgrade boundary](../operations/message-search-retirement.md)
+is explicit; no physical file-size or custom-SQL compatibility claim is made.
+
+UX685 repeated-work follow-through: Workforce's 54 department decisions use one
+current plan read rather than 54 separate reads, with no retained authority.
+Ordinary tool browsing computes only the visible summaries; current searches
+retain the full permitted domain. English pages avoid an unused full translation
+catalog, and other languages build it once. Actual native policy changes, source
+catalog byte equality, rendered pages and ordinary searches passed. This reduces
+specific page work; it does not claim that UX691 memory use or every cold-page
+latency has been solved.
+
 This maps the current delivery batch to the original `claude/ux-backlog-status` `NOT_DONE.md`, rather than replacing that backlog with a new checklist. Ordinary customer controls and their current boundaries are listed below. The detailed native journeys used isolated local transports, not customer or paid-provider accounts. No hosted CI was used.
 
 | Original item | Working product change | Customer control and boundary |

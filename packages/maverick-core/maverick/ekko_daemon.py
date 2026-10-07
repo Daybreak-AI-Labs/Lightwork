@@ -1,11 +1,13 @@
 """Explicit, local-first Ekko collector loop.
 
-The daemon accepts an injected semantic observer.  Its one built-in platform
-adapter is intentionally narrow: on Windows it maps the foreground executable
+The daemon accepts an injected semantic observer. Built-in platform adapters
+are intentionally narrow: Windows maps the foreground executable
 to a fixed application vocabulary and never reads a window title, UI tree,
 screen, keyboard, clipboard, URL, document filename, or document content. The Windows
 process API returns an image path transiently; the adapter immediately reduces
 it to a basename for fixed-map lookup and never emits or persists that path.
+``ekko_foreground`` adds a Mac bundle-ID observer and a local Linux X11
+same-user executable observer; neither reads work content. Wayland is refused.
 
 Nothing starts automatically.  A caller must first enable the independent
 ``[ekko]`` policy, enroll an owner/device, and invoke the foreground loop.

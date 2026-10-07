@@ -7,6 +7,7 @@ credentials or a remote database. Live account acceptance remains separate.
 from __future__ import annotations
 
 import importlib
+import sys
 import xml.etree.ElementTree as ET
 
 _LIBPQ_SECURITY_FLOORS = {
@@ -109,7 +110,18 @@ def verify_full_release_runtime() -> int:
     verify_release_plugin_runtime()
     verify_release_token_counter_runtime()
     verify_release_checkpoint_storage_runtime()
+    verify_release_desktop_recording_runtime()
     return libpq_version
+
+
+def verify_release_desktop_recording_runtime() -> None:
+    """Require installed platform bindings without opening or reading a desktop."""
+    if sys.platform == "darwin":
+        importlib.import_module("AppKit")
+        importlib.import_module("objc")
+    elif sys.platform.startswith("linux"):
+        importlib.import_module("Xlib.display")
+        importlib.import_module("Xlib.Xatom")
 
 
 def verify_release_checkpoint_storage_runtime() -> None:

@@ -5345,8 +5345,10 @@ tested without spawning py-spy.
   bytes plugs in.
 - **Image edit tool** (`tools/image_edit.py`): the edit verbs to pair with
   replicate's generation — hosted inpaint/variation/upscale over the same
-  Replicate API surface (default models are operator knobs:
-  `MAVERICK_{INPAINT,VARIATION,UPSCALE}_MODEL` or per-call `model=`; local
+  Replicate API surface. All settings > AI models > Images and the installer
+  provide reviewed choices for repainting, variations and enlargement; the
+  actual tool reads them on each operation. Existing
+  `MAVERICK_{INPAINT,VARIATION,UPSCALE}_MODEL` overrides remain authoritative; local
   images inlined as data URIs) and local crop/resize/rotate via Pillow
   (`[computer-use]` extra, no key). Every model-supplied path is
   workspace-confined.
