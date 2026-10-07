@@ -158,6 +158,9 @@ test("oversized responses are cancelled and failures carry only a status", async
   assert.equal(failure.technical, "GRC studio action conflicts");
 });
 
+const DRAFTS = "/api/v1/compliance/grc-draft-changes";
+const DRAFT_CONTEXT = "c".repeat(64);
+
 function page(t, rows, extra = {}) {
   const dom = new JSDOM(`<main id="content">${shell}</main>`, { url: "https://lightwork.test/compliance/grc-studio", runScripts: "outside-only" });
   t.after(() => dom.window.close());
@@ -179,6 +182,12 @@ function page(t, rows, extra = {}) {
     if (key === "GET /studios/supplier-review/active") return respond({ detail: "not found" }, 404);
     if (key.endsWith("/submit") || key.endsWith("/publish")) return respond({ ...rows[0], revision: 4 });
     if (key === "POST /studios/supplier-review/versions") return respond({ ...rows[0], version: 2 });
+    // Saving a draft goes through its own complete review (grc-draft-changes).
+    if (key === "GET " + DRAFTS) return respond({ context: DRAFT_CONTEXT });
+    if (key === "POST " + DRAFTS + "/review") return respond({ context: DRAFT_CONTEXT, token: "sealed-draft",
+      changes: [{ label: "Version", before: "1", after: "2" }] });
+    if (key === "POST " + DRAFTS + "/save") return respond({ context: DRAFT_CONTEXT, confirmed: true, message: "Saved as draft version 2.",
+      name: "Supplier review", version: 2, revision: 1 });
     return respond({ detail: "GRC studio action conflicts with current state" }, 409);
   };
   w.eval(source);
@@ -235,8 +244,18 @@ test("building with pickers saves the next version and errors stay plain", async
   await h.settle();
   h.$("grcs-builder-form").dispatchEvent(new h.w.Event("submit", { cancelable: true }));
   await h.settle();
-  const saved = h.calls.find((call) => call.key === "POST /studios/supplier-review/versions");
-  assert.equal(saved.body.expected_latest_version, 1);
+  // Saving first shows the complete reviewed change; nothing is saved yet.
+  const reviewed = h.calls.find((call) => call.key === "POST " + DRAFTS + "/review");
+  assert.equal(reviewed.body.studio, "supplier-review");
+  assert.equal(reviewed.body.body.expected_latest_version, 1);
+  assert.equal(h.$("grcs-save-review").hidden, false);
+  assert.equal(h.calls.filter((call) => call.key === "POST " + DRAFTS + "/save").length, 0);
+  h.$("grcs-save-confirm").checked = true;
+  h.$("grcs-save-confirm").dispatchEvent(new h.w.Event("change"));
+  h.$("grcs-save-apply").click();
+  await h.settle();
+  const saved = h.calls.find((call) => call.key === "POST " + DRAFTS + "/save");
+  assert.deepEqual(saved.body, { token: "sealed-draft", confirmed: true });
   assert.match(h.$("grcs-operation-status").textContent, /draft version 2/);
 });
 
