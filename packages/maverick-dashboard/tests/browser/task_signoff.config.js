@@ -5,4 +5,4 @@ module.exports=defineConfig({testDir:'.',testMatch:'task_signoff.spec.js',worker
   use:{baseURL:`http://127.0.0.1:${port}`,extraHTTPHeaders:{Origin:`http://127.0.0.1:${port}`},
     browserName:'chromium',headless:true,actionTimeout:15000,screenshot:'only-on-failure',trace:'retain-on-failure'},
   webServer:{command:`${JSON.stringify(python)} task_signoff_server.py --port ${port}`,
-    url:`http://127.0.0.1:${port}/livez`,reuseExistingServer:false,timeout:120000}});
+    url:`http://127.0.0.1:${port}/livez`,reuseExistingServer:false,timeout:120000,gracefulShutdown:{signal:'SIGTERM',timeout:10000}}});

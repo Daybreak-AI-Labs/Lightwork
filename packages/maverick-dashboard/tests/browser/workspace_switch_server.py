@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-from server import block_outbound, environment
+from server import block_outbound, environment, exit_cleanly_on_sigterm
 
 
 def build(directory: Path, *, fixed: bool = False):
@@ -65,6 +65,7 @@ def build(directory: Path, *, fixed: bool = False):
 
 if __name__ == "__main__":
     import uvicorn
+    exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--fixed", action="store_true")

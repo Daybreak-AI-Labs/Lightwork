@@ -5,10 +5,11 @@ import secrets
 import tempfile
 from pathlib import Path
 
-from server import block_outbound
+from server import block_outbound, exit_cleanly_on_sigterm
 
 
 def main():
+    exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()

@@ -10,7 +10,9 @@ import hashlib
 import json
 import os
 import secrets
+import signal
 import socket
+import sys
 import tempfile
 import time
 from dataclasses import replace
@@ -346,9 +348,23 @@ def block_outbound():
     socket.socket.connect = local_connect
 
 
+def exit_cleanly_on_sigterm():
+    """Turn SIGTERM into an ordinary exit so the temporary home is removed.
+
+    Playwright stops a fixture server with SIGTERM. uvicorn then shuts down and
+    raises the signal again under the previous handler; with the default one the
+    process ends there, before any TemporaryDirectory can delete its folder.
+    """
+    def stop(signum, frame):
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+
+
 def main():
     import uvicorn
 
+    exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8769)
     parser.add_argument(

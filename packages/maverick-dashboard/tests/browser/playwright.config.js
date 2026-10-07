@@ -28,5 +28,6 @@ module.exports=defineConfig({
   timeout:45000,expect:{timeout:10000},
   reporter:[['list'],['html',{outputFolder:'browser-report',open:'never'}],['json',{outputFile:'test-results/results.json'}]],
   use:{baseURL:`http://127.0.0.1:${port}`,extraHTTPHeaders:{Origin:`http://127.0.0.1:${port}`},browserName:'chromium',headless:true,trace:'retain-on-failure',screenshot:'only-on-failure'},
-  webServer:{command:`${pythonCommand} server.py --port ${port}${showVendorSetup}`,url:`http://127.0.0.1:${port}/livez`,reuseExistingServer:false,timeout:120000},
+  // SIGTERM lets the fixture server delete its temporary home; SIGKILL follows only if it is still running after 10s.
+  webServer:{command:`${pythonCommand} server.py --port ${port}${showVendorSetup}`,url:`http://127.0.0.1:${port}/livez`,reuseExistingServer:false,timeout:120000,gracefulShutdown:{signal:'SIGTERM',timeout:10000}},
 });

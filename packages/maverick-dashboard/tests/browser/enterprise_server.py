@@ -11,7 +11,12 @@ import tempfile
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-from server import block_outbound, environment, fake_connection_authorization
+from server import (
+    block_outbound,
+    environment,
+    exit_cleanly_on_sigterm,
+    fake_connection_authorization,
+)
 
 
 def build(directory):
@@ -90,6 +95,7 @@ def build(directory):
 
 def main():
     import uvicorn
+    exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()

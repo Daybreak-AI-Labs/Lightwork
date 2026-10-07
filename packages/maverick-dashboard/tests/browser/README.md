@@ -27,9 +27,10 @@ administrators must separately select the job in branch protection if required.
 run fails. Run one of those journeys alone with
 `npx playwright test --config <journey>.config.js`.
 
-The fixture binds only `127.0.0.1`, uses a new temporary home/configuration,
-clears inherited Lightwork configuration and provider-key environment aliases,
-and blocks outbound sockets before importing the product. Browser requests are
+The fixture binds only `127.0.0.1`, uses a new temporary home/configuration
+(Playwright stops it with SIGTERM so it deletes that home), clears inherited
+Lightwork configuration and provider-key environment aliases, and blocks
+outbound sockets before importing the product. Browser requests are
 restricted to that local origin. Explicitly synthetic named identities exercise
 real current permission checks. The enterprise lifecycle fixture instead uses
 real single-use invitations and signed local-session cookies for an administrator,
