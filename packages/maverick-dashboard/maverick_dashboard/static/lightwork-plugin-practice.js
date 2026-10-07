@@ -12,18 +12,13 @@
     keys.slice(0, Math.max(0, keys.length - 20)).forEach(function (name) { if (name !== key(context, fingerprint)) sessionStorage.removeItem(name); });
   }
   async function call(path, body) {
-    var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 55000);
-    try {
-      var response = await fetch('/api/v1/plugins/practice' + path, {method: body ? 'POST' : 'GET', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin', cache: 'no-store', signal: controller.signal, body: body ? JSON.stringify(body) : undefined});
-      var value = await response.json().catch(function () { return {}; });
-      if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'These practice controls could not be confirmed. Your answers are kept.');
-      return value;
-    } finally { clearTimeout(timer); }
+    var F = 'These practice controls could not be confirmed. Your answers are kept.';
+    return window.mvFetchJSON('/api/v1/plugins/practice' + path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body || undefined, timeout: 55000,
+      serverDetail: F, messages: {timeout: F, offline: F, unreadable: F}}, 'check the practice');
   }
   async function checkResult(operation) {
-    var response = await fetch('/api/v1/plugins/workbench', {credentials: 'same-origin', cache: 'no-store'});
-    var value = await response.json();
-    if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'The saved check could not be read.');
+    var F = 'The saved check could not be read.';
+    var value = await window.mvFetchJSON('/api/v1/plugins/workbench', {cache: 'no-store', serverDetail: F, messages: {offline: F, unreadable: F}}, 'read the saved check');
     return (value.checks || []).find(function (item) { return item.id === operation; });
   }
   function mount(host, plugin, context) {

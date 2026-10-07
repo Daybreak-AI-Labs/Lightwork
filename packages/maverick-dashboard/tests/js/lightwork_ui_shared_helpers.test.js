@@ -336,3 +336,61 @@ test("an unreachable server gives the same words whether the error or its cause 
   assert.equal(error.name, "TypeError");
   w.close();
 });
+
+test("serverDetail shows the server's own sentence as written, else the page's sentence", async () => {
+  const w = load();
+  const fallback = "The reply could not be checked. Read the original request before another attempt.";
+  w.fetch = async () => respond(422, { detail: "Choose at most three reviewers." });
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: fallback }, "save"), { message: "Choose at most three reviewers.", status: 422 });
+  w.fetch = async () => respond(422, { detail: [{ loc: ["body", "x"], msg: "field required" }] });
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: fallback }, "save"), { message: fallback }, "a structured detail is never shown");
+  w.fetch = async () => respond(500, "<html>boom</html>");
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: fallback }, "save"), { message: fallback, status: 500 });
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: fallback, messages: { 500: "Try again in a minute." } }, "save"), { message: "Try again in a minute." }, "a page's sentence for the status comes before its fallback");
+  w.close();
+});
+
+test("serverDetail reads a lost access's own sentence only after the page cleared, never a redirect's page", async () => {
+  const w = load();
+  const order = [];
+  w.fetch = async () => ({ ok: false, status: 403, headers: new Map(), redirected: false,
+    text: async () => { order.push("read"); return JSON.stringify({ detail: "Learning permission was removed." }); } });
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: "Unavailable.", onAccess: () => order.push("cleared") }, "load"),
+    { message: "Learning permission was removed.", status: 403, accessChanged: true });
+  assert.deepEqual(order, ["cleared", "read"]);
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: "Unavailable.", messages: { 403: "Sign in with current permission." }, onAccess() {} }, "load"),
+    { message: "Sign in with current permission." }, "the page's own sentence for a lost access comes first");
+  let read = false;
+  w.fetch = async () => ({ ok: true, status: 200, headers: new Map(), redirected: true, text: async () => { read = true; return "<html>sign in</html>"; } });
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: "Unavailable.", onAccess() {} }, "load"), { message: "Unavailable." });
+  assert.equal(read, false);
+  w.close();
+});
+
+test("onContextChange clears private data when a 409 says the account or workspace changed", async () => {
+  const w = load();
+  const cleared = [];
+  const onContextChange = (error) => cleared.push(error.message);
+  w.fetch = async () => respond(409, { detail: "Your account or workspace changed. Reopen the page." });
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: "x", onContextChange }, "save"),
+    { message: "Your account or workspace changed. Reopen the page.", status: 409, contextChanged: true });
+  assert.deepEqual(cleared, ["Your account or workspace changed. Reopen the page."], "cleared before the rejection");
+  w.fetch = async () => respond(409, { detail: "This record changed since you opened it." });
+  await assert.rejects(w.mvFetchJSON("/a", { serverDetail: "x", onContextChange }, "save"), (error) => error.contextChanged === undefined);
+  w.fetch = async () => respond(422, { detail: "Your account or workspace changed." });
+  await assert.rejects(w.mvFetchJSON("/a", { onContextChange }, "save"));
+  w.fetch = async () => respond(409, { detail: "The account, workspace or access changed." });
+  await assert.rejects(w.mvFetchJSON("/a", { onContextChange, contextChange: /account, workspace or access changed/ }, "save"));
+  assert.equal(cleared.length, 2, "only a 409 whose sentence matches clears");
+  w.close();
+});
+
+test("messages.unreadable names a reply whose body cannot be read", async () => {
+  const w = load();
+  const unreadable = "The reply could not be confirmed. Entered work is kept.";
+  w.fetch = async () => respond(200, "<html>x</html>");
+  await assert.rejects(w.mvFetchJSON("/a", { messages: { unreadable } }, "save"), { message: unreadable, status: 0, unreadable: true });
+  w.fetch = async () => respond(502, "<html>gateway</html>");
+  await assert.rejects(w.mvFetchJSON("/a", { messages: { unreadable }, serverDetail: "x" }, "save"), { message: unreadable, status: 502 });
+  w.close();
+});

@@ -48,7 +48,9 @@ def test_workforce_deploy_is_single_flight_and_surfaces_response_details():
     assert "function controls(){save.disabled=busy||invalid;" in teams
     assert "finally{if(started===generation){busy=false;controls();}}" in teams
     # Failures read as the server's plain sentence, never an HTTP code.
-    assert "typeof value.detail==='string'?value.detail:'This team review is unavailable. Reload and check current access.'" in teams
+    # (mvFetchJSON's serverDetail: the server's sentence, else the page's.)
+    assert "var F='This team review is unavailable. Reload and check current access.'" in teams
+    assert "serverDetail:F" in teams
     assert "HTTP" not in teams
     assert "Check the original result before another save. No save will be repeated automatically." in teams
 

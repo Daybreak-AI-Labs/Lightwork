@@ -20,16 +20,18 @@
   function selection(value) { publishing = true; try { document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: value}})); } finally { publishing = false; } }
   function clear() { ++generation; calls.forEach(value => value.abort()); context = ''; state = prepared = pending = qualified = null; dirty = false; picks.forEach(value => value.replaceChildren(new Option('Refresh in the current account', ''))); sections.forEach(value => value.replaceChildren()); by('history').replaceChildren(new Option('Refresh original requests', '')); by('result').replaceChildren(); by('run').hidden = true; by('inputs').replaceChildren(); invalidate(); by('error').textContent = ''; by('status').textContent = 'Private rules and entered work were cleared because your account, workspace or access changed.'; lock(false); }
   async function request(path, body, expected = context) {
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 35000); calls.add(controller);
+    const controller = new AbortController(); calls.add(controller);
+    const F = 'This result could not be confirmed. Read the original outcome without repeating work.';
+    const T = 'The reply could not be confirmed. Entered work is kept. Read the original outcome without repeating it.';
+    const A = 'Sign in with current permission before reading private local rules.';
     try {
-      const response = await fetch(api + path, {method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', signal: controller.signal, headers: {'Content-Type': 'application/json', ...(expected ? {'X-Lightwork-Joint-Context': expected} : {})}, body: body ? JSON.stringify(body) : undefined});
-      if (response.redirected || response.status === 401 || response.status === 403) { clear(); throw new Error('Sign in with current permission before reading private local rules.'); }
-      const value = await response.json();
-      if (!response.ok) { const message = typeof value.detail === 'string' ? value.detail : 'This result could not be confirmed. Read the original outcome without repeating work.'; if (response.status === 409 && message.includes('account, workspace or access changed')) clear(); throw new Error(message); }
+      const value = await window.mvFetchJSON(api + path, {method: body ? 'POST' : 'GET', cache: 'no-store', signal: controller.signal,
+        headers: expected ? {'X-Lightwork-Joint-Context': expected} : {}, body: body || undefined, timeout: 35000,
+        serverDetail: F, messages: {401: A, 403: A, timeout: T, offline: T, unreadable: T},
+        onAccess: clear, contextChange: /account, workspace or access changed/, onContextChange: clear}, 'check the rules together');
       if (expected && value.context && value.context !== expected) { clear(); throw new Error('Your account or workspace changed. Private work was cleared.'); }
       return value;
-    } catch (error) { if (error.name === 'AbortError' || error instanceof TypeError || error instanceof SyntaxError) throw new Error('The reply could not be confirmed. Entered work is kept. Read the original outcome without repeating it.'); throw error; }
-    finally { clearTimeout(timer); calls.delete(controller); }
+    } finally { calls.delete(controller); }
   }
   function kept() { return sections.map(section => Array.from(section.querySelectorAll('[data-case]')).filter(value => value.checked).map(value => value.dataset.case)); }
   function adopt(next, selected = kept()) {

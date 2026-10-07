@@ -104,5 +104,7 @@ def test_agent_department_deploy_does_not_turn_invalid_json_into_success() -> No
     # Both team buttons save through the shared reviewed-team client.
     assert source.count("await window.LWDepartmentTeamUpdates.open(") == 2
     client = (STATIC / "lightwork-department-team-updates.js").read_text(encoding="utf-8")
-    assert "response.json().catch(function(){var unreadable=new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.');" in client
+    # An unreadable reply is never a success: mvFetchJSON rejects it with the page's own sentence.
+    assert "U='The result could not be confirmed. Refresh the page to check whether the team was set up.'" in client
+    assert "window.mvFetchJSON(API+path," in client and "messages:{unreadable:U}" in client
     assert "return {}" not in client

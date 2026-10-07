@@ -40,16 +40,17 @@ def client(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     import maverick.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
+    from maverick import client as bound_client
     from maverick import config
     config.reset_config_cache()
+    bound_client.reset_client_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
     yield TestClient(dash_app.app, headers=ORIGIN)
     config.reset_config_cache()
-    # A test that resolved the organisation binding while MAVERICK_CLIENT_ID
-    # was set must not hand that binding (or its world) to the next file.
-    from maverick import client as client_binding
-    client_binding.reset_client_cache()
+    # The process-wide client binding was read under this test's organisation;
+    # forget it so later tests resolve their own (unbound) installation.
+    bound_client.reset_client_cache()
     dash_app._world_cache.clear()
 
 

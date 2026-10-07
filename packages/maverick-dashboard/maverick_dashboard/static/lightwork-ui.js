@@ -582,14 +582,35 @@
       //   raw           resolve to the response itself (a download), unread.
       //   messages      the page's own sentence for a status it knows more
       //                 about ({409: 'This changed since the list loaded…'},
-      //                 timeout: for the deadline, or offline: when the
-      //                 server cannot be reached); every other failure gets
+      //                 timeout: for the deadline, offline: when the
+      //                 server cannot be reached, or unreadable: for a reply
+      //                 whose body cannot be read); every other failure gets
       //                 mvErrorText's words.
-      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw', 'messages'];
+      //   serverDetail  the page's own fallback sentence. A refusal shows the
+      //                 server's detail as written whenever it is a sentence
+      //                 (a string), else the page's sentence for that status
+      //                 (messages), else this one. For a lost access the
+      //                 page's sentence for the status comes first.
+      //   onContextChange(error)  runs before the rejection when a 409 says
+      //                 the account or workspace changed (its detail matches
+      //                 contextChange: a RegExp or a test function, by default
+      //                 a detail starting "Your account or workspace changed.");
+      //                 the page clears what it showed privately.
+      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw', 'messages', 'serverDetail', 'onContextChange', 'contextChange'];
+      var CONTEXT_CHANGED = /^Your account or workspace changed\./;
+      function serverSentence(detail, opts) {
+        return opts.serverDetail != null && typeof detail === 'string' && detail ? detail : '';
+      }
+      function contextChanged(detail, opts) {
+        var test = opts.contextChange || CONTEXT_CHANGED;
+        if (typeof detail !== 'string') return false;
+        return typeof test === 'function' ? !!test(detail) : test.test(detail);
+      }
       function fetchFailure(failure, action, opts) {
         var plain = opts.plainDetail && typeof window.mvPlainDetail === 'function' ? window.mvPlainDetail(failure.detail) : '';
         var own = opts.messages && Object.prototype.hasOwnProperty.call(opts.messages, failure.status) ? opts.messages[failure.status] : '';
-        var error = new Error(plain || own || window.mvErrorText(failure, action));
+        var fallback = opts.serverDetail != null ? String(opts.serverDetail) : '';
+        var error = new Error(plain || serverSentence(failure.detail, opts) || own || fallback || window.mvErrorText(failure, action));
         error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = failure.payload;
         return error;
       }
@@ -659,10 +680,21 @@
           // The page clears what it showed privately before anything else,
           // and the refusal's body (often a sign-in page) is never read. A
           // redirect lands on the sign-in page: say so, as for a 401.
-          clearTimeout(timer); release(response);
+          clearTimeout(timer);
           var gone = fetchFailure({ status: response.ok ? 401 : response.status, headers: response.headers }, action, own);
           gone.status = response.status; gone.accessChanged = true;
           own.onAccess(gone);
+          // A page that shows the server's own sentence reads the refusal's
+          // detail only after it cleared, unless it has its own sentence for
+          // this status; a redirect's sign-in page is never read.
+          var named = own.messages && Object.prototype.hasOwnProperty.call(own.messages, response.status);
+          if (own.serverDetail != null && !response.redirected && !response.ok && !named) {
+            var refusal = null;
+            try { refusal = await readJSON(response); } catch (_) { refusal = null; }
+            var said = serverSentence(refusal && refusal.detail, own);
+            if (said) { gone.message = said; gone.detail = said; }
+          }
+          release(response);
           throw gone;
         }
         if (own.raw && response.ok) { clearTimeout(timer); return response; }
@@ -671,13 +703,19 @@
         finally { clearTimeout(timer); }
         if (response.ok && !unreadable) return payload;
         if (!response.ok || unreadable) release(response);  // a refusal's or unreadable body is never left open
-        if (response.ok) {
+        var unread = unreadable && own.messages && own.messages.unreadable;
+        if (response.ok || unread) {
           // Malformed success never counts as success, and is never shown.
-          var bad = new Error(window.mvErrorText({ name: 'SyntaxError' }, action));
-          bad.status = 0; bad.unreadable = true;
+          var bad = new Error(unread || window.mvErrorText({ name: 'SyntaxError' }, action));
+          bad.status = response.ok ? 0 : response.status; bad.unreadable = true;
           throw bad;
         }
-        throw fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
+        var failure = fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
+        if (response.status === 409 && typeof own.onContextChange === 'function' && contextChanged(failure.detail, own)) {
+          failure.contextChanged = true;
+          own.onContextChange(failure);
+        }
+        throw failure;
       };
       // Two page-wide live regions (polite, and assertive for errors) that
       // exist before any message: base.html renders them, and a page without

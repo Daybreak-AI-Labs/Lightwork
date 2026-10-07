@@ -13,17 +13,15 @@
     if (ownsDialog) { document.getElementById('mv-form-fields')?.querySelectorAll('input,select').forEach(value => { value.value = ''; }); document.getElementById('mv-form-cancel')?.click(); ownsDialog = false; }
     by('result').replaceChildren(); by('read').hidden = true; say('Your account or workspace changed. Private step values were cleared.'); }
   async function request(path, body) {
-    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 30000);
-    try {
-      const response = await fetch(api + path, {method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-        headers: {'Content-Type': 'application/json', ...(context ? {'X-Lightwork-Step-Context': context} : {})}, body: body ? JSON.stringify(body) : undefined});
-      if (response.redirected || [401, 403].includes(response.status)) { clearPrivate(); throw new Error('Sign in with current workflow permission before reading or checking private values.'); }
-      const value = await response.json();
-      if (!response.ok) { if (response.status === 409 && typeof value.detail === 'string' && value.detail.includes('account or workspace changed')) clearPrivate(); throw new Error(typeof value.detail === 'string' ? value.detail : 'This check could not be confirmed. Read the original result without repeating it.'); }
-      if (context && value.context && context !== value.context) { clearPrivate(); throw new Error('Your current account changed. Private values were cleared.'); }
-      return value;
-    } catch (error) { if (error.name === 'AbortError' || error instanceof TypeError || error instanceof SyntaxError) throw new Error('The reply could not be confirmed. Read the original result below; nothing repeats automatically.'); throw error; }
-    finally { clearTimeout(timeout); }
+    const F = 'This check could not be confirmed. Read the original result without repeating it.';
+    const T = 'The reply could not be confirmed. Read the original result below; nothing repeats automatically.';
+    const A = 'Sign in with current workflow permission before reading or checking private values.';
+    const value = await window.mvFetchJSON(api + path, {method: body ? 'POST' : 'GET', cache: 'no-store',
+      headers: context ? {'X-Lightwork-Step-Context': context} : {}, body: body || undefined, timeout: 30000,
+      serverDetail: F, messages: {401: A, 403: A, timeout: T, offline: T, unreadable: T},
+      onAccess: clearPrivate, contextChange: /account or workspace changed/, onContextChange: clearPrivate}, 'check the step');
+    if (context && value.context && context !== value.context) { clearPrivate(); throw new Error('Your current account changed. Private values were cleared.'); }
+    return value;
   }
   function show(value) {
     by('result').replaceChildren(); say(value.message);
