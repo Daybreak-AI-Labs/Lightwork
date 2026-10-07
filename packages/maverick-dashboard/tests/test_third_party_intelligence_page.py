@@ -46,7 +46,7 @@ def test_page_is_a_set_of_record_lists_in_plain_words(
                  "tpi-cases", "tpi-monitors", "tpi-alerts", "tpi-consents"):
         assert f'id="{host}"' in page
     for label in ("Add a data source", "Add a vendor", "Create risk policy",
-                  "Send waiting alerts now", "See what partners shared", "Delete expired records"):
+                  "Review waiting alerts", "See what partners shared", "Delete expired records"):
         assert label in page
     # No operation consoles, JSON boxes, sample ids or confirm() walls.
     for gone in ("Closed request JSON", "<textarea", "Load safe example", 'value="vendor-1"',
@@ -108,6 +108,7 @@ def test_main_dashboard_mounts_third_party_intelligence_page_api_and_visibility(
         "/api/v1/third-party/intelligence/provider-runtime/sources/"
         "{source_id}/readiness"
     ) in paths
+    assert "/api/v1/third-party/intelligence/outbox/review" in paths
     assert "/api/v1/third-party/intelligence/outbox/run" in paths
     assert app.state.third_party_intelligence_provider_runtime is not None
     assert app.state.third_party_intelligence_feed_scheduler is not None
