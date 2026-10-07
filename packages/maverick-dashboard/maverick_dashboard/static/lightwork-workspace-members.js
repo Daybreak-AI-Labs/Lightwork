@@ -28,7 +28,7 @@
   const ask=(message,okText)=>window.mvConfirm?window.mvConfirm(message,{okText}):Promise.resolve(false);
   const access=window.LightworkAccessState.create(()=>tenant()+":"+expected(),lock);
   function node(tag,text,cls){const item=document.createElement(tag);item.textContent=text;if(cls)item.className=cls;return item;}
-  function lock(){denied=true;labels={};root.dataset.labels="{}";el("list").replaceChildren();el("principal").replaceChildren();el("role").selectedIndex=0;root.querySelectorAll("button,input,select").forEach(control=>control.disabled=true);const invite=document.getElementById("wi-root");if(invite)invite.replaceChildren(node("p","Your account, workspace or administrator access changed. Reload Users before continuing.","muted"));el("status").textContent="Your account, workspace or administrator access changed. Reload Users before continuing.";}
+  function lock(){denied=true;labels={};root.dataset.labels="{}";el("list").replaceChildren();el("principal").replaceChildren();el("principal").value="";el("role").selectedIndex=0;root.querySelectorAll("button,input,select").forEach(control=>control.disabled=true);const invite=document.getElementById("wi-root");if(invite)invite.replaceChildren(node("p","Your account, workspace or administrator access changed. Reload Users before continuing.","muted"));el("status").textContent="Your account, workspace or administrator access changed. Reload Users before continuing.";}
   function roleHasAdmin(role){return (rolePermissions[role]||[]).includes("admin");}
   function syncRoles(){
     if(globalAdmin||!Object.keys(roleOptions).length)return;
