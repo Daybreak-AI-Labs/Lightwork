@@ -1,5 +1,24 @@
 # Invention register: implementation status
 
+October 7 Learning follow-through: F04/F05's ordinary model planning discards
+recommendations for obsolete choices and rechecks native current access after
+the read. Protected Copilot opens the complete existing code-practice form and
+keeps newer objective/round drafts without starting work or installing a change.
+Learning task display failures now settle controls and offer exact retained
+progress without repeating admission. These repairs improve the operating path;
+neither an empty-input local task nor a renderer check establishes better
+answers, evaluator evolution or a new research disposition. Counts remain
+unchanged.
+
+October 7 shared-storage follow-through: P14/N05's complete ordinary decision
+reviews and protected Copilot now support loss-review admission and changes on
+native PostgreSQL through its existing guarded record writer. Current authority,
+deadlines, exact source revisions and final changed-material checks remain
+binding across native writer phases; encryption, audit and exact Original are
+unchanged. The October 6 local-only storage boundary below describes the earlier
+implementation. This extends the supported product path; it does not establish
+independent business truth, superiority or a new research disposition.
+
 October 7 product follow-through: F03/F06 now have ordinary Activity log and
 protected Copilot controls for independently retained signed checkpoint copies.
 Complete review, second-person approval, pre-send custody, a one-attempt upload

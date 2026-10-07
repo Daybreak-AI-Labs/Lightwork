@@ -150,38 +150,86 @@
     var form = $('fa-cortex-add');
     if (!form) return;
     var status = $('fa-cortex-status');
+    var submit = form.querySelector('button[type="submit"]'), file = $('fa-cortex-file');
+    var busy = false, locked = false, generation = 0, edits = 0, fileGeneration = 0, reading = false;
+    function stamp() {
+      return JSON.stringify(['text', 'kind', 'source', 'domain', 'collection'].map(function (key) {
+        return form.elements[key] ? form.elements[key].value : '';
+      }));
+    }
+    function clear() {
+      locked = true; generation++; fileGeneration++; reading = false;
+      form.reset();
+      Array.from(form.elements).forEach(function (field) { field.disabled = true; });
+      say(status, 'Your account, workspace or access changed. Private work was cleared; reload Knowledge before adding anything.');
+    }
+    form.addEventListener('input', function () { edits++; });
+    form.addEventListener('change', function (event) { if (event.target !== file) edits++; });
+    window.addEventListener('lightwork:context-changed', clear);
+    document.addEventListener('lightwork:workspace-changed', clear);
+    document.addEventListener('lightwork:account-context-changed', clear);
+    document.addEventListener('lightwork:copilot-context-changed', function (event) {
+      if (!event.detail || event.detail.reason !== 'selection') clear();
+    });
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
+      if (busy || locked) return;
+      if (reading) { say(status, 'Wait for the chosen file to finish reading before adding this. Your entered text is kept.'); return; }
       var text = form.elements.text.value.trim();
       if (!text) { say(status, 'Write or paste what you want Lightwork to remember first.'); return; }
       var payload = {text: text, kind: form.elements.kind.value, source: form.elements.source.value.trim()};
       if (form.elements.domain && form.elements.domain.value) payload.domain = form.elements.domain.value;
       if (form.elements.collection && form.elements.collection.value) payload.collection = form.elements.collection.value;
-      form.querySelector('button[type="submit"]').disabled = true;
+      var submitted = stamp(), submittedEdits = edits, chosenFile = file && file.files[0], bound = generation;
+      busy = true;
+      submit.disabled = true;
       say(status, 'Adding…');
       try {
-        var result = await request('/api/v1/cortex/deposit', {method: 'POST', json: payload});
+        var result = await window.mvFetchJSON('/api/v1/cortex/deposit', {method: 'POST', body: payload, cache: 'no-store', onAccess: clear});
+        if (locked || bound !== generation) return;
         if (result.ok) {
-          form.reset();
-          say(status, 'Added. It can be found in searches from now on.');
+          var unchanged = stamp() === submitted && edits === submittedEdits && (!file || file.files[0] === chosenFile);
+          if (unchanged) { fileGeneration++; form.reset(); }
+          say(status, 'Added. It can be found in searches from now on.' +
+            (unchanged ? '' : ' Your newer draft is kept and has not been added.'));
         } else {
           say(status, 'Lightwork did not add this. The source may be turned off or the text may contain private details.');
         }
       } catch (failure) {
-        say(status, await failText(failure, 'add this'));
+        if (!locked && bound === generation) say(status, await failText(failure, 'add this'));
       } finally {
-        form.querySelector('button[type="submit"]').disabled = false;
+        busy = false;
+        submit.disabled = locked;
       }
     });
-    var file = $('fa-cortex-file');
     if (file) {
       file.addEventListener('change', async function () {
-        if (!file.files.length) return;
+        var current = ++fileGeneration, chosen = file.files[0], entered = stamp(), initialEdits = edits, bound = generation;
+        reading = !!chosen;
+        if (!chosen || locked) return;
+        if (chosen.size > 20000 * 4 + 3) {
+          reading = false;
+          say(status, 'This file is too long. Keep up to 20,000 characters, or paste the part you want to add. Your draft is kept.');
+          return;
+        }
         try {
-          form.elements.text.value = String(await readFile(file.files[0], true)).slice(0, 20000);
-          if (!form.elements.source.value) form.elements.source.value = file.files[0].name;
+          var text = String(await readFile(chosen, true));
+          if (locked || bound !== generation || current !== fileGeneration || file.files[0] !== chosen) return;
+          if (text.length > 20000) {
+            say(status, 'This file is too long. Keep up to 20,000 characters, or paste the part you want to add. Your draft is kept.');
+            return;
+          }
+          if (edits !== initialEdits || stamp() !== entered) {
+            say(status, 'Your draft changed while the file was read. It was kept; choose the file again if you still want to use it.');
+            return;
+          }
+          form.elements.text.value = text;
+          if (!form.elements.source.value) form.elements.source.value = chosen.name;
+          say(status, 'File ready. Review the text before adding it.');
         } catch (failure) {
-          say(status, 'That file could not be read. Choose a text file.');
+          if (!locked && bound === generation && current === fileGeneration) say(status, 'That file could not be read. Choose a text file.');
+        } finally {
+          if (current === fileGeneration) reading = false;
         }
       });
     }

@@ -13,6 +13,35 @@
   const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
   let context = root.dataset.context || '';
   let busy = false;
+  let generation = 0;
+  let locked = false;
+  let shown = false;
+
+  function current(started) { return !locked && started === generation; }
+
+  function forgetPrivate() {
+    generation++;
+    locked = true;
+    context = '';
+    shown = false;
+    list.replaceChildren();
+    readiness.textContent = '';
+    if (proposalPanel) proposalPanel.hidden = true;
+    if (proposalForm) {
+      proposalForm.reset();
+      ['run_id', 'target_preset'].forEach(name => {
+        proposalForm.elements.namedItem(name)?.replaceChildren(new Option('Reload to read current choices', ''));
+      });
+    }
+    setBusy(false);
+    message('Your account, workspace or access changed. Reload this page to read current release decisions.', true);
+  }
+
+  function staleReply() {
+    const error = new Error('This earlier reply is no longer current. No action was repeated.');
+    error.stale = true;
+    return error;
+  }
 
   function element(tag, text, className) {
     const value = document.createElement(tag);
@@ -29,7 +58,7 @@
   function setBusy(value) {
     busy = value;
     root.querySelectorAll('#research-promotions button, #research-promotions input, #research-promotions select, #research-promotions textarea')
-      .forEach(control => { control.disabled = value || control.dataset.unavailable === 'true'; });
+      .forEach(control => { control.disabled = locked || value || control.dataset.unavailable === 'true'; });
   }
 
   async function api(path, method = 'GET', body, action = 'load candidate promotions') {
@@ -39,8 +68,23 @@
   // A reply that cannot be confirmed is never shown as an answer; the saved
   // release decisions are the source of truth.
   async function readJSON(url, method = 'GET', body, action = 'read the saved release') {
-    try { return await window.mvFetchJSON(url, {method, cache: 'no-store', body, timeout: 20000}, action); }
+    const started = generation;
+    if (!current(started)) throw staleReply();
+    try {
+      const value = await window.mvFetchJSON(url, {method, cache: 'no-store', body, timeout: 20000}, action);
+      if (!current(started)) throw staleReply();
+      if (value && typeof value.context === 'string' && context && value.context !== context) {
+        forgetPrivate();
+        throw staleReply();
+      }
+      return value;
+    }
     catch (error) {
+      if (!current(started) || error?.stale) throw staleReply();
+      if (error && [401, 403].includes(error.status)) {
+        forgetPrivate();
+        throw error;
+      }
       // A definite refusal (a read that failed, or a change the server
       // declined) says plainly what did not happen. A lost or unreadable
       // reply, or a server failure during a change, stays unconfirmed.
@@ -84,8 +128,9 @@
 
   // The dialog's button repeats the action the person chose.
   async function transition(candidate, action, prompt, extra = {}, okText = 'Save this decision') {
-    if (busy || !(await confirmAction(prompt, okText))) return;
-    if (busy) return;
+    const started = generation;
+    if (locked || busy || !(await confirmAction(prompt, okText))) return;
+    if (!current(started) || busy) return;
     setBusy(true);
     try {
       const result = await api('/' + encodeURIComponent(candidate.candidate_id) + '/' + action, 'POST', {
@@ -95,15 +140,18 @@
         ...extra,
       }, 'update this candidate');
       await refresh();
+      if (!current(started)) return;
       message(candidate.local_release ? (candidate.local_release.name || 'Selected workflow') + ': ' + label(result.state) + '.' : 'Candidate ' + candidate.candidate_id + ' is now updated.');
     } catch (error) {
+      if (!current(started)) return;
       try {
         await refresh();
+        if (!current(started)) return;
         message(error && !error.unconfirmed && error.message ? error.message :
           'The reply could not be confirmed. Current release decisions were refreshed; inspect the saved result before trying another action.', true);
-      } catch (_) { message(error.message || 'That didn\'t work. Refresh the page and try again.', true); }
+      } catch (_) { if (current(started)) message(error.message || 'That didn\'t work. Refresh the page and try again.', true); }
     } finally {
-      setBusy(false);
+      if (current(started)) setBusy(false);
     }
   }
 
@@ -213,10 +261,12 @@
         const review = element('button', 'Read exact workflow instructions and examples', 'btn btn--ghost');
         review.type = 'button';
         review.addEventListener('click', async () => {
-          if (busy) return;
+          if (locked || busy) return;
+          const started = generation;
           setBusy(true);
           try {
             const report = await readJSON('/api/v1/research/local-flow-release/review/' + encodeURIComponent(candidate.candidate_id));
+            if (!current(started)) return;
             const previous = item.querySelector('[data-local-release-review]'); if (previous) previous.remove();
             const panel = element('div', undefined, 'research-advanced'); panel.dataset.localReleaseReview = 'true';
             (report.known_case_comparison?.reviewed_cases || []).forEach((example, index) => {
@@ -245,8 +295,8 @@
               panel.appendChild(section);
             });
             item.appendChild(panel);
-          } catch (error) { message(error.message, true); }
-          finally { setBusy(false); }
+          } catch (error) { if (current(started)) message(error.message, true); }
+          finally { if (current(started)) setBusy(false); }
         });
         item.appendChild(review);
       }
@@ -311,10 +361,10 @@
     if (!value || typeof value !== 'object' || !Array.isArray(value.items) ||
         !Array.isArray(value.completed_runs) || !Array.isArray(value.target_presets) ||
         typeof value.available !== 'boolean' || typeof value.can_manage !== 'boolean' ||
-        typeof value.can_propose !== 'boolean') {
+        typeof value.can_propose !== 'boolean' || !/^[a-f0-9]{64}$/.test(value.context || '')) {
       throw new Error('The candidate list could not be read. Refresh and try again.');
     }
-    if (typeof value.context === 'string') context = value.context;
+    context = value.context;
     list.replaceChildren();
     readiness.textContent = value.detail || '';
     if (proposalPanel) proposalPanel.hidden = !(value.available && value.can_propose);
@@ -359,26 +409,28 @@
     render(value);
   }
 
-  let shown = false;
   async function runRefresh() {
-    if (busy) return;
+    if (locked || busy) return;
+    const started = generation;
     setBusy(true);
-    try { await refresh(); shown = true; }
+    try { await refresh(); if (current(started)) shown = true; }
     catch (error) {
+      if (!current(started)) return;
       message(error.message || 'Candidate promotions could not be loaded. Refresh the page and try again.', true);
       // Nothing was ever shown: clear the list's "Loading…"; the status line
       // above it says what happened and what to do.
       if (!shown) list.replaceChildren();
     }
-    finally { setBusy(false); }
+    finally { if (current(started)) setBusy(false); }
   }
 
   refreshButton.addEventListener('click', runRefresh);
   if (proposalForm) proposalForm.addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy || !proposalForm.reportValidity()) return;
+    const started = generation;
+    if (locked || busy || !proposalForm.reportValidity()) return;
     if (!(await confirmAction('Create a review request from this completed run and reviewed target preset? This does not stage or activate anything.', 'Create request'))) return;
-    if (busy) return;
+    if (!current(started) || busy) return;
     setBusy(true);
     try {
       const value = await api('', 'POST', {
@@ -388,6 +440,7 @@
         run_id: field(proposalForm, 'run_id'),
         target_preset: field(proposalForm, 'target_preset'),
       }, 'create the review request');
+      if (!current(started)) return;
       message(
         value.state === 'not_advancing'
           ? 'Candidate ' + value.candidate_id + ' was retained as a non-advancing study result.'
@@ -396,11 +449,16 @@
       proposalForm.reset();
       await refresh();
     } catch (error) {
-      try { await refresh(); message('The reply could not be confirmed. Current release requests were refreshed; inspect the saved result before trying another action.', true); }
-      catch (_) { message('The saved request could not be checked. Refresh before trying again.', true); }
+      if (!current(started)) return;
+      try { await refresh(); if (current(started)) message('The reply could not be confirmed. Current release requests were refreshed; inspect the saved result before trying another action.', true); }
+      catch (_) { if (current(started)) message('The saved request could not be checked. Refresh before trying again.', true); }
     } finally {
-      setBusy(false);
+      if (current(started)) setBusy(false);
     }
   });
+  ['lightwork:workspace-changed', 'lightwork:account-context-changed'].forEach(name => document.addEventListener(name, forgetPrivate));
+  window.addEventListener('lightwork:context-changed', event => { if (event.detail?.reason !== 'selection') forgetPrivate(); });
+  document.addEventListener('lightwork:copilot-context-changed', event => { if (event.detail?.reason !== 'selection') forgetPrivate(); });
+  window.addEventListener('pagehide', forgetPrivate);
   runRefresh();
 })();

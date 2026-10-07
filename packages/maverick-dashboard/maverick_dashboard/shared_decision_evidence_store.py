@@ -14,7 +14,11 @@ from maverick.authority_effects import authority_effect_fence
 from maverick.budget import Budget
 from maverick.file_lock import cross_process_lock
 from maverick.governed_operations import digest
-from maverick.governed_records import GovernedRecordStore, LocalGovernedRecordBackend
+from maverick.governed_records import (
+    GovernedRecordStore,
+    LocalGovernedRecordBackend,
+    PostgresGovernedRecordBackend,
+)
 from maverick.robust_decisions import amount, binding, decimal, evaluate
 from maverick.shared_decision_evidence import Solver, check_certificate, validate
 
@@ -540,7 +544,8 @@ def apply(request, prepared, operation):
         checked_effect = {}
         def physical_guard():
             guard()
-            _fresh_effect(prepared, checked_effect["before"], checked_effect["after"])
+            if checked_effect:  # Postgres also checks authority before mutation.
+                _fresh_effect(prepared, checked_effect["before"], checked_effect["after"])
         def effect(current):
             guard()
             payload = _open(current)
@@ -615,16 +620,18 @@ def _fresh_effect(prepared, before, after):
 
 def _reserve_create(row, payload, guard):
     backend = STORE._backend()
+    def admission_guard():
+        guard()
+        if any(case["due_at"] <= time.time() for case in payload["model"]["cases"]):
+            raise HTTPException(409, "A decision deadline expired before the complete review could be admitted.")
     if isinstance(backend, LocalGovernedRecordBackend):
         with cross_process_lock(backend._store._dir() / ".namespace-admission", strict=True), cross_process_lock(backend._store._path(row["id"]), strict=True):
             guard()
             if any(case["due_at"] <= time.time() for case in payload["model"]["cases"]):
                 raise HTTPException(409, "A decision deadline expired while waiting to save the complete review. Nothing was admitted.")
-            def admission_guard():
-                guard()
-                if any(case["due_at"] <= time.time() for case in payload["model"]["cases"]):
-                    raise HTTPException(409, "A decision deadline expired before the complete review could be admitted.")
             return STORE.create(row, action="shared_decision_reserved", actor=row["actor"], max_records=100, effect_guard=admission_guard)
+    if isinstance(backend, PostgresGovernedRecordBackend):
+        return STORE.create(row, action="shared_decision_reserved", actor=row["actor"], max_records=100, effect_guard=admission_guard)
     if "robust" in payload["model"]:
         raise HTTPException(409, "This installation cannot save the loss review with its required final checks. No loss review was admitted.")
     guard()
@@ -632,7 +639,7 @@ def _reserve_create(row, payload, guard):
 
 
 def _write_checks(model, guard):
-    if isinstance(STORE._backend(), LocalGovernedRecordBackend):
+    if isinstance(STORE._backend(), (LocalGovernedRecordBackend, PostgresGovernedRecordBackend)):
         return {"effect_guard": guard}
     if "robust" in model:
         raise HTTPException(409, "This installation cannot save the loss review with its required final checks. No loss review was changed.")

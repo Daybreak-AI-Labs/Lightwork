@@ -48,6 +48,29 @@ class CodecIn(BaseModel):
 
 # ---- model improvement --------------------------------------------------------
 
+def _planning_context(request: Request) -> str:
+    from . import auth
+    from .app import require_page_visible
+    from .draft_api import context_for
+
+    with auth.fresh_configuration():
+        principal = getattr(request.state, "principal", None)
+        if principal is not None:
+            via = (principal.claims or {}).get("via")
+            resolver = {"session": auth._session_principal, "invite": auth._invite_session_principal,
+                        "proxy": auth._proxy_principal}.get(via)
+            fresh = resolver(request) if resolver else principal
+            if fresh is None or fresh.principal != principal.principal:
+                raise HTTPException(401, "Sign in again before reading learning controls.")
+            request.state.principal = fresh
+            auth._enforce_scim_active(fresh)
+            auth._enforce_workspace_policies(request, fresh)
+        require_permission(request, "view")
+        auth.require_page_permission(request, "/learning")
+        require_page_visible(request, "/learning")
+        return context_for(request)
+
+
 def _readiness_reason(text: str) -> str:
     low = text.lower()
     if "need" in low and "train" in low:
@@ -87,18 +110,21 @@ def _status() -> dict:
 
 @router.get("/model-improvement")
 async def model_improvement(request: Request) -> dict:
-    require_permission(request, "view")
+    context = _planning_context(request)
     try:
-        return await run_in_threadpool(_status)
+        status = await run_in_threadpool(_status)
     except Exception as exc:  # noqa: BLE001 -- plain message, no internals
         raise HTTPException(status_code=503, detail="Model planning details are not available right now.") from exc
+    if _planning_context(request) != context:
+        raise HTTPException(409, "Your account or workspace changed. Reload Learning before reading model choices.")
+    return {**status, "context": context}
 
 
 @router.get("/model-improvement/models")
 async def planning_models(request: Request, role: str = Query(min_length=1, max_length=64),
                           memory_gib: int = Query(), context_tokens: int = 16384,
                           concurrency: int = 1) -> dict:
-    require_permission(request, "view")
+    context = _planning_context(request)
     if memory_gib not in _MEMORY or context_tokens not in _CONTEXT or concurrency not in _CONCURRENCY:
         raise HTTPException(status_code=422, detail="Choose from the lists.")
     from maverick.training.improvement_report import candidates_report
@@ -108,7 +134,10 @@ async def planning_models(request: Request, role: str = Query(min_length=1, max_
             role, memory_gib=float(memory_gib), context_tokens=context_tokens, concurrency=concurrency))
     except (SpecialistModelError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Choose a role from the list.") from exc
-    return {"planning_only": True, "models": [
+    if _planning_context(request) != context:
+        raise HTTPException(409, "Your account or workspace changed. Reload Learning before reading model choices.")
+    return {"planning_only": True, "context": context,
+        "query": {"role": role, "memory_gib": memory_gib, "context_tokens": context_tokens, "concurrency": concurrency}, "models": [
         {"name": c["model_id"], "licence": _clip(c["license"], 80), "status": str(c["status"]).replace("_", " "),
          "priority": int(c["planning_priority"]), "fits": bool(c["estimate"].get("fits")),
          "memory_needed_gib": round(float(c["estimate"].get("minimum_memory_gib") or 0.0), 1)}

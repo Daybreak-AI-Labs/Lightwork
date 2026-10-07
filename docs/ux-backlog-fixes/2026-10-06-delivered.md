@@ -1,5 +1,47 @@
 # Product changes delivered on October 6
 
+Learning continuity follow-through: native model-planning replies bind the exact
+current choices and account/workspace, and recheck current signed access after
+the read. An older result cannot replace changed choices. Protected Copilot
+opens the complete ordinary code-practice form while preserving a newer
+objective and rounds; opening starts no work. Access withdrawal clears private
+work and locks the controls.
+
+Learning task recovery follow-through: a rejected result renderer, initial or
+polled, settles the waiting control, removes partial output and offers a pure
+read of the exact recorded job. Unsupported replies remain unconfirmed and an
+unavailable worker does not imply completion. One actual free shorthand-learning
+job and unchanged retained custody qualified the no-repeat recovery; an empty
+input result establishes no learning-quality or savings claim.
+
+W1-23: additive migration 50 supplies ordered per-task question indexes on both
+native backends. Actual 49-to-50 upgrade, fresh open and reopen preserved 12,003
+questions and every saved answer/task result. Native query plans use the new
+index; PostgreSQL's parent-task tenant and owner boundary remains unchanged.
+No previous migration checksum, bootstrap SQL or data was rewritten.
+
+Knowledge follow-through: newer entered work survives a delayed add and
+superseded file reads; overlapping submission is blocked. Oversized text files
+refuse with the form's 20,000-character limit instead of losing content. Local
+grid, heading and input sizing fit the complete 320-pixel form without hiding
+controls. One native document save, file-ordering/size checks, preserved drafts,
+desktop layout and current access withdrawal passed without an AI provider.
+Browser file selection permission remains an explicit qualification boundary.
+
+Release-view follow-through: actual role/session withdrawal clears the private
+candidate list and review form and locks controls. An old successful reply cannot
+redraw a cleared account/workspace view; ordinary connection failures preserve
+the draft. Actual signed native page and Copilot reads passed with authentic
+retained fictional records and zero release mutations.
+
+P14/N05 shared-storage follow-through: complete ordinary decision and Copilot
+controls now use the existing guarded PostgreSQL writer for loss reviews. The
+writer receives current authority, deadline and exact before/after checks at its
+supported phases; the pre-mutation check no longer dereferences a change that
+has not happened. Existing local guards, encryption, audit, Originals, finite
+limits and unknown outcomes remain binding. This does not establish customer
+facts, business execution or a new research result.
+
 F04/F05 instruction suggestion follow-through: Learned preserves every field of
 a newer suggestion entered while a previous save is pending. Enter and overlapping
 submissions cannot duplicate that admission; a reply resets only the unchanged
