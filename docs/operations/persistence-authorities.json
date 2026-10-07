@@ -27091,7 +27091,9 @@
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
       "governed_namespaces": [],
-      "literal_path_hints": [],
+      "literal_path_hints": [
+        "notification-links/signing.key"
+      ],
       "observed_mechanism_markers": {
         "atomic_replace": 2,
         "cross_process_lock": 1,
@@ -27115,6 +27117,13 @@
           "function": "_secret",
           "kind": "atomic_write_bytes",
           "expression": "atomic_write_bytes(path, value, mode=384)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "notification-links/signing.key",
+          "recovery_policy": "notification_link_signing_key",
+          "disposition": "Installation-level link-signing key custody. A restored copy is retained and blocks startup; a rolled-back key must not re-authorize old mute/unsubscribe links."
         }
       ]
     },
@@ -28850,7 +28859,9 @@
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
       "governed_namespaces": [],
-      "literal_path_hints": [],
+      "literal_path_hints": [
+        "dashboard-passphrases.json"
+      ],
       "observed_mechanism_markers": {
         "atomic_replace": 1,
         "cross_process_lock": 3
@@ -28897,6 +28908,13 @@
           "function": "login",
           "kind": "cross_process_lock",
           "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard-passphrases.json",
+          "recovery_policy": "dashboard_local_passphrases",
+          "disposition": "Installation-level colleague sign-in credentials. A restored copy is retained and blocks startup pending current identity reconciliation; it is never silently adopted or discarded."
         }
       ]
     },

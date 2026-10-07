@@ -420,6 +420,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "governance_reference_keyring"
     if _contains(parts, "governance_inventory", "integrity.key"):
         return "governance_inventory_key"
+    if _contains(parts, "notification-links", "signing.key"):
+        # Signs one-action mute/unsubscribe links; a restored or rolled-back
+        # key would let old links act again, so it stays custody authority.
+        return "notification_link_signing_key"
     if _contains(parts, "tech_risk_compliance", "grc-studio", "integrity.key"):
         return "grc_studio_integrity_key"
     if _contains(parts, "harness", "addenda.json"):
@@ -457,6 +461,7 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         "dashboard-invites.json": "dashboard_invites",
         "dashboard-user-suites.json": "dashboard_suite_grants",
         "dashboard-session.key": "dashboard_session_secret",
+        "dashboard-passphrases.json": "dashboard_local_passphrases",
         "scim_users.json": "scim_user_directory",
         "scim_groups.json": "scim_group_directory",
         "scim_groups.audit-outbox.json": "scim_audit_delivery",
@@ -726,6 +731,8 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "dashboard-invites.json": "dashboard_invites",
     "dashboard-user-suites.json": "dashboard_suite_grants",
     "dashboard-session.key": "dashboard_session_secret",
+    "dashboard-passphrases.json": "dashboard_local_passphrases",
+    "notification-links/signing.key": "notification_link_signing_key",
     "scim_users.json": "scim_user_directory",
     "scim_groups.json": "scim_group_directory",
     "scim_groups.audit-outbox.json": "scim_audit_delivery",
