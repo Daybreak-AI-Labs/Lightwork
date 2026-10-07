@@ -1,5 +1,45 @@
 # Post-install operation coverage
 
+October 7 UX658 specialist default: encrypted personal Preferences and typed
+Copilot can select a named current published specialist. Untouched new Chat and
+task forms prefill that name; explicit handoffs, deliberate blank choices and
+restored drafts take precedence. Unavailable saved names remain visible and
+require a deliberate repair. Review binds the current published definition,
+and native authority/source checks run after encryption before the existing
+atomic preference writer. The latest exact Original remains historical even
+after publication withdrawal; mismatched review metadata stays unconfirmed.
+
+One actual specialist-default save with a lost reply recovered without replay;
+a second harmless reviewed name save occurred in the same fixture. Another
+user had no default and could not read the owner's Original. Publication change
+at the physical writer refused replacement. Current typed review/cancel and
+ordinary blank-choice Unicode draft restoration passed without starting work.
+Deferred production confirmation also refused changed draft/private context
+with zero requests. This completes the model/specialist-default portions with
+the existing answer-style controls; it does not publish a specialist or pin
+future execution to a saved edition.
+
+October 7 published-specialist work: ordinary Chat can choose a currently
+published specialist by name. Agent Factory opens that selection separately
+from its unpublished edits. Typed Copilot reviews the complete published
+definition before using the existing native task admission path. Explicit task
+AI choices are preserved. Native current publication, suite permissions and
+account/workspace checks run at admission and dispatch claim. Chat's exact
+sealed submission retains the selection through uploads, companion preparation
+and original recovery. Its saved draft retains the selected name while binding
+the current available revision on restoration.
+
+Actual ordinary and typed admissions retained two fictional tasks and reached
+two isolated physical worker boundaries; exact typed replay created no second
+task. Source withdrawal during staging refused admission. Withdrawal during
+companion preparation kept one original draft and prevented its dispatch and
+obsolete recovery. Genuine role withdrawal refused further admission. A fresh
+read-only Agent Factory handoff passed with a different personal default,
+explicit blank selection and unavailable-source refusal. No provider, selected
+tool or knowledge retrieval was executed. Work uses published settings when
+execution begins; there is no future version pin. The unpublished Try remains
+an answer-only check, not a full unpublished-specialist execution.
+
 October 7 shorthand review follow-through: learning and measurement capture
 the sample count and counting method before confirmation. A changed count,
 method, account or workspace event invalidates the open review while keeping
@@ -41,8 +81,8 @@ policy withdrawal at the native writer refused further writes; another user's
 default was blank and could not read the owner's Original. New Chat, explicit
 reset, delayed refresh, Copilot review, 320-pixel layout and private clearing
 passed without task submission or model calls. Original confirms only the
-latest save per scope; older requests remain unconfirmed. A default specialist
-is separate from this delivered model/depth portion.
+latest save per scope; older requests remain unconfirmed. The default-specialist
+portion is separately qualified above.
 
 October 7 UX644 model follow-through: the complete specialist editor offers
 named AI choices for the specialist and its supporting parts. Typed Copilot

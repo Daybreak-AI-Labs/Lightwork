@@ -1,6 +1,8 @@
 """Owned task discovery and reviewed launch through native task admission."""
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from fastapi import BackgroundTasks, HTTPException, Response
 from maverick.governed_operations import digest
 from maverick.runner import (
@@ -30,6 +32,77 @@ class StartInput(StrictInput):
     max_depth: int | None = Field(default=None, ge=1, le=10)
     task_model: str = Field(default="", max_length=128)
     task_effort: str = Field(default="", max_length=8)
+    domain: str = Field(default="", max_length=120)
+
+
+SPECIALIST_NOTICE = (
+    "This uses the currently published specialist, including its permitted actions, company reference sources and AI choices. "
+    "It is real work: AI spending, source privacy, approvals and the installation's normal learning rules apply. "
+    "When work begins, it uses that specialist's published settings. "
+    "Unpublished drafts are not used or published by starting a task."
+)
+
+
+def published_specialists(request):
+    with auth.fresh_configuration():
+        return _published_specialists(request)
+
+
+def _published_specialists(request):
+    """Current named choices only; the complete definition stays native."""
+    from maverick.domain import enabled_domains, suites_for_domain
+
+    from .plain_labels import pack_display_name
+    from .preferences_api import personal_specialist_default
+    from .task_model_selection_api import current_authority
+
+    current_authority(request)
+    current = context_for(request)
+    allowed = auth.caller_suites(request)
+    choices = [{"value": name, "label": pack_display_name(name, profile.persona, profile.description),
+                "revision": digest(asdict(profile))}
+               for name, profile in sorted(enabled_domains().items())
+               if len(name) <= 120 and (allowed is None or suites_for_domain(name, profile) <= allowed)]
+    personal_default = personal_specialist_default(request)
+    current_authority(request)
+    if current != context_for(request):
+        raise HTTPException(409, "Your account or workspace changed. Read the current specialist choices again.")
+    return {"context": current, "choices": choices, "personal_default": personal_default}
+
+
+def published_selection(request, name):
+    with auth.fresh_configuration():
+        return _published_selection(request, name)
+
+
+def _published_selection(request, name):
+    from maverick.domain import enabled_domains, suites_for_domain
+
+    from .task_model_selection_api import current_authority
+
+    current_authority(request)
+    current = context_for(request)
+    if not name:
+        return {"context": current, "name": "", "definition": None, "revision": ""}
+    profile = enabled_domains().get(name)
+    if profile is None:
+        raise HTTPException(409, "Choose a currently published specialist; unpublished drafts cannot start this work.")
+    definition = asdict(profile)
+    for suite in suites_for_domain(name, profile):
+        auth.require_suite(request, suite)
+    current_authority(request)
+    if current != context_for(request):
+        raise HTTPException(409, "Your account or workspace changed. Review this specialist again.")
+    return {"context": current, "name": name, "definition": definition, "revision": digest(definition)}
+
+
+def published_guard(request, name, context, revision):
+    """Compose with native admission guards after attachment/source waits."""
+    def guard():
+        selected = published_selection(request, name)
+        if selected["context"] != context or selected["revision"] != revision:
+            raise HTTPException(409, "The selected published specialist or your workspace changed. Review its current version before starting; your message is kept.")
+    return guard
 
 
 def find_snapshot(request, selection):
@@ -94,6 +167,10 @@ def start_snapshot(request, selection):
     auth.require_permission(request, "operate")
     from .task_model_selection_api import choices
     models = choices(request)
+    specialists = published_specialists(request)
+    specialist_choices = [{"value": row["value"], "label": row["label"]} for row in specialists["choices"]]
+    if specialists["personal_default"] and specialists["personal_default"] not in {row["value"] for row in specialist_choices}:
+        specialist_choices.append({"value": specialists["personal_default"], "label": "Saved specialist — unavailable; choose a current specialist"})
     policy = _policy()
     steps = policy["agent_step_limit"]
     blocked = "" if steps["ready"] else steps["reason"]
@@ -107,7 +184,7 @@ def start_snapshot(request, selection):
                 raise
             blocked = "Set up an available AI provider before starting a task."
     return Snapshot(digest({"context": context_for(request), "policy": policy,
-                            "provider_ready": provider_ready, "models": models}),
+                            "provider_ready": provider_ready, "models": models, "specialists": specialists}),
         "Current task limits and AI connection",
         "Start one new task under current workspace limits. Acceptance starts work; it does not mean the task is complete.",
         {"Most steps for each agent": steps["max_steps"] if steps["ready"] and steps["max_steps"] else
@@ -121,6 +198,9 @@ def start_snapshot(request, selection):
                              "href": steps["settings"]["href"] if not steps["ready"] else "/start"}},
         [{"name": "title", "label": "Task", "kind": "text", "required": True, "max_length": 200},
          {"name": "description", "label": "Instructions (optional)", "kind": "textarea", "max_length": 12000},
+         {"name": "domain", "label": "Published specialist", "kind": "select", "value": specialists["personal_default"],
+          "choices": [{"value": "", "label": "Let Lightwork choose the team"},
+                      *specialist_choices]},
          {"name": "task_model", "label": "AI model for this task", "kind": "select", "value": "",
           "choices": [{"value": "", "label": "Use workspace settings"}, *models]},
          {"name": "task_effort", "label": "Thinking depth (supported models only)", "kind": "select", "value": "",
@@ -152,8 +232,14 @@ def start_prepare(request, selection, arguments):
     # the limits that endpoint will actually dispatch, including REST safety
     # ceilings on a legacy installation whose general task defaults are off.
     effective = api._rest_goal_limits(payload)
+    specialist = published_selection(request, arguments.get("domain", ""))
+    specialist_review = []
+    if specialist["definition"] is not None:
+        from .agent_override_changes import _readable
+        specialist_review = [{"label": "Complete published specialist", "after": _readable(specialist["definition"], "definition")},
+                             {"label": "Specialist work", "after": SPECIALIST_NOTICE}]
     return Preview("Start one new task. Its accepted receipt confirms admission, not completion or external delivery.",
-        [{"label": "Task", "after": title},
+        [*specialist_review, {"label": "Task", "after": title},
          {"label": "Instructions", "after": arguments["description"]},
          {"label": "AI model", "after": model_label},
          {"label": "Thinking depth", "after": EFFORT_LABELS.get(arguments["task_effort"], "Use the model’s usual thinking depth")},
@@ -163,7 +249,8 @@ def start_prepare(request, selection, arguments):
          {"label": "Levels of helpers", "after": effective["max_depth"]},
          {"label": "Most steps for each agent", "after": policy["agent_step_limit"]["max_steps"] or "No step limit"},
          {"label": "External effects", "after": "Work may use authorized tools; review task progress and any approvals."}],
-        {"policy": policy, "effective": effective, "model_context": model_context})
+        {"policy": policy, "effective": effective, "model_context": model_context,
+         "specialist": {key: specialist[key] for key in ("name", "context", "revision")}})
 
 
 def _receipt_outcome(goal, *, replayed, background=None):
@@ -196,8 +283,15 @@ def start_execute(request, selection, arguments, prepared, operation_id, *, effe
     if _policy() != prepared["policy"]:
         raise HTTPException(409, "Task limits changed. Review the current limits before starting.")
     background, response = BackgroundTasks(), Response()
+    specialist = prepared["specialist"]
+    check_specialist = published_guard(request, arguments.get("domain", ""), specialist["context"], specialist["revision"])
+    def current_start_guard():
+        if effect_guard is not None:
+            effect_guard()
+        check_specialist()
+    current_start_guard()
     goal = api._create_goal(request, GoalIn(**{**arguments, "title": arguments["title"].strip(), "task_model_context": prepared["model_context"]}),
-                            background, response, idempotency_key=operation_id, **({"effect_guard": effect_guard} if effect_guard is not None else {}))
+                            background, response, idempotency_key=operation_id, effect_guard=current_start_guard)
     return _receipt_outcome(goal, replayed=response.headers.get("Idempotency-Replayed") == "true",
                             background=background)
 

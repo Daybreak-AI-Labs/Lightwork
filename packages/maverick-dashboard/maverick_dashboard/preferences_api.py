@@ -80,13 +80,28 @@ def _current_state(request: Request, thread: int | None = None) -> dict:
     state["values"]["favorites"], _preset = pin_hrefs(state, destinations, _app()._page_role(request))
     if state["values"]["start_page"] not in destinations:
         state["values"]["start_page"] = "/chat"
-    ai_models = []
+    ai_models, specialists = [], []
     if thread is None and auth.has_permission(request, "operate"):
         from .task_model_selection_api import choices
         ai_models = choices(request)
-    return {**state, "context": context_for(request), "destinations": destinations, "chat_models": ai_models,
+        from .product_operations_task_launch import published_specialists
+        specialists = published_specialists(request)["choices"]
+    return {**state, "context": context_for(request), "destinations": destinations, "chat_models": ai_models, "chat_specialists": specialists,
             "scopes": ["personal"] + (["workspace"] if auth.has_permission(request, "admin") else []) +
                       (["organization"] if auth.has_global_permission(request, "admin") else [])}
+
+
+def personal_specialist_default(request) -> str:
+    """Only the person's saved name; publication and execution remain separate."""
+    from .task_model_selection_api import current_authority
+    with auth.fresh_configuration():
+        current_authority(request)
+        context, principal = context_for(request), auth.caller_principal(request)
+        name = preferences.state(principal)["values"]["chat_specialist"] if principal and preferences.enabled() else ""
+        current_authority(request)
+        if context != context_for(request):
+            raise HTTPException(409, "Your account or workspace changed while your Chat default was read.")
+        return name
 
 
 @router.get('/preferences')
@@ -119,6 +134,7 @@ class PreferenceUpdate(BaseModel):
     thread: int | None = None
     changes: dict[str, Any]
     operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    specialist_revision: str | None = Field(default=None, pattern=r"^(?:|[a-f0-9]{64})$")
 
 
 def _check_display(key: str, value: str) -> None:
@@ -173,7 +189,7 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
     try:
         preferences.save(principal, scope=body.scope, changes=body.changes,
                          expected_revision=body.expected_revision, thread=_thread(request, body.thread), operation_id=body.operation_id,
-                         before_effect=_effect_guard(request, body, principal))
+                         before_effect=_effect_guard(request, body, principal), specialist_revision=body.specialist_revision)
     except preferences.PreferenceConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
@@ -200,12 +216,24 @@ def _effect_guard(request, body, principal):
 
 
 def _validate_chat_defaults(request, body):
-    if not set(body.changes) & {"chat_model", "chat_effort"}:
+    changed = set(body.changes) & {"chat_model", "chat_effort", "chat_specialist"}
+    if not changed:
         return
     if body.scope != "personal" or body.thread is not None:
         raise HTTPException(422, "Chat AI defaults belong to your account in this workspace. Choose Personal scope.")
     from .task_model_selection_api import choices, current_authority
     current_authority(request)
+    if "chat_specialist" in changed:
+        from .product_operations_task_launch import published_selection
+        try:
+            name = preferences._validate("chat_specialist", body.changes["chat_specialist"] or "")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        current = published_selection(request, name)["revision"]
+        if body.specialist_revision is None or not hmac.compare_digest(body.specialist_revision, current):
+            raise HTTPException(409, "This published specialist changed. Read its current choice and review your retained preference again.")
+    if not changed & {"chat_model", "chat_effort"}:
+        return
     values = preferences.state(_principal(request))["values"]
     picked = {key: body.changes.get(key, values[key]) or "" for key in ("chat_model", "chat_effort")}
     if not picked["chat_model"]:
@@ -230,7 +258,8 @@ def original_preferences(request: Request, body: PreferenceUpdate):
     elif body.scope != "personal":
         raise HTTPException(422, "Choose a supported preference scope.")
     confirmed = preferences.operation_confirmed(principal, scope=body.scope, changes=body.changes,
-        expected_revision=body.expected_revision, operation_id=body.operation_id, thread=_thread(request, body.thread))
+        expected_revision=body.expected_revision, operation_id=body.operation_id, thread=_thread(request, body.thread),
+        specialist_revision=body.specialist_revision)
     current = _state(request, body.thread)
     if _principal(request) != principal or not hmac.compare_digest(body.context, context_for(request)):
         raise HTTPException(409, "Your account, workspace or access changed. Private preferences cannot be released.")

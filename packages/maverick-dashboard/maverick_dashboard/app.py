@@ -7901,12 +7901,22 @@ async def agents_page(request: Request) -> HTMLResponse:
 
     model_options = [(spec, _plain_labels.model_label(spec)) for spec, _label in model_picker_options()] if (selected or creating) and editable else []
     model_roles = [{"role": role, "label": _plain_labels.agent_role_title(role)} for role in ROLES]
+    published_work_available = False
+    if selected and not creating and has_permission(request, "operate"):
+        from .product_operations_task_launch import published_selection
+        try:
+            published_selection(request, selected["name"])
+            published_work_available = True
+        except HTTPException as exc:
+            if exc.status_code not in {403, 409}:
+                raise
     return templates.TemplateResponse(
         request,
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
          "selected": selected, "editable": editable, "creating": creating,
          "model_options": model_options, "model_roles": model_roles,
+         "published_work_available": published_work_available,
          "can_set_model_cost_tier": has_global_permission(request, "admin"),
          "agent_changes": agent_changes, "selected_kind": selected_kind,
          # Names of the people who changed an agent are shown to administrators.
@@ -11125,6 +11135,15 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
     # prefill the form (never auto-start; the user reviews, edits, submits).
     prefill_title = (request.query_params.get("title") or "")[:200]
     prefill_description = (request.query_params.get("description") or "")[:8000]
+    from .product_operations_task_launch import (
+        SPECIALIST_NOTICE,
+        published_selection,
+        published_specialists,
+    )
+    specialist_choices = published_specialists(request) if has_permission(request, "operate") else {"context": "", "choices": []}
+    requested_specialist = request.query_params.get("specialist")
+    if requested_specialist is not None:
+        published_selection(request, requested_specialist)
     return templates.TemplateResponse(
         request,
         "chat.html",
@@ -11133,6 +11152,9 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             "threads": _chat_threads(request, w),
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
+            "published_specialists": specialist_choices,
+            "specialist_work_notice": SPECIALIST_NOTICE,
+            "requested_specialist": requested_specialist,
             "submission_key": secrets.token_urlsafe(24),
             # One truth: a missing, blocked or failed AI service disables the
             # composer; a saved-but-untested key still lets work start.
@@ -11311,6 +11333,28 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     from .attachment_submission import dispatch
 
     kwargs: dict = {"allowed_suites": caller_suites(request)}
+    selection = receipt.get("detail", {}).get("specialist_selection")
+    if selection is not None:
+        from ._request_memo import fresh_configuration
+        from .product_operations_task_launch import published_guard
+        from .task_model_selection_api import effect_guard as task_ai_guard
+
+        if (not isinstance(selection, dict) or set(selection) != {"name", "context", "revision"}
+                or any(not isinstance(value, str) for value in selection.values())):
+            raise HTTPException(409, "This specialist selection cannot be verified. Start a new task with the current specialist.")
+        goal = _world().get_goal(goal_id)
+        if goal is None or goal.domain != selection["name"]:
+            raise HTTPException(409, "The original specialist selection no longer matches this task.")
+        check_model = task_ai_guard(request, receipt["detail"].get("task_model_selection"), selection["context"])
+        check_specialist = published_guard(request, **selection)
+        def current_start_guard():
+            with fresh_configuration():
+                check_model()
+                check_specialist()
+                if caller_suites(request) != kwargs["allowed_suites"]:
+                    raise HTTPException(409, "Your specialist access changed. Reopen Chat and review the current choices before starting.")
+        current_start_guard()
+        kwargs["effect_guard"] = current_start_guard
     if max_dollars is not None:
         kwargs["max_dollars"] = max_dollars
     if conversation_id is not None:
@@ -11386,6 +11430,9 @@ async def chat_send(
     task_model: str = Form(""),
     task_effort: str = Form(""),
     task_model_context: str = Form(""),
+    domain: str = Form(""),
+    specialist_context: str = Form(""),
+    specialist_revision: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
@@ -11395,6 +11442,17 @@ async def chat_send(
     from .task_model_selection_api import selection as select_task_ai
 
     task_selection = select_task_ai(request, task_model, task_effort, task_model_context)
+    from .product_operations_task_launch import published_guard
+    chosen_specialist = domain.strip()
+    if len(chosen_specialist) > 120:
+        raise HTTPException(422, "Choose a named published specialist from the list.")
+    task_model_guard = task_ai_guard(request, task_selection, task_model_context)
+    specialist_guard = published_guard(request, chosen_specialist, specialist_context, specialist_revision) if chosen_specialist else None
+    def start_guard():
+        task_model_guard()
+        if specialist_guard is not None:
+            specialist_guard()
+    start_guard()
     from maverick.template_connections import validate as validate_connections
     try:
         if len(connection_references) > 200000:
@@ -11446,9 +11504,13 @@ async def chat_send(
 
     receipt = await submit(w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
                            owner=owner, title=title, description=description,
+                           domain=chosen_specialist,
                            chat_text=chat_text, connection_references=refs,
                            task_selection=task_selection,
-                           effect_guard=task_ai_guard(request, task_selection, task_model_context))
+                           specialist_selection={"name": chosen_specialist, "context": specialist_context,
+                                                 "revision": specialist_revision} if chosen_specialist else None,
+                           effect_guard=start_guard)
+    start_guard()
     goal_id = receipt["goal_id"]
     if director is not None and receipt.get("created"):
         from maverick.director_mode import record

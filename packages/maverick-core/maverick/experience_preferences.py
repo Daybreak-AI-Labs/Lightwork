@@ -25,14 +25,14 @@ DEFAULTS = {
     "today_days": "7", "template_favorites": [],
     "notification_preferences": {},
     "conversation_mode": "queue", "conversation_detail": "balanced",
-    "chat_model": "", "chat_effort": "",
+    "chat_model": "", "chat_effort": "", "chat_specialist": "",
     # Navigation style ("" follows the installation's [dashboard] navigation;
     # used only while [dashboard] navigation_personal lets people choose) and
     # the person's own order of sidebar areas ([] = their role's preset).
     "navigation": "", "navigation_areas": [],
 }
 PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences",
-                           "navigation", "navigation_areas", "chat_model", "chat_effort"})
+                           "navigation", "navigation_areas", "chat_model", "chat_effort", "chat_specialist"})
 CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"},
            "conversation_mode": {"queue", "guidance", "independent"},
            "conversation_detail": {"brief", "balanced", "detailed"}, "verbosity": {"brief", "balanced", "detailed"},
@@ -151,6 +151,8 @@ def _validate(key: str, value):
         return _clean_user_name(value)
     if key == "chat_model" and (not isinstance(value, str) or value and not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", value)):
         raise ValueError("Choose an available Chat model.")
+    if key == "chat_specialist" and (not isinstance(value, str) or len(value) > 120 or any(ord(char) < 32 for char in value)):
+        raise ValueError("Choose a currently published Chat specialist.")
     if key in {*CHOICES, "tone", "output_style"} and not isinstance(value, str):
         raise ValueError("Choose an available preference value.")
     if key in CHOICES:
@@ -169,9 +171,18 @@ def _validate(key: str, value):
     return value
 
 
+def _operation_digest(scope, changes, expected_revision, thread, specialist_revision):
+    material = [scope, changes, expected_revision, thread]
+    if specialist_revision is not None:
+        if not isinstance(specialist_revision, str) or not re.fullmatch(r"(?:|[a-f0-9]{64})", specialist_revision):
+            raise ValueError("Review a current published specialist before saving this preference.")
+        material.append({"specialist_revision": specialist_revision})
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+
+
 def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
          thread: int | None = None, operation_id: str | None = None,
-         before_effect: Callable[[], None] | None = None) -> dict:
+         before_effect: Callable[[], None] | None = None, specialist_revision: str | None = None) -> dict:
     if not enabled():
         raise ValueError("Personal preferences are turned off by your administrator.")
     # One installation fence serializes hierarchy writes against each other.
@@ -181,7 +192,7 @@ def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
     with authority_effect_fence(), cross_process_lock(config.dashboard_overrides_path(), strict=True), cross_process_lock(lock, strict=True):
         path = _path(scope, principal, thread)
         record = _read(path)
-        operation_digest = hashlib.sha256(json.dumps([scope, changes, expected_revision, thread], sort_keys=True).encode()).hexdigest()
+        operation_digest = _operation_digest(scope, changes, expected_revision, thread, specialist_revision)
         if operation_id:
             import re
             if not re.fullmatch(r"[a-f0-9]{32}", operation_id):
@@ -217,10 +228,10 @@ def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
 
 
 def operation_confirmed(principal: str, *, scope: str, changes: dict, expected_revision: str,
-                        operation_id: str, thread: int | None = None) -> bool:
+                        operation_id: str, thread: int | None = None, specialist_revision: str | None = None) -> bool:
     """Inspect the native atomic receipt; never reapply an uncertain preference save."""
     record = _read(_path(scope, principal, thread))
-    digest = hashlib.sha256(json.dumps([scope, changes, expected_revision, thread], sort_keys=True).encode()).hexdigest()
+    digest = _operation_digest(scope, changes, expected_revision, thread, specialist_revision)
     previous = record.get("last_operation") or {}
     return previous.get("id") == operation_id and previous.get("digest") == digest
 

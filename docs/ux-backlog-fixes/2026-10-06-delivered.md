@@ -1,5 +1,29 @@
 # Product changes delivered on October 6
 
+UX658, specialist portion: current named published specialists are available in
+encrypted personal Preferences and typed Copilot. Untouched Chat/task forms
+prefill the saved name; explicit handoffs, restored drafts and deliberate blank
+choices win. An unavailable name stays visible without silent substitution.
+Native reviewed source metadata and current authority are checked after
+encryption before the atomic writer. One actual specialist-default save with a
+lost reply recovered through pure Original; another person's read was refused,
+and source change at the writer prevented replacement. Typed Cancel, Unicode
+blank-choice restoration and zero-request changed-dialog refusal passed. The
+fixture also made one harmless unchanged reviewed name save. Together with the
+model/depth repair and existing answer-style controls this covers the original
+preference portions, without publishing a specialist or pinning future work.
+
+Specialist work follow-through: Chat selects a named published specialist;
+Agent Factory opens it separately from unsaved edits, and Copilot reviews its
+complete published definition. Current source/suite/access checks guard native
+admission and dispatch claim after attachment waits. Exact Chat submission and
+draft restoration retain the selected name; explicit task AI choices survive.
+Two admitted fictional tasks reached isolated worker boundaries, same-key
+typed replay admitted no second task, and staging/companion/access withdrawal
+refused stale work. The fresh ordinary handoff passed without another admission.
+No paid execution or full unpublished-profile Try is established; the existing
+orchestrator uses current published settings when work begins.
+
 Learning shorthand follow-through: the reviewed sample and counting method are
 captured before each ordinary confirmation. Changed choices or an account/
 workspace event refuse the request and preserve entered work. Unchanged review
@@ -22,8 +46,8 @@ new composers prefill it; explicit or recovered choices and newer drafts win.
 Native checks after writer waits refuse withdrawn access/model policy. One
 actual lost-reply Save recovered without replay, with separate-user isolation,
 complete reset review, private clearing and the 320-pixel form qualified.
-Only the latest native save per scope can be confirmed by Original. Default
-specialist selection remains a separate portion of the original item.
+Only the latest native save per scope can be confirmed by Original. The default
+specialist portion is qualified separately above.
 
 UX644, model portion: the ordinary complete editor and typed Copilot Save now
 retain usable specialist and supporting-part AI choices. Complete review and

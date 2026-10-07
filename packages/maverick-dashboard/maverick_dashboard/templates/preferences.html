@@ -28,9 +28,11 @@
 {% endif %}
 </div>
 {% if not preference_thread %}
-<fieldset class="preference-grid"><legend>{{ ui("Conversation defaults") }}</legend><p>{{ ui('Choose the initial execution boundary while a task runs. Every message still shows its selected mode; administrator policy may disable a mode.') }}</p>
+<fieldset class="preference-grid"><legend>{{ ui("Conversation defaults") }}</legend><p>{{ ui('Choose how much guidance Lightwork asks for while work runs. You can change the mode in each conversation; your team may limit the choices.') }}</p>
 {% if preference_can_operate %}
 <p>These AI defaults belong to your account in this workspace. They prefill a new Chat task; your entered task choices take precedence. Running tasks and specialist AI settings stay unchanged.</p>
+<label class="preference-field">Default Chat specialist<select class="select" id="preference-chat_specialist" data-pref="chat_specialist"><option value="">Let Lightwork choose the team</option>{% for row in preference_state.chat_specialists %}<option value="{{ row.value }}" data-revision="{{ row.revision }}">{{ row.label }}</option>{% endfor %}</select><span data-source-for="chat_specialist" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="chat_specialist"> Let Lightwork choose the team</span></label>
+<p id="preference-specialist-status" class="muted" role="status">New Chat tasks use this published specialist unless you choose a different team. Publication, permitted actions and required approvals stay separate from this preference.</p>
 <label class="preference-field">Default Chat model<select class="select" id="preference-chat_model" data-pref="chat_model"><option value="">Use workspace settings</option>{% for row in preference_state.chat_models %}<option value="{{ row.value }}">{{ row.label }}</option>{% endfor %}</select><span data-source-for="chat_model" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="chat_model"> Use workspace settings</span></label>
 <label class="preference-field">Default thinking depth<select class="select" id="preference-chat_effort" data-pref="chat_effort"><option value="">Use the model’s usual thinking depth</option></select><span data-source-for="chat_effort" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="chat_effort"> Use the model’s usual thinking depth</span></label>
 <p id="preference-chat-status" class="muted" role="status"></p>

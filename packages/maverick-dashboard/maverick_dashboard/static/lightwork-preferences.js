@@ -13,10 +13,11 @@
   function productError(message){var error=new Error(message);error.productCopy=true;return error;}
   function knownError(error,fallback){var message=error&&error.message;return error&&error.productCopy||window.LightworkI18n&&window.LightworkI18n.has(message)?message:fallback;}
   function sourceLabel(source){return text({'personal':'Personal','workspace':'Workspace','organization':'Organization','conversation':'Conversation','product default':'Product default','installation settings':'Installation settings','organization style':'Organization style','organization policy':'Organization policy'}[source]||source);}
-  function fieldLabel(key){return text({chat_model:'Default Chat model',chat_effort:'Default Chat thinking depth',preferred_name:'What Lightwork calls you',tone:'Writing tone',verbosity:'Detail',language:'Response language',interface_language:'Interface language',output_style:'Output style',custom_style_name:'Style name',custom_style:'Style guidance',start_page:'Starting page',navigation:'Sidebar',theme:'Theme',font:'Font',density:'Page spacing',text_size:'Text size',glass:'Glass effects',favorites:'Pinned pages',today_days:'Today period',today_cards:'Today cards',conversation_mode:'While a task runs',conversation_detail:'Inbox detail'}[key]||key);}
+  function fieldLabel(key){return text({chat_specialist:'Default Chat specialist',chat_model:'Default Chat model',chat_effort:'Default Chat thinking depth',preferred_name:'What Lightwork calls you',tone:'Writing tone',verbosity:'Detail',language:'Response language',interface_language:'Interface language',output_style:'Output style',custom_style_name:'Style name',custom_style:'Style guidance',start_page:'Starting page',navigation:'Sidebar',theme:'Theme',font:'Font',density:'Page spacing',text_size:'Text size',glass:'Glass effects',favorites:'Pinned pages',today_days:'Today period',today_cards:'Today cards',conversation_mode:'While a task runs',conversation_detail:'Inbox detail'}[key]||key);}
   var changes = {}, pins = [], busy = false;
   var compare = document.getElementById('preference-compare');
   var aiModel = document.getElementById('preference-chat_model'), aiEffort = document.getElementById('preference-chat_effort');
+  var specialist = document.getElementById('preference-chat_specialist');
   var originalPanel = document.getElementById('preference-original'), originalStatus = document.getElementById('preference-original-status');
   var originalRead = document.getElementById('preference-original-read'), originalNew = document.getElementById('preference-original-new');
   var original = null, recoveryKey = 'lightwork-preference-original:' + (thread || 'account'), editRevision = 0;
@@ -32,9 +33,15 @@
     document.getElementById('preference-chat-status').textContent = aiModel.value && !row ? 'Your saved model is no longer available. Choose a current model or workspace settings before starting new Chat work.' : 'New Chat tasks start with these choices. You can change them in each task.';
   }
   function savedValue(key, value) {
+    if (key === 'chat_specialist') { var selected = (model.chat_specialists || []).find(function (row) { return row.value === value; }); return selected ? selected.label : value ? 'Saved specialist — no longer available' : 'Let Lightwork choose the team'; }
     if (key === 'chat_model') { var row = (model.chat_models || []).find(function (item) { return item.value === value; }); return row ? row.label : value ? 'Saved model — no longer available' : 'Use workspace settings'; }
     if (key === 'chat_effort') { var item = (model.chat_models || []).flatMap(function (row) { return row.efforts; }).find(function (row) { return row.value === value; }); return item ? item.label : value || 'Use the model’s usual thinking depth'; }
     return JSON.stringify(value);
+  }
+  function syncSpecialist() {
+    if (!specialist) return;
+    var available = !specialist.value || (model.chat_specialists || []).some(function (row) { return row.value === specialist.value; });
+    document.getElementById('preference-specialist-status').textContent = available ? 'New Chat tasks use this published specialist unless you choose a different team. Its current publication, permitted actions and required approvals still apply.' : 'Your saved specialist is no longer available. Choose a current specialist or let Lightwork choose the team before starting new Chat work.';
   }
   function originalMessage(message) { originalPanel.hidden = !original; originalStatus.textContent = message; }
   function clearPrivate() {
@@ -71,21 +78,24 @@
   function render() {
     var effective = model.effective_by_scope[thread ? "conversation" : scope.value] || model;
     if (aiModel) { aiModel.replaceChildren(option('', 'Use workspace settings')); (model.chat_models || []).forEach(function (row) { aiModel.append(option(row.value, row.label)); }); }
+    if (specialist) { specialist.replaceChildren(option('', 'Let Lightwork choose the team')); (model.chat_specialists || []).forEach(function (row) { var item = option(row.value, row.label); item.dataset.revision = row.revision; specialist.append(item); }); }
     form.querySelectorAll('[data-pref]').forEach(function (field) {
       var key = field.dataset.pref;
       if (key === 'chat_model' && effective.values[key] && !Array.from(field.options).some(function (item) { return item.value === effective.values[key]; })) field.append(option(effective.values[key], 'Saved model — no longer available'));
+      if (key === 'chat_specialist' && effective.values[key] && !Array.from(field.options).some(function (item) { return item.value === effective.values[key]; })) field.append(option(effective.values[key], 'Saved specialist — no longer available'));
       field.value = effective.values[key];
-      field.disabled = model.locked.indexOf(key) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page','today_days','chat_model','chat_effort'].indexOf(key) !== -1);
+      field.disabled = model.locked.indexOf(key) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page','today_days','chat_model','chat_effort','chat_specialist'].indexOf(key) !== -1);
       var source = form.querySelector('[data-source-for="' + key + '"]');
       if(source)copy(source,model.locked.indexOf(key)!==-1?'Effective source: {source} — Set by organization policy':'Effective source: {source}',{source:sourceLabel(effective.sources[key])});
     });
-    form.querySelectorAll('[data-inherit-pref]').forEach(function (box) { box.checked = false; box.disabled = model.locked.indexOf(box.dataset.inheritPref) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page','today_days','chat_model','chat_effort'].indexOf(box.dataset.inheritPref) !== -1); });
+    form.querySelectorAll('[data-inherit-pref]').forEach(function (box) { box.checked = false; box.disabled = model.locked.indexOf(box.dataset.inheritPref) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page','today_days','chat_model','chat_effort','chat_specialist'].indexOf(box.dataset.inheritPref) !== -1); });
     form.querySelectorAll('[data-today-card]').forEach(function (box) { box.checked = model.values.today_cards.indexOf(box.dataset.todayCard) !== -1; box.disabled = scope.value !== 'personal'; });
     orderCards(model.values.today_cards);
     form.querySelectorAll('[data-card-move]').forEach(function (button) { button.disabled = scope.value !== 'personal'; });
     form.querySelectorAll('[data-inherit-list]').forEach(function (button) { var key = button.dataset.inheritList; button.disabled = scope.value !== 'personal'; var source = form.querySelector('[data-source-for="' + key + '"]'); if(source)copy(source,'Effective source: {source}',{source:sourceLabel(model.sources[key])}); });
     pins = model.values.favorites.slice(); renderPins(); preview(); changes = {};
     syncAI(effective.values.chat_effort);
+    syncSpecialist();
     if (compare) compare.hidden = true;
   }
   function orderCards(order) {
@@ -113,6 +123,7 @@
       if (target.dataset.inheritPref && target.checked) aiModel.value = '';
       changes.chat_effort = ''; syncAI('');
     }
+    if (target === specialist || target.dataset.inheritPref === 'chat_specialist') { if (target.dataset.inheritPref && target.checked) specialist.value = ''; syncSpecialist(); }
   });
   form.addEventListener('input', function () { editRevision += 1; });
   form.addEventListener('change', function () { editRevision += 1; });
@@ -146,6 +157,7 @@
       var field = form.querySelector('[data-pref="' + key + '"]'), inherit = form.querySelector('[data-inherit-pref="' + key + '"]');
       if (field && draft[key] !== null) {
         if (key === 'chat_model' && draft[key] && !Array.from(field.options).some(function (item) { return item.value === draft[key]; })) field.append(option(draft[key], 'Your draft model — no longer available'));
+        if (key === 'chat_specialist' && draft[key] && !Array.from(field.options).some(function (item) { return item.value === draft[key]; })) field.append(option(draft[key], 'Your draft specialist — no longer available'));
         field.value = draft[key];
       }
       if (inherit) inherit.checked = draft[key] === null;
@@ -154,6 +166,7 @@
     if (draft.today_cards) { orderCards(draft.today_cards); form.querySelectorAll('[data-today-card]').forEach(function (box) { box.checked = draft.today_cards.indexOf(box.dataset.todayCard) !== -1; }); }
     preview();
     syncAI(changes.chat_effort !== undefined ? changes.chat_effort : model.values.chat_effort);
+    syncSpecialist();
   }
   if (compare) compare.addEventListener('click', async function () {
     if (busy) return;
@@ -176,13 +189,18 @@
     event.preventDefault(); if (busy || !Object.keys(changes).length) return;
     if (original) { originalMessage('Check the retained original save before another review. Nothing was repeated.'); originalRead.focus(); return; }
     var submitted = Object.assign({}, changes);
-    if (!(await window.mvConfirm('Apply to {scope}: {changes}', {okText:'Save preferences',productCopy:true,values:{scope:sourceLabel(thread?'conversation':scope.value),changes:describe(submitted,model)}}))) return;
+    var reviewedScope = scope.value, reviewedContext = model.context, reviewedRevision = model.revision, submittedRevision = editRevision;
+    var specialistRevision;
+    if (Object.prototype.hasOwnProperty.call(submitted,'chat_specialist')) { var reviewed = (model.chat_specialists || []).find(function (row) { return row.value === submitted.chat_specialist; }); specialistRevision = reviewed ? reviewed.revision : ''; }
+    if (!(await window.mvConfirm('Apply to {scope}: {changes}', {okText:'Save preferences',productCopy:true,values:{scope:sourceLabel(thread?'conversation':reviewedScope),changes:describe(submitted,model)}}))) return;
+    if (!model.context || scope.value !== reviewedScope || model.context !== reviewedContext || model.revision !== reviewedRevision || editRevision !== submittedRevision) { copy(status,'Your draft, account or saved preferences changed while the review was open. Nothing was saved. Review your retained choices again.'); return; }
     busy = true; window.LightworkI18n ? window.LightworkI18n.set(status, 'Saving preferences.') : copy(status,'Saving preferences.');
     var controls = Array.from(form.querySelectorAll('input,select,textarea,button')).map(function (field) { var old = field.disabled; field.disabled = true; return [field,old]; });
-    var confirmed = false, submittedRevision = editRevision;
+    var confirmed = false;
     var bytes = crypto.getRandomValues(new Uint8Array(16));
-    var envelope = {scope:scope.value, thread:thread, context:model.context, expected_revision:model.revision, changes:submitted,
+    var envelope = {scope:reviewedScope, thread:thread, context:reviewedContext, expected_revision:reviewedRevision, changes:submitted,
       operation_id:Array.from(bytes).map(function (item) { return item.toString(16).padStart(2,'0'); }).join('')};
+    if (specialistRevision !== undefined) envelope.specialist_revision = specialistRevision;
     try {
       sessionStorage.setItem(recoveryKey, JSON.stringify(envelope)); original = envelope; originalNew.hidden = true;
       originalMessage('Saving the reviewed preferences. If the reply is interrupted, check this original request before another save.');

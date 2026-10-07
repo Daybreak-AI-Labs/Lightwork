@@ -140,6 +140,20 @@
     required data-error-required="{{ ut('Describe the task first, for example: Summarise this week’s open invoices.') }}"
     {% if not compose_form %}autofocus{% endif %}
   >{{ prefill_title or '' }}</textarea>
+  <details>
+    <summary>{{ ui('Work with a specialist') }}</summary>
+    <label for="chat-specialist">{{ ui('Published specialist') }}
+      <select id="chat-specialist" name="domain" class="select" aria-describedby="chat-specialist-help">
+        <option value="">{{ ui('Let Lightwork choose the team') }}</option>
+        {% for choice in published_specialists.choices %}
+        <option value="{{ choice.value }}" data-revision="{{ choice.revision }}"{% if choice.value == requested_specialist %} selected{% endif %}>{{ choice.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <input type="hidden" name="specialist_context" value="{{ published_specialists.context }}">
+    <input type="hidden" name="specialist_revision" value="">
+    <p class="muted" id="chat-specialist-help">{{ ui(specialist_work_notice) }}</p>
+  </details>
   <details data-task-model-controls>
     <summary>{{ ui('AI for this task') }}</summary>
     <label>{{ ui('AI model') }}<select class="select" name="task_model" disabled><option value="">{{ ui('Use workspace settings') }}</option></select></label>
@@ -246,6 +260,40 @@
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
       event.preventDefault(); field.form.requestSubmit();
     });
+  })();
+  (function () {
+    var choice = document.getElementById('chat-specialist');
+    if (!choice) return;
+    var form = choice.form, revision = form.querySelector('[name="specialist_revision"]'), unavailable = false;
+    function selected() {
+      revision.value = choice.selectedOptions[0]?.dataset.revision || '';
+      if (choice.value && !revision.value) chatCopy(document.getElementById('chat-specialist-help'), 'Your saved specialist is kept but is unavailable here. Choose a current specialist or let Lightwork choose the team before starting.');
+      else if (!unavailable) chatCopy(document.getElementById('chat-specialist-help'), {{ specialist_work_notice | tojson }});
+    }
+    var saved = {{ published_specialists.personal_default | default('') | tojson }};
+    if ({{ (requested_specialist is none) | tojson }} && saved && !choice.value && !form.querySelector('[name="title"]').value.trim() && !form.querySelector('[name="description"]').value.trim()) {
+      if (!Array.from(choice.options).some(function (item) { return item.value === saved; })) {
+        var missing = document.createElement('option'); missing.value = saved; missing.textContent = chatText('Saved specialist — unavailable'); choice.append(missing);
+      }
+      choice.value = saved;
+    }
+    choice.addEventListener('change', selected); selected();
+    form.addEventListener('lightwork:task-model-restored', selected);
+    function clear(event) {
+      if (event.detail?.reason === 'selection') return;
+      unavailable = true;
+      choice.replaceChildren(); choice.disabled = true; revision.value = '';
+      form.querySelector('[name="specialist_context"]').value = '';
+      chatCopy(document.getElementById('chat-specialist-help'), 'Your account or workspace changed. Your message is kept; reopen Chat before starting work.');
+    }
+    document.addEventListener('lightwork:copilot-context-changed', clear);
+    document.addEventListener('lightwork:account-context-changed', clear);
+    form.addEventListener('submit', function (event) {
+      selected();
+      if (!unavailable && (!choice.value || revision.value)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      choice.closest('details').open = true;
+    }, true);
   })();
   // A prepared template becomes an ordinary draft for review, never a run.
   (async function receiveTemplateDraft() {
