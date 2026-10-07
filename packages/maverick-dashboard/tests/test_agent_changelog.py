@@ -84,7 +84,7 @@ def test_built_in_packs_are_specialists_and_everything_else_is_an_agent():
 def test_saving_and_resetting_an_agent_writes_the_changelog(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
     monkeypatch.setattr("maverick.agent_publish_policy.require_passing_tests", lambda: False)  # changelog only, not the publish gate
-    from .test_agents_editor import _publish
+    from test_support.agent_drafts import publish as _publish
 
     # Publishing a reviewed complete draft is the only way a definition changes.
     r = _publish("proc_po_chaser", {"persona": "You are the strict PO Confirmation Chaser."}, reason="")

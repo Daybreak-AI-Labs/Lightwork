@@ -278,7 +278,7 @@ def test_specialist_access_names_the_editor_setting_and_spending(client, monkeyp
     name = _clean_builtin_name()
     current = client.get(f"/api/v1/agents/{name}").json()
     policy = {**current["autonomy"]["pack"], "default": "request", "high": "suggest", "onboarding": True}
-    from .test_agents_editor import _publish
+    from test_support.agent_drafts import publish as _publish
 
     saved = _publish(name, {"autonomy": policy}, app=client)
     assert saved.status_code == 200 and saved.json()["confirmed"], saved.text
