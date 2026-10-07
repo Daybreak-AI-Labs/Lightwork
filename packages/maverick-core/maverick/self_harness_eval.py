@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import secrets
 import threading
 import time
@@ -1429,7 +1430,8 @@ def _authoring_raw(corpus_path: str | Path) -> dict:
         else:
             from .crypto_at_rest import unseal
             from .file_lock import _windows_extended_path
-            with Path(_windows_extended_path(corpus_path)).open("rb") as handle:
+            io_path = _windows_extended_path(corpus_path) if os.name == "nt" else corpus_path
+            with Path(io_path).open("rb") as handle:
                 encoded = handle.read(8 * 1024 * 1024 + 1)
             if len(encoded) > 8 * 1024 * 1024:
                 raise ValueError("The test-question collection is too large to change here.")

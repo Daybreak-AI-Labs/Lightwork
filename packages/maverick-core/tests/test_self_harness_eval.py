@@ -950,3 +950,15 @@ def test_metamorphic_fails_closed_with_corpus_heuristic_scorer():
         metamorphic_fn=lambda goals: [f"PARA::{g}" for g in goals])
     assert not vr.accepted
     assert "non-finite" in vr.reason or "indeterminate" in vr.reason
+
+
+def test_authored_import_reads_and_keeps_the_existing_file_collection(tmp_path):
+    """The strict authoring read opens the real file on every OS, never an empty stand-in."""
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps({"claude-x": [{"goal": "old", "expected": "x"}]}))
+    incoming = {"claude-x": [{"goal": "old", "expected": "x"}, {"goal": "new", "expected": "y"}]}
+    preview = ev.preview_corpus_import(path, incoming)
+    assert preview["added"] == 1 and preview["keys"] == [{"key": "claude-x", "now": 1, "after": 2}]
+    assert ev.corpus_authoring_state(path)["counts"] == {"claude-x": 1}
+    assert ev.import_corpus(path, incoming, expected_revision=preview["revision"]) == 1
+    assert [row["goal"] for row in ev._load_raw(path)["claude-x"]] == ["old", "new"]
