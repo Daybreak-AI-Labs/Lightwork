@@ -704,6 +704,105 @@ def test_bootstrap_admin_recovers_a_missing_roster(monkeypatch, tmp_path):
     assert auth.role_for_principal("user:demoted") == "viewer"
 
 
+def _break_writes_of(monkeypatch, name):
+    """Make every write of ``name`` fail, as a full disk or a Windows sharing
+    violation would. ``fault["armed"] = False`` clears the fault."""
+    import errno
+    from pathlib import Path
+
+    from maverick import file_lock
+
+    real = file_lock.atomic_write_text
+    fault = {"armed": True, "failed": 0}
+
+    def flaky(path, *args, **kwargs):
+        if fault["armed"] and Path(path).name == name:
+            fault["failed"] += 1
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(file_lock, "atomic_write_text", flaky)
+    return fault
+
+
+def test_a_failed_first_roster_write_leaves_nothing_behind_and_a_retry_succeeds(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    fault = _break_writes_of(monkeypatch, "dashboard-users.json")
+    with pytest.raises(OSError):
+        rbac.set_role("user:owner", "admin", actor="user:owner")
+    assert fault["failed"] == 1
+    marker = rbac.store_path().with_name("dashboard-users.json.present")
+    assert not rbac.store_path().exists() and not marker.exists()
+    # Nothing was recorded, so this is still a fresh install: no refusal, no wrong message.
+    assert rbac.list_users() == {}
+    assert rbac.missing_rosters() == []
+
+    fault["armed"] = False
+    rbac.set_role("user:owner", "admin", actor="user:owner")
+    assert rbac.list_users() == {"user:owner": "admin"}
+    assert marker.exists()
+    # The protection against a lost roster applies from the first successful write.
+    rbac.store_path().unlink()
+    assert rbac.missing_rosters() == ["global"]
+    with pytest.raises(rbac.RosterMissingError):
+        rbac.list_users()
+
+
+def test_a_failed_first_workspace_roster_write_leaves_provisioning_unblocked(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac
+
+    fault = _break_writes_of(monkeypatch, "dashboard-tenant-roles.json")
+    with pytest.raises(OSError):
+        rbac.set_tenant_role("acme", "user:a", "viewer")
+    assert fault["failed"] == 1
+    marker = rbac.tenant_store_path().with_name("dashboard-tenant-roles.json.present")
+    assert not rbac.tenant_store_path().exists() and not marker.exists()
+    assert registry._legacy_role_names() == set()          # not "history is unavailable"
+    assert rbac.list_tenant_roles("acme") == {}
+    assert rbac.missing_rosters() == []
+
+    fault["armed"] = False
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", "user:a", "viewer")
+    assert rbac.get_tenant_role("acme", "user:a") == "viewer"
+    assert marker.exists()
+    assert registry._legacy_role_names()                   # now it is real history
+
+
+def test_a_marker_that_cannot_be_written_does_not_undo_a_role_change(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    fault = _break_writes_of(monkeypatch, "dashboard-users.json.present")
+    rbac.set_role("user:a", "viewer")                       # the roster is written and stands
+    assert rbac.list_users() == {"user:a": "viewer"}
+    marker = rbac.store_path().with_name("dashboard-users.json.present")
+    assert not marker.exists()
+
+    fault["armed"] = False
+    assert rbac.get_stored_role("user:a") == "viewer"       # the next read records it
+    assert marker.exists()
+    rbac.store_path().unlink()
+    assert rbac.missing_rosters() == ["global"]
+
+
+def test_the_missing_roster_refusal_names_the_file_level_recovery(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:a", "viewer")
+    rbac.store_path().unlink()
+    with pytest.raises(rbac.RosterMissingError) as caught:
+        rbac.list_users()
+    text = str(caught.value)
+    assert "roles were assigned" not in text
+    assert "[dashboard] admins" in text and "MAVERICK_DASHBOARD_ADMINS" in text and "backup" in text
+
+
 def test_lost_workspace_membership_history_refuses_new_provisioning(monkeypatch, tmp_path):
     from maverick.tenant import registry
     from maverick_dashboard import rbac

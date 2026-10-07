@@ -1256,7 +1256,7 @@ def users_page(request: Request) -> HTMLResponse:
         auth.require_global_permission(request, "admin")
         return _app().templates.TemplateResponse(request, "error.html", {
             "status": 503, "title": "The role list is missing",
-            "message": ("Roles were assigned on this installation, but the role list is missing, so "
+            "message": ("Lightwork recorded a role list on this installation, but it is missing, so "
                         "nobody's stored role is used and no access is granted from it. Restore "
                         "dashboard-users.json (and dashboard-tenant-roles.json) from a backup, or "
                         "start a new, empty role list and assign roles again."),

@@ -21,6 +21,12 @@ roster is then a refusal (:class:`RosterMissingError`), never a silent return
 to the authenticated-user default. A configured bootstrap admin keeps access
 and can restore the file from backup or explicitly start a new, empty roster
 (:func:`reset_missing_rosters`).
+
+The marker is written AFTER the roster, never before: a first roster write
+that fails (disk full, a sharing violation) must leave nothing behind, or every
+retry would find a marker with no roster and be refused. A roster without a
+marker is the state older installations are already in; the next read records
+it (:func:`_backfill_record`).
 """
 from __future__ import annotations
 
@@ -52,11 +58,23 @@ class RbacStoreError(RuntimeError):
 
 
 class RosterMissingError(RbacStoreError):
-    """Roles were assigned on this installation, but the roster file is gone.
+    """A role list was recorded on this installation, but the roster file is gone.
 
     Deleting, failing to restore, or misresolving the roster must not return
     every demoted person to the default role.
     """
+
+
+# What the person who runs Lightwork can do, in the words the sign-in page, the
+# Users page and the API refusal all share. An installation set up with the
+# local owner has no administrator in configuration, and the owner's admin role
+# lived only in the lost list, so the file-level step is part of the guidance.
+ROSTER_RECOVERY = (
+    "Restore the role list from a backup. Or have an administrator set up in configuration "
+    "start a new, empty role list on the Users page. If none is set up, add the owner's email "
+    "as user:name@company.com to [dashboard] admins in config.toml, or set "
+    "MAVERICK_DASHBOARD_ADMINS, then restart Lightwork and sign in to start a new list."
+)
 
 
 class RecoveryAuthorityError(ValueError):
@@ -392,9 +410,7 @@ def _record_roster(path: Path) -> None:
 def _missing_roster(path: Path, label: str) -> dict:
     if _roster_recorded(path):
         raise RosterMissingError(
-            f"{label} is missing although roles were assigned on this installation. "
-            "Restore it from a backup, or have a configured bootstrap administrator "
-            "start a new, empty role list."
+            f"{label} is missing although this installation recorded one. {ROSTER_RECOVERY}"
         )
     return {}
 
@@ -466,8 +482,10 @@ def _write(data: dict[str, str]) -> None:
     # the other). Cross-process serialization of the RMW is in the mutators.
     from maverick.file_lock import atomic_write_text
     path = store_path()
-    _record_roster(path)  # before the roster, so a crash between fails closed
     atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+    # After the roster, so a failed first write leaves no marker behind. If this
+    # note cannot be written the roster still stands and the next read records it.
+    _backfill_record(path)
 
 
 def list_users() -> dict[str, str]:
@@ -657,8 +675,8 @@ def _load_tenant() -> dict[str, dict[str, str]]:
 def _write_tenant(data: dict[str, dict[str, str]]) -> None:
     from maverick.file_lock import atomic_write_text
     path = tenant_store_path()
-    _record_roster(path)
     atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+    _backfill_record(path)  # after the roster, as in _write
 
 
 def missing_rosters() -> list[str]:
@@ -815,7 +833,7 @@ def clear_tenant_roles(tenant: str) -> int:
 
 
 __all__ = [
-    "ROLES", "PERMISSION_ATOMS", "RbacStoreError", "RosterMissingError",
+    "ROLES", "PERMISSION_ATOMS", "ROSTER_RECOVERY", "RbacStoreError", "RosterMissingError",
     "RecoveryAuthorityError", "missing_rosters", "reset_missing_rosters",
     "store_path", "default_role",
     "permissions_for", "list_users", "get_stored_role", "set_role", "remove_user",
