@@ -172,6 +172,9 @@
         (node.branches || []).forEach(removeEmptyActionBuffers);
       });
     }(editableFlow));
+    // Absent evidence custody is the same draft whether it was loaded as null
+    // or restored from history (which drops an empty custody record).
+    if (editableFlow._fdEvidence == null) delete editableFlow._fdEvidence;
     delete editableFlow.version;
     delete editableFlow.revision;
     delete editableFlow.published;
