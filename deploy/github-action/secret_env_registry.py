@@ -27,6 +27,7 @@ SECRET_ENV_NAMES = (
     "ANTHROPIC_API_KEY",
     "ASANA_TOKEN",
     "AWS_ACCESS_KEY_ID",
+    "AWS_BEARER_TOKEN_BEDROCK",
     "AWS_CONTAINER_AUTHORIZATION_TOKEN",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
@@ -186,6 +187,9 @@ SECRET_ENV_NAMES = (
     "SLACK_APP_TOKEN",
     "SLACK_BOT_TOKEN",
     "SLACK_NOTIFY_WEBHOOK_URL",
+    # Path to a live SSH agent socket: whoever can reach it can authenticate
+    # as the operator, so its value is redacted like a credential.
+    "SSH_AUTH_SOCK",
     "SNOWFLAKE_TOKEN",
     "SPOTIFY_ACCESS_TOKEN",
     "STRIPE_SECRET_KEY",
@@ -243,6 +247,9 @@ REVIEWED_NON_SECRET_ENV_NAMES = frozenset(
         "AZURE_OPENAI_TOKEN_SCOPE",
         "AZURE_TENANT_ID",
         "AZURE_TOKEN_CREDENTIALS",
+        # Bedrock provider mode selector (for example "api_key" or "iam");
+        # the credential itself is AWS_BEARER_TOKEN_BEDROCK.
+        "BEDROCK_AUTH_MODE",
         "CALENDLY_USER_URI",
         "EMAIL_TRUSTED_AUTHSERV_ID",
         "MAVERICK_A2A_ALLOW_UNAUTHENTICATED",
