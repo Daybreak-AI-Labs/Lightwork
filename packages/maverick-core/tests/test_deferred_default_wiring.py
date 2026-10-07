@@ -86,4 +86,6 @@ def test_knob_off_restores_identity_catalog(ctx, monkeypatch):
     agent = _agent(ctx)
     offered = {t["name"] for t in agent.tools.to_anthropic()}
     assert "acumatica" in offered
-    assert "find_tools" not in offered
+    # find_tools may still be offered (af75b456): a model's tool ceiling can
+    # leave overflow that is only reachable by search. What the knob restores
+    # is the long tail itself, as asserted above.
