@@ -26,7 +26,8 @@ to it or to a saved subscription -- is logged and retried.
 The HTTP POST body is the JSON envelope from :func:`build_envelope`
 (documented in docs/webhooks.md); if ``secret`` is set, an HMAC-SHA256
 signature over ``"<timestamp>." + body`` is sent in the
-``X-Maverick-Signature`` header with the timestamp in ``X-Maverick-Timestamp``.
+``X-Lightwork-Signature`` header with the timestamp in ``X-Lightwork-Timestamp``.
+The original ``X-Maverick-*`` headers carry the same values for existing clients.
 
 Webhook failures are logged but never block the run.
 """
@@ -39,6 +40,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Mapping
 from contextvars import copy_context
 from typing import Any
 
@@ -127,7 +129,7 @@ def _sign(body: bytes, secret: str, *, timestamp: str | None = None) -> str:
 
     When ``timestamp`` is given it is prepended to the signed material
     (``"<ts>.".encode() + body``). This is the Lightwork-CONTROLLED replay
-    defence: the sender sends the same ``timestamp`` in an ``X-Maverick-
+    defence: the sender sends the same ``timestamp`` in an ``X-Lightwork-
     Timestamp`` header, so a captured request can't be replayed past the
     freshness window without breaking the signature. Body-only signing
     (``timestamp=None``) is preserved for the existing receiver round-trip.
@@ -292,6 +294,35 @@ def encode_body(envelope: dict[str, Any]) -> bytes:
     return json.dumps(envelope, default=str).encode("utf-8")
 
 
+def read_signature_headers(headers: Mapping[str, str]) -> tuple[str, str]:
+    """Read Lightwork or legacy authentication headers without ambiguity.
+
+    Matching aliases (including repeated header fields) are compatible. Any
+    conflicting signature or timestamp is refused before authentication, so a
+    caller cannot silently choose a different signed request interpretation.
+    """
+    observed: dict[str, str] = {}
+    accepted = {
+        "x-lightwork-signature", "x-maverick-signature",
+        "x-lightwork-timestamp", "x-maverick-timestamp",
+    }
+    for key, value in headers.items():
+        name = key.lower()
+        if name not in accepted:
+            continue
+        if name in observed and observed[name] != value:
+            raise ValueError("Conflicting webhook authentication headers.")
+        observed[name] = value
+    values = []
+    for field in ("signature", "timestamp"):
+        current = observed.get(f"x-lightwork-{field}")
+        legacy = observed.get(f"x-maverick-{field}")
+        if current is not None and legacy is not None and current != legacy:
+            raise ValueError("Conflicting webhook authentication headers.")
+        values.append(current if current is not None else legacy or "")
+    return values[0], values[1]
+
+
 def build_headers(body: bytes, event: str, secret: str | None, *,
                   event_id: str | None = None) -> dict[str, str]:
     """Request headers for one attempt. The signature binds a fresh timestamp
@@ -300,18 +331,23 @@ def build_headers(body: bytes, event: str, secret: str | None, *,
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Lightwork-Webhook/1.0",
+        "X-Lightwork-Event": event,
         "X-Maverick-Event": event,
     }
     if event_id:
+        headers["X-Lightwork-Delivery"] = event_id
         headers["X-Maverick-Delivery"] = event_id
     if secret:
         # Bind a timestamp into the signature so a receiver enforcing a max-age
         # (see verify_signature) can reject a replayed capture. The timestamp is
-        # sent alongside in X-Maverick-Timestamp and is part of the signed
+        # sent alongside in X-Lightwork-Timestamp and is part of the signed
         # material -- it can't be altered without breaking the HMAC.
         ts = str(int(time.time()))
+        signature = _sign(body, secret, timestamp=ts)
+        headers["X-Lightwork-Timestamp"] = ts
         headers["X-Maverick-Timestamp"] = ts
-        headers["X-Maverick-Signature"] = _sign(body, secret, timestamp=ts)
+        headers["X-Lightwork-Signature"] = signature
+        headers["X-Maverick-Signature"] = signature
     return headers
 
 
@@ -506,4 +542,4 @@ def inbound_secret() -> str | None:
 
 
 __all__ = ["build_envelope", "build_headers", "encode_body", "fire",
-           "verify_signature", "inbound_secret"]
+           "verify_signature", "inbound_secret", "read_signature_headers"]

@@ -2080,6 +2080,7 @@ from .personal_push_devices_api import router as personal_push_devices_router  #
 from .product_tour import router as product_tour_router  # noqa: E402
 from .runtime_enforcement_api import router as runtime_enforcement_router  # noqa: E402
 from .voice_receiver_api import router as voice_receiver_router  # noqa: E402
+from .work_record_details_api import router as work_record_details_router  # noqa: E402
 
 app.include_router(dsar_handling_router)
 app.include_router(runtime_enforcement_router, prefix="/api/v1")
@@ -2089,6 +2090,7 @@ app.include_router(personal_push_devices_router)
 app.include_router(product_tour_router)
 app.include_router(audit_checkpoint_custody_router)
 app.include_router(executive_report_schedules_router)
+app.include_router(work_record_details_router)
 app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
@@ -2823,7 +2825,7 @@ async def _verify_maverick_webhook(request: Request) -> dict:
     return the parsed JSON object. Shared by /webhook/start and /webhook/run,
     which had byte-identical preambles. Raises HTTPException (401 unconfigured,
     403 bad signature, 400 bad body) and enforces a configured LLM provider."""
-    from maverick.webhooks import inbound_secret, verify_signature
+    from maverick.webhooks import inbound_secret, read_signature_headers, verify_signature
 
     secret = inbound_secret()
     if not secret:
@@ -2831,13 +2833,13 @@ async def _verify_maverick_webhook(request: Request) -> dict:
             status_code=401,
             detail=(
                 "Inbound webhooks aren't set up yet — an administrator must "
-                "configure a signing secret (a [webhooks] secret in the server "
-                "configuration, or the MAVERICK_WEBHOOK_SECRET environment "
-                "variable)."
+                "set up the signing secret in Settings."
             ),
         )
-    signature = request.headers.get("X-Maverick-Signature") or ""
-    timestamp = request.headers.get("X-Maverick-Timestamp") or ""
+    try:
+        signature, timestamp = read_signature_headers(request.headers)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Conflicting webhook authentication headers.") from exc
     if not signature or not timestamp:
         raise HTTPException(status_code=403, detail="bad webhook signature")
     body = await _read_limited_webhook_body(request)
@@ -4375,6 +4377,7 @@ def goals_page(request: Request, owner: str = "", include: str = "") -> HTMLResp
         "task_search_context": task_page["context"],
         "task_search_continuation": task_page["continuation"],
         "task_views_available": task_views_available,
+        "work_details_available": page_visible(request, "/work-details") and has_permission(request, "operate"),
         "page_size": GOALS_PAGE_SIZE,
         "has_more": has_more,
         "next_offset": GOALS_PAGE_SIZE if has_more else 0,
@@ -4382,6 +4385,16 @@ def goals_page(request: Request, owner: str = "", include: str = "") -> HTMLResp
         "goals_background": background,
         "work_context": context_for(request) if background else "",
     })
+
+
+@app.get("/work-details", response_class=HTMLResponse)
+def work_record_details_page(request: Request) -> HTMLResponse:
+    """Ordinary business fields and stages for currently readable native work."""
+    from .work_record_details_api import page_context
+
+    require_permission(request, "operate")
+    require_page_visible(request, "/work-details")
+    return templates.TemplateResponse(request, "work_record_details.html", page_context(request))
 
 
 @app.get("/projects", response_class=HTMLResponse)
@@ -6471,6 +6484,7 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
         "model_risk_assurance.html",
         {
             "model_risk_enabled": model_risk_enabled,
+            "work_details_available": page_visible(request, "/work-details"),
             "model_risk_totals": {
                 "assets": len(assets),
                 "evidence": len(evidence),
@@ -11544,9 +11558,10 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     Body is JSON ``{title, description?, budget?, id?}`` (an optional ``id``
     gives at-most-once delivery: a repeat within the freshness window 409s).
     The request must carry
-    an ``X-Maverick-Signature: sha256=<hex>`` header computed over the
+    an ``X-Lightwork-Signature: sha256=<hex>`` header computed over the
     timestamp + raw body with the configured ``[webhooks] secret`` (see
-    ``maverick.webhooks``), plus an ``X-Maverick-Timestamp`` header. Returns
+    ``maverick.webhooks``), plus an ``X-Lightwork-Timestamp`` header. Matching
+    ``X-Maverick-*`` aliases remain supported for existing clients. Returns
     ``{"goal_id": <int>}`` on success.
 
     Auth: this route is exempt from the dashboard bearer / same-origin
@@ -11554,7 +11569,7 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     credential. We fail closed -- a missing/empty secret yields 401.
 
     Replay defence (Lightwork-CONTROLLED format): the signature binds the
-    ``X-Maverick-Timestamp``; a request whose timestamp is outside the
+    signed timestamp; a request whose timestamp is outside the
     configured freshness window (``[webhooks] max_age_seconds``) is rejected,
     so a captured signed request can't be replayed to re-spend budget.
     """
@@ -11797,8 +11812,9 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
 
     Body is JSON ``{"trigger": "<name>", "data"?: {...}, "id"?: "<delivery-id>"}``.
     Authenticated by the same HMAC signature as ``/webhook/start``
-    (``X-Maverick-Signature`` over the ``X-Maverick-Timestamp`` + raw body, with
-    the ``[webhooks]`` secret) and the same replay-freshness window. We fail
+    (``X-Lightwork-Signature`` over the ``X-Lightwork-Timestamp`` + raw body, with
+    the ``[webhooks]`` secret; matching legacy aliases remain accepted) and
+    the same replay-freshness window. We fail
     closed -- a missing secret yields 401. An optional ``id`` gives at-most-once
     delivery: a repeat of that id within the window is rejected (409).
 
@@ -14079,6 +14095,16 @@ async def third_party_executive_reports_client() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-work-record-details.js")
+async def work_record_details_client() -> FileResponse:
+    """Reviewed business-field controls using the shared product design."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-work-record-details.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.get("/static/lightwork-executive-report-schedules.js")
 async def executive_report_schedules_client() -> FileResponse:
     """Ordinary controls for current reviewed recurring executive reports."""
@@ -14488,6 +14514,7 @@ async def workflow_builder_page(
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
             "pack_editing_allowed": pack_editing_allowed,
+            "webhook_setup_available": has_global_permission(request, "admin") and page_visible(request, "/settings"),
             "prefill": prefill,
             "edit_prefill": edit_prefill,
             "edit_agent_prefill": edit_agent_prefill,

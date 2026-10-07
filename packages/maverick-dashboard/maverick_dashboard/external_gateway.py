@@ -314,10 +314,15 @@ async def _require_agent(request: Request) -> str:
         raise HTTPException(status_code=401,
                             detail="invalid credentials") from e
     agent_hdr = request.headers.get("x-lightwork-agent-id", "")
-    ts = request.headers.get("x-maverick-timestamp", "")
+    from maverick.webhooks import read_signature_headers
+
+    try:
+        hmac_sig, ts = read_signature_headers(request.headers)
+    except ValueError as exc:
+        raise HTTPException(status_code=401,
+                            detail="conflicting webhook authentication headers") from exc
     nonce = request.headers.get("x-lightwork-nonce", "")
     envelope_sig = request.headers.get("x-lightwork-request-signature", "")
-    hmac_sig = request.headers.get("x-maverick-signature", "")
     if agent_hdr and ts and nonce and envelope_sig:
         scheme = "envelope"
         # Starlette caches the body, so the endpoint model still parses it.

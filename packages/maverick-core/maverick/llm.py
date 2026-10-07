@@ -1677,7 +1677,7 @@ def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
         # request builder bumps it for thinking headroom (explicit budget, or
         # the adaptive floor on Opus 4.7/4.8), and a hold priced at the
         # pre-bump value under-reserves the real worst-case output spend.
-        from .providers.anthropic_provider import effective_max_tokens
+        from .providers.anthropic_limits import effective_max_tokens
         max_tokens = effective_max_tokens(str(model_id or ""), max_tokens,
                                           thinking_budget)
     except Exception:  # pragma: no cover -- estimate must never block a call

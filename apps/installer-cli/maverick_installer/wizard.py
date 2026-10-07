@@ -5210,6 +5210,11 @@ def pick_advanced() -> dict[str, Any]:
             "Assigned workspace reviewers cannot execute or sign off the live task.",
             default=False,
         ),
+        "allow_work_details": _q_confirm(
+            "Enable named business fields and stages for tasks and security records? "
+            "Your team sets them up in the app and reviews each save. Business labels do not execute or approve work.",
+            default=True,
+        ),
         "allow_task_handoffs": _q_confirm(
             "Enable named task handoffs with explicit recipient acceptance, selected evidence and a new-work ceiling? Requires selected deliverable bundles.",
             default=False,
@@ -9279,6 +9284,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
         _feature_locks.append("project_reviews = true")
+    if "allow_work_details" in advanced:
+        lines.extend(["[work_details]"])
+        _emit_kv(lines, "enable", advanced["allow_work_details"] is True)
     if advanced.get("allow_task_handoffs") is True:
         _feature_locks.append("task_handoffs = true")
     if advanced.get("allow_deliverable_bundles") is True:

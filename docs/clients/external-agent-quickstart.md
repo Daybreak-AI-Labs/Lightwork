@@ -221,10 +221,13 @@ raw = json.dumps({"tool": "send_email", "risk": "medium"}).encode()
 ts = str(int(time.time()))
 mac = hmac.new(SECRET.encode(), f"{ts}.".encode() + raw, hashlib.sha256)
 headers = {"X-Lightwork-Agent-Id": "sf-quotebot",
-           "X-Maverick-Timestamp": ts,
-           "X-Maverick-Signature": "sha256=" + mac.hexdigest(),
+           "X-Lightwork-Timestamp": ts,
+           "X-Lightwork-Signature": "sha256=" + mac.hexdigest(),
            "Content-Type": "application/json"}
 ```
+
+The original `X-Maverick-Timestamp` and `X-Maverick-Signature` names still
+work. If both names are supplied, each pair must contain identical values.
 
 ```python
 # Ed25519: sign the domain-separated envelope with your private key
@@ -234,7 +237,7 @@ digest = hashlib.sha256(raw).hexdigest()
 msg = (f"lightwork-external-request-v1|sf-quotebot|{ts}|{nonce}|"
        f"{digest}".encode())
 headers = {"X-Lightwork-Agent-Id": "sf-quotebot",
-           "X-Maverick-Timestamp": ts,
+           "X-Lightwork-Timestamp": ts,
            "X-Lightwork-Nonce": nonce,
            "X-Lightwork-Request-Signature": private_key.sign(msg).hex(),
            "Content-Type": "application/json"}

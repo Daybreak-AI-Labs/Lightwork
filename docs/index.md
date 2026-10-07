@@ -1,10 +1,10 @@
 # Lightwork
 
-> Enterprise recursive multi-agent swarm. One kernel, every model.
+> AI workers, company knowledge and repeatable workflows — under your control.
 
-Lightwork is an **agentic enterprise platform**: a governed AI workforce of
-2,031 prebuilt specialists across business suites, with reviewable learning
-and improvement controls — deployed in your own environment. It supports
+Lightwork brings AI workers, company knowledge, repeatable workflows and
+governed learning together, with operating controls for your team —
+deployed in your own environment. It supports
 configured model providers including Claude, GPT, Gemini, DeepSeek, Ollama, and OpenRouter, and
 ships a governed, auditable safety surface built for regulated teams.
 Lightwork is proprietary, commercially licensed software (see

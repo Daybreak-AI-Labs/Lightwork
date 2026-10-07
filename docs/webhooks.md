@@ -68,7 +68,7 @@ Every POST body is this JSON object:
 | Field | Meaning |
 |---|---|
 | `v` | Envelope version, always `1`. |
-| `id` | Unique event id (`evt_` + 32 hex). Also sent as the `X-Maverick-Delivery` header. Retries carry the same id, so receivers can de-duplicate. |
+| `id` | Unique event id (`evt_` + 32 hex). Also sent as the `X-Lightwork-Delivery` header and matching legacy alias. Retries carry the same id, so receivers can de-duplicate. |
 | `event`, `type` | The event name (the two fields are the same; `event` is the original name, `type` the documented one). |
 | `ts`, `occurred_at` | When it happened, seconds since the epoch (the same value). |
 | `workspace` | The workspace (tenant) id, or `""` for a single-workspace installation. |
@@ -109,16 +109,21 @@ matching change is recorded on the request (from the dashboard tracker or the
 public rights form). `vendor.review_due` is in the catalogue so subscriptions
 can be created for it now; it is emitted once vendors carry review dates.
 
-## Signature (unchanged)
+## Signed messages and compatible header names
 
 When a subscription (or the legacy list) has a secret, each request carries:
 
 ```
-X-Maverick-Timestamp: 1790000000
-X-Maverick-Signature: sha256=<hex HMAC-SHA256(secret, "<timestamp>." + body)>
-X-Maverick-Event: dsar.opened
-X-Maverick-Delivery: evt_5f1c…
+X-Lightwork-Timestamp: 1790000000
+X-Lightwork-Signature: sha256=<hex HMAC-SHA256(secret, "<timestamp>." + body)>
+X-Lightwork-Event: dsar.opened
+X-Lightwork-Delivery: evt_5f1c…
 ```
+
+The matching `X-Maverick-*` headers are also sent for existing integrations.
+Both names carry the same values, signed bytes and signing key. Lightwork's
+inbound receivers accept either name or matching pairs. Conflicting signature
+or timestamp headers are rejected; they are never resolved by choosing one.
 
 Verify with `maverick.webhooks.verify_signature(body, signature, secret,
 timestamp=timestamp)`, or in any language: HMAC-SHA256 the bytes
@@ -137,10 +142,14 @@ fresh timestamp and signature over the same body.
 | 4 | About 15 minutes after that. |
 | 5 | About 40 minutes after that. |
 
-Each wait is jittered by ±20 %. A response below HTTP 400 counts as delivered.
-After the fifth failure the delivery is **dead**: it stays in the log with
-every attempt's status code, latency and the first 200 characters of the
-response, and "Retry now" (or the API) starts the schedule again. Retries are
+Each wait is jittered by ±20 %. Only HTTP 200–299 confirms that the receiving
+system accepted the request; it does not prove that its later actions finished.
+After the fifth known unsuccessful reply the delivery is **dead**: it stays in
+the log with every attempt's status code, latency and the first 200 characters
+of the response. "Retry now" is available for known unsuccessful deliveries.
+An active or unconfirmed send is never automatically repeated. Read its
+original record; the separate reviewed new-attempt control warns that another
+send may duplicate an action in the receiving system. Retries are
 run by the dashboard's background scheduler
 (`maverick_dashboard.deadline_alerts_scheduler`), which also evaluates
 deadline alerts; without the dashboard running, only the first attempt is
