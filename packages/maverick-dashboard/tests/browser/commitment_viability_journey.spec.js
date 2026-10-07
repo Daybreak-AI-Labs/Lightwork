@@ -6,16 +6,38 @@ function localTime(minutesFromNow) {
   return `${d.getFullYear()}-${two(d.getMonth()+1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
+async function enableFeature(page, name) {
+  await expect(page).toHaveURL(new RegExp(`/settings/all\\?id=features\\.${name}$`));
+  const feature = page.locator(`[data-setting-id="features.${name}"]`);
+  const toggle = feature.getByRole('switch');
+  await expect(toggle).toBeVisible();
+  // The browser server is shared: an earlier journey may already have turned
+  // Copilot changes on, and then there is nothing to save.
+  if (!(await toggle.isChecked())) {
+    await toggle.check();
+    await feature.locator('[data-save]').click();
+    const review = page.getByRole('dialog', {name: 'Review setting changes'});
+    await expect(review).toContainText('Include');
+    await review.getByRole('button', {name: 'Use reviewed changes'}).click();
+    await expect(feature.locator('[data-row-status]')).toHaveText('Saved.');
+  }
+  await page.reload();
+  await expect(toggle).toBeChecked();
+}
+
 test('Settings enables an owner review; native and Copilot decisions survive response loss and reload', async ({page, context, baseURL}, testInfo) => {
   test.setTimeout(120000);
   await context.setExtraHTTPHeaders({Origin:baseURL, 'X-Browser-Principal':'browser-reviewer'});
   await page.goto('/commitment-reviews');
   await expect(page.getByText('Promise reviews are off')).toBeVisible();
-  await page.locator('#content a[href^="/settings"]').click();
-  await page.locator('#feature-commitment_viability input').check();
-  await page.locator('#feature-copilot_operations input').check();
-  await page.locator('form[action="/settings/features"] button[type="submit"]').click();
-  await expect(page.locator('form[action="/settings/features"] [data-save-status]')).toContainText('Saved');
+  // The page also offers the separate financial-comparison switch; open this review's own setting.
+  await page.locator('#content a[href="/settings?focus=feature-commitment_viability"]').click();
+  // Settings lists the feature; its switch is changed through the reviewed save in All settings.
+  await page.locator('#feature-commitment_viability').getByRole('link', {name: 'Review choice'}).click();
+  await enableFeature(page, 'commitment_viability');
+  await page.goto('/settings#settings-features');
+  await page.locator('#feature-copilot_operations').getByRole('link', {name: 'Review choice'}).click();
+  await enableFeature(page, 'copilot_operations');
   await page.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID',
     {value:undefined, configurable:true}));
   await page.goto('/commitment-reviews');

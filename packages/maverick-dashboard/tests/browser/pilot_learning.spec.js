@@ -5,6 +5,15 @@ async function localOnly(context,baseURL){
   await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(baseURL).origin?route.continue():route.abort('blockedbyclient'));
 }
 async function fits(page){const widths=await page.evaluate(()=>[document.documentElement.scrollWidth,document.documentElement.clientWidth]);expect(widths[0]).toBeLessThanOrEqual(widths[1]+1);}
+// Every pilot change is saved through its complete review: read it, confirm, then save.
+async function saveReviewed(page){
+  const review=page.locator('#op-guided-review');
+  await expect(review.getByRole('heading',{name:'Review every detail before saving'})).toBeVisible();
+  const save=review.getByRole('button',{name:'Save reviewed change'});await expect(save).toBeDisabled();
+  await review.getByRole('checkbox',{name:'I reviewed the complete source, scope and proposed change.'}).check();
+  await save.click();
+}
+const CONTROLS='/api/v1/outcome-pilot-controls';
 async function downloadedReport(page){
   const pending=page.waitForEvent('download');await page.locator('#op-export').click();
   const download=await pending;return JSON.parse(await fs.readFile(await download.path(),'utf8'));
@@ -27,9 +36,11 @@ test('protected pilot enforces child exclusion and independently reviews exact l
   await page.locator('#op-prior-exposure').fill('These synthetic cases are new locally; previous model exposure and provider training remain unverified.');
   for(let index=0;index<4;index++)await page.locator('#op-planned-cases select').nth(index).selectOption('goal:'+fixture.goals[index]);
   await fits(page);
-  const created=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/v1/outcome-pilots');
-  await plan.getByRole('button',{name:'Save and freeze plan'}).click();const creation=await created;expect(creation.status()).toBe(200);
-  const pilot=await creation.json();await expect(page.locator('#op-report')).toContainText('Automatic local learning exclusion is recorded');
+  const created=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===CONTROLS+'/save');
+  await plan.getByRole('button',{name:'Save and freeze plan'}).click();await saveReviewed(page);
+  const creation=await created;expect(creation.status()).toBe(200);
+  const outcome=await creation.json();expect(outcome.confirmed).toBe(true);
+  const pilot={id:new URL(outcome.href,baseURL).searchParams.get('pilot')};expect(pilot.id).toMatch(/^OPL-[a-f0-9]{48}$/);await expect(page.locator('#op-report')).toContainText('Automatic local learning exclusion is recorded');
   await expect(page.locator('#op-report')).toContainText('complete for all 4 planned cases');
   const report=await downloadedReport(page);expect(report.state).toBe('frozen');
   expect(report.learning_policy.automatic_local_exclusion_enforced).toBe(true);
@@ -79,8 +90,8 @@ test('protected pilot enforces child exclusion and independently reviews exact l
     const independent=second.locator('#op-independent-report form');await independent.locator('select').selectOption('accepted_local_scope');
     await independent.locator('textarea').fill(body.notes);await independent.locator('input[type="checkbox"]').check();await fits(second);
     await info.attach('independent-review-phone',{body:await second.screenshot({fullPage:true}),contentType:'image/png'});
-    const saved=second.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===reviewPath);
-    await independent.getByRole('button',{name:'Record independent review'}).click();expect((await saved).status()).toBe(200);
+    const saved=second.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===CONTROLS+'/save');
+    await independent.getByRole('button',{name:'Record independent review'}).click();await saveReviewed(second);expect((await saved).status()).toBe(200);
     await expect(second.locator('#op-independent-report')).toContainText('Independent review recorded');
     await page.locator('#op-refresh').click();await expect(page.locator('#op-report')).toContainText('browser-learning-reviewer');
     const reviewed=await downloadedReport(page);expect(reviewed.learning_policy.independent_review.current).toBe(true);
@@ -89,9 +100,10 @@ test('protected pilot enforces child exclusion and independently reviews exact l
     const stale=second.locator('#op-independent-report form');await stale.locator('select').selectOption('accepted_local_scope');
     await stale.locator('textarea').fill('This review must refuse after the original source input changes.');await stale.locator('input[type="checkbox"]').check();
     expect((await request.post('/__browser_fixture/pilot-learning/'+pilot.id+'/change')).status()).toBe(200);
-    const refused=second.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===reviewPath);
+    // The changed evidence is refused when the review is prepared; nothing is saved.
+    const refused=second.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===CONTROLS+'/review');
     await stale.getByRole('button',{name:'Record independent review'}).click();expect((await refused).status()).toBe(409);
-    await expect(second.locator('#op-status')).toContainText('plan, source or exclusion evidence changed');
+    await expect(second.locator('#op-status')).toContainText('The pilot or learning evidence changed. Review the current complete evidence again. Your entered work is kept.');
     await expect(second.locator('#op-review-reference')).toHaveValue(pilot.id);
     await expect(stale.locator('textarea')).toHaveValue('This review must refuse after the original source input changes.');
     await expect(second.locator('#op-review-load')).toBeEnabled();

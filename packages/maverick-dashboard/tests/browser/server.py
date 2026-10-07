@@ -123,7 +123,7 @@ def fake_connection_authorization(module):
                 "expires_in":3600, "token_type":"Bearer"}
 
     module._post_token = local_connection_token
-    module._provider_identity = lambda provider, token: {
+    module._provider_identity = lambda provider, token, **_identity_inputs: {
         "provider": provider, "subject": "browser-fixture-account",
         "display_name": "Browser Fixture Account", "email": "browser@example.test",
         "email_verified": True, "hosted_domain": "example.test",

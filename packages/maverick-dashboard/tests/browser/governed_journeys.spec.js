@@ -337,6 +337,14 @@ test('recovery comparison pages real protected differences, downloads captured e
 });
 
 test('pilot preparation freezes four unrun tasks and preserves an observation after failed save',async({page},info)=>{
+  // Every pilot change is saved through its complete review: read it, confirm, then save.
+  const saveReviewed=async()=>{
+    const review=page.locator('#op-guided-review');
+    await expect(review.getByRole('heading',{name:'Review every detail before saving'})).toBeVisible();
+    const save=review.getByRole('button',{name:'Save reviewed change'});await expect(save).toBeDisabled();
+    await review.getByRole('checkbox',{name:'I reviewed the complete source, scope and proposed change.'}).check();
+    await save.click();
+  };
   await page.goto('/outcome-pilots');
   await page.locator('#op-plan-details > summary').click();
   await page.getByText('Prepare a task without starting it',{exact:true}).click();
@@ -346,7 +354,7 @@ test('pilot preparation freezes four unrun tasks and preserves an observation af
     await preparation.locator('[name="title"]').fill('Browser prepared case '+i);
     await page.locator('#op-specialist').selectOption({index:1});
     await preparation.locator('[name="description"]').fill('Synthetic held task; no provider execution.');
-    await preparation.getByRole('button',{name:'Save prepared task'}).click();
+    await preparation.getByRole('button',{name:'Save prepared task'}).click();await saveReviewed();
     await expect(page.locator('#op-prepared')).toContainText('Prepared: Browser prepared case '+i);
     await expect(preparation.getByRole('button')).toBeEnabled();
   }
@@ -354,17 +362,18 @@ test('pilot preparation freezes four unrun tasks and preserves an observation af
   await plan.locator('[name="title"]').fill('Browser comparison pilot');await plan.locator('[name="customer"]').fill('Synthetic internal team');
   await plan.locator('[name="workflow"]').fill('Review identical prepared cases');await plan.locator('[name="criteria"]').fill('Human-reviewed evidence and all limitations recorded');
   for(let i=0;i<4;i++)await page.locator('#op-planned-cases select').nth(i).selectOption({label:'Task: Browser prepared case '+(i+1)});
-  await plan.getByRole('button',{name:'Save and freeze plan'}).click();
+  await plan.getByRole('button',{name:'Save and freeze plan'}).click();await saveReviewed();
   await expect(page.locator('#op-report')).toContainText('0 accepted / 4 planned');
   const details=page.locator('#op-report > details').first();await details.locator('summary').click();
   const form=details.locator('form');await form.locator('[name="baseline_minutes"]').fill('75');
   await form.locator('[name="evidence"]').fill('Synthetic timing sheet; no customer evidence');await form.locator('[name="note"]').fill('Partial observation; no claim of savings');
   const reject=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Synthetic interruption before save'})});
-  await page.route('**/api/v1/outcome-pilots/*/cases/*',reject);
+  // The interruption hits the observation's review request; nothing is saved.
+  await page.route('**/api/v1/outcome-pilot-controls/review',reject);
   await form.getByRole('button',{name:'Save observation'}).click();await expect(page.locator('#op-status')).toContainText('Could not save that.');await expect(page.locator('#op-status')).not.toContainText('Synthetic interruption');
   await expect(form.locator('[name="baseline_minutes"]')).toHaveValue('75');await expect(form.locator('[name="note"]')).toHaveValue('Partial observation; no claim of savings');
-  await page.unroute('**/api/v1/outcome-pilots/*/cases/*',reject);
-  await form.getByRole('button',{name:'Save observation'}).click();await expect(page.locator('#op-status')).toContainText('Saved.');
+  await page.unroute('**/api/v1/outcome-pilot-controls/review',reject);
+  await form.getByRole('button',{name:'Save observation'}).click();await saveReviewed();await expect(page.locator('#op-status')).toContainText('observation is recorded');
   await expect(page.locator('#op-report')).toContainText('0 current complete pairs');
   const costs=page.locator('#op-cost-form');await costs.getByRole('button',{name:'Find billing receipts'}).click();
   await expect(costs.getByRole('status')).toContainText('matching source lines');

@@ -62,9 +62,13 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
     // Typing also schedules the finder's records search (300 ms debounce) and
     // the answer re-renders the results, so wait for it before selecting: the
     // selection stays put and Enter never aborts an in-flight request.
+    // The finder's settings search (60 ms debounce) answers the typed name
+    // too; wait for its answer to the complete name as well.
     const recordsSearched = page.waitForResponse(response => response.url().endsWith('/api/v1/records/search'), {timeout: 10000});
+    const settingsSearched = page.waitForResponse(response => response.url().endsWith(`/api/v1/settings/search?q=${encodeURIComponent(label)}`), {timeout: 10000});
     await page.keyboard.type(label);
     await recordsSearched;
+    await settingsSearched;
     const choice = page.locator(`#navfinder-results a[href="${path}"]`);
     await expect(choice).toBeVisible();
     // Select the existing registry option with the keyboard, including when

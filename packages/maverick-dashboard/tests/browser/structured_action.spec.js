@@ -56,7 +56,9 @@ test('ordinary nested details save as typed values and execute only after native
   const resumed=page.waitForResponse(response=>response.url().endsWith(`/flows/runs/${runId}/resume`)&&response.request().method()==='POST');
   await page.locator('#fr-actions').getByRole('button',{name:'Approve',exact:true}).click();expect((await resumed).ok()).toBeTruthy();
   await expect.poll(async()=>(await (await request.get('/__browser_fixture/structured-action/state')).json()).calls).toEqual([{...expected,summary:'Reviewed local order'}]);
-  await expect(page.locator('#fr-status')).toHaveText('Finished');await expect(page.locator('#fr-data-rows')).toContainText('Recorded order for Alex');
+  await expect(page.locator('#fr-status')).toHaveText('Finished');
+  // Saved run values are listed by name; opening one reads it.
+  await page.locator('#fr-data-rows summary').filter({hasText:/^receipt$/}).click();await expect(page.locator('#fr-data-rows')).toContainText('Recorded order for Alex');
   const protectedBefore=await (await request.get('/api/v1/flows/browser-protected-action')).json();
   await page.goto('/flows/designer/browser-protected-action');await page.getByRole('button',{name:'Change step 2: Protected connection action',exact:true}).click();
   await expect(fields).toContainText('protected connection information');await expect(fields.getByRole('link',{name:'Open Connections',exact:true})).toHaveAttribute('href','/connections');
