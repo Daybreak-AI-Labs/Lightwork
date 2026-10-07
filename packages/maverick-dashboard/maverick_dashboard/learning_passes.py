@@ -190,7 +190,7 @@ def _state(request, *, context=None, write=False):
 def catalog(request):
     state = _state(request)
     rows = [row for row in _requests().list(limit=10001)
-            if row["actor"] == native._actor(request) and row["context"] == state["context"] and row["workspace"] == native._workspace()]
+            if row.get("purpose", "learning_pass") == "learning_pass" and row["actor"] == native._actor(request) and row["context"] == state["context"] and row["workspace"] == native._workspace()]
     questions._authority(request, state["context"])
     return {"context": state["context"], "revision": state["revision"], "notice": NOTICE,
             "models": [{"value": m, "label": model_label(m)} for m in state["models"]],
@@ -228,10 +228,12 @@ def review_rows(prepared):
             {"label": "Standing instructions supplied for this test", "after": body["instructions"] or "None supplied. No verified production instruction snapshot is claimed."}]
 
 
-def owned(request, operation, prepared=None):
+def owned(request, operation, prepared=None, *, purpose="learning_pass"):
     context = questions._authority(request)
     questions._request_id(operation)
     row = _requests().get("LPR-" + operation)
+    if row and row.get("purpose", "learning_pass") != purpose:
+        raise HTTPException(404, "This original request belongs to a different learning operation.")
     if row and (row["actor"], row["context"], row["workspace"]) != (native._actor(request), context, native._workspace()):
         raise HTTPException(404, "This original learning pass is unavailable to your account and workspace.")
     if row and prepared is not None and row["binding"] != digest([operation, native._actor(request), prepared]):
@@ -240,10 +242,10 @@ def owned(request, operation, prepared=None):
     return row
 
 
-def original(request, operation, prepared=None):
-    row = owned(request, operation, prepared)
+def original(request, operation, prepared=None, *, purpose="learning_pass", notice=NOTICE):
+    row = owned(request, operation, prepared, purpose=purpose)
     result = {"context": questions._authority(request), "operation": operation, "recorded": bool(row), "confirmed": False,
-              "message": "Whether the original pass started is unconfirmed. Nothing was repeated; a missing task does not prove failure.", "notice": NOTICE}
+              "message": "Whether the original pass started is unconfirmed. Nothing was repeated; a missing task does not prove failure.", "notice": notice}
     if row and row.get("job_id"):
         job = jobs.get(row["job_id"])
         if job and (job.kind, job.started_by, job.workspace) == ("self_harness_run", row["actor"], row["workspace"]):
@@ -314,27 +316,71 @@ def _model_report(model, report, retired):
     return result
 
 
-def start(request, prepared, operation, *, expires):
+def _review_guard(request, prepared, expires, check_current):
+    def current_review():
+        questions._authority(request, prepared["context"], write=True)
+        _deadline(expires)
+        current = _state(request, context=prepared["context"], write=True)
+        if current["revision"] != prepared["revision"]:
+            raise HTTPException(409, "The reviewed work, questions, models or settings changed. No pass was started.")
+        if check_current is not None:
+            check_current()
+        questions._authority(request, prepared["context"], write=True)
+        _deadline(expires)
+        return current
+    return current_review
+
+
+def _reviewed_work(prepared, operation, job, budget, guard, effect_scope, state, run_work):
+    if run_work is not None:
+        return run_work(job, budget, guard, effect_scope, state)
+    reports, stopped_early = [], False
+    try:
+        for model in prepared["models"]:
+            guard()
+            report, retired = runner.run_self_harness_cycle(state["rows"], model_id=model, retire=prepared["body"]["retire"],
+                canary=True if prepared["body"]["trial"] else None, evaluation_system=prepared["body"]["instructions"] or None,
+                evaluation_budget=budget, evaluation_corpus_manifest=state["corpus"], dispatch_guard=guard, effect_scope=effect_scope,
+                work_item_id="learning-pass:" + operation, raise_errors=True)
+            guard()
+            reports.append(_model_report(model, report, retired))
+    except Exception as exc:
+        if not _cooperative_stop(job, exc):
+            raise
+        stopped_early = True
+    return _pass_result(reports, budget, stopped_early)
+
+
+def start(request, prepared, operation, *, expires, run_work=None, check_current=None,
+          purpose="learning_pass", notice=NOTICE):
     questions._request_id(operation)
+    if purpose not in {"learning_pass", "lesson_transfer"} or (purpose == "lesson_transfer") != (run_work is not None):
+        raise ValueError("unsupported native learning operation")
+
+    def read_original():
+        return original(request, operation, prepared, purpose=purpose, notice=notice)
+
+    current_review = _review_guard(request, prepared, expires, check_current)
 
     with authority_effect_fence():
         questions._authority(request, prepared["context"], write=True)
-        if owned(request, operation, prepared):
-            return original(request, operation, prepared)
-        _deadline(expires)
-        state = _state(request, context=prepared["context"], write=True)
-        if state["revision"] != prepared["revision"]:
-            raise HTTPException(409, "The reviewed work, questions, models or settings changed. No pass was started.")
+        if owned(request, operation, prepared, purpose=purpose):
+            return read_original()
+        state = current_review()
         native._record(request, "self_harness_run", phase="prepared", operation=operation, reviewed_revision=prepared["revision"], models=len(prepared["models"]))
         store, actor = _requests(), native._actor(request)
         try:
-            claim = store.create({"id": "LPR-" + operation, "actor": actor, "context": prepared["context"], "workspace": native._workspace(),
-                                  "binding": digest([operation, actor, prepared]), "state": "admitting"},
-                                 action="learning.pass.prepare", actor=actor, max_records=10000)
+            record = {"id": "LPR-" + operation, "actor": actor, "context": prepared["context"], "workspace": native._workspace(),
+                      "binding": digest([operation, actor, prepared]), "state": "admitting"}
+            guarded = {}
+            if run_work is not None:
+                record["purpose"] = purpose
+                guarded["effect_guard"] = current_review
+            claim = store.create(record, action="learning.pass.prepare", actor=actor, max_records=10000, **guarded)
         except RecordConflict:
-            return original(request, operation, prepared)
+            return read_original()
         if claim.get("_audit_pending"):
-            return original(request, operation, prepared)
+            return read_original()
 
     budget_box = []
 
@@ -350,6 +396,8 @@ def start(request, prepared, operation, *, expires):
             current = _state(request, context=prepared["context"])
             if current["source_revision"] != prepared["source_revision"] or current["artifact"] not in {expected_artifact[0], *allowed_artifacts}:
                 raise HTTPException(409, "The reviewed sources, models, settings or access changed. No further call or learning change was admitted.")
+            if check_current is not None:
+                check_current()
             _check_current_budget(budget)
 
         @contextmanager
@@ -374,7 +422,7 @@ def start(request, prepared, operation, *, expires):
 
         with admission_scope():
             accepted = store.update(claim["id"], lambda row: row.update(job_id=job.id, state="admitted"), expected_revision=claim["revision"],
-                                    action="learning.pass.admitted", actor=actor)
+                                    action="learning.pass.admitted", actor=actor, **guarded)
             if not accepted or accepted.get("_audit_pending"):
                 raise HTTPException(503, "The original task could not be recorded. No AI call was made.")
             _deadline(expires)
@@ -387,36 +435,20 @@ def start(request, prepared, operation, *, expires):
         with admission_scope():
             scope = dreaming.learning_mutation_scope()
             scope.__enter__()
-        reports = []
-        stopped_early = False
         try:
             with admission_scope():
                 _deadline(expires)
-            for model in prepared["models"]:
-                guard()
-                report, retired = runner.run_self_harness_cycle(state["rows"], model_id=model, retire=prepared["body"]["retire"],
-                    canary=True if prepared["body"]["trial"] else None, evaluation_system=prepared["body"]["instructions"] or None,
-                    evaluation_budget=budget, evaluation_corpus_manifest=state["corpus"], dispatch_guard=guard, effect_scope=effect_scope,
-                    work_item_id="learning-pass:" + operation, raise_errors=True)
-                guard()
-                reports.append(_model_report(model, report, retired))
-        except Exception as exc:
-            if not _cooperative_stop(job, exc):
-                raise
-            # The native worker owns the confirmed cooperative stop. Completed
-            # changes remain; an unfinished model has no complete report.
-            stopped_early = True
+            return _reviewed_work(prepared, operation, job, budget, guard, effect_scope, state, run_work)
         finally:
             scope.__exit__(None, None, None)
-        return _pass_result(reports, budget, stopped_early)
 
     def cancel():
         if budget_box:
             jobs.stop_budget(budget_box[0])()
 
     try:
-        native.start_job(request, "self_harness_run", "Reviewed learning pass", run,
+        native.start_job(request, "self_harness_run", "Reviewed lesson transfer" if run_work is not None else "Reviewed learning pass", run,
                          cancellable=True, on_cancel=cancel)
     except Exception:  # noqa: BLE001 -- a lost admission must never replay work
-        return original(request, operation, prepared)
-    return original(request, operation, prepared)
+        return read_original()
+    return read_original()

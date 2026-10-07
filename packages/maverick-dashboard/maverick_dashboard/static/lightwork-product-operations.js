@@ -62,6 +62,9 @@
     var specialist = query.get('name');
     if (window.location.pathname === '/agents' && specialist && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(specialist)) return {name: specialist};
     var learningPass = query.get('learning_pass');
+    var learningTransfer = query.get('learning_transfer');
+    if (window.location.pathname === '/learned' && learningTransfer && /^[a-f0-9]{32}$/.test(learningTransfer))
+      return {kind: 'learning_transfer', operation: learningTransfer};
     if (window.location.pathname === '/learned' && learningPass && /^[a-f0-9]{32}$/.test(learningPass))
       return {kind: 'learning_pass', operation: learningPass};
     // The workflow builder's Steps mode is the flow designer's editor for ?flow=<id>.
@@ -223,6 +226,23 @@
             '/compliance/continuous-evidence#trc-root',
             evidenceControls && typeof evidenceControls.openReview === 'function'
               ? function (isCurrent) { return evidenceControls.openReview({}, {isCurrent: isCurrent, context: evidenceContext}); } : null);
+          return;
+        }
+        if (entry[0] === 'learning_transfer_form') {
+          var transferForm = entry[1], transferControls = window.LightworkLearningTransfers;
+          if (!transferForm || Array.isArray(transferForm) ||
+              Object.keys(transferForm).sort().join(',') !== 'context,original' ||
+              !/^[a-f0-9]{64}$/.test(transferForm.context || '') ||
+              typeof transferForm.original !== 'boolean') return;
+          var transferSelection = context();
+          if (transferForm.original && (transferSelection.kind !== 'learning_transfer' ||
+              !/^[a-f0-9]{32}$/.test(transferSelection.operation || ''))) return;
+          var transferHref = '/learned' + (transferForm.original ? '?learning_transfer=' +
+            encodeURIComponent(transferSelection.operation) : '') + '#learning-transfers';
+          protectedControls(node('dd', undefined, list),
+            transferForm.original ? 'Read this original lesson test' : 'Review a lesson test', transferHref,
+            transferControls && typeof transferControls.open === 'function'
+              ? function (isCurrent) { return transferControls.open(transferForm.context, transferForm.original, isCurrent); } : null);
           return;
         }
         if (entry[0] === 'continuous_evidence_source_review') {

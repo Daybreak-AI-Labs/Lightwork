@@ -26,8 +26,6 @@
       parts.push(d.spending_limit != null ? 'Testing can spend up to ' + J.money(d.spending_limit) + ' per run.' : '');
       say('lpo-plan', parts.filter(Boolean).join(' '));
       addOptions($('lpo-clash-model'), d.models);
-      addOptions($('lpo-transfer-source'), d.models);
-      addOptions($('lpo-transfer-target'), d.models);
     }).catch(async function (failure) {
       say('lpo-plan', await J.problem(failure, 'load the self-coaching tools'));
     });
@@ -118,22 +116,6 @@
     window.addEventListener('lightwork:context-changed', function () { forget(); load(); });
     lock(false); load().then(function () { if (choice.value && context && !busy) readOriginal(); });
   })();
-
-  J.wire($('lpo-transfer-run'), async function () {
-    var source = $('lpo-transfer-source').value;
-    if (!source) { say('lpo-transfer-status', 'There are no models with lessons yet.'); return null; }
-    if (!(await window.mvConfirm('Test lessons proven for this model on ' + ($('lpo-transfer-target').value ? 'the chosen model' : 'every other model') +
-      '? Testing uses the evaluation spending limit. Lessons that pass start on trial.', { okText: 'Try the lessons' }))) return null;
-    return { url: API + '/transfer', init: { method: 'POST', json: { source: source,
-      target: $('lpo-transfer-target').value || null, retry_judged: $('lpo-transfer-retry').checked } } };
-  }, { status: $('lpo-transfer-status'), out: $('lpo-transfer-out'), action: 'try the lessons', render: function (d) {
-    if (!d.targets.length) return el('p', 'muted', 'There were no lessons to try.');
-    return d.targets.map(function (t) {
-      var p = el('p', null, (window.mvHuman ? window.mvHuman(t.model) : t.model) + ': tried ' + plural(t.tried, 'lesson') + ', ' +
-        plural(t.on_trial.length, 'lesson') + ' now on trial.');
-      return p;
-    });
-  } });
 
   var harvest = $('lpo-harvest');
   harvest.addEventListener('click', async function () {
