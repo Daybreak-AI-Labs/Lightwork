@@ -312,14 +312,20 @@ def send_email(to: str, subject: str, text_body: str, *, html_body: str | None =
         # No dedicated alert server: the platform mailer's [email] account
         # (invitations use it) carries the plain-text version.
         try:
-            from .mailer import MailerError, configured, send
+            from .mailer import MailerError, MailerNotSent, configured, send
 
             if not configured():
                 return False
             send(recipient, str(subject or "Lightwork"), str(text_body or ""))
             return True
+        except MailerNotSent as e:
+            # The mailer's own "definitely not sent": it could not connect or
+            # log in, the recipient was refused, or sending is off. Stays a
+            # plain failure (safe to retry), never "unknown".
+            log.warning("notify email failed: %s", type(e).__name__)
+            return False
         except MailerError as e:
-            _network_unknown()
+            _network_unknown()  # the message may already be on the wire
             log.warning("notify email failed: %s", type(e).__name__)
             return False
     message = EmailMessage()
@@ -336,16 +342,24 @@ def send_email(to: str, subject: str, text_body: str, *, html_body: str | None =
     message.set_content(str(text_body or ""))
     if html_body:
         message.add_alternative(str(html_body), subtype="html")
+    on_the_wire = False
     try:
         with _smtp_session(mail) as smtp:
             if mail["tls"] == "starttls":
                 smtp.starttls(context=ssl.create_default_context())
             if mail["user"]:
                 smtp.login(mail["user"], mail["password"])
+            on_the_wire = True  # from here (MAIL FROM, RCPT TO, DATA) it may be delivered
             refused = smtp.send_message(message)
         return not refused
     except (OSError, smtplib.SMTPException, ssl.SSLError) as e:
-        _network_unknown()
+        # A failure before the message is handed over (connection refused, TLS,
+        # login) or an explicit refusal by the server sent nothing: a plain,
+        # retryable failure. Only a lost or unanswered hand-over is unknown.
+        refused_by_server = isinstance(e, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused,
+                                           smtplib.SMTPDataError))
+        if on_the_wire and not refused_by_server:
+            _network_unknown()
         log.warning("notify email failed: %s", type(e).__name__)
         return False
 

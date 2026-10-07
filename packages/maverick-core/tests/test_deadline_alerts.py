@@ -377,3 +377,48 @@ def test_a_subscribed_webhook_counts_as_delivery(world, monkeypatch):
     summary = _cycle(world, [d], lambda body, **kw: 0)
     assert summary["sent"] == 1 and summary["alerts"][0]["backends"] == 1
     assert _cycle(world, [d], lambda body, **kw: 0, now=NOW + 900)["already_sent"] == 1
+
+
+def test_email_that_never_reached_the_server_is_retried_not_marked_unconfirmed(world, tmp_path, monkeypatch):
+    import smtplib
+
+    from maverick import notifications
+
+    monkeypatch.setattr(notifications, "_load_config", lambda: {
+        "backend": "email", "delivery_receipts": False,
+        "email": {"host": "smtp.example.test", "from_address": "lw@example.test", "user": "lw",
+                  "password": "expired", "tls": "ssl", "to": "ops@example.test"}})  # pragma: allowlist secret
+
+    class Session:
+        def __init__(self, login=None, send=None):
+            self._login, self._send = login, send
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def login(self, user, password):
+            if self._login:
+                raise self._login
+
+        def send_message(self, message):
+            if self._send:
+                raise self._send
+            return {}
+    d = _deadline(record_type="incident", record_id="I9", due_in=-HOUR)
+    monkeypatch.setattr(notifications, "_smtp_session",
+                        lambda mail: Session(login=smtplib.SMTPAuthenticationError(535, b"bad credentials")))
+    refused = _cycle(world, [d], None)
+    assert refused["not_sent"] == 1 and refused["unconfirmed"] == 0 and da.recent_alerts(world=world) == []
+    # The password is fixed; the statutory-clock alert goes out.
+    monkeypatch.setattr(notifications, "_smtp_session", lambda mail: Session())
+    assert _cycle(world, [d], None, now=NOW + 3600)["sent"] == 1
+    # A timeout once the message was handed over may have delivered it: never replayed.
+    other = _deadline(record_type="incident", record_id="I10", due_in=-HOUR)
+    monkeypatch.setattr(notifications, "_smtp_session",
+                        lambda mail: Session(send=TimeoutError("no reply after the message body")))
+    lost = _cycle(world, [other], None)
+    assert lost["unconfirmed"] == 1 and lost["not_sent"] == 0
+    assert _cycle(world, [other], None, now=NOW + 3600)["already_sent"] == 1

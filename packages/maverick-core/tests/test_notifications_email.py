@@ -137,3 +137,115 @@ def test_notify_email_backend_uses_the_default_recipient(monkeypatch):
     monkeypatch.setattr(notifications, "_load_config",
                         lambda: {"backend": "email", "email": {**CFG["email"], "to": ""}})
     assert notifications.notify("Run 43 finished", async_dispatch=False) == 0
+
+
+# ---- "unknown" only once the message may be on the wire --------------------
+
+def _checked(cfg, to="bob@example.test"):
+    """(sent, may_have_been_sent) for one email through the real ``send_email``."""
+    from maverick.notifications import send_checked, send_email
+
+    return send_checked(lambda: send_email(to, "s", "b", cfg=cfg))
+
+
+def test_failures_before_the_message_is_handed_over_are_definite(monkeypatch):
+    import smtplib
+    import ssl
+
+    class AuthFails(FakeSMTP):
+        def login(self, user, password):
+            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+
+    class TlsFails(FakeSMTP):
+        def starttls(self, context=None):
+            raise ssl.SSLError("handshake failure")
+
+    class ConnectionRefused(FakeSMTP):
+        def __init__(self, *a, **kw):
+            raise ConnectionRefusedError("refused")
+
+    class NoSuchHost(FakeSMTP):
+        def __init__(self, *a, **kw):
+            raise OSError("name or service not known")
+
+    for fake in (AuthFails, TlsFails, ConnectionRefused, NoSuchHost):
+        monkeypatch.setattr(smtplib, "SMTP", fake)
+        assert _checked(CFG) == (False, False), fake.__name__
+
+
+def test_a_server_that_refuses_the_message_sent_nothing(monkeypatch):
+    import smtplib
+
+    for refusal in (smtplib.SMTPRecipientsRefused({"bob@example.test": (550, b"no such user")}),
+                    smtplib.SMTPSenderRefused(553, b"sender not allowed", "alerts@example.test"),
+                    smtplib.SMTPDataError(554, b"message rejected")):
+        class Refuses(FakeSMTP):
+            def send_message(self, message, _refusal=refusal):
+                raise _refusal
+
+        monkeypatch.setattr(smtplib, "SMTP", Refuses)
+        assert _checked(CFG) == (False, False), type(refusal).__name__
+
+
+def test_a_timeout_or_lost_connection_during_the_hand_over_is_unconfirmed(monkeypatch):
+    import smtplib
+
+    class TimesOutInData(FakeSMTP):
+        def send_message(self, message):
+            raise TimeoutError("no reply after the message body")
+
+    class DropsInData(FakeSMTP):
+        def send_message(self, message):
+            raise smtplib.SMTPServerDisconnected("connection unexpectedly closed")
+
+    class QuitFailsAfterSending(FakeSMTP):
+        def __exit__(self, *exc):
+            raise smtplib.SMTPResponseException(421, b"closing channel")
+
+    for fake in (TimesOutInData, DropsInData, QuitFailsAfterSending):
+        monkeypatch.setattr(smtplib, "SMTP", fake)
+        assert _checked(CFG) == (False, True), fake.__name__
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    assert _checked(CFG) == (True, False)
+
+
+def test_the_platform_mailer_separates_not_sent_from_maybe_sent(monkeypatch):
+    from maverick import mailer
+
+    monkeypatch.setattr(mailer, "configured", lambda: True)
+    for failure, expected in ((mailer.MailerNotSent("Email was not sent."), (False, False)),
+                              (mailer.MailerError("Email sending failed (TimeoutError)."), (False, True))):
+        def send(*args, _failure=failure, **kwargs):
+            raise _failure
+        monkeypatch.setattr(mailer, "send", send)
+        assert _checked({}) == expected, type(failure).__name__
+
+
+def test_the_platform_mailers_own_transport_login_connect_and_data_failures(monkeypatch):
+    import smtplib
+
+    monkeypatch.setenv("EMAIL_USER", "alerts@example.test")
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", "expired-app-password")  # pragma: allowlist secret
+
+    class LoginFails(FakeSMTP):
+        def login(self, user, password):
+            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+
+    class ConnectionRefused(FakeSMTP):
+        def __init__(self, *a, **kw):
+            raise ConnectionRefusedError("refused")
+
+    class RecipientRefused(FakeSMTP):
+        def send_message(self, message):
+            raise smtplib.SMTPRecipientsRefused({"bob@example.test": (550, b"no such user")})
+
+    class TimesOutInData(FakeSMTP):
+        def send_message(self, message):
+            raise TimeoutError("no reply after the message body")
+
+    for fake, expected in ((LoginFails, (False, False)), (ConnectionRefused, (False, False)),
+                           (RecipientRefused, (False, False)), (TimesOutInData, (False, True)),
+                           (FakeSMTP, (True, False))):
+        monkeypatch.setattr(smtplib, "SMTP", fake)
+        monkeypatch.setattr(smtplib, "SMTP_SSL", fake)
+        assert _checked({}) == expected, fake.__name__

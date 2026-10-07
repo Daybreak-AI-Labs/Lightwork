@@ -465,6 +465,9 @@ class _Smtp:
     def starttls(self, **kwargs):
         return None
 
+    def login(self, user, password):
+        return None
+
     def send_message(self, message):
         return self.refused
 
@@ -483,10 +486,11 @@ def test_email_the_server_refused_is_retried_and_one_it_may_have_taken_is_not(tm
     assert refused["failed"] == 1 and _last_sent() == ""
     attempts = []
 
-    def no_reply(mail):
-        attempts.append(mail["host"])
-        raise TimeoutError("no reply after the message was sent")
-    monkeypatch.setattr(notifications, "_smtp_session", no_reply)
+    class NoReplyAfterData(_Smtp):
+        def send_message(self, message):
+            attempts.append("data")
+            raise TimeoutError("no reply after the message was sent")
+    monkeypatch.setattr(notifications, "_smtp_session", lambda mail: NoReplyAfterData({}))
     lost = _cycle(world, NOON + 300)
     assert lost["unconfirmed"] == 1 and lost["failed"] == 0 and _last_sent() == "2026-07-01"
     assert _deliveries(recorded) == [("email", "not_sent"), ("email", "unconfirmed")]
@@ -588,3 +592,28 @@ def test_changing_the_channel_settings_ends_the_wait_at_once(teams, recorded, tm
     channel_identities.link("slack", "U9", "user:alice", actor="admin")
     linked = _cycle(teams["world"], _at(56))
     assert linked["backing_off"] == 0 and linked["failed"] == 1
+
+
+def test_a_mail_login_failure_is_retried_once_the_password_is_fixed(tmp_path, recorded, monkeypatch):
+    import smtplib
+
+    from maverick import notifications, user_preferences
+
+    world = _world(tmp_path)
+    _seed(world)
+    user_preferences.set_preferences("user:alice", email="alice@example.com")
+    monkeypatch.setattr(notifications, "_load_config", lambda: {"email": {
+        "host": "smtp.example.test", "from_address": "lw@example.test", "user": "lw",
+        "password": "expired", "tls": "ssl"}})  # pragma: allowlist secret
+
+    class ExpiredPassword(_Smtp):
+        def login(self, user, password):
+            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+    monkeypatch.setattr(notifications, "_smtp_session", lambda mail: ExpiredPassword({}))
+    first = _cycle(world, NOON)
+    # Nothing was handed to the server: a definite failure with a back-off, not "unconfirmed".
+    assert first["failed"] == 1 and first["unconfirmed"] == 0 and _last_sent() == ""
+    assert _deliveries(recorded) == [("email", "not_sent")]
+    monkeypatch.setattr(notifications, "_smtp_session", lambda mail: _Smtp({}))
+    fixed = _cycle(world, NOON + 300)
+    assert fixed["sent"] == 1 and _last_sent() == "2026-07-01"
