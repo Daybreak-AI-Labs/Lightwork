@@ -51,6 +51,12 @@ def _isolated(tmp_path, monkeypatch):
                         lambda: tmp_path / "agent_trust.json")
     monkeypatch.setattr(external_agents, "registry_path",
                         lambda: tmp_path / "external_agents.json")
+    # Unrated action names take the high refusal floor, so the deployment
+    # rates this fixture's platform actions and fake connector read the way an
+    # operator classifies their own (wire_transfer/send_contract stay high).
+    (tmp_path / "config.toml").write_text(
+        '[security.tool_risk]\nresearch = "low"\ncrm_update = "medium"\n"fakecrm.read" = "low"\n',
+        encoding="utf-8")
     config.reset_config_cache()
     yield
     config.reset_config_cache()
@@ -1059,7 +1065,7 @@ def test_execute_read_end_to_end_over_http(monkeypatch):
                         "path": "/opportunities"})
     assert r.status_code == 200
     verdict = r.json()
-    assert verdict["allowed"] is True and verdict["rule"] == "executed"
+    assert verdict["allowed"] is True and verdict["rule"] == "executed", verdict
     assert verdict["status"] == "executed"
     assert "42 open opportunities" in verdict["result"]
     assert conn.reads == [{"path": "/opportunities"}]
