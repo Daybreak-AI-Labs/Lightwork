@@ -162,13 +162,13 @@ def test_every_everyday_navigation_page_has_authored_help() -> None:
     ("/action-center", "_action_center_body.html", "Refresh list"),  # the page includes it
     ("/goals", "goals.html", "Result"),
     ("/deliverables", "deliverables.html", "Finished work"),
-    ("/automations", "automations.html", "Schedules"),
+    ("/automations", "automations.html", "Create schedule"),
     ("/overview", "index.html", "Recent tasks"),
     ("/spend", "spend.html", "Cost of each task"),
     ("/savings", "savings.html", "Save and recalculate"),
     ("/shoring", "shoring.html", "Book of Work"),
     ("/knowledge-access", "_knowledge_sources.html", "Saved Knowledge sources"),  # the page includes it
-    ("/learning", "learning.html", "Preview what would change"),
+    ("/learning", "learning.html", "Learning systems"),
     ("/connections", "connections.html", "Saved connections"),
     ("/settings", "settings.html", "Models"),
     ("/users", "users.html", "Workspace members"),
