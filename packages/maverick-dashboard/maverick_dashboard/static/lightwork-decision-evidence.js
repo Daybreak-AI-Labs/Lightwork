@@ -15,7 +15,7 @@
   const storage = 'lightwork-decision-original';
   const actionLabel=action=>({create:'new decision review',edit:'changed entered choices',consent:'source use allowed',withdraw:'source use withdrawn',refresh:'source reviewed again',acquire:'single observation',answer:'operator report',remove:'review removal',qualify:'complete loss check',acquire_batch:'complete observation batch',acknowledge:'unconfirmed check acknowledgment','unconfirmed create':'unconfirmed review admission'})[action]||'earlier reviewed change';
   try { pending = JSON.parse(sessionStorage.getItem(storage)); } catch (_) {}
-  function say(text) { $('status').textContent = text; }
+  function say(text) { var line = $('status'); window.mvStatus ? window.mvStatus(line, text) : (line.textContent = text); }
   function remember() { try { if (pending) sessionStorage.setItem(storage, JSON.stringify(pending)); else sessionStorage.removeItem(storage); } catch (_) {} }
   function clearPrivate() { epoch++; current = null; model = null; draft = null; context = ''; pending = null; dirty=false;lossStates=null;remember(); ['saved','author','results','sources','observations','review','state-table','loss-author'].forEach(id => $(id).replaceChildren()); $('history').replaceChildren(); ['current','editor','review'].forEach(id => $(id).hidden = true); }
   async function api(path, body) {

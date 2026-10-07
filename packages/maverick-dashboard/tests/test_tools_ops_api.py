@@ -93,6 +93,20 @@ def _verbs(seen) -> list[str]:
     return [p.get("verb") for p in seen if p.get("verb")]
 
 
+def _skill_change(client, name, action, fingerprint, *, publish_name="", confirm=True):
+    """Review, then add or remove a suggested skill the way the Skills page does."""
+    base = "/api/v1/skills/learned-candidates/" + name
+    context = client.get("/api/v1/skills/learned-candidates").json()["context"]
+    review = client.post(base + "/review", json={"action": action, "fingerprint": fingerprint,
+                                                 "publish_name": publish_name, "context": context})
+    if review.status_code != 200:
+        return review
+    body = {"fingerprint": fingerprint, "confirm": confirm, "review_token": review.json()["token"]}
+    if action == "admit" and publish_name:
+        body["publish_name"] = publish_name
+    return client.post(base + "/" + action, json=body)
+
+
 def _plain(text: str) -> None:
     from test_support.plain_language import developer_terms
     assert developer_terms(f"<main>{text}</main>") == [], text
@@ -124,22 +138,15 @@ def test_suggested_skill_requires_shared_source_review_and_audited_admission(
     assert "Check customer renewal timing" in row["instructions"]
     assert row["source_tasks"] == [shared]
     assert "private-payroll" not in listing.text
-    assert client.post("/api/v1/skills/learned-candidates/private-payroll/admit", json={
-        "fingerprint": "a" * 64, "confirm": True,
-    }).status_code == 404
-    assert client.post("/api/v1/skills/learned-candidates/renewal-timing/admit", json={
-        "fingerprint": row["fingerprint"], "confirm": False,
-    }).status_code == 422
-    assert client.post("/api/v1/skills/learned-candidates/renewal-timing/admit", json={
-        "fingerprint": "b" * 64, "confirm": True,
-    }).status_code == 409
+    # A private source cannot even be reviewed.
+    assert _skill_change(client, "private-payroll", "admit", "a" * 64).status_code == 409
+    assert _skill_change(client, "renewal-timing", "admit", row["fingerprint"], confirm=False).status_code == 422
+    assert _skill_change(client, "renewal-timing", "admit", "b" * 64).status_code == 409
     assert skills.load_skills() == []
 
-    added = client.post("/api/v1/skills/learned-candidates/renewal-timing/admit", json={
-        "fingerprint": row["fingerprint"], "publish_name": "renewal-timing", "confirm": True,
-    })
+    added = _skill_change(client, "renewal-timing", "admit", row["fingerprint"], publish_name="renewal-timing")
     assert added.status_code == 201, added.text
-    assert added.json()["name"] == "renewal-timing"
+    assert added.json()["name"] == "renewal-timing" and added.json()["confirmed"] is True
     assert "learned_skill_admit" in _verbs(seen)
     assert [skill.name for skill in skills.load_skills()] == ["renewal-timing"]
     after = client.get("/api/v1/skills/learned-candidates").json()
@@ -157,13 +164,9 @@ def test_suggested_skill_requires_shared_source_review_and_audited_admission(
     assert "turned off" in paused["status"]
     monkeypatch.delenv("MAVERICK_USE_SKILLS")
     fp = after["added"][0]["fingerprint"]
-    assert client.post("/api/v1/skills/learned-candidates/renewal-timing/withdraw", json={
-        "fingerprint": "0" * 64, "confirm": True,
-    }).status_code == 409
-    removed = client.post("/api/v1/skills/learned-candidates/renewal-timing/withdraw", json={
-        "fingerprint": fp, "confirm": True,
-    })
-    assert removed.status_code == 200, removed.text
+    assert _skill_change(client, "renewal-timing", "withdraw", "0" * 64).status_code == 409
+    removed = _skill_change(client, "renewal-timing", "withdraw", fp)
+    assert removed.status_code == 200 and removed.json()["confirmed"] is True, removed.text
     assert "learned_skill_withdraw" in _verbs(seen)
     assert skills.load_skills() == []
 
@@ -186,12 +189,12 @@ def test_suggested_skill_admission_refuses_disabled_learning_and_audit_failure(
     from maverick import audit
 
     monkeypatch.setattr(audit, "audit_event", lambda *args, **kwargs: False)
-    body = {"fingerprint": row["fingerprint"], "confirm": True}
-    refused = client.post("/api/v1/skills/learned-candidates/renewal-review/admit", json=body)
+    refused = _skill_change(client, "renewal-review", "admit", row["fingerprint"])
     assert refused.status_code == 503
     assert client.get("/api/v1/skills").json() == []
     monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "0")
-    assert client.post("/api/v1/skills/learned-candidates/renewal-review/admit", json=body).status_code == 403
+    # With learning off the suggestion cannot even be reviewed for adding.
+    assert _skill_change(client, "renewal-review", "admit", row["fingerprint"]).status_code == 409
     data = client.get("/api/v1/skills/learned-candidates").json()
     assert data["can_add"] is False and data["suggestions"]
 
@@ -210,9 +213,7 @@ def test_admitted_suggestion_remains_visible_and_withdrawable_after_source_becom
                 "n_examples": 2, "source_goal_ids": [source]},
                tmp_path / "home" / "learned-skills")
     proposal = client.get("/api/v1/skills/learned-candidates").json()["suggestions"][0]
-    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
-        "fingerprint": proposal["fingerprint"], "confirm": True,
-    }).status_code == 201
+    assert _skill_change(client, "renewal-schedule", "admit", proposal["fingerprint"]).status_code == 201
     assert world.bind_goal_owner(source, "user:alice")
     world.close()
 
@@ -225,10 +226,8 @@ def test_admitted_suggestion_remains_visible_and_withdrawable_after_source_becom
     assert paused["source_shared"] is False
     assert "Paused" in paused["status"]
 
-    removed = client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
-        "fingerprint": paused["fingerprint"], "confirm": True,
-    })
-    assert removed.status_code == 200, removed.text
+    removed = _skill_change(client, "renewal-schedule", "withdraw", paused["fingerprint"])
+    assert removed.status_code == 200 and removed.json()["confirmed"] is True, removed.text
     assert client.get("/api/v1/skills/learned-candidates").json()["added"] == []
 
 
@@ -264,20 +263,19 @@ def test_suggested_skill_last_write_rechecks_administrator_permission(
                 state["admin"] = False
             yield
 
+    from maverick_dashboard import learned_skill_changes
     monkeypatch.setattr(native, "require_permission", permission)
+    monkeypatch.setattr(learned_skill_changes, "require_permission", permission)
     monkeypatch.setattr(file_lock, "cross_process_lock", lock_and_demote)
-    body = {"fingerprint": proposal["fingerprint"], "confirm": True}
-    refused = client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json=body)
+    refused = _skill_change(client, "renewal-schedule", "admit", proposal["fingerprint"])
     assert refused.status_code == 403
     assert skills.load_skills() == []
 
     state.update(admin=True, demote_on_lock=False)
-    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json=body).status_code == 201
+    assert _skill_change(client, "renewal-schedule", "admit", proposal["fingerprint"]).status_code == 201
     current = client.get("/api/v1/skills/learned-candidates").json()["added"][0]
     state.update(admin=True, demote_on_lock=True)
-    refused = client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
-        "fingerprint": current["fingerprint"], "confirm": True,
-    })
+    refused = _skill_change(client, "renewal-schedule", "withdraw", current["fingerprint"])
     assert refused.status_code == 403
     assert [item.name for item in skills.load_skills()] == ["renewal-schedule"]
 
@@ -306,22 +304,20 @@ def test_suggested_skill_audit_never_claims_success_before_file_change(
         return original_write(path, text, **kwargs)
 
     monkeypatch.setattr(file_lock, "atomic_write_text", disk_full)
-    failed = client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
-        "fingerprint": proposal["fingerprint"], "confirm": True,
-    })
-    assert failed.status_code == 503 and "Refresh" in failed.text
+    failed = _skill_change(client, "renewal-schedule", "admit", proposal["fingerprint"])
+    # The reserved original stays unconfirmed: no success is claimed and the
+    # change is not repeated.
+    assert failed.json()["confirmed"] is False and "unconfirmed" in failed.json()["message"]
     events = [row for row in seen if row.get("verb") == "learned_skill_admit"]
     assert [row["phase"] for row in events] == ["prepared"]
     assert all(row.get("ok") is not True for row in events)
     assert not (tmp_path / "skills" / "renewal-schedule.md").exists()
 
     monkeypatch.setattr(file_lock, "atomic_write_text", original_write)
-    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
-        "fingerprint": proposal["fingerprint"], "confirm": True,
-    }).status_code == 201
+    added = _skill_change(client, "renewal-schedule", "admit", proposal["fingerprint"])
+    assert added.status_code == 201 and added.json()["confirmed"] is True
     events = [row for row in seen if row.get("verb") == "learned_skill_admit"]
-    assert [row["phase"] for row in events][-2:] == ["prepared", "completed"]
-    assert events[-1]["ok"] is True
+    assert [row["phase"] for row in events] == ["prepared", "prepared"]
 
     saved = client.get("/api/v1/skills/learned-candidates").json()["added"][0]
     original_unlink = Path.unlink
@@ -332,22 +328,17 @@ def test_suggested_skill_audit_never_claims_success_before_file_change(
         return original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", refuse_delete)
-    failed = client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
-        "fingerprint": saved["fingerprint"], "confirm": True,
-    })
-    assert failed.status_code == 503 and "Refresh" in failed.text
+    failed = _skill_change(client, "renewal-schedule", "withdraw", saved["fingerprint"])
+    assert failed.json()["confirmed"] is False and "unconfirmed" in failed.json()["message"]
     events = [row for row in seen if row.get("verb") == "learned_skill_withdraw"]
     assert [row["phase"] for row in events] == ["prepared"]
     assert all(row.get("ok") is not True for row in events)
     assert (tmp_path / "skills" / "renewal-schedule.md").exists()
 
     monkeypatch.setattr(Path, "unlink", original_unlink)
-    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
-        "fingerprint": saved["fingerprint"], "confirm": True,
-    }).status_code == 200
-    events = [row for row in seen if row.get("verb") == "learned_skill_withdraw"]
-    assert [row["phase"] for row in events][-2:] == ["prepared", "completed"]
-    assert events[-1]["ok"] is True
+    removed = _skill_change(client, "renewal-schedule", "withdraw", saved["fingerprint"])
+    assert removed.status_code == 200 and removed.json()["confirmed"] is True
+    assert not (tmp_path / "skills" / "renewal-schedule.md").exists()
 
 
 def test_suggested_skill_completed_audit_failure_reports_changed_state(
@@ -365,19 +356,19 @@ def test_suggested_skill_completed_audit_failure_reports_changed_state(
                 "n_examples": 2, "source_goal_ids": [source]},
                tmp_path / "home" / "learned-skills")
     proposal = client.get("/api/v1/skills/learned-candidates").json()["suggestions"][0]
-    original_audit = audit.audit_event
+    original_record = audit.record
 
     def lose_completion(kind, **payload):
-        if payload.get("phase") == "completed":
+        if payload.get("action") == "skills.reviewed_change.completed":
             return False
-        return original_audit(kind, **payload)
+        return original_record(kind, **payload)
 
-    monkeypatch.setattr(audit, "audit_event", lose_completion)
-    result = client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
-        "fingerprint": proposal["fingerprint"], "confirm": True,
-    })
-    assert result.status_code == 503
-    assert "skill changed" in result.text.lower()
+    monkeypatch.setattr(audit, "record", lose_completion)
+    result = _skill_change(client, "renewal-schedule", "admit", proposal["fingerprint"])
+    # The skill changed, but its completion record was lost: the original is
+    # reported as unconfirmed and the installed skill is named separately.
+    assert result.json()["confirmed"] is False
+    assert result.json()["current"] == "This saved version is still installed."
     assert [item.name for item in skills.load_skills()] == ["renewal-schedule"]
     assert client.get("/api/v1/skills/learned-candidates").json()["added"][0]["name"] == "renewal-schedule"
 

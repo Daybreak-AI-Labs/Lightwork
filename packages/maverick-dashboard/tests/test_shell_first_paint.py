@@ -70,17 +70,74 @@ def test_the_one_stylesheet_carries_the_preference_and_translation_rules():
 
 
 @pytest.mark.parametrize("path", ["/overview", "/chat"])
-def test_copilot_scripts_are_deferred_ahead_of_page_scripts(path):
+def test_copilot_scripts_load_after_the_page_not_with_it(path):
+    # They shared a slow phone link's bandwidth with the stylesheet and the
+    # first paint. lightwork-ui.js loads them when the page is idle or the
+    # Copilot is opened (tests/js/copilot_lazy_load.test.js), in this order.
     page = _page(path)
-    head = _head(page)
-    scripts = re.findall(r"<script\b[^>]*\bsrc=\"([^\"]+)\"[^>]*>", page)
-    deferred = [src for src, tag in zip(scripts, re.findall(r"<script\b[^>]*\bsrc=\"[^\"]+\"[^>]*>", page), strict=True)
-                if " defer" in tag]
-    assert [src.split("?")[0] for src in deferred[:2]] == [
-        "/static/lightwork-product-operations.js", "/static/lightwork-copilot.js"]
+    tags = re.findall(r"<script\b[^>]*>", page)
     for name in ("lightwork-product-operations.js", "lightwork-copilot.js"):
-        assert page.count(name) == 1 and name in head, name
+        assert not [tag for tag in tags if name in tag], name
+    fab = re.search(r'<button[^>]*id="mv-copilot-fab"[^>]*>', page).group(0)
+    operations = re.search(r'data-operations-src="(/static/lightwork-product-operations\.js\?v=[^"]+)"', fab)
+    copilot = re.search(r'data-copilot-src="(/static/lightwork-copilot\.js\?v=[^"]+)"', fab)
+    assert operations and copilot, fab
+    assert "window.mvLoadCopilot = load;" in (STATIC / "lightwork-ui.js").read_text(encoding="utf-8")
     # Inline page scripts call these as the page parses: they stay synchronous.
     for name in ("lightwork-ui.js", "lightwork-i18n.js"):
         tag = re.search(rf"<script\b[^>]*{re.escape(name)}[^>]*>", page).group(0)
         assert " defer" not in tag and " async" not in tag, tag
+
+
+@pytest.mark.parametrize("path", ["/overview", "/chat"])
+def test_the_scripts_the_first_paint_waits_for_are_requested_first(path):
+    # On a slow phone link the responses share one connection's bandwidth in
+    # the order they were asked for. lightwork-ui.js and lightwork-i18n.js are
+    # parser-blocking at the end of the page, so their requests go out right
+    # after the stylesheet, before the font.
+    head = _head(_page(path))
+    stylesheet = head.index('<link rel="stylesheet" href="/static/lightwork.css')
+    ui = head.index('<link rel="preload" as="script" href="/static/lightwork-ui.js')
+    i18n = head.index('<link rel="preload" as="script" href="/static/lightwork-i18n.js')
+    font = head.index('<link rel="preload" href="/static/fonts/manrope-var.woff2"')
+    assert stylesheet < ui < font and i18n < font
+
+
+def test_a_task_conversation_is_visible_from_its_first_paint():
+    # The conversation faded in from opacity 0 over 0.4 s, so the task page's
+    # largest text (the request) counted as painted 0.4 s late on phones.
+    # It still slides in, but is never invisible.
+    source = (TEMPLATES / "chat_goal.html").read_text(encoding="utf-8")
+    keyframes = re.search(r"@keyframes convoIn \{(.*?)\}\s*\}", source, re.DOTALL)
+    assert keyframes is not None
+    assert "opacity" not in keyframes.group(1)
+
+
+@pytest.mark.parametrize("path", ["/approvals", "/security"])
+def test_the_assessment_review_code_is_a_cached_file_not_page_text(path):
+    # Its 39 KB of code was written into every page with the review pop-out,
+    # so a phone downloaded and parsed it before the first paint, on every
+    # visit. It is one deferred, cached file now; the pop-out's markup stays.
+    page = _page(path)
+    assert 'id="arv-dialog"' in page
+    assert "window.mvAssessmentReview.open(id): fetch" not in page
+    tags = re.findall(r'<script\b[^>]*lightwork-assessment-review\.js[^>]*>', page)
+    assert len(tags) == 1 and " defer" in tags[0], tags
+    assert "window.mvAssessmentReview = { open: open };" in (
+        STATIC / "lightwork-assessment-review.js").read_text(encoding="utf-8")
+
+
+def test_approval_rows_are_shaped_before_the_review_code_runs():
+    # The approvals queue still shapes its rows as the page parses (no shift
+    # after the first paint); only the click needs the deferred review code.
+    source = (TEMPLATES / "_approvals_queue.html").read_text(encoding="utf-8")
+    assert "if (!window.mvAssessmentReview) return;" not in source
+    assert "if (!document.getElementById('arv-dialog')) return;" in source
+    assert "if (window.mvAssessmentReview) window.mvAssessmentReview.open(assessmentId);" in source
+
+
+def test_the_brand_mark_is_a_small_download():
+    # It loads beside the stylesheet on every page, sharing a slow phone
+    # link before the first paint. 256 colours look the same at 30 px.
+    data = (STATIC / "daybreak-mark.png").read_bytes()
+    assert len(data) < 12_000

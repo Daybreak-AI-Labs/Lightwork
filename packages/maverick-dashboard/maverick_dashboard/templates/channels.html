@@ -350,7 +350,7 @@
       });
     }
     function say(form, text, failed) {
-      var result = form.querySelector('[data-ch-save-result]'); result.textContent = text;
+      var result = form.querySelector('[data-ch-save-result]'); window.mvStatus ? window.mvStatus(result, text) : (result.textContent = text);
       result.className = 'ch-result ' + (failed ? 'ch-result--failed' : 'ch-result--ok');
     }
     function pending(form, value) {

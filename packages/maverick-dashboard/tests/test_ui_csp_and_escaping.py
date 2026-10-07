@@ -31,9 +31,12 @@ def test_csp_header_present_and_locked_down(monkeypatch, tmp_path):
 
 def test_docs_csp_allows_fastapi_cdn_assets(monkeypatch):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    docs_csp = _client().get("/docs").headers.get("Content-Security-Policy", "")
+    docs = _client().get("/docs")
+    docs_csp = docs.headers.get("Content-Security-Policy", "")
     redoc_csp = _client().get("/redoc").headers.get("Content-Security-Policy", "")
-    assert "https://cdn.jsdelivr.net" in docs_csp
+    # The API explorer ships its own assets, so it stays self-only.
+    assert "/static/swagger-ui-" in docs.text and "cdn.jsdelivr.net" not in docs.text
+    assert "https://" not in docs_csp
     assert "https://cdn.jsdelivr.net" in redoc_csp
     assert "connect-src 'self'" in docs_csp and "connect-src 'self'" in redoc_csp
 

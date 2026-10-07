@@ -35,20 +35,44 @@ def _harness(monkeypatch):
     monkeypatch.setattr(suggested.native, "_learned_candidates", lambda: {
         key: value for key, value in state.items() if key in {"suggestions", "added", "can_add", "blocked"}})
 
-    def admit(request, name, body):
-        state["calls"].append(("admit", name, body.fingerprint, body.publish_name, body.confirm))
-        state["suggestions"] = []
-        state["added"] = [{"name": body.publish_name, "fingerprint": "b" * 64,
-                           "candidate_fingerprint": row["fingerprint"]}]
-        return {"name": body.publish_name, "triggers": row["triggers"], "tools_needed": []}
+    state["done"] = {}
 
-    def withdraw(request, name, body):
-        state["calls"].append(("withdraw", name, body.fingerprint, body.confirm))
-        state["added"] = []
-        return {"name": name, "removed": True}
+    def prepare(request, name, action, fingerprint, publish_name=""):
+        rows = state["suggestions"] if action == "admit" else state["added"]
+        row = next((item for item in rows if item["name"] == name and item["fingerprint"] == fingerprint), None)
+        if row is None:
+            raise HTTPException(409, "This suggestion changed or is unavailable. Refresh before reviewing it.")
+        return {"action": action, "name": name, "fingerprint": fingerprint, "publish_name": publish_name or name,
+                "changes": [{"label": "Full instructions", "after": row.get("instructions", "")}],
+                "message": "Read every instruction and its source tasks."}
 
-    monkeypatch.setattr(suggested.native, "admit_checked_learned_skill", admit)
-    monkeypatch.setattr(suggested.native, "withdraw_checked_learned_skill", withdraw)
+    def apply(request, prepared, operation, *, expires):
+        """The Skills page's reviewed custody: one effect per original request."""
+        if operation in state["done"]:
+            return state["done"][operation]
+        if prepare(request, prepared["name"], prepared["action"], prepared["fingerprint"], prepared["publish_name"]) != prepared:
+            raise HTTPException(409, "The reviewed skill or its source changed.")
+        if prepared["action"] == "admit":
+            state["calls"].append(("admit", prepared["name"], prepared["fingerprint"], prepared["publish_name"], True))
+            state["suggestions"] = []
+            state["added"] = [{"name": prepared["publish_name"], "fingerprint": "b" * 64,
+                               "candidate_fingerprint": prepared["fingerprint"]}]
+        else:
+            state["calls"].append(("withdraw", prepared["name"], prepared["fingerprint"], True))
+            state["added"] = []
+        state["done"][operation] = {"operation": operation, "confirmed": True, "name": prepared["publish_name"],
+                                    "message": "Your original reviewed skill was changed."}
+        return state["done"][operation]
+
+    monkeypatch.setattr(suggested.changes, "prepare", prepare)
+    monkeypatch.setattr(suggested.changes, "apply", apply)
+    monkeypatch.setattr(suggested.changes, "original_for_review",
+                        lambda request, prepared, operation: state["done"].get(operation))
+
+    def authority(request, context=None, **_):
+        suggested.auth.require_permission(request, "admin")
+        return "c" * 64
+    monkeypatch.setattr(suggested.changes, "authority", authority)
     app = FastAPI()
     app.include_router(ops.router)
     return TestClient(app), state
@@ -70,7 +94,8 @@ def test_copilot_reviews_exact_candidate_then_calls_native_admit_and_withdraw(mo
     with client:
         catalog = _catalog(client)
         assert {row["id"] for row in catalog["operations"]} == {
-            "skills.review_suggestions", "skills.admit_suggestion", "skills.withdraw_suggestion"}
+            "skills.review_suggestions", "skills.admit_suggestion", "skills.withdraw_suggestion",
+            "skills.read_original_change"}
         read = _prepare(client, catalog, "skills.review_suggestions", {})
         assert read.status_code == 200 and read.json()["read_only"]
         assert "Check the date" in read.json()["details"]["suggestions"][0]["instructions"]

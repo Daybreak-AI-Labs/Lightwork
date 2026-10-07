@@ -633,20 +633,24 @@ def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
     """The playbook form persists through the existing /agents/<name>/override
     path: a new pack, discoverable, with its gated workflow intact."""
     _isolate(monkeypatch, tmp_path)
+    # Saving accepts only actions this installation can run.
     r = _client().post("/api/v1/agents/ap-bot/override", json={
         "description": "AP clerk", "persona": "You are a careful AP clerk.",
-        "allow_tools": ["ocr_read", "send_payment"], "deny_tools": ["shell"],
+        "allow_tools": ["ocr", "global_payments"], "deny_tools": ["shell"],
         "max_risk": "high",
         "workflow": [
-            {"name": "Read", "instruction": "ocr", "tools": ["ocr_read"], "gate": None},
-            {"name": "Pay", "instruction": "pay", "tools": ["send_payment"], "gate": "approval"},
+            {"name": "Read", "instruction": "ocr", "tools": ["ocr"], "gate": None},
+            {"name": "Pay", "instruction": "pay", "tools": ["global_payments"], "gate": "approval"},
         ],
     })
     assert r.status_code == 200, r.text
     from maverick.domain import available_domains
     prof = available_domains()["ap-bot"]
     assert [(s.name, s.gate) for s in prof.workflow] == [("Read", None), ("Pay", "approval")]
-    assert prof.allow_tools == ["ocr_read", "send_payment"]
+    assert prof.allow_tools == ["ocr", "global_payments"]
+    unknown = _client().post("/api/v1/agents/ap-bot-2/override", json={
+        "description": "AP clerk", "allow_tools": ["send_payment"], "max_risk": "low"})
+    assert unknown.status_code == 422 and "not available in this installation" in unknown.text
 
 
 def test_save_playbook_rejects_lint_failure(monkeypatch, tmp_path):

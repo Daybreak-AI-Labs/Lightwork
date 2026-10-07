@@ -491,9 +491,10 @@ def step_check_snapshot(request, selection):
     from . import workflow_step_checks as checks
     flow_id = _flow_id(selection)
     node_id = selection.get("node_id")
+    # The flow is read first: a person who cannot open it never sees this action.
+    source = native.get_flow_endpoint(request, flow_id)
     if not node_id:
         raise HTTPException(409, "Select a taught step in this workflow first.")
-    source = native.get_flow_endpoint(request, flow_id)
     value = checks.call(lambda: checks.material(request, {"flow": source, "step": node_id}))
     return Snapshot(digest([value["context"], value["saved_source"], node_id, value["version"]]),
                     "Current owned workflow and selected taught step",

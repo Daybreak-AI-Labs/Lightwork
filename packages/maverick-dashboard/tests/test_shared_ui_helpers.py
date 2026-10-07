@@ -46,9 +46,6 @@ _DEFINITION = re.compile(
 # The local fetch-and-read wrappers still allowed, each because moving it onto
 # mvFetchJSON would change what the page does:
 _KEPT_WRAPPERS = {
-    # Tells a saved change (200) from one queued for approval (202), and
-    # mvFetchJSON returns only the body.
-    ("lightwork-settings-all.js", "send"),
     # Also runs on the recovery page, whose shell has no lightwork-ui.js.
     ("lightwork-provider-spending.js", "request"),
     # Checks the page's access token on both sides of the request and of the
@@ -71,6 +68,18 @@ _KEPT_WRAPPERS = {
     # before it counts, in the page's own words.
     ("lightwork-local-runtime.js", "call"),
     ("lightwork-retention-maintenance.js", "call"),
+    # From the owner's later commits on #2529 (answer feedback, questionnaires,
+    # notices). The answer panel checks that the answer it reviewed is still
+    # the live one between the reply and its body, before any access
+    # decision, and counts a 404 as lost access only while it is live. The
+    # questionnaire builder and notice proposals pass the server's sentence
+    # through mvPlainDetail and fall back to their own, and the builder
+    # names a cancel by the page as a timeout. The other wrappers from these
+    # commits now go through mvFetchJSON's serverDetail, messages and
+    # onContextChange options.
+    ("lightwork-answer-panel.js", "request"),
+    ("lightwork-compliance-questionnaire-builder.js", "call"),
+    ("lightwork-privacy-notice-proposals.js", "call"),
 }
 
 # Status-line setters that still write the text themselves, each named with

@@ -429,8 +429,8 @@ def test_scoped_user_sees_filtered_pack_catalog(monkeypatch, tmp_path):
 
 
 def test_scoped_user_sees_filtered_agents_and_safe_workforce_recovery(monkeypatch, tmp_path):
-    # /agents keeps its filtered roster. /workforce also contains unfiltered
-    # company rollups, so a scoped user gets a clear recovery page instead.
+    # /agents keeps its filtered roster. /workforce's company rollups are
+    # unfiltered, so a scoped user gets their own department board instead.
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
     c = _client(monkeypatch, tmp_path)
     from maverick_dashboard import suite_grants
@@ -438,8 +438,8 @@ def test_scoped_user_sees_filtered_agents_and_safe_workforce_recovery(monkeypatc
     _as(monkeypatch, "user:fin")
 
     workforce = c.get("/workforce", headers={"Accept": "text/html"})
-    assert workforce.status_code == 403
-    assert "departments you cannot access" in workforce.text
+    assert workforce.status_code == 200
+    assert "Other people's work and inaccessible departments are excluded. These are not company totals." in workforce.text.replace("&#39;", "'")
     assert "Capital Markets" not in workforce.text
 
     agents_page = c.get("/agents").text

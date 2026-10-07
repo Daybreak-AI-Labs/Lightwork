@@ -133,3 +133,17 @@ test("non-administrators see the list without change buttons", async (t) => {
   assert.equal(ui.rowButton("Acme", "Send a new link"), undefined);
   assert.equal(ui.calls.some((c) => c.url.pathname.endsWith("/sharing")), false);
 });
+
+test("a list that cannot load says so with a retry instead of staying on Loading", async (t) => {
+  let down = true;
+  const ui = await fixture({ intercept: (call) => (down && call.url.pathname.endsWith("/invitations") && call.method === "GET"
+    ? { __status: 503, detail: "unavailable" } : undefined) });
+  t.after(() => ui.window.close());
+  const list = ui.el("tpc-invitations");
+  assert.doesNotMatch(list.textContent, /Loading/);
+  assert.match(list.textContent, /Invitations could not be loaded/);
+  const retry = [...list.querySelectorAll("button")].find((b) => b.textContent === "Try again");
+  assert.ok(retry);
+  down = false; retry.click(); await ui.settle();
+  assert.match(ui.el("tpc-invitations").textContent, /Acme Corp/);
+});

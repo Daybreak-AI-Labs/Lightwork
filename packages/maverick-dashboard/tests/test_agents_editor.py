@@ -279,31 +279,51 @@ class TestOverrideLifecycle:
         assert client.post(f"/api/v1/agents/{name}/validate", json=body).json()["ok"]
         assert client.post(f"/api/v1/agents/{name}/override", json=body).status_code == 200
 
+    @staticmethod
+    def _review_change(name, action):
+        """Prepare the Agent Factory review of a reset or removal."""
+        context = client.get("/api/v1/agent-override-changes").json()["context"]
+        return client.post("/api/v1/agent-override-changes/review",
+                           json={"name": name, "action": action, "context": context})
+
+    def _change(self, name, action):
+        """Reset or remove through the reviewed change, as Agent Factory does."""
+        review = self._review_change(name, action)
+        if review.status_code != 200:
+            return review
+        return client.request("DELETE", f"/api/v1/agents/{name}/override",
+                              json={"token": review.json()["token"], "confirmed": True})
+
     def test_delete_override_reverts(self, monkeypatch):
         import maverick.audit as audit
 
         events = []
-        monkeypatch.setattr(audit, "audit_event", lambda *_args, **kwargs: events.append(kwargs) or True)
+        real_record = audit.record
+
+        def recording(kind, **payload):
+            events.append(payload.get("action"))
+            return real_record(kind, **payload)
+        monkeypatch.setattr(audit, "record", recording)
         name = _clean_builtin_name()
         client.post(f"/api/v1/agents/{name}/override", json={"description": "temp"})
         current = client.get(f"/api/v1/agents/{name}").json()
         assert current["is_override"] is True
-        missing_revision = client.delete(f"/api/v1/agents/{name}/override")
-        assert missing_revision.status_code == 409
+        events.clear()
+        missing_review = client.delete(f"/api/v1/agents/{name}/override")
+        assert missing_review.status_code == 409
         assert not events
-        monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: False)
-        no_record = client.delete(f"/api/v1/agents/{name}/override", params={
-            "expected_generation": current["generation"],
-        })
-        assert no_record.status_code == 503
+        review = self._review_change(name, "reset_builtin")
+        assert review.status_code == 200 and "Description" in str(review.json()["changes"])
+        monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: False)
+        # Without an activity record the reserved request stays unconfirmed and
+        # nothing is reset.
+        no_record = self._change(name, "reset_builtin")
+        assert no_record.status_code == 200 and no_record.json()["confirmed"] is False
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is True
-        monkeypatch.setattr(audit, "audit_event", lambda *_args, **kwargs: events.append(kwargs) or True)
-        r = client.delete(f"/api/v1/agents/{name}/override", params={
-            "expected_generation": current["generation"],
-        })
-        assert r.status_code == 200
-        assert events and events[0]["verb"] == "specialist_override_reset_requested"
-        assert "description" in events[0]["removed_fields"]
+        monkeypatch.setattr(audit, "record", recording)
+        r = self._change(name, "reset_builtin")
+        assert r.status_code == 200 and r.json()["confirmed"] is True
+        assert events[:1] == ["agents.override_removal.started"] and "agents.override_removal.completed" in events
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is False
 
     def test_rejected_builtin_can_be_restored_in_app_with_generation(self, tmp_path, monkeypatch):
@@ -320,21 +340,18 @@ class TestOverrideLifecycle:
         assert state and state["generation"] and state["is_builtin"]
         page = client.get("/agents").text
         assert "Agents and specialists paused for setup review" in page
-        assert f'data-name="{name}"' in page
-        assert f'data-generation="{state["generation"]}"' in page
-        assert "Restore original setup" in page
+        assert f'data-agent-change="{name}" data-agent-change-action="reset_builtin"' in page
+        assert "Review discard and built-in reset" in page
         assert client.get(f"/api/v1/agents/{name}").status_code == 404
 
+        review = self._review_change(name, "reset_builtin")
+        assert review.status_code == 200 and review.json()["source_kind"] == "damaged"
         path.write_text(f'name = "{name}"\nallow_tools = ["shell"]\n', encoding="utf-8")
-        stale = client.delete(f"/api/v1/agents/{name}/override", params={
-            "expected_generation": state["generation"],
-        })
+        stale = client.request("DELETE", f"/api/v1/agents/{name}/override",
+                               json={"token": review.json()["token"], "confirmed": True})
         assert stale.status_code == 409 and path.exists()
-        current = rejected_override_view(name)
-        restored = client.delete(f"/api/v1/agents/{name}/override", params={
-            "expected_generation": current["generation"],
-        })
-        assert restored.status_code == 200 and restored.json()["removed"] is True
+        restored = self._change(name, "reset_builtin")
+        assert restored.status_code == 200 and restored.json()["confirmed"] is True
         assert not path.exists()
         assert client.get(f"/api/v1/agents/{name}").status_code == 200
 
@@ -349,12 +366,10 @@ class TestOverrideLifecycle:
 
         state = rejected_override_view("custom_bad")
         assert state and not state["is_builtin"]
-        assert "Remove unavailable agent" in client.get("/agents").text
-        response = client.delete("/api/v1/agents/custom_bad/override", params={
-            "expected_generation": state["generation"],
-        })
+        assert "Review discard of damaged setup" in client.get("/agents").text
+        response = self._change("custom_bad", "remove_custom")
         assert response.status_code == 200
-        assert response.json() == {"removed": True, "agent": None}
+        assert response.json()["confirmed"] is True and response.json()["action"] == "remove_custom"
         assert not path.exists()
 
     @pytest.mark.parametrize("method", ["post", "delete"])
@@ -368,7 +383,7 @@ class TestOverrideLifecycle:
         if method == "post":
             response = client.post(url, json={"description": "overwrite"})
         else:
-            response = client.delete(url)
+            response = self._review_change("..\\config", "remove_custom")
 
         assert response.status_code == 422
         assert escaped.read_text(encoding="utf-8") == "sentinel"

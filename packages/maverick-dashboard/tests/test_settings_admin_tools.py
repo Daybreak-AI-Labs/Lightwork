@@ -40,12 +40,18 @@ def client(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     import maverick.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
+    from maverick import client as bound_client
     from maverick import config
     config.reset_config_cache()
+    bound_client.reset_client_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
     yield TestClient(dash_app.app, headers=ORIGIN)
     config.reset_config_cache()
+    # The process-wide client binding was read under this test's organisation;
+    # forget it so later tests resolve their own (unbound) installation.
+    bound_client.reset_client_cache()
+    dash_app._world_cache.clear()
 
 
 def _as_viewer(monkeypatch):
@@ -523,8 +529,9 @@ def test_organisation_data_download_and_erase(client, monkeypatch, tmp_path, aud
 def test_erase_is_refused_without_a_named_organisation(client, monkeypatch):
     from maverick import client as client_binding
     client_binding.reset_client_cache()
+    # The fixture binds this installation to another organisation.
     r = client.post("/api/v1/admin/system/client/erase", json={"organisation": "acme", "confirm": True})
-    assert r.status_code == 409 and "nothing was erased" in r.json()["detail"]
+    assert r.status_code == 409 and "nothing was erased" in r.json()["detail"].lower()
     _as_viewer(monkeypatch)
     assert client.post("/api/v1/admin/system/client/erase",
                        json={"organisation": "acme", "confirm": True}).status_code == 403

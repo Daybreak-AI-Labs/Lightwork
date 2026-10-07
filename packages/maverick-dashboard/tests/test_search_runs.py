@@ -45,7 +45,7 @@ def test_goals_page_renders_search_box():
     resp = client.get("/goals")
     assert resp.status_code == 200
     assert 'id="run-search-q"' in resp.text
-    assert "/api/v1/goals/search?q=" in resp.text
+    assert "/api/v1/goals/search-page?" in resp.text
 
 
 def test_tasks_whose_wording_looks_risky_carry_a_plain_label():

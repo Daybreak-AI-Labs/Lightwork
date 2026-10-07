@@ -12,6 +12,24 @@ from maverick_dashboard.app import app
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def _review_team(key):
+    """Prepare the reviewed team save the Workforce page shows."""
+    context = client.get("/api/v1/department-team-updates/context")
+    if context.status_code != 200:
+        return context
+    return client.post("/api/v1/department-team-updates/review",
+                       json={"department": key, "expected_context": context.json()["context"]})
+
+
+def _save_team(key):
+    """Save a department team through its review, as Update team does."""
+    review = _review_team(key)
+    if review.status_code != 200:
+        return review
+    return client.post("/api/v1/department-team-updates/save",
+                       json={"token": review.json()["token"], "confirmed": True})
+
+
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
     from maverick import world_model
@@ -50,9 +68,9 @@ def test_team_with_no_usable_specialist_is_not_deployed(monkeypatch):
         {"name": name, "readiness": {"state": "needs_setup"}}
         for name in get_department("finance").members
     ])
-    response = client.post("/api/v1/departments/finance/deploy", json={})
+    response = _review_team("finance")
     assert response.status_code == 409
-    assert "no specialists" in response.json()["detail"]
+    assert "No specialist in this department passed its action setup check" in response.json()["detail"]
 
 
 def test_team_with_only_unverified_specialists_is_not_deployed(monkeypatch):
@@ -63,9 +81,9 @@ def test_team_with_only_unverified_specialists_is_not_deployed(monkeypatch):
         {"name": name, "readiness": {"state": "unknown"}}
         for name in get_department("finance").members
     ])
-    response = client.post("/api/v1/departments/finance/deploy", json={})
+    response = _review_team("finance")
     assert response.status_code == 409
-    assert "setup checks" in response.json()["detail"]
+    assert "passed its action setup check" in response.json()["detail"]
 
 
 def test_unknown_department_404():
@@ -265,12 +283,14 @@ def test_deploy_department_creates_a_fleet(tmp_path, monkeypatch):
     ])
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    r = client.post("/api/v1/departments/finance/deploy")
-    assert r.status_code == 201
-    fleet = r.json()["fleet"]
-    assert fleet["name"] == "dept-finance"
-    assert fleet["agents"]
-    assert r.json()["skipped_count"] == 0
+    review = _review_team("finance")
+    assert review.status_code == 200 and review.json()["preview"]["Setup still needed"] == []
+    r = _save_team("finance")
+    assert r.status_code == 200 and r.json()["message"] == "Team set up."
+    from maverick.fleet import load_fleet
+    fleet = load_fleet("dept-finance")
+    assert fleet.name == "dept-finance"
+    assert fleet.agents
     # It is now a real, runnable fleet.
     assert any(f["name"] == "dept-finance" for f in client.get("/api/v1/fleets").json()["fleets"])
 
@@ -286,17 +306,18 @@ def test_repeat_deploy_keeps_customer_changes_and_reports_no_new_members(tmp_pat
     ])
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    first = client.post("/api/v1/departments/finance/deploy")
-    assert first.status_code == 201 and first.json()["created"] is True
+    first = _save_team("finance")
+    assert first.status_code == 200 and first.json()["message"] == "Team set up."
     original = load_fleet("dept-finance")
     changed = FleetAgent(original.agents[0].name, "customer_role", "Customer instructions", original.agents[0].domain)
     manual = FleetAgent("customer_added", "customer_role", "Customer addition")
     save_fleet(Fleet(name=original.name, owner=original.owner,
                      agents=(changed, *original.agents[2:], manual), created_at=original.created_at))
 
-    again = client.post("/api/v1/departments/finance/deploy")
+    again = _save_team("finance")
     assert again.status_code == 200
-    assert again.json()["created"] is False and again.json()["added_count"] == 0
+    assert again.json()["details"]["New specialists at this save"] == 0
+    assert again.json()["message"] != "Team set up."
     kept = load_fleet("dept-finance")
     assert kept.agents == (changed, *original.agents[2:], manual)
     assert kept.created_at == original.created_at
@@ -306,8 +327,9 @@ def test_repeat_deploy_keeps_customer_changes_and_reports_no_new_members(tmp_pat
     monkeypatch.setattr(domain_edit, "list_agents", lambda: [
         {"name": name, "readiness": {"state": "needs_setup"}} for name in members
     ])
-    unavailable = client.post("/api/v1/departments/finance/deploy")
-    assert unavailable.status_code == 200 and unavailable.json()["added_count"] == 0
+    unavailable = _save_team("finance")
+    assert unavailable.status_code == 200
+    assert unavailable.json()["details"]["New specialists at this save"] == 0
     assert load_fleet("dept-finance").agents == kept.agents
 
 
@@ -327,14 +349,15 @@ def test_deploy_excludes_specialists_that_need_setup_and_reports_them(tmp_path, 
     ])
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    response = client.post("/api/v1/departments/finance/deploy")
-    assert response.status_code == 201, response.text
-    body = response.json()
-    assert [agent["name"] for agent in body["fleet"]["agents"]] == [ready]
-    assert body["deployed_count"] == 1
-    assert body["skipped_count"] == len(members) - 1
-    assert all(item["reason"] == "Needs a connected source" and item["fix_url"] == "/connections"
-               for item in body["skipped_specialists"])
+    review = _review_team("finance")
+    assert review.status_code == 200, review.text
+    skipped = review.json()["preview"]["Setup still needed"]
+    assert len(skipped) == len(members) - 1
+    assert all(item["Reason"] == "Needs a connected source" and item["Next step"]["href"] == "/connections"
+               for item in skipped)
+    response = _save_team("finance")
+    assert response.status_code == 200, response.text
+    assert response.json()["details"]["Team size at this save"] == 1
     from maverick.fleet import load_fleet
 
     assert [agent.name for agent in load_fleet("dept-finance").agents] == [ready]
@@ -368,12 +391,12 @@ def test_deploy_managed_roster_without_active_tenant_fails_closed(tmp_path, monk
         tenant_registry.create_tenant("acme", plan="free")
         rows = client.get("/api/v1/departments").json()
         assert any(r["key"] == "finance" and r["entitled"] is False for r in rows)
-        r = client.post("/api/v1/departments/finance/deploy")
+        r = _review_team("finance")
     finally:
         reset_tenant(token)
 
     assert r.status_code == 402
-    assert "active tenant" in r.json()["detail"]
+    assert "Choose your workspace" in r.json()["detail"]
 
 
 def test_deploy_passes_active_tenant_to_entitlement(tmp_path, monkeypatch):

@@ -7,6 +7,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.channel_review import channel_review_token
+
 FAKE_SECRET = "not-a-real-secret"  # pragma: allowlist secret
 APP_ID = "0f0f0f0f-1111-2222-3333-444444444444"
 TENANT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -258,9 +260,13 @@ class _Resp:
 
 def _save_teams(client):
     r = client.post("/channels/save", data={"channel": "teams", "enabled": "on", "app_id": APP_ID,
+                                              "review_token": channel_review_token(client),
+                                              # A chat app with nobody permitted is refused before any
+                                              # network test, so the connection test names one person.
+                                              "allowed_users": "12345678-abcd-abcd-abcd-1234567890ab", "confirm_people": "yes",
                                               "app_password": FAKE_SECRET, "tenant_id": TENANT},
                     follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 303, r.text
     from maverick import config
     config.reset_config_cache()
 

@@ -781,6 +781,14 @@
     <details class="settings-details" data-maintenance-details="health" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-out="health"></ul></details>
   </div>
 
+  {% if can_open_page('/settings/page-speed') %}
+  <div class="section-head" data-settings-group="maintenance"><h2>Page speed for real visitors</h2></div>
+  <div class="panel" data-settings-group="maintenance">
+    <p class="muted settings-lead">How fast pages load and respond for the people using Lightwork, on phones and computers, over the last 28 days. Measuring is optional and off until you turn it on.</p>
+    <p class="settings-row-form"><a class="btn" href="/settings/page-speed">Open page speed</a></p>
+  </div>
+  {% endif %}
+
   <div class="section-head" data-settings-group="maintenance"><h2>Installation settings check</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="settings">
     <p class="muted settings-lead">Looks for mistakes in the settings chosen when Lightwork was installed.</p>
@@ -989,15 +997,6 @@
     .model-group-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
     .model-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; }
     .model-row input { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
-    .settings-index { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-3); align-items: end; margin-bottom: var(--space-4); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--border) 72%, white 18%); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 78%, transparent); box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in srgb, white 15%, transparent); backdrop-filter: blur(22px) saturate(145%); -webkit-backdrop-filter: blur(22px) saturate(145%); }
-    .settings-index > * { min-width: 0; }
-    .settings-index h2, .settings-index p { margin: 0; }
-    .settings-index label { display: grid; gap: var(--space-1); }
-    .settings-index > .mv-tabs { grid-column: 1 / -1; }
-    #settings-filter-status { grid-column: 1 / -1; min-height: 1.3em; }
-    .settings-all-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
-    @media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
-    @media (prefers-reduced-transparency: reduce) { .settings-index { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--panel); } }
   </style>
   <script>
   (function () {
@@ -1027,7 +1026,9 @@
     // starts keyboard focus there instead of at the skip link.
     function selectGroup(group, focus, remember) {
       active = groups.indexOf(group) === -1 ? 'general' : group;
-      if (search) search.value = '';
+      // Writing a text field's value makes the browser lay the page out at
+      // once (about 40 ms on a phone), so an empty search is left alone.
+      if (search && search.value) search.value = '';
       grouped.forEach(function (node) { node.hidden = node.dataset.settingsGroup !== active; });
       if (sectionsRoot) sectionsRoot.setAttribute('aria-labelledby', 'settings-tab-' + active);
       tabs.forEach(function (tab) {

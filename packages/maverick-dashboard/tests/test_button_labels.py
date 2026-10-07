@@ -34,7 +34,6 @@ undo unlink update upload use view withdraw work write
 #: (template, label): owned elsewhere, with the reason. May only shrink.
 ALLOWED = {
     # Approval button names belong to the approvals work (stream X1).
-    ("_approvals_queue.html", "Yes, approve"),
     ("_chat_answer_panel.html", "Approve"),
     # The shared confirm and notice dialogs: page code sets the real label
     # ("Delete 3 agents", "Close report") each time the dialog opens.

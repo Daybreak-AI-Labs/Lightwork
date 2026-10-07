@@ -57,7 +57,7 @@ def _wait(client, response):
     assert response.status_code == 200, response.text
     job = response.json()["job"]
     deadline = time.time() + 15
-    while job["state"] in {"running", "stopping"}:
+    while job["state"] in {"admitted", "running", "stopping"}:  # an admitted job has not started yet
         assert time.time() < deadline, job
         time.sleep(.05)
         job = client.get("/api/v1/learning-ops/jobs/" + job["id"]).json()["job"]

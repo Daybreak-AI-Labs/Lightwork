@@ -66,10 +66,31 @@ def _key(secret: str) -> dict:
     return {"Authorization": f"Bearer {secret}"}
 
 
+def _reviewed(client, headers, action, key_id=None, **body):
+    """A key change the way Access keys makes it: the complete review first
+    (access_key_requests_api), then the sealed review confirmed. A refusal at
+    either step is returned as it is."""
+    context = client.get("/api/v1/access-key-requests", headers=headers)
+    if context.status_code != 200:
+        return context
+    request = {"context": context.json()["context"], "action": action, **body}
+    if key_id is not None:
+        request["key_id"] = key_id
+    review = client.post("/api/v1/access-key-requests/review", json=request, headers=headers)
+    if review.status_code != 200:
+        return review
+    path = "/api/v1/api-keys" + (f"/{key_id}/{action}" if key_id is not None else "")
+    return client.post(path, json={"token": review.json()["token"], "confirmed": True}, headers=headers)
+
+
 def _create(client, who, **body):
     payload = {"label": "nightly report", "scopes": ["tasks:read"]}
     payload.update(body)
-    return client.post("/api/v1/api-keys", json=payload, headers=_as(who))
+    return _reviewed(client, _as(who), "create", **payload)
+
+
+def _change(client, who, key_id, action):
+    return _reviewed(client, _as(who), action, key_id)
 
 
 # ---- create / list / use ----------------------------------------------------
@@ -85,7 +106,7 @@ def test_create_shows_secret_once_and_stores_only_its_hash(monkeypatch):
     body = r.json()
     secret = body["secret"]
     assert secret.startswith("lwk_") and len(secret) > 40
-    assert "won't see it again" in body["notice"]
+    assert "A new key is shown once" in body["notice"]  # the secret is shown once
     assert body["key"]["prefix"] == secret[:12]
     assert body["key"]["scopes"] == ["tasks:read", "tasks:write"]
     assert body["key"]["owner"] == "user:alice"
@@ -299,7 +320,8 @@ def test_key_cannot_exceed_owner_role(monkeypatch):
     rbac.set_role("user:vic", "viewer")
     c = _client()
     r = _create(c, "vic", scopes=["tasks:read", "tasks:write"])
-    assert r.status_code == 400
+    # The review refuses it before anything is minted (422, plain words).
+    assert r.status_code == 422
     assert "never do more than" in r.json()["detail"]
     # The page only offers the scopes the role allows.
     assert c.get("/api/v1/api-keys", headers=_as("vic")).json()["scopes_available"] == ["tasks:read"]
@@ -334,7 +356,7 @@ def test_rotate_keeps_old_key_for_the_grace_period_then_stops_it(monkeypatch):
     first = _create(c, "alice", scopes=["tasks:read"]).json()
     old_secret, old_id = first["secret"], first["key"]["id"]
 
-    r = c.post(f"/api/v1/api-keys/{old_id}/rotate", headers=_as("alice"))
+    r = _change(c, "alice", old_id, "rotate")
     assert r.status_code == 200, r.text
     new_secret, new_key = r.json()["secret"], r.json()["key"]
     assert new_secret != old_secret and new_key["rotated_from"] == old_id
@@ -352,7 +374,8 @@ def test_rotate_keeps_old_key_for_the_grace_period_then_stops_it(monkeypatch):
     assert "rotated" in r.json()["detail"]
     assert c.get("/api/v1/account/me", headers=_key(new_secret)).status_code == 200
     # A rotated-out key cannot be rotated again.
-    assert c.post(f"/api/v1/api-keys/{old_id}/rotate", headers=_as("alice")).status_code == 400
+    stale = _change(c, "alice", old_id, "rotate")
+    assert stale.status_code == 409 and "no longer supports this change" in stale.json()["detail"]
 
 
 def test_expired_key_fails_with_a_plain_message_and_the_page_warns_before(monkeypatch):
@@ -377,8 +400,9 @@ def test_expiry_is_capped_by_the_installation_maximum(monkeypatch):
     rbac.set_role("user:alice", "operator")
     c = _client()
     r = _create(c, "alice", expires_in_days=400)
-    assert r.status_code == 400 and "at most 365 days" in r.json()["detail"]
-    assert _create(c, "alice", expires_in_days=0).status_code == 400
+    # The review refuses both before anything is minted (422).
+    assert r.status_code == 422 and "at most 365 days" in r.json()["detail"]
+    assert _create(c, "alice", expires_in_days=0).status_code == 422
 
 
 def test_revoke_stops_the_key_at_once_and_others_cannot_touch_it(monkeypatch):
@@ -391,11 +415,12 @@ def test_revoke_stops_the_key_at_once_and_others_cannot_touch_it(monkeypatch):
     key_id = made["key"]["id"]
     # Bob cannot see, revoke or rotate Alice's key (404: no existence oracle).
     assert c.get("/api/v1/api-keys", headers=_as("bob")).json()["keys"] == []
-    assert c.post(f"/api/v1/api-keys/{key_id}/revoke", headers=_as("bob")).status_code == 404
-    assert c.post(f"/api/v1/api-keys/{key_id}/rotate", headers=_as("bob")).status_code == 404
+    assert _change(c, "bob", key_id, "revoke").status_code == 404
+    assert _change(c, "bob", key_id, "rotate").status_code == 404
 
-    r = c.post(f"/api/v1/api-keys/{key_id}/revoke", headers=_as("alice"))
-    assert r.status_code == 200 and r.json()["key"]["status"] == "revoked"
+    r = _change(c, "alice", key_id, "revoke")
+    # A revocation issues no secret; its record names the current key.
+    assert r.status_code == 200 and r.json()["current_key"]["status"] == "revoked"
     r = c.get("/api/v1/account/me", headers=_key(made["secret"]))
     assert r.status_code == 401 and r.json()["detail"] == "This API key was revoked."
 
@@ -443,8 +468,7 @@ def test_api_key_cannot_mint_rotate_or_revoke_credentials(monkeypatch):
     # The signed-in owner still manages and rotates keys in the product.
     assert len(c.get("/api/v1/api-keys", headers=_as("alice")).json()["keys"]) == 2
     assert rbac.get_stored_role("user:svc:existing-sync") == "viewer"
-    assert c.post(f"/api/v1/api-keys/{admin_key['key']['id']}/rotate",
-                  headers=_as("alice")).status_code == 200
+    assert _change(c, "alice", admin_key['key']['id'], "rotate").status_code == 200
 
 
 # ---- service accounts -------------------------------------------------------
@@ -477,7 +501,7 @@ def test_admin_creates_service_account_which_holds_keys_but_cannot_sign_in(monke
     assert me.status_code == 200 and me.json()["signed_in"] is True
     assert c.get("/api/v1/api-keys", headers=_key(secret)).json()["you"] == "user:svc:billing-sync"
     # An admin scope is more than the account's operator role.
-    assert _create(c, "root", owner="user:svc:billing-sync", scopes=["admin"]).status_code == 400
+    assert _create(c, "root", owner="user:svc:billing-sync", scopes=["admin"]).status_code == 422
     # A non-admin cannot mint for it.
     assert _create(c, "alice", owner="user:svc:billing-sync").status_code == 403
 
@@ -494,7 +518,8 @@ def test_admin_creates_service_account_which_holds_keys_but_cannot_sign_in(monke
     assert r.status_code == 200 and r.json()["service_account"]["disabled_at"]
     assert c.get("/api/v1/account/me", headers=_key(secret)).status_code == 401
     assert rbac.get_stored_role("user:svc:billing-sync") is None
-    assert _create(c, "root", owner="user:svc:billing-sync").status_code == 400
+    gone = _create(c, "root", owner="user:svc:billing-sync")
+    assert gone.status_code == 409 and "no longer available" in gone.json()["detail"]
 
 
 # ---- static token / break-glass ---------------------------------------------
@@ -508,8 +533,7 @@ def test_static_token_still_works_and_is_audited_as_break_glass(monkeypatch):
     tok = {"Authorization": "Bearer static-break-glass-token-for-tests"}
     assert c.get("/api/v1/account/me", headers=tok).status_code == 200
     assert c.get("/api/v1/account/me", headers=tok).status_code == 200
-    assert c.post("/api/v1/api-keys", json={"label": "recovery", "scopes": ["tasks:read"]},
-                  headers=tok).status_code == 201
+    assert _reviewed(c, tok, "create", label="recovery", scopes=["tasks:read"]).status_code == 201
     kinds = [getattr(k, "value", k) for k, _p in rows]
     assert kinds.count("break_glass_token_used") == 1  # rate-limited
     payload = next(p for k, p in rows if getattr(k, "value", k) == "break_glass_token_used")
@@ -558,7 +582,10 @@ def test_disabled_setting_turns_the_feature_off(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_API_KEYS", "0")
     c = _client()
     assert c.get("/api/v1/api-keys").status_code == 404
-    assert c.get("/account/api-keys").status_code == 404
+    # The page stays reachable and says the feature is off: its controls read
+    # ``enabled`` from the review catalog and stay disabled.
+    assert c.get("/account/api-keys").status_code == 200
+    assert c.get("/api/v1/access-key-requests").json()["enabled"] is False
     from maverick_dashboard import api_keys
     with pytest.raises(api_keys.ApiKeyError):
         api_keys.create_key(label="x", scopes=["tasks:read"], owner="user:local", created_by="")

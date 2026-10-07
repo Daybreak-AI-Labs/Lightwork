@@ -78,11 +78,13 @@ def admit_prepare(request, selection, arguments):
 
 def admit_recover(request, selection, arguments, prepared, operation):
     result = changes.original_for_review(request, prepared["review"], operation)
-    return _outcome(result) if result else None
+    return _outcome(result, replay=True) if result else None
 
 
-def _outcome(result):
-    return Outcome("confirmed" if result["confirmed"] else "unconfirmed", result["message"], result)
+def _outcome(result, *, replay=False):
+    # A confirmed original read back again was not repeated: report it as replayed.
+    status = ("replayed" if replay else "confirmed") if result["confirmed"] else "unconfirmed"
+    return Outcome(status, result["message"], result)
 
 
 def admit_execute(request, selection, arguments, prepared, operation):
@@ -96,8 +98,10 @@ def withdraw_prepare(request, selection, arguments):
     if row is None:
         raise HTTPException(409, "This saved skill is unavailable. Refresh the current review.")
     review = changes.prepare(request, row["name"], "withdraw", row["fingerprint"])
+    # A paused skill says why it is paused before its removal is reviewed.
+    paused = row.get("status", "") + " " if row.get("source_shared") is False else ""
     return Preview(
-        review["message"], changes=review["changes"], native={"review": review, "expires": time.time() + changes.TTL},
+        paused + review["message"], changes=review["changes"], native={"review": review, "expires": time.time() + changes.TTL},
     )
 
 

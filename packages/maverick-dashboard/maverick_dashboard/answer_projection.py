@@ -3,26 +3,62 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import asdict
 
+from fastapi import HTTPException
 from maverick.governed_operations import digest
 
 from .auth import assert_goal_access, caller_principal, has_permission, require_permission
 from .draft_api import context_for
 from .product_errors import product_error
 
+# While a task is queued or working, the runner keeps rewriting these columns
+# (admission flips pending to active, every write advances updated_at). They
+# are progress, not the answer or who may see it, so they do not make an open
+# page stale. A finished, stopped or failed task compares its whole row.
+_RUN_PROGRESS_FIELDS = ("status", "updated_at")
+_RUN_OPEN = frozenset({"draft", "pending", "active", "running", "in_progress"})
+# A page built while a real change lands is rebuilt; it waits this long
+# before each new attempt and gives up (409, retryable) after the last.
+SETTLE_ATTEMPTS = 3
+SETTLE_PAUSE_SECONDS = 0.2
+
+
+def _answer_row(goal) -> dict:
+    row = asdict(goal)
+    if goal.status in _RUN_OPEN:
+        for field in _RUN_PROGRESS_FIELDS:
+            row.pop(field, None)
+    return row
+
 
 def version_for(goal, contract, signoff, artifacts, handoff_closed=None):
-    source = {"goal": asdict(goal), "contract": contract, "signoff": signoff, "artifacts": artifacts}
+    source = {"goal": _answer_row(goal), "contract": contract, "signoff": signoff, "artifacts": artifacts}
     version = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":"),
                                        default=str).encode()).hexdigest()
     return hashlib.sha256((version + json.dumps(handoff_closed, sort_keys=True)).encode()).hexdigest()
 
 
+def _policy_removed(goal) -> bool:
+    """The task's specialist (and so its result policy) no longer exists.
+
+    The task still opens, read as an ungated result exactly as the page reads
+    it, while every export stays withheld (``_chat_answer_download_state``
+    fails closed on the missing policy). A catalogue that cannot be read is
+    not "removed": it raises and the page is withheld (503) as before.
+    """
+    if not goal.domain:
+        return False
+    from maverick.domain import available_domains
+
+    return available_domains().get(goal.domain) is None
+
+
 def _snapshot(world, goal):
     from .app import _goal_artifacts, _goal_deliverable
 
-    contract, rendered = ((None, None) if goal.status in ("blocked", "failed")
+    contract, rendered = ((None, None) if goal.status in ("blocked", "failed") or _policy_removed(goal)
                           else _goal_deliverable(goal, strict=True))
     signoff = world.signoff_for(goal.id) if contract and contract.get("gate") else None
     artifacts = _goal_artifacts(world, goal.id, strict=True)
@@ -46,10 +82,35 @@ def validate_current(request, world, context, expected_context):
         raise product_error(503, "result_unavailable", "The saved result and its release requirements could not be loaded. Retry to confirm the current version.", retryable=True) from exc
     require_permission(request, "view")
     assert_goal_access(request, fresh)
+    again = world.get_goal(fresh.id)
+    if again is None:
+        raise product_error(404, "task_unavailable", "This task is no longer available.")
+    assert_goal_access(request, again)
     if (context["answer_version"] != latest["answer_version"]
-            or world.get_goal(fresh.id) != fresh
+            or _answer_row(again) != _answer_row(fresh)
             or expected_context != context_for(request)):
         raise product_error(409, "result_changing", "The saved result or your access changed. Refresh it again in a moment.", retryable=True)
+
+
+def _still_changing(exc: HTTPException) -> bool:
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    return exc.status_code == 409 and detail.get("code") == "result_changing"
+
+
+def settled(build):
+    """Build a task page again when a change overtook it, a few times.
+
+    Only the read is repeated: nothing here writes, so a retry can never start
+    or change work. Access is checked again on every attempt by ``build``.
+    """
+    for attempt in range(1, SETTLE_ATTEMPTS + 1):
+        try:
+            return build()
+        except HTTPException as exc:
+            if attempt == SETTLE_ATTEMPTS or not _still_changing(exc):
+                raise
+        time.sleep(SETTLE_PAUSE_SECONDS * attempt)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def projection(request, world, goal_id: int) -> dict:

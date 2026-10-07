@@ -122,7 +122,8 @@ def decision_recover(request, _selection, arguments, prepared, _operation, *, un
                                                 _operation, prepared["context"], undo=undo)
     if receipt is None:
         return None
-    return Outcome(receipt["status"], receipt["message"],
+    # A confirmed original read back here was not repeated: report it as replayed.
+    return Outcome("replayed" if receipt["status"] == "confirmed" else receipt["status"], receipt["message"],
                    {"result": receipt, "current_instructions": {"href": "/learned#llp-original", "label": "Check the original decision and review current instructions"}})
 
 

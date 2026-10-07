@@ -9,7 +9,7 @@
   var save = document.getElementById('pnp-save'), recover = document.getElementById('pnp-readback');
   var source = null, pending = null, busy = false, generation = 0, controllers = new Set();
   var storage = 'lightwork.privacy-notice-proposal.original.v1';
-  function say(text) { status.textContent = text; }
+  function say(text) { window.mvStatus ? window.mvStatus(status, text) : (status.textContent = text); }
   function add(tag, text, parent) { var node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (parent) parent.appendChild(node); return node; }
   function valid(start) { return start === generation; }
   function keep() { try { if (pending) sessionStorage.setItem(storage, JSON.stringify({token: pending.token, context: source.context})); else sessionStorage.removeItem(storage); } catch (_) { say('This browser could not keep the original request after reload. Keep this page open until its result is confirmed.'); } }

@@ -32,9 +32,11 @@ def test_repair_uses_native_receipt_and_never_replays_historical_work(parked):
     queue, request, args = parked
     preview = operations.repair_prepare(request, {}, args)
     result = operations.repair_execute(request, {}, args, preview.native, "b" * 32)
-    assert result.status == "confirmed" and result.details["historical_replayed"] is False
+    # The details read in plain words: the continuation, and no repeated history.
+    assert result.status == "confirmed" and result.details["Historical work repeated"] is False
     again = operations.repair_recover(request, {}, args, preview.native, "b" * 32)
-    assert again.status == "replayed" and again.details["successor_id"] == result.details["successor_id"]
+    assert again.status == "replayed"
+    assert again.details["Recorded continuation"] == result.details["Recorded continuation"]
     assert queue.get(args["job_id"]).status == "failed"
     assert len(queue.list(status="pending")) == 1
 

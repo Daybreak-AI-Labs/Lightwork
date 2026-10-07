@@ -73,7 +73,7 @@ def _configure(body: str) -> None:
 def _wait(client, started, timeout: float = 60.0) -> dict:
     job = started.json()["job"]
     deadline = time.time() + timeout
-    while job["state"] in ("running", "stopping"):
+    while job["state"] in ("admitted", "running", "stopping"):  # an admitted job has not started yet
         assert time.time() < deadline, job
         time.sleep(0.1)
         job = client.get(f"/api/v1/learning-ops/jobs/{job['id']}").json()["job"]

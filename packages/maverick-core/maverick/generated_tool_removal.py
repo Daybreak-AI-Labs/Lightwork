@@ -69,6 +69,9 @@ def inspect(name, owner, budget, *, absent_record=None):
         source = _physical(path)
         if source is not None:
             ensure_private_file(path)
+            # Tightening an older broad file changes its ctime; report the
+            # tightened identity so the next read of it matches.
+            source = _physical(path)
             if source[2] > self_learning._MAX_GENERATED_SOURCE_BYTES:
                 raise ValueError("The complete tool exceeds the supported removal review limit.")
             # Match the native publisher/loader's normalized UTF-8 source digest,

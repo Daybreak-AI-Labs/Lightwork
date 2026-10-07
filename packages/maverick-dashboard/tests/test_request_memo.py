@@ -70,7 +70,9 @@ def test_auth_predicates_are_answered_once_per_request(monkeypatch):
     assert calls["n"] == 4
 
 
-def test_anonymous_grant_is_remembered_on_request_state_but_refusal_is_not(monkeypatch):
+def test_anonymous_access_is_rechecked_at_every_gate(monkeypatch):
+    # Principal-less access is never remembered: each gate rechecks current
+    # local policy, so a policy change takes effect inside the same request.
     import pytest
 
     checks = {"n": 0}
@@ -86,7 +88,7 @@ def test_anonymous_grant_is_remembered_on_request_state_but_refusal_is_not(monke
     request = Request(scope)
     assert auth._authorization_principal(request) is None
     assert auth._authorization_principal(Request(scope)) is None  # same scope, same state
-    assert checks["n"] == 1
+    assert checks["n"] == 2
 
     allowed["v"] = False
     denied = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
@@ -94,4 +96,4 @@ def test_anonymous_grant_is_remembered_on_request_state_but_refusal_is_not(monke
         auth._authorization_principal(denied)
     with pytest.raises(HTTPException):
         auth._authorization_principal(denied)
-    assert checks["n"] == 3
+    assert checks["n"] == 4

@@ -8,6 +8,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from test_support.channel_review import channel_review_token
+
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
@@ -104,14 +106,15 @@ def test_channel_credentials_are_redacted(client, rows):
     secret = "telegram-secret-do-not-log"  # pragma: allowlist secret
     response = client.post(
         "/channels/save", data={"channel": "telegram", "bot_token": secret,
-                                "enabled": "on"}, follow_redirects=False,
+                                "enabled": "on", "review_token": channel_review_token(client)}, follow_redirects=False,
     )
     assert response.status_code == 303, response.text
     assert [r["phase"] for r in rows] == ["prepared", "completed"]
     assert rows[-1]["new"] == {"enabled": True, "fields_set": ["bot_token"]}
     assert secret not in json.dumps(rows)
     rows.clear()
-    response = client.post("/channels/clear", data={"channel": "telegram"},
+    response = client.post("/channels/clear", data={"channel": "telegram", "confirm_people": "yes",
+                                                    "review_token": channel_review_token(client)},
                            follow_redirects=False)
     assert response.status_code == 303, response.text
     assert rows[-1]["new"] == {"enabled": None, "fields_set": []}

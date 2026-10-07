@@ -41,6 +41,8 @@ async function loadPanel(statusResponse, { search = "" } = {}) {
       getElementById: id => nodes[id] || null,
       createElement: () => element(),
       querySelectorAll: () => [],
+      // The page starts once the shell's helpers have loaded.
+      addEventListener: (type, listener) => { if (type === "DOMContentLoaded") listener(); },
     },
     window: {
       location: { pathname: "/audit", search, origin: "https://lightwork.example" },

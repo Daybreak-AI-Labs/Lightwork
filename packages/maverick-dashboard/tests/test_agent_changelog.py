@@ -88,9 +88,18 @@ def test_saving_and_resetting_an_agent_writes_the_changelog(tmp_path, monkeypatc
     assert r.status_code == 200, r.text
     rows = changelog.entries("proc_po_chaser", include_workspace=False)
     assert rows and rows[0]["changes"] == ["Changed its instructions"]
-    # A reset names the version it replaces (#2529 refuses a stale reset).
-    r = client.delete("/api/v1/agents/proc_po_chaser/override",
-                      params={"expected_generation": r.json()["generation"]})
+    generation = r.json()["generation"]
+    # A reset without the complete review changes nothing (#2529).
+    bare = client.delete("/api/v1/agents/proc_po_chaser/override", params={"expected_generation": generation})
+    assert bare.status_code == 409 and "Nothing was changed" in bare.text
+    assert changelog.entries("proc_po_chaser", include_workspace=False)[0]["changes"] == ["Changed its instructions"]
+    # The reviewed reset names the version it replaces (a stale one is refused).
+    context = client.get("/api/v1/agent-override-changes").json()["context"]
+    review = client.post("/api/v1/agent-override-changes/review",
+                         json={"name": "proc_po_chaser", "action": "reset_builtin", "context": context})
+    assert review.status_code == 200, review.text
+    r = client.request("DELETE", "/api/v1/agents/proc_po_chaser/override", params={"expected_generation": generation},
+                       json={"token": review.json()["token"], "confirmed": True})
     assert r.status_code == 200, r.text
     assert changelog.entries("proc_po_chaser", include_workspace=False)[0]["changes"] == ["Reset to the built-in version"]
 

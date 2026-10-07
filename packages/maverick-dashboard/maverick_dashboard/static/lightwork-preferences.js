@@ -8,7 +8,10 @@
   function copy(node,source,values){if(window.LightworkI18n)window.LightworkI18n.set(node,source,values);else node.textContent=text(source,values);}
   function text(source,values){return window.LightworkI18n?window.LightworkI18n.text(source,values):String(source||'').replace(/\{(\w+)\}/g,function(whole,key){return values&&Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):whole;});}
   function appendCopy(node,source,values){var span=document.createElement('span');copy(span,source,values);node.append(' ',span);}
-  function knownError(error,fallback){var message=error&&error.message;return window.LightworkI18n&&window.LightworkI18n.has(message)?message:fallback;}
+  // Messages this page writes itself are product copy even where no catalog
+  // is loaded (English pages); other text needs a catalog entry to be shown.
+  function productError(message){var error=new Error(message);error.productCopy=true;return error;}
+  function knownError(error,fallback){var message=error&&error.message;return error&&error.productCopy||window.LightworkI18n&&window.LightworkI18n.has(message)?message:fallback;}
   function sourceLabel(source){return text({'personal':'Personal','workspace':'Workspace','organization':'Organization','conversation':'Conversation','product default':'Product default','installation settings':'Installation settings','organization style':'Organization style','organization policy':'Organization policy'}[source]||source);}
   function fieldLabel(key){return text({preferred_name:'What Lightwork calls you',tone:'Writing tone',verbosity:'Detail',language:'Response language',interface_language:'Interface language',output_style:'Output style',custom_style_name:'Style name',custom_style:'Style guidance',start_page:'Starting page',navigation:'Sidebar',theme:'Theme',font:'Font',density:'Page spacing',text_size:'Text size',glass:'Glass effects',favorites:'Pinned pages',today_days:'Today period',today_cards:'Today cards',conversation_mode:'While a task runs',conversation_detail:'Inbox detail'}[key]||key);}
   var changes = {}, pins = [], busy = false;
@@ -114,9 +117,9 @@
     busy = true;
     try {
       var response = await fetch('/api/v1/preferences' + (thread ? '?thread=' + encodeURIComponent(thread) : ''), {cache:'no-store'});
-      if (!response.ok) throw new Error('Current preferences could not be read. Your draft remains available. Refresh the page and try again.');
+      if (!response.ok) throw productError('Current preferences could not be read. Your draft remains available. Refresh the page and try again.');
       var current = await response.json(), draft = Object.assign({}, changes);
-      if (current.context !== model.context) throw new Error('Your account or workspace changed. Save this draft separately before reloading.');
+      if (current.context !== model.context) throw productError('Your account or workspace changed. Save this draft separately before reloading.');
       var locked = Object.keys(draft).filter(function (key) { return current.locked.indexOf(key) !== -1; });
       var policy=locked.length?text('Policy now controls {fields}. These proposed edits will be removed; other drafts remain.',{fields:locked.map(fieldLabel).join(', ')}):'';
       if (!(await window.mvConfirm('Compare current saved values with your retained draft: {changes} {policy} Use these current values as the basis for a new review? Nothing is saved by this step.', {okText:'Keep draft for review',productCopy:true,values:{changes:describe(draft,current),policy:policy}}))) return;
@@ -187,7 +190,7 @@
       var response = await fetch('/api/v1/preferences/profile/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profile:JSON.parse(await file.text())})});
       var data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'This profile could not be loaded. Refresh the page and try again.');
-      if (data.state.context !== model.context) throw new Error('Your account or workspace changed. Reload before importing.');
+      if (data.state.context !== model.context) throw productError('Your account or workspace changed. Reload before importing.');
       model = data.state; render(); applyDraft(data.changes);
       copy(profileStatus,'Profile loaded as a personal draft. Review the before/after changes and save when ready.');
       form.inert = false; form.querySelector('[type="submit"]').focus();

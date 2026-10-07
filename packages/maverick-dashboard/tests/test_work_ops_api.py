@@ -492,6 +492,10 @@ class FakeLLM:
     def __init__(self, model=None):
         self.model = model
 
+    def _provider_client_config(self, provider):
+        # A reviewed viewpoints request binds the connection identity only.
+        return SimpleNamespace(fingerprint="test-connection:" + provider)
+
     def complete(self, *, system, messages, budget=None, **_):
         budget.check()
         budget.record_tokens(100, 40)
@@ -514,6 +518,9 @@ def ai(env, monkeypatch):
     monkeypatch.setattr(llm, "model_for_role", lambda role: roles.append(role) or "anthropic:configured")
     monkeypatch.setattr(_shared, "require_provider_or_400", lambda role=None: None)
     monkeypatch.setattr(viewpoints_api, "require_provider_or_400", lambda role=None: None)
+    from maverick_dashboard import viewpoints_requests
+    monkeypatch.setattr(viewpoints_requests, "LLM", FakeLLM)
+    monkeypatch.setattr(viewpoints_requests, "model_for_role", llm.model_for_role)
     return roles
 
 
@@ -537,7 +544,7 @@ def test_viewpoints_job_runs_with_chosen_sides(env, ai):
                                                                "for_side": "Sunday trade is worth it"})
     assert started.status_code == 202, started.text
     result = _wait(env.client, "/api/v1/viewpoints/jobs/" + started.json()["job"])["result"]
-    assert result["ran"] is True and result["verdict"] == "for" and ai == ["analyst"]
+    assert result["ran"] is True and result["verdict"] == "for" and set(ai) == {"analyst"}
     assert env.client.get("/api/v1/viewpoints/jobs/" + started.json()["job"], headers=_as("other")).status_code == 404
     assert env.client.post("/api/v1/viewpoints/jobs", json={"question": "Why?", "for_side": "x" * 301}).status_code == 422
 

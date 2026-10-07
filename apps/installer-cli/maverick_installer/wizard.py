@@ -1748,8 +1748,8 @@ def pick_automation_import() -> dict[str, Any]:
     if not enable:
         return {"enable": False}
     create_schedules = _q_confirm(
-        "  Auto-create Lightwork schedules for imported cron triggers? "
-        "(off = import the template, you activate the schedule yourself)",
+        "  Offer to recreate imported schedules (each reviewed after its draft is published)? "
+        "(off = import the draft, then schedule it yourself in Automations)",
         default=False,
     )
     return {"enable": True, "create_schedules": create_schedules}
@@ -6892,6 +6892,34 @@ def pick_usability_survey() -> dict[str, Any]:
     return {"usability_survey": True}
 
 
+def pick_web_vitals() -> dict[str, Any]:
+    """Optional page speed for real visitors (field Core Web Vitals). OFF by default.
+
+    When on, the dashboard times a sample of real page loads in the browser
+    (LCP, INP and CLS) and keeps only counts per page and device class, so
+    Settings > Page speed shows the 75th percentile over the last 28 days.
+    No names, addresses or browsing history are kept, and nothing is sent
+    anywhere. Written under ``[analytics]`` as ``web_vitals`` and
+    ``web_vitals_sample_rate`` (the share of visits measured, 0 to 1).
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: measure how fast pages load and respond for the people "
+        "using Lightwork, on phones and computers. Only counts per page are "
+        "kept on this server; no names or browsing history, and nothing is "
+        "sent anywhere. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Measure page speed for real visitors?", default=False):
+        return {}
+    # ``[analytics] web_vitals_sample_rate``: the share of visits measured.
+    while True:
+        raw = _q_text("Share of visits to measure, from 0 to 1 (0.5 measures every other visit):", default="0.5").strip()
+        rate = _safe_float(raw, default=float("nan"))
+        if math.isfinite(rate) and 0 <= rate <= 1:
+            return {"web_vitals": True, "web_vitals_sample_rate": rate}
+        console.print("[yellow]Enter a number from 0 to 1, for example 0.5.[/yellow]")
+
+
 def pick_usage_measures() -> dict[str, Any]:
     """Optional, name-free usage measures. OFF by default.
 
@@ -11493,7 +11521,7 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     _announce()
     analytics = state.get("analytics")
     if analytics is None:
-        analytics = {**pick_analytics(), **pick_usability_survey(), **pick_usage_measures()}
+        analytics = {**pick_analytics(), **pick_usability_survey(), **pick_web_vitals(), **pick_usage_measures()}
         state["analytics"] = analytics
         _save_partial(state)
 

@@ -109,6 +109,13 @@
       if (toggle) toggle.disabled = on;
     }
 
+    // Nothing changed: the list and the button stay as they were.
+    function refused(failure, toast) {
+      if (status) status.textContent = failure;
+      if (toast && typeof global.mvToast === "function") global.mvToast(failure, {error: true});
+      return null;
+    }
+
     // One change at a time; the server answers with the whole new list.
     async function change(op, href, toast) {
       if (busy || !href) return null;
@@ -120,13 +127,8 @@
           headers: {"Content-Type": "application/json", "Accept": "application/json"},
           body: JSON.stringify({op: op, href: href, context: meta("lightwork-preference-context")}),
         });
-        if (!response.ok) {
-          var failure = typeof global.mvErrorText === "function" ? global.mvErrorText(response, "change your pinned pages")
-            : text("Your pinned pages could not be changed. Try again.");
-          if (status) status.textContent = failure;
-          if (toast && typeof global.mvToast === "function") global.mvToast(failure, {error: true});
-          return null;
-        }
+        if (!response.ok) return refused(global.mvErrorText ? global.mvErrorText(response, "change your pinned pages")
+          : text("Your pinned pages could not be changed. Try again."), toast);
         var data = await response.json();
         render(Array.isArray(data.pins) ? data.pins : []);
         var revision = doc.querySelector('meta[name="lightwork-preference-revision"]');
@@ -135,8 +137,8 @@
              down: "Moved {page} down."}[op], {page: page}, toast);
         return data;
       } catch (error) {
-        say("Your pinned pages could not be changed. Check your connection and try again.", null, toast);
-        return null;
+        // Blocked or offline: an error like a refusal, never a quiet note.
+        return refused(text("Your pinned pages could not be changed. Check your connection and try again."), toast);
       } finally {
         setBusy(false);
       }

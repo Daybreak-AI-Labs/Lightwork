@@ -8,6 +8,11 @@ const {JSDOM} = require("jsdom");
 const {shell} = require("./_shell");
 const base = path.resolve(__dirname, "../../maverick_dashboard");
 const turn = () => new Promise(resolve => setImmediate(resolve));
+// flow_teach.html inlines the exact-JSON helpers (FDRecipeInputs) before the
+// teach script: rules and drafts travel as exact JSON text, so replies are read
+// with text(), not json().
+const recipeInputs = fs.readFileSync(path.join(base, "templates/flow_designer_inputs.js"), "utf8");
+const reply = value => ({ok: true, json: async () => value, text: async () => JSON.stringify(value)});
 
 test("Copilot teaching reaches the existing name, draft and save controls without raw package authoring", async () => {
   const template = fs.readFileSync(path.join(base, "templates/flow_teach.html"), "utf8");
@@ -53,12 +58,13 @@ test("Copilot teaching reaches the existing name, draft and save controls withou
     } else if (url === "/api/v1/flows") {
       assert.deepEqual(body.flow, draft); value = draft;
     } else throw new Error("Unexpected native request: " + url);
-    return {ok: true, json: async () => value};
+    return reply(value);
   };
   shell(dom.window); dom.window.fetch = fetch;  // the shell's helpers send through this fetch
   dom.window.mvConfirm = async () => true;
   const runtime = {window: dom.window, document, CustomEvent: dom.window.CustomEvent,
     URL: dom.window.URL, URLSearchParams, AbortController, setTimeout, clearTimeout, fetch};
+  vm.runInNewContext(recipeInputs, runtime);
   vm.runInNewContext(fs.readFileSync(path.join(base, "static/lightwork-flow-teach.js"), "utf8"), runtime);
   vm.runInNewContext(fs.readFileSync(path.join(base, "static/lightwork-product-operations.js"), "utf8"), runtime);
   await turn(); await turn();
@@ -68,8 +74,11 @@ test("Copilot teaching reaches the existing name, draft and save controls withou
   document.querySelectorAll('[name="run_ids"] option').forEach(option => { option.selected = true; });
   document.querySelector("#mv-product-operation-form form").dispatchEvent(new dom.window.Event("submit", {bubbles: true, cancelable: true}));
   await turn(); await turn();
-  document.querySelector('#mv-product-operation-form input[type="checkbox"]').checked = true;
-  Array.from(document.querySelectorAll("#mv-product-operation-form button")).find(button => button.textContent === "Apply reviewed change").click();
+  const consent = document.querySelector('#mv-product-operation-form input[type="checkbox"]');
+  const apply = Array.from(document.querySelectorAll("#mv-product-operation-form button")).find(button => button.textContent === "Apply reviewed change");
+  assert.equal(apply.disabled, true, "nothing applies before the review is ticked");
+  consent.checked = true; consent.dispatchEvent(new dom.window.Event("change"));
+  apply.click();
   await turn(); await turn();
   assert.equal(document.getElementById("rc-result").hidden, false);
   assert.equal(document.getElementById("rc-name").value, "Order review (learned)");
@@ -115,12 +124,13 @@ test("the shared rule form learns, refines, attaches and saves with the reviewed
       assert.equal(options.headers['X-Lightwork-Flow-Version'], "1");
       assert.equal(options.headers['X-Lightwork-Flow-Revision'], "flow-1");
     }
-    return {ok: true, json: async () => value};
+    return reply(value);
   };
   shell(dom.window); dom.window.fetch = fetch;  // the shell's helpers send through this fetch
   dom.window.mvConfirm = async () => true;
-  vm.runInNewContext(fs.readFileSync(path.join(base, "static/lightwork-flow-teach.js"), "utf8"),
-    {window: dom.window, document, CustomEvent: dom.window.CustomEvent, setTimeout, fetch});
+  const runtime = {window: dom.window, document, CustomEvent: dom.window.CustomEvent, setTimeout, fetch};
+  vm.runInNewContext(recipeInputs, runtime);
+  vm.runInNewContext(fs.readFileSync(path.join(base, "static/lightwork-flow-teach.js"), "utf8"), runtime);
   await turn(); await turn();
   document.getElementById("tr-output").value = "boolean";
   document.getElementById("tr-output").dispatchEvent(new dom.window.Event("change"));

@@ -160,7 +160,7 @@ def test_pins_can_be_added_moved_and_removed_and_are_the_today_list(client):
     assert _pin(client, "down", "/goals").json()["pins"][0]["href"] == "/overview"
     # Today and Your preferences read the same list.
     today = client.get("/today").text
-    pinned = re.search(r'<nav aria-label="Pinned pages">(.*?)</nav>', today, re.DOTALL).group(1)
+    pinned = re.search(r'<nav\b[^>]*\baria-label="Pinned pages"[^>]*>(.*?)</nav>', today, re.DOTALL).group(1)
     assert re.findall(r'href="([^"]+)"', pinned) == ["/overview", "/goals", "/deliverables"]
     assert client.get("/api/v1/preferences").json()["values"]["favorites"] == ["/overview", "/goals", "/deliverables"]
 

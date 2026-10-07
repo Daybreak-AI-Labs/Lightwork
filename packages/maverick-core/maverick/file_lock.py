@@ -1020,6 +1020,10 @@ def ensure_private_file(path: str | Path, mode: int = 0o600) -> Path:
     # that mutation without weakening alias, hard-link, owner, or ABA checks.
     if os.name == "nt" and _windows_open_private_file_is_restricted(path, info, mode):
         return path
+    # On POSIX a chmod to the same mode still moves ctime, which readers that
+    # bind a file's identity see as a change; an exact private mode is kept.
+    if os.name != "nt" and stat.S_IMODE(info.st_mode) == mode:
+        return path
     harden_path_permissions(path, mode)
     try:
         after = path.lstat()

@@ -15,6 +15,7 @@ from markupsafe import Markup, escape
 from .i18n_flow_credentials import ROWS as FLOW_CREDENTIAL_ROWS
 from .i18n_journey_ai_trust import ROWS as AI_TRUST_ROWS
 from .i18n_journey_budget import ROWS as BUDGET_ROWS
+from .i18n_journey_chat_review import ROWS as CHAT_REVIEW_ROWS
 from .i18n_journey_common import ROWS as COMMON_ROWS
 from .i18n_journey_composer_files import ROWS as COMPOSER_FILE_ROWS
 from .i18n_journey_connections import ROWS as CONNECTION_ROWS
@@ -27,6 +28,7 @@ from .i18n_journey_next_steps import ROWS as NEXT_STEP_ROWS
 from .i18n_journey_preferences import ROWS as PREFERENCE_ROWS
 from .i18n_journey_receipts import ROWS as RECEIPT_ROWS
 from .i18n_journey_recovery_controls import ROWS as RECOVERY_CONTROL_ROWS
+from .i18n_journey_recovery_states import ROWS as RECOVERY_STATE_ROWS
 from .i18n_journey_resume import ROWS as RESUME_ROWS
 from .i18n_journey_review import ROWS as REVIEW_ROWS
 from .i18n_journey_shell import ROWS as SHELL_ROWS
@@ -37,7 +39,7 @@ from .i18n_journey_workflow import ROWS as WORKFLOW_ROWS
 ROWS = [*FLOW_CREDENTIAL_ROWS, *BUDGET_ROWS, *COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS, *CONVERSATION_ROWS,
         *RECEIPT_ROWS, *RECOVERY_CONTROL_ROWS, *RESUME_ROWS, *SHELL_ROWS, *TASK_CONTROL_ROWS,
         *LIVE_CHAT_ROWS, *PREFERENCE_ROWS, *VOICE_CONTROL_ROWS, *COMPOSER_FILE_ROWS, *CONNECTION_ROWS,
-        *FINDER_ROWS, *AI_TRUST_ROWS, *NEXT_STEP_ROWS, *COVERAGE_GAP_ROWS]
+        *FINDER_ROWS, *AI_TRUST_ROWS, *NEXT_STEP_ROWS, *COVERAGE_GAP_ROWS, *CHAT_REVIEW_ROWS, *RECOVERY_STATE_ROWS]
 
 TRANSLATION_LANGS = ("fr", "de", "ja", "zh")
 # Rows are source, French, German, Japanese, Chinese. No Arabic machine completion.
@@ -137,10 +139,12 @@ def context(request, lang):
     catalog = browser_catalog(lang)
     metadata = {"language": lang, "locale": locale_for(request, lang),
                 "review_status": "source" if lang == "en" else "community_seed" if lang == "ar" else "draft_partial"}
-    revision, _ = browser_catalog_asset(lang)
+    # English is the source language and its catalog is identity (the
+    # runtime's fallback), so English pages skip the blocking download.
+    asset = "" if lang == "en" else f"/static/lightwork-i18n-catalog/{lang}/{browser_catalog_asset(lang)[0]}.js"
     return {"ui": lambda source, /, **values: region(source, lang, **values),
             "ut": lambda source, /, **values: text(source, lang, **values),
             "ul": lambda source: entry(source, lang)[1],
             "journey_i18n": {**metadata, "catalog": catalog},
             "journey_i18n_bootstrap": metadata,
-            "journey_i18n_asset": f"/static/lightwork-i18n-catalog/{lang}/{revision}.js"}
+            "journey_i18n_asset": asset}

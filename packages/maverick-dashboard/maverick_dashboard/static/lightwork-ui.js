@@ -582,14 +582,35 @@
       //   raw           resolve to the response itself (a download), unread.
       //   messages      the page's own sentence for a status it knows more
       //                 about ({409: 'This changed since the list loaded…'},
-      //                 timeout: for the deadline, or offline: when the
-      //                 server cannot be reached); every other failure gets
+      //                 timeout: for the deadline, offline: when the
+      //                 server cannot be reached, or unreadable: for a reply
+      //                 whose body cannot be read); every other failure gets
       //                 mvErrorText's words.
-      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw', 'messages'];
+      //   serverDetail  the page's own fallback sentence. A refusal shows the
+      //                 server's detail as written whenever it is a sentence
+      //                 (a string), else the page's sentence for that status
+      //                 (messages), else this one. For a lost access the
+      //                 page's sentence for the status comes first.
+      //   onContextChange(error)  runs before the rejection when a 409 says
+      //                 the account or workspace changed (its detail matches
+      //                 contextChange: a RegExp or a test function, by default
+      //                 a detail starting "Your account or workspace changed.");
+      //                 the page clears what it showed privately.
+      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw', 'messages', 'serverDetail', 'onContextChange', 'contextChange'];
+      var CONTEXT_CHANGED = /^Your account or workspace changed\./;
+      function serverSentence(detail, opts) {
+        return opts.serverDetail != null && typeof detail === 'string' && detail ? detail : '';
+      }
+      function contextChanged(detail, opts) {
+        var test = opts.contextChange || CONTEXT_CHANGED;
+        if (typeof detail !== 'string') return false;
+        return typeof test === 'function' ? !!test(detail) : test.test(detail);
+      }
       function fetchFailure(failure, action, opts) {
         var plain = opts.plainDetail && typeof window.mvPlainDetail === 'function' ? window.mvPlainDetail(failure.detail) : '';
         var own = opts.messages && Object.prototype.hasOwnProperty.call(opts.messages, failure.status) ? opts.messages[failure.status] : '';
-        var error = new Error(plain || own || window.mvErrorText(failure, action));
+        var fallback = opts.serverDetail != null ? String(opts.serverDetail) : '';
+        var error = new Error(plain || serverSentence(failure.detail, opts) || own || fallback || window.mvErrorText(failure, action));
         error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = failure.payload;
         return error;
       }
@@ -659,10 +680,21 @@
           // The page clears what it showed privately before anything else,
           // and the refusal's body (often a sign-in page) is never read. A
           // redirect lands on the sign-in page: say so, as for a 401.
-          clearTimeout(timer); release(response);
+          clearTimeout(timer);
           var gone = fetchFailure({ status: response.ok ? 401 : response.status, headers: response.headers }, action, own);
           gone.status = response.status; gone.accessChanged = true;
           own.onAccess(gone);
+          // A page that shows the server's own sentence reads the refusal's
+          // detail only after it cleared, unless it has its own sentence for
+          // this status; a redirect's sign-in page is never read.
+          var named = own.messages && Object.prototype.hasOwnProperty.call(own.messages, response.status);
+          if (own.serverDetail != null && !response.redirected && !response.ok && !named) {
+            var refusal = null;
+            try { refusal = await readJSON(response); } catch (_) { refusal = null; }
+            var said = serverSentence(refusal && refusal.detail, own);
+            if (said) { gone.message = said; gone.detail = said; }
+          }
+          release(response);
           throw gone;
         }
         if (own.raw && response.ok) { clearTimeout(timer); return response; }
@@ -671,13 +703,19 @@
         finally { clearTimeout(timer); }
         if (response.ok && !unreadable) return payload;
         if (!response.ok || unreadable) release(response);  // a refusal's or unreadable body is never left open
-        if (response.ok) {
+        var unread = unreadable && own.messages && own.messages.unreadable;
+        if (response.ok || unread) {
           // Malformed success never counts as success, and is never shown.
-          var bad = new Error(window.mvErrorText({ name: 'SyntaxError' }, action));
-          bad.status = 0; bad.unreadable = true;
+          var bad = new Error(unread || window.mvErrorText({ name: 'SyntaxError' }, action));
+          bad.status = response.ok ? 0 : response.status; bad.unreadable = true;
           throw bad;
         }
-        throw fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
+        var failure = fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
+        if (response.status === 409 && typeof own.onContextChange === 'function' && contextChanged(failure.detail, own)) {
+          failure.contextChanged = true;
+          own.onContextChange(failure);
+        }
+        throw failure;
       };
       // Two page-wide live regions (polite, and assertive for errors) that
       // exist before any message: base.html renders them, and a page without
@@ -728,6 +766,62 @@
           if (words) window.mvAnnounce(words, { error: error });
         }
         return element;
+      };
+      // The one loading state for a region that is being filled. The region
+      // is marked aria-busy at once, but the words appear only after `delay`
+      // (300 ms), so a quick answer never flashes a loader; once shown they
+      // stay at least `minVisible` (500 ms) so they can be read. A wait that
+      // passes `timeout` (20 s) becomes the plain error, with Try again when
+      // the caller passes `retry`. The page's own content is left in place.
+      //   var wait = mvLoading(list, {text: 'Loading tasks…', action: 'load the tasks', retry: load});
+      //   try { var rows = await mvFetchJSON(url); await wait.done(); render(rows); }
+      //   catch (error) { wait.fail(error); }
+      window.mvLoading = function (element, opts) {
+        var o = opts || {}, shownAt = 0, settled = false, node = null;
+        var delay = o.delay >= 0 ? o.delay : 300, minVisible = o.minVisible >= 0 ? o.minVisible : 500;
+        if (element._mvLoading) element._mvLoading.cancel();
+        var old = element.querySelector(':scope > [data-mv-loading-error]');
+        if (old) old.remove();
+        element.setAttribute('aria-busy', 'true');
+        var showTimer = setTimeout(function () {
+          node = window.mvEl('p', 'mv-loading', o.text || 'Loading…');
+          node.setAttribute('data-mv-loading', '');
+          element.appendChild(node); shownAt = Date.now();
+        }, delay);
+        var limit = setTimeout(function () {
+          var late = new Error('The operation timed out.'); late.name = 'AbortError'; handle.fail(late);
+        }, o.timeout > 0 ? o.timeout : 20000);
+        function settle() {
+          if (settled) return Promise.resolve(false);
+          settled = true; clearTimeout(showTimer); clearTimeout(limit);
+          if (element._mvLoading === handle) element._mvLoading = null;
+          var left = node ? minVisible - (Date.now() - shownAt) : 0;
+          function clear() { if (node) node.remove(); element.removeAttribute('aria-busy'); return true; }
+          if (left <= 0) return Promise.resolve(clear());
+          return new Promise(function (resolve) { setTimeout(function () { resolve(clear()); }, left); });
+        }
+        var handle = {
+          active: function () { return !settled; },
+          cancel: function () { settled = true; clearTimeout(showTimer); clearTimeout(limit); if (node) node.remove(); },
+          done: function () { return settle().then(function () {}); },
+          fail: function (failure) {
+            return settle().then(function (mine) {
+              if (!mine) return;
+              var box = window.mvEl('p', 'mv-loading mv-loading--error');
+              box.setAttribute('data-mv-loading-error', ''); box.setAttribute('role', 'alert');
+              box.appendChild(document.createTextNode(window.mvErrorText(failure, o.action)));
+              if (typeof o.retry === 'function') {
+                var again = window.mvEl('button', 'btn btn--ghost', window.LightworkI18n ? window.LightworkI18n.text('Try again') : 'Try again');
+                again.type = 'button';
+                again.addEventListener('click', function () { box.remove(); o.retry(); });
+                box.appendChild(document.createTextNode(' ')); box.appendChild(again);
+              }
+              element.appendChild(box);
+            });
+          },
+        };
+        element._mvLoading = handle;
+        return handle;
       };
       // A stored value (status, kind, slug) as a readable label:
       // "pending_review" -> "Pending review", "ai_act" -> "AI Act".
@@ -1186,10 +1280,16 @@
       const errBox = document.getElementById('goal-error');
       if (!form || !errBox) return;
       const btn = form.querySelector('button[type="submit"]');
-      let authoringPending = false;
+      let authoringPending = false, startPending = false, unlockStart = null;
+      // Back from the task page (a restored page): the form works again.
+      window.addEventListener('pageshow', function (event) {
+        if (event.persisted && unlockStart) unlockStart();
+      });
       form.addEventListener('submit', async function(ev) {
         ev.preventDefault();
-        if (authoringPending) return;
+        // One submit makes one task: a second click or Enter while the first
+        // is on its way is ignored, not sent again.
+        if (authoringPending || startPending) return;
         errBox.style.display = 'none';
         const kindEl = form.querySelector('[name="authoring_kind"]');
         const kind = kindEl ? kindEl.value : 'goal';
@@ -1259,17 +1359,30 @@
             return;
           }
         }
+        // Disabling the form below moves focus to the page body. A refused
+        // send puts it back where the person was typing (WCAG 2.4.3).
+        const typing = form.contains(document.activeElement) ? document.activeElement : form.querySelector('[name="title"]');
         if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+        startPending = true;
         const submittedForm = new FormData(form);
         const submittedControls = Array.from(form.querySelectorAll('input,textarea,select')).map(function (control) {
           const wasDisabled = control.disabled; control.disabled = true; return [control,wasDisabled];
         });
+        unlockStart = function () {
+          unlockStart = null; startPending = false;
+          submittedControls.forEach(function (item) { item[0].disabled = item[1]; });
+          if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        };
         try {
           const resp = await fetch(form.action, { method: 'POST', body: submittedForm });
-          if (resp.redirected && resp.ok && new URL(resp.url).pathname.startsWith('/chat/goal/')) {
+          // The server answers a started task with a redirect to its page. If
+          // that page was still being set up (a retryable 409 or 503), the
+          // task did start: open it, never "Could not start" and a second try.
+          if (resp.redirected && new URL(resp.url).pathname.startsWith('/chat/goal/') &&
+              (resp.ok || resp.status === 409 || resp.status === 503)) {
             if (form.mvRecovery) await form.mvRecovery.clear();
             window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: form, recoveryCleared: true}}));
-            window.location.href = resp.url; return;
+            startPending = 'opening'; window.location.href = resp.url; return;
           }
           if (resp.ok && !resp.redirected) {
             if (form.mvRecovery) await form.mvRecovery.clear();
@@ -1304,8 +1417,12 @@
           errBox.textContent = 'Lightwork is not responding. Check your connection and try again.';
           errBox.style.display = 'block';
         } finally {
-          submittedControls.forEach(function (item) { item[0].disabled = item[1]; });
-          if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+          // While the task page opens, the form stays locked.
+          if (startPending !== 'opening' && unlockStart) {
+            unlockStart();
+            const lost = !document.activeElement || document.activeElement === document.body;
+            if (lost && typing && typing.isConnected && !typing.disabled && typeof typing.focus === 'function') typing.focus();
+          }
         }
       });
     })();
@@ -2497,3 +2614,88 @@ window.mvReveal = function (element, options) {
   if (!element.matches('input, button, select, textarea, a[href], [tabindex]')) element.tabIndex = -1;
   element.focus({preventScroll: true});
 };
+
+// The Copilot's scripts (lightwork-product-operations.js, then
+// lightwork-copilot.js) are not part of the page's first download: on a slow
+// phone link they took bandwidth from the stylesheet and the first paint.
+// They load once the page is idle, or at once when someone opens the Copilot
+// first (its button, or any [data-copilot-toggle]); that open waits for them
+// and then happens. A selection a page makes meanwhile is kept for them in
+// window.LightworkCopilotEarlySelection.
+(function () {
+  'use strict';
+  var fab = document.getElementById('mv-copilot-fab');
+  if (!fab || !fab.dataset.copilotSrc || !fab.dataset.operationsSrc) return;
+  var state = 'idle', pending = null;
+  document.addEventListener('lightwork:copilot-selection', function (event) {
+    window.LightworkCopilotEarlySelection = event.detail || null;
+  });
+  function ready() {
+    state = 'ready'; fab.removeAttribute('aria-busy');
+    if (pending) { var opener = pending; pending = null; opener.click(); }
+  }
+  function loaded() { return state === 'ready' || fab.dataset.copilotReady === 'true'; }
+  function load() {
+    if (state !== 'idle' || loaded()) return;
+    state = 'loading';
+    var scripts = [fab.dataset.operationsSrc, fab.dataset.copilotSrc].map(function (src) {
+      var script = document.createElement('script');
+      script.src = src; script.async = false;   // in order, like the deferred tags they replace
+      document.head.appendChild(script);
+      return script;
+    });
+    var last = scripts[scripts.length - 1];
+    last.addEventListener('load', ready);
+    last.addEventListener('error', function () { state = 'idle'; pending = null; fab.removeAttribute('aria-busy'); });
+  }
+  window.mvLoadCopilot = load;
+  document.addEventListener('click', function (event) {
+    if (loaded()) return;
+    var target = event.target instanceof Element ? event.target : null;
+    var opener = target && target.closest('#mv-copilot-fab, [data-copilot-toggle]');
+    if (!opener) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    pending = opener; fab.setAttribute('aria-busy', 'true');
+    load();
+  }, true);
+  function whenIdle() {
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(load, {timeout: 3000});
+    else setTimeout(load, 1500);
+  }
+  if (document.readyState === 'complete') whenIdle(); else window.addEventListener('load', whenIdle, {once: true});
+})();
+
+// Phones: the top bar's controls need two 44 px rows (109 px), too much of a
+// small screen to cover while reading. Scrolling down tucks the bar away;
+// scrolling up, the top of the page, a focus inside it or an open menu or
+// drawer shows every control again (lightwork.css: body.topbar-tucked).
+(function () {
+  'use strict';
+  var bar = document.querySelector('.topbar');
+  if (!bar || typeof window.matchMedia !== 'function') return;
+  var phone = window.matchMedia('(max-width: 560px)');
+  var body = document.body, last = window.scrollY || 0, queued = false;
+  function tuck(on) { body.classList.toggle('topbar-tucked', on); }
+  function held() {
+    return !phone.matches || body.classList.contains('nav-open') || bar.contains(document.activeElement) ||
+      !!bar.querySelector('[aria-expanded="true"], details[open]');
+  }
+  function update() {
+    queued = false;
+    var y = window.scrollY || 0;
+    if (y <= 0 || held()) { tuck(false); last = y; return; }
+    if (Math.abs(y - last) < 8) return;   // jitter and momentum ends change nothing
+    tuck(y > last);
+    last = y;
+  }
+  window.addEventListener('scroll', function () {
+    if (queued) return;
+    queued = true;
+    (window.requestAnimationFrame || setTimeout)(update);
+  }, {passive: true});
+  bar.addEventListener('focusin', function () { tuck(false); });
+  // Shift+Tab heads back towards the bar: show it before focus arrives, so
+  // the browser does not scroll the page to reach a control out of view.
+  document.addEventListener('keydown', function (event) { if (event.key === 'Tab' && event.shiftKey) tuck(false); }, true);
+  if (typeof phone.addEventListener === 'function') phone.addEventListener('change', function () { if (!phone.matches) tuck(false); });
+})();

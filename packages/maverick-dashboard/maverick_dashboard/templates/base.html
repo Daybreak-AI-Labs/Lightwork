@@ -18,17 +18,24 @@
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
+  {% set _session = page_session(request) if request is defined and page_session is defined else none %}
+  {% include "_session_meta.html" %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   {#- One stylesheet holds the whole shell (a phone pays one round trip before
       the first paint). The Copilot and its native controls never take part in
-      the first paint: deferred, and first among deferred scripts, so page
-      scripts still find them ready. -#}
+      the first paint: lightwork-ui.js loads them when the page is idle, or
+      when the Copilot is first opened (that press is kept, see _copilot.html). -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  {#- The two parser-blocking scripts at the end of the page are requested
+      next, so a slow phone link carries them before the font
+      (test_shell_first_paint). -#}
+  <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
+  {% include "_journey_i18n.html" %}
   <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
-  <script src="{{ asset('lightwork-product-operations.js') }}" defer></script>
+  {#- Page features (not the Copilot), deferred: they bind their own panels.
+      The Copilot reads LWSpecialistDrafts when it renders, after these. -#}
   <script src="{{ asset('lightwork-specialist-drafts.js') }}" defer></script>
   <script src="{{ asset('lightwork-human-conversation-handoffs.js') }}" defer></script>
-  <script src="{{ asset('lightwork-copilot.js') }}" defer></script>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
     /* Operator-defined themes ([dashboard] themes in config.toml). Values
@@ -41,8 +48,6 @@
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
   <link rel="apple-touch-icon" href="{{ asset('daybreak-logo.jpg') }}" />
-<link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
-{% include "_journey_i18n.html" %}
 </head>
 <body class="{% if practice_mode %}is-practice {% endif %}theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
   {# The skip link is the first keyboard stop on every page. #}
@@ -199,7 +204,9 @@
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-practice.js') }}" defer></script>
   {% if usage_measures_on %}<script src="{{ asset('lightwork-usage-measures.js') }}"></script>{% endif %}
+  {% if _session %}<script src="{{ asset('lightwork-session.js') }}" defer></script>{% endif %}
   {% if usability_survey_on %}<script src="{{ asset('lightwork-usability-survey.js') }}" defer></script>{% endif %}
+  {% if web_vitals_on %}<script src="{{ asset('lightwork-web-vitals.js') }}" data-sample-rate="{{ web_vitals_sample_rate }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>
 </html>

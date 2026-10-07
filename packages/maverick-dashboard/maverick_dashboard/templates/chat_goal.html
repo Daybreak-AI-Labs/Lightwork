@@ -217,7 +217,7 @@
   .halt-card__steps { margin: var(--space-1) 0 0; padding-left: var(--space-4); font-size: var(--text-sm); }
   .halt-card__lists .muted { margin: var(--space-1) 0 0; font-size: var(--text-sm); }
   @media (prefers-reduced-motion: no-preference) { .convo { animation: convoIn 0.4s ease; } }
-  @keyframes convoIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes convoIn { from { transform: translateY(8px); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
   /* ---- Redesign layer (chat-first): the raw trace collapses into a

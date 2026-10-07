@@ -16,7 +16,7 @@
   const urls = new Set();
   function status(button, message) {
     const output = document.getElementById(button.dataset.reportStatus);
-    if (output) output.textContent = message;
+    if (output) { window.mvStatus ? window.mvStatus(output, message) : (output.textContent = message); }
   }
   function release() { urls.forEach(url => URL.revokeObjectURL(url)); urls.clear(); }
   function lock(value) { busy = value; buttons.forEach(button => { button.disabled = value || !context; }); }

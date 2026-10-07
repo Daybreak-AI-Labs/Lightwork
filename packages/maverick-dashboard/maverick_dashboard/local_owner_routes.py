@@ -124,7 +124,14 @@ async def _submit(request, *, setup):
         from .oidc_login import _cookie_secure, _set_cookie
         # The owner lands on Get started; a colleague lands on their home page.
         owner_signed_in = setup or not colleagues or local_passphrases.owner_of(fields.get("email", ""))
-        response = RedirectResponse("/start" if owner_signed_in else "/", status_code=303)
+        # Signing in again after a sign-in ended returns to that page.
+        from .oidc_login import _is_safe_return_to
+
+        return_to = request.query_params.get("return_to")
+        landing = return_to if (not setup and _is_safe_return_to(return_to)
+                                and not return_to.startswith("/auth/")) else (
+            "/start" if owner_signed_in else "/")
+        response = RedirectResponse(landing, status_code=303)
         _set_cookie(response, "mvk_session", token, max_age=session_ttl_seconds(), secure=_cookie_secure(request))
         response.headers["Cache-Control"] = "no-store"
         return response

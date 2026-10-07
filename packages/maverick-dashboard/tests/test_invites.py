@@ -136,8 +136,10 @@ def test_local_accept_flow_signs_in_and_binds_role(client, monkeypatch):
     assert r.status_code == 303
     assert "mvk_session=" in r.headers.get("set-cookie", "")
     assert rbac.get_stored_role("user:bob@corp.com") == "viewer"
-    # single-use: replaying the link is dead
-    assert client.post(f"/auth/invite/{token}").status_code == 410
+    # single-use: replaying the link only reads the original result
+    replay = client.post(f"/auth/invite/{token}")
+    assert replay.status_code == 200 and "it does not give access again" in replay.text
+    assert "mvk_session=" not in replay.headers.get("set-cookie", "")
     # the cookie now establishes a principal whose role gates admin pages
     assert client.get("/users").status_code == 403      # viewer ≠ admin
     client.cookies.clear()

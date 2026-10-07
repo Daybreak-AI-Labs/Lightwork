@@ -200,6 +200,8 @@ def _sample(setting, tmp_path):  # noqa: C901 - one branch per control
             folder.mkdir(parents=True, exist_ok=True)
             return str(folder)
         return str(_file(tmp_path, setting.id.replace(".", "-") + ".pem"))
+    if setting.id == "plugins.workbench_image":
+        return _IMAGE_ID
     choices = [v for v, _ in page._resolved(setting).choices]
     if control == "select":
         return next(v for v in choices if v != setting.default)
@@ -240,6 +242,23 @@ def _lookup(tree, setting):
     return catalog.lookup(tree, setting.path)
 
 
+_IMAGE_ID = "sha256:" + "ab" * 32
+
+
+@pytest.fixture()
+def local_image(monkeypatch):
+    """Stand in for one installed practice environment at the engine boundary."""
+    from maverick.sandbox import local_images
+
+    def selected(identity):
+        if identity != _IMAGE_ID:
+            raise local_images.LocalImageUnavailable("The selected practice environment is missing.")
+        return local_images.LocalImage(_IMAGE_ID, "Plugin practice")
+    monkeypatch.setattr(local_images, "selected", selected)
+    monkeypatch.setattr(local_images, "inventory", lambda *, refresh=False: (
+        (local_images.LocalImage(_IMAGE_ID, "Plugin practice"),), "One installed environment."))
+
+
 @pytest.fixture()
 def workspaces(monkeypatch):
     monkeypatch.setitem(page._ACCESS_SOURCES, "workspaces", lambda: [("acme", "Acme")])
@@ -250,7 +269,7 @@ def workspaces(monkeypatch):
 # ------------------------------------------------------------ round trip
 @pytest.mark.parametrize("setting", EDITABLE, ids=lambda s: s.id)
 def test_every_access_row_saves_reads_back_and_resets(setting, tmp_path, monkeypatch, as_token,
-                                                      workspaces, audit_rows):
+                                                      workspaces, local_image, audit_rows):
     monkeypatch.setattr(guard, "_prerequisites", lambda changed, values: None)
     monkeypatch.setattr(settings_tests, "check_kms",
                         lambda values: settings_tests.Outcome(True, "ok"))

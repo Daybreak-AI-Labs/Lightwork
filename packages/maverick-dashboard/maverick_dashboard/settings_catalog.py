@@ -845,6 +845,16 @@ SETTINGS: tuple[Setting, ...] = (
       "server, are reported by the role people choose, never by name, and are never sent anywhere. "
       "Results are on People > Ease-of-use results.",
       "toggle", "Privacy", False, "maverick.usability_survey"),
+    S("analytics", "web_vitals", "Measure page speed for real visitors",
+      "Time how fast pages load, respond and stay steady (LCP, INP and CLS) in a sample of real visits, "
+      "and show the 75th percentile for each page on phones and computers over the last 28 days. "
+      "Only counts per page are kept: no names, addresses or browsing history. Nothing is sent anywhere. "
+      "Results are on Settings > Page speed.",
+      "toggle", "Privacy", False, "maverick.web_vitals"),
+    S("analytics", "web_vitals_sample_rate", "Share of visits measured for page speed",
+      "How many visits are measured when page speed measurement is on, from 0 (none) to 1 (every visit). "
+      "0.5 measures about every other visit. More visits give results sooner; each one measured sends three numbers.",
+      "number", "Privacy", 0.5, "maverick.web_vitals", minimum=0, maximum=1, step=0.05, unit="share"),
     S("analytics", "usage_measures", "Count first results and AI suggestions, without names",
       "Count whether new people see a finished result of their own task in their first session, and how often "
       "AI suggestions are shown, used or dismissed. People and suggestions are kept only as one-way codes, and "
@@ -1032,7 +1042,8 @@ SETTINGS: tuple[Setting, ...] = (
       "Bring in existing automations from tools such as n8n, Make, Workato, Power Automate or UiPath.",
       "toggle", "Integrations", False, "maverick.config", env=("MAVERICK_AUTOMATION_IMPORT",)),
     S("automation_import", "create_schedules", "Recreate imported schedules",
-      "When an imported automation ran on a schedule, create the matching schedule here.",
+      "When an imported automation ran on a schedule, offer to recreate that schedule here, "
+      "reviewed once its draft is published.",
       "toggle", "Integrations", False, "maverick.config"),
     S("event_triggers", "enable", "Start workflows from events",
       "Watch connected services and start the chosen workflow when something new arrives.",

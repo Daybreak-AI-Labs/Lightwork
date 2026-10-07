@@ -857,12 +857,12 @@ class _FakeConsentStore:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
 
-    def list_profiles(self, tenant_id, *, limit):
+    def list_profiles(self, tenant_id, *, limit, after=None, search=""):
         self.calls.append(("profiles", limit))
         return {"items": []}
 
     def export_profile(self, tenant_id, profile_id, *, actor_sha256, access_purpose,
-                       receipt_limit):
+                       receipt_limit, **_page):
         self.calls.append(("receipts", receipt_limit))
         return {"receipts": []}
 

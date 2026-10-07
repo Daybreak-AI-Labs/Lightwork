@@ -99,6 +99,26 @@ def test_every_registered_page_has_exactly_one_area_and_a_known_section():
     assert set(sections) == {*ui_visibility.SIDEBAR_AREAS, "Ask", "Account", "Help"}
 
 
+def test_a_newly_registered_page_cannot_ship_without_an_area():
+    """Names each registered page that areas mode cannot place, so a new page
+    fails here (not only as a sorted-list diff) until it gets an area, an
+    existing section of that area and that section's translations."""
+    from maverick_dashboard import i18n_journeys, ui_visibility
+
+    sections = {title: set(names) for title, _hub, names in ui_visibility.AREAS}
+    translated = {row[0] for row in i18n_journeys.ROWS}
+    unplaced = []
+    for page in ui_visibility.PAGES:
+        spot = ui_visibility.PAGE_AREAS.get(page["path"])
+        if spot is None:
+            unplaced.append(f"{page['path']}: no entry in PAGE_AREAS")
+        elif spot[1] not in sections.get(spot[0], ()):
+            unplaced.append(f"{page['path']}: section {spot[1]!r} is not one of {spot[0]!r}'s sections")
+        elif not set(spot) <= translated:
+            unplaced.append(f"{page['path']}: {spot!r} has no translations")
+    assert not unplaced, "\n".join(unplaced)
+
+
 def test_each_area_hub_is_a_registered_page_of_that_area_and_every_section_is_used():
     from maverick_dashboard import ui_visibility
 

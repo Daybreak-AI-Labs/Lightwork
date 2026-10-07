@@ -265,9 +265,9 @@ def test_lineage_http_reads_and_imports_are_tenant_scoped(enabled):
 def test_signed_source_explanation_publication_and_withdrawal(enabled):
     from maverick_dashboard import product_operations as operations
     from maverick_dashboard import product_operations_workflow_explanation as copilot
-    from maverick_dashboard import workflow_explanation
 
-    enabled.client.app.include_router(workflow_explanation.router, prefix="/api/v1")
+    # The dashboard app already mounts the explanation and Copilot operation
+    # routes; mounting them again would leave duplicates for every later test.
     sources, value = package(enabled)
     admitted = enabled.client.post(BASE, json={"package": value}).json()
     draft = enabled.client.post(BASE + "/" + admitted["id"] + "/draft",
@@ -286,7 +286,6 @@ def test_signed_source_explanation_publication_and_withdrawal(enabled):
     assert "package_sha256" not in initial.text and "definition_digest" not in initial.text
     assert PRIVATE_REF not in initial.text and RATIONALE not in initial.text
     assert enabled.client.get(path, headers={"Authorization": "Bearer bob"}).status_code == 404
-    enabled.client.app.include_router(operations.router)
     enabled.monkeypatch.setattr(operations, "_gate", lambda _request: None)
     enabled.monkeypatch.setattr(operations, "_context", lambda _request: "c" * 64)
     enabled.monkeypatch.setattr(operations, "enabled_families", lambda: {"learning"})

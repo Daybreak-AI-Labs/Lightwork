@@ -297,3 +297,22 @@ def test_slack_slash_command_over_http(tmp_path):
     body = urlencode({"command": "/lightwork", "text": "ask write the report", "user_id": "U1"}).encode()
     r = client.post("/webhook/slack/commands", content=body, headers=_signed(body))
     assert "not available" in r.json()["text"]
+
+
+def test_waiting_for_decision_table_stacks_on_phones():
+    # At 390 px the table scrolled sideways and pushed "Decide by" and
+    # "Waiting on" off screen. Each cell carries its column name, and the
+    # shared stylesheet turns each row into a labelled card under 560 px.
+    import re
+    from pathlib import Path
+
+    package = Path(__file__).resolve().parents[1] / "maverick_dashboard"
+    page = (package / "templates" / "me.html").read_text(encoding="utf-8")
+    start = page.index("Waiting for your decision")
+    table = page[page.index("<table", start):page.index("</table>", start)]
+    assert 'class="table--stacked"' in table
+    headers = re.findall(r'<th scope="col">([^<]+)</th>', table)
+    labels = re.findall(r'<td data-label="([^"]+)"', table)
+    assert headers == labels == ["Request", "Risk", "Spending", "Decide by", "Waiting on"]
+    css = (package / "static" / "lightwork.css").read_text(encoding="utf-8")
+    assert ".table--stacked td[data-label]::before" in css

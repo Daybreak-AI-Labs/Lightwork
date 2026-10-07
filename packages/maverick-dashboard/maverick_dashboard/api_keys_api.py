@@ -154,7 +154,12 @@ def _reviewed_key_change(request, body, action, key_id=None):
         reviewed = ApplyIn.model_validate(body)
     except ValueError as exc:
         raise HTTPException(422, "Confirm the complete current review in Access keys. No key was changed.") from exc
-    return apply_sealed(request, reviewed, action=action, key_id=key_id)
+    result = apply_sealed(request, reviewed, action=action, key_id=key_id)
+    if action == "create":
+        # The route's documented answer for a key it created (status_code=201);
+        # a JSONResponse would otherwise send 200.
+        result.status_code = 201
+    return result
 
 
 @router.post("/api/v1/api-keys/{key_id}/rotate")
