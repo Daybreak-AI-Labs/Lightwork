@@ -65,7 +65,7 @@ test('readiness check lists each switch with a fix button', async (t) => {
   assert.match(ui.document.querySelector('[data-maintenance-status="readiness"]').textContent, /need attention/);
 });
 
-test('resuming a paused schedule confirms and sends the attempt count it showed', async (t) => {
+test('a paused schedule is resumed only from its full review on Automations', async (t) => {
   const ui = await fixture((url, options) => {
     if (url.endsWith('/resume')) return response({resumed: true, next: 9});
     return response({counts: [{state: 'Stopped', count: 1}], stopped: [
@@ -74,14 +74,14 @@ test('resuming a paused schedule confirms and sends the attempt count it showed'
   t.after(() => ui.window.close());
   ui.document.querySelector('[data-maintenance-run="queue"]').click();
   await ui.settle();
-  const button = [...ui.document.querySelectorAll('[data-maintenance-out="queue"] button')]
-    .find((b) => b.textContent === 'Resume schedule');
-  assert.ok(button);
-  button.click();
-  await ui.settle();
-  assert.match(ui.confirms[0], /will not be repeated/);
-  const resume = ui.calls.find((c) => c.url.endsWith('/queue/7/resume'));
-  assert.deepEqual(JSON.parse(resume.options.body), {attempts: 3});
+  const out = ui.document.querySelector('[data-maintenance-out="queue"]');
+  // Settings no longer resumes in place: it links to the schedule's review,
+  // which shows the attempt count and confirms before anything runs again.
+  assert.equal([...out.querySelectorAll('button')].some((b) => b.textContent === 'Resume schedule'), false);
+  const review = [...out.querySelectorAll('a')].find((a) => a.textContent === 'Review this schedule');
+  assert.ok(review);
+  assert.equal(review.getAttribute('href'), '/automations?recover_schedule=7');
+  assert.equal(ui.calls.some((c) => c.url.endsWith('/resume')), false);
 });
 
 test('forms marked for confirmation do not submit when cancelled', async (t) => {
