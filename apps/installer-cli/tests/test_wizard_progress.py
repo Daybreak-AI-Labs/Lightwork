@@ -44,11 +44,18 @@ def test_step_indicator_no_breadcrumb_when_done_empty():
 
 # ---------- indicator surfaces in run() ----------
 
-def test_run_prints_step_indicators(monkeypatch):
+def test_run_prints_step_indicators(monkeypatch, tmp_path):
     import io
 
     from maverick_installer import wizard
     from rich.console import Console
+
+    # A fresh installation. The config paths are frozen at the wizard's first
+    # import, which in a shared worker can be an earlier test's home holding a
+    # saved setup; run() would then stop at the existing-setup notice.
+    monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path / ".maverick")
+    monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / ".maverick" / "config.toml")
+    monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".maverick" / ".env")
 
     # Use a no-color console so Rich doesn't fragment "Step N/M" with
     # inline ANSI codes, which would break the substring assertions.
