@@ -153,7 +153,7 @@ def test_queued_inbox_preview_refuses_inflight_without_dispatch(monkeypatch):
     from maverick import conversation_inbox
     monkeypatch.setattr(deletion.personal_memory, "require_scope", lambda *a: None)
     monkeypatch.setattr(conversation_inbox, "owned_inventory", lambda actor: [{"id": "CI-private", "revision": 2, "inflight": True}])
-    with pytest.raises(ValueError, match="consuming or dispatching"):
+    with pytest.raises(ValueError, match="active or unconfirmed"):
         deletion.preview("user:a", "dashboard", "a", ["conversation_inbox"], None)
 
 
