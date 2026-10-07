@@ -13,10 +13,11 @@ from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
 PRIMARY = re.compile(r"btn--primary|btn-primary")
-# Measured 6 October 2026 after governance, data use rules and the vendor
-# pages were brought to one main action. Only ever lower these.
-MAX_TEMPLATES_WITH_EXTRA = 138
-MAX_EXTRA_PRIMARIES = 288
+# Measured 7 October 2026 after human conversations, continuous evidence,
+# decision reviews and the draft review steps were brought back to one main
+# action. Only ever lower these.
+MAX_TEMPLATES_WITH_EXTRA = 137
+MAX_EXTRA_PRIMARIES = 287
 FIXED = ("governance.html", "data_use_governance.html", "vendor_detail.html")
 
 

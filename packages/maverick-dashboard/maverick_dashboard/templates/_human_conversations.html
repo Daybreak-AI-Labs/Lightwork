@@ -16,13 +16,13 @@
 <form data-human-duty-form>
 <label>{{ ui('Name customers see') }}<input class="input" data-human-duty-label maxlength="120" autocomplete="name"></label>
 <label>{{ ui('Your availability') }}<select class="input" data-human-duty-hours><option value="0">{{ ui('Off duty') }}</option><option value="1">{{ ui('1 hour') }}</option><option value="2">{{ ui('2 hours') }}</option><option value="4">{{ ui('4 hours') }}</option><option value="8">{{ ui('8 hours') }}</option></select></label>
-<button class="btn btn--primary" type="submit">{{ ui('Review my availability') }}</button>
+<button class="btn" type="submit">{{ ui('Review my availability') }}</button>
 </form>
 {% endif %}
 <form data-human-reply-form hidden>
 <label>{{ ui('Reply to this human conversation') }}<textarea class="input" data-human-reply-text rows="4" maxlength="4000" required></textarea></label>
 <p>{{ ui('This sends only the exact reply reviewed below. It does not start AI work, send files or add human messages to AI context.') }}</p>
-<button class="btn btn--primary" type="submit">{{ ui('Review human reply') }}</button>
+<button class="btn" type="submit">{{ ui('Review human reply') }}</button>
 </form>
 <div data-human-review class="human-full-review" aria-live="polite"></div>
 <label>{{ ui('Earlier original decisions') }}<select class="input" data-human-history><option value="">{{ ui('Choose an original decision') }}</option></select></label>
