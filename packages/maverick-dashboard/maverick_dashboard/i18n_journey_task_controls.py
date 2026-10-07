@@ -114,5 +114,12 @@ ROWS = [
     ("Try again starts the task over. This workspace does not save progress, so finished steps run again.", "Réessayer recommence la tâche. Cet espace de travail n’enregistre pas la progression : les étapes terminées sont refaites.", "Erneut versuchen beginnt die Aufgabe von vorn. Dieser Arbeitsbereich speichert keinen Fortschritt, daher laufen erledigte Schritte erneut.", "もう一度試すとタスクを最初からやり直します。このワークスペースは進捗を保存しないため、完了した手順も再実行されます。", "重试会从头开始任务。此工作区不保存进度，因此已完成的步骤会再次运行。"),
     ("Stopping. Lightwork stops after the step it is on.", "Arrêt en cours. Lightwork s’arrête après l’étape en cours.", "Wird gestoppt. Lightwork stoppt nach dem aktuellen Schritt.", "停止しています。Lightworkは現在の手順の後に停止します。", "正在停止。Lightwork 会在当前步骤完成后停止。"),
     ("Stop requested. The current step may still be cleaning up. Already completed external changes are not undone. You can resume or try again below once it stops.", "Arrêt demandé. L’étape en cours peut encore se terminer. Les modifications externes déjà effectuées ne sont pas annulées. Vous pourrez reprendre ou réessayer ci-dessous une fois l’arrêt effectif.", "Stopp angefordert. Der aktuelle Schritt wird eventuell noch abgeschlossen. Bereits erfolgte externe Änderungen werden nicht rückgängig gemacht. Nach dem Stopp können Sie unten fortsetzen oder es erneut versuchen.", "停止を要求しました。現在の手順の後片付けが続く場合があります。完了済みの外部変更は元に戻りません。停止後、下で再開または再試行できます。", "已请求停止。当前步骤可能仍在收尾。已完成的外部更改不会撤销。停止后可在下方继续或重试。"),
-
+    ("AI for this task", "IA pour cette tâche", "KI für diese Aufgabe", "このタスクのAI", "此任务使用的 AI"),
+    ("AI for the next task", "IA pour la prochaine tâche", "KI für die nächste Aufgabe", "次のタスクのAI", "下一个任务使用的 AI"),
+    ("AI model", "Modèle d’IA", "KI-Modell", "AIモデル", "AI 模型"),
+    ("Use workspace settings", "Utiliser les paramètres de l’espace de travail", "Arbeitsbereichseinstellungen verwenden", "ワークスペースの設定を使用", "使用工作区设置"),
+    ("Thinking depth", "Profondeur de réflexion", "Denktiefe", "思考の深さ", "思考深度"),
+    ("Use the model’s usual thinking depth", "Utiliser la profondeur de réflexion habituelle du modèle", "Die übliche Denktiefe des Modells verwenden", "モデルの通常の思考の深さを使用", "使用模型通常的思考深度"),
+    ("Reading available AI choices…", "Lecture des choix d’IA disponibles…", "Verfügbare KI-Optionen werden gelesen…", "利用できるAIの選択肢を読み込み中…", "正在读取可用的 AI 选项…"),
+    ("Refresh AI choices", "Actualiser les choix d’IA", "KI-Optionen aktualisieren", "AIの選択肢を更新", "刷新 AI 选项"),
 ]
