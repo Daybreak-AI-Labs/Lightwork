@@ -56,7 +56,10 @@ def test_worker_defers_when_goal_could_not_start(tmp_path, monkeypatch):
     from maverick.job_queue import JobQueue
     from maverick.worker import Worker
 
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: None)
+    # The detailed outcome names a refused concurrency slot explicitly; a bare
+    # None now means "outcome unconfirmed" and is never deferred or replayed.
+    monkeypatch.setattr(runner, "run_goal_in_thread",
+                        lambda gid, **k: runner.GoalRunUnavailable("concurrency_slot"))
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, retry_after=0.0, max_attempts=5)
     now = time.time()
@@ -81,15 +84,33 @@ def test_worker_gives_up_after_defer_budget_exhausted(tmp_path, monkeypatch):
     from maverick.job_queue import JobQueue
     from maverick.worker import Worker
 
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: None)
+    monkeypatch.setattr(runner, "run_goal_in_thread",
+                        lambda gid, **k: runner.GoalRunUnavailable("concurrency_slot"))
     monkeypatch.setattr(worker_mod, "_MAX_GOAL_SLOT_DEFERS", 2)
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, retry_after=0.0, max_attempts=5)
     jid = q.enqueue("run_goal", {"goal_id": 1, "_slot_defers": 2})
     w.run_once()
-    # Defer budget already spent -> raises -> job_queue's normal retry path.
-    assert q.get(jid).status == "pending"
-    assert q.list(status="pending", limit=10)[0].id == jid  # no new successor
+    # Defer budget already spent -> the job stops with a plain reason instead
+    # of automatically retrying, and no successor is created.
+    job = q.get(jid)
+    assert job.status != "pending" and job.status != "done"
+    assert "concurrency slot" in (job.last_error or "")
+    assert q.list(status="pending", limit=10) == []
+
+
+def test_worker_never_replays_an_unconfirmed_goal_outcome(tmp_path, monkeypatch):
+    import maverick.runner as runner
+    from maverick.job_queue import JobQueue
+    from maverick.worker import Worker
+
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: None)
+    q = JobQueue(db_path=tmp_path / "jobs.db")
+    w = Worker(queue=q, retry_after=0.0, max_attempts=5)
+    jid = q.enqueue("run_goal", {"goal_id": 1})
+    w.run_once()
+    assert q.get(jid).status not in ("pending", "done")
+    assert q.list(status="pending", limit=10) == []
 
 
 def test_worker_completes_when_goal_done(tmp_path, monkeypatch):

@@ -48,6 +48,10 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(intelligence, "require_enabled", require_enabled)
     monkeypatch.setattr(intelligence, "enabled", lambda: bool(state["enabled"]))
     monkeypatch.setattr(api, "_tenant_id", lambda: str(state["tenant"]))
+    # Vendor writes recheck the live workspace at the effect boundary.
+    from maverick_dashboard import vendor_profile
+
+    monkeypatch.setattr(vendor_profile, "current_tenant_id_strict", lambda: str(state["tenant"]))
     monkeypatch.setattr(api, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(
         api,

@@ -1343,6 +1343,11 @@ def test_tamper_is_detected(harness):
     publish(store, principal, clock)
     submit(store, principal, clock)
     with sqlite3.connect(store.path) as connection:
+        # The runs index orders by a store-registered SQL function that itself
+        # refuses a malformed payload. An outside tamperer drops those indexes
+        # first and rewrites the row directly.
+        connection.execute("DROP INDEX run_recent")
+        connection.execute("DROP INDEX run_state_recent")
         connection.execute("UPDATE runs SET payload_json='{}' WHERE tenant_id='tenant-a'")
     principal.value = "auditor"
     with pytest.raises(GovernanceAgentIntegrityError, match="integrity"):

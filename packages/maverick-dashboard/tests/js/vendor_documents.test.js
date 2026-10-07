@@ -175,7 +175,7 @@ test('editing a transcription after preview retains editable text and requires a
 
 test("citation view distinguishes PDF pages, uploaded source dates and conflicting renewal claims", async t=>{
   const citation={quote:"Model provenance is undisclosed.",pages:[3],start:0,end:32};
-  const row=record("one",{evidence:{status:"available",documents:[{document_id:"pdf",name:"Policy.pdf",source:"upload",status:"available",version:"1",modified_at:100,
+  const row=record("one",{evidence:{status:"available",documents:[{document_id:"pdf",name:"Policy.pdf",source:"upload",status:"available",version:"1",modified_at:100,fresh_until:1900000000,
     extracted:{answers:{aiv_provenance:{answer:"no",citations:[citation]}}}}],changes:{comparison:"previous_review",documents:[{document_id:"pdf",change:"changed",before_version:"1",after_version:"2",
       answer_changes:[{question_id:"aiv_provenance",before:"yes",after:"no",before_citations:[{quote:"Model provenance is documented."}],after_citations:[citation]}]}]}},
     assessment:{answers:{aiv_provenance:{answer:"unknown",note:"Conflicting current document answers require human resolution."}},
@@ -183,6 +183,7 @@ test("citation view distinguishes PDF pages, uploaded source dates and conflicti
   const ui=await fixture([row,record("two")]);t.after(()=>ui.dom.window.close());await ui.load("one");
   assert.match(ui.el("assessment").textContent,/pages 3/); assert.match(ui.el("assessment").textContent,/Conflicting/);
   assert.match(ui.el("evidence").textContent,/uploader asserted/);
+  assert.match(ui.el("evidence").textContent,/valid until/);
   assert.match(ui.el("evidence-changes").textContent,/Previous: Model provenance is documented/);
   ui.el("document-date").value="2026-09-01";await ui.load("two");assert.equal(ui.el("document-date").value,"");
 });

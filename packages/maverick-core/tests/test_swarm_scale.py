@@ -69,14 +69,22 @@ def _agent(ctx):
 
 
 @pytest.mark.parametrize("bound, expected_peak", [(3, 3), (0, 12)])
-def test_model_calls_are_bounded_across_the_swarm(swarm_cfg, bound, expected_peak):
+def test_model_calls_are_bounded_across_the_swarm(swarm_cfg, bound, expected_peak, tmp_path):
+    from maverick.world_model import WorldModel
+
     llm = _CountingLLM()
     ctx = _ctx(max_concurrent_model_calls=bound)
     ctx.llm, ctx.budget = llm, Budget(max_wall_seconds=30)
+    # Each guarded call re-reads the goal's cancel/handoff state from the world.
+    ctx.world = WorldModel(tmp_path / "world.db")
+    ctx.goal_id = ctx.world.create_goal("swarm", "")
     agents = [_agent(ctx) for _ in range(12)]
 
     async def _drive():
         return await asyncio.gather(*(Agent._complete_guarded(a) for a in agents))
 
-    assert asyncio.run(_drive()) == ["ok"] * 12
+    try:
+        assert asyncio.run(_drive()) == ["ok"] * 12
+    finally:
+        ctx.world.close()
     assert llm.peak == expected_peak

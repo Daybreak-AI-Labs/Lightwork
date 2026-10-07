@@ -10,6 +10,12 @@ class _World:
         self.turns = []
         self.goals = []
 
+    def latest_artifacts(self, goal_id):
+        return []  # the goal saved no output files
+
+    def open_channel_questions(self, conversation_id, owner, execution_principal):
+        return []  # no blocked question awaits a reply
+
     def get_or_create_conversation(self, channel, user_id):
         self.conversation_key = (channel, user_id)
         return type("Conversation", (), {"id": 1})()
@@ -25,7 +31,7 @@ class _World:
         return None
 
     def get_goal(self, goal_id):
-        return type("Goal", (), {"result": "ok"})()
+        return type("Goal", (), {"result": "ok", "status": "done"})()
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,7 @@ class _Principal:
 
 def _server(server_mod):
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world = _World()
     srv.llm = object()
     srv.sandbox = object()
@@ -116,7 +123,7 @@ def test_oidc_enabled_uses_verified_principal_for_goal_context(monkeypatch):
     srv = _server(server_mod)
     out = asyncio.run(srv._handle_message(_Msg()))
 
-    assert out == "ok"
+    assert _answer(out) == "ok"
     assert seen_tokens == ["signed.jwt"]
     assert srv.world.conversation_key == ("slack", "user:alice")
     assert srv.world.turns == [(1, "user", "hello")]
@@ -160,10 +167,17 @@ def test_oidc_opaque_subject_is_bound_exactly_without_path_interpolation(monkeyp
         text = "hello"
 
     srv = _server(server_mod)
-    assert asyncio.run(srv._handle_message(_Msg())) == "ok"
+    assert _answer(asyncio.run(srv._handle_message(_Msg()))) == "ok"
 
     expected_user_id = f"slack:{subject}"
     assert captured["user_id"] == expected_user_id
     assert srv.world.goals == [
         ("hello", "hello", f"user:{expected_user_id}", f"user:{expected_user_id}")
     ]
+
+
+def _answer(reply):
+    """The goal's answer, without the agent-written label channels append (AI-2)."""
+    answer, label = reply.rsplit("\n\n", 1)
+    assert label.startswith("-- Written by an agent in Lightwork.")
+    return answer

@@ -33,6 +33,25 @@ from maverick_dashboard.trc_stock_evidence_composition import (
 SHA_A = "a" * 64
 
 
+@pytest.fixture()
+def native_sources_enabled(tmp_path, monkeypatch):
+    """Readiness also lists managed sources from the native evidence store,
+    which keeps its own enable gate; give it an isolated, enabled home."""
+    from maverick import config
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[tech_risk_compliance]\nenable = true\n\n"
+        "[tech_risk_compliance.continuous_evidence]\nenable = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
+    config.reset_config_cache()
+    yield
+    config.reset_config_cache()
+
+
 class Transport:
     def request(self, _request):
         raise AssertionError("composition attachment must not perform provider I/O")
@@ -210,7 +229,7 @@ def production_config(*, omit_last: bool = False) -> dict[str, object]:
     }
 
 
-def test_config_driven_composition_installs_all_seven_stock_collectors_lazily():
+def test_config_driven_composition_installs_all_seven_stock_collectors_lazily(native_sources_enabled):
     calls: list[tuple[str, str]] = []
     config = production_config()
     settings = stock_collector_settings(config, tenant_id="tenant-a")
@@ -246,7 +265,7 @@ def test_config_driven_composition_installs_all_seven_stock_collectors_lazily():
     assert runtime.status()["custom_collector_dependencies_injected"] is True
 
 
-def test_production_readiness_fails_closed_for_selected_source_without_manifest():
+def test_production_readiness_fails_closed_for_selected_source_without_manifest(native_sources_enabled):
     composition = ConfigDrivenTrcStockEvidenceComposition(
         config_loader=lambda _tenant: production_config(omit_last=True),
         credential_ref_present=lambda _name: True,

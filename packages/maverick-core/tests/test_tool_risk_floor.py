@@ -48,8 +48,8 @@ def test_namespaced_action_inherits_its_namespaces_risk():
 def test_namespace_inheritance_is_upward_only():
     # A suffix must never launder a namespace DOWN: inheriting ``low`` from
     # read_file would classify an unknown ``read_file.<something>`` below the
-    # medium default it is entitled to.
-    assert tool_risk("read_file.thing", {}) == "medium"
+    # unrated high floor it is entitled to.
+    assert tool_risk("read_file.thing", {}) == "high"
     assert tool_risk("read_file", {}) == "low"
 
 
@@ -59,8 +59,9 @@ def test_an_exact_override_still_beats_inherited_risk():
 
 
 def test_a_dotless_or_empty_namespace_changes_nothing():
-    assert tool_risk("totally_unknown_tool", {}) == "medium"
-    assert tool_risk(".leading_dot", {}) == "medium"
+    # Unrated names keep the high refusal floor, with or without a dot.
+    assert tool_risk("totally_unknown_tool", {}) == "high"
+    assert tool_risk(".leading_dot", {}) == "high"
 
 
 def test_pinned_overrides_reads_config_once_per_block(monkeypatch):

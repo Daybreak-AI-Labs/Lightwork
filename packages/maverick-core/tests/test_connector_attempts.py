@@ -96,21 +96,26 @@ def test_each_retry_reenters_configured_rate_limit(connector, monkeypatch):
     assert len(requests) == 1
 
 
-def test_real_agent_dispatch_binds_its_existing_budget_to_connector_retry(connector, monkeypatch):
+def test_real_agent_dispatch_binds_its_existing_budget_to_connector_retry(connector, monkeypatch, tmp_path):
     from maverick.agent import Agent
+    from maverick.world_model import WorldModel
 
     requests = transport(monkeypatch, [(503, b"", {})])
     budget = Budget(max_tool_calls=1)
     budget.record_tool_call()
     registry = ToolRegistry()
     registry.register(connector)
-    obj = SimpleNamespace(ctx=SimpleNamespace(budget=budget, goal_id=1), tools=registry,
+    # The dispatch guard reads the goal's handoff/cancel state from the world.
+    world = WorldModel(tmp_path / "world.db")
+    goal_id = world.create_goal("connector retry", "")
+    obj = SimpleNamespace(ctx=SimpleNamespace(budget=budget, goal_id=goal_id, world=world), tools=registry,
                           _HALT_POLL_SECONDS=0.01, _audit_tool_event=lambda *_a, **_k: True)
     obj._await_wall_clock_guarded = Agent._await_wall_clock_guarded.__get__(obj)
     with pytest.raises(BudgetExceeded):
         asyncio.run(Agent._run_dispatched_tool(
             obj, connector.name, {"op": "get", "path": "/items"}, shield=None,
             quarantine=None, call_id="fixture", call_commitment="fixture", principal=None))
+    world.close()
     assert len(requests) == 1
 
 

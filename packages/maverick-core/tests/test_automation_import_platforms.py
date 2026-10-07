@@ -217,7 +217,13 @@ class TestRegistry:
     def test_all_definition_importers_registered(self):
         for s in ("make", "power_automate", "uipath", "workato"):
             assert s in ai.available_sources()
+        for s in ("make", "uipath", "workato"):
             assert ai.get_importer(s).can_fetch_definitions is True
+        # Power Automate definitions import from an exported file only: live
+        # enumeration is environment-specific, so it does not claim to fetch.
+        assert ai.get_importer("power_automate").can_fetch_definitions is False
+        with pytest.raises(ai.ImporterError, match="--from-file"):
+            ai.get_importer("power_automate").fetch()
 
     @pytest.mark.parametrize("source,raw", [
         ("make", TestMake.BLUEPRINT),

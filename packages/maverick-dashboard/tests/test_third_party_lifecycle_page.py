@@ -42,7 +42,7 @@ def test_page_is_a_list_workflow_in_plain_words(page_client) -> None:
     # Lists load on open, with a button to start each kind of record.
     for host in ("tpl-templates", "tpl-assessments", "tpl-lifecycles", "tpl-offboarding"):
         assert f'id="{host}"' in page
-    for label in ("New questionnaire", "New assessment", "Start tracking a vendor",
+    for label in ("Create questionnaire", "Create assessment", "Start tracking a vendor",
                   "Delete expired records", "Check records haven't been changed"):
         assert label in page
     assert "/static/lightwork-third-party-lifecycle.js" in page

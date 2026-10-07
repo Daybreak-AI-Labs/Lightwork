@@ -76,9 +76,12 @@ def test_vendor_detail_renders_record_without_form_tokens():
     token = record["form_path"].removeprefix("/form/")
     assert token not in body
     # Every section has its button; no raw IDs or lowercase keys to read.
+    # A new vendor starts under review: activation goes through its
+    # assessment, so the page offers that instead of a no-op status button.
     for label in ("Add contract", "Send a questionnaire", "Link a record", "Add a note",
-                  "Mark as under review", "Stop using this vendor"):
+                  "Review assessment before activation", "Stop using this vendor"):
         assert label in body
+    assert "Mark as under review" not in body
     assert f'data-revision="{record["revision"]}"' in body
     assert "window.confirm" not in body
     from test_support.plain_language import developer_terms

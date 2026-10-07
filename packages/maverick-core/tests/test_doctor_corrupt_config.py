@@ -18,8 +18,9 @@ def test_doctor_flags_corrupt_config(tmp_path: Path, capsys):
 
     cfg = _check_config()
     out = capsys.readouterr().out
-    assert "invalid TOML" in out
-    assert "IGNORED" in out
+    # Reported as a blocking (red) row in plain words, naming the file.
+    assert "✗ config" in out
+    assert "unreadable or invalid" in out and "config.toml" in out
     assert cfg == {}
 
 

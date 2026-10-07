@@ -180,7 +180,7 @@
     "artifact": 54,
     "a2a": 4,
     "preferences": 8,
-    "learning": 60,
+    "learning": 61,
     "sqlite_domain": 82,
     "configuration": 74,
     "read_projection": 24,
@@ -29737,6 +29737,25 @@
           "function": "prepare",
           "kind": "maverick_home",
           "expression": "maverick_home()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/factory_guidance.py",
+      "contract": "learning",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/factory_guidance.py",
+      "purpose": "Reviewed paired intake checks and one exact native factory adoption.",
+      "referenced_store_owners": [],
+      "review": "October 7 G1 sweep: module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 90,
+          "function": "_artifact",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
         }
       ]
     }

@@ -124,29 +124,39 @@ def test_records_to_send_need_an_active_workspace(monkeypatch):
 
 @pytest.mark.parametrize("kind", ["finding", "risk_acceptance", "ai_incident"])
 def test_records_to_send_are_exact_and_accepted_by_the_send_form(monkeypatch, kind):
-    from maverick_dashboard import assurance_pickers_api, model_risk_schemas
+    from maverick import grc_outbound_sync
+    from maverick_dashboard import assurance_pickers_api, model_risk_api
 
     monkeypatch.setenv("MAVERICK_TENANT", "alpha")
     officer = _Officer()
     monkeypatch.setattr(assurance_pickers_api, "_module", lambda *_args: officer)
+    monkeypatch.setattr(model_risk_api, "_module", lambda *_args: officer)
 
     response = client.get(f"{BASE}/grc-sources?source_kind={kind}")
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["count"] == 1
-    source = body["sources"][0]["source"]
-    assert source["source_kind"] == kind
-    # Every candidate is exactly what the preview and send routes accept.
-    model_risk_schemas.GRCOutboundSourceIn.model_validate(source)
+    row = body["sources"][0]
+    record = {"finding": officer.finding, "risk_acceptance": officer.acceptance,
+              "ai_incident": officer.incident}[kind]
+    assert row["asset_id"] == record["asset_id"]
+    assert row["severity"] == record["severity"]
+    # The choice is only a reference: the browser never supplies the values
+    # that are sent. It is exactly what the preview route accepts ...
+    source = row["source"]
+    assert source == {"source_kind": kind, "source_id": record["id"]}
+    model_risk_api.GRCOutboundSelectionIn.model_validate(source)
+    # ... and the server resolves it to the exact current native record.
+    resolved, _ = model_risk_api._grc_source(grc_outbound_sync, kind, source["source_id"])
+    assert resolved.kind.value == kind and resolved.source_id == record["id"]
     if kind == "finding":
-        assert source["source_digest"] == DIGEST and source["source_revision"] == 1
+        assert resolved.source_digest == DIGEST and resolved.source_revision == 1
     else:
-        record = officer.acceptance if kind == "risk_acceptance" else officer.incident
-        assert source["source_revision"] == record["revision"]
-        assert len(source["source_digest"]) == 64
-        again = client.get(f"{BASE}/grc-sources?source_kind={kind}").json()
-        assert again["sources"][0]["source"]["source_digest"] == source["source_digest"]
+        assert resolved.source_revision == record["revision"]
+        assert len(resolved.source_digest) == 64
+        again, _ = model_risk_api._grc_source(grc_outbound_sync, kind, source["source_id"])
+        assert again.source_digest == resolved.source_digest
 
 
 def test_records_to_send_need_the_same_permission_as_the_page(monkeypatch):

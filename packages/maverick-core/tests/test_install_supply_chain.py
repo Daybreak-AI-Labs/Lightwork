@@ -727,7 +727,10 @@ def test_customer_install_guides_do_not_direct_customers_to_clone_internal_sourc
         text = path.read_text(encoding="utf-8")
         assert "git clone https://github.com/Daybreak-AI-Labs/Lightwork" not in text, path
         assert "pipx install 'maverick-agent[installer]'" not in text
-        assert "https://github.com/Daybreak-AI-Labs/Lightwork/releases" in text, path
+        # Each guide points at a verified binary: a release asset or, since
+        # d827a611, a requested (licensed) customer package.
+        assert ("https://github.com/Daybreak-AI-Labs/Lightwork/releases" in text
+                or "customer package" in text), path
 
 
 def _metadata(relative_path: str) -> dict:

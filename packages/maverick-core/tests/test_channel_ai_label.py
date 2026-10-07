@@ -40,6 +40,7 @@ def _server(monkeypatch, tmp_path, outcome):
 
     monkeypatch.setattr(runner, "run_goal_in_background_async", dispatch)
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world, srv.llm, srv.sandbox, srv.max_depth = world, object(), object(), 3
     srv._shield = None
     return srv, world

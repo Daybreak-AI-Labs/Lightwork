@@ -3215,8 +3215,9 @@ def dsar_estate_worksheet(request_id: str) -> dict:
 
     The fulfillment machinery exports what Lightwork itself holds; this
     worksheet is the human search plan for the rest of the estate: the
-    data-map assets whose flagged columns identify people, the active
-    vendors who process on the organization's behalf, and (when document
+    data-map assets whose flagged columns identify people, every vendor
+    that is not offboarded (a vendor still under review may already hold
+    the subject's data, so it stays on the search plan), and (when document
     sources are connected) a bounded document search for the subject.
     Every section degrades to ``enabled: false`` when its module is off —
     the worksheet never fails because part of the estate is unmapped.
@@ -3264,8 +3265,10 @@ def dsar_estate_worksheet(request_id: str) -> dict:
             processors = {
                 "enabled": True,
                 "vendors": [
-                    {"id": row.get("id"), "name": row.get("name")}
-                    for row in vm.list_vendors(status="active")
+                    {"id": row.get("id"), "name": row.get("name"),
+                     "status": row.get("status")}
+                    for row in vm.list_vendors()
+                    if row.get("status") != "offboarded"
                 ][:100],
             }
     except Exception:

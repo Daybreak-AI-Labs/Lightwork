@@ -861,6 +861,14 @@ def dispatcher(ledger, monkeypatch):
     monkeypatch.setattr(llm, "_enforce_circuit", lambda *a: None)
     monkeypatch.setattr(llm, "_hedge_ms", lambda: None)
     monkeypatch.setattr("maverick.budget._lookup_price", lambda _model, **_kw: (1_000_000, 0))
+    # Attempt prices now come from the quote itself; keep its provenance
+    # (an estimate for this synthetic model) and only fix the synthetic rate.
+    from dataclasses import replace as _replace
+
+    from maverick import budget as _budget
+    _real_quote = _budget._lookup_price_quote
+    monkeypatch.setattr(_budget, "_lookup_price_quote", lambda model, **kw: _replace(
+        _real_quote(model, **kw), input_per_mtok=1_000_000, output_per_mtok=0))
     cap.record("openai", 18, path=ledger)
     return llm.LLM(model="openai:synthetic-cap-model")
 

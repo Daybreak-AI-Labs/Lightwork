@@ -69,11 +69,19 @@ def test_dedicated_connectors_high(_home):
 # --- precision: read-only / unknown stay put --------------------------------
 
 def test_readonly_and_unknown_stay_medium(_home):
-    from maverick.safety.tool_risk import tool_risk
-    # bitbucket exposes only issue/pr/pipeline reads; translate/wolfram are
-    # pure lookups; an unrecognized name keeps the medium fallback.
-    for n in ("bitbucket", "translate", "wolfram", "some_unknown_tool"):
+    from maverick.safety.tool_risk import tool_risk, tool_risk_is_classified
+    # Reviewed medium-risk tools (bounded goal-local memory) stay medium.
+    for n in ("kv_memory", "remember_outcome_key"):
         assert tool_risk(n) == "medium", n
+    # bitbucket/translate/wolfram used to sit here as "pure lookups", but they
+    # exchange credentials with and dispatch data to an external service, so
+    # they are deliberately classified high now.
+    for n in ("bitbucket", "translate", "wolfram"):
+        assert tool_risk(n) == "high", n
+    # An unrecognized name no longer slips under a medium ceiling: it fails
+    # safe to high, without being marked as intentionally classified.
+    assert tool_risk("some_unknown_tool") == "high"
+    assert tool_risk_is_classified("some_unknown_tool") is False
 
 
 def test_builtin_classifications_unaffected(_home):

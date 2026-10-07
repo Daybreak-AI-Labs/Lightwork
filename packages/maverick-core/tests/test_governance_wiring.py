@@ -37,7 +37,7 @@ def _agent(tmp_path):
 
 def _gov(monkeypatch, policy: dict):
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {"governance": policy})
-    monkeypatch.setattr("maverick.config.config_source_errors", dict)
+    monkeypatch.setattr("maverick.config.config_source_errors", lambda *a, **k: {})
 
 
 @pytest.mark.asyncio

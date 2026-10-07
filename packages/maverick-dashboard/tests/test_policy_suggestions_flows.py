@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,10 +54,32 @@ def client(monkeypatch, tmp_path):
     audit_writer._defaults.clear()
 
 
+_SIGNED_IN: dict[str, str | None] = {"principal": None}
+
+
+class _SignedIn:
+    """Carry the signed-in person on the request, as the auth middleware does.
+
+    Privacy notice approvals re-check a fresh authenticated principal on the
+    request itself, so an anonymous local request cannot decide them.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            state = dict(scope.get("state") or {})
+            state["principal"] = SimpleNamespace(principal=_SIGNED_IN["principal"], sub=None, claims={})
+            scope = {**scope, "state": state}
+        await self.app(scope, receive, send)
+
+
 def _as(monkeypatch, principal):
     from maverick_dashboard import auth, data_use_governance_api, rbac
 
     role = ROLES[principal]
+    monkeypatch.setitem(_SIGNED_IN, "principal", principal)
     allowed = lambda request, perm, **kw: perm in rbac.permissions_for(role)  # noqa: E731
     monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
     monkeypatch.setattr(auth, "_authorization_principal", lambda request: principal)
@@ -166,7 +189,8 @@ def notices(client, monkeypatch):
     from maverick_dashboard import auth
     from maverick_dashboard import privacy_notice_governance_api as native
 
-    http, app, tmp_path = client
+    _http, app, tmp_path = client
+    http = TestClient(_SignedIn(app), headers=ORIGIN)
     database = tmp_path / "notices.sqlite3"
     monkeypatch.setattr(notice, "require_enabled", lambda: None)
     monkeypatch.setattr(notice, "enabled", lambda: True)

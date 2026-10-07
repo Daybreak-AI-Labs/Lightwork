@@ -118,10 +118,13 @@ def test_check_answers_from_the_compiled_policy(monkeypatch, tmp_path):
     assert body["classified"] is True and body["risk"]
     assert "gdpr-art17-erasure-governed-path" in body["covered_by"]
 
-    # An unclassified name is said to be unclassified, not silently allowed.
+    # An unclassified name is said to be unclassified, not silently allowed:
+    # unrated tools fail safe to high risk, so GDPR Art. 22 (every high-risk
+    # action pauses for a human) applies, while no named-action rule does.
     body = authed.post(f"{BASE}/check", json={"action": "tool_that_does_not_exist"}).json()
-    assert body["decision"] == "allow" and body["classified"] is False
-    assert body["obligation"] is None and body["covered_by"] == []
+    assert body["decision"] == "require_human" and body["classified"] is False
+    assert body["obligation"]["obligation_id"] == "gdpr-art22-automated-decision"
+    assert "gdpr-art17-erasure-governed-path" not in body["covered_by"]
 
 
 def test_check_can_ask_about_the_whole_library_without_enabling_it():

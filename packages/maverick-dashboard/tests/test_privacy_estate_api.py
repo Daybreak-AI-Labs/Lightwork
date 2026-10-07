@@ -203,13 +203,21 @@ def test_vendor_status_note_and_onetrust_import():
     vendor = client.post("/api/v1/vendors", json={
         "name": "Initech", "category": "billing",
         "criticality": "low", "owner": "finance"}).json()
-    moved = client.post(
-        f"/api/v1/vendors/{vendor['id']}/status",
-        json={"status": "under_review", "revision": vendor["revision"]})
-    assert moved.status_code == 200, moved.text
-    stale = client.post(
+    # A new vendor starts under review; activating it needs a completed
+    # assessment, so a bare status move to active is refused.
+    assert vendor["status"] == "under_review"
+    gated = client.post(
         f"/api/v1/vendors/{vendor['id']}/status",
         json={"status": "active", "revision": vendor["revision"]})
+    assert gated.status_code == 422, gated.text
+    moved = client.post(
+        f"/api/v1/vendors/{vendor['id']}/status",
+        json={"status": "offboarded", "revision": vendor["revision"]})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["status"] == "offboarded"
+    stale = client.post(
+        f"/api/v1/vendors/{vendor['id']}/status",
+        json={"status": "under_review", "revision": vendor["revision"]})
     assert stale.status_code == 409
 
     noted = client.post(
