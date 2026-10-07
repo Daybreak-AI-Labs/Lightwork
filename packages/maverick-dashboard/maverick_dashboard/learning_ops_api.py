@@ -657,7 +657,7 @@ async def export_cases(request: Request) -> Response:
     require_global_permission(request, "admin")
     from maverick import self_harness_eval as ev
     cpath = await run_in_threadpool(_corpus_path)
-    raw = await run_in_threadpool(ev._load_raw, cpath)
+    raw = await run_in_threadpool(ev.export_corpus_protected, cpath)
     cases = sum(len(v) for v in raw.values() if isinstance(v, list))
     await run_in_threadpool(lambda: _record(request, "self_harness_corpus_export", cases=cases))
     return Response(json.dumps(raw, indent=2, sort_keys=True), media_type="application/json", headers={

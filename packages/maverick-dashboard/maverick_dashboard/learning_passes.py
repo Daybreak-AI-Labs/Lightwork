@@ -351,10 +351,20 @@ def _reviewed_work(prepared, operation, job, budget, guard, effect_scope, state,
     return _pass_result(reports, budget, stopped_early)
 
 
+def _purpose_metadata(purpose, prepared, operation):
+    if purpose == "question_quality":
+        return {"quality_sources": prepared["quality_sources"]}
+    if purpose == "checker_calibration":
+        return {"checker_sources": prepared["checker_sources"],
+                "checker_action": prepared["body"]["action"],
+                "checker_measurements_operation": operation if prepared["body"]["action"] == "judge" else prepared["sample_operation"]}
+    return {}
+
+
 def start(request, prepared, operation, *, expires, run_work=None, check_current=None,
           purpose="learning_pass", notice=NOTICE):
     questions._request_id(operation)
-    if purpose not in {"learning_pass", "lesson_transfer", "checker_calibration"} or (purpose != "learning_pass") != (run_work is not None):
+    if purpose not in {"learning_pass", "lesson_transfer", "checker_calibration", "question_quality"} or (purpose != "learning_pass") != (run_work is not None):
         raise ValueError("unsupported native learning operation")
 
     def read_original():
@@ -378,10 +388,7 @@ def start(request, prepared, operation, *, expires, run_work=None, check_current
                 guarded["effect_guard"] = current_review
                 # Reference-only custody permits current source-right checks
                 # on reassessment without storing private responses/labels.
-                record.update({"checker_sources": prepared["checker_sources"],
-                               "checker_action": prepared["body"]["action"],
-                               "checker_measurements_operation": operation if prepared["body"]["action"] == "judge" else prepared["sample_operation"]}
-                              if purpose == "checker_calibration" else {})
+                record.update(_purpose_metadata(purpose, prepared, operation))
             claim = store.create(record, action="learning.pass.prepare", actor=actor, max_records=10000, **guarded)
         except RecordConflict:
             return read_original()
@@ -453,7 +460,7 @@ def start(request, prepared, operation, *, expires, run_work=None, check_current
             jobs.stop_budget(budget_box[0])()
 
     try:
-        label = {"lesson_transfer": "Reviewed lesson transfer", "checker_calibration": "Reviewed answer check"}.get(purpose, "Reviewed learning pass")
+        label = {"lesson_transfer": "Reviewed lesson transfer", "checker_calibration": "Reviewed answer check", "question_quality": "Reviewed question check"}.get(purpose, "Reviewed learning pass")
         native.start_job(request, "self_harness_run", label, run,
                          cancellable=True, on_cancel=cancel)
     except Exception:  # noqa: BLE001 -- a lost admission must never replay work

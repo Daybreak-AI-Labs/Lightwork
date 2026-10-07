@@ -83,6 +83,7 @@
     var aws = value === 'aws_s3' || Boolean(p && p.aws);
     document.getElementById('cx-aws').hidden = !aws;
     document.getElementById('cx-token').closest('.cx__fld').hidden = aws;
+    document.getElementById('cx-token').required = Boolean(!editing && catalog[value] && catalog[value].reference_data);
     document.getElementById('cx-save-test').hidden = Boolean(discoveryPreset(value) || evidencePreset(value));
     document.getElementById('cx-credential-help').textContent = p && p.help ? p.help : catalog[value] ? catalog[value].auth_method + '. ' + catalog[value].prerequisites : 'Existing tool binding preserved. Unknown adapters require administrator review before migration.';
     document.getElementById('cx-key-help').hidden = !(p && p.keyHelp);
@@ -99,6 +100,8 @@
     connEl.value = preset.value === 'custom' ? '' : preset.value;
     document.getElementById('cx-connector-field').hidden = preset.value !== 'custom';
     if (p) { baseEl.value = p.base || ''; baseEl.placeholder = p.hint || 'https://'; }
+    else { baseEl.value = catalog[preset.value] && catalog[preset.value].default_base_url || ''; baseEl.placeholder = 'https://'; }
+    baseEl.readOnly = Boolean(catalog[preset.value] && catalog[preset.value].reference_data);
     if (!nameEl.value.trim()) nameEl.value = p ? p.label : catalog[preset.value] ? catalog[preset.value].label : '';
     advanced.open = true; clearSecrets(); credentialFields(connEl.value);
   });
@@ -128,7 +131,7 @@
     addOption(record.connector, catalog[record.connector] ? catalog[record.connector].label : record.connector + ' (existing binding)');
     connEl.value = record.connector; preset.value = record.connector;
     // Metadata edits never migrate a credential to a different adapter. Reconnect explicitly.
-    connEl.disabled = true; preset.disabled = true; baseEl.readOnly = Boolean(record.oauth);
+    connEl.disabled = true; preset.disabled = true; baseEl.readOnly = Boolean(record.oauth || catalog[record.connector] && catalog[record.connector].reference_data);
     baseEl.value = record.base_url || '';
     document.getElementById('cx-tenant-access').checked = record.access === 'tenant';
     peopleBoxes().forEach(function (box) { box.checked = (record.allowed_principals || []).includes(box.value); });
@@ -151,12 +154,12 @@
     await load();
     if (inventoryReady && currentByName[name]) { editRecord(currentByName[name]); document.getElementById('cx-conflict').hidden = true; nameEl.focus(); }
   });
-  async function load() {
+  async function load(knownInventory) {
     if (accessLost) return;
     var serial = ++loadSerial; inventoryReady = false; document.getElementById('cx-empty').hidden = true; controls();
     inventoryStatus.textContent = 'Checking saved connections.';
     try {
-      var data = await request('/api/v1/connections');
+      var data = knownInventory || await request('/api/v1/connections');
       if (serial !== loadSerial || accessLost) return;
       if (!Array.isArray(data.connections) || data.connections.some(function (c) { return !c || typeof c.name !== 'string' || typeof c.revision !== 'string'; }) || typeof data.context !== 'string') throw new Error('Unreadable inventory.');
       if (context && context !== data.context) { clearAccess(); return; }
@@ -231,7 +234,8 @@
       if (action === 'remove' && result.deleted !== record.name) throw new Error('Removal receipt is unreadable.');
       if (action === 'test' && typeof result.reachable !== 'boolean') throw new Error('Test receipt is unreadable.');
       if (action === 'save') {
-        clearSecrets(); editing=null; unknownBinding=false; nameEl.readOnly=false; preset.disabled=false; connEl.disabled=false; baseEl.readOnly=false;
+        clearSecrets(); editing=null; unknownBinding=false; nameEl.readOnly=false; preset.disabled=false; connEl.disabled=false;
+        baseEl.readOnly=Boolean(catalog[connEl.value] && catalog[connEl.value].reference_data); credentialFields(connEl.value);
         if (thenTest && !discoveryPreset(body.connector) && !evidencePreset(body.connector)) { await request('/api/v1/connections/'+encodeURIComponent(body.name)+'/test',{method:'POST'}); }
       }
       say(action === 'remove' ? 'Local connection removed. Provider authorization has not been revoked.' : action === 'test' ? 'Check recorded. Review its scope and time on the connection row.' : 'Connection saved. Review the separate service or source check before running work.');
@@ -251,6 +255,25 @@
     data.connectors.forEach(function (item) { catalog[item.name]=item; addOption(item.name,item.label + (item.key_setup_supported ? '' : ' (dedicated setup)')); });
     if (editing && catalog[editing.connector]) { unknownBinding=false; controls(); }
   }).catch(function () { if (!accessLost) say('The full service catalog is unavailable. Refresh before setting up a new service.',true); });
+  window.LightworkConnections = {openReview: async function (expectedContext, isCurrent) {
+    if (typeof isCurrent !== 'function' || !isCurrent()) return false;
+    if (!canManage || !inventoryReady || accessLost || busy || uncertain || conflict || unknownBinding ||
+        !/^[a-f0-9]{64}$/.test(String(expectedContext || '')) || context !== expectedContext) {
+      say('Finish the current connection review before opening setup. Your entered work is kept.', true); return false;
+    }
+    var serial = loadSerial;
+    try {
+      var responses = await Promise.all([request('/api/v1/connections/catalog'), request('/api/v1/connections')]);
+      if (!isCurrent() || accessLost || serial !== loadSerial || busy || uncertain || conflict || unknownBinding || context !== expectedContext) return false;
+      if (!responses[1] || responses[1].context !== expectedContext) { clearAccess(); return false; }
+      if (!Array.isArray(responses[0].connectors)) throw new Error('The service choices could not be read.');
+      responses[0].connectors.forEach(function (item) { catalog[item.name]=item; addOption(item.name,item.label + (item.key_setup_supported ? '' : ' (dedicated setup)')); });
+      await load(responses[1]);
+      if (!isCurrent() || !inventoryReady || accessLost || busy || uncertain || conflict || unknownBinding || context !== expectedContext) return false;
+      document.getElementById('cx-catalog-search').focus();
+      say('Choose a service to connect. Your entered connection and account sign-in work is kept.'); return true;
+    } catch (error) { if (isCurrent() && !accessLost) say(error.message || 'Connection setup could not be opened. Your entered work is kept.', true); return false; }
+  }};
   var requestedEvidence = new URLSearchParams(location.search).get('evidence');
   if (evidencePreset(requestedEvidence)) {
     preset.value = requestedEvidence; preset.dispatchEvent(new Event('change'));

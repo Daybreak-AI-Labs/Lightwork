@@ -931,36 +931,10 @@ async def original_learning_pass(request: Request, operation: str):
 
 @router.post("/corpus-quality")
 async def corpus_quality(request: Request, body: QualityIn) -> dict:
-    """``self-harness corpus quality`` (with ``--retire`` when asked): a
-    background job. Removing test cases needs an explicit confirmation."""
+    """The former check-and-delete shortcut cannot retire incomplete checks."""
     require_global_permission(request, "admin")
-    from maverick import self_harness
-    from maverick import self_harness_eval as ev
-    from maverick import self_improvement_runner as runner
+    raise HTTPException(409, "Open Learned and choose Check saved learning questions. Review the complete questions and spending before starting. Checking never removes a question; retirement needs its separate review.")
 
-    from .learning_ops_api import start_job
-    cpath = self_harness.settings().get("eval_corpus")
-    if not cpath:
-        return {"configured": False, "cases": []}
-    if body.remove_weak and not body.confirm:
-        raise HTTPException(status_code=422, detail="Confirm removing the test cases first.")
-    model = await run_in_threadpool(_model_choice, body.model_id)
-    _audit(request, "self_harness_corpus_quality", model=model or "", retire=body.remove_weak)
-
-    def _run(job) -> dict:
-        rows = runner.run_corpus_quality(key=model, samples=2, raise_errors=True)
-        removed = 0
-        weak = [r["goal"] for r in rows if not r.get("discriminative")]
-        if body.remove_weak and weak:
-            from maverick.llm import model_for_role
-            removed = ev.retire_corpus_cases(cpath, model or model_for_role("orchestrator"), weak)
-        return {"configured": True, "removed": int(removed), "cases": [
-            {"task": _clip(str(r.get("goal") or "").splitlines()[0] if r.get("goal") else ""),
-             "useful": bool(r.get("discriminative")), "baseline_rate": r.get("baseline_rate"),
-             "age_days": r.get("age_days")}
-            for r in rows[:200]
-        ]}
-    return start_job(request, "self_harness_corpus_quality", "Checking the test cases", _run)
 
 
 __all__ = ["router"]

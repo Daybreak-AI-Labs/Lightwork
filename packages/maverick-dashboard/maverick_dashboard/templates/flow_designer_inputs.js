@@ -361,10 +361,12 @@ var FDRecipeInputs = (function () {
           var option = document.createElement('option'); option.value = entry[0]; option.textContent = entry[1]; control.appendChild(option);
         });
         control.required = true;
+      } else if (field.type === 'string') {
+        control = document.createElement('textarea'); control.rows = 3; control.autocomplete = 'off';
+        control.required = field.min > 0;
       } else {
         control = document.createElement('input'); control.type = 'text'; control.autocomplete = 'off';
-        if (field.type !== 'string') { control.inputMode = 'decimal'; control.required = true; }
-        else control.required = field.min > 0;
+        control.inputMode = 'decimal'; control.required = true;
       }
       control.id = field.id; control.className = 'input'; wrap.appendChild(control);
       if (field.type !== 'null') controls[field.id] = control;

@@ -21,6 +21,7 @@ anything -- it only produces the scores the governed validator/gate consume.
 """
 from __future__ import annotations
 
+import base64
 import contextvars
 import hashlib
 import json
@@ -115,14 +116,14 @@ def _read_json_text(path: str | Path) -> str:
     kind = _world_corpus_kind(path)
     if kind is not None:
         from . import learning_store
-        return json.dumps(learning_store.load_corpus_db(kind))
+        return json.dumps(_task_corpus_rows(learning_store.load_corpus_db(kind)))
     raw = Path(path).read_bytes()
     try:
         from .crypto_at_rest import unseal
         raw = unseal(raw)
     except Exception as e:
         raise ValueError(f"unreadable sealed corpus file {path}: {e}") from e
-    return raw.decode("utf-8")
+    return json.dumps(_task_corpus_rows(json.loads(raw.decode("utf-8"))))
 
 
 def _shared_case_current(row: Mapping) -> bool:
@@ -131,7 +132,118 @@ def _shared_case_current(row: Mapping) -> bool:
             and _shared_sources_current(row.get("source_goal_ids")))
 
 
+TASK_QUESTION_SCHEMA = "owned-task-question-v1"
+
+
+def _task_corpus_rows(data, *, encode=False):
+    """Protect only explicitly selected private-task text; manual rows stay intact."""
+    from .crypto_at_rest import seal_bound, unseal_bound
+    from .governed_operations import digest
+
+    if not isinstance(data, dict):
+        return data
+    result = dict(data)
+    for key, rows in data.items():
+        if not isinstance(rows, list):
+            continue
+        changed = []
+        for row in rows:
+            if not isinstance(row, Mapping) or "task_source" not in row:
+                changed.append(row)
+                continue
+            value = dict(row)
+            context = TASK_QUESTION_SCHEMA + ":" + digest([value.get("task_source"), value.get("authoring_request")])
+            if encode and isinstance(value.get("goal"), str) and isinstance(value.get("expected"), str):
+                text = json.dumps({name: value.pop(name) for name in ("goal", "expected")}, ensure_ascii=False).encode()
+                value["task_question_payload"] = base64.b64encode(seal_bound(text, context)).decode()
+            elif not encode and "task_question_payload" in value:
+                value.pop("goal", None)
+                value.pop("expected", None)
+                try:
+                    body = json.loads(unseal_bound(base64.b64decode(value["task_question_payload"], validate=True), context))
+                    if set(body) != {"goal", "expected"} or any(not isinstance(text, str) for text in body.values()):
+                        raise ValueError
+                    value.update(body)
+                    value.pop("task_question_payload")
+                except Exception:
+                    pass  # Retain unavailable encrypted rows; never treat them as manual questions.
+            changed.append(value)
+        result[key] = changed
+    return result
+
+
+def task_question_source(world, goal_id: int, owner: str) -> dict:
+    """Current text-source binding, using the existing task and copied-source gates.
+
+    This explicit teaching path does not override protected pilot/Knowledge
+    learning exclusions. It never changes tenant to make a shared row usable.
+    """
+    from dataclasses import asdict
+
+    from .attachments import _verify_stored_attachment
+    from .chat_message_actions import require_copy_sources
+    from .config import config_source_errors
+    from .conversation_inbox import current_authority
+    from .domain import available_domains, deliverable_release_allowed
+    from .governed_operations import digest
+    from .knowledge_task_context import has_binding
+    from .memory_ownership import source_allowed
+    from .paths import current_tenant_id_strict
+
+    if type(goal_id) is not int or goal_id < 1 or not isinstance(owner, str) or not owner.startswith("user:"):
+        raise PermissionError("Choose a completed task belonging to your signed-in account.")
+    if config_source_errors(include_tenant=True):
+        raise PermissionError("Current task and learning permissions are unavailable.")
+
+    def authorize(goal):
+        if goal.owner != owner or not source_allowed(goal.id, owner, world=world) or has_binding(goal.id, world):
+            raise PermissionError("This task or a copied source does not permit this learning use.")
+        current_authority(goal)
+        if goal.domain:
+            profile = available_domains().get(goal.domain)
+            if profile is None or not deliverable_release_allowed(profile, world.signoff_for(goal.id)):
+                raise PermissionError("The task's current specialist release has not been approved.")
+
+    goal = world.get_goal(goal_id)
+    if goal is None or goal.status != "done":
+        raise PermissionError("Choose a currently completed task.")
+    authorize(goal)
+    require_copy_sources(world, goal_id, authorize=authorize)
+    files = world.list_attachments(goal_id)
+    if len(files) > 128:
+        raise PermissionError("This task has too many retained files to verify here.")
+    manifest = []
+    for item in files:
+        _verify_stored_attachment(Path(item.path), item.sha256)
+        manifest.append({key: getattr(item, key) for key in ("filename", "mime", "size_bytes", "sha256")})
+    return {"tenant": current_tenant_id_strict(), "owner": owner, "goal_id": goal_id,
+            "digest": digest({"goal": asdict(goal), "files": manifest})}
+
+
+def _task_case_current(row: Mapping) -> bool:
+    from .paths import current_tenant_id_strict
+    from .world_model import close_world_if_owned, open_world
+
+    source = row.get("task_source")
+    if (row.get("privacy_schema") != TASK_QUESTION_SCHEMA or not isinstance(source, dict)
+            or set(source) != {"tenant", "owner", "goal_id", "digest"}
+            or source["tenant"] != current_tenant_id_strict()
+            or not isinstance(row.get("authoring_request"), str) or len(row["authoring_request"]) != 64):
+        return False
+    world = None
+    try:
+        world = open_world()
+        return task_question_source(world, source["goal_id"], source["owner"]) == source
+    except Exception:
+        return False
+    finally:
+        if world is not None:
+            close_world_if_owned(world)
+
+
 def case_current(row: Mapping) -> bool:
+    if "task_source" in row or row.get("privacy_schema") == TASK_QUESTION_SCHEMA:
+        return _task_case_current(row)
     derived = any(key in row for key in ("added_at", "privacy_schema", "source_goal_ids"))
     return not derived or _shared_case_current(row)
 
@@ -143,7 +255,7 @@ def require_cases_current(cases) -> None:
 
 def _case_identity(row: Mapping) -> str:
     return json.dumps({k: row.get(k) for k in
-                       ("goal", "expected", "privacy_schema", "source_goal_ids")}, sort_keys=True)
+                       ("goal", "expected", "privacy_schema", "source_goal_ids", "task_source", "authoring_request")}, sort_keys=True)
 
 
 def load_eval_corpus(path: str | Path) -> dict[str, list[dict]]:
@@ -167,12 +279,12 @@ def load_eval_corpus(path: str | Path) -> dict[str, list[dict]]:
         cases = []
         for r in rows:
             if isinstance(r, Mapping) and str(r.get("goal") or "").strip():
-                derived = pending or "added_at" in r or "privacy_schema" in r or "source_goal_ids" in r
-                if derived and not _shared_case_current(r):
+                derived = pending or "added_at" in r or "privacy_schema" in r or "source_goal_ids" in r or "task_source" in r
+                if derived and not case_current(r):
                     continue  # unknown historical harvest is retained, not inherited
                 case = {"goal": str(r["goal"]), "expected": str(r.get("expected") or "")}
                 if derived:
-                    case.update(privacy_schema=r["privacy_schema"], source_goal_ids=list(r["source_goal_ids"]))
+                    case.update({name: r[name] for name in ("privacy_schema", "source_goal_ids", "task_source", "authoring_request") if name in r})
                 cases.append(case)
         if cases:
             out[str(key)] = cases
@@ -988,7 +1100,7 @@ _REJECTED_CAP = 500
 _corpus_lock = threading.Lock()
 
 
-def _write_corpus_file(path: Path, data: dict, *, seal: bool = False) -> None:
+def _write_corpus_file(path: Path, data: dict, *, seal: bool = False, effect_guard=None) -> None:
     """Serialize a corpus-family file. ``seal`` opts a MACHINE-OWNED sidecar
     (pending/rejected) into at-rest encryption when the deployment seals its
     stores -- goal text there is the same content the world DB seals. The LIVE
@@ -997,10 +1109,14 @@ def _write_corpus_file(path: Path, data: dict, *, seal: bool = False) -> None:
     caller must not silently write sensitive plaintext. A world-routed corpus
     path writes rows to the world store instead (the world DB is its own
     at-rest surface; goal text is already secret-redacted before staging)."""
+    data = _task_corpus_rows(data, encode=True)
     kind = _world_corpus_kind(path)
     if kind is not None:
         from . import learning_store
-        learning_store.write_corpus_db(kind, data)
+        if effect_guard is None:
+            learning_store.write_corpus_db(kind, data)
+        else:
+            learning_store.write_corpus_db(kind, data, effect_guard=effect_guard)
         return
     text = json.dumps(data, indent=2, sort_keys=True)
     if seal:
@@ -1008,10 +1124,12 @@ def _write_corpus_file(path: Path, data: dict, *, seal: bool = False) -> None:
         if at_rest_enabled():
             from .crypto_at_rest import seal_text
             from .file_lock import atomic_write_bytes
-            atomic_write_bytes(Path(path), seal_text(text), mode=0o600)
+            options = {"effect_guard": effect_guard} if effect_guard is not None else {}
+            atomic_write_bytes(Path(path), seal_text(text), mode=0o600, **options)
             return
     from .file_lock import atomic_write_text
-    atomic_write_text(Path(path), text, mode=0o600)
+    options = {"effect_guard": effect_guard} if effect_guard is not None else {}
+    atomic_write_text(Path(path), text, mode=0o600, **options)
 
 
 def _load_raw(path: str | Path) -> dict:
@@ -1023,7 +1141,7 @@ def _load_raw(path: str | Path) -> dict:
     kind = _world_corpus_kind(path)
     if kind is not None:
         from . import learning_store
-        return learning_store.load_corpus_db(kind, strict=True)
+        return _task_corpus_rows(learning_store.load_corpus_db(kind, strict=True))
     try:
         data = json.loads(_read_json_text(path))
         if isinstance(data, dict):
@@ -1031,6 +1149,11 @@ def _load_raw(path: str | Path) -> dict:
     except (FileNotFoundError, ValueError, OSError):
         pass
     return {}
+
+
+def export_corpus_protected(path: str | Path) -> dict:
+    """Keep explicit private-source cases encrypted in ordinary corpus downloads."""
+    return _task_corpus_rows(_load_raw(path), encode=True)
 
 
 def _add_fresh(dest_path: Path, dest_raw: dict, key: str,
@@ -1174,19 +1297,15 @@ def resolve_pending(corpus_path: str | Path, key: str, *,
 
 def corpus_quality(cases: list[dict], *, run_fn: Callable[[str, str], str],
                    judge_fn: Callable[[str, str, str], bool] | None = None,
-                   samples: int = 2) -> list[dict]:
-    """Per-case discriminativeness of the corpus's ground truth.
+                   samples: int = 2, dispatch_guard=None,
+                   retain_responses: bool = False) -> list[dict]:
+    """Measure baseline answers without treating unavailable checks as evidence.
 
-    Runs the BASELINE (no candidate line) ``samples`` times per case and
-    judges each attempt: a case the baseline passes every time cannot show a
-    candidate's lift -- it is dead weight in every split. Returns one row per
-    case: ``{goal, expected, passes, samples, baseline_rate,
-    discriminative}`` where ``discriminative`` is False only when every
-    sample passed. A sample that RAISES is indeterminate and excluded
-    (``baseline_rate`` is over the judged samples; a case with no judged
-    samples reports ``baseline_rate=None`` and stays discriminative --
-    unknown is not dead). ``BudgetExceeded`` propagates: a half-probed
-    quality report must not silently masquerade as a full one."""
+    Every requested sample must be judged successfully before a question can
+    be labelled consistently passed. Existing callers retain aggregate rows;
+    protected native views may request bounded complete response observations.
+    Current authority and Budget failures raised by the guard propagate.
+    """
     judge = judge_fn or _heuristic_judge
     out: list[dict] = []
     n = max(1, int(samples))
@@ -1196,24 +1315,48 @@ def corpus_quality(cases: list[dict], *, run_fn: Callable[[str, str], str],
         if not goal or not case_current(c):
             continue
         passes = judged = 0
+        observations = []
         for _ in range(n):
+            if dispatch_guard is not None:
+                dispatch_guard()
+            require_cases_current([c])
+            output, verdict = None, None
             try:
-                require_cases_current([c])
+                degraded = getattr(run_fn, "degraded", 0)
                 output = run_fn("", goal)
+                if (getattr(run_fn, "degraded", 0) != degraded or not isinstance(output, str)
+                        or retain_responses and len(output) > 8000):
+                    output = None
+                    raise ValueError("incomplete baseline response")
                 require_cases_current([c])
-                if judge(goal, output, expected):
-                    passes += 1
+                if dispatch_guard is not None:
+                    dispatch_guard()
+                degraded = getattr(judge, "degraded", 0)
+                verdict = judge(goal, output, expected)
+                if type(verdict) is not bool or getattr(judge, "degraded", 0) != degraded:
+                    raise ValueError("incomplete judgment")
+                passes += int(verdict)
                 judged += 1
             except BudgetExceeded:
                 raise
-            except Exception:  # one bad sample is indeterminate, excluded
-                log.debug("eval: quality sample failed", exc_info=True)
+            except Exception:
+                verdict = None
+                log.debug("eval: quality sample unavailable", exc_info=True)
+            if dispatch_guard is not None:
+                dispatch_guard()
+            require_cases_current([c])
+            if retain_responses:
+                observations.append({"response": output if isinstance(output, str) and len(output) <= 8000 else None,
+                                     "verdict": verdict})
         if not case_current(c):
             continue
-        rate = (passes / judged) if judged else None
-        out.append({"goal": goal, "expected": expected, "passes": passes,
-                    "samples": judged, "baseline_rate": rate,
-                    "discriminative": not (judged and passes == judged)})
+        row = {"goal": goal, "expected": expected, "passes": passes,
+               "samples": judged, "requested_samples": n, "unavailable": n - judged,
+               "complete": judged == n, "baseline_rate": passes / judged if judged else None,
+               "discriminative": not (judged == n and passes == n)}
+        if retain_responses:
+            row["observations"] = observations
+        out.append(row)
     return out
 
 
@@ -1288,7 +1431,7 @@ def _authoring_raw(corpus_path: str | Path) -> dict:
         return {}
     if len(text.encode("utf-8")) > 5 * 1024 * 1024:
         raise ValueError("The test-question collection is too large to change here.")
-    raw = json.loads(text)
+    raw = _task_corpus_rows(json.loads(text))
     if not isinstance(raw, dict):
         raise ValueError("The current test questions could not be read safely.")
     # This also refuses non-finite numbers in existing operator-authored fields.
@@ -1350,20 +1493,21 @@ def _case_ref(key: str, index: int, row) -> str:
     return _corpus_revision({"model": key, "index": index, "case": row})
 
 
-def _case_view(key: str, index: int, row) -> dict:
+def _case_view(key: str, index: int, row, authorize=None) -> dict:
     supported = (isinstance(row, Mapping) and isinstance(row.get("goal"), str)
                  and isinstance(row.get("expected"), str) and bool(row["goal"].strip())
                  and bool(row["expected"].strip()) and len(row["goal"]) <= 4000
                  and len(row["expected"]) <= 4000)
-    permitted = supported and case_current(row)
+    permitted = supported and case_current(row) and (authorize is None or authorize(row))
     return {"value": _case_ref(key, index, row), "supported": permitted,
+            "source_bound": isinstance(row, Mapping) and "task_source" in row,
             "question": row["goal"] if permitted else "Imported question needs attention" if not supported else "Question unavailable for learning",
             "expected": row["expected"] if permitted else "",
             "notice": "" if permitted else "This imported entry is not an ordinary question and expected answer. It remains in place." if not supported else "Current learning permission could not be verified. Retained information stays in place and is excluded from checks."}
 
 
 def browse_corpus_cases(corpus_path: str | Path, key: str, *, offset: int = 0,
-                        limit: int = 50) -> dict:
+                        limit: int = 50, authorize=None) -> dict:
     """Bounded current named questions; unsupported rows are counted, never dropped."""
     from .file_lock import cross_process_lock
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 50:
@@ -1375,15 +1519,15 @@ def browse_corpus_cases(corpus_path: str | Path, key: str, *, offset: int = 0,
             raise ValueError("This model's imported collection is not a list of test questions. It remains unchanged.")
         return {"revision": _corpus_revision(raw), "total": len(rows), "offset": offset,
                 "next": offset + limit if offset + limit < len(rows) else None,
-                "cases": [_case_view(key, index, rows[index]) for index in range(offset, min(len(rows), offset + limit))]}
+                "cases": [_case_view(key, index, rows[index], authorize) for index in range(offset, min(len(rows), offset + limit))]}
 
 
-def _selected_case(raw: dict, key: str, reference: str):
+def _selected_case(raw: dict, key: str, reference: str, authorize=None):
     rows = raw.get(key, [])
     if isinstance(rows, list):
         for index, row in enumerate(rows):
             if _case_ref(key, index, row) == reference:
-                view = _case_view(key, index, row)
+                view = _case_view(key, index, row, authorize)
                 if not view["supported"]:
                     raise ValueError(view["notice"])
                 return rows, index, row
@@ -1391,8 +1535,8 @@ def _selected_case(raw: dict, key: str, reference: str):
 
 
 def _changed_case(raw: dict, key: str, reference: str, action: str,
-                  goal: str | None, expected: str | None):
-    rows, index, row = _selected_case(raw, key, reference)
+                  goal: str | None, expected: str | None, authorize=None):
+    rows, index, row = _selected_case(raw, key, reference, authorize)
     before = dict(row)
     if action == "retire":
         del rows[index]
@@ -1411,15 +1555,16 @@ def _changed_case(raw: dict, key: str, reference: str, action: str,
 
 
 def review_corpus_change(corpus_path: str | Path, key: str, reference: str,
-                         action: str, goal: str | None = None, expected: str | None = None) -> dict:
+                         action: str, goal: str | None = None, expected: str | None = None, *, authorize=None) -> dict:
     from .file_lock import cross_process_lock
     with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
         raw = _authoring_raw(corpus_path)
         revision = _corpus_revision(raw)
-        before, after = _changed_case(raw, key, reference, action, goal, expected)
+        before, after = _changed_case(raw, key, reference, action, goal, expected, authorize)
         return {"revision": revision, "before_digest": _corpus_revision(before),
                 "after_digest": _corpus_revision(after) if after is not None else None,
-                "before": {"question": before["goal"], "expected": before["expected"]},
+                "before": {"question": before["goal"], "expected": before["expected"],
+                           **({"task_source": before["task_source"]} if "task_source" in before else {})},
                 "questions_before": len(raw[key]) + (1 if action == "retire" else 0)}
 
 
@@ -1448,7 +1593,13 @@ def change_reviewed_corpus_case(corpus_path: str | Path, key: str, reference: st
         authorize()
         require_cases_current([before])
         before_write()
-        _write_corpus_file(Path(corpus_path), raw)
+        if "task_source" in before:
+            def guard():
+                authorize()
+                require_cases_current([before])
+            _write_corpus_file(Path(corpus_path), raw, effect_guard=guard)
+        else:
+            _write_corpus_file(Path(corpus_path), raw)
 
 
 def authored_corpus_effect(corpus_path: str | Path, binding: str) -> dict | None:
@@ -1602,7 +1753,7 @@ def decide_reviewed_pending(corpus_path: str | Path, key: str, reference: str, a
 def append_reviewed_corpus_case(corpus_path: str | Path, key: str, goal: str,
                                 expected: str, *, expected_revision: str,
                                 binding: str, authorize: Callable[[], None],
-                                before_write: Callable[[], None]) -> dict:
+                                before_write: Callable[[], None], task_source: dict | None = None) -> dict:
     """The ordinary author's bounded CAS append, through the existing native writer.
 
     A durable request is claimed by ``before_write`` only after the exact corpus
@@ -1621,12 +1772,25 @@ def append_reviewed_corpus_case(corpus_path: str | Path, key: str, goal: str,
         rows = raw.get(key, [])
         if not isinstance(rows, list) or any(isinstance(row, Mapping) and row.get("goal") == goal for row in rows):
             raise ValueError("This model already has that question or its collection changed. No duplicate was added.")
-        _merge_corpus_rows(raw, {key: [{"goal": goal, "expected": expected, "authoring_request": binding}]})
+        row = {"goal": goal, "expected": expected, "authoring_request": binding}
+        if task_source is not None:
+            row.update(privacy_schema=TASK_QUESTION_SCHEMA, task_source=task_source)
+            require_cases_current([row])
+        _merge_corpus_rows(raw, {key: [row]})
         if len(json.dumps(raw).encode()) > 5 * 1024 * 1024:
             raise ValueError("The test-question collection is too large to change here.")
         authorize()
         before_write()
-        _write_corpus_file(Path(corpus_path), raw)
+        if task_source is not None:
+            authorize()
+            require_cases_current([row])
+        if task_source is not None:
+            def guard():
+                authorize()
+                require_cases_current([row])
+            _write_corpus_file(Path(corpus_path), raw, effect_guard=guard)
+        else:
+            _write_corpus_file(Path(corpus_path), raw)
         return {"revision": _corpus_revision(raw), "model_cases": len(raw[key])}
 
 

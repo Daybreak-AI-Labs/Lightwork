@@ -590,7 +590,7 @@ def _validation_floors(st: dict) -> dict:
         metamorphic_tolerance=st.get("metamorphic_tolerance", 0.0))
 
 
-def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
+def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, object]]]:
     """Normalize one already-read raw corpus snapshot for evaluation.
 
     Risk-limited cycles hash the raw manifest and evaluate this derived view of
@@ -600,7 +600,7 @@ def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
     if not isinstance(raw, Mapping):
         return {}
     from .self_harness_eval import case_current
-    out: dict[str, list[dict[str, str]]] = {}
+    out: dict[str, list[dict[str, object]]] = {}
     for key, rows in raw.items():
         if not isinstance(rows, list):
             continue
@@ -611,7 +611,10 @@ def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
                     continue
                 case = {"goal": str(row["goal"]), "expected": str(row.get("expected") or "")}
                 if "privacy_schema" in row:
-                    case.update(privacy_schema=row["privacy_schema"], source_goal_ids=list(row["source_goal_ids"]))
+                    case.update({name: row[name] for name in
+                                 ("privacy_schema", "task_source", "authoring_request") if name in row})
+                    if "source_goal_ids" in row:
+                        case["source_goal_ids"] = list(row["source_goal_ids"])
                 cases.append(case)
         if cases:
             out[str(key)] = cases

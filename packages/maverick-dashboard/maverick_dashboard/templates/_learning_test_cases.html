@@ -1,10 +1,24 @@
 <section class="stack" id="learning-test-questions" aria-labelledby="learning-case-title">
-  <h3 id="learning-case-title">Self-coaching questions</h3>
+  <h3 id="learning-case-title">Learning questions</h3>
   <p class="muted">Give Lightwork a real question and the answer it should work toward. Review saved questions, improve an answer or retire a question from future checks.</p>
   <div class="stack" id="learning-case-setup" hidden>
     <p class="muted">Set up your shared question collection once. Lightwork chooses its managed location for you; your current learning and storage choices stay in place.</p>
     <button class="btn btn--primary" id="learning-case-setup-review" type="button">Set up learning questions</button>
   </div>
+  <details id="learning-task-examples" class="stack">
+    <summary>Use one of my completed tasks</summary>
+    <p class="muted">Choose your own completed work, read its task text and recorded answer, then edit the expected answer before reviewing. Attachments, conversation history and other task inputs are not copied. Some protected work and Knowledge analyses cannot be used here. If the complete answer cannot fit, or needs those other inputs, write a separate question.</p>
+    <label for="learning-task-example">Completed task</label>
+    <select class="select" id="learning-task-example"><option value="">Refresh task choices</option></select>
+    <div class="actions">
+      <button class="btn btn--ghost" id="learning-task-refresh" type="button">Refresh my completed tasks</button>
+      <button class="btn btn--ghost" id="learning-task-more" type="button" hidden>More completed tasks</button>
+      <button class="btn btn--primary" id="learning-task-open" type="button" disabled>Read this task</button>
+      <button class="btn btn--ghost" id="learning-task-clear" type="button">Write a separate new question</button>
+    </div>
+    <p class="muted" id="learning-task-status" role="status" aria-live="polite"></p>
+    <div id="learning-task-source" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+  </details>
   <form id="learning-case-form" class="stack">
     <label for="learning-case-model">Model</label>
     <select class="select" id="learning-case-model" name="model" required disabled><option value="">Reading available models…</option></select>

@@ -311,7 +311,7 @@ def schedule_create_review(request: Request, body: ScheduleReviewIn) -> dict:
                 "earlier_task": earlier.title if earlier else None,
                 "inputs": body.schedule.params or {}, "timetable": body.schedule.timetable.model_dump(),
                 "next_runs": runs, "kind": body.schedule.what,
-                "notice": "Creating this schedule enables future recurring work under current permissions and limits. It does not run the work now. A repeated or interrupted reply must be checked through the original request; it is not permission to create another schedule."}
+                "notice": "This saves recurring work for its next scheduled start, using current permissions and limits. If the reply is interrupted, choose Check original before creating again."}
 
 
 def _creation_apply(request, body):

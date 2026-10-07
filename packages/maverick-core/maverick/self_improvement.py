@@ -1046,10 +1046,16 @@ class SelfImprovementController:
                 raise PromotionLedgerError(
                     "pre-apply authorization requires the exact original artifact"
                 )
-            allowed, reason = self._model_risk_record_approval(current.record)
-            if allowed:
+            failure = self._prepared_control_failure()
+            if failure is None:
+                allowed, reason = self._model_risk_record_approval(current.record)
+                failure = (self._prepared_control_failure() if allowed else (
+                    "model_risk_assurance",
+                    f"model-risk authority changed before artifact application: {reason}",
+                ))
+            if failure is None:
                 return preparation.verdict
-            denial = f"model-risk authority changed before artifact application: {reason}"
+            gate, denial = failure
             self.ledger.abort(
                 current.id,
                 artifact=artifact,
@@ -1058,7 +1064,7 @@ class SelfImprovementController:
             )
             failed = self._fail_verdict(
                 preparation.verdict,
-                gate="model_risk_assurance",
+                gate=gate,
                 reason=denial,
             )
             self._audit(
@@ -1089,6 +1095,21 @@ class SelfImprovementController:
                 transaction=preparation.transaction.id,
             )
             return failed
+
+    def _prepared_control_failure(self) -> tuple[str, str] | None:
+        """Current new-effect controls, never a gate on committed originals."""
+        if not enabled():
+            return "enabled", "self-improvement disabled"
+        halt_reason = self._halt_reason("promotion")
+        if halt_reason is not None:
+            return "killswitch", halt_reason
+        try:
+            frozen = self.frozen_fn()
+        except Exception:
+            frozen = True  # Same unavailable-calibration refusal as evaluate.
+        if frozen:
+            return "calibration", "learning frozen: verifier mis-calibrated"
+        return None
 
     def commit_prepared(
         self, preparation: PromotionPreparation, *, artifact: ArtifactRevision,

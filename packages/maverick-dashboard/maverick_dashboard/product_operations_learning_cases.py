@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import learning_test_cases_api as native
-from .product_operations import Adapter, Outcome, Preview, Snapshot
+from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot
 
 
 def snapshot(request, _selection):
@@ -98,6 +98,63 @@ def setup_snapshot(request, _selection):
                     blocked=state["blocked"])
 
 
+def _task_form_current(request):
+    from .learning_task_examples import catalog
+
+    choices = catalog(request, offset=0)
+    state = native.current(request)
+    if state["context"] != choices["context"]:
+        raise HTTPException(409, "Your account or workspace changed. Open the current learning-question controls again.")
+    return choices, state
+
+
+def task_form_snapshot(request, _selection):
+    from maverick.governed_operations import digest
+
+    choices, state = _task_form_current(request)
+    return Snapshot(digest([choices, state]), "Your current completed-work question controls",
+        "Open the ordinary task picker to choose your own completed work, edit its question and expected answer, "
+        "and review source use before saving. Opening copies nothing and runs no AI.",
+        blocked=state["blocked"])
+
+
+def task_form_prepare(request, selection, _arguments):
+    from maverick.governed_operations import digest
+
+    current = task_form_snapshot(request, selection)
+    choices, state = _task_form_current(request)
+    if digest([choices, state]) != current.revision:
+        raise HTTPException(409, "Your task choices or learning settings changed. Open the current controls again.")
+    if current.blocked:
+        raise HTTPException(409, current.blocked)
+    return Preview(current.summary, native={"learning_task_question_review": {
+        "scope": "current_page", "context": choices["context"],
+    }})
+
+
+def question_check_snapshot(request, _selection):
+    from maverick.governed_operations import digest
+
+    from .learning_question_checks import catalog
+
+    current = catalog(request)
+    return Snapshot(digest(current), "Current question-check controls",
+        "Open the complete question check to choose saved questions, review AI use and limits, "
+        "or read the original request. Opening starts no check and removes no question.")
+
+
+def question_check_prepare(request, selection, _arguments):
+    from maverick.governed_operations import digest
+
+    from .learning_question_checks import catalog
+
+    state = question_check_snapshot(request, selection)
+    current = catalog(request)
+    if digest(current) != state.revision:
+        raise HTTPException(409, "Your question-check settings or access changed. Open the current controls again.")
+    return Preview(state.summary, native={"learning_question_check_form": {"context": current["context"]}})
+
+
 def setup_prepare(request, _selection, _arguments):
     prepared = native.prepare_setup(request)
     return Preview("Set up the existing learning-question collection. No learning system is turned on and no AI runs.",
@@ -159,7 +216,13 @@ def change_recover(request, selection, arguments, prepared, operation, *, read_o
 
 
 def entries():
-    return (Adapter("learning.setup_test_questions", "Set up learning questions", "learning", native.PAGE,
+    return (Adapter("learning.question_check_form", "Review a complete question check", "learning", "/learned#learning-question-checks",
+        ("/learned",), EmptyInput, question_check_snapshot, question_check_prepare,
+        aliases=("check my learning questions", "check question usefulness", "review question checks")),
+        Adapter("learning.task_question_form", "Turn completed work into a learning question", "learning", native.PAGE,
+        ("/learning", "/learned"), EmptyInput, task_form_snapshot, task_form_prepare,
+        aliases=("learn from my completed work", "use a completed task as a test question", "open task question controls")),
+        Adapter("learning.setup_test_questions", "Set up learning questions", "learning", native.PAGE,
         ("/learning", "/learned"), RetireSelected, setup_snapshot, setup_prepare, setup_execute, setup_recover,
         read_recovery=lambda r, s, a, p, o: setup_recover(r, s, a, p, o, read_only=True)),
         Adapter("learning.add_test_question", "Add a self-coaching test question", "learning", native.PAGE,
