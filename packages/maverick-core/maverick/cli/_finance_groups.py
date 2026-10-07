@@ -425,6 +425,9 @@ def demo_cmd() -> None:
             user_notes_path=tmp / "user_notes.ndjson",
             settings_override={"enable": True, "min_cluster": 2,
                                "prune": False, "user_notes": False},
+            # Like the dry run: throwaway stores in a temp directory, so no
+            # learning receipt belongs in the installation's activity record.
+            audit=False,
         )
         click.echo("   " + report.summary())
         click.echo("\n2) HINDSIGHT -- did learning help on the failures?")
