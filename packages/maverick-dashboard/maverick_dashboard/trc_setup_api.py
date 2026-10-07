@@ -90,8 +90,11 @@ def _manifests(request: Request, tenant: str) -> dict[str, dict[str, Any]]:
     if callable(settings):
         try:
             sources = settings(tenant).sources
-        except Exception:
-            sources = ()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Current evidence source settings could not be read. Your work is kept; refresh after the connection is available.",
+            ) from exc
     else:
         directory = getattr(composition, "directory", None)
         sources = tuple(getattr(directory, "_sources", {}).values()) if directory is not None else ()

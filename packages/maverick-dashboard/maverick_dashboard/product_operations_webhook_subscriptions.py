@@ -36,7 +36,9 @@ def _state(request, selection):
         "Installation signing secret present": bool(secret),
         "Recent deliveries included": min(len(deliveries), 100),
         "Recent delivery states": dict(Counter(
-            {"pending": "Waiting or retrying", "delivered": "Delivered", "dead": "Needs attention"}
+            {"pending": "Waiting or retrying", "sending": "Being sent; acceptance unconfirmed",
+             "unknown": "Acceptance unconfirmed", "delivered": "Accepted by the destination",
+             "dead": "Needs attention"}
             .get(row["status"], "Other retained state") for row in deliveries[:100])),
         "More retained deliveries": len(deliveries) > 100,
         "Scope": "Saved settings and the newest 100 retained deliveries at most. "

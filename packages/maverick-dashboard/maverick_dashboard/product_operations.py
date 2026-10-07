@@ -193,6 +193,7 @@ def _adapter_modules():
         product_operations_connections,
         product_operations_consent_jobs,
         product_operations_consent_publication,
+        product_operations_continuous_evidence,
         product_operations_conversation,
         product_operations_decision_evidence,
         product_operations_department_boards,
@@ -391,6 +392,7 @@ def _adapter_modules():
         product_operations_work_restructuring,
         product_operations_webhook_recovery,
         product_operations_webhook_subscriptions,
+        product_operations_continuous_evidence,
         product_operations_viewpoints,
     )
 

@@ -97,6 +97,11 @@
   var retireInFlight = false;
   var runInFlight = false;
   var applyInFlight = false;
+  var unconfirmedApply = null;
+  function unresolvedApply(node) {
+    return unconfirmedApply && unconfirmedApply.flow === rootFlow.id &&
+      unconfirmedApply.node === node.id && unconfirmedApply.version === rootFlow.version;
+  }
   var draftGeneration = 0;
   var pendingDraft = null;
   var draftRecovery = null;
@@ -198,7 +203,8 @@
     var del = document.getElementById('fd-delete-flow');
     if (del) del.disabled = busy;
     props.querySelectorAll('[data-apply-node]').forEach(function (button) {
-      button.disabled = busy || !proposals[button.getAttribute('data-apply-node')];
+      var nodeId = button.getAttribute('data-apply-node');
+      button.disabled = busy || !proposals[nodeId] || !!unresolvedApply({id: nodeId});
     });
   }
   function canonicalizeSavedFlow(id) {
@@ -1268,7 +1274,7 @@
       pl.textContent = '💡 ' + prop.reason;
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
       pb.setAttribute('data-apply-node', n.id);
-      pb.disabled = saveInFlight || publishInFlight || applyInFlight;
+      pb.disabled = saveInFlight || publishInFlight || applyInFlight || !!unresolvedApply(n);
       pb.textContent = prop.to_kind === 'action'
         ? 'Review action and inputs'
         : 'Review: let the AI handle this step';
@@ -2162,7 +2168,7 @@
       if (selected) renderProps();
     }).catch(function () {});
   }
-  async function applyProposal(n, prop, button) {
+  async function applyProposal(n, prop, button, expectedReview) {
     // Persisted apply: save the current graph, review the current action and
     // inputs, then enact the swap as a new measured draft version.
     if (applyInFlight || saveInFlight || publishInFlight || retireInFlight) return;
@@ -2170,13 +2176,19 @@
     if (flow !== rootFlow || rootFlow.nodes.indexOf(n) < 0) {
       say('Select the current step in the main flow before applying its suggestion.', true); return;
     }
-    var applyingFlow = rootFlow, fromKind = n.kind, confirmed = false;
+    if (unresolvedApply(n)) {
+      say('Read Earlier versions and reload the saved flow before trying another change. The earlier save is not confirmed here.', true); return;
+    }
+    if (prop.to_kind === 'agent' && draftIsDirty()) {
+      say('Your entered workflow was kept. Save its current draft before reviewing replacement instructions.', true); return;
+    }
+    var applyingFlow = rootFlow, fromKind = n.kind, confirmed = false, applySent = false, uncertain = false;
     var body = { node_id: n.id, to_kind: prop.to_kind, tool: n.tool || prop.inferred_tool || '', brief: n.brief || n.label || '' };
     applyInFlight = true;
     if (button) button.disabled = true;
     syncSaveButtons();
     try {
-      if (!(await save(true))) return;
+      if (prop.to_kind !== 'agent' && !(await save(true))) return;
       if (rootFlow !== applyingFlow || draftIsDirty()) {
         say('The workflow changed while saving. Your edits were kept; review the suggestion and apply again.', true);
         return;
@@ -2184,12 +2196,12 @@
       var flowId = rootFlow.id, snapshot = draftSnapshot();
       body.version = rootFlow.version;
       body.revision = rootFlow.revision;
-      if (prop.to_kind === 'action') {
+      if (prop.to_kind === 'action' || prop.to_kind === 'agent') {
         if (!window.LightworkFlowRewrite) {
           say('The action review is unavailable. Refresh the designer and try again.', true); return;
         }
-        var reviewed = await window.LightworkFlowRewrite.prepare(flowId, prop, body.tool);
-        if (!reviewed) { say('Review cancelled. The flow was not hardened.'); return; }
+        var reviewed = await window.LightworkFlowRewrite.prepare(flowId, prop, body.tool, expectedReview);
+        if (!reviewed) { say('Review cancelled. The flow was not changed.'); return; }
         if (rootFlow !== applyingFlow || draftSnapshot() !== snapshot ||
             reviewed.version !== body.version || reviewed.revision !== body.revision) {
           say('The flow changed during review. Your edits were kept; review the suggestion again.', true); return;
@@ -2197,6 +2209,7 @@
         body = reviewed;
       }
       say('Applying suggestion…');
+      applySent = true;
       var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
         method: 'POST', body: JSON.stringify(body)
       });
@@ -2214,13 +2227,41 @@
       say('Applied ✓ — now version ' + result.version + '. Results appear as new runs finish.');
       await load(flowId, snapshot);                  // retain edits made during the refresh too
     } catch (e) {
-      say(e.message || unconfirmedMutation('Apply'), true);
+      uncertain = applySent && (!response || response.status >= 500 || response.ok);
+      if (uncertain) unconfirmedApply = {flow: flowId, node: body.node_id, version: body.version};
+      say(uncertain ? 'The replacement save result could not be confirmed. Read Earlier versions and reload the saved flow before trying another change. Your entered instructions were kept; do not apply this request again.' : (e.message || unconfirmedMutation('Apply')), true);
     } finally {
       applyInFlight = false;
-      if (button) button.disabled = confirmed;
+      if (button) button.disabled = confirmed || uncertain;
+      if (uncertain && selected) renderProps();
       syncSaveButtons();
     }
   }
+  async function receiveSofteningHandoff(query) {
+    query = query || new URLSearchParams(location.search);
+    var step = query.get('review_softening');
+    if (!step) return;
+    var binding = query.get('review_binding'), context = query.get('review_context');
+    if (!/^[a-f0-9]{64}$/.test(binding || '') || !/^[a-f0-9]{64}$/.test(context || '') || draftIsDirty()) {
+      say('Your current work was kept. Reopen the current suggestion before reviewing replacement instructions.', true); return;
+    }
+    var node = rootFlow.nodes.find(function (item) { return item.id === step; });
+    if (!node || node.kind !== 'action') {
+      say('The selected action changed. Open its current suggestions.', true); return;
+    }
+    selectNode(step);
+    await applyProposal(node, {node_id: step, to_kind: 'agent'}, null, {binding: binding, context: context});
+  }
+  document.addEventListener('click', function (event) {
+    var anchor = event.target.closest && event.target.closest('a[href]');
+    if (!anchor) return;
+    var target;
+    try { target = new URL(anchor.href, location.href); } catch (_) { return; }
+    if (target.origin !== location.origin || target.pathname !== location.pathname ||
+        !target.searchParams.has('review_softening')) return;
+    event.preventDefault();
+    receiveSofteningHandoff(target.searchParams);
+  });
   function showHistory() {
     if (!rootFlow.id) { say('Save the flow first.', true); return; }
     if (window.__fdShowProps) window.__fdShowProps();
@@ -2810,7 +2851,8 @@
   // replaces this with its server snapshot; gallery/import/AI drafts remain
   // dirty and therefore receive the unload warning until saved.
   markClean();
-  if (editId) load(editId).then(initializeRecovery);
+  if (editId) load(editId, new URLSearchParams(location.search).has('review_softening') ? draftSnapshot() : undefined)
+    .then(function () { initializeRecovery(); return receiveSofteningHandoff(); });
   else if (seed && seed.nodes) {   // ?from_template= -> the template as a 1-node flow
     fromApiFlow(seed);
     say('Loaded the template as a flow — add branches, approvals, or loops around it.');

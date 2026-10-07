@@ -1452,7 +1452,8 @@ _CONTEXTS = tuple(
                 "Use Collect evidence now for due work, then review incomplete collections and recorded changes before relying on the evidence.",
             ),
             suggested_questions=(
-                "How do I start collecting from a source?",
+                "Read current evidence collection status",
+                "Open complete evidence controls",
                 "Why does setup need another administrator's approval?",
                 "What does collected evidence tell us?",
             ),
