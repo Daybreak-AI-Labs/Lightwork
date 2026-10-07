@@ -132,6 +132,29 @@ def task_form_prepare(request, selection, _arguments):
     }})
 
 
+def question_check_snapshot(request, _selection):
+    from maverick.governed_operations import digest
+
+    from .learning_question_checks import catalog
+
+    current = catalog(request)
+    return Snapshot(digest(current), "Current question-check controls",
+        "Open the complete question check to choose saved questions, review AI use and limits, "
+        "or read the original request. Opening starts no check and removes no question.")
+
+
+def question_check_prepare(request, selection, _arguments):
+    from maverick.governed_operations import digest
+
+    from .learning_question_checks import catalog
+
+    state = question_check_snapshot(request, selection)
+    current = catalog(request)
+    if digest(current) != state.revision:
+        raise HTTPException(409, "Your question-check settings or access changed. Open the current controls again.")
+    return Preview(state.summary, native={"learning_question_check_form": {"context": current["context"]}})
+
+
 def setup_prepare(request, _selection, _arguments):
     prepared = native.prepare_setup(request)
     return Preview("Set up the existing learning-question collection. No learning system is turned on and no AI runs.",
@@ -193,7 +216,10 @@ def change_recover(request, selection, arguments, prepared, operation, *, read_o
 
 
 def entries():
-    return (Adapter("learning.task_question_form", "Turn completed work into a learning question", "learning", native.PAGE,
+    return (Adapter("learning.question_check_form", "Review a complete question check", "learning", "/learned#learning-question-checks",
+        ("/learned",), EmptyInput, question_check_snapshot, question_check_prepare,
+        aliases=("check my learning questions", "check question usefulness", "review question checks")),
+        Adapter("learning.task_question_form", "Turn completed work into a learning question", "learning", native.PAGE,
         ("/learning", "/learned"), EmptyInput, task_form_snapshot, task_form_prepare,
         aliases=("learn from my completed work", "use a completed task as a test question", "open task question controls")),
         Adapter("learning.setup_test_questions", "Set up learning questions", "learning", native.PAGE,

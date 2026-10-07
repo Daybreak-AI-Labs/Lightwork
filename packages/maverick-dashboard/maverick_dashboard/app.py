@@ -2054,6 +2054,12 @@ app.include_router(report_downloads_api.router)
 from .chat_answer_exports_api import router as chat_answer_exports_router  # noqa: E402
 
 app.include_router(chat_answer_exports_router)
+from .product_operations_chat_code_controls import router as chat_code_controls_router  # noqa: E402
+
+app.include_router(chat_code_controls_router)
+from .learning_question_checks_api import router as learning_question_checks_router  # noqa: E402
+
+app.include_router(learning_question_checks_router)
 app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
@@ -13052,7 +13058,7 @@ def download_chat_answer(request: Request, goal_id: int, turn_id: int | None = N
         binding = ChatThreads(w).binding(goal_id)
         if binding is None:
             raise HTTPException(status_code=404, detail="no such answer")
-        turn = next((t for t in w.recent_turns(binding.conversation_id, limit=200)
+        turn = next((t for t in ChatThreads(w).selected_turns(goal_id, turn_id=turn_id)
                      if t.id == turn_id and t.goal_id == goal_id and t.role == "assistant"), None)
         if turn is None:
             raise HTTPException(status_code=404, detail="no such answer")
@@ -13824,6 +13830,8 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-consent-workbench.css")
 @app.get("/static/lightwork-consent-publishing.js")
 @app.get("/static/lightwork-markdown.js")
+@app.get("/static/lightwork-chat-code-actions.js")
+@app.get("/static/lightwork-learning-question-checks.js")
 @app.get("/static/lightwork-draft-recovery.css")
 @app.get("/static/lightwork-ai-cloud-agent-governance.js")
 @app.get("/static/lightwork-governance-agents.js")

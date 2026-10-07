@@ -2312,3 +2312,25 @@ The native corpus checker consumes the actual saved question. Its risk-limited m
 ## Complete text in ordinary workflow inputs
 
 Supported free-text fields in ordinary learned-workflow Run now use textareas, including nested notes and fixed-list entries. Single-line fields previously removed line breaks from legitimate native string values. The same schema validation and exact structured submission remain in place; Yes/No and number controls stay typed. An ordinary signed submission admitted one queued legacy-recipe run with exact line breaks, tabs, Unicode, spaces and short text retained. This qualifies form input custody and native admission, without a worker, model call or new claim about signed teaching or external execution.
+
+## Editable tables in Chat Word downloads
+
+Supported Markdown tables now become editable Word tables, with repeated bold headers, numeric alignment and complete cell values. Escaped pipes, inline-code pipes, tabs, Unicode and large numbers remain present. Fenced examples remain code; malformed rows or additional cells remain literal rather than being dropped. The exact original Markdown remains embedded. One actual signed owned-answer download passed complete package/XML reading and independent Word-document library reading. No new provider call or output writer is introduced. Word-engine visual rendering remains unqualified.
+
+## Complete question checks without automatic deletion
+
+Learned now lets an administrator choose named saved questions, review every question and expected answer, the answering model, checker, provider-use permission and limits, then separately start a check. The existing guarded learning-pass custody retains its original, progress and Stop path. Private responses stay encrypted and require current question/source access to read. Interrupted replies do not automatically repeat answers or judgments. Copilot opens this same form while preserving selected questions, model and original.
+
+Every requested sample must complete before a question is described as consistently passed in the bounded check. Requested, judged and unavailable counts remain distinct; complete permitted responses and judgments are readable. The former inline check-and-delete action refuses instead of removing questions. Removal requires the separate existing current Learning questions review. A complete bounded pass is still an AI judgment against an operator-authored expectation, not verified customer truth, general difficulty or measured improvement.
+
+## Named reference-service key setup
+
+Connections includes the shipped keyed reference-data services in its ordinary searchable service choices. Their existing service address and plain credential guidance come from the native connector definitions; no-key public tools retain their defaults. New and existing reference-account controls keep the prescribed address. Save uses the existing encrypted connection and current administrator, owner and revision checks. Copilot opens the same key form without saving, testing, selecting a service or changing account-sign-in work. Saving a key does not establish provider access or authorize later task use.
+
+The native ordinary form saved an owned FRED account, and the stock lazy tool used that sealed account and its native query authentication against one fictional bounded response. Another principal could not use the private account. All nineteen keyed reference choices were distinct, and the no-key World Bank default remained unchanged. Actual Copilot review opened the same form while retaining its private key and unrelated Google account/application draft. No real reference service or model was contacted.
+
+## Individual saved Chat snippet controls (UX667)
+
+Each supported saved code block has its own labelled Copy code action. Current answers, prose/code files and retained earlier messages use exact native selected-source and result-release checks immediately before local copying. The complete rendered snippet, including whitespace, tabs and Unicode, must match that current source. Changed, unavailable or unapproved content refuses the copy. Earlier retained messages remain available while newer work runs. An unavailable clipboard offers selectable text and never falsely says Copied. Copilot opens these same controls without copying or executing code, keeping the message draft.
+
+Selected historical Markdown and Word downloads now resolve the exact retained turn through the existing owner-, thread- and tenant-scoped reader. The previous latest-two-hundred lookup stopped finding earlier answers after a longer conversation, including answers loaded by the ordinary history pager. A native signed download after 201 later turns returned the complete original in both formats and refused a turn from another conversation. The ordinary all-turn reader keeps its existing separate limit. Actual current/historical clipboard and Copilot journeys preserved the composer; a fixture-injected clipboard rejection exercised selectable fallback. No browser permission or external code execution is claimed.

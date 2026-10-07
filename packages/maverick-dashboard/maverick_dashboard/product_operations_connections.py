@@ -20,6 +20,39 @@ class TemplateAccountInput(StrictInput):
     account: str = Field(min_length=1, max_length=2048)
 
 
+def _key_setup_current(request):
+    from maverick.tools.enterprise_connectors import connection_setup_catalog
+
+    from .api import _require_connections
+    from .app import require_page_visible
+    from .auth import require_page_permission
+    from .draft_api import context_for
+
+    require_permission(request, "admin")
+    require_page_permission(request, "/connections")
+    require_page_visible(request, "/connections")
+    _require_connections()
+    return {"context": context_for(request), "connectors": connection_setup_catalog()}
+
+
+def key_setup_snapshot(request, _selection):
+    current = _key_setup_current(request)
+    return Snapshot(digest(current), "Current saved-key connection setup",
+        "Open the protected connection form to choose a named service and save its key. "
+        "Your entered choices stay in the form. Opening it saves nothing and contacts no service.",
+        details={"Available services": [row["label"] for row in current["connectors"] if row["key_setup_supported"]]})
+
+
+def key_setup_prepare(request, selection, _arguments):
+    state = key_setup_snapshot(request, selection)
+    current = _key_setup_current(request)
+    if digest(current) != state.revision:
+        raise HTTPException(409, "Your connection setup or access changed. Open the current controls again.")
+    return Preview(state.summary, native={"connections_key_review": {
+        "scope": "current_page", "context": current["context"],
+    }})
+
+
 def account_snapshot(request, selection):
     from .in_app_routes import template_connection_choices
     current = template_connection_choices(request)
@@ -344,6 +377,8 @@ def receipt_prepare(request, selection, arguments):
 
 def entries():
     return (
+        Adapter("connections.key_setup", "Set up a service with its key", "connections", "/connections#cx-form", ("/connections",),
+            EmptyInput, key_setup_snapshot, key_setup_prepare, aliases=("connect a reference service", "set up FRED", "save a service key", "connect Census")),
         Adapter("templates.accounts", "Review a workflow account selection", "connections", "/templates", ("/templates", "/workflow-builder", "/connections"), TemplateAccountInput, account_snapshot, account_prepare),
         Adapter("connections.review", "Review connection diagnostics", "connections", "/connections", ("/connections", "/automations"), ConnectionInput, connection_snapshot, connection_prepare, aliases=("check my connection",)),
         Adapter("schedules.change", "Change future schedule runs", "schedules", "/automations", ("/automations",), ScheduleInput, schedule_snapshot, schedule_prepare, schedule_execute, schedule_recover, aliases=("pause my schedule",), read_recovery=schedule_recover),

@@ -685,6 +685,19 @@ def connection_setup_catalog() -> list[dict]:
                      "prerequisites": ("Service API address and a credential with only the permissions your task needs."
                                        if supported else "This adapter requires its dedicated administrator setup; a single saved key is insufficient."),
                      "live_provider_verified": False})
+    for spec in _PUBLIC_DATA_SPECS:
+        if spec.get("keyless"):
+            continue
+        rows.append({"name": spec["name"],
+                     "label": spec["description"].split(", READ-ONLY", 1)[0],
+                     "auth_method": "Key from the reference service",
+                     "key_setup_supported": True, "reference_data": True,
+                     "default_base_url": spec["default_base_url"],
+                     "prerequisites": "Paste a key issued by this service. Lightwork fills in its address and "
+                                      "keeps the key encrypted. These tools read reference data; they do not change it. "
+                                      "Saving does not contact the service or establish that its data is current. "
+                                      "The service's own access and usage limits still apply.",
+                     "live_provider_verified": False})
     # Definition imports use these protected named credentials. Preserve the
     # existing tool labels; UiPath has no generic connector catalog entry.
     for name, label, auth, location in (

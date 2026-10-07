@@ -94,11 +94,7 @@
 
     {% if can_manage %}
     {% include '_learning_passes.html' %}
-    <h3>Check existing test questions</h3>
-    <div class="llp-row">
-      <button type="button" class="btn btn--ghost" id="llp-quality-btn">Check the test cases</button>
-      <label><input type="checkbox" id="llp-quality-remove"> Remove test cases that are too easy</label>
-    </div>
+    {% include '_learning_question_checks.html' %}
     <p class="muted" id="llp-cost">Both use the evaluation spending limit and stop if learning is paused.</p>
     <p class="muted" id="llp-run-status" role="status" aria-live="polite"></p>
     <div id="llp-run-result"></div>

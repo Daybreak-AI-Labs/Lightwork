@@ -120,7 +120,7 @@ class ChatThreads:
         return list(reversed([Turn(r[0], r[1], r[2], r[3], self.store.open(r[4]), r[5])
                               for r in rows[:size]])), len(rows) > size
 
-    def selected_turns(self, goal_id):
+    def selected_turns(self, goal_id, *, turn_id=None):
         """Persisted web turns for this member, scoped to its canonical thread."""
         from .world_model import Turn
 
@@ -129,16 +129,18 @@ class ChatThreads:
             return []
         gs, gv = self._scope("g")
         cs, cv = self._scope("c")
+        selected = " AND t.id=?" if turn_id is not None else ""
+        selected_values = (int(turn_id),) if turn_id is not None else ()
         rows = self._rows(
             "SELECT t.id,t.conversation_id,t.goal_id,t.role,t.content,t.ts "
             "FROM turns t JOIN goals g ON g.id=t.goal_id "
             "JOIN conversations c ON c.id=t.conversation_id "
             "WHERE t.conversation_id=? AND t.goal_id=? AND g.owner=? "
             "AND (g.id=? OR g.parent_id=?) "
-            f"AND {gs} AND {cs} AND t.role IN ('user','assistant') "
+            f"AND {gs} AND {cs} AND t.role IN ('user','assistant'){selected} "
             "ORDER BY t.id LIMIT 101",
             (binding.conversation_id, goal_id, binding.owner, binding.root_id,
-             binding.root_id, *gv, *cv),
+             binding.root_id, *gv, *cv, *selected_values),
         )
         if len(rows) > 100:
             raise ValueError("The selected message has too many turns to share.")

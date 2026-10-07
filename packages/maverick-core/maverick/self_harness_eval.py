@@ -1297,19 +1297,15 @@ def resolve_pending(corpus_path: str | Path, key: str, *,
 
 def corpus_quality(cases: list[dict], *, run_fn: Callable[[str, str], str],
                    judge_fn: Callable[[str, str, str], bool] | None = None,
-                   samples: int = 2) -> list[dict]:
-    """Per-case discriminativeness of the corpus's ground truth.
+                   samples: int = 2, dispatch_guard=None,
+                   retain_responses: bool = False) -> list[dict]:
+    """Measure baseline answers without treating unavailable checks as evidence.
 
-    Runs the BASELINE (no candidate line) ``samples`` times per case and
-    judges each attempt: a case the baseline passes every time cannot show a
-    candidate's lift -- it is dead weight in every split. Returns one row per
-    case: ``{goal, expected, passes, samples, baseline_rate,
-    discriminative}`` where ``discriminative`` is False only when every
-    sample passed. A sample that RAISES is indeterminate and excluded
-    (``baseline_rate`` is over the judged samples; a case with no judged
-    samples reports ``baseline_rate=None`` and stays discriminative --
-    unknown is not dead). ``BudgetExceeded`` propagates: a half-probed
-    quality report must not silently masquerade as a full one."""
+    Every requested sample must be judged successfully before a question can
+    be labelled consistently passed. Existing callers retain aggregate rows;
+    protected native views may request bounded complete response observations.
+    Current authority and Budget failures raised by the guard propagate.
+    """
     judge = judge_fn or _heuristic_judge
     out: list[dict] = []
     n = max(1, int(samples))
@@ -1319,24 +1315,48 @@ def corpus_quality(cases: list[dict], *, run_fn: Callable[[str, str], str],
         if not goal or not case_current(c):
             continue
         passes = judged = 0
+        observations = []
         for _ in range(n):
+            if dispatch_guard is not None:
+                dispatch_guard()
+            require_cases_current([c])
+            output, verdict = None, None
             try:
-                require_cases_current([c])
+                degraded = getattr(run_fn, "degraded", 0)
                 output = run_fn("", goal)
+                if (getattr(run_fn, "degraded", 0) != degraded or not isinstance(output, str)
+                        or retain_responses and len(output) > 8000):
+                    output = None
+                    raise ValueError("incomplete baseline response")
                 require_cases_current([c])
-                if judge(goal, output, expected):
-                    passes += 1
+                if dispatch_guard is not None:
+                    dispatch_guard()
+                degraded = getattr(judge, "degraded", 0)
+                verdict = judge(goal, output, expected)
+                if type(verdict) is not bool or getattr(judge, "degraded", 0) != degraded:
+                    raise ValueError("incomplete judgment")
+                passes += int(verdict)
                 judged += 1
             except BudgetExceeded:
                 raise
-            except Exception:  # one bad sample is indeterminate, excluded
-                log.debug("eval: quality sample failed", exc_info=True)
+            except Exception:
+                verdict = None
+                log.debug("eval: quality sample unavailable", exc_info=True)
+            if dispatch_guard is not None:
+                dispatch_guard()
+            require_cases_current([c])
+            if retain_responses:
+                observations.append({"response": output if isinstance(output, str) and len(output) <= 8000 else None,
+                                     "verdict": verdict})
         if not case_current(c):
             continue
-        rate = (passes / judged) if judged else None
-        out.append({"goal": goal, "expected": expected, "passes": passes,
-                    "samples": judged, "baseline_rate": rate,
-                    "discriminative": not (judged and passes == judged)})
+        row = {"goal": goal, "expected": expected, "passes": passes,
+               "samples": judged, "requested_samples": n, "unavailable": n - judged,
+               "complete": judged == n, "baseline_rate": passes / judged if judged else None,
+               "discriminative": not (judged == n and passes == n)}
+        if retain_responses:
+            row["observations"] = observations
+        out.append(row)
     return out
 
 

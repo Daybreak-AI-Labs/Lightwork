@@ -13,10 +13,16 @@
     if (seen.has(turn.id)) return;
     seen.add(turn.id);
     var item = document.createElement('article'); item.className = 'msg msg--' + (turn.role === 'user' ? 'user' : 'agent');
+    if (turn.role === 'assistant') { item.dataset.chatCodeGoal = String(turn.goal_id); item.dataset.chatCodeTurn = String(turn.id); }
     var label = document.createElement('strong'); label.textContent = turn.role === 'user' ? 'You' : 'Lightwork';
     var text = content(document.createElement('div'), turn.content); text.className = 'prose'; text.style.whiteSpace = 'pre-wrap';
     var link = document.createElement('a'); link.href = '/chat/goal/' + turn.goal_id; link.textContent = 'Open this turn';
     item.append(label, text, link); batch.append(item);
+    if (turn.role === 'assistant') {
+      var source = document.createElement('textarea'); source.className = 'turn-copy-source'; source.readOnly = true; source.hidden = true;
+      source.setAttribute('aria-label', 'Earlier answer text to copy'); source.value = turn.content; item.append(source);
+      if (window.lwMarkdown) window.lwMarkdown.renderInto(text, turn.content);
+    }
     if (turn.role === 'user' && Array.isArray(turn.questions)) turn.questions.forEach(function (exchange) {
       var qa = document.createElement('div'); qa.className = 'qa';
       var question = content(document.createElement('p'), exchange.question); question.className = 'qa__q';

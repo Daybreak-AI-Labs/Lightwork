@@ -20,6 +20,7 @@ _BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
 _HEADING = re.compile(r"^(#{1,6}) ([^#].*)$")
 _BULLET = re.compile(r"^[-+*] (\S.*)$")
 _FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})([^`~]*)$")
+_CELL_RULE = re.compile(r":?-{3,}:?")
 
 
 def _runs(text):
@@ -57,12 +58,118 @@ def _blocks(text, title):
             blocks.append(("bullet", _runs(bullet[1])))
         else:
             # Paragraph-per-line retains blanks, indentation and complex layouts.
-            blocks.append(("para", _runs(line)))
-    return [block for block in blocks if block[0] != "skip"]
+            blocks.append(("para", _runs(line), line))
+    return _tables([block for block in blocks if block[0] != "skip"])
+
+
+def _cells(line):
+    """Split only actual Markdown cell separators, preserving escaped/code pipes."""
+    cells, cell, fence, separators, index = [], [], "", 0, 0
+    while index < len(line):
+        char = line[index]
+        if char == "\\" and index + 1 < len(line):
+            following = line[index + 1]
+            cell.append(following if following == "|" and not fence else char + following)
+            index += 2
+            continue
+        if char == "`":
+            end = index + 1
+            while end < len(line) and line[end] == "`":
+                end += 1
+            marker = line[index:end]
+            if not fence:
+                fence = marker
+            elif marker == fence:
+                fence = ""
+            cell.append(marker)
+            index = end
+            continue
+        if char == "|" and not fence:
+            cells.append("".join(cell).strip())
+            cell, separators = [], separators + 1
+        else:
+            cell.append(char)
+        index += 1
+    if fence or not separators:
+        return None
+    cells.append("".join(cell).strip())
+    if not cells[0]:
+        cells.pop(0)
+    if cells and not cells[-1]:
+        cells.pop()
+    return cells or None
+
+
+def _tables(blocks):
+    output, index = [], 0
+    while index < len(blocks):
+        header = _cells(blocks[index][2]) if blocks[index][0] == "para" else None
+        following = blocks[index + 1] if index + 1 < len(blocks) else None
+        rules = _cells(following[2]) if following and following[0] == "para" else None
+        if not header or not rules or len(header) != len(rules) or not all(_CELL_RULE.fullmatch(cell) for cell in rules):
+            output.append(blocks[index])
+            index += 1
+            continue
+        rows, index = [header], index + 2
+        while index < len(blocks) and blocks[index][0] == "para":
+            cells = _cells(blocks[index][2])
+            if cells is None or len(cells) != len(header):
+                break  # Keep malformed/extra cells literally instead of losing data.
+            rows.append(cells)
+            index += 1
+        output.append(("table", [], rows, rules))
+    return output
+
+
+def _word_table(rows, rules):
+    table = ET.Element(f"{{{_W}}}tbl")
+    properties = ET.SubElement(table, f"{{{_W}}}tblPr")
+    ET.SubElement(properties, f"{{{_W}}}tblW", {f"{{{_W}}}w": "5000", f"{{{_W}}}type": "pct"})
+    borders = ET.SubElement(properties, f"{{{_W}}}tblBorders")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        ET.SubElement(borders, f"{{{_W}}}{side}", {f"{{{_W}}}val": "single", f"{{{_W}}}sz": "4", f"{{{_W}}}color": "D5D9DF"})
+    grid = ET.SubElement(table, f"{{{_W}}}tblGrid")
+    for _cell in rules:
+        ET.SubElement(grid, f"{{{_W}}}gridCol", {f"{{{_W}}}w": str(9600 // len(rules))})
+    for index, cells in enumerate(rows):
+        row = ET.SubElement(table, f"{{{_W}}}tr")
+        if not index:
+            ET.SubElement(ET.SubElement(row, f"{{{_W}}}trPr"), f"{{{_W}}}tblHeader")
+        for cell, rule in zip(cells, rules, strict=True):
+            target = ET.SubElement(row, f"{{{_W}}}tc")
+            if not index:
+                ET.SubElement(ET.SubElement(target, f"{{{_W}}}tcPr"), f"{{{_W}}}shd", {f"{{{_W}}}fill": "F2F4F7"})
+            paragraph = ET.SubElement(target, f"{{{_W}}}p")
+            alignment = "center" if rule.startswith(":") and rule.endswith(":") else "right" if rule.endswith(":") else "left"
+            ET.SubElement(ET.SubElement(paragraph, f"{{{_W}}}pPr"), f"{{{_W}}}jc", {f"{{{_W}}}val": alignment})
+            for text, options in _runs(cell):
+                run = ET.SubElement(paragraph, f"{{{_W}}}r")
+                if not index or isinstance(options, dict) and options.get("bold"):
+                    ET.SubElement(ET.SubElement(run, f"{{{_W}}}rPr"), f"{{{_W}}}b")
+                ET.SubElement(run, f"{{{_W}}}t", {f"{{{_XML}}}space": "preserve"}).text = text
+    return table
+
+
+def _word_tabs(document):
+    for paragraph in document.iter(f"{{{_W}}}p"):
+        for run in paragraph.findall(f"{{{_W}}}r"):
+            for node in list(run):
+                if node.tag != f"{{{_W}}}t" or "\t" not in (node.text or ""):
+                    continue
+                position = list(run).index(node)
+                for index, value in enumerate((node.text or "").split("\t")):
+                    if index:
+                        run.insert(position, ET.Element(f"{{{_W}}}tab"))
+                        position += 1
+                    segment = ET.Element(f"{{{_W}}}t", {f"{{{_XML}}}space": "preserve"})
+                    segment.text = value
+                    run.insert(position, segment)
+                    position += 1
+                run.remove(node)
 
 
 def word_answer(text: str, title: str) -> bytes:
-    """Basic business formatting; exact original Markdown retained in the ZIP."""
+    """Editable business text and tables; exact original retained in the ZIP."""
     if any(not (char in "\t\n\r" or 32 <= ord(char) <= 0xD7FF
                 or 0xE000 <= ord(char) <= 0xFFFD or 0x10000 <= ord(char) <= 0x10FFFF)
            for char in text + title):
@@ -87,7 +194,11 @@ def word_answer(text: str, title: str) -> bytes:
     document = ET.fromstring(parts["word/document.xml"])
     body = document.find(f"{{{_W}}}body")
     paragraphs = body.findall(f"{{{_W}}}p")
+    tables = {}
     for paragraph, block in zip(paragraphs, blocks, strict=True):
+        if block[0] == "table":
+            tables[paragraph] = _word_table(block[2], block[3])
+            continue
         if block[0] == "code":
             ppr = ET.Element(f"{{{_W}}}pPr")
             paragraph.insert(0, ppr)
@@ -97,20 +208,8 @@ def word_answer(text: str, title: str) -> bytes:
                 run.insert(0, props)
                 ET.SubElement(props, f"{{{_W}}}rFonts", {f"{{{_W}}}ascii": "Consolas", f"{{{_W}}}hAnsi": "Consolas"})
                 ET.SubElement(props, f"{{{_W}}}sz", {f"{{{_W}}}val": "19"})
-        for run in paragraph.findall(f"{{{_W}}}r"):
-            for node in list(run):
-                if node.tag != f"{{{_W}}}t" or "\t" not in (node.text or ""):
-                    continue
-                position = list(run).index(node)
-                for index, value in enumerate((node.text or "").split("\t")):
-                    if index:
-                        run.insert(position, ET.Element(f"{{{_W}}}tab"))
-                        position += 1
-                    segment = ET.Element(f"{{{_W}}}t", {f"{{{_XML}}}space": "preserve"})
-                    segment.text = value
-                    run.insert(position, segment)
-                    position += 1
-                run.remove(node)
+    body[:] = [tables.get(child, child) for child in body]
+    _word_tabs(body)
     section = body.find(f"{{{_W}}}sectPr")
     for node in list(section):
         if node.tag == f"{{{_W}}}headerReference":

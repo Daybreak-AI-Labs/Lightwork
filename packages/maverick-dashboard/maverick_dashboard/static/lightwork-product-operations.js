@@ -216,6 +216,18 @@
               ? function (isCurrent) { return discoveryControls.openReview({}, {isCurrent: isCurrent}); } : null);
           return;
         }
+        if (entry[0] === 'chat_code_review') {
+          var codeReview = entry[1], codeControls = window.LightworkChatCodeActions;
+          var codeContext = catalog && catalog.context;
+          if (!codeReview || Array.isArray(codeReview) ||
+              Object.keys(codeReview).join(',') !== 'scope' || codeReview.scope !== 'current_page' ||
+              typeof codeContext !== 'string' || !/^[a-f0-9]{64}$/.test(codeContext)) return;
+          protectedControls(node('dd', undefined, list), 'Open the snippet copy controls',
+            window.location.pathname,
+            codeControls && typeof codeControls.openReview === 'function'
+              ? function (isCurrent) { return codeControls.openReview({}, {isCurrent: isCurrent, context: codeContext}); } : null);
+          return;
+        }
         if (entry[0] === 'continuous_evidence_review') {
           var evidenceReview = entry[1], evidenceControls = window.LightworkContinuousEvidence;
           var evidenceContext = catalog && catalog.context;
@@ -240,6 +252,17 @@
               ? function (isCurrent) { return exceptionControls.openReview({}, {isCurrent: isCurrent, context: exceptionContext}); } : null);
           return;
         }
+        if (entry[0] === 'learning_question_check_form') {
+          var questionCheckReview = entry[1], questionCheckControls = window.LightworkLearningQuestionChecks;
+          if (!questionCheckReview || Array.isArray(questionCheckReview) ||
+              Object.keys(questionCheckReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(questionCheckReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review the complete question check',
+            '/learned#learning-question-checks',
+            questionCheckControls && typeof questionCheckControls.open === 'function'
+              ? function (isCurrent) { return questionCheckControls.open(questionCheckReview.context, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'learning_task_question_review') {
           var taskQuestionReview = entry[1], taskQuestionControls = window.LightworkLearningQuestions;
           if (!taskQuestionReview || Array.isArray(taskQuestionReview) ||
@@ -249,6 +272,17 @@
             '/learned#learning-test-questions',
             taskQuestionControls && typeof taskQuestionControls.openTaskReview === 'function'
               ? function (isCurrent) { return taskQuestionControls.openTaskReview(taskQuestionReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'connections_key_review') {
+          var keyReview = entry[1], keyControls = window.LightworkConnections;
+          if (!keyReview || Array.isArray(keyReview) ||
+              Object.keys(keyReview).sort().join(',') !== 'context,scope' ||
+              keyReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(keyReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Choose a service and review its key setup',
+            '/connections#cx-form',
+            keyControls && typeof keyControls.openReview === 'function'
+              ? function (isCurrent) { return keyControls.openReview(keyReview.context, isCurrent); } : null);
           return;
         }
         if (entry[0] === 'mail_connection_review') {

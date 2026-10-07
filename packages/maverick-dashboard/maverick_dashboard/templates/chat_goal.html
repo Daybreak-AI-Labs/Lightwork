@@ -63,6 +63,11 @@
   .prose code { font-family: var(--font-mono); font-size: 0.9em; padding: 0.1em 0.35em; border-radius: var(--radius-sm); background: var(--surface-sunken); }
   .prose pre { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--surface-sunken); border: 1px solid var(--hairline); overflow-x: auto; font-size: var(--text-sm); line-height: var(--leading); }
   .prose pre code { padding: 0; background: transparent; font-size: inherit; }
+  .chat-code-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-1); }
+  .chat-code-tools button { min-height: 44px; }
+  .chat-code-tools span { overflow-wrap: anywhere; }
+  .chat-code-fallback { width: 100%; min-height: 8rem; margin-bottom: var(--space-3); box-sizing: border-box; }
+  @media print { .chat-code-tools, .chat-code-fallback { display: none !important; } }
   .prose blockquote { margin-inline: 0; padding: var(--space-1) var(--space-4); border-inline-start: 3px solid var(--border-strong); color: var(--muted); }
   .prose table { display: block; overflow-x: auto; font-size: var(--text-sm); border-collapse: collapse; }
   .prose th, .prose td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--hairline); text-align: start; vertical-align: top; }
@@ -358,7 +363,7 @@
   </div>
   {% endfor %}
     {% else %}
-  <div class="msg msg--agent">
+  <div class="msg msg--agent" data-chat-code-goal="{{ t.goal_id }}" data-chat-code-turn="{{ t.id }}">
     <div class="agent__label">{{ agent_mark() }} Lightwork</div>
     {% set historical_stop = (thread_stop_notes or {}).get(t.id) %}
     {% if historical_stop %}
@@ -494,6 +499,7 @@
     <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>{{ ui('Refresh saved result and controls') }}</button>
     {% include "_chat_answer_panel.html" %}
     <script src="/static/lightwork-answer-panel.js" defer></script>
+    <script src="/static/lightwork-chat-code-actions.js" defer></script>
     <div id="halt-card" class="halt-card" style="display: none;" data-stop-kind="{{ stop.kind if stop else '' }}" data-resume-mode="{{ stop_progress.mode if stop_progress else 'retry' }}">
       {% set pilot_prepared = stop and stop.kind == 'pilot_prepared' %}
       {% set specialist_setup = stop and stop.kind in ('specialist_setup', 'specialist_needs_web_search', 'specialist_needs_connection') %}
