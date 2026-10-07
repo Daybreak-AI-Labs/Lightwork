@@ -351,6 +351,17 @@
               ? function (isCurrent) { return instructionSuggestionControls.openSuggestion(instructionSuggestionForm.context, isCurrent); } : null);
           return;
         }
+        if (entry[0] === 'learning_case_import_form') {
+          var caseImportForm = entry[1], caseImportControls = window.LightworkLearnedCaseImport;
+          if (!caseImportForm || Array.isArray(caseImportForm) ||
+              Object.keys(caseImportForm).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(caseImportForm.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open the question import form',
+            '/learned#learning-case-import',
+            caseImportControls && typeof caseImportControls.open === 'function'
+              ? function (isCurrent) { return caseImportControls.open(caseImportForm.context, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'learning_code_practice_form') {
           var codePracticeForm = entry[1], codePracticeControls = window.LightworkLearningOps;
           if (!codePracticeForm || Array.isArray(codePracticeForm) ||

@@ -147,45 +147,166 @@
     } finally { exportBtn.disabled = false; }
   });
 
-  var check = $('lpo-import-check');
-  check.addEventListener('click', async function () {
-    var input = $('lpo-import-file');
-    var file = input.files && input.files[0];
-    if (!file) { say('lpo-cases-status', 'Choose a test-case file first.'); return; }
-    var replace = $('lpo-import-how').value === 'replace';
-    var body = await J.readFile(file);
-    check.disabled = true;
-    $('lpo-cases-out').textContent = '';
-    say('lpo-cases-status', 'Checking the file…');
-    try {
-      var d = await J.request(API + '/test-cases/import/preview?replace=' + replace, { method: 'POST', body: body, type: 'application/json' });
-      say('lpo-cases-status', replace
-        ? 'Replacing would change the test cases from ' + d.total_now + ' to ' + d.total_after + '.'
-        : 'This would add ' + plural(d.added, 'new test case') + '. Existing ones stay as they are.');
-      var nodes = [J.table(['Model', 'Test cases now', 'After'], d.keys.map(function (k) { return [k.label, String(k.now), String(k.after)]; }))];
-      var apply = el('button', replace ? 'btn btn--danger' : 'btn btn--primary', replace ? 'Replace the test cases' : 'Add these test cases');
-      apply.type = 'button';
-      apply.addEventListener('click', async function () {
-        var msg = replace
-          ? 'Replace all ' + d.total_now + ' test cases with the ' + d.total_after + ' in this file? Test cases not in the file are removed.'
-          : 'Add ' + plural(d.added, 'new test case') + ' from this file?';
-        if (!(await window.mvConfirm(msg, { okText: replace ? 'Replace' : 'Add' }))) return;
-        apply.disabled = true;
-        try {
-          var r = await J.request(API + '/test-cases/import?confirm=true&replace=' + replace, { method: 'POST', body: body, type: 'application/json' });
-          $('lpo-cases-out').textContent = '';
-          say('lpo-cases-status', replace ? 'Replaced. There are now ' + plural(r.cases, 'test case') + '.' : 'Added ' + plural(r.cases, 'test case') + '.');
-        } catch (failure) {
-          say('lpo-cases-status', await J.problem(failure, 'add the test cases'));
-          apply.disabled = false;
+  (function questionImport() {
+    var input = $('lpo-import-file'), mode = $('lpo-import-how'), check = $('lpo-import-check');
+    var originals = $('lpo-import-original'), read = $('lpo-import-recover'), refresh = $('lpo-import-refresh');
+    var context = '', revision = '', generation = 0, accessGeneration = 0, reading = 0, busy = false, locked = true;
+    var key = 'lightwork-question-import';
+    function placeholder() { var option = el('option', null, 'Choose your original import'); option.value = ''; return option; }
+    function status(message) { say('lpo-import-status', message); }
+    function lock() {
+      check.disabled = busy || locked; input.disabled = locked; mode.disabled = locked;
+      refresh.disabled = busy; originals.disabled = busy || locked; read.disabled = busy || locked || !originals.value;
+    }
+    function invalidate() { generation++; $('lpo-cases-out').replaceChildren(); }
+    function clear() {
+      accessGeneration++; invalidate(); reading++; context = ''; revision = ''; locked = true; busy = false;
+      input.value = ''; mode.value = 'merge'; originals.replaceChildren(placeholder());
+      $('lpo-import-result').replaceChildren(); status('Your account or access changed. Refresh the current controls before continuing.'); lock();
+    }
+    function saved() {
+      try { var value = JSON.parse(sessionStorage.getItem(key) || 'null'); return value && value.context === context && /^[a-f0-9]{32}$/.test(value.operation) ? value : null; }
+      catch (_) { return null; }
+    }
+    function remember(value) { sessionStorage.setItem(key, JSON.stringify({context: context, operation: value.operation})); }
+    function addOriginal(value, label) {
+      if (!Array.from(originals.options).some(function (option) { return option.value === value; })) {
+        var option = el('option', null, label); option.value = value; originals.appendChild(option);
+      }
+    }
+    async function request(path, options) {
+      options = options || {};
+      var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 20000);
+      var headers = {'Content-Type': 'application/json'};
+      if (context) headers['X-Lightwork-Import-Context'] = context;
+      if (options.token) headers['X-Lightwork-Import-Review'] = options.token;
+      try {
+        var response = await fetch(API + '/test-cases/import' + path, {method: options.body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', headers: headers, body: options.body, signal: controller.signal});
+        var text = await response.text(); if (text.length > 262144) throw new Error('The complete review is too large to display. Nothing was repeated.');
+        var value; try { value = JSON.parse(text); } catch (_) { value = {}; }
+        if (!response.ok || response.redirected) {
+          var detail = value.detail;
+          var failure = new Error(typeof detail === 'string' ? detail : detail && detail.message || 'The current import could not be read. Nothing was repeated.');
+          failure.authority = response.redirected || response.status === 401 || response.status === 403 || !!(detail && detail.context_lost); throw failure;
         }
+        if (context && value.context && value.context !== context) { var changed = new Error('Your account or workspace changed.'); changed.authority = true; throw changed; }
+        return value;
+      } finally { clearTimeout(timer); }
+    }
+    function failed(error, access, current, message) {
+      if (access !== accessGeneration) return;
+      if (error.authority) { clear(); return; }
+      if (current === undefined || current === generation) status(message || error.message || 'The current import could not be read. Your chosen file is kept.');
+    }
+    async function controls(expected, isCurrent) {
+      var access = accessGeneration, current = generation;
+      try {
+        var state = await request('');
+        if (access !== accessGeneration || current !== generation || isCurrent && !isCurrent()) return false;
+        if (expected && state.context !== expected) { clear(); throw new Error('Your account or workspace changed. Open the current controls again.'); }
+        if (revision && revision !== state.revision) invalidate();
+        context = state.context; revision = state.revision; locked = false;
+        $('lpo-import-notice').textContent = state.notice;
+        var chosen = originals.value;
+        originals.replaceChildren(placeholder());
+        state.requests.forEach(function (row) { addOriginal(row.value, row.label); });
+        var pending = saved(); if (pending) addOriginal(pending.operation, 'Original import · awaiting its result');
+        if (chosen) originals.value = chosen; else if (pending) originals.value = pending.operation;
+        lock(); return true;
+      } catch (error) { failed(error, access, current); throw error; }
+    }
+    // Every saved field is displayed, including fields Lightwork preserves but
+    // does not interpret. No editable file code is needed for this review.
+    function label(keyName) {
+      var names = {goal: 'Question or task', expected: 'Expected answer', task_source: 'Completed-work source', goal_id: 'Completed work',
+        tenant: 'Workspace', owner: 'Owner', digest: 'Source fingerprint', authoring_request: 'Original question reference',
+        privacy_schema: 'Source protection', source_goal_ids: 'Original work', added_at: 'Saved at', _lightwork_case_effects_v1: 'Import history'};
+      return names[keyName] || keyName.replace(/_/g, ' ').replace(/^./, function (character) { return character.toUpperCase(); });
+    }
+    function detail(value, field) {
+      if (field === 'privacy_schema' && value === 'owned-task-question-v1') value = 'Protected question from completed work';
+      if (!value || typeof value !== 'object') return el('p', null, value === null ? 'Not set' : String(value));
+      var list = el(Array.isArray(value) ? 'ol' : 'dl');
+      Object.keys(value).forEach(function (name) {
+        if (Array.isArray(value)) { var item = el('li'); item.appendChild(detail(value[name])); list.appendChild(item); }
+        else { list.appendChild(el('dt', null, label(name))); var description = el('dd'); description.appendChild(detail(value[name], name)); list.appendChild(description); }
       });
-      nodes.push(apply);
-      fill('lpo-cases-out', nodes);
-    } catch (failure) {
-      say('lpo-cases-status', await J.problem(failure, 'check the file'));
-    } finally { check.disabled = false; }
-  });
+      if (!Object.keys(value).length) list.appendChild(el('p', 'muted', 'No saved details.'));
+      return list;
+    }
+    function collection(title, data, models) {
+      var section = el('details'), heading = el('summary', null, title); section.appendChild(heading);
+      Object.keys(data).forEach(function (name) {
+        var group = el('section');
+        var model = models.find(function (row) { return row.key === name; });
+        group.appendChild(el('h4', null, model ? model.label : label(name)));
+        group.appendChild(detail(data[name])); section.appendChild(group);
+      });
+      if (!Object.keys(data).length) section.appendChild(el('p', 'muted', 'No questions.'));
+      return section;
+    }
+    input.addEventListener('change', invalidate); mode.addEventListener('change', invalidate);
+    document.addEventListener('lightwork:account-context-changed', clear);
+    originals.addEventListener('change', function () { reading++; lock(); });
+    refresh.addEventListener('click', function () { controls().catch(function () {}); });
+    read.addEventListener('click', async function () {
+      var operation = originals.value, access = accessGeneration, sequence = ++reading;
+      if (locked || busy || !operation) return;
+      busy = true; lock();
+      try {
+        var row = await request('/requests/' + operation);
+        if (access !== accessGeneration || sequence !== reading || originals.value !== operation) return;
+        $('lpo-import-result').replaceChildren(el('p', null, row.message));
+        if (row.confirmed && saved() && saved().operation === operation) sessionStorage.removeItem(key);
+      } catch (error) { failed(error, access); }
+      finally { if (access === accessGeneration) { busy = false; lock(); } }
+    });
+    check.addEventListener('click', async function () {
+      if (locked || busy) return;
+      var file = input.files && input.files[0], replace = mode.value === 'replace';
+      if (!file) { status('Choose a learning-question file first.'); return; }
+      if (file.size > 5 * 1024 * 1024) { status('Choose a file of 5 MiB or less. Nothing was shortened or changed.'); return; }
+      invalidate(); var current = generation, access = accessGeneration, selectedContext = context;
+      function same() { return access === accessGeneration && current === generation && selectedContext === context && !locked && file === input.files[0] && replace === (mode.value === 'replace'); }
+      busy = true; lock(); status('Reading the complete file and current questions…');
+      try {
+        var body = await J.readFile(file); if (!same()) return;
+        var data = await request('/preview?replace=' + replace, {body: body}); if (!same()) return;
+        var nodes = [el('p', null, data.notice), J.table(['Model', 'Questions now', 'After import'], data.keys.map(function (row) { return [row.label, String(row.now), String(row.after)]; })),
+          collection('Complete chosen file', data.file, data.keys), collection('Current saved questions', data.before, data.keys), collection('Questions after this import', data.after, data.keys)];
+        var apply = el('button', replace ? 'btn btn--danger' : 'btn btn--primary', replace ? 'Replace with this reviewed file' : 'Add these reviewed questions');
+        apply.type = 'button'; var dispatched = false;
+        apply.addEventListener('click', async function () {
+          if (busy || dispatched || !same()) return;
+          apply.disabled = true;
+          var confirmed = await window.mvConfirm(replace ? 'Replace all ' + data.total_now + ' current questions with the ' + data.total_after + ' reviewed questions? Questions outside this file will be removed.' : 'Add ' + plural(data.added, 'new question') + ' from this reviewed file? Current questions and their saved details stay in place.', {okText: replace ? 'Replace' : 'Add'});
+          if (!same()) return;
+          if (!confirmed) { apply.disabled = false; return; }
+          try { remember(data); } catch (_) { status('This browser cannot keep your original request for recovery. Nothing was imported.'); apply.disabled = false; return; }
+          dispatched = true; busy = true; lock();
+          addOriginal(data.operation, 'Original import · awaiting its result'); originals.value = data.operation;
+          try {
+            var row = await request('?confirm=true&replace=' + replace, {body: body, token: data.token});
+            if (!same()) return;
+            $('lpo-import-result').replaceChildren(el('p', null, row.message));
+            invalidate(); if (row.confirmed) sessionStorage.removeItem(key);
+            status('Read the original result for this import. Refresh before reviewing another file.');
+          } catch (error) { failed(error, access, current, error.message + ' Read original result; this import will not be repeated. Your chosen file is kept.'); }
+          finally { if (access === accessGeneration) { busy = false; lock(); } }
+        });
+        nodes.push(apply); fill('lpo-cases-out', nodes);
+        status(replace ? 'Review the complete before and after questions. Replacement removes questions outside the file.' : 'Review the complete file and preserved questions before adding ' + plural(data.added, 'new question') + '.');
+      } catch (error) { failed(error, access, current); }
+      finally { if (access === accessGeneration) { busy = false; lock(); } }
+    });
+    window.LightworkLearnedCaseImport = {open: async function (expected, isCurrent) {
+      if (!/^[a-f0-9]{64}$/.test(expected || '') || typeof isCurrent !== 'function' || !isCurrent()) throw new Error('Open the current question-import controls again.');
+      if (!await controls(expected, isCurrent) || !isCurrent()) return false;
+      $('learning-case-import').scrollIntoView({behavior: 'smooth', block: 'start'}); input.focus();
+      return true;
+    }};
+    lock(); controls().catch(function () {});
+  })();
 
   loadPlan();
 })();

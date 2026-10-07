@@ -1802,7 +1802,9 @@ def append_reviewed_corpus_case(corpus_path: str | Path, key: str, goal: str,
 
 
 def import_corpus(corpus_path: str | Path, data: dict, *,
-                  replace: bool = False) -> int:
+                  replace: bool = False, expected_revision: str | None = None,
+                  binding: str | None = None, authorize: Callable[[], None] | None = None,
+                  before_write: Callable[[], None] | None = None, effect_guard=None) -> int:
     """Write an exported (hand-edited) corpus JSON back to the LIVE corpus --
     the hand-editing handle when the corpus lives in the world store, and a
     plain locked write in file mode. Default merges by goal (every field on
@@ -1812,14 +1814,43 @@ def import_corpus(corpus_path: str | Path, data: dict, *,
     if not isinstance(data, dict):
         raise ValueError("corpus root must be a JSON object")
     data = _imported_corpus(data)
-    with _corpus_lock, cross_process_lock(Path(corpus_path)), \
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), \
             _corpus_rmw_lock(corpus_path):
+        raw = _authoring_raw(corpus_path)
+        revision = _corpus_revision(raw)
+        if expected_revision is not None and revision != expected_revision:
+            raise ValueError("The test questions changed. Review the current collection before importing.")
         if replace:
-            _write_corpus_file(Path(corpus_path), data)
-            return sum(len(v) for v in data.values() if isinstance(v, list))
-        raw = _load_raw(corpus_path)
-        added = _merge_corpus_rows(raw, data)
-        _write_corpus_file(Path(corpus_path), raw)
+            after = json.loads(json.dumps(data, allow_nan=False))
+            added = sum(len(v) for v in data.values() if isinstance(v, list))
+            if _CASE_EFFECTS in raw:
+                after[_CASE_EFFECTS] = raw[_CASE_EFFECTS]
+        else:
+            after = raw
+            added = _merge_corpus_rows(after, data)
+        if binding is not None:
+            effects = after.setdefault(_CASE_EFFECTS, {})
+            if (len(binding) != 64 or any(c not in "0123456789abcdef" for c in binding)
+                    or not isinstance(effects, dict) or len(effects) >= 10000 or binding in effects):
+                raise ValueError("The original import history needs attention. Nothing was changed.")
+            effects[binding] = {"action": "import", "before_digest": revision,
+                                "data_digest": _corpus_revision(data), "replace": bool(replace), "cases": added}
+        if len(json.dumps(after, allow_nan=False).encode()) > 5 * 1024 * 1024:
+            raise ValueError("The test-question collection is too large to change here.")
+        if authorize is not None:
+            authorize()
+        if before_write is not None:
+            before_write()
+        def final_guard():
+            # Run at the physical writer, after serialization/sealing as well as
+            # before admission. A retained review never authorizes a newer file.
+            if expected_revision is not None and _corpus_revision(_authoring_raw(corpus_path)) != revision:
+                raise ValueError("The test questions changed after review. Nothing was imported.")
+            guard = effect_guard or authorize
+            if guard is not None:
+                guard()
+        guarded = expected_revision is not None or effect_guard is not None or authorize is not None
+        _write_corpus_file(Path(corpus_path), after, effect_guard=final_guard if guarded else None)
         return added
 
 
@@ -1836,7 +1867,7 @@ def _imported_corpus(data: dict) -> dict:
 
 
 def preview_corpus_import(corpus_path: str | Path, data: dict, *,
-                          replace: bool = False) -> dict:
+                          replace: bool = False, complete: bool = False) -> dict:
     """What :func:`import_corpus` WOULD change, without writing anything: per
     corpus key, the cases live now and after the import. Same root check as
     the import (``ValueError`` when the root is not an object); the merge is
@@ -1844,18 +1875,25 @@ def preview_corpus_import(corpus_path: str | Path, data: dict, *,
     if not isinstance(data, dict):
         raise ValueError("corpus root must be a JSON object")
     data = _imported_corpus(data)
-    current = _load_raw(corpus_path)
-    after = json.loads(json.dumps(data if replace else current))
-    added = 0 if replace else _merge_corpus_rows(after, data)
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path), strict=True), _corpus_rmw_lock(corpus_path):
+        current = _authoring_raw(corpus_path)
+        after = json.loads(json.dumps(data if replace else current, allow_nan=False))
+        added = 0 if replace else _merge_corpus_rows(after, data)
 
     def _count(raw: dict) -> dict[str, int]:
         return {str(k): len(v) for k, v in raw.items() if isinstance(v, list)}
     now, then = _count(current), _count(after)
     keys = sorted(set(now) | set(then))
-    return {"replace": bool(replace), "added": added,
+    result = {"replace": bool(replace), "added": added,
             "total_now": sum(now.values()), "total_after": sum(then.values()),
+            "revision": _corpus_revision(current), "data_digest": _corpus_revision(data),
             "keys": [{"key": k, "now": now.get(k, 0), "after": then.get(k, 0)}
                      for k in keys]}
+    if complete:
+        result.update(before={key: value for key, value in current.items() if key != _CASE_EFFECTS},
+                      after={key: value for key, value in after.items() if key != _CASE_EFFECTS})
+    return result
 
 
 def migrate_corpus_files(corpus_path: str | Path) -> dict | None:

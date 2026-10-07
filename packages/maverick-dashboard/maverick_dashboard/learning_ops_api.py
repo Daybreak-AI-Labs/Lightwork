@@ -15,6 +15,7 @@ change is made. Long work runs as a background job the page polls.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -675,9 +676,17 @@ async def export_cases(request: Request) -> Response:
 
 
 def _parse_cases(raw: bytes) -> dict:
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Repeated collection fields cannot be reviewed exactly.")
+            result[key] = value
+        return result
     try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, ValueError) as exc:
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+        json.dumps(data, allow_nan=False)
+    except (UnicodeError, ValueError, RecursionError) as exc:
         raise HTTPException(status_code=422, detail="That file is not a test-case file Lightwork can read.") from exc
     if not isinstance(data, dict):
         raise HTTPException(status_code=422, detail="That file is not a test-case file Lightwork can read.")
@@ -686,38 +695,217 @@ def _parse_cases(raw: bytes) -> dict:
 
 def _plain_keys(preview: dict) -> dict:
     from .plain_labels import model_label
-    preview["keys"] = [dict(k, label=model_label(k["key"])) for k in preview["keys"][:50]]
+    preview["keys"] = [dict(k, label=model_label(k["key"])) for k in preview["keys"]]
     return preview
+
+
+def _import_scope(request, context=None, *, write=False):
+    from . import auth
+    from . import learning_test_cases_api as cases
+    with auth.fresh_configuration():
+        _import_authority(request, context)
+        return cases._scope(request, context, write=write)
+
+
+def _import_authority(request, context=None):
+    from . import auth
+    from . import learning_test_cases_api as cases
+    from .task_model_selection_api import current_authority
+    with auth.fresh_configuration():
+        principal = getattr(request.state, "principal", None)
+        if (getattr(principal, "claims", None) or {}).get("via") == "api_key":
+            fresh = auth._authenticate_api_key(request, auth._api_key_bearer(request))
+            if fresh.principal != principal.principal:
+                raise HTTPException(401, "Sign in with the account that owns this import review.")
+            request.state.principal = fresh
+        current_authority(request)
+        auth.require_page_permission(request, "/learned")
+        from .app import require_page_visible
+        require_page_visible(request, "/learned")
+        current = cases._authority(request)
+        if context is not None and current != context:
+            raise HTTPException(409, {"message": "Your account or workspace changed. Refresh the current import controls.", "context_lost": True})
+        return current
+
+
+_IMPORT_NOTICE = ("Review the complete file and current questions before importing. Future checks can send shared "
+                  "questions to configured AI providers. Importing runs no AI. Files are limited to 5 MiB; the complete "
+                  "file and before/after review together must fit within 192,000 UTF-8 bytes. Reviews expire after 10 minutes. "
+                  "References copied into a file cannot recreate original save or import history.")
+
+
+def _import_store():
+    from maverick.governed_records import GovernedRecordStore
+    return GovernedRecordStore("learning-case-import-requests", "LCI", "learning_case_import_request")
+
+
+def _import_rows(data):
+    return [row for rows in data.values() if isinstance(rows, list) for row in rows if isinstance(row, dict)]
+
+
+def _import_access(request, *collections):
+    from maverick import self_harness_eval as ev
+
+    from .learning_task_examples import case_access
+    rows = [row for data in collections for row in _import_rows(data)]
+    if any(not case_access(request, row) for row in rows):
+        raise HTTPException(403, "A question's source is no longer available to your account. Nothing was imported.")
+    try:
+        ev.require_cases_current(rows)
+    except PermissionError as exc:
+        raise HTTPException(409, "A question's learning permission or source changed. Review its current source before importing.") from exc
+
+
+def import_controls(request):
+    from maverick import self_harness_eval as ev
+    from maverick.governed_operations import digest
+    scope = _import_scope(request)
+    state = ev.corpus_authoring_state(scope["path"])
+    rows = _import_store().list(limit=10000)
+    if _import_scope(request, scope["context"]) != scope:
+        raise HTTPException(409, "Learning storage or your access changed. Refresh the current import controls.")
+    return {"context": scope["context"], "revision": digest([scope["source"], state["revision"]]),
+            "total": state["total_cases"], "notice": _IMPORT_NOTICE,
+            "requests": [{"value": row["id"][4:], "label": "Original import · " + str(row["created_at"])}
+                for row in rows if row.get("actor") == _actor(request) and row.get("context") == scope["context"]]}
+
+
+def import_original(request, operation):
+    from maverick import self_harness_eval as ev
+    context = _import_authority(request, request.headers.get("X-Lightwork-Import-Context"))
+    if not re.fullmatch(r"[a-f0-9]{32}", operation):
+        raise HTTPException(404, "Choose an original import request.")
+    row = _import_store().get("LCI-" + operation)
+    if row and (row["actor"], row["context"]) != (_actor(request), context):
+        raise HTTPException(404, "This original import is not available to this account.")
+    confirmed = bool(row and row["state"] == "saved")
+    effect = None
+    if row and not confirmed:
+        try:
+            scope = _import_scope(request, context)
+            if row["prepared"]["source"] == scope["source"]:
+                effect = ev.authored_corpus_effect(scope["path"], row["binding"])
+        except HTTPException as exc:
+            if exc.status_code not in {409, 503}:
+                raise
+        except (ValueError, OSError):
+            pass  # Unreadable current storage cannot establish an original effect.
+        expected = {"action": "import", "before_digest": row["prepared"]["revision"],
+                    "data_digest": row["prepared"]["data_digest"], "replace": row["prepared"]["replace"],
+                    "cases": row["prepared"]["cases"]}
+        confirmed = confirmed or effect == expected
+    _import_authority(request, context)
+    return {"operation": operation, "context": context, "confirmed": confirmed,
+            "message": "The original import is confirmed. This is its saved outcome; later collection changes are separate. Nothing was repeated." if confirmed else
+                       "The original import is unconfirmed. Matching questions cannot prove it succeeded. Read current questions before another decision; nothing was repeated.",
+            "cases": row["prepared"]["cases"] if row else None, "replaced": row["prepared"]["replace"] if row else None}
+
+
+@router.get("/self-harness/test-cases/import")
+async def import_state(request: Request):
+    return JSONResponse(await run_in_threadpool(import_controls, request), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/self-harness/test-cases/import/requests/{operation}")
+async def original_import(request: Request, operation: str):
+    return JSONResponse(await run_in_threadpool(import_original, request, operation), headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/self-harness/test-cases/import/preview")
 async def import_preview(request: Request, replace: bool = Query(default=False)) -> dict:
-    require_global_permission(request, "admin")
+    from maverick import crypto_at_rest
     from maverick import self_harness_eval as ev
-    cpath = await run_in_threadpool(_corpus_path)
-    data = _parse_cases(await _upload(request, _CORPUS_LIMIT))
+    scope = await run_in_threadpool(_import_scope, request, request.headers.get("X-Lightwork-Import-Context"), write=True)
+    raw = await _upload(request, _CORPUS_LIMIT)
+    data = _parse_cases(raw)
+    if any("task_source" in row or "task_question_payload" in row for row in _import_rows(data)):
+        raise HTTPException(409, "Private task-derived questions need their native source review. Use one of my completed tasks in Learning questions; a file cannot recreate that permission.")
     try:
-        preview = await run_in_threadpool(lambda: ev.preview_corpus_import(cpath, data, replace=replace))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="That file is not a test-case file Lightwork can read.") from exc
-    return _plain_keys(preview)
+        preview = await run_in_threadpool(lambda: ev.preview_corpus_import(scope["path"], data, replace=replace, complete=True))
+        if len(json.dumps([data, preview], ensure_ascii=False, allow_nan=False).encode()) > 192000:
+            raise HTTPException(422, "The complete file and collection exceed the 192,000-byte review limit. Open Learning review and restoration to check a safety copy's actual collection coverage. Nothing was shortened or changed.")
+        await run_in_threadpool(_import_access, request, data, preview["before"], preview["after"])
+    except (ValueError, OSError, RecursionError) as exc:
+        raise HTTPException(409, "The current questions or file could not be read safely. Nothing was changed.") from exc
+    if await run_in_threadpool(_import_scope, request, scope["context"], write=True) != scope:
+        raise HTTPException(409, "Learning storage changed during review. Refresh the import controls.")
+    prepared = {"context": scope["context"], "source": scope["source"], "revision": preview["revision"],
+                "body_digest": hashlib.sha256(raw).hexdigest(), "data_digest": preview["data_digest"], "replace": replace,
+                "cases": preview["total_after"] if replace else preview["added"], "operation": secrets.token_hex(16),
+                "expires": time.time() + 600, "actor": _actor(request)}
+    token = crypto_at_rest.seal_to_str(json.dumps({"purpose": "lightwork.case-import.v1", "prepared": prepared}))
+    if not crypto_at_rest.is_sealed_str(token):
+        raise HTTPException(503, "The import review could not be protected. Nothing was changed.")
+    # Sealing and storage reads are waits too. Revalidate every private source
+    # before returning the complete questions to the current account.
+    if await run_in_threadpool(_import_scope, request, scope["context"], write=True) != scope:
+        raise HTTPException(409, "Learning storage changed during review. Refresh the import controls.")
+    await run_in_threadpool(_import_access, request, data, preview["before"], preview["after"])
+    if await run_in_threadpool(_import_scope, request, scope["context"], write=True) != scope:
+        raise HTTPException(409, "Learning storage or your access changed before the review could be shown. Refresh the import controls.")
+    return JSONResponse({**_plain_keys(preview), "file": data, "context": scope["context"], "token": token,
+                         "operation": prepared["operation"], "notice": _IMPORT_NOTICE},
+                        headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/self-harness/test-cases/import")
 async def import_cases(request: Request, replace: bool = Query(default=False),
                        confirm: bool = Query(default=False)) -> dict:
-    require_global_permission(request, "admin")
-    if not confirm:
-        raise HTTPException(status_code=422, detail="Confirm the change first.")
+    from maverick import crypto_at_rest
     from maverick import self_harness_eval as ev
-    cpath = await run_in_threadpool(_corpus_path)
-    data = _parse_cases(await _upload(request, _CORPUS_LIMIT))
-    await run_in_threadpool(lambda: _record(request, "self_harness_corpus_import", replace=replace))
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.governed_operations import digest
+    await run_in_threadpool(_import_scope, request, write=True)
     try:
-        n = await run_in_threadpool(lambda: ev.import_corpus(cpath, data, replace=replace))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="That file is not a test-case file Lightwork can read.") from exc
-    return {"cases": int(n), "replaced": replace}
+        token = request.headers.get("X-Lightwork-Import-Review", "")
+        material = json.loads(crypto_at_rest.unseal_from_str(token)) if crypto_at_rest.is_sealed_str(token) else {}
+        prepared = material["prepared"]
+        if (not confirm or set(material) != {"purpose", "prepared"} or material["purpose"] != "lightwork.case-import.v1"
+                or set(prepared) != {"context", "source", "revision", "body_digest", "data_digest", "replace", "cases", "operation", "expires", "actor"}
+                or prepared["actor"] != _actor(request) or type(prepared["replace"]) is not bool
+                or any(not isinstance(prepared[key], str) or not re.fullmatch(r"[a-f0-9]{64}", prepared[key])
+                       for key in ("context", "source", "revision", "body_digest", "data_digest"))
+                or type(prepared["cases"]) is not int or prepared["cases"] < 0
+                or type(prepared["expires"]) not in {int, float} or not math.isfinite(prepared["expires"])
+                or not re.fullmatch(r"[a-f0-9]{32}", prepared["operation"])):
+            raise ValueError
+    except Exception as exc:
+        raise HTTPException(409, {"message": "Open Review import in Learned and confirm its complete current file. Nothing was imported by this call.", "open_review": "/learned#learning-case-import"}) from exc
+    raw = await _upload(request, _CORPUS_LIMIT)
+    data = _parse_cases(raw)
+    if prepared["replace"] != replace or prepared["body_digest"] != hashlib.sha256(raw).hexdigest():
+        raise HTTPException(409, "The file or import choice changed after review. Your newer file is kept; review it again.")
+    def save():
+        with authority_effect_fence():
+            scope = _import_scope(request, prepared["context"], write=True)
+            existing = _import_store().get("LCI-" + prepared["operation"])
+            request_digest = digest(prepared)
+            if existing:
+                if existing["request_digest"] != request_digest:
+                    raise HTTPException(409, "This original request belongs to another import review.")
+                return import_original(request, prepared["operation"])
+            binding = secrets.token_hex(32)
+            def authorize():
+                current = _import_scope(request, prepared["context"], write=True)
+                if current["source"] != prepared["source"] or time.time() >= prepared["expires"]:
+                    raise HTTPException(409, "Learning storage, access or the review deadline changed. Review again; nothing was imported.")
+                _import_access(request, data, ev._authoring_raw(current["path"]))
+            def claim():
+                _record(request, "self_harness_corpus_import", replace=replace, phase="prepared", operation=prepared["operation"])
+                _import_store().create({"id": "LCI-" + prepared["operation"], "actor": _actor(request), "context": prepared["context"],
+                    "prepared": prepared, "binding": binding, "request_digest": request_digest, "state": "writing"},
+                    action="learning.import.prepare", actor=_actor(request), max_records=10000)
+            try:
+                ev.import_corpus(scope["path"], data, replace=replace, expected_revision=prepared["revision"],
+                    binding=binding, authorize=authorize, before_write=claim, effect_guard=authorize)
+                row = _import_store().get("LCI-" + prepared["operation"])
+                _import_store().update(row["id"], lambda value: value.update(state="saved"), expected_revision=row["revision"],
+                    action="learning.import.saved", actor=_actor(request))
+            except (ValueError, OSError) as exc:
+                if _import_store().get("LCI-" + prepared["operation"]) is None:
+                    raise HTTPException(409, "The current questions changed or could not be read safely. Review again; nothing was imported.") from exc
+            return import_original(request, prepared["operation"])
+    return JSONResponse(await run_in_threadpool(save), headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/self-harness/hold-out/set-up")

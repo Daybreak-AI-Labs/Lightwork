@@ -1,5 +1,35 @@
 # Post-install operation coverage
 
+October 7 question-file import: Learned reviews the complete chosen file,
+current saved questions and resulting collection in ordinary readable controls.
+The sealed review binds exact file bytes, add/replace choice, current collection,
+storage, account/workspace and a ten-minute deadline. Native current authority
+and private question-source access are checked again at the physical writer.
+A changed collection refuses replacement; copied history cannot establish a
+successful original operation. The native retained request and actual corpus
+commit marker support pure Original readback after an interrupted response,
+without automatically repeating an uncertain import.
+
+One actual signed ordinary import with a lost reply recovered its exact Original.
+A separately saved question invalidated an older replacement. Changed file
+bytes, late file/preview/dialog results, current storage withdrawal, actual role
+and completed-source changes at the physical writer all refused without another
+import. Copilot opened the protected ordinary form and preserved the selected
+file. Private access withdrawal cleared file, review, outcome and original
+choices without finally re-enabling controls. A complete 390-pixel review had
+no horizontal overflow. The native file and SQLite corpus writers were exercised;
+PostgreSQL uses the existing guarded writer but was not executed in this batch.
+
+Files are limited to 5 MiB; the combined complete file and before/after review
+must fit within 192,000 UTF-8 bytes, and the resulting collection within 5 MiB.
+Larger reviews refuse unchanged and link to ordinary Learning review/restoration
+for the saved point's actual coverage. Native import requests and shared corpus
+effect markers each retain at most 10,000 entries. Incoming private task-derived
+file questions require the existing completed-task source review instead of
+becoming unbound manual text. Importing runs no AI; future checks can send shared
+questions to configured providers. No live provider or whole-collection safety
+copy coverage is established by these import witnesses.
+
 October 7 UX650 parallel-choice repair: Designer's 2/4/8 “How many at once”
 choice now survives its ordinary serializer and native versioned Save/Load.
 Execution honors an explicit limit including the calling thread. Older omitted

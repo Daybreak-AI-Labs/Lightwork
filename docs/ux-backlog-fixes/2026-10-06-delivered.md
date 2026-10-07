@@ -1,5 +1,19 @@
 # Product changes delivered on October 6
 
+Learning question-import follow-through: the ordinary complete file and before/
+after review binds exact bytes, mode, current collection/storage/account and
+deadline. Native current authority and private source checks run at the physical
+writer; stale replacement refuses rather than erasing newer questions. One
+actual lost-reply import recovered through pure Original without replay. Late
+file/preview/dialog results preserve newer choices; current role/source changes
+refuse and clear private views. Typed Copilot opens the same protected form
+without importing. Native file/SQLite and the complete 390-pixel review passed;
+PostgreSQL and live providers were not exercised here. The explicit complete
+review and collection limits refuse unchanged, with the ordinary restoration
+route offered. Incoming task-derived file questions still need their native
+completed-work source review. This repairs operating custody, not measured
+learning quality or a whole-backlog completion claim.
+
 UX650, parallel-choice portion: ordinary 2/4/8 choices reach the saved native
 definition and execution instead of disappearing during serialization. The
 explicit maximum includes the caller; legacy omitted/zero values retain their

@@ -155,6 +155,22 @@ def question_check_prepare(request, selection, _arguments):
     return Preview(state.summary, native={"learning_question_check_form": {"context": current["context"]}})
 
 
+def import_snapshot(request, _selection):
+    from .learning_ops_api import import_controls
+    current = import_controls(request)
+    return Snapshot(current["revision"], "Current learning-question import controls", current["notice"],
+                    details={"Saved questions": current["total"], "File": "Choose your file in the ordinary form. Opening imports nothing."})
+
+
+def import_prepare(request, selection, _arguments):
+    from .learning_ops_api import import_controls
+    state = import_snapshot(request, selection)
+    current = import_controls(request)
+    if current["revision"] != state.revision:
+        raise HTTPException(409, "Your learning questions, storage or access changed. Open the current import controls again.")
+    return Preview(state.summary, native={"learning_case_import_form": {"context": current["context"]}})
+
+
 def setup_prepare(request, _selection, _arguments):
     prepared = native.prepare_setup(request)
     return Preview("Set up the existing learning-question collection. No learning system is turned on and no AI runs.",
@@ -216,7 +232,10 @@ def change_recover(request, selection, arguments, prepared, operation, *, read_o
 
 
 def entries():
-    return (Adapter("learning.question_check_form", "Review a complete question check", "learning", "/learned#learning-question-checks",
+    return (Adapter("learning.import_question_file_form", "Review a learning-question file", "learning", "/learned#learning-case-import",
+        ("/learned",), EmptyInput, import_snapshot, import_prepare,
+        aliases=("import my learning questions", "review a test question file", "open question import controls")),
+        Adapter("learning.question_check_form", "Review a complete question check", "learning", "/learned#learning-question-checks",
         ("/learned",), EmptyInput, question_check_snapshot, question_check_prepare,
         aliases=("check my learning questions", "check question usefulness", "review question checks")),
         Adapter("learning.task_question_form", "Turn completed work into a learning question", "learning", native.PAGE,
