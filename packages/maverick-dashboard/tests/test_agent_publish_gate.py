@@ -87,6 +87,29 @@ def _current(app):
     return app.get("/api/v1/agents/" + PACK).json()
 
 
+DRAFTS = "/api/v1/specialist-drafts"
+
+
+def _decide(app, name, action, **fields):
+    """Review, then confirm, one Agent Factory decision on a complete draft."""
+    context = app.get(DRAFTS + "/history").json()["context"]
+    review = app.post(DRAFTS + "/review", json={"name": name, "action": action, "context": context, **fields})
+    if review.status_code != 200:
+        return review
+    return app.post(DRAFTS + "/apply", json={"token": review.json()["token"], "confirmed": True})
+
+
+def _save_draft(app, name, entered):
+    saved = _decide(app, name, "save", entered=entered)
+    assert saved.status_code == 200 and saved.json()["confirmed"], saved.text
+    return "SPD-" + saved.json()["operation"]
+
+
+def _publish(app, name, entered, reason=""):
+    """Publishing a retained complete draft is the only way a definition changes."""
+    return _decide(app, name, "publish", selected=_save_draft(app, name, entered), reason=reason)
+
+
 def _edit(app, persona, **extra):
     view = _current(app)
     body = {"expected_generation": view["generation"], "persona": persona}
@@ -119,16 +142,15 @@ def test_changed_instructions_need_a_passing_run_or_a_recorded_reason(client, mo
     assert verdict["tests"] == 2 and verdict["latest"] is None
     assert verdict["tests_url"].startswith("/workforce?specialist=" + PACK)
 
-    refused = app.post("/api/v1/agents/" + PACK + "/override", json=_edit(app, new))
-    assert refused.status_code == 409 and "no passing test run" in refused.json()["detail"]
+    refused = _publish(app, PACK, {"persona": new})
+    assert refused.status_code == 409 and "finished passing check" in refused.json()["detail"]
     assert _current(app)["persona"] != new
-    short = app.post("/api/v1/agents/" + PACK + "/override",
-                     json=_edit(app, new, publish_without_passing_tests=True, override_reason="ok"))
-    assert short.status_code == 422
+    short = _publish(app, PACK, {"persona": new}, reason="ok")
+    assert short.status_code == 409 and "at least eight characters" in short.json()["detail"]
+    assert _current(app)["persona"] != new
 
-    published = app.post("/api/v1/agents/" + PACK + "/override", json=_edit(
-        app, new, publish_without_passing_tests=True, override_reason="Urgent supplier change approved by finance"))
-    assert published.status_code == 200, published.text
+    published = _publish(app, PACK, {"persona": new}, reason="Urgent supplier change approved by finance")
+    assert published.status_code == 200 and published.json()["confirmed"], published.text
     assert _current(app)["persona"] == new
     logged = [row for row in audit_rows if row.get("verb") == "agent_published_without_passing_tests"]
     assert logged and logged[0]["reason"] == "Urgent supplier change approved by finance"
@@ -149,9 +171,24 @@ def test_a_passing_comparison_of_the_exact_new_instructions_unlocks_publishing(c
     verdict = app.post("/api/v1/agents/" + PACK + "/publish-check", json=_edit(app, new)).json()
     assert verdict["required"] and verdict["passing"] and not verdict["blocked"]
     assert verdict["latest"]["passed"] == 2 and verdict["latest"]["covers_all_tests"]
-    saved = app.post("/api/v1/agents/" + PACK + "/override", json=_edit(app, new))
-    assert saved.status_code == 200, saved.text
-    assert not [row for row in audit_rows if row.get("verb") == "agent_published_without_passing_tests"]
+    # Publication accepts a finished passing check of the exact complete draft.
+    draft = _save_draft(app, PACK, {"persona": new})
+    checked = _decide(app, PACK, "check", selected=draft)
+    assert checked.status_code == 200, checked.text
+    # The background worker confirms the original admission when it starts.
+    operation, original = checked.json()["operation"], checked.json()
+    deadline = time.time() + 20
+    while not (original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}):
+        assert time.time() < deadline, original
+        time.sleep(.05)
+        original = app.get(DRAFTS + "/originals/" + operation).json()
+    run = original["run"]
+    assert run["state"] == "done" and all(row["passed"] for row in run["results"]), run
+    saved = _decide(app, PACK, "publish", selected=draft)
+    assert saved.status_code == 200 and saved.json()["confirmed"], saved.text
+    assert _current(app)["persona"] == new
+    assert not [row for row in audit_rows if row.get("verb") in {
+        "agent_published_without_passing_tests", "agent_draft_published_without_complete_check"}]
 
     # A different wording is a different set of instructions: it needs its own run.
     other = app.post("/api/v1/agents/" + PACK + "/publish-check", json=_edit(app, new + " Be brief."))
@@ -187,19 +224,28 @@ def test_unchanged_instructions_new_agents_and_the_switched_off_gate_are_not_blo
     from maverick import config
 
     view = _current(app)
-    same = app.post("/api/v1/agents/" + PACK + "/override", json={
+    # Unchanged instructions pass the instruction check...
+    same = app.post("/api/v1/agents/" + PACK + "/publish-check", json={
         "expected_generation": view["generation"], "persona": view["persona"], "description": "Chases late POs"})
-    assert same.status_code == 200, same.text
-    created = app.post("/api/v1/agents/acme_po_helper/override", json={
-        "expected_generation": "new", "description": "PO helper", "persona": "You help with purchase orders.",
+    assert same.status_code == 200 and not same.json()["blocked"], same.text
+    # ...but publishing any change to a live specialist's complete definition
+    # needs current acceptance or a separately recorded reason (UX-368/369/370).
+    entered = {"persona": view["persona"], "description": "Chases late POs"}
+    assert _publish(app, PACK, entered).status_code == 409
+    described = _publish(app, PACK, entered, reason="Description wording approved by procurement")
+    assert described.status_code == 200 and described.json()["confirmed"], described.text
+    # A brand-new agent has no earlier answers to protect.
+    created = _publish(app, "acme_po_helper", {
+        "description": "PO helper", "persona": "You help with purchase orders.",
         "allow_tools": ["read_file"], "max_risk": "low"})
-    assert created.status_code == 200, created.text
+    assert created.status_code == 200 and created.json()["confirmed"], created.text
 
     (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
                                     "[agent_factory]\nrequire_passing_tests = false\n", encoding="utf-8")
     config.reset_config_cache()
-    off = app.post("/api/v1/agents/" + PACK + "/override", json=_edit(app, "You chase every late purchase order."))
-    assert off.status_code == 200, off.text
+    off = _publish(app, PACK, {"persona": "You chase every late purchase order."})
+    assert off.status_code == 200 and off.json()["confirmed"], off.text
+    assert _current(app)["persona"] == "You chase every late purchase order."
 
 
 def test_the_knob_defaults_on_and_stays_on_when_settings_are_unreadable(monkeypatch, tmp_path):
