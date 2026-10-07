@@ -58,6 +58,9 @@ async function fixture(t, routes = {}) {
   };
   shell(w);
   w.eval(fs.readFileSync(path.join(base, "static/lightwork-assurance-forms.js"), "utf8"));
+  // Exception request/approve/close run through their reviewed controller.
+  if (!w.HTMLDialogElement.prototype.showModal) w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  w.eval(fs.readFileSync(path.join(base, "static/lightwork-policy-exceptions.js"), "utf8"));
   w.eval(inline);
   const settle = async () => { for (let i = 0; i < 30; i += 1) await new Promise(resolve => setImmediate(resolve)); };
   // File and text fingerprints finish on a worker thread, so wait for the
@@ -90,8 +93,14 @@ const policies = {policies: [{policy_id: "customer-data", status: "active", acti
     applicability: {risk_tiers: [], jurisdictions: [], data_classes: [], deployment_types: [], asset_types: [], tags: [], use_case_tags: []}, required_control_ids: []}]}
 ]}]};
 
+// The exception controller's current choices for the same workspace.
+const choices = {context: "c".repeat(64), revision: 1, notice: "Current exception choices.", assets: [], exceptions: [],
+  policies: policies.policies,
+  controls: [{value: "manual-review", label: "Manual review", status: "implemented", owner: "Ops"},
+             {value: "traffic-cap", label: "Traffic cap", status: "planned", owner: "Ops"}]};
+
 test("choosing rules offers their versions and rules, and turning one on asks first in plain words", async t => {
-  const h = await fixture(t, {"/ai-policy-management/policies": policies, "POST /ai-policy-management/policies/customer-data/activate": {policy_id: "customer-data"}});
+  const h = await fixture(t, {"/ai-policy-management/policies": policies, "/pickers/policy-exceptions": choices, "POST /ai-policy-management/policies/customer-data/activate": {policy_id: "customer-data"}});
   h.open("Customer data rules, tighter");
   await h.settle();
   const activate = h.byId("ai-policy-activate");
@@ -109,7 +118,13 @@ test("choosing rules offers their versions and rules, and turning one on asks fi
 });
 
 test("an exception is requested from checkboxes, with names made from plain words", async t => {
-  const h = await fixture(t, {"/ai-policy-management/policies": policies, "POST /ai-policy-management/exceptions": {}});
+  const h = await fixture(t, {
+    "/ai-policy-management/policies": policies,
+    "/pickers/policy-exceptions": choices,
+    "POST /ai-policy-management/exceptions": {},
+    "POST /pickers/policy-exceptions/original": {confirmed: true, message: "The exception request was recorded.",
+      record: {exception_key: "holiday-support-pilot", status: "pending", reason: "Seasonal demand", expires_at: 1798736400}},
+  });
   h.open("Customer data rules, tighter");
   await h.settle();
   const form = h.byId("ai-policy-exception-request");
@@ -118,10 +133,21 @@ test("an exception is requested from checkboxes, with names made from plain word
   const rule = Array.from(form.querySelectorAll("label")).find(label => label.textContent.trim() === "Keep personal data internal").querySelector("input");
   rule.checked = true;
   form.elements.reason.value = "Seasonal demand";
-  form.elements.compensating_control_ids.value = "Manual review, traffic cap";
+  // Safeguards are chosen from the recorded list, never typed.
+  const controls = Array.from(h.w.document.querySelectorAll("#policy-exception-controls input"));
+  assert.equal(controls.length, 2);
+  for (const control of controls) control.checked = true;
   h.submit(form); await h.settle();
+  // A complete review opens first; nothing is recorded until it is confirmed.
+  assert.equal(h.posted("/ai-policy-management/exceptions").length, 0);
+  const dialog = h.$("dialog.policy-exception-dialog");
+  assert.ok(dialog, "the complete review is shown");
+  const reviewed = dialog.querySelector("input[type=checkbox]");
+  reviewed.checked = true; reviewed.dispatchEvent(new h.w.Event("change"));
+  Array.from(dialog.querySelectorAll("button")).find(button => button.textContent === "Confirm reviewed action").click();
+  await h.settle();
   const body = plain(h.posted("/ai-policy-management/exceptions")[0].body);
-  assert.equal(body.exception_key, "holiday-support-pilot");
+  assert.match(body.exception_key, /^holiday-support-pilot-[0-9a-f-]{36}$/);
   assert.equal(body.policy_version, 1);
   assert.deepEqual(body.scope, {asset_ids: [], statement_ids: ["external-pii"], risk_tiers: []});
   assert.deepEqual(body.compensating_control_ids, ["manual-review", "traffic-cap"]);
