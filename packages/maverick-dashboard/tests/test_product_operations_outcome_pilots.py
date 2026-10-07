@@ -79,17 +79,28 @@ def test_selected_pilot_release_is_read_only_and_rechecks_fresh_state(monkeypatc
         assert stale.status_code == 409
 
 
+# Operations about one selected pilot. The page also lists its own complete
+# controls (open the form, prepare, plan, observe, review), which are not
+# claims about a selected pilot.
+SELECTED_PILOT_OPERATIONS = {"learning.pilot_release_status", "learning.pilot_value_evidence"}
+
+
+def _about_selected_pilot(catalog):
+    return [item for item in catalog["operations"] if item["id"] in SELECTED_PILOT_OPERATIONS]
+
+
 def test_missing_pilot_or_release_is_not_advertised_as_actionable(monkeypatch):
     client, current = _harness(monkeypatch)
     with client:
         unselected = client.post(BASE + "/catalog", json={"page": "/outcome-pilots", "selection": {}}).json()
-        assert unselected["operations"] == []
+        assert _about_selected_pilot(unselected) == []
         current["binding"] = None
         blocked = client.post(BASE + "/catalog", json={"page": "/outcome-pilots", "selection": SELECTION}).json()
-        assert blocked["operations"][0]["available"] is False
+        release = next(item for item in blocked["operations"] if item["id"] == "learning.pilot_release_status")
+        assert release["available"] is False
         current["available"] = False
         hidden = client.post(BASE + "/catalog", json={"page": "/outcome-pilots", "selection": SELECTION}).json()
-        assert hidden["operations"] == []
+        assert _about_selected_pilot(hidden) == []
 
 
 def test_copilot_reads_the_full_pilot_evidence_boundary_and_rechecks_changes(monkeypatch):
