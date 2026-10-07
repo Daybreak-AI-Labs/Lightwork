@@ -105,3 +105,18 @@ def test_explicit_overrides_argument_beats_the_pin(monkeypatch):
     monkeypatch.setattr(risk, "_load_overrides", lambda: {"shell": "low"})
     with risk.pinned_overrides():
         assert tool_risk("shell", {"shell": "critical"}) == "critical"
+
+
+def test_audited_abstract_adapters_are_rated_medium_not_unknown():
+    # The pack catalog's operator-provisioned read adapters are an audited
+    # ratchet, so they keep a deliberate medium rating (never low) instead of
+    # the high refusal floor an unknown name gets; an exact override still wins.
+    from maverick.domain_prose_lint import ABSTRACT_ADAPTERS
+    from maverick.safety.tool_risk import tool_risk, tool_risk_is_classified
+    for name in ("ledger_read", "ehr_read", "get_account_summary"):
+        assert name in ABSTRACT_ADAPTERS
+        assert tool_risk(name, overrides={}) == "medium"
+        assert tool_risk_is_classified(name, overrides={})
+    assert tool_risk("ledger_read", overrides={"ledger_read": "high"}) == "high"
+    assert tool_risk("customer_ledger_read", overrides={}) == "high"
+    assert not tool_risk_is_classified("customer_ledger_read", overrides={})
