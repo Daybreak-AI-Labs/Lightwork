@@ -32,15 +32,17 @@ def _answers(monkeypatch, confirms, texts):
 
 def test_step_declined_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    _answers(monkeypatch, [False], [""])
+    # Browser time limits declined, then second factor declined.
+    _answers(monkeypatch, [False, False], [""])
     assert wizard.pick_sign_in_security(True) == {}
     # Without company sign-in the second-factor question is not even asked.
-    _answers(monkeypatch, [], [""])
+    _answers(monkeypatch, [False], [""])
     assert wizard.pick_sign_in_security(False) == {}
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(parents=True)
     cfg = _write(cfg_dir, monkeypatch, {"sign_in_security": {}})
     assert "[auth.mfa]" not in cfg and "[auth.ip_allowlist]" not in cfg
+    assert "[auth.sessions]" not in cfg
     from maverick import config
 
     config.reset_config_cache()
@@ -53,9 +55,9 @@ def test_step_answers_write_and_are_read(tmp_path, monkeypatch):
     for env in ("MAVERICK_MFA_REQUIRE", "MAVERICK_MFA_STEP_UP_MINUTES",
                 "MAVERICK_IP_ALLOWLIST"):
         monkeypatch.delenv(env, raising=False)
-    _answers(monkeypatch, [True], ["20", "10.0.0.0/8, 203.0.113.7"])
+    _answers(monkeypatch, [True, True], ["45", "12", "20", "10.0.0.0/8, 203.0.113.7"])
     chosen = wizard.pick_sign_in_security(True)
-    assert chosen == {"require": True, "step_up_minutes": 20,
+    assert chosen == {"idle_minutes": 45, "company_hours": 12, "require": True, "step_up_minutes": 20,
                       "cidrs": ["10.0.0.0/8", "203.0.113.7"]}
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(parents=True)
@@ -63,17 +65,20 @@ def test_step_answers_write_and_are_read(tmp_path, monkeypatch):
     parsed = tomllib.loads(cfg)
     assert parsed["auth"]["mfa"] == {"require": True, "step_up_minutes": 20}
     assert parsed["auth"]["ip_allowlist"] == {"cidrs": ["10.0.0.0/8", "203.0.113.7"]}
+    assert parsed["auth"]["sessions"] == {"company_hours": 12, "idle_minutes": 45}
     from maverick import config
 
     config.reset_config_cache()
     assert config.get_auth_mfa()["require"] is True
     assert config.get_auth_mfa()["step_up_minutes"] == 20
     assert config.get_ip_allowlist()["cidrs"] == ["10.0.0.0/8", "203.0.113.7"]
+    sessions = config.get_auth_sessions()
+    assert (sessions["company_hours"], sessions["idle_minutes"]) == (12, 45)
 
 
 def test_bad_address_is_asked_again(tmp_path, monkeypatch):
     printed: list[str] = []
     monkeypatch.setattr(wizard.console, "print", lambda *a, **k: printed.append(str(a[0])))
-    _answers(monkeypatch, [False], ["office, 10.0.0.0/8", "10.0.0.0/8"])
+    _answers(monkeypatch, [False, False], ["office, 10.0.0.0/8", "10.0.0.0/8"])
     assert wizard.pick_sign_in_security(True) == {"cidrs": ["10.0.0.0/8"]}
     assert any("office" in line for line in printed)
