@@ -19,6 +19,8 @@ _datas = (
     + collect_data_files('maverick_shield')
     + collect_data_files('latex2mathml')
     + collect_data_files('jsonschema_specifications')
+    + collect_data_files('boto3')
+    + collect_data_files('botocore')
     # Copied into the offline worker at runtime; PYZ bytecode is not a source
     # resource. Retain this one reviewed standalone script in frozen builds.
     + collect_data_files('maverick', includes=['sandbox/document_engine.py'], include_py_files=True)
@@ -33,6 +35,7 @@ for _dist in (
     'latex2mathml', 'prometheus-client',
     'jsonschema', 'jsonschema-specifications', 'referencing', 'rpds-py',
     'tiktoken', 'regex',
+    'boto3', 'botocore', 's3transfer',
 ):
     try:
         _datas += copy_metadata(_dist)
@@ -92,6 +95,9 @@ a = Analysis(
       + collect_submodules('jsonschema')
       + collect_submodules('jsonschema_specifications')
       + collect_submodules('referencing')
+      + collect_submodules('boto3')
+      + collect_submodules('botocore')
+      + collect_submodules('s3transfer')
       + collect_submodules('rpds'),
     hookspath=[],
     hooksconfig={},

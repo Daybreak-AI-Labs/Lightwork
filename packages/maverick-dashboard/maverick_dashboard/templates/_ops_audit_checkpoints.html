@@ -57,3 +57,4 @@
   {% endif %}
 </section>
 <script src="/static/lightwork-ops-panels.js" defer></script>
+{% if can_global_admin %}{% include "_audit_checkpoint_custody.html" %}{% endif %}

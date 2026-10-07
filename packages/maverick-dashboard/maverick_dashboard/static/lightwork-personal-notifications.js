@@ -117,7 +117,7 @@
     document.getElementById('personal-background-status').textContent = state.background_enabled
       ? 'Background observation is enabled while the dashboard runs. ' + (observed ? 'Last completed observation: ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(observed) : new Date(observed * 1000).toLocaleString()) + '.' : 'No completed background observation yet.')
       : 'Background observation is disabled. This inbox observes changes while its page is open and catches up when you return.';
-    status.textContent = state.delivery_note + (state.partial ? ' Some assigned decisions could not be checked. Refresh your inbox.' : '') + ' Last checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(state.checked_at) : new Date(state.checked_at * 1000).toLocaleTimeString());
+    status.textContent = state.delivery_note + (state.partial ? ' Some sources could not be checked completely. Refresh your inbox.' : '') + ' Last checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(state.checked_at) : new Date(state.checked_at * 1000).toLocaleTimeString());
     const active = document.activeElement;
     const restoreId = active && active.dataset ? active.dataset.alertId : null;
     items.replaceChildren();

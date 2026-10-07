@@ -1,5 +1,20 @@
 # Invention register: implementation status
 
+October 7 product follow-through: F03/F06 now have ordinary Activity log and
+protected Copilot controls for independently retained signed checkpoint copies.
+Complete review, second-person approval, pre-send custody, a one-attempt upload
+and exact remote Original are connected. Complete remote version inventory
+detects local checkpoint and custody-receipt rollback together, refuses signed
+forks and rejects partial inventory. Actual native/UI/phone and stock SDK
+contract qualification used isolated storage responses, with current authority
+checks and private-view clearing after a real refusal. Live Amazon acceptance,
+independent storage administration, future availability, every-operation
+coverage and full executable assembly remain unqualified. F04/F05 also gain
+guarded incremental per-run compaction with a limited operational outcome
+signal; that signal is not answer accuracy. Existing [operation coverage](../post-install-operation-coverage.md)
+separates these shipped mechanisms from their precise research boundaries.
+The research dispositions and counts below remain unchanged.
+
 October 6 product integration: complete ordinary and Copilot workflow-pilot
 controls now prepare unstarted tasks, freeze plans, record complete observations
 and costs, request independent review, and read the exact original write after

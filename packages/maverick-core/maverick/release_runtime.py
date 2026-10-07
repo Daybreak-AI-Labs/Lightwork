@@ -108,7 +108,30 @@ def verify_full_release_runtime() -> int:
     verify_release_metrics_runtime()
     verify_release_plugin_runtime()
     verify_release_token_counter_runtime()
+    verify_release_checkpoint_storage_runtime()
     return libpq_version
+
+
+def verify_release_checkpoint_storage_runtime() -> None:
+    """Load packaged S3 request models with explicit fictional keys; no request."""
+    import json
+
+    from .audit.checkpoint_custody import _client
+
+    client = _client({"token": json.dumps({"access_key_id": "AKIA" + "0" * 16,
+        "secret_access_key": "fictional-release-key" * 2, "region": "us-east-1"})}, "us-east-1")
+    try:
+        models = client.meta.service_model
+        required = {"PutObject": {"IfNoneMatch", "ObjectLockMode", "ObjectLockRetainUntilDate"},
+                    "ListObjectVersions": {"KeyMarker", "VersionIdMarker", "MaxKeys"},
+                    "GetObjectRetention": {"Key", "VersionId"}, "GetObject": {"Key", "VersionId"}}
+        for name, members in required.items():
+            if not members <= models.operation_model(name).input_shape.members.keys():
+                raise RuntimeError("Release checkpoint storage request data is incomplete.")
+        if client.meta.config.retries.get("total_max_attempts") != 1:
+            raise RuntimeError("Release checkpoint storage must not replay an uncertain request.")
+    finally:
+        client.close()
 
 
 def verify_release_plugin_runtime() -> None:
