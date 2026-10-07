@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const {JSDOM} = require('jsdom');
 const script = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-outcome-pilots.js'),'utf8');
-const template = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/templates/outcome_pilots.html'),'utf8').replace(/{%[\s\S]*?%}/g,'').replace('{{ pilot_context }}','alice');
+const template = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/templates/outcome_pilots.html'),'utf8').replace(/{%[\s\S]*?%}/g,'').replace('{{ pilot_context }}','alice').replace("{{ 'true' if pilot_enabled else 'false' }}",'true');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function report() {
   return {context:'alice',id:'OPL-test',title:'<script>bad</script>',customer:'Example',workflow:'Review',criteria:'Good evidence',revision:2,
@@ -19,6 +19,7 @@ function report() {
 async function setup(next) {
   const dom = new JSDOM(template,{url:'https://lightwork.test',runScripts:'outside-only'});
   const w=dom.window,d=w.document,calls=[];
+  w.HTMLElement.prototype.scrollIntoView=()=>{};  // browsers scroll the review into view; jsdom has no layout
   w.fetch=async(url,options)=>{
     calls.push({url,options});
     if (calls.length===1) return {ok:true,json:async()=>({context:'alice',items:[{id:'OPL-test',title:'A pilot',cases:4}]})};
@@ -39,6 +40,17 @@ async function open(ui) {
   ui.d.getElementById('op-selected').value='OPL-test';
   ui.d.getElementById('op-selected').dispatchEvent(new ui.w.Event('change'));await tick();
 }
+// Every pilot write is a complete review first, then a separately confirmed
+// save of that exact sealed review.
+const CONTROLS='/api/v1/outcome-pilot-controls';
+function reviewReply(kind){return {context:'alice',operation:'e'.repeat(32),token:'sealed-'+kind,changes:[{label:'Proposed change',after:'The exact '+kind+' request'}]};}
+function savedReply(href='/outcome-pilots?pilot=OPL-test'){return {context:'alice',confirmed:true,message:'The original request is recorded. No work was repeated.',href};}
+async function confirmSave(ui){
+  const host=ui.d.getElementById('op-guided-review'),box=host.querySelector('[data-review-confirm]');
+  box.checked=true;box.dispatchEvent(new ui.w.Event('change'));
+  host.querySelector('[data-save-review]').click();for(let i=0;i<6;i++)await tick();
+}
+const sent=call=>JSON.parse(call.options.body);
 test('record picker, missing coverage, source titles and unknown values render honestly',async()=>{
   const ui=await setup([report()]);await open(ui);
   assert.equal(ui.d.querySelectorAll('#op-planned-cases select').length,4);
@@ -53,17 +65,27 @@ test('record picker, missing coverage, source titles and unknown values render h
   ui.dom.window.close();
 });
 test('lost save keeps measurements and exact retry identity without automatic retry',async()=>{
-  const ui=await setup([report(),new Error('Connection interrupted')]);await open(ui);
+  const ui=await setup([report(),reviewReply('observe'),new Error('Connection interrupted')]);await open(ui);
   const form=ui.d.querySelector('#op-report form');
   form.elements.evidence.value='Timing sheet row 5';form.elements.note.value='Observed work';form.elements.baseline_minutes.value='45';
-  form.dispatchEvent(new ui.w.Event('submit',{cancelable:true,bubbles:true}));await tick();
+  form.dispatchEvent(new ui.w.Event('submit',{cancelable:true,bubbles:true}));await tick();await tick();
   assert.equal(ui.calls.length,4);
+  assert.equal(ui.calls[3].url,CONTROLS+'/review');
+  const review=sent(ui.calls[3]);
+  assert.deepEqual([review.kind,review.pilot,review.case],['observe','OPL-test','1']);
+  assert.equal(review.values.baseline_minutes,45);assert.equal(review.values.review_minutes,null);
+  await confirmSave(ui);
+  assert.equal(ui.calls.length,5);
+  assert.deepEqual(sent(ui.calls[4]),{token:'sealed-observe',confirmed:true});
   assert.equal(form.elements.baseline_minutes.value,'45');
   assert.equal(form.elements.review_minutes.value,'');
-  assert.equal(form.dataset.operation,JSON.parse(ui.calls[3].options.body).operation_id);
-  assert.equal(JSON.parse(ui.calls[3].options.body).review_minutes,null);
-  assert.match(ui.d.getElementById('op-status').textContent,/Connection interrupted/);
-  assert.equal(ui.d.activeElement,ui.d.getElementById('op-status'));
+  assert.match(ui.d.getElementById('op-status').textContent,/original result is not confirmed/);
+  assert.match(ui.d.getElementById('op-guided-review').textContent,/not responding.*Saving was not repeated/);
+  // Only the opaque original reference is kept, to read its outcome later.
+  assert.deepEqual(JSON.parse(ui.w.sessionStorage.getItem('lightwork-pilot-original')),
+    {kind:'observe',operation:'e'.repeat(32),pilot:'OPL-test',case:'1'});
+  for(let i=0;i<5;i++)await tick();
+  assert.equal(ui.calls.length,5,'a lost save is never repeated automatically');
   ui.dom.window.close();
 });
 test('account switch clears old report and refuses the new response',async()=>{
@@ -76,20 +98,23 @@ test('account switch clears old report and refuses the new response',async()=>{
 });
 test('pending save disables fields and duplicate submissions',async()=>{
   let finish;
-  const ui=await setup([report(),()=>new Promise(resolve=>{finish=resolve;}),report()]);await open(ui);
+  const ui=await setup([report(),()=>new Promise(resolve=>{finish=resolve;}),savedReply(),report()]);await open(ui);
   const form=ui.d.querySelector('#op-report form');form.elements.evidence.value='Timing';form.elements.note.value='Observed';
   form.dispatchEvent(new ui.w.Event('submit',{cancelable:true,bubbles:true}));
   form.dispatchEvent(new ui.w.Event('submit',{cancelable:true,bubbles:true}));
   assert.equal(ui.calls.length,4);
   assert.equal(form.elements.note.disabled,true);
-  finish({ok:true,json:async()=>({context:'alice',id:'OPL-test',revision:3})});await tick();await tick();
-  assert.equal(ui.calls.length,5);
+  finish({ok:true,json:async()=>reviewReply('observe')});await tick();await tick();
+  assert.equal(ui.calls.length,4,'a prepared review saves nothing by itself');
+  await confirmSave(ui);
+  assert.equal(ui.calls.length,6);
+  assert.equal(ui.calls[4].url,CONTROLS+'/save');
   assert.equal(ui.d.getElementById('outcome-pilots').getAttribute('aria-busy'),'false');
   ui.dom.window.close();
 });
 
 test('protected plan sends an explicit learning mode and attributed prior-exposure statement',async()=>{
-  const ui=await setup([{context:'alice',id:'OPL-test',revision:2},{context:'alice',items:[{id:'OPL-test',title:'Pilot',cases:4}]},report()]);
+  const ui=await setup([reviewReply('plan'),savedReply(),{context:'alice',items:[{id:'OPL-test',title:'Pilot',cases:4}]},report()]);
   const form=ui.d.getElementById('op-plan');
   for(const name of ['title','customer','workflow','criteria'])form.elements[name].value='Representative pilot '+name;
   [...ui.d.querySelectorAll('#op-planned-cases select')].forEach((select,index)=>{select.value='goal:'+(index+1);});
@@ -98,8 +123,13 @@ test('protected plan sends an explicit learning mode and attributed prior-exposu
   assert.equal(ui.calls.length,2);assert.match(ui.d.getElementById('op-status').textContent,/prior-exposure/);
   ui.d.getElementById('op-prior-exposure').value='Checked local source history; provider prior exposure is unverified.';
   form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
-  const body=JSON.parse(ui.calls[2].options.body);assert.equal(body.learning_mode,'exclude_local_learning');assert.match(body.prior_exposure_statement,/provider prior exposure/);
-  assert.equal(body.cases.length,4);ui.dom.window.close();
+  const body=sent(ui.calls[2]);assert.equal(body.kind,'plan');
+  assert.equal(body.values.learning_mode,'exclude_local_learning');assert.match(body.values.prior_exposure_statement,/provider prior exposure/);
+  assert.equal(body.values.cases.length,4);
+  await confirmSave(ui);
+  assert.equal(ui.calls[3].url,CONTROLS+'/save');
+  assert.equal(ui.d.getElementById('op-selected').value,'OPL-test');
+  ui.dom.window.close();
 });
 
 test('improvement pilot chooses a governed candidate and keeps release lift unqualified',async()=>{
@@ -107,7 +137,7 @@ test('improvement pilot chooses a governed candidate and keeps release lift unqu
   const ui=await setup([
     {context:'alice',available:true,readiness:{status:'ready',next_action:'Choose a candidate. Its deployed baseline is checked again.'},
       items:[{candidate_id:'candidate-one',target_id:'installed-lightwork',state:'authorized'}]},
-    {context:'alice',id:'OPL-test',revision:2},
+    reviewReply('plan'),savedReply(),
     {context:'alice',items:[{id:'OPL-test',title:'Pilot',cases:4}]},
     bound,
     {context:'alice',deployment_state:'candidate_active',promotion_state:'canary',case_exposure_verified:false,
@@ -123,9 +153,10 @@ test('improvement pilot chooses a governed candidate and keeps release lift unqu
   ui.d.getElementById('op-prior-exposure').value='Checked task inputs and local history; provider exposure remains unknown.';
   [...ui.d.querySelectorAll('#op-planned-cases select')].forEach((select,index)=>{select.value='goal:'+(index+1);});
   form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
-  const create=ui.calls.find(call=>call.url==='/api/v1/outcome-pilots' && call.options.method==='POST');
-  assert.equal(JSON.parse(create.options.body).candidate_id,'candidate-one');
-  assert.equal(JSON.parse(create.options.body).learning_mode,'exclude_local_learning');
+  const create=ui.calls.find(call=>call.url===CONTROLS+'/review');
+  assert.equal(sent(create).values.candidate_id,'candidate-one');
+  assert.equal(sent(create).values.learning_mode,'exclude_local_learning');
+  await confirmSave(ui);
   assert.equal(selections.at(-1).kind,'outcome_pilot');
   assert.equal(selections.at(-1).id,'OPL-test');
   assert.match(ui.d.getElementById('op-report').textContent,/do not establish a causal release improvement/);
@@ -180,21 +211,29 @@ test('duplicate-pilot conflict keeps the complete plan and exact retry reference
   assert.equal(form.elements.customer.value,'Private customer');
   assert.equal(ui.d.querySelectorAll('#op-planned-cases select').length,4);
   assert.ok([...ui.d.querySelectorAll('#op-planned-cases select')].every(select=>select.value));
-  assert.match(form.dataset.operation,/^[a-f0-9-]{16,100}$/);
+  // The refused review admitted nothing, so there is no original to retry.
+  assert.equal(ui.calls.filter(call=>call.url===CONTROLS+'/save').length,0);
+  assert.equal(ui.w.sessionStorage.getItem('lightwork-pilot-original'),null);
   assert.match(ui.d.getElementById('op-status').textContent,/No allocation model is configured/);
-  assert.match(ui.d.getElementById('op-status').textContent,/inputs are still here/);
+  assert.match(ui.d.getElementById('op-status').textContent,/entered work is kept/);
   assert.equal(form.elements.title.disabled,false);ui.dom.window.close();
 });
 
 test('independent review binds exact evidence and needs a separate confirmation',async()=>{
   const packet={...report(),learning_policy:{prior_exposure_statement:'Local inputs checked; external training unknown.',automatic_local_exclusion_enforced:true,evidence_version:'c'.repeat(64)}};
-  const ui=await setup([packet,{context:'alice',id:'OPL-test',revision:3}]);
+  const ui=await setup([packet,reviewReply('review'),savedReply()]);
   pickPilot(ui,'OPL-test');ui.d.getElementById('op-review-load').click();await tick();
   const form=ui.d.querySelector('#op-independent-report form');form.querySelector('textarea').value='Independent policy receipts and their limits checked.';
   form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();assert.equal(ui.calls.length,3);
-  form.querySelector('input[type="checkbox"]').checked=true;form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
-  const body=JSON.parse(ui.calls[3].options.body);assert.equal(body.confirm,true);assert.equal(body.evidence_version,'c'.repeat(64));assert.equal(body.expected_revision,2);
-  assert.match(ui.calls[3].url,/independent-review\/OPL-test$/);ui.dom.window.close();
+  form.querySelector('input[type="checkbox"]').checked=true;form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
+  assert.equal(ui.calls[3].url,CONTROLS+'/review');
+  const body=sent(ui.calls[3]);assert.deepEqual([body.kind,body.pilot],['review','OPL-test']);
+  assert.equal(body.values.confirm,true);assert.equal(body.values.evidence_version,'c'.repeat(64));assert.equal(body.values.expected_revision,2);
+  assert.equal(ui.calls.length,4,'recording needs the separate confirmation of the complete review');
+  await confirmSave(ui);
+  assert.deepEqual(sent(ui.calls[4]),{token:'sealed-review',confirmed:true});
+  assert.match(ui.d.getElementById('op-independent-report').textContent,/Independent review recorded/);
+  ui.dom.window.close();
 });
 
 test('HTML access loss during independent review clears private report, prepared inputs and picker labels',async()=>{
