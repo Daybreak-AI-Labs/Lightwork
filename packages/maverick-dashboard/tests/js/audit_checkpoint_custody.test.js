@@ -27,3 +27,17 @@ test('a failed first read leaves no saved copy requests at Loading and keeps Ref
   assert.equal(ui.d.getElementById('acc-status').textContent, 'Could not read the checkpoint copy. Try again.');
   assert.equal(ui.d.getElementById('acc-refresh').disabled, false);
 });
+
+test('a first read refused for lost access shows one instruction: sign in or reload, with every control locked', async t => {
+  const ui = await page(t, (url, options) => {
+    // The shared fetch helper clears private details before it throws.
+    options.onAccess();
+    const error = new Error('Your access changed.'); error.status = 401; error.accessChanged = true; throw error;
+  });
+  assert.equal(ui.calls.length, 1);
+  assert.equal(ui.d.getElementById('acc-requests').textContent, '');
+  assert.equal(ui.d.getElementById('acc-status').textContent,
+    'Your access changed. Sign in or reload the current page before continuing. The saved Original reference was kept.');
+  assert.equal(ui.d.getElementById('acc-refresh').disabled, true);
+  assert.doesNotMatch(ui.d.getElementById('independent-checkpoint-custody').textContent, /Use Refresh choices/);
+});

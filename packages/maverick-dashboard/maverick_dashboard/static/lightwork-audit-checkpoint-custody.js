@@ -159,7 +159,9 @@
     try { await refresh(); }
     catch (error) {
       // A failed first read must not leave the request list saying "Loading…".
-      if (!current) el('acc-requests').replaceChildren(node('p', 'Saved copy requests could not be read. Use Refresh choices to try again.', 'muted'));
+      // When access was lost the page is locked (Refresh included) and says to
+      // sign in or reload, so it must not also tell the person to use Refresh.
+      if (!current && !accessLost) el('acc-requests').replaceChildren(node('p', 'Saved copy requests could not be read. Use Refresh choices to try again.', 'muted'));
       throw error;
     }
     const reference = retained();
