@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import secrets
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -125,8 +128,39 @@ def test_production_agent_admission_never_mutates_same_id_in_another_world(tmp_p
         other.close()
 
 
+@pytest.fixture
+def governed_pg_dsn(postgres_test_dsn, monkeypatch):
+    """Run admission reads Postgres governed records: least-privilege role plus the shared key."""
+    import psycopg
+    from maverick import crypto_at_rest
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+
+    role = "mvk_flow_" + uuid.uuid4().hex[:12]
+    password = secrets.token_urlsafe(24)
+    with psycopg.connect(postgres_test_dsn, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE")
+                      .format(sql.Identifier(role), sql.Literal(password)))
+        admin.execute(sql.SQL("CREATE SCHEMA {} AUTHORIZATION {}").format(sql.Identifier(role), sql.Identifier(role)))
+    key = hashlib.sha256(b"flow-thread-context-pg-fixture").digest()
+    monkeypatch.setenv("MAVERICK_PG_DSN", make_conninfo(postgres_test_dsn, user=role, password=password,
+                                                        options=f"-c search_path={role}"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_PER_TENANT", "0")
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", key.hex())
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY_DIGEST", "sha256:" + hashlib.sha256(key).hexdigest())
+    crypto_at_rest._reset_shared_key_identity_for_testing()
+    try:
+        yield
+    finally:
+        crypto_at_rest._reset_shared_key_identity_for_testing()
+        with psycopg.connect(postgres_test_dsn, autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(role)))
+            admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
 @pytest.mark.parametrize("shape", ["serial", "timed", "parallel", "foreach", "nested"])
-def test_postgres_agent_admission_preserves_tenant_without_rls(postgres_test_dsn, monkeypatch, shape):
+def test_postgres_agent_admission_preserves_tenant_without_rls(governed_pg_dsn, monkeypatch, shape):
     from maverick.flow.execution import default_agent_runner, execute
     from maverick.world_model import open_world
 
