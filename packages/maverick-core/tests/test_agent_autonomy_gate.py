@@ -61,7 +61,9 @@ def _enable(monkeypatch, agents=None):
     )
     # no org governance policy configured
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
-    monkeypatch.setattr("maverick.config.config_source_errors", dict)
+    # Accept the keyword form (`include_tenant=False`) the deployment-global
+    # enterprise check uses; `dict(include_tenant=False)` is a non-empty error map.
+    monkeypatch.setattr("maverick.config.config_source_errors", lambda *a, **k: {})
 
 
 @pytest.mark.asyncio
