@@ -36,7 +36,10 @@ def verified_identity(response, *, client_id, nonce=""):
     claims = principal.claims
     if claims.get("tid") != tenant or claims.get("ver") != "2.0":
         raise ValueError("Microsoft organization identity was not confirmed.")
-    if nonce and (not isinstance(claims.get("nonce"), str) or not hmac.compare_digest(claims["nonce"], nonce)):
+    # Every Microsoft consent carries a nonce; a request without one (or a
+    # token without the matching one) cannot bind this sign-in to it.
+    if (not isinstance(nonce, str) or not nonce or not isinstance(claims.get("nonce"), str)
+            or not hmac.compare_digest(claims["nonce"], nonce)):
         raise ValueError("Microsoft sign-in did not match this account request. Start again.")
     email = connection_oauth._identity_text(claims.get("email") or claims.get("preferred_username"), maximum=320)
     if not _EMAIL.fullmatch(email):

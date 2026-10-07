@@ -117,7 +117,8 @@ ADMIN_ONLY = (
     ("get", f"{LO}/self-harness/plan", None),
     ("post", f"{LO}/self-harness/hold-out/set-up", {"confirm": True}),
     ("get", f"{LO}/refinements/0123456789abcdef/preview", None),  # pragma: allowlist secret
-    ("post", f"{LO}/flywheel/turn", {}),
+    ("post", f"{LO}/flywheel/review", {"context": "0" * 64, "revision": "0" * 64}),
+    ("post", f"{LO}/flywheel/turn", {"token": "sealed-review", "confirmed": True}),
     ("get", f"{LO}/factory/preview", None),
     ("get", f"{LO}/self-modify", None),
     ("get", f"{LO}/self-modify/results", None),
@@ -145,7 +146,7 @@ def test_a_workspace_admin_is_not_a_global_admin(client, monkeypatch):
     from maverick_dashboard import auth
     _as(monkeypatch, "operator", "user:wsadmin")
     monkeypatch.setattr(auth, "has_permission", lambda request, perm: True)
-    assert client.post(f"{LO}/flywheel/turn", json={}).status_code == 403
+    assert client.post(f"{LO}/flywheel/turn", json={"token": "sealed-review", "confirmed": True}).status_code == 403
     assert client.post(f"{LO}/self-modify/run", json={"objective": "make it faster please",
                                                        "confirm": True}).status_code == 403
 
@@ -231,17 +232,25 @@ def test_failures_become_one_plain_sentence(client):
 
 # ---- improvement flywheel ------------------------------------------------------------
 
+def _flywheel_review(client):
+    """A cycle starts only from a complete current review (sealed token)."""
+    current = client.get(f"{LO}/flywheel").json()
+    return current, client.post(f"{LO}/flywheel/review", json={
+        "context": current["context"], "revision": current.get("revision") or "0" * 64})
+
+
 def test_flywheel_needs_its_switch_and_respects_the_learning_stop(client, monkeypatch):
     from maverick import data_engine, learning_guard
     monkeypatch.setattr(data_engine, "enabled", lambda: False)
-    r = client.post(f"{LO}/flywheel/turn", json={})
-    assert r.status_code == 409 and "Improvement flywheel" in r.json()["detail"]
+    current, r = _flywheel_review(client)
+    assert current["ready"] is False and "improvement flywheel" in current["problem"]
+    assert r.status_code == 409 and "improvement flywheel" in r.json()["detail"]
     monkeypatch.setattr(data_engine, "enabled", lambda: True)
 
     def halted(job, phase):
         raise learning_guard.Halted("stop", "operator")
     monkeypatch.setattr(learning_guard, "check_learning_halt", halted)
-    r = client.post(f"{LO}/flywheel/turn", json={})
+    _current, r = _flywheel_review(client)
     assert r.status_code == 409 and "stopped" in r.json()["detail"]
 
 
@@ -256,11 +265,23 @@ def test_flywheel_turn_runs_the_kernel_and_is_recorded_first(client, monkeypatch
                                guardrails=[SimpleNamespace(action="send_invoice_unchecked")],
                                memories=[SimpleNamespace(action="check_totals")],
                                hypotheses=[SimpleNamespace(baseline_action="retry", candidate_action="ask_owner")])
-    monkeypatch.setattr(flywheel, "maybe_run", turn)
-    done = _wait(client, client.post(f"{LO}/flywheel/turn", json={}))
-    assert done["state"] == "done"
-    assert done["result"]["tasks"] == 12 and done["result"]["avoid"] == ["send_invoice_unchecked"]
-    assert done["result"]["ideas"] == [{"instead_of": "retry", "try": "ask_owner"}]
+    monkeypatch.setattr(flywheel, "run_once", lambda steps, **_kwargs: turn())
+    current, review = _flywheel_review(client)
+    assert current["ready"] is True, current
+    assert review.status_code == 200, review.text
+    started = client.post(f"{LO}/flywheel/turn", json={"token": review.json()["token"], "confirmed": True})
+    assert started.status_code == 200, started.text
+    original, deadline = started.json(), time.time() + 15
+    while "task_href" not in original:  # the worker names its task once admitted
+        assert time.time() < deadline, original
+        time.sleep(0.05)
+        original = client.get(f"{LO}/flywheel/original/{review.json()['operation']}").json()
+    job_id = original["task_href"].split("learning_task=", 1)[1].split("#", 1)[0]
+    done = _wait(client, client.get(f"{LO}/jobs/{job_id}").json()["job"])
+    assert done["state"] == "done", done
+    assert done["result"]["complete"] is True
+    assert done["result"]["counts"] == {"avoid": 1, "habits": 1, "ideas": 1}
+    # The activity record row is written before the kernel turns.
     assert [r["action"] for r in audit_rows] == ["flywheel_turn"] and seen == [1]
 
 
@@ -318,27 +339,19 @@ def test_clash_check_asks_the_checker_model_within_a_spending_limit(client, monk
 
 def test_transfer_needs_the_switch_and_test_cases(client, monkeypatch, tmp_path, audit_rows):
     from maverick import self_improvement_runner as runner
+    calls: list = []
+    monkeypatch.setattr(runner, "run_self_harness_transfer", lambda *a, **k: calls.append((a, k)))
     _configure("[self_harness]\nenable = false")
-    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
-    assert r.status_code == 409 and "Turn on “Self-harness” under Learning systems" in r.json()["detail"]
-    _harness(monkeypatch, tmp_path, corpus=False)
-    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
-    assert r.status_code == 409 and "test cases" in r.json()["detail"]
+    current = client.get("/api/v1/learning-transfers/current").json()
+    assert current["available"] is False and "Self-coaching is off" in current["problem"]
     _harness(monkeypatch, tmp_path)
     monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["claude-x", "worker-y"])
-    calls: list[dict] = []
-
-    def transfer(source, *, targets, force, raise_errors):
-        calls.append({"source": source, "targets": targets, "force": force, "raise": raise_errors})
-        return {"worker-y": {"attempted": ["always cite the source"], "promoted": ["always cite the source"],
-                             "skipped": []}}
-    monkeypatch.setattr(runner, "run_self_harness_transfer", transfer)
-    assert client.post(f"{LO}/self-harness/transfer", json={"source": "nope"}).status_code == 422
-    done = _wait(client, client.post(f"{LO}/self-harness/transfer",
-                                     json={"source": "claude-x", "retry_judged": True}))
-    assert calls == [{"source": "claude-x", "targets": ["worker-y"], "force": True, "raise": True}]
-    assert done["result"]["targets"][0]["tried"] == 1
-    assert [r["action"] for r in audit_rows] == ["self_harness_transfer"]
+    # Lesson tests start only from the complete reviewed lesson test on Learned
+    # (current lessons, questions, standing instructions and spending); the
+    # old one-click start refuses before anything runs or is recorded.
+    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x", "retry_judged": True})
+    assert r.status_code == 409 and "Test lessons on another model" in r.json()["detail"]
+    assert calls == [] and audit_rows == []
 
 
 def test_test_cases_find_download_preview_and_add(client, monkeypatch, tmp_path, audit_rows):
@@ -438,15 +451,19 @@ def test_factory_learning_preview_and_adopt_with_evidence(client, monkeypatch, a
     pv = client.get(f"{LO}/factory/preview?min_support=5").json()
     assert pv["corrections"] == [{"guidance": "Always add a deny list.", "seen_in": 5, "area": "provisioning"}]
     assert client.get(f"{LO}/factory/preview?min_support=4").status_code == 422
-    assert client.post(f"{LO}/factory/promote", content=b"{}").status_code == 422
-    bad = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 1}')
-    assert bad.status_code == 422 and "version 2" in bad.json()["detail"]
+    # Adoption now goes through Improve how new agents are built (one
+    # suggestion, a complete comparison, then a separate Adopt review). The old
+    # bulk shortcut refuses, even with evidence and a confirmation, and adopts nothing.
     monkeypatch.setattr(factory_learning, "load_measured_evidence", lambda path: "scorer")
-    monkeypatch.setattr(factory_learning, "review_and_promote",
-                        lambda *, min_support, scorer: ["one", "two"] if scorer == "scorer" else [])
-    ok = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 2}')
-    assert ok.json() == {"adopted": 2}
-    assert [r["action"] for r in audit_rows] == ["factory_learning_promote", "factory_learning_promote"]
+
+    def adopt(**_kwargs):
+        raise AssertionError("the retired shortcut must not adopt guidance")
+    monkeypatch.setattr(factory_learning, "review_and_promote", adopt)
+    for query, body in (("", b"{}"), ("?confirm=true", b'{"version": 2}')):
+        refused = client.post(f"{LO}/factory/promote{query}", content=body)
+        assert refused.status_code == 409
+        assert "review a complete comparison" in refused.json()["detail"]
+    assert audit_rows == []
 
 
 # ---- practising changes to its own code -----------------------------------------------------
@@ -636,8 +653,8 @@ def test_learning_page_stays_closed_to_non_admins(client, monkeypatch):
 
 def test_learned_page_has_the_extra_self_coaching_tools(client, monkeypatch):
     page = client.get("/learned").text
-    for control in ("lpo-clash-run", "lpo-transfer-run", "lpo-harvest", "lpo-export", "lpo-import-check",
-                    "lp-trial", "lp-instructions", "llp-quality-remove"):
+    for control in ("lpo-clash-run", "lt-review", "lpo-harvest", "lpo-export", "lpo-import-check",
+                    "lp-trial", "lp-instructions", "lqc-load"):
         assert f'id="{control}"' in page, control
     visible = _visible(page, 'id="lpo-root"')
     assert "Check lessons for clashes by meaning" in visible

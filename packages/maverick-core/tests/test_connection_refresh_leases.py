@@ -23,7 +23,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_SECURE_DEFAULT", "0")
     config.config_path().write_text("[connections]\nenable=true\n[oauth]\nvault=true\n")
-    monkeypatch.setattr(oauth, "_provider_identity", lambda *args: {
+    monkeypatch.setattr(oauth, "_provider_identity", lambda *args, **_identity_inputs: {
         "provider": "google", "subject": "fixture-account", "display_name": "Fixture Account",
         "email": "fixture@example.test", "email_verified": True, "hosted_domain": "example.test",
     })

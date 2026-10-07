@@ -985,4 +985,8 @@ def test_worker_surface_accepts_no_request_selected_authority() -> None:
         "expected_property_revision",
         "expected_publication_revision",
         "idempotency_key",
+        # A guard callback and the digest that binds the withdrawal receipt to
+        # its reviewed requester; neither selects content, target or credential.
+        "before_write",
+        "receipt_owner",
     }

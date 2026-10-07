@@ -241,11 +241,16 @@ def _task_case_current(row: Mapping) -> bool:
             close_world_if_owned(world)
 
 
-def case_current(row: Mapping) -> bool:
+def _derived_case_current(row: Mapping) -> bool:
+    """A machine-derived case is usable only with its current source lineage."""
     if "task_source" in row or row.get("privacy_schema") == TASK_QUESTION_SCHEMA:
         return _task_case_current(row)
-    derived = any(key in row for key in ("added_at", "privacy_schema", "source_goal_ids"))
-    return not derived or _shared_case_current(row)
+    return _shared_case_current(row)
+
+
+def case_current(row: Mapping) -> bool:
+    derived = any(key in row for key in ("added_at", "privacy_schema", "source_goal_ids", "task_source"))
+    return not derived or _derived_case_current(row)
 
 
 def require_cases_current(cases) -> None:
@@ -280,7 +285,9 @@ def load_eval_corpus(path: str | Path) -> dict[str, list[dict]]:
         for r in rows:
             if isinstance(r, Mapping) and str(r.get("goal") or "").strip():
                 derived = pending or "added_at" in r or "privacy_schema" in r or "source_goal_ids" in r or "task_source" in r
-                if derived and not case_current(r):
+                # Every staged (pending) row is machine-derived, even one that
+                # lacks lineage keys: without current lineage it is withheld.
+                if derived and not _derived_case_current(r):
                     continue  # unknown historical harvest is retained, not inherited
                 case = {"goal": str(r["goal"]), "expected": str(r.get("expected") or "")}
                 if derived:

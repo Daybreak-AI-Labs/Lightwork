@@ -3,6 +3,7 @@ const {test}=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {JSDOM}=require("jsdom");
+const {reviewedSaving}=require('./_settings_review');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<20;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -47,6 +48,7 @@ async function page(handler,url){
   const dom=new JSDOM(HTML,{url:url||"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[],confirms=[];
   w.mvConfirm=async message=>{confirms.push(message);return true;};
+  reviewedSaving(w,{confirms});
   w.mvErrorText=(failure,action)=>"Could not "+action+".";
   w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{

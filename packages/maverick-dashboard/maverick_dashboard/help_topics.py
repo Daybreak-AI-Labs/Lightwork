@@ -72,10 +72,11 @@ TOPICS: tuple[Topic, ...] = (
     ), (("chat_goal.html", "Stop task"), ("chat_goal.html", "Try again"))),
     Topic("use-result", "Use a result", "Employee", ("/deliverables",), (
         "Open the finished task.",
-        "Use Copy answer or Download answer to take the result with you.",
+        "Use Copy answer, Download Word document or Download Markdown to take the result with you.",
         "Ask for a change in the message box; the task keeps its history.",
         "Results lists every finished result you can see.",
-    ), (("chat_goal.html", "Copy answer"), ("chat_goal.html", "Download answer"))),
+    ), (("chat_goal.html", "Copy answer"), ("chat_goal.html", "Download Word document"),
+        ("chat_goal.html", "Download Markdown"))),
     Topic("find-task", "Find a past task", "Employee", ("/goals",), (
         "Open Tasks.",
         "Type part of the task's title in Search tasks.",
@@ -119,9 +120,10 @@ TOPICS: tuple[Topic, ...] = (
     Topic("vendor", "Review a vendor", "Privacy officer", ("/vendors",), (
         "Open the vendor from Privacy, or press Add a vendor.",
         "Press Send a questionnaire and wait for the replies; View replies shows them.",
-        "Mark as active when the review is done, or Stop using this vendor.",
+        "When the review is done, press Review assessment before activation and confirm the activation, "
+        "or press Stop using this vendor.",
     ), (("privacy.html", "Add a vendor"), ("vendor_detail.html", "Send a questionnaire"),
-        ("vendor_detail.html", "View replies"), ("vendor_detail.html", "Mark as active"))),
+        ("vendor_detail.html", "View replies"), ("vendor_detail.html", "Review assessment before activation"))),
     Topic("privacy-report", "Share the privacy programme report", "Privacy officer", ("/privacy/report",), (
         "Open the privacy report from Privacy.",
         "Print it or save it as a PDF to share it.",

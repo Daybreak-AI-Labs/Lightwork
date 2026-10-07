@@ -1,8 +1,9 @@
 """The DSAR estate worksheet: where a human looks beyond the platform.
 
 The assertions that matter: the worksheet reflects the platform's own
-holdings, surfaces only identifying data-map assets, lists active vendors
-as processors, and degrades every absent module to ``enabled: false``
+holdings, surfaces only identifying data-map assets, lists every vendor
+that is not offboarded as a processor (a newly registered vendor starts
+under review and may already hold the subject's data), and degrades every absent module to ``enabled: false``
 instead of failing.
 """
 from __future__ import annotations
@@ -51,6 +52,14 @@ def test_worksheet_builds_the_estate_search_plan():
         "Acme Analytics", category="analytics", criticality="high",
         owner="procurement", actor="ops",
     )
+    gone = vendor_management.register_vendor(
+        "Retired Mailer", category="email", criticality="low",
+        owner="procurement", actor="ops",
+    )
+    vendor_management.set_vendor_status(
+        gone["id"], "offboarded", actor="ops",
+        expected_revision=gone["revision"],
+    )
 
     plan = privacy_ops.dsar_estate_worksheet(request["id"])
     assert plan["request_id"] == request["id"]
@@ -62,6 +71,10 @@ def test_worksheet_builds_the_estate_search_plan():
     ]
     assert plan["data_map"]["assets"][0]["categories"] == ["email", "phone"]
     assert plan["processors"]["vendors"][0]["name"] == "Acme Analytics"
+    assert [v["name"] for v in plan["processors"]["vendors"]] == [
+        "Acme Analytics"
+    ]
+    assert plan["processors"]["vendors"][0]["status"] == "under_review"
     # Document discovery has no configured sources here: no hits, and
     # discover() contributes nothing rather than erroring.
     assert plan["documents"].get("hits", []) == []

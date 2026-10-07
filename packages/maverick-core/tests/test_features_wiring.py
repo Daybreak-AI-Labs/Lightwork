@@ -48,6 +48,7 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
         "private_task_computation": False,
         "portable_competence": False,
         "work_restructuring": False,
+        "human_conversation_handoffs": False,
     }
 
 
@@ -91,6 +92,7 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "private_task_computation": False,
         "portable_competence": False,
         "work_restructuring": False,
+        "human_conversation_handoffs": False,
     }
 
 

@@ -30,7 +30,7 @@ test("store inventory distinguishes draft counts from owned learning provenance"
 });
 test("new stores have explicit independently reviewed deletion choices",()=>{
   const ui=fixture({}); const rendered=content(ui.el("pd-delete-stores"));
-  assert.match(rendered,/model-test history/);assert.match(rendered,/current authorized generated tools/);assert.match(rendered,/queued conversation messages/);
+  assert.match(rendered,/model-test history/);assert.match(rendered,/current authorized generated tools/);assert.match(rendered,/queued messages, ended human exchanges and on-duty name/);
   assert.match(rendered,/saved dashboard views and task pins/);assert.match(rendered,/keeps tasks, annotations and gallery/);
 });
 

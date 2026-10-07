@@ -21,7 +21,7 @@ function slice(template, start, end) {
   return text.slice(from, to + end.length);
 }
 
-async function page(markup, script, reply, { confirm = true, shell = true } = {}) {
+async function page(markup, script, reply, { confirm = true, shell = true, before = [], realTimers = false } = {}) {
   const dom = new JSDOM('<main>' + strip(markup) + '</main>', { url: 'https://app.example/x', runScripts: 'outside-only' });
   const w = dom.window, calls = [], asked = [];
   // shell: the page script uses the shell's shared helpers (mvFetchJSON,
@@ -34,12 +34,18 @@ async function page(markup, script, reply, { confirm = true, shell = true } = {}
   w.mvErrorText = (failure, action) => 'Could not ' + action + '. Plain message.';
   w.mvConfirm = async message => { asked.push(message); return confirm; };
   w.mvWhen = () => 'soon';
-  w.setTimeout = fn => { fn(); return 0; };
+  // Waits run at once, unless the page bounds its requests with a timeout
+  // (mvFetchJSON's timeout would otherwise expire before the reply).
+  if (!realTimers) w.setTimeout = fn => { fn(); return 0; };
+  // jsdom has no layout: scrolling a review into view does nothing here.
+  w.Element.prototype.scrollIntoView = function () {};
   w.fetch = async (url, options = {}) => {
     calls.push({ url, options });
     const out = await reply(url, options);
     return out instanceof Response ? out : new Response(JSON.stringify(out));
   };
+  // Inline helpers the page template includes ahead of its own script.
+  before.forEach(name => w.eval(read(name)));
   w.eval(read('static/' + script));
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
   await settle();
@@ -100,12 +106,17 @@ test('sharing a task on GitHub reviews exact content before uploading and shows 
 });
 
 test('the schedule picker sends plain choices and a chosen time zone, never a typed timetable', async t => {
-  const markup = slice('automations.html', '<details id="auto-new-sched"', '</details>\n  </section>');
+  // The original-creation panel the picker reports to, then the form.
+  const markup = slice('automations.html', '<section class="auto__section panel auto__original" id="auto-create-original"', '</section>') +
+    slice('automations.html', '<details id="auto-new-sched"', '</details>\n  </section>');
+  const context = 'c'.repeat(64);
   const ui = await page(markup, 'lightwork-schedule-picker.js', (url, options) => {
-    if (url.endsWith('/options')) return { zones: ['UTC', 'Europe/Paris'], workflows: [], tasks: [{ id: 4, title: 'Weekly notes' }] };
+    if (url.endsWith('/options')) return { context, zones: ['UTC', 'Europe/Paris'], workflows: [], tasks: [{ id: 4, title: 'Weekly notes' }] };
     if (url.endsWith('/preview')) return { cron: '0 9 * * *', zone: 'UTC', next_runs: [1, 2, 3] };
-    return { id: 1, next_run: 5 };
-  }, { shell: true });
+    if (url.endsWith('/create-review')) return { context, title: 'Weekly notes', earlier_task: 'Weekly notes', work: 'Run the earlier task again',
+      inputs: {}, next_runs: [1, 2], notice: 'Nothing runs until the first time shown.', reference: 'r'.repeat(32), operation: 'o'.repeat(32) };
+    return { context, found: true, title: 'Weekly notes', message: 'Schedule created.', execution: 'It first runs at its next time.' };
+  }, { shell: true, realTimers: true });
   t.after(() => ui.w.close());
   ui.$('auto-new-sched').open = true;
   ui.$('auto-new-sched').dispatchEvent(new ui.w.Event('toggle'));
@@ -117,15 +128,21 @@ test('the schedule picker sends plain choices and a chosen time zone, never a ty
   ui.$('auto-new-zone').value = 'Europe/Paris';
   ui.$('auto-new-form').dispatchEvent(new ui.w.Event('submit', { cancelable: true }));
   await ui.settle();
+  assert.equal(ui.calls.some(c => c.url === '/api/v1/schedules/add'), false, 'a review comes first');
+  assert.equal(ui.$('auto-new-review').hidden, false);
+  ui.$('auto-new-confirm').click();
+  await ui.settle();
   const add = ui.calls.find(c => c.url === '/api/v1/schedules/add');
   const body = JSON.parse(add.options.body);
+  assert.equal(body.review_reference, 'r'.repeat(32));
+  assert.equal(body.confirmed, true);
   assert.equal(body.what, 'rerun');
   assert.equal(body.goal_id, 4);
   assert.equal(body.timetable.repeat, 'weekly');
   assert.equal(body.timetable.zone, 'Europe/Paris');
   assert.deepEqual(body.timetable.days, [1]);
   assert.equal(body.timetable.advanced, undefined);
-  assert.match(ui.$('auto-new-preview').textContent, /Schedule created/);
+  assert.match(ui.$('auto-create-original-message').textContent, /Schedule created/);
 });
 
 test('library templates are added only by administrators after a confirmation', async t => {
@@ -164,7 +181,12 @@ test('business specialist setup drafts, shows the draft plainly and approves by 
   const approve = ui.calls.find(c => c.url.endsWith('/approve'));
   assert.ok(approve.options.body instanceof ui.w.FormData, 'the pack itself is never sent back');
   assert.equal(approve.options.body.get('confirm'), 'true');
-  assert.match(ui.$('biz-status').textContent, /Added/);
+  // Adding opens the new agent's editor; that next page says it was added.
+  const added = JSON.parse(ui.w.sessionStorage.getItem('lightwork-business-agent-added'));
+  assert.equal(added.name, 'acme_bakery');
+  ui.w.eval(read('static/lightwork-business-agent.js'));
+  assert.match(ui.$("biz-status").textContent, /Added “Acme bakery”/);
+  assert.equal(ui.w.sessionStorage.getItem('lightwork-business-agent-added'), null);
 });
 
 test('Ekko recording needs the consent box and reports counts plainly', async t => {
@@ -203,9 +225,15 @@ test('teach page learns a rule, and saving the draft needs a confirmation', asyn
     if (url.endsWith('/rule/attach')) return { draft: { id: 'billing' }, note: 'Save to keep this change.' };
     return { id: 'billing', version: 2 };
   };
-  const ui = await page(markup, 'lightwork-flow-teach.js', reply, { confirm: false });
+  const ui = await page(markup, 'lightwork-flow-teach.js', reply, { confirm: false, before: ['templates/flow_designer_inputs.js'] });
   t.after(() => ui.w.close());
   assert.equal(ui.$('tr-step').value, 'decide');
+  // Every whole-number example value must be entered before learning.
+  ui.$('tr-learn').click();
+  await ui.settle();
+  assert.equal(ui.calls.filter(c => c.url.endsWith('/rule/learn')).length, 0);
+  assert.match(ui.$('ft-status').textContent, /Complete the highlighted example value/);
+  ui.d.querySelectorAll('#tr-examples [data-input]').forEach((control, i) => { control.value = String(10 + i * 490); });
   ui.$('tr-learn').click();
   await ui.settle();
   const learn = JSON.parse(ui.calls.find(c => c.url.endsWith('/rule/learn')).options.body);
@@ -229,7 +257,7 @@ test('teach page still loads when reviewed-run learning is unavailable', async t
     if (url.endsWith('/teach')) return { flow: { id: 'billing', name: 'Billing', version: 1 }, steps: [], tools: [] };
     if (url.endsWith('/teach/examples')) return { available: false, runs: [] };
     return { recipes: [] };
-  });
+  }, { before: ['templates/flow_designer_inputs.js'] });
   t.after(() => ui.w.close());
   assert.equal(ui.$('rc-learn'), null);
   assert.equal(ui.$('rc-draft'), null);
@@ -245,7 +273,7 @@ test('a run at its first approval is kept as an example with plain, editable dat
       tool_data_schemas: { lookup: { arguments: object({ query: { type: 'string', maxLength: 1024 } }), result: object({}) } },
       unknown_results: ['lookup'] } };
   const ui = await page(markup, 'lightwork-learning-capture.js', (url, options) => {
-    if (url.endsWith('/episode-capture') && !options.body) return new Response('{}', { status: 404 });
+    if (url.includes('/learning-example-decisions/')) return new Response('{}', { status: 404 });
     if (url.endsWith('/suggestion')) return prepared;
     return { status: 'enrolled', revision: 1 };
   });
@@ -268,40 +296,66 @@ test('a run at its first approval is kept as an example with plain, editable dat
   assert.match(ui.$('lx-status').textContent, /being kept as a learning example/);
 });
 
+// Decisions on a kept example are reviewed in full, then confirmed once with
+// a ticked box (/api/v1/learning-example-decisions/<flow>/<run>).
+const EXAMPLE_CONTEXT = 'c'.repeat(64);
+function decisions(state, { review, apply } = {}) {
+  return (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    if (url.endsWith('/history')) return { context: EXAMPLE_CONTEXT, choices: [] };
+    if (url.endsWith('/review')) return review ? review(body) : { context: EXAMPLE_CONTEXT, token: 'sealed-' + body.kind,
+      operation: 'f'.repeat(32), changes: [{ label: 'Decision', after: body.kind }, { label: 'Reason', after: body.reason }] };
+    if (url.endsWith('/apply')) return apply ? apply(body) : { context: EXAMPLE_CONTEXT, message: 'Your decision is recorded.' };
+    if (url.endsWith('/learning-example-decisions/1/1')) return { context: EXAMPLE_CONTEXT, record: state.record, changes: state.changes };
+    throw new Error('unexpected request ' + url);
+  };
+}
+async function confirmReview(ui) {
+  const host = ui.$('lx-decision-review'), box = host.querySelector('input[type=checkbox]');
+  const save = [...host.querySelectorAll('button')].find(b => /^Confirm/.test(b.textContent));
+  assert.equal(save.disabled, true, 'nothing is confirmed before the box is ticked');
+  box.checked = true; box.dispatchEvent(new ui.w.Event('change'));
+  save.click();
+  await ui.settle();
+}
+
 test('a finished example is reviewed, then learning is allowed only after a confirmation', async t => {
   const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
-  const reviewing = { status: 'awaiting_review', revision: 4, episode_sha256: 'e'.repeat(64), retain_until: Date.now() / 1000 + 5 * 86400 };
-  const ui = await page(markup, 'lightwork-learning-capture.js', (url, options) => {
-    if (url.endsWith('/detail')) return { evidence: { inputs: { ref: '<b>A-1</b>' }, slots: [{ tool: 'lookup', arguments: { query: 'A-1' }, result: { customer_id: 'C9' } }] } };
-    if (url.endsWith('/review')) return { ...reviewing, status: 'accepted', revision: 5 };
-    if (url.endsWith('/training-grant')) return { ...reviewing, status: 'accepted', revision: 6,
-      grant_sha256: 'g'.repeat(64), training_available: true };
-    return reviewing;
-  }, { confirm: true });
+  const retain = Date.now() / 1000 + 5 * 86400;
+  const state = { record: { status: 'awaiting_review', revision: 4, episode_sha256: 'e'.repeat(64), retain_until: retain },
+    changes: [{ label: 'What the run started with', after: 'ref: <b>A-1</b>' }, { label: 'What “lookup” gave back', after: 'customer id: C9' }] };
+  const ui = await page(markup, 'lightwork-learning-capture.js', decisions(state, {
+    apply: body => {
+      state.record = body.token === 'sealed-accept' ? { ...state.record, status: 'accepted', revision: 5 }
+        : { ...state.record, status: 'accepted', revision: 6, grant_sha256: 'g'.repeat(64), training_available: true };
+      return { context: EXAMPLE_CONTEXT, message: 'Your decision is recorded.' };
+    } }));
   t.after(() => ui.w.close());
   assert.equal(ui.$('lx-review').hidden, false);
   assert.equal(ui.d.querySelector('#lx-evidence b'), null, 'recorded values are shown as text');
-  assert.match(ui.$('lx-evidence').textContent, /Customer id|customer id/i);
+  assert.match(ui.$('lx-evidence').textContent, /customer id: C9/);
   ui.$('lx-accept').click();
   await ui.settle();
-  assert.match(ui.$('lx-status').textContent, /Say briefly why/);
+  assert.match(ui.$('lx-status').textContent, /Enter a brief reason/);
   ui.$('lx-review-reason').value = 'Matches the real order.';
   ui.$('lx-accept').click();
   await ui.settle();
-  const review = JSON.parse(ui.calls.find(c => c.url.endsWith('/review') && c.options.body).options.body);
-  assert.deepEqual([review.expected_revision, review.accepted, review.reviewed], [4, true, true]);
+  const review = JSON.parse(ui.calls.find(c => c.url.endsWith('/review')).options.body);
+  assert.deepEqual(review, { context: EXAMPLE_CONTEXT, kind: 'accept', reason: 'Matches the real order.' });
+  assert.equal(ui.calls.filter(c => c.url.endsWith('/apply')).length, 0, 'reviewing changes nothing');
+  await confirmReview(ui);
+  assert.deepEqual(JSON.parse(ui.calls.find(c => c.url.endsWith('/apply')).options.body), { token: 'sealed-accept', confirmed: true });
   assert.equal(ui.$('lx-grant').hidden, false);
   ui.$('lx-grant-reason').value = 'Teach the order flow.';
-  ui.$('lx-grant-go').click();
-  await ui.settle();
-  assert.match(ui.$('lx-status').textContent, /Tick the box/);
   ui.$('lx-grant-copies').checked = true;
   ui.$('lx-grant-go').click();
   await ui.settle();
-  assert.match(ui.asked.at(-1), /Allow new flows to learn/);
-  const grant = JSON.parse(ui.calls.find(c => c.url.endsWith('/training-grant')).options.body);
-  assert.equal(grant.retain_derived_copies, true);
-  assert.ok(grant.use_until < reviewing.retain_until);
+  const grant = JSON.parse(ui.calls.filter(c => c.url.endsWith('/review')).at(-1).options.body);
+  assert.equal(grant.kind, 'grant');
+  assert.equal(grant.retain_copies, true);
+  assert.ok(grant.use_until < retain);
+  await confirmReview(ui);
+  assert.equal(ui.calls.filter(c => c.url.endsWith('/apply')).length, 2);
   assert.equal(ui.$('lx-next').hidden, false);
 });
 
@@ -312,13 +366,13 @@ test('learning capture distinguishes an unavailable check from an ineligible run
     suggestion: { input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
       tool_data_schemas: {}, unknown_results: [] } };
   const ui = await page(markup, 'lightwork-learning-capture.js', url => {
-    if (url.endsWith('/episode-capture')) return new Response('{}', { status: 404 });
+    if (url.includes('/learning-example-decisions/')) return new Response('{}', { status: 404 });
     if (url.endsWith('/suggestion')) return available ? suggestion : new Response('{}', { status: 503 });
     throw new Error('unexpected request');
   });
   t.after(() => ui.w.close());
   assert.equal(ui.$('lx-enroll').hidden, true);
-  assert.match(ui.$('lx-status').textContent, /could not confirm.*current learning status/i);
+  assert.match(ui.$('lx-status').textContent, /could not check this run’s learning status/i);
   assert.doesNotMatch(ui.$('lx-status').textContent, /can’t become a learning example/);
 
   available = true;
@@ -344,26 +398,25 @@ test('learning capture does not mistake denied status for a missing example', as
 test('uncertain review clears stale controls and only a fresh status check reveals the result', async t => {
   const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
   const pending = { status: 'awaiting_review', revision: 4, episode_sha256: 'e'.repeat(64), retain_until: Date.now() / 1000 + 5 * 86400 };
-  let current = pending;
-  const ui = await page(markup, 'lightwork-learning-capture.js', url => {
-    if (url.endsWith('/detail')) return { evidence: { inputs: {}, slots: [] } };
-    if (url.endsWith('/review')) {
-      current = { ...pending, status: 'accepted', revision: 5 };
+  const state = { record: pending, changes: [{ label: 'What the run started with', after: 'nothing' }] };
+  const ui = await page(markup, 'lightwork-learning-capture.js', decisions(state, {
+    apply: () => {
+      state.record = { ...pending, status: 'accepted', revision: 5 };
       throw new Error('connection lost after the decision');
-    }
-    return current;
-  });
+    } }));
   t.after(() => ui.w.close());
   ui.$('lx-review-reason').value = 'This example matches the finished run.';
   ui.$('lx-accept').click();
   await ui.settle();
-  assert.equal(ui.$('lx-review').hidden, true);
-  assert.equal(ui.$('lx-review-reason').value, '');
-  assert.match(ui.$('lx-status').textContent, /could not confirm.*Check current status/i);
-  assert.equal(ui.calls.filter(c => c.url.endsWith('/review')).length, 1);
+  await confirmReview(ui);
+  assert.equal(ui.$('lx-decision-review').textContent, '', 'the stale review is gone');
+  assert.equal(ui.$('lx-original').hidden, false);
+  assert.match(ui.$('lx-original-status').textContent, /could not be confirmed.*nothing will be submitted again/i);
+  assert.equal(ui.$('lx-review-reason').value, 'This example matches the finished run.', 'the entered reason is kept');
+  assert.equal(ui.calls.filter(c => c.url.endsWith('/apply')).length, 1);
 
   ui.$('lx-refresh').click();
   await ui.settle();
   assert.equal(ui.$('lx-grant').hidden, false);
-  assert.equal(ui.calls.filter(c => c.url.endsWith('/review')).length, 1, 'refresh never replays a decision');
+  assert.equal(ui.calls.filter(c => c.url.endsWith('/apply')).length, 1, 'refresh never replays a decision');
 });

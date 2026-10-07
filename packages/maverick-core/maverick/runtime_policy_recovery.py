@@ -43,9 +43,13 @@ def target():
 
 
 def store(*, requests=False):
-    return GovernedRecordStore("runtime-policy-requests" if requests else "runtime-policy-copies",
-        "RPR" if requests else "RPC", "runtime_policy_request" if requests else "runtime_policy_copy",
-        authority_scope="deployment_global")
+    # Two literal declarations keep both namespaces visible to the closed
+    # recovery-authority registry check.
+    if requests:
+        return GovernedRecordStore("runtime-policy-requests", "RPR", "runtime_policy_request",
+                                   authority_scope="deployment_global")
+    return GovernedRecordStore("runtime-policy-copies", "RPC", "runtime_policy_copy",
+                               authority_scope="deployment_global")
 
 
 def source():

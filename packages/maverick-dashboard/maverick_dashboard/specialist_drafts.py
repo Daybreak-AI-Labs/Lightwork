@@ -412,6 +412,10 @@ def _publish(request, prepared, row):
     published = digest(_source(request, prepared["name"]))
     STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published), expected_revision=row["revision"],
         action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
+    # The agent's own plain-words history (who, when, what) records every
+    # published or restored definition, as the retired direct save did.
+    from .api import _record_agent_change
+    _record_agent_change(request, prepared["name"], prepared["before"]["profile"], prepared["profile"])
     return original(request, row["id"], prepared=prepared)
 
 

@@ -7,6 +7,8 @@ const { JSDOM } = require("jsdom");
 const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-compliance.js"), "utf8");
+// Retention periods are filled by their own script on the same page.
+const retentionSource = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-retention-maintenance.js"), "utf8");
 const html = `<div id="cmp-status"></div>
 <button type="button" data-cmp-switch="signed_audit" data-cmp-confirm="Sign it?">Turn on</button>
 <button type="button" data-cmp-halt>Stop</button>
@@ -45,6 +47,7 @@ async function fixture({ confirm = true, reply } = {}) {
   };
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done)); };
   window.eval(source);
+  window.eval(retentionSource);
   await settle();
   return { window, doc: window.document, calls, confirms, settle };
 }

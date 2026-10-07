@@ -15,13 +15,16 @@ async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx
   const description = { value: existing.description || "", closest: () => details };
   const notice = { hidden: true }, storage = new Map([["lightwork:template-draft:v1", JSON.stringify(draft)]]);
   let submits = 0;
-  const form = { querySelector: selector => selector.includes("connection_references") ? references : selector.startsWith("input") ? title : description, submit() { submits++; } };
+  const form = { querySelector: selector => selector.includes("connection_references") ? references : selector.includes('name="title"') ? title : description, submit() { submits++; } };
   for (const input of [title, description]) { input.listeners = {}; input.addEventListener = (type, callback) => { input.listeners[type] = callback; }; input.removeEventListener = type => { delete input.listeners[type]; }; }
   const context = { window: {}, Date, fetch: async () => typeof serverContext === "function" ? serverContext(title, description) : ({ ok: true, json: async () => ({ context: serverContext }) }),
     sessionStorage: { getItem: key => storage.get(key), removeItem: key => storage.delete(key) },
     document: { querySelector: () => form, getElementById: () => notice } };
   const source = readTemplate("chat.html");
-  vm.runInNewContext(source.slice(source.indexOf("  function chatCopy("), source.indexOf("  // A prepared template")), context);
+  // Only the page's copy helpers; the composer's own resize/Enter wiring that
+  // follows them is not part of the template handoff.
+  const helpers = source.indexOf("  function chatCopy(");
+  vm.runInNewContext(source.slice(helpers, source.indexOf("  (function () {", helpers)), context);
   const start = source.indexOf("  (async function receiveTemplateDraft()");
   await vm.runInNewContext(source.slice(start, source.indexOf("  })();", start) + 7), context);
   return { title, description, references, details, notice, storage, submits };
@@ -90,7 +93,9 @@ function scheduleFixture(value = "") {
     "fd-sched-days": { hidden: true }, "fd-sched-dom-row": { hidden: true }, "fd-sched-minute-row": { hidden: true },
     "fd-sched-time-row": { hidden: true }, "fd-sched-tz-row": { hidden: true },
   };
-  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days } };
+  // A changed timetable is one undoable edit (the designer's pushHistory).
+  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days }, edits: 0 };
+  context.pushHistory = () => { context.edits += 1; };
   const source = readTemplate("flow_designer.js");
   vm.runInNewContext(source.slice(source.indexOf("  // ---- schedule picker"),
     source.indexOf("  function fillTimeZones(")), context);
@@ -251,6 +256,9 @@ test("plain schedule choices produce the matching timetable and read back the sa
     ui.context.syncScheduleControls();
     assert.equal(ui.fields["fd-sched-freq"].value, freq);
   }
+  assert.equal(ui.context.edits, cases.length, "each changed timetable is one undo step");
+  ui.context.chooseSchedule();
+  assert.equal(ui.context.edits, cases.length, "choosing the same timetable adds no undo step");
   ui.fields["fd-sched-freq"].value = "weekly";
   ui.days.find(d => d.value === "5").checked = true;
   ui.fields["fd-sched-time"].value = "17:45";

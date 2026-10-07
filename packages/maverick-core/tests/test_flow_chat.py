@@ -240,7 +240,9 @@ def test_model_output_with_raw_credential_is_not_rendered_or_applied():
 
     assert result.flow is None
     assert "sk-proj" not in result.reply
-    assert any("safety check" in note for note in result.notes)
+    # Refused at the provider boundary, in plain words, with nothing prepared.
+    assert "could not prepare a safe reply" in result.reply
+    assert "No workflow change was prepared" in result.reply
 
 
 def test_system_prompt_documents_ops_and_schema():

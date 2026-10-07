@@ -92,14 +92,17 @@ def test_member_revocation_is_checked_on_each_read(store, monkeypatch):
         pairing.authenticate(token, 'GET', '/api/v1/goals')
 
 
-def test_paired_administrator_cannot_expand_own_goal_scope(monkeypatch):
+def test_paired_administrator_cannot_expand_own_goal_scope(monkeypatch, tmp_path):
+    from maverick import world_model
+    # Goal access also re-checks copied-conversation sources in an isolated world.
+    monkeypatch.setattr(world_model, 'DEFAULT_DB', tmp_path / 'world.db')
     request = Request({'type': 'http', 'method': 'GET', 'path': '/api/v1/goals', 'headers': []})
     request.state.paired_device_id = 'a' * 32
     monkeypatch.setattr(auth, '_authorization_principal', lambda request: 'user:alice')
     monkeypatch.setattr(auth, 'is_dashboard_admin', lambda principal: True)
     assert auth.goal_owner_filter(request) == 'user:alice'
-    assert not auth.can_access_goal(request, SimpleNamespace(owner='user:bob'))
-    assert auth.can_access_goal(request, SimpleNamespace(owner='user:alice'))
+    assert not auth.can_access_goal(request, SimpleNamespace(id='goal-bob', owner='user:bob'))
+    assert auth.can_access_goal(request, SimpleNamespace(id='goal-alice', owner='user:alice'))
 
 
 def test_oidc_issuer_string_cannot_mint_device_binding(monkeypatch):

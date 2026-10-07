@@ -11,6 +11,7 @@ ROWS = [
     ("Search results", "Résultats de la recherche", "Suchergebnisse", "検索結果", "搜索结果"),
     ("My background work", "Mon travail en arrière-plan", "Meine Hintergrundarbeit", "バックグラウンドの作業", "我的后台工作"),
     ("My conversations", "Mes conversations", "Meine Unterhaltungen", "自分の会話", "我的对话"),
+    ("Human conversations", "Conversations prises en charge par une personne", "Von Menschen geführte Unterhaltungen", "人が対応する会話", "由人工处理的对话"),
     ("Project workspaces", "Espaces de travail de projet", "Projektarbeitsbereiche", "プロジェクトのワークスペース", "项目工作区"),
     ("Your paired devices", "Vos appareils associés", "Ihre gekoppelten Geräte", "ペアリング済みのデバイス", "您已配对的设备"),
     ("Permission requests", "Demandes d’autorisation", "Berechtigungsanfragen", "権限のリクエスト", "权限申请"),

@@ -84,11 +84,14 @@ def test_built_in_packs_are_specialists_and_everything_else_is_an_agent():
 def test_saving_and_resetting_an_agent_writes_the_changelog(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
     monkeypatch.setattr("maverick.agent_publish_policy.require_passing_tests", lambda: False)  # changelog only, not the publish gate
-    r = client.post("/api/v1/agents/proc_po_chaser/override", json={"persona": "You are the strict PO Confirmation Chaser."})
-    assert r.status_code == 200, r.text
+    from .test_agents_editor import _publish
+
+    # Publishing a reviewed complete draft is the only way a definition changes.
+    r = _publish("proc_po_chaser", {"persona": "You are the strict PO Confirmation Chaser."}, reason="")
+    assert r.status_code == 200 and r.json()["confirmed"], r.text
     rows = changelog.entries("proc_po_chaser", include_workspace=False)
     assert rows and rows[0]["changes"] == ["Changed its instructions"]
-    generation = r.json()["generation"]
+    generation = client.get("/api/v1/agents/proc_po_chaser").json()["generation"]
     # A reset without the complete review changes nothing (#2529).
     bare = client.delete("/api/v1/agents/proc_po_chaser/override", params={"expected_generation": generation})
     assert bare.status_code == 409 and "Nothing was changed" in bare.text

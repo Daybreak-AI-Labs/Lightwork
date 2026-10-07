@@ -31,10 +31,16 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
+# External tool names are the agent's own: unrated in Lightwork, each keeps
+# the high refusal floor unless the operator rates it at enrollment.
+_RATED_TOOLS = ["crm_update:low", "research:low", "send_contract:high",
+                "wire_transfer", "fakecrm.read:low", "fakecrm.write:medium"]
+
+
 def _enroll(**kw):
     args = {"description": "quoting agent", "owner": "jordan@corp.test",
             "department": "sales", "max_risk": "medium", "max_dollars": 5.0,
-            "enrolled_by": "admin@corp.test"}
+            "enrolled_by": "admin@corp.test", "allow_tools": list(_RATED_TOOLS)}
     args.update(kw)
     return xa.enroll("sf-quotebot", "agentforce", **args)
 
@@ -596,7 +602,7 @@ def test_operator_tool_risk_floors_the_declared_risk():
     verdict = xa.screen("sf-quotebot", "send_contract", risk="low")
     assert verdict["rule"] == "approval_required"
     assert verdict["requires_approval"] is True
-    # Unrated tools keep the declared risk.
+    # Under this high ceiling, unrated tools keep the declared risk.
     assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
     # A rated tool above the agent's ceiling is denied outright.
     xa.enroll("low-bot", "bedrock", max_risk="low",
@@ -605,6 +611,17 @@ def test_operator_tool_risk_floors_the_declared_risk():
                      risk="low")["rule"] == "capability"
     with pytest.raises(xa.ExternalAgentsError, match="unknown risk"):
         xa.enroll("bad-bot", "bedrock", allow_tools=["x:apocalyptic"])
+
+
+def test_unrated_tools_need_an_operator_rating_under_a_medium_ceiling():
+    _enroll(allow_tools=["crm_update", "shell:low", "salesforce.write:low"])
+    # Unrated in Lightwork and at enrollment: the high floor refuses it even
+    # though the caller declares low risk.
+    assert xa.screen("sf-quotebot", "crm_update", risk="low")["rule"] == "capability"
+    # An enrollment rating never down-rates a name Lightwork already rates,
+    # nor a name whose namespace it rates.
+    assert xa.screen("sf-quotebot", "shell", risk="low")["rule"] == "capability"
+    assert xa.screen("sf-quotebot", "salesforce.write", risk="low")["rule"] == "capability"
 
 
 def test_monthly_budget_rolls_over_and_resets():

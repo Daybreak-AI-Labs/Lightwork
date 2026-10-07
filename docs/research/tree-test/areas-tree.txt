@@ -4,6 +4,7 @@ Ask
 		Task builder
 	Conversations
 		My conversations
+		Human conversations
 	Start from a template
 		Templates
 	My companion

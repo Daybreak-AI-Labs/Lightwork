@@ -124,6 +124,12 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
             self._cid = 1
             self._gid = 1
             self.created_goal = None
+        def latest_artifacts(self, goal_id):
+            return []  # the goal saved no output files
+
+        def open_channel_questions(self, conversation_id, owner, execution_principal):
+            return []  # no blocked question awaits a reply
+
         def get_or_create_conversation(self, channel, user_id):
             class C:
                 pass
@@ -140,7 +146,7 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
         def set_goal_status(self, *args, **kwargs):
             return None
         def get_goal(self, goal_id):
-            return type("Goal", (), {"result": "ok"})()
+            return type("Goal", (), {"result": "ok", "status": "done"})()
 
     captured = {}
     async def _fake_dispatch(*args, **kwargs):
@@ -163,7 +169,7 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
 
     import asyncio
     out = asyncio.run(srv._handle_message(_Msg()))
-    assert out == "ok"
+    assert _answer(out) == "ok"
     assert captured["channel"] == "telegram"
     assert captured["user_id"] == "telegram:42"
     assert world.created_goal == (
@@ -420,3 +426,10 @@ def test_skill_index_example_parses_as_json():
     skill = data["skills"][0]
     for required in ("name", "version", "summary", "source", "sha256", "triggers"):
         assert required in skill
+
+
+def _answer(reply):
+    """The goal's answer, without the agent-written label channels append (AI-2)."""
+    answer, label = reply.rsplit("\n\n", 1)
+    assert label.startswith("-- Written by an agent in Lightwork.")
+    return answer

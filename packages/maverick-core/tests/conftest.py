@@ -147,6 +147,29 @@ def local_audit_key_custody(monkeypatch):
         signing._reset_injected_keypair_cache()
 
 
+@pytest.fixture
+def signed_audit(monkeypatch, request):
+    """Sign this test's audit rows with a throwaway, test-scoped key.
+
+    Learning cycles accept only a signed, confirmed activity row as their
+    receipt (an unsigned row is not proof). The suite's legacy posture leaves
+    signing off, so tests that run a real cycle opt into the production
+    signing path here instead of stubbing the receipt away.
+    """
+    from maverick.audit import signing, writer
+
+    seed = f"maverick-signed-audit-test:{request.node.nodeid}".encode()
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(seed).hexdigest())
+    signing._reset_injected_keypair_cache()
+    monkeypatch.setattr(writer, "_default", None)
+    monkeypatch.setattr(writer, "_defaults", {})
+    try:
+        yield
+    finally:
+        signing._reset_injected_keypair_cache()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_root_logging():
     """Snapshot + restore the root logger around every test.

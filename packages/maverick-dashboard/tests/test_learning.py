@@ -272,8 +272,10 @@ def test_learning_page_renders_flow_autonomy_toggles_when_engine_on(tmp_path, mo
     _isolate(tmp_path, monkeypatch)
     reset_config_cache()
     t = client.get("/learning").text
-    assert 'id="lrn-auto-evolve"' in t and 'id="lrn-auto-apply"' in t
-    assert "Autonomous workflow self-improvement" in t
+    # Automatic undo is the only automatic control; suggestions wait for a
+    # complete human review, so there is no automatic-apply switch.
+    assert 'id="lrn-auto-evolve"' in t and 'id="lrn-auto-apply"' not in t
+    assert "Workflow improvements" in t and "Suggestions wait for complete review" in t
 
 
 def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch):

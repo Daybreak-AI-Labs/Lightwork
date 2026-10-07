@@ -354,6 +354,29 @@ def _read_connector_risks() -> dict[str, str]:
     return _READ_CONNECTOR_RISKS
 
 
+# Operator-provisioned read adapters the audited pack catalog names as
+# deployment prerequisites (``domain_prose_lint.ABSTRACT_ADAPTERS``, a ratchet).
+# They are deliberately rated, not unknown: each is a read seat a medium-ceiling
+# pack declares, so it keeps the medium rating it had before unrated names were
+# raised to the high refusal floor. Medium, never low: these seats can return
+# confidential records. An exact ``[security.tool_risk]`` override still wins,
+# so an operator whose adapter can do more rates it higher.
+_ABSTRACT_ADAPTER_RISK_LEVEL = "medium"
+_ABSTRACT_ADAPTERS: frozenset[str] | None = None
+
+
+def _abstract_adapter_names() -> frozenset[str]:
+    global _ABSTRACT_ADAPTERS
+    if _ABSTRACT_ADAPTERS is not None:
+        return _ABSTRACT_ADAPTERS
+    try:
+        from ..domain_prose_lint import ABSTRACT_ADAPTERS
+    except Exception:
+        return frozenset()  # not importable yet -- fail closed, retry next call
+    _ABSTRACT_ADAPTERS = frozenset(ABSTRACT_ADAPTERS)
+    return _ABSTRACT_ADAPTERS
+
+
 def risk_rank(level: str) -> int:
     """Rank of a risk level (0=low). Unknown levels rank as medium."""
     try:
@@ -408,6 +431,26 @@ def pinned_overrides():
         _PINNED_OVERRIDES.reset(token)
 
 
+@contextlib.contextmanager
+def reviewed_ratings(ratings: dict[str, str]):
+    """Apply operator-reviewed ratings for otherwise *unrated* names in the block.
+
+    An external agent's tool names are its own, so its enrollment carries the
+    operator's rating for each. Those ratings only fill the unrated high
+    floor; a name Lightwork (or ``[security.tool_risk]``) already classifies
+    keeps that classification, so an enrollment can never down-rate it.
+    """
+    base = _current_overrides(None)
+
+    extra = {name: level for name, level in (ratings or {}).items()
+             if level in RISK_LEVELS and tool_risk_is_unrated(name, base)}
+    token = _PINNED_OVERRIDES.set({**extra, **base})
+    try:
+        yield
+    finally:
+        _PINNED_OVERRIDES.reset(token)
+
+
 def _current_overrides(overrides: dict[str, str] | None) -> dict[str, str]:
     if overrides is not None:
         return overrides
@@ -456,6 +499,8 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
         return _read_connector_risks().get(name, "high")
     if name in _enterprise_connector_names():
         return "high"
+    if name in _abstract_adapter_names():
+        return _ABSTRACT_ADAPTER_RISK_LEVEL
     # A namespaced action (``salesforce.write``, ``servicenow.read``) inherits
     # its namespace's classification when it has none of its own -- UPWARD
     # ONLY, so a suffix never launders a high-risk connector into a lower
@@ -493,7 +538,23 @@ def tool_risk_is_classified(
         name.startswith("mcp_")
         or name in _read_connector_names()
         or name in _enterprise_connector_names()
+        or name in _abstract_adapter_names()
     )
+
+
+def tool_risk_is_unrated(
+    name: str, overrides: dict[str, str] | None = None,
+) -> bool:
+    """Whether ``name`` only carries the unrated high refusal floor.
+
+    A namespaced name (``salesforce.write``) inherits its namespace's rating
+    upward, so a classified namespace makes the name rated too.
+    """
+    name = str(name or "")
+    overrides = _current_overrides(overrides)
+    namespace = name.split(".", 1)[0]
+    return not (tool_risk_is_classified(name, overrides)
+                or (namespace != name and tool_risk_is_classified(namespace, overrides)))
 
 
 def tools_exceeding(

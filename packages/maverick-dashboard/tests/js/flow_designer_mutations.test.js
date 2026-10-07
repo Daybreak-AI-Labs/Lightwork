@@ -41,6 +41,9 @@ function fixture(fetchImpl) {
     commitRawFields() { return []; },
     toApiFlow() { return { ...context.rootFlow }; },
     FDCore: require("../../maverick_dashboard/templates/flow_designer_core.js"),
+    FDRecipeInputs: require("../../maverick_dashboard/templates/flow_designer_inputs.js"),
+    retireInFlight: false, undoStack: [], redoStack: [], pendingSnap: null, firstSaveHistory: null,
+    selected: null, renderProps() {},
     draftSnapshot() { return context.snapshot; },
     draftIsDirty() { return context.cleanDraft !== null && context.cleanDraft !== context.snapshot; },
     syncSaveButtons() {},
@@ -53,7 +56,8 @@ function fixture(fetchImpl) {
     fromApiFlow(flow) { painted.push(flow); context.rootFlow = flow; context.snapshot = JSON.stringify(flow); },
     load(...args) { loaded.push(args); },
     loadSuggestions() {}, loadSchema() {},
-    document: { getElementById(id) {
+    // The sliced source also registers the page's softening-handoff link listener.
+    document: { addEventListener() {}, getElementById(id) {
       if (id === "fd-sample") return context.sample;
       if (id === "fd-test-data") return context.testData;
       if (id === "fd-legend") return { classList: { add() {} } };
@@ -69,6 +73,11 @@ function fixture(fetchImpl) {
   const end = source.indexOf("  function runUrl(", start);
   assert.ok(start >= 0 && end > start);
   vm.runInNewContext(source.slice(start, end), context, { filename: "flow_designer.js" });
+  // The page-level record of an apply whose outcome could not be confirmed.
+  const applyStateStart = source.indexOf("  var unconfirmedApply = null;");
+  const applyStateEnd = source.indexOf("  var draftGeneration", applyStateStart);
+  assert.ok(applyStateStart >= 0 && applyStateEnd > applyStateStart);
+  vm.runInNewContext(source.slice(applyStateStart, applyStateEnd), context, { filename: "flow_designer.js" });
   for (const [first, next] of [["draft", "load"], ["applyProposal", "showHistory"]]) {
     const pattern = new RegExp("  (?:async )?function " + first + "\\(");
     const begin = source.search(pattern);
@@ -256,10 +265,23 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// Softening remains a direct action; hardening now opens a separate review.
-const proposal = { to_kind: "agent" };
+// Both directions now open a separate review of the exact replacement. A
+// hardening suggestion (agent step -> fixed action) still saves the canvas
+// first, so it carries the save/apply custody these tests check.
+const proposal = { node_id: "step", to_kind: "action", inferred_tool: "lookup" };
 function applied(overrides = {}) {
-  return { id: "flow", version: 3, node_id: "step", from_kind: "action", to_kind: "agent", ...overrides };
+  return { id: "flow", version: 3, node_id: "step", from_kind: "agent", to_kind: "action", ...overrides };
+}
+function reviewedBody(context) {
+  return { node_id: "step", to_kind: "action", tool: "lookup", params: {},
+    version: context.rootFlow.version, revision: context.rootFlow.revision };
+}
+function hardening(ui) {
+  const node = ui.context.rootFlow.nodes[0];
+  node.kind = "agent"; node.brief = "Look up the customer";
+  ui.context.proposals.step = proposal;
+  ui.context.LightworkFlowRewrite = { prepare: async () => reviewedBody(ui.context) };
+  return node;
 }
 function drafted(name) {
   return { flow: { id: "flow", name, start: "step", nodes: [{ id: "step", kind: "setvar" }] }, notes: [] };
@@ -268,7 +290,7 @@ function drafted(name) {
 test("Apply & track awaits its confirmed save and suppresses duplicate clicks until apply completes", async () => {
   const saveResult = deferred(), applyResult = deferred();
   const ui = fixture((url) => url.endsWith("/apply") ? applyResult.promise : saveResult.promise);
-  const proposalNode = ui.context.rootFlow.nodes[0];
+  const proposalNode = hardening(ui);
   const button = { disabled: false };
   const operation = ui.context.applyProposal(proposalNode, proposal, button);
   ui.context.applyProposal(proposalNode, proposal, button);
@@ -280,7 +302,7 @@ test("Apply & track awaits its confirmed save and suppresses duplicate clicks un
   assert.equal(ui.calls.length, 2);
   assert.equal(ui.calls[1][0], "/api/v1/flows/flow/apply");
   assert.deepEqual(JSON.parse(ui.calls[1][1].body), {
-    node_id: "step", to_kind: "agent", tool: "lookup", brief: "Lookup", version: 2, revision: "draft-2",
+    node_id: "step", to_kind: "action", tool: "lookup", params: {}, version: 2, revision: "draft-2",
   });
   ui.context.applyProposal(proposalNode, proposal, button);
   assert.equal(ui.calls.length, 2);
@@ -296,7 +318,7 @@ test("Apply & track awaits its confirmed save and suppresses duplicate clicks un
 
 test("Apply sends nothing after an unconfirmed save", async () => {
   const ui = fixture(async () => response({}));
-  const proposalNode = ui.context.rootFlow.nodes[0];
+  const proposalNode = hardening(ui);
   await ui.context.applyProposal(proposalNode, proposal);
   await turn();
   assert.equal(ui.calls.length, 1);
@@ -306,10 +328,10 @@ test("Apply sends nothing after an unconfirmed save", async () => {
 });
 
 for (const receipt of [null, {}, applied({ id: "other" }), applied({ node_id: "other" }),
-  applied({ from_kind: "agent" }), applied({ to_kind: "action" }), applied({ version: 2 })]) {
+  applied({ from_kind: "action" }), applied({ to_kind: "agent" }), applied({ version: 2 })]) {
   test(`Apply rejects an incomplete or mismatched receipt: ${JSON.stringify(receipt)}`, async () => {
     const ui = fixture(async (url) => response(url.endsWith("/apply") ? receipt : saved()));
-    const proposalNode = ui.context.rootFlow.nodes[0];
+    const proposalNode = hardening(ui);
     await ui.context.applyProposal(proposalNode, proposal);
     await turn();
     assert.equal(ui.calls.length, 2);
@@ -320,6 +342,27 @@ for (const receipt of [null, {}, applied({ id: "other" }), applied({ node_id: "o
     assert.equal(ui.context.applyInFlight, false);
   });
 }
+
+test("a softening suggestion keeps a dirty draft and reviews a clean one without a hidden save", async () => {
+  const ui = fixture(async (url) => response(url.endsWith("/apply") ? applied({ from_kind: "action", to_kind: "agent" }) : saved()));
+  const node = ui.context.rootFlow.nodes[0];
+  const softening = { node_id: "step", to_kind: "agent" };
+  let reviews = 0;
+  ui.context.LightworkFlowRewrite = { prepare: async () => {
+    reviews += 1;
+    return { node_id: "step", to_kind: "agent", tool: "lookup", brief: "Lookup", instructions: "Reviewed",
+      version: ui.context.rootFlow.version, revision: ui.context.rootFlow.revision };
+  } };
+  ui.context.cleanDraft = "saved draft";  // the canvas differs from its saved draft
+  await ui.context.applyProposal(node, softening);
+  assert.equal(ui.calls.length, 0);
+  assert.equal(reviews, 0);
+  assert.match(ui.messages.at(-1).message, /kept\. Save its current draft/);
+  ui.context.cleanDraft = ui.context.snapshot;
+  await ui.context.applyProposal(node, softening);
+  assert.equal(reviews, 1);
+  assert.deepEqual(ui.calls.map((call) => call[0]), ["/api/v1/flows/flow/apply"]);
+});
 
 test("a hardening suggestion applies only after reviewed parameter bindings", async () => {
   const ui = fixture(async (url) => response(url.endsWith("/apply")
@@ -344,7 +387,7 @@ test("a hardening suggestion applies only after reviewed parameter bindings", as
 test("a failed apply restores its control and shows the server's conflict message", async () => {
   const ui = fixture(async (url) => url.endsWith("/apply")
     ? response({ detail: "Flow changed; reload before applying." }, { ok: false }) : response(saved()));
-  const proposalNode = ui.context.rootFlow.nodes[0];
+  const proposalNode = hardening(ui);
   const button = { disabled: false };
   await ui.context.applyProposal(proposalNode, proposal, button);
   assert.equal(ui.calls.length, 2);
@@ -356,7 +399,7 @@ test("a failed apply restores its control and shows the server's conflict messag
 test("manual save and publish cannot interleave with an in-flight apply", async () => {
   const pending = deferred();
   const ui = fixture(async (url) => url.endsWith("/apply") ? pending.promise : response(saved()));
-  const proposalNode = ui.context.rootFlow.nodes[0];
+  const proposalNode = hardening(ui);
   const operation = ui.context.applyProposal(proposalNode, proposal);
   await turn();
   assert.equal(await ui.context.save(), false);
@@ -369,7 +412,7 @@ test("manual save and publish cannot interleave with an in-flight apply", async 
 test("Apply preserves canvas edits made while save is pending and does not apply an outdated proposal", async () => {
   const pending = deferred();
   const ui = fixture(() => pending.promise);
-  const proposalNode = ui.context.rootFlow.nodes[0];
+  const proposalNode = hardening(ui);
   const operation = ui.context.applyProposal(proposalNode, proposal);
   await turn();
   ui.context.snapshot = "newer canvas edits";
@@ -385,7 +428,7 @@ test("Apply preserves canvas edits made while save is pending and does not apply
 test("Apply keeps newer canvas edits instead of reloading over them after a confirmed receipt", async () => {
   const pending = deferred();
   const ui = fixture(async (url) => url.endsWith("/apply") ? pending.promise : response(saved()));
-  const proposalNode = ui.context.rootFlow.nodes[0];
+  const proposalNode = hardening(ui);
   const operation = ui.context.applyProposal(proposalNode, proposal);
   await turn();
   ui.context.snapshot = "newer canvas edits";

@@ -17,7 +17,7 @@ async function flush() {
   for (let i = 0; i < 5; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
 }
 
-test("both Agent Factory deploy paths open the exact team with its next action", async () => {
+test("both Agent Factory deploy paths open the exact team's reviewed setup", async () => {
   const dom = new JSDOM(`<div id="dept-roster"></div>
     <dialog id="dept-dialog">
       <span id="dept-dlg-avatar"></span><span id="dept-dlg-title"></span>
@@ -27,35 +27,40 @@ test("both Agent Factory deploy paths open the exact team with its next action",
       <p id="dept-dlg-msg" role="status"></p>
     </dialog>`, {url: "https://lightwork.test/agents", runScripts: "outside-only"});
   const w = dom.window;
-  w.document.getElementById("dept-dialog").showModal = () => {};
-  w.document.getElementById("dept-dialog").close = () => {};
+  let dialogOpen = false;
+  w.document.getElementById("dept-dialog").showModal = () => { dialogOpen = true; };
+  w.document.getElementById("dept-dialog").close = () => { dialogOpen = false; };
   w.mvConfirm = async () => true;
-  let deploys = 0;
+  const fetched = [];
   w.fetch = async url => {
-    if (String(url).endsWith("/deploy")) {
-      deploys += 1;
-      return {ok: true, status: 201, json: async () => ({
-        fleet: {name: "dept-sales-user_alice_83a5de"}, deployed_count: deploys === 1 ? 1 : 0,
-      })};
-    }
+    fetched.push(String(url));
     return {ok: true, json: async () => [{key: "sales", title: "Sales", entitled: true, members: ["sales_ops"]}]};
   };
   w.eval(source);
   await flush();
-
   const roster = w.document.getElementById("dept-roster");
+
+  // Without the team review loaded, neither path saves a team behind the person's back.
   roster.querySelector(".dep-deploy").click();
   await flush();
-  const cardLink = roster.querySelector(".dep-msg a");
-  assert.equal(cardLink.getAttribute("href"), "/fleets#team-dept-sales-user_alice_83a5de");
-  assert.match(cardLink.parentElement.textContent, /Team set up\. Give this team a task/);
-  assert.match(cardLink.className, /btn--primary/);
+  assert.match(roster.querySelector(".dep-msg").textContent, /team review could not load/);
+  assert.deepEqual(fetched, ["/api/v1/departments"]);
+
+  // Team setup now goes through the complete before-and-after review.
+  const opened = [];
+  w.LWDepartmentTeamUpdates = {open: async (key, origin) => { opened.push([key, origin]); }};
+  roster.querySelector(".dep-deploy").click();
+  await flush();
+  assert.deepEqual(opened.map(([key]) => key), ["sales"]);
+  assert.equal(opened[0][1], roster.querySelector(".dep-deploy"));
 
   roster.querySelector(".dep-details").click();
+  assert.equal(dialogOpen, true);
   w.document.getElementById("dept-dlg-deploy").click();
   await flush();
-  const dialogLink = w.document.querySelector("#dept-dlg-msg a");
-  assert.equal(dialogLink.getAttribute("href"), "/fleets#team-dept-sales-user_alice_83a5de");
-  assert.match(dialogLink.parentElement.textContent, /Team saved\. No specialist is ready to start\. Review team setup/);
+  assert.equal(dialogOpen, false, "the details dialog hands over to the team review");
+  assert.deepEqual(opened.map(([key]) => key), ["sales", "sales"]);
+  assert.equal(opened[1][1], roster.querySelector(".dep-details"), "focus returns to the team that was reviewed");
+  assert.deepEqual(fetched, ["/api/v1/departments"], "no team is deployed without its review");
   w.close();
 });

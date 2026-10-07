@@ -63,7 +63,7 @@ class _FakeResponse:
         self.url = "https://example.com/"
         self.headers = {"content-type": content_type}
 
-    def iter_bytes(self):
+    def iter_bytes(self, chunk_size=None):  # httpx signature
         yield self.content
 
     def __enter__(self):

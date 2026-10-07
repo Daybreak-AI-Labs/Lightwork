@@ -104,11 +104,8 @@ _RETRY_OWNERSHIP = {
         "run_sonnet_self_consistency_n8",
         "Anthropic",
     ): _INTENTIONAL_ONE_SHOT,
-    (
-        "packages/maverick-core/maverick/codec_probe.py",
-        "anthropic_counter",
-        "Anthropic",
-    ): _INTENTIONAL_ONE_SHOT,
+    # codec_probe.anthropic_counter now counts through the LLM's configured
+    # dispatch client (417d9da9) instead of constructing its own Anthropic().
     (
         "packages/maverick-core/maverick/health.py",
         "_check_anthropic",

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from maverick_dashboard.app import static_url
 
 PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
 _ORIGIN = {"Origin": "http://testserver"}
@@ -114,7 +115,7 @@ def _check_panel_tabs(html: str, page: _Page, path: str) -> int:
                 assert panel.get("aria-labelledby") == tab["id"], (path, label, controls)
                 assert ("hidden" in panel) == (tab is not selected[0]), (path, label, controls)
     if panel_lists:
-        assert '<script src="/static/lightwork-tabs.js" defer></script>' in html, path
+        assert f'<script src="{static_url("lightwork-tabs.js")}" defer></script>' in html, path
     return len(panel_lists)
 
 

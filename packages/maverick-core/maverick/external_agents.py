@@ -1329,9 +1329,14 @@ def _screen_admission(
     if mapped and (not req_risk
                    or risk_rank(mapped) > risk_rank(req_risk)):
         req_risk = mapped
-    decision = decide_inbound(
-        agent_id, requested_tools=[tool] if tool else (),
-        max_risk=req_risk or None, enforced=True)
+    # The capability gate rates the tool name too. An external tool unrated in
+    # Lightwork takes the operator's enrollment rating; without one it keeps
+    # the unrated high floor and is refused under a lower ceiling.
+    from .safety.tool_risk import reviewed_ratings
+    with reviewed_ratings({tool: mapped} if tool and mapped else {}):
+        decision = decide_inbound(
+            agent_id, requested_tools=[tool] if tool else (),
+            max_risk=req_risk or None, enforced=True)
     if not decision.allowed:
         record_denied(agent_id, decision, direction="inbound",
                       correlation_id=correlation)

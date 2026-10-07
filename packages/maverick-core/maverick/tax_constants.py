@@ -352,9 +352,28 @@ def apply_bundle(envelope: dict, *, trusted: list[str] | None = None,
 
 
 def _file_version(p: Path, *, trusted: list[str] | None = None) -> int:
+    """The downgrade floor: the applied bundle's version.
+
+    A bundle verified with the caller's keys is authoritative. Otherwise the
+    retained bundle still pins the floor (by today's configured keys, or by its
+    recorded version), so a key list that cannot verify the applied bundle
+    never reopens a downgrade to an older version.
+    """
     try:
         _, payload = _read_verified_bundle(p, trusted)
         return int(payload["version"])
+    except Exception:
+        pass
+    try:
+        _, payload = _read_verified_bundle(p)
+        return int(payload["version"])
+    except Exception:
+        pass
+    try:
+        with p.open("rb") as stream:
+            raw = stream.read(_MAX_BUNDLE_BYTES + 1)
+        version = json.loads(raw)["payload"]["version"]
+        return version if isinstance(version, int) and not isinstance(version, bool) and version > 0 else 0
     except Exception:
         return 0
 

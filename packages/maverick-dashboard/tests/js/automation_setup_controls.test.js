@@ -45,6 +45,10 @@ function fixture() {
       sessionStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) } } };
   context.el = (tag, cls, text = "") => { const e = new Element(tag); e.className = cls; e.textContent = text; return e; };
   context.window.mvFetchJSON = fetchHelpers(() => context.fetch).mvFetchJSON;  // the shell's helper, through this fetch
+  // Named connected sources (SharePoint, Salesforce...) have their own module and
+  // tests; these guided sources are the page's ordinary ones.
+  context.window.LwConnectedEventSource = { create: () => ({ isConnected: () => false, config() { return {}; }, render() {},
+    draft() { return {}; }, clear() {}, summary() { return ""; }, async retainOriginal() {}, async original() { return {}; } }) };
   vm.createContext(context);
   return { context, get, nodes, calls, events, storage, providers, reply };
 }
@@ -494,53 +498,96 @@ function loadOAuth(ui) {
   vm.runInContext(source.slice(start, end), ui.context);
 }
 
-function importFixture() {
-  const ui = fixture();
-  ui.context.loadSchedules = () => {}; ui.context.loadTriggers = () => {};
-  const original = ui.context.fetch;
-  ui.context.fetch = (url, options) => url === "/api/v1/import/sources" ? Promise.resolve(ui.reply({ sources: [{ source: "n8n", mode: "fetch" }] })) : original(url, options);
-  vm.runInContext(source.slice(source.indexOf("  var importForm ="), source.indexOf("  // ---- event triggers (")), ui.context);
-  return ui;
+// Imports moved to their own reviewed module: a chosen export is only read in
+// the browser, reviewed completely by the server, and saved as drafts after a
+// separate confirmation. Activation is never part of an import.
+async function importFixture(review) {
+  const { JSDOM } = require("jsdom");
+  const { shell } = require("./_shell");
+  const partial = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/_automation_imports.html"), "utf8")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const dom = new JSDOM("<!doctype html><body>" + partial + "</body>", { url: "https://app.example/automations", runScripts: "outside-only" });
+  const w = dom.window, calls = [];
+  w.HTMLElement.prototype.scrollIntoView = () => {};
+  const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+  w.fetch = async (url, options = {}) => {
+    calls.push({ url, method: options.method || "GET", body: options.body ? JSON.parse(options.body) : undefined });
+    if (url === "/api/v1/automation-imports") return json({ context: "ctx", enabled: true, connections: [], timezones: ["UTC"],
+      sources: [{ value: "n8n", label: "n8n", live: false }] });
+    if (url === "/api/v1/automation-imports/history") return json({ choices: [] });
+    if (url === "/api/v1/automation-imports/review") return review(json);
+    throw new Error("Unexpected request " + url);
+  };
+  shell(w);
+  w.eval(fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-automation-imports.js"), "utf8"));
+  const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(done => setImmediate(done)); };
+  await settle();
+  const d = w.document, file = d.getElementById("air-file");
+  async function choose(...files) {
+    Object.defineProperty(file, "files", { value: files, configurable: true });
+    file.dispatchEvent(new w.Event("change"));
+  }
+  function submit() { d.getElementById("air-form").dispatchEvent(new w.Event("submit", { cancelable: true })); }
+  d.getElementById("air-source").value = "n8n";
+  return { w, d, calls, settle, choose, submit, close: () => w.close() };
 }
+const reviewRows = [{ label: "Platform", after: "n8n" }, { label: "Automations", after: "Review" },
+  { label: "Drafts", after: "Saved as drafts only" }, { label: "Activation", after: "Schedules and starts stay off" }];
 
 test("choosing an export file prepares definitions without starting an import or changing activation choices", async () => {
-  const ui = importFixture(); await settle();
-  const file = ui.get("auto-import-file"); file.files = [{ size: 80, name: "workflows.json", text: async () => '[{"name":"Review","nodes":[]}]' }];
-  await file.listeners.change();
-  assert.match(ui.get("auto-import-file-msg").textContent, /Ready to import workflows.json \(1 automation\)/);
-  assert.equal(ui.get("auto-import-webhooks").checked, false); assert.equal(ui.get("auto-import-schedules").checked, false);
-  assert.equal(ui.calls.some(call => call.options?.method === "POST"), false);
-  let body; ui.context.fetch = async (_, options) => { body = JSON.parse(options.body); return ui.reply({ imported: [], dry_run: true }); };
-  await ui.get("auto-import-form").listeners.submit({ preventDefault() {} });
-  assert.deepEqual(body.definitions, [{ name: "Review", nodes: [] }]);
+  const ui = await importFixture(json => json({ context: "ctx", operation: "AIR-" + "a".repeat(32), token: "sealed", changes: reviewRows, existing: [] }));
+  await ui.choose({ size: 80, name: "workflows.json", text: async () => '[{"name":"Review","nodes":[]}]' });
+  await ui.settle();
+  assert.match(ui.d.getElementById("air-status").textContent, /Export selected/);
+  assert.equal(ui.calls.some(call => call.method === "POST"), false, "choosing a file submits nothing");
+  ui.submit(); await ui.settle();
+  const review = ui.calls.find(call => call.url.endsWith("/review"));
+  assert.equal(review.body.file_text, '[{"name":"Review","nodes":[]}]');
+  assert.equal(review.body.mode, "file");
+  assert.equal(Object.keys(review.body).some(key => /activat|schedule/.test(key)), false);
+  assert.match(ui.d.getElementById("air-review-box").textContent, /Schedules and starts stay off/);
+  assert.equal(ui.calls.some(call => call.url.endsWith("/apply")), false, "a review alone saves nothing");
+  ui.close();
 });
 
 test("an older file read cannot replace a newer file choice", async () => {
-  const ui = importFixture(); await settle(); let resolve;
-  const file = ui.get("auto-import-file"); file.files = [{ size: 80, name: "old.json", text: () => new Promise(done => { resolve = done; }) }];
-  const loading = file.listeners.change();
-  file.files = [{ size: 80, name: "new.json", text: async () => '{"name":"Newer"}' }];
-  await file.listeners.change();
-  resolve('{"name":"Old file"}'); await loading;
-  assert.match(ui.get("auto-import-file-msg").textContent, /new.json/);
+  const ui = await importFixture(json => json({ context: "ctx", operation: "AIR-" + "b".repeat(32), token: "sealed", changes: reviewRows, existing: [] }));
+  let resolve;
+  await ui.choose({ size: 80, name: "old.json", text: () => new Promise(done => { resolve = done; }) });
+  await ui.choose({ size: 80, name: "new.json", text: async () => '{"name":"Newer"}' });
+  await ui.settle();
+  resolve('{"name":"Old file"}'); await ui.settle();
+  ui.submit(); await ui.settle();
+  assert.equal(ui.calls.find(call => call.url.endsWith("/review")).body.file_text, '{"name":"Newer"}');
+  ui.close();
 });
 
 test("a file that is not an export blocks an accidental import", async () => {
-  const ui = importFixture(); await settle();
-  const file = ui.get("auto-import-file"); file.files = [{ size: 10, name: "broken.json", text: async () => "null" }];
-  await file.listeners.change();
-  assert.match(ui.get("auto-import-file-msg").textContent, /not an automation export/);
-  await ui.get("auto-import-form").listeners.submit({ preventDefault() {} });
-  assert.equal(ui.calls.some(call => call.options?.method === "POST"), false);
-  assert.match(ui.get("auto-import-results").textContent, /valid export/);
+  const ui = await importFixture(json => json({ detail: "This file is not an automation export from the chosen platform." }, 422));
+  await ui.choose({ size: 600000, name: "huge.json", text: async () => assert.fail("an oversized file is never read") });
+  await ui.settle();
+  assert.match(ui.d.getElementById("air-error").textContent, /no larger than 512 KB/);
+  ui.submit(); await ui.settle();
+  assert.equal(ui.calls.some(call => call.method === "POST"), false, "without a readable export nothing is sent");
+  await ui.choose({ size: 10, name: "broken.json", text: async () => "null" });
+  await ui.settle();
+  ui.submit(); await ui.settle();
+  assert.match(ui.d.getElementById("air-error").textContent, /not an automation export/);
+  assert.equal(ui.d.getElementById("air-review-box").textContent, "");
+  assert.equal(ui.calls.some(call => call.url.endsWith("/apply")), false);
+  ui.close();
 });
 
 test("import network failures release the submit control with a plain message", async () => {
-  const ui = importFixture(); await settle();
-  ui.context.fetch = async () => { throw new TypeError("Failed to fetch"); };
-  await ui.get("auto-import-form").listeners.submit({ preventDefault() {} });
-  assert.equal(ui.get("auto-import-form").querySelector().disabled, false);
-  assert.match(ui.get("auto-import-results").textContent, /Could not import these automations/);
+  const ui = await importFixture(() => { throw new TypeError("Failed to fetch"); });
+  await ui.choose({ size: 20, name: "workflows.json", text: async () => '{"name":"Review"}' });
+  await ui.settle();
+  ui.submit(); await ui.settle();
+  assert.equal(ui.d.getElementById("air-review").disabled, false);
+  const shown = ui.d.getElementById("air-error").textContent;
+  assert.ok(shown.length > 0);
+  assert.doesNotMatch(shown, /TypeError|Failed to fetch/);
+  ui.close();
 });
 
 function pending(overrides = {}) {

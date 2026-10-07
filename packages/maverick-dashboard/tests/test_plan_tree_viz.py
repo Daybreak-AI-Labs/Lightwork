@@ -10,6 +10,7 @@ that fetches /api/v1/goals/{id}/tree and polls it. These tests lock in:
 from __future__ import annotations
 
 import pytest
+from maverick_dashboard.app import static_url
 
 fastapi = pytest.importorskip("fastapi")
 TestClient = pytest.importorskip("fastapi.testclient").TestClient
@@ -46,7 +47,7 @@ def test_plan_page_renders_interactive_container_and_script(client, world_with_t
     # The interactive graph mount point.
     assert 'id="plan-tree"' in body
     # Cytoscape ships with the dashboard, using the unchanged version and SRI.
-    assert 'src="/static/cytoscape-3.30.2.min.js"' in body
+    assert f'src="{static_url("cytoscape-3.30.2.min.js")}"' in body
     assert "cdn.jsdelivr.net/npm/cytoscape" not in body
     assert "integrity=" in body and "sha384-" in body
     assert 'crossorigin="anonymous"' in body

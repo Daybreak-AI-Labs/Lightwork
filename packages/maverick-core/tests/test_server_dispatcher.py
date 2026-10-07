@@ -60,6 +60,7 @@ def test_channel_question_reaches_sender_and_reply_resumes_same_goal(
 
     monkeypatch.setattr(runner, "run_goal_in_background_async", dispatch)
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world, srv.llm, srv.sandbox, srv.max_depth = world, object(), object(), 3
     srv._shield = None
     try:
@@ -120,6 +121,7 @@ def test_channel_question_stays_with_authenticated_sender_and_thread(monkeypatch
 
     monkeypatch.setattr(runner, "run_goal_in_background_async", dispatch)
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world, srv.llm, srv.sandbox, srv.max_depth = world, object(), object(), 3
     srv._shield = None
     try:
@@ -195,6 +197,7 @@ def test_answer_to_queued_question_watches_same_goal_for_next_question(monkeypat
 
     monkeypatch.setattr(runner, "run_goal_in_background_async", queued)
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world, srv.llm, srv.sandbox, srv.max_depth = world, object(), object(), 3
     srv._shield = None
     first = ChannelMessage("slack", "C1", "U1", "Prepare report", "root-1")
@@ -244,6 +247,7 @@ def test_existing_slack_dm_question_keeps_legacy_conversation_key(monkeypatch, t
 
     monkeypatch.setattr(runner, "run_goal_in_background_async", dispatch)
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world, srv.llm, srv.sandbox, srv.max_depth = world, object(), object(), 3
     srv._shield = None
     try:
@@ -302,6 +306,7 @@ def test_channel_submission_uses_dispatcher_and_never_runs_locally(
     )
 
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world = world
     srv.llm = object()
     srv.sandbox = object()

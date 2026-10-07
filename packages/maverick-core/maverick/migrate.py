@@ -37,6 +37,9 @@ log = logging.getLogger(__name__)
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
     "conversation_inbox",
+    # [chat_message_actions] enabled: alternative conversation answers
+    # (maverick.chat_message_actions), changeable on All settings.
+    "chat_message_actions",
     "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.

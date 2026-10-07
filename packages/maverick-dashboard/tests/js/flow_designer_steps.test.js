@@ -23,6 +23,7 @@ function pageHtml(options = {}) {
     .replace(/\{\{[^}]*\}\}/g, "")
     .replace('{% include "flow_designer_core.js" %}', () => raw(read("flow_designer_core.js")))
     .replace('{% include "flow_designer_inputs.js" %}', () => raw(read("flow_designer_inputs.js")))
+    .replace('{% include "flow_designer_action_fields.js" %}', () => raw(read("flow_designer_action_fields.js")))
     .replace('{% include "flow_hardening_review.js" %}', () => raw(read("flow_hardening_review.js")))
     .replace('{% include "flow_designer.js" %}', () => raw(read("flow_designer.js")));
   return "<!doctype html><html><body><p id=\"fd-state\"></p>" + html + "</body></html>";
@@ -35,6 +36,17 @@ function open(options = {}) {
     beforeParse(window) {
       window.fetch = async (url, requestOptions) => {
         calls.push({ url, options: requestOptions });
+        if (url.startsWith("/api/v1/workflow-action-fields/")) {
+          // Each action's settings come from its own current field contract.
+          const tool = decodeURIComponent(url.slice("/api/v1/workflow-action-fields/".length));
+          const listed = [options.toolResponse ? options.toolResponse("") : null,
+            options.toolResponse ? options.toolResponse("offset=2") : null].flatMap((r) => (r ? r.tools : []));
+          const known = listed.concat([{ name: "slack_post_message", params: ["channel_id", "text"] }]);
+          const params = (known.find((item) => item.name === tool) || { params: [] }).params;
+          return { ok: true, status: 200, json: async () => ({ tool, revision: "fields-1", schema: {
+            type: "object", required: params,
+            properties: Object.fromEntries(params.map((key) => [key, { type: "string" }])) } }) };
+        }
         const body = url.startsWith("/api/v1/people/assignable") ? { items: [{ ref: "user:ana", label: "Ana Diaz" }] }
           : url.startsWith("/api/v1/flows/tools") ? (options.toolResponse ? options.toolResponse(url) : { tools: [{ name: "slack_post_message", description: "Post to Slack", params: ["channel_id", "text"], category: "chat" }], categories: ["chat"] })
           : url === "/api/v1/flows" ? { flows: [{ id: "onboard-customer", name: "Onboard a customer", inputs: [{ key: "customer_name", label: "Customer name" }] }] }
@@ -188,6 +200,7 @@ test("action browsing loads the next page without losing the selected action or 
     Array.from(doc.querySelectorAll("#fd-simple-body button")).find((b) => b.textContent === "Add step").click();
     const sel = doc.getElementById("fd-tool-select");
     sel.value = "slack_post_message"; sel.dispatchEvent(new w.Event("change"));
+    await settle();  // the chosen action's field contract loads before its boxes appear
     const textLabel = Array.from(doc.querySelectorAll("#fd-props label")).find((label) => label.textContent === "Text");
     const text = doc.getElementById(textLabel.htmlFor);
     text.value = "Keep this message"; text.dispatchEvent(new w.Event("input"));

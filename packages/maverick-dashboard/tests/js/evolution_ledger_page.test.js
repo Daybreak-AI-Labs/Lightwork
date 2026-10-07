@@ -47,7 +47,7 @@ test("history renders in plain words with fingerprints tucked away", async (t) =
   assert.ok(ui.doc.querySelector("#elv-entries details summary"));
   assert.equal(ui.doc.querySelector('#elv-entries a').getAttribute('href'),
     '/api/v1/audit/evolution-ledger/entries/' + 'a'.repeat(64) + '/receipt');
-  assert.match(ui.doc.getElementById("elv-limitations").textContent, /does not by itself prove who approved it/);
+  assert.match(ui.doc.getElementById("elv-limitations").textContent, /do not establish who created or approved a receipt/);
 });
 
 test("a failed load shows a plain sentence, not a status code", async (t) => {

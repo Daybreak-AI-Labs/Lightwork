@@ -58,7 +58,7 @@
     <div class="stat"><div class="num" id="trc-cycle">—</div><div class="label" id="trc-cycle-detail">Last collection</div></div>
   </section>
 
-  <div class="section-head"><h2>Sources</h2><button class="btn btn--primary" id="trc-source-new" type="button"{% if not trc_can_admin %} disabled{% endif %}>Add a source</button></div>
+  <div class="section-head"><h2>Sources</h2><button class="btn" id="trc-source-new" type="button"{% if not trc_can_admin %} disabled{% endif %}>Add a source</button></div>
   <section class="panel" id="trc-source-editor" hidden aria-labelledby="trc-source-editor-title">
     <h2 id="trc-source-editor-title" tabindex="-1">Connect evidence to your controls</h2>
     <p class="muted">Choose a saved account, the systems to check and the controls that need evidence. Saving creates a setup for a different administrator to approve. It does not start collection.</p>
@@ -84,7 +84,7 @@
       <label class="check" style="display:flex;gap:var(--space-2);align-items:flex-start;margin-top:var(--space-3)"><input type="checkbox" id="trc-source-background"><span>Allow this saved account to be used for these checks during future scheduled collections, after separate approval and Start collecting.</span></label>
       <p id="trc-source-form-status" role="status" aria-live="polite"></p>
       <div class="trc-actions" style="margin-top:var(--space-3)">
-        <button class="btn btn--primary" id="trc-source-prepare" type="submit" disabled>Review complete setup</button>
+        <button class="btn" id="trc-source-prepare" type="submit" disabled>Review complete setup</button>
         <button class="btn" id="trc-source-close" type="button">Close and keep entered choices</button>
       </div>
     </form>
@@ -95,7 +95,7 @@
       <p id="trc-source-review-expiry" class="muted"></p>
       <label class="check" style="display:flex;gap:var(--space-2);align-items:flex-start"><input type="checkbox" id="trc-source-confirm"><span>I reviewed this complete setup and its consequences.</span></label>
       <div class="trc-actions" style="margin-top:var(--space-3)">
-        <button class="btn btn--primary" id="trc-source-save" type="button" disabled>Save setup for approval</button>
+        <button class="btn" id="trc-source-save" type="button" disabled>Save setup for approval</button>
         <button class="btn" id="trc-source-edit" type="button">Keep editing</button>
       </div>
     </section>

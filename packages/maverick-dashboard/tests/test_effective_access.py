@@ -278,9 +278,10 @@ def test_specialist_access_names_the_editor_setting_and_spending(client, monkeyp
     name = _clean_builtin_name()
     current = client.get(f"/api/v1/agents/{name}").json()
     policy = {**current["autonomy"]["pack"], "default": "request", "high": "suggest", "onboarding": True}
-    saved = client.post(f"/api/v1/agents/{name}/override", json={
-        "expected_generation": current["generation"], "autonomy": policy})
-    assert saved.status_code == 200, saved.text
+    from .test_agents_editor import _publish
+
+    saved = _publish(name, {"autonomy": policy}, app=client)
+    assert saved.status_code == 200 and saved.json()["confirmed"], saved.text
     spending_limits.set_workspace_limit("300", "month", actor="user:cfo@corp.com")
     page = client.get(f"/agents?name={name}").text
     panel = visible_text(page).split("Check access", 1)[1].split("Tasks it works on also count", 1)[0]
@@ -345,7 +346,12 @@ def test_outside_agent_tiers_match_what_screening_answers(outside, ceiling):
     assert report["blocked"] == ["delete_record"]
     # One action the catalog rates at each risk, so the tool ceiling and the
     # risk ceiling agree on what the tier means.
-    rated = {"low": "read_file", "medium": "send_email", "high": "write_file"}
+    # (An unrated name such as send_email is not medium: it takes the high
+    # refusal floor, so the medium tier uses a deliberately medium-rated tool.)
+    rated = {"low": "read_file", "medium": "kv_memory", "high": "write_file"}
+    from maverick.safety.tool_risk import tool_risk
+    assert {risk: tool_risk(tool, overrides={}) for risk, tool in rated.items()} == {
+        "low": "low", "medium": "medium", "high": "high"}
     for tier in report["tiers"]:
         verdict = outside.screen("sf-quotebot", rated[tier["risk"]], risk=tier["risk"])
         expected = ("auto" if verdict["allowed"]

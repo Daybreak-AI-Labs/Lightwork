@@ -447,6 +447,12 @@ def _legacy_mutation(request, kind, body, pilot="", case=""):
         if not original["confirmed"]:
             raise HTTPException(503, "The original change is not confirmed. Check current records; it was not repeated.")
         original_native(request, kind, operation, pilot, case, prepared={"values": values})
+        if kind == "review":
+            # Reading an independent review's receipt still requires current
+            # access to every source it judged, exactly like its review packet.
+            row = outcome_pilots.STORE.get(pilot) or {"cases": []}
+            for item in row["cases"]:
+                outcome_pilot_sources.resolve(request, item["kind"], item["reference"], independent_review=True)
     else:
         prepared = prepare_native(request, {"kind": kind, "pilot": pilot, "case": case, "values": values})
         original = execute_native(request, prepared, operation)

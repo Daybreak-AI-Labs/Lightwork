@@ -29,7 +29,11 @@ def env(tmp_path, monkeypatch):
     from maverick_dashboard import api, auth
     api._world_cache.clear()
     monkeypatch.setattr(auth, "caller_principal", lambda request: ANA)
+    from maverick_dashboard import app as app_module
     from maverick_dashboard.app import app
+
+    # The chat page reads the signed-in person through its own import.
+    monkeypatch.setattr(app_module, "caller_principal", lambda request: ANA)
     yield TestClient(app, headers={"Origin": "http://testserver"}), world
     world.close()
     api._world_cache.clear()

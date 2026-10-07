@@ -25,8 +25,9 @@ def _seed(tmp_path, monkeypatch):
 
 
 def test_spend_human_output(tmp_path, monkeypatch):
-    _seed(tmp_path, monkeypatch)
-    r = CliRunner().invoke(main, ["spend"])
+    db = _seed(tmp_path, monkeypatch)
+    # The CLI reports on the Workspace database; point it at the seeded file.
+    r = CliRunner().invoke(main, ["--db", str(db), "spend"])
     assert r.exit_code == 0, r.output
     assert "Total spend" in r.output
     assert "$0.2500" in r.output
@@ -34,8 +35,8 @@ def test_spend_human_output(tmp_path, monkeypatch):
 
 
 def test_spend_json_is_machine_readable(tmp_path, monkeypatch):
-    _seed(tmp_path, monkeypatch)
-    r = CliRunner().invoke(main, ["spend", "--json"])
+    db = _seed(tmp_path, monkeypatch)
+    r = CliRunner().invoke(main, ["--db", str(db), "spend", "--json"])
     assert r.exit_code == 0, r.output
     data = json.loads(r.output)
     assert {"total", "by_goal", "by_tag", "tag_field"} <= set(data)
@@ -49,7 +50,7 @@ def test_spend_empty_world_ok(tmp_path, monkeypatch):
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     world_model.WorldModel(db).close()
-    r = CliRunner().invoke(main, ["spend"])
+    r = CliRunner().invoke(main, ["--db", str(db), "spend"])
     assert r.exit_code == 0, r.output
     assert "no priced episodes" in r.output.lower()
 

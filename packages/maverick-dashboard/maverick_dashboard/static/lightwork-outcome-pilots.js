@@ -64,7 +64,12 @@
         : (r.status === 422 || r.status === 400 ? 'Some of the details need fixing. Check what you entered and try again.' : 'That could not be completed. Try again.');
       const error = new Error(message); error.status = r.status; throw error;
     }
-    if (data.context !== context) { clearAuthority(); const error = new Error('The account or workspace changed. Reload this page.'); error.status = 409; throw error; }
+    if (data.context !== context) {
+      // Clearing authority cancels the waiting work, so say why here; the
+      // cancelled caller can no longer report it.
+      clearAuthority(); const error = new Error('The account or workspace changed. Reload this page.'); error.status = 409;
+      status.textContent = error.message; throw error;
+    }
     return data;
   }
   function controls(disabled) {

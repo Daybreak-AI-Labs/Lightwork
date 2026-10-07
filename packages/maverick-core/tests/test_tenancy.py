@@ -270,6 +270,12 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
             self.seen_tenants = []
             self.created_goal = None
 
+        def latest_artifacts(self, goal_id):
+            return []  # the goal saved no output files
+
+        def open_channel_questions(self, conversation_id, owner, execution_principal):
+            return []  # no blocked question awaits a reply
+
         def get_or_create_conversation(self, channel, user_id):
             self.seen_tenants.append(current_tenant())
             self.conversation_key = (channel, user_id)
@@ -293,7 +299,7 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
 
         def get_goal(self, goal_id):
             self.seen_tenants.append(current_tenant())
-            return type("Goal", (), {"result": "ok"})()
+            return type("Goal", (), {"result": "ok", "status": "done"})()
 
     captured = {}
 
@@ -318,14 +324,17 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
         principal_id = "UALICE"
         text = "hello"
 
-    assert asyncio.run(srv._handle_message(_RoomMessage())) == "ok"
+    assert _answer(asyncio.run(srv._handle_message(_RoomMessage()))) == "ok"
     assert world.conversation_key == ("slack", "UALICE")
     assert captured["kwargs"]["user_id"] == "slack:UALICE"
     assert captured["tenant"] == "slack%3AUALICE"
     assert world.created_goal == (
         "hello", "hello", "user:slack:UALICE", "user:slack:UALICE",
     )
-    assert world.seen_tenants == ["slack%3AUALICE"] * 4
+    # Every world read/write (conversation, turn, goal, status and the reply's
+    # result reads) happens inside the authenticated principal's tenant.
+    assert len(world.seen_tenants) >= 4
+    assert set(world.seen_tenants) == {"slack%3AUALICE"}
     assert world.turn_goal_id == 7
     assert current_tenant() is None
 
@@ -347,6 +356,12 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
             self.seen_tenants = []
             self.created_goal = None
 
+        def latest_artifacts(self, goal_id):
+            return []  # the goal saved no output files
+
+        def open_channel_questions(self, conversation_id, owner, execution_principal):
+            return []  # no blocked question awaits a reply
+
         def get_or_create_conversation(self, channel, user_id):
             self.seen_tenants.append(("conversation", current_tenant()))
             return type("Conversation", (), {"id": 1})()
@@ -367,7 +382,7 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
 
         def get_goal(self, goal_id):
             self.seen_tenants.append(("result", current_tenant()))
-            return type("Goal", (), {"result": "ok"})()
+            return type("Goal", (), {"result": "ok", "status": "done"})()
 
     def _sqlite_must_not_open(_tenant):
         raise AssertionError("configured Postgres path opened a tenant SQLite world")
@@ -391,12 +406,14 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
         principal_id = "UALICE"
         text = "hello"
 
-    assert asyncio.run(srv._handle_message(_Message())) == "ok"
+    assert _answer(asyncio.run(srv._handle_message(_Message()))) == "ok"
     expected_tenant = "slack%3AUALICE"
     assert world.seen_tenants == [
         ("conversation", expected_tenant),
         ("goal", expected_tenant),
         ("turn", expected_tenant),
+        ("result", expected_tenant),
+        # The reply re-reads the finished goal to attach its saved output.
         ("result", expected_tenant),
     ]
     assert world.turn_goal_id == 7
@@ -449,3 +466,10 @@ def test_lazy_skill_distillation_store_follows_active_tenant(monkeypatch, tmp_pa
         assert path_b.parent == tmp_path / "tenants" / "tenant-b" / "learned-skills"
         assert distillation_v2.signatures_from_store()
         assert not (tmp_path / "tenants" / "tenant-b" / "learned-skills" / "missing.md").exists()
+
+
+def _answer(reply):
+    """The goal's answer, without the agent-written label channels append (AI-2)."""
+    answer, label = reply.rsplit("\n\n", 1)
+    assert label.startswith("-- Written by an agent in Lightwork.")
+    return answer

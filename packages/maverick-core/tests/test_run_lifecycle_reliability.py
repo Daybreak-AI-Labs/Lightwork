@@ -91,7 +91,8 @@ async def test_exception_and_cancel_close_every_started_episode(
         monkeypatch.setattr("maverick.orchestrator.start_mcp_clients", fail)
     with pytest.raises(error):
         await run_goal(ctx.llm, ctx.world, ctx.budget, ctx.goal_id, sandbox=ctx.sandbox)
-    assert ctx.world.get_goal(ctx.goal_id).status == ("cancelled" if cancel else "blocked")
+    # An unexpected error marks the goal failed (2182ba8e); a cancel stays cancelled.
+    assert ctx.world.get_goal(ctx.goal_id).status == ("cancelled" if cancel else "failed")
     episode, = ctx.world.list_episodes(goal_id=ctx.goal_id)
     assert episode.ended_at is not None
     assert episode.outcome == ("interrupted" if cancel else "failure")

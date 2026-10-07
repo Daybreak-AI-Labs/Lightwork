@@ -277,7 +277,7 @@ def test_configured_profiles_reach_the_live_policy(monkeypatch):
     import maverick.compliance_profiles as cpmod
     monkeypatch.setattr(cpmod, "configured_profiles", lambda *_a, **_k: ["gdpr"])
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
-    monkeypatch.setattr("maverick.config.config_source_errors", dict)
+    monkeypatch.setattr("maverick.config.config_source_errors", lambda *a, **k: {})
     pol = Policy.from_config()
     assert evaluate("email", policy=pol).decision == Decision.REQUIRE_HUMAN
 
@@ -477,6 +477,7 @@ async def test_autonomy_replacement_preserves_governance_profile_snapshot(
             decision="deny",
             reason="restricted rung",
             level=SimpleNamespace(value="restricted"),
+            execute_by="agent",
         ),
     )
     observed = []

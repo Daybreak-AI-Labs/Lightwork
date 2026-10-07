@@ -45,7 +45,7 @@ def test_page_is_a_set_of_record_lists_in_plain_words(
     for host in ("tpi-sources", "tpi-vendors", "tpi-runs", "tpi-policies", "tpi-decisions",
                  "tpi-cases", "tpi-monitors", "tpi-alerts", "tpi-consents"):
         assert f'id="{host}"' in page
-    for label in ("Add a data source", "Add a vendor", "New risk policy",
+    for label in ("Add a data source", "Add a vendor", "Create risk policy",
                   "Send waiting alerts now", "See what partners shared", "Delete expired records"):
         assert label in page
     # No operation consoles, JSON boxes, sample ids or confirm() walls.

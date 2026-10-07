@@ -319,10 +319,7 @@
     function loadTools() {
       // The shared loading state (lightwork-ui.js, loaded at the end of the page).
       var toolWait = window.mvLoading(toolList, {text: 'Loading tools…'});
-      fetch('/api/v1/tools', {credentials: 'same-origin'}).then(function (r) {
-        if (!r.ok) throw r;
-        return r.json();
-      }).then(async function (data) { await toolWait.done(); renderTools((data && data.tools) || []); }).catch(async function (e) {
+      window.mvFetchJSON('/api/v1/tools', {}, 'load the list of tools').then(async function (data) { await toolWait.done(); renderTools((data && data.tools) || []); }).catch(async function (e) {
         await toolWait.done();
         toolList.textContent = '';
         var p = document.createElement('p');

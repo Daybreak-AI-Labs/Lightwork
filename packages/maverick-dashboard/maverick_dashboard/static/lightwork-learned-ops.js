@@ -22,7 +22,7 @@
   function loadPlan() {
     J.request(API + '/plan').then(function (d) {
       var parts = [d.enabled ? 'Self-coaching is on.' : 'Self-coaching is off. Some tools below need it on: turn on ' + d.places.self_coaching + '.'];
-      parts.push(d.test_cases_set_up ? '' : 'Test cases are not set up yet. Use Self-coaching questions below to choose Lightwork’s managed location.');
+      parts.push(d.test_cases_set_up ? '' : 'Test cases are not set up yet. Use Learning questions below to choose Lightwork’s managed location.');
       parts.push(d.spending_limit != null ? 'Testing can spend up to ' + J.money(d.spending_limit) + ' per run.' : '');
       say('lpo-plan', parts.filter(Boolean).join(' '));
       addOptions($('lpo-clash-model'), d.models);

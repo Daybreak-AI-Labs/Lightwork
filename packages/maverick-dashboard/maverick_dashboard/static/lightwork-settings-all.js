@@ -468,7 +468,10 @@
       announce(done ? (done === 1 ? '1 setting saved.' : done + ' settings saved.') + (result.data.restart ? ' Check configuration status below for the services that need a restart.' : '') : '');
       updateFilter();
     } catch (failure) {
-      var text2 = errorText(failure, action);
+      // A refused review (a lock-out, say) carries the server's own sentence,
+      // as a refused save does above.
+      var told = failure && failure.data && typeof failure.data.message === 'string' ? failure.data.message : '';
+      var text2 = told || errorText(failure, action);
       busyRows.forEach(function (row) { say(row, text2); });
     } finally {
       root.dataset.saving = '0';

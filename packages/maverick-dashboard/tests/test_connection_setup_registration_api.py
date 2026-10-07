@@ -26,7 +26,7 @@ def client(tmp_path, monkeypatch):
     rbac.set_tenant_role("tenant-a", "user:customer", "admin")
     rbac.set_tenant_role("tenant-b", "user:customer", "admin")
     monkeypatch.setattr(connection_oauth, "_post_token", lambda *a: pytest.fail("Unexpected provider request"))
-    monkeypatch.setattr(connection_oauth, "_provider_identity", lambda provider, token: {
+    monkeypatch.setattr(connection_oauth, "_provider_identity", lambda provider, token, **_identity_inputs: {
         "provider": provider, "subject": "registration-fixture-account",
         "display_name": "Registration Fixture", "email": "registration@example.test",
         "email_verified": True, "hosted_domain": "example.test",

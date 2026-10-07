@@ -4,6 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {JSDOM}=require("jsdom");
 const {shell} = require('./_shell');
+const {reviewedSaving} = require('./_settings_review');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<20;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -41,10 +42,11 @@ function stateFor(id,over){
   return {groups:[{settings:[Object.assign({id,value:null,value_text:"x",source:"here",source_text:"Set here"},over||{})]}]};
 }
 
-async function page(handler){
+async function page(handler,warnings){
   const dom=new JSDOM(HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[],confirms=[];
   w.mvConfirm=async message=>{confirms.push(message);return true;};
+  reviewedSaving(w,{confirms,warnings});
   w.mvErrorText=(failure,action)=>"Could not "+action+".";
   w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{
@@ -64,7 +66,8 @@ test("saving one setting sends its value and shows where it now comes from",asyn
   try{
     row(ui,"safety.profile").querySelector("select").value="strict";
     await click(row(ui,"safety.profile").querySelector("[data-save]"));
-    assert.deepEqual(ui.calls[0].body,{changes:[{id:"safety.profile",value:"strict"}],confirm:false});
+    // Sent once, after the complete review, with the review's sealed token.
+    assert.deepEqual(ui.calls[0].body,{changes:[{id:"safety.profile",value:"strict"}],reviewed_token:"sealed-review",confirm:true});
     assert.equal(ui.calls[0].url,"/api/v1/settings/catalog");
     assert.equal(row(ui,"safety.profile").querySelector("[data-value-text]").textContent,"Strict");
     assert.equal(row(ui,"safety.profile").querySelector("[data-source-text]").textContent,"Set here");
@@ -72,16 +75,16 @@ test("saving one setting sends its value and shows where it now comes from",asyn
   }finally{ui.dom.window.close();}
 });
 
-test("a weakening change asks first and resends with the confirmation",async()=>{
-  const ui=await page((url,body)=>body.confirm
-    ?reply(200,{changed:["safety.profile"],...stateFor("safety.profile",{value:"off"})})
-    :reply(409,{detail:"confirmation required",confirm:[{id:"safety.profile",label:"Safety level",warning:"Agents will be screened less strictly."}]}));
+test("a weakening change shows its warning in the review before anything is sent",async()=>{
+  const weaker=changes=>changes.some(c=>c.id==="safety.profile"&&c.value==="off")
+    ?[{label:"Safety level",warning:"Agents will be screened less strictly."}]:[];
+  const ui=await page(()=>reply(200,{changed:["safety.profile"],...stateFor("safety.profile",{value:"off"})}),weaker);
   try{
     row(ui,"safety.profile").querySelector("select").value="off";
     await click(row(ui,"safety.profile").querySelector("[data-save]"));
     assert.equal(ui.confirms.length,1);
     assert.match(ui.confirms[0],/Safety level: Agents will be screened less strictly/);
-    assert.equal(ui.calls.length,2);assert.equal(ui.calls[1].body.confirm,true);
+    assert.equal(ui.calls.length,1);assert.equal(ui.calls[0].body.confirm,true);
   }finally{ui.dom.window.close();}
 });
 
@@ -188,6 +191,7 @@ async function formsPage(handler){
   const dom=new JSDOM(FORMS,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[],confirms=[];
   w.mvConfirm=async message=>{confirms.push(message);return true;};
+  reviewedSaving(w,{confirms});
   w.mvErrorText=(failure,action)=>"Could not "+action+".";
   w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{

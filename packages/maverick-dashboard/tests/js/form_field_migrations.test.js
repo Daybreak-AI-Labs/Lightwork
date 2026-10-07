@@ -123,8 +123,11 @@ test("Spending limits: raising or removing a limit says the amount and the butto
 
 function scheduleForm() {
   const source = template("automations.html");
+  // The page's "check the original schedule creation" panel, then the form.
+  const panel = source.indexOf('<section class="auto__section panel auto__original" id="auto-create-original"');
   const start = source.indexOf('<details id="auto-new-sched"');
-  return source.slice(start, source.indexOf("</details>\n  </section>", start) + "</details>".length)
+  return (source.slice(panel, source.indexOf("</section>", panel) + "</section>".length) +
+    source.slice(start, source.indexOf("</details>\n  </section>", start) + "</details>".length))
     .replace(/{%[^%]*%}/g, "").replace(/{{[^}]*}}/g, "1");
 }
 function schedulePage(responses, setup) {
@@ -140,7 +143,12 @@ function schedulePage(responses, setup) {
     if (setup) setup(win);
   })};
 }
-const OPTIONS = {workflows: [{name: "weekly-report", title: "Weekly report", params: ["team"]}], tasks: [], zones: ["UTC"]};
+const SCHEDULE_CONTEXT = "c".repeat(64);
+const OPTIONS = {context: SCHEDULE_CONTEXT, workflows: [{name: "weekly-report", title: "Weekly report", params: ["team"]}], tasks: [], zones: ["UTC"]};
+// Creating a schedule shows a complete review first; only Create reviewed
+// schedule sends the exact reviewed request.
+const REVIEW = {context: SCHEDULE_CONTEXT, title: "Monday digest", work: "Weekly report", inputs: {team: "Support"},
+  next_runs: [1790000000], notice: "Nothing runs until the first time shown.", reference: "r".repeat(32), operation: "o".repeat(32)};
 const picker = fs.readFileSync(path.join(root, "static/lightwork-schedule-picker.js"), "utf8");
 
 test("Automations: create a schedule ties each missing answer to its field and keeps them on a failed request", async () => {
@@ -163,7 +171,8 @@ test("Automations: create a schedule ties each missing answer to its field and k
   doc.getElementById("auto-new-title").value = "Monday digest";
   form.requestSubmit();
   await tick(); await tick();
-  assert.ok(calls.some(c => c.url.includes("/schedules/add")));
+  assert.ok(calls.some(c => c.url.includes("/schedules/create-review")));
+  assert.equal(calls.some(c => c.url.includes("/schedules/add")), false, "nothing is created before its review");
   const summary = doc.querySelector("[data-mv-error-summary]:not([hidden])");
   assert.match(summary.textContent, /could not be reached/);
   assert.match(summary.textContent, /What you entered is still here/);
@@ -174,7 +183,9 @@ test("Automations: create a schedule ties each missing answer to its field and k
 
 test("Automations: what was typed comes back after a reload and is forgotten once the schedule is created", async () => {
   const stored = JSON.stringify({at: Date.now(), values: {what: ["workflow"], "auto-new-workflow": "weekly-report", "auto-new-param-0": "Support", "auto-new-title": "Monday digest"}});
-  const {w} = schedulePage(url => url.includes("options") ? OPTIONS : url.includes("preview") ? {next_runs: []} : {next_run: 1790000000},
+  const {w} = schedulePage(url => url.includes("options") ? OPTIONS : url.includes("preview") ? {next_runs: []}
+    : url.includes("create-review") ? REVIEW
+    : {context: SCHEDULE_CONTEXT, found: true, title: "Monday digest", message: "Schedule created.", execution: "It first runs on its next time."},
     win => win.sessionStorage.setItem("mv-keep:automation-schedule", stored));
   w.eval(picker);
   const doc = w.document;
@@ -186,7 +197,12 @@ test("Automations: what was typed comes back after a reload and is forgotten onc
   assert.equal(doc.getElementById("auto-new-param-0").value, "Support");
   doc.getElementById("auto-new-form").requestSubmit();
   await tick(); await tick();
-  assert.match(doc.getElementById("auto-new-preview").textContent, /Schedule created/);
+  assert.equal(doc.getElementById("auto-new-review").hidden, false);
+  assert.match(doc.getElementById("auto-new-review-values").textContent, /Support/);
+  assert.notEqual(w.sessionStorage.getItem("mv-keep:automation-schedule"), null, "kept until the reviewed creation");
+  doc.getElementById("auto-new-confirm").click();
+  await tick(); await tick();
+  assert.match(doc.getElementById("auto-create-original-message").textContent, /Schedule created/);
   assert.equal(w.sessionStorage.getItem("mv-keep:automation-schedule"), null);
   w.close();
 });

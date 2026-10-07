@@ -226,5 +226,5 @@ test("schema rejects extra fields, duplicates, invalid digests and oversized inp
   assert.throws(() => api.parseItems(JSON.stringify([{
     item_id: "export-1", profile_id: "profile-1", receipt_limit: 501,
   }]), "export_receipts"), /1 to 500/);
-  assert.throws(() => api.parseItems(" ".repeat(api.MAX_JSON_INPUT_BYTES + 1), "export_receipts"), /48 KiB/);
+  assert.throws(() => api.parseItems(" ".repeat(api.MAX_JSON_INPUT_BYTES + 1), "export_receipts"), /too much detail for one submission/);
 });

@@ -1505,7 +1505,7 @@
           isCurrent:function () { var now = playbookPayload(); delete now.expected_generation; return current === pbDecisionGeneration && pbName.value.trim() === name && JSON.stringify(now) === binding; },
           onSaved:function (result, handoff) {
             setStatus('The complete draft is saved. The active agent is unchanged.');
-            var link = document.createElement('a'); link.className = 'btn btn--primary'; link.textContent = 'Open this draft in Agent Factory to review Publish';
+            var link = document.createElement('a'); link.className = 'btn'; link.textContent = 'Open this draft in Agent Factory to review Publish';
             link.href = '/agents?' + (handoff.newAgent ? 'new=1' : 'name=' + encodeURIComponent(name)) + '&specialist_draft=' + encodeURIComponent(result.draft || ('SPD-' + result.operation)) + '#specialist-drafts';
             pbDecisionReview.appendChild(link);
             if (recovery) recovery.changed();

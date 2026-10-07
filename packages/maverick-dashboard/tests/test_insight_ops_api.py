@@ -219,6 +219,8 @@ def test_spend_replay_and_task_pages_carry_the_new_controls(client):
     assert "Check this task's health" in text and "Run code for this task" in text
     assert "lightwork-insight-ops.js" in task and "lightwork-code-sandbox.js" in task
     for page, marker, end in ((spend, 'id="io-ask-title"', "</section>"), (replay, 'id="io-steps-title"', "</section>"),
-                              (task, '<div class="task-ops">', 'id="halt-card"')):
+                              # The task controls (health check, code sandbox) now sit after the
+                              # stop card, just before the reply composer.
+                              (task, '<div class="task-ops">', 'id="composer"')):
         start = page.index(marker)
         assert developer_terms("<main>" + page[start:page.index(end, start)] + "</main>") == []

@@ -184,18 +184,40 @@ test("deleting waiting outlines confirms the consequence", async (t) => {
   assert.match(ui.doc.getElementById("lo-dn-status").textContent, /Deleted 2 outlines/);
 });
 
-test("the agent-building preview lists guidance in a table", async (t) => {
-  const ui = await fixture(LEARNING(), [learning]);
+test("agent-building suggestions are chosen one at a time before any comparison", async (t) => {
+  // Improve how new agents are built: current suggestions, one chosen with the
+  // agents it was reported for, and nothing compared without consent.
+  const catalog = { context: CONTEXT, revision: "rev-f", model: "Claude X", enabled: true, requests: [],
+    notice: "Suggestions come from recorded corrections.",
+    corrections: [{ key: "k1", guidance: "Add a deny list.", why: "Seen in 3 agents.", supported: true, packs: ["invoice_clerk", "ap_bot"] },
+      { key: "k2", guidance: "Rarely seen idea.", why: "Seen in 1 agent.", supported: false, packs: [] }] };
+  const ui = await fixture(LEARNING(), [learning], { answers: { "/api/v1/learning-ops/factory/catalog": catalog } });
   t.after(() => ui.window.close());
-  ui.doc.getElementById("lo-fa-preview").click();
+  const $ = (id) => ui.doc.getElementById(id);
+  $("lo-fa-preview").click();
   await ui.settle();
-  assert.match(ui.doc.getElementById("lo-fa-out").textContent, /Add a deny list\.3 agents/);
+  assert.ok(ui.calls.some((c) => (c.url || "").startsWith("/api/v1/learning-ops/factory/catalog?min_support=")));
+  assert.match($("lo-fa-status").textContent, /Suggestions come from recorded corrections\..*Claude X/);
+  const choices = Array.from($("lo-fa-suggestion").options);
+  assert.deepEqual(choices.map((o) => o.value), ["", "k1", "k2"]);
+  assert.equal(choices[2].disabled, true, "an unsupported suggestion cannot be chosen");
+  $("lo-fa-suggestion").value = "k1";
+  $("lo-fa-suggestion").dispatchEvent(new ui.window.Event("change"));
+  assert.equal($("lo-fa-suggestion-help").textContent, "Add a deny list. Seen in 3 agents.");
+  assert.deepEqual(Array.from($("lo-fa-requests").querySelectorAll("label")).map((l) => l.textContent.trim()), ["invoice clerk", "ap bot"]);
+  assert.equal($("lo-fa-compare").disabled, true, "no comparison without consent");
+  $("lo-fa-consent").checked = true;
+  $("lo-fa-consent").dispatchEvent(new ui.window.Event("input", { bubbles: true }));
+  assert.equal($("lo-fa-compare").disabled, false);
+  assert.equal(ui.calls.some((c) => c.method === "POST"), false, "choosing sends nothing");
 });
 
 test("learned page tools: a reviewed meaning check and a previewed import", async (t) => {
   const ui = await fixture(LEARNED(), [learned]);
   t.after(() => ui.window.close());
-  assert.equal(ui.doc.getElementById("lpo-transfer-source").options.length, 2);
+  // Lesson transfers moved to their own reviewed page (learning_transfers);
+  // this panel no longer offers the old unreviewed transfer picker.
+  assert.equal(ui.doc.getElementById("lpo-transfer-source"), null);
   ui.doc.getElementById("lpo-clash-run").click();
   await ui.settle();
   const review = ui.doc.getElementById("lpo-clash-review");
@@ -233,12 +255,12 @@ test("the learned page names the exact setting to fill in first", async (t) => {
     { test_cases_set_up: false, hold_out: { set_up: false, exists: false } }) };
   const ui = await fixture(LEARNED(), [learned], { answers });
   t.after(() => ui.window.close());
-  // Test cases are set up in the Self-coaching questions section on this page.
+  // Test cases are set up in the Learning questions section on this page.
   assert.match(ui.doc.getElementById("lpo-plan").textContent,
-    /Test cases are not set up yet\. Use Self-coaching questions below to choose Lightwork’s managed location\./);
+    /Test cases are not set up yet\. Use Learning questions below to choose Lightwork’s managed location\./);
   const raw = (name) => fs.readFileSync(path.join(templates, name), "utf8");
   assert.match(raw("_learned_ops.html"), /\{% include "_learning_test_cases\.html" %\}/);
-  assert.match(raw("_learning_test_cases.html"), /<h3 id="learning-case-title">Self-coaching questions<\/h3>/);
+  assert.match(raw("_learning_test_cases.html"), /<h3 id="learning-case-title">Learning questions<\/h3>/);
 });
 
 test("the hold-out record is initialized once, only after its review is ticked", async (t) => {

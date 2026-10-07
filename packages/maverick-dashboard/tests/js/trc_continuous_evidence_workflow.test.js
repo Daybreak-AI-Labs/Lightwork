@@ -7,7 +7,11 @@ const { JSDOM } = require("jsdom");
 const {shell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
+// Render the enabled page branch, as Jinja does when the module is on: the
+// block-level disabled branch now carries its own data-enabled="false"
+// #trc-root, which would otherwise come first.
 const markup = fs.readFileSync(path.join(folder, "templates/trc_continuous_evidence.html"), "utf8")
+  .replace(/^{%-?\s*if not trc_continuous_evidence_enabled\s*-?%}$[\s\S]*?^{%-?\s*else\s*-?%}$/m, "")
   .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
   .replace(/{%-?[\s\S]*?-?%}/g, "").replace(/{{[\s\S]*?}}/g, "");
 const helpers = fs.readFileSync(path.join(folder, "static/lightwork-record-workflows.js"), "utf8");
@@ -31,7 +35,7 @@ async function fixture({ running = false, admin = true } = {}) {
       { key: "okta", label: "Okta policies", definition_id: "okta-def", definition_version: 1, enrollment_id: "okta", control_count: 3, credential_ready: false },
     ] },
     "/definitions": { items: [{ definition_id: "local-soc2", version: 1, state: "approved", allowed_control_refs: ["audit_log"], integrity_sha256: "a".repeat(64), created_at: 1 }] },
-    "/enrollments": { items: [{ enrollment_id: "local-soc2", definition_id: "local-soc2", state: "active", revision: 3, integrity_sha256: "b".repeat(64) }] },
+    "/enrollments": { items: [{ enrollment_id: "local-soc2", definition_id: "local-soc2", definition_version: 1, state: "active", revision: 3, integrity_sha256: "b".repeat(64) }] },
     "/runs": { items: [{ enrollment_id: "local-soc2", completed_at: 100, complete: true, item_count: 8 }] },
     "/jobs": { items: [] },
     "/alerts": { items: [{ enrollment_id: "local-soc2", control_ref: "encryption_at_rest", previous_status: "observed", current_status: "failed", created_at: 50 }] },
@@ -60,7 +64,7 @@ test("sources show plain states with one button for the next step", async (t) =>
   const ui = await fixture(); t.after(() => ui.window.close());
   const text = ui.el("trc-sources").textContent;
   assert.match(text, /Lightwork's own security checks/);
-  assert.match(text, /Collecting/);
+  assert.match(text, /Schedule active/);
   assert.match(text, /Okta policies/);
   assert.match(text, /Missing/);
   assert.ok(ui.rowButton("trc-sources", "Okta", "Set up"));

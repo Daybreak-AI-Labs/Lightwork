@@ -6,6 +6,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {JSDOM}=require("jsdom");
 const {shell} = require('./_shell');
+const {reviewedSaving} = require('./_settings_review');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<20;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -31,10 +32,11 @@ const HTML=`<!doctype html><main>
   <button data-save>Save</button><button data-test>Test connection</button><button data-reset>Reset to default</button><p data-row-status></p></div>
 </section></div><p id="settings-all-empty" hidden></p></main>`;
 
-async function page(handler){
+async function page(handler,review={}){
   const dom=new JSDOM(HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[],confirms=[];
   w.mvConfirm=async message=>{confirms.push(message);return true;};
+  reviewedSaving(w,{confirms,...review});
   w.mvErrorText=(failure,action)=>"Could not "+action+".";
   w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{
@@ -99,29 +101,30 @@ test("a failed check never shows a raw status",async()=>{
   }finally{ui.dom.window.close();}
 });
 
-test("a sign-in change that could lock people out asks in plain words before saving",async()=>{
-  const ui=await page((url,body)=>body.confirm
-    ?reply(200,{changed:["auth.oidc.enabled"],groups:[]})
-    :reply(409,{detail:"confirmation required",confirm:[{id:"auth.oidc.enabled",label:"Your access",kind:"access",warning:"You will be signed out of Lightwork and will need to sign in again with your company sign-in."}]}));
+test("a sign-in change that could lock people out is explained in plain words before saving",async()=>{
+  const access=changes=>changes.some(c=>c.id==="auth.oidc.enabled")
+    ?[{label:"Your access",kind:"access",warning:"You will be signed out of Lightwork and will need to sign in again with your company sign-in."}]:[];
+  const ui=await page(()=>reply(200,{changed:["auth.oidc.enabled"],groups:[]}),{warnings:access});
   try{
     const r=row(ui,"auth.oidc.enabled");
     r.querySelector("[data-input]").checked=true;
     await click(r.querySelector("[data-save]"));
     assert.equal(ui.confirms.length,1);
-    assert.match(ui.confirms[0],/^This changes how people get into Lightwork\. Your access: You will be signed out/);
+    assert.match(ui.confirms[0],/^Your access: You will be signed out/);
     assert.doesNotMatch(ui.confirms[0],/lowers a protection/);
-    assert.equal(ui.calls[1].body.confirm,true);
+    assert.equal(ui.calls.length,1);assert.equal(ui.calls[0].body.confirm,true);
   }finally{ui.dom.window.close();}
 });
 
 test("a refused lock-out shows the server's explanation",async()=>{
   const message="Nobody can sign in to Lightwork yet, so this would lock you out. Set up and test a sign-in method first, then change this.";
-  const ui=await page(()=>reply(409,{detail:message,message,lockout:true}));
+  const ui=await page(()=>reply(200,{changed:[],groups:[]}),{refuse:()=>({detail:message,message,lockout:true})});
   try{
     const r=row(ui,"auth.oidc.enabled");
     r.querySelector("[data-input]").checked=true;
     await click(r.querySelector("[data-save]"));
     assert.equal(ui.confirms.length,0);
+    assert.equal(ui.calls.length,0);
     assert.equal(r.querySelector("[data-row-status]").textContent,message);
   }finally{ui.dom.window.close();}
 });
@@ -150,6 +153,7 @@ test("a row's saved password is never shown, and an empty box keeps it",async()=
   const dom=new JSDOM(PEER_HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[];
   w.mvConfirm=async()=>true;w.mvErrorText=(f,a)=>"Could not "+a+".";w.mvToast=()=>{};
+  reviewedSaving(w);
   w.fetch=async(url,init={})=>{calls.push(JSON.parse(init.body));return reply(200,{changed:["federation.peers"],groups:[]});};
   shell(w);
   w.eval(read("static/lightwork-settings-all.js"));
@@ -189,6 +193,7 @@ test("themes: rows are named by the person and colours come from colour pickers"
   const dom=new JSDOM(THEME_HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[];
   w.mvConfirm=async()=>true;w.mvErrorText=(f,a)=>"Could not "+a+".";w.mvToast=()=>{};
+  reviewedSaving(w);
   w.fetch=async(url,init={})=>{calls.push(JSON.parse(init.body));return reply(200,{changed:["dashboard.themes"],groups:[]});};
   shell(w);
   w.eval(read("static/lightwork-settings-all.js"));

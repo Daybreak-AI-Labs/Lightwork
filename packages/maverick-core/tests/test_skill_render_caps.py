@@ -14,7 +14,8 @@ from maverick.skills import render_for_prompt
 
 
 def _skill(name: str, body: str):
-    return SimpleNamespace(name=name, body=body, source="builtin")
+    # A built-in skill carries no learned runtime binding.
+    return SimpleNamespace(name=name, body=body, source="builtin", _runtime_binding=None)
 
 
 class TestRenderCaps:

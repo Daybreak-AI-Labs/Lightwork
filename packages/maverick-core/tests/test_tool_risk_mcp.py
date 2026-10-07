@@ -31,11 +31,14 @@ def test_unclassified_mcp_tool_defaults_high(tmp_path, monkeypatch):
 def test_non_mcp_unknown_stays_medium(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path)
-    from maverick.safety.tool_risk import tool_risk
-    # The generic fallback is unchanged; only the `mcp_` *prefix* triggers the
-    # high default (a name that merely contains "mcp" does not).
-    assert tool_risk("some_unknown_tool") == "medium"
-    assert tool_risk("not_mcp_really") == "medium"
+    from maverick.safety.tool_risk import tool_risk, tool_risk_is_classified
+    # Every unrated name now fails safe to high, but only the `mcp_` *prefix*
+    # counts as a deliberate classification (a name that merely contains
+    # "mcp" is just unrated).
+    assert tool_risk("some_unknown_tool") == "high"
+    assert tool_risk("not_mcp_really") == "high"
+    assert tool_risk_is_classified("mcp_github__create_issue") is True
+    assert tool_risk_is_classified("not_mcp_really") is False
 
 
 def test_builtin_classifications_unaffected(tmp_path, monkeypatch):

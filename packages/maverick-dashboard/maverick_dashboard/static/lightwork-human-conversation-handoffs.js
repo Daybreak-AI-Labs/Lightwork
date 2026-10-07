@@ -29,7 +29,7 @@
   let state=null,busy=false,generation=0,submitted=false,privateValid=true;
   const storageKey='lightwork:human-original:'+context+':'+goal;
   let pointer=null;try{pointer=JSON.parse(sessionStorage.getItem(storageKey)||'null');}catch(_){}
-  function say(message){status.textContent=message;}
+  function say(message){window.mvStatus(status,message);}
   function remember(value){pointer={record:value.record,operation:value.operation};try{sessionStorage.setItem(storageKey,JSON.stringify(pointer));}catch(_){say('Keep this page open: this browser cannot retain the original reference across reload.');}}
   function button(host,label,action){const value=el('button',label,host);value.type='button';value.className='btn btn--ghost';value.onclick=action;return value;}
   function cleared(event){if(event?.type==='lightwork:copilot-context-changed'&&event.detail?.reason==='selection')return;generation++;privateValid=false;state=null;review.replaceChildren();current.replaceChildren();history.replaceChildren();historyResult.replaceChildren();root.querySelectorAll('textarea,input,select').forEach(input=>{if(input.type==='checkbox')input.checked=false;else input.value='';});pointer=null;root.querySelectorAll('button').forEach(input=>{input.disabled=true;});say('Your account, workspace or access changed. Reopen this page before sharing private content.');holdComposer(true);}

@@ -145,10 +145,13 @@ class TestGateTool:
 
     def test_medium_risk_survives_one_notch_drop(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_AUTONOMY_GATE", "1")
-        # One deficit drops a None ceiling to medium. An unclassified tool
-        # defaults to medium risk, which is == the tightened ceiling -> allowed.
+        # One deficit drops a None ceiling to medium. A deliberately medium-rated
+        # tool is == the tightened ceiling -> allowed. (An unrated name is not
+        # medium any more: it takes the high refusal floor.)
+        from maverick.safety.tool_risk import tool_risk
+        assert tool_risk("kv_memory", overrides={}) == "medium"
         v = autonomy.gate_tool(
-            "some_unclassified_tool", disagreement=0.9, verifier_confidence=1.0,
+            "kv_memory", disagreement=0.9, verifier_confidence=1.0,
         )
         assert v.allowed is True
 

@@ -9,9 +9,20 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from maverick import third_party_lifecycle as lifecycle
 from maverick_dashboard import third_party_lifecycle_api as api
+from maverick_dashboard import vendor_profile
 
 API = "/api/v1/third-party/lifecycle"
 DAY = 86_400
+
+
+def _vendor(label: str) -> str:
+    return "VMR-" + hashlib.sha256(label.encode()).hexdigest()[:24]
+
+
+VENDOR_1, VENDOR_CALLBACK, VENDOR_ROLE, VENDOR_LIST = (
+    _vendor(label) for label in ("vendor-1", "vendor-callback", "vendor-role", "vendor-list")
+)
+REGISTERED_VENDORS = frozenset({VENDOR_1, VENDOR_CALLBACK, VENDOR_ROLE, VENDOR_LIST})
 
 
 @pytest.fixture()
@@ -31,6 +42,18 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(lifecycle, "require_enabled", require_enabled)
     monkeypatch.setattr(lifecycle, "enabled", lambda: bool(state["enabled"]))
     monkeypatch.setattr(api, "_tenant_id", lambda: str(state["tenant"]))
+    # Assessments and lifecycles name a vendor from the Privacy register, and
+    # their writes recheck the live workspace at the effect boundary.
+    from maverick import paths
+
+    for module in (paths, vendor_profile):
+        monkeypatch.setattr(module, "current_tenant_id_strict", lambda: str(state["tenant"]))
+    monkeypatch.setattr(
+        vendor_profile.vm,
+        "get_vendor",
+        lambda identifier: {"id": identifier} if identifier in REGISTERED_VENDORS else None,
+    )
+    state["database"] = database
 
     def tenant_permission(_request, permission):
         calls = state["permission_calls"]
@@ -44,6 +67,9 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(api, "require_permission", tenant_permission)
     monkeypatch.setattr(api, "require_global_permission", global_permission)
+    # The vendor effect guard re-checks the same floors through auth itself.
+    monkeypatch.setattr(vendor_profile.auth, "require_permission", tenant_permission)
+    monkeypatch.setattr(vendor_profile.auth, "require_global_permission", global_permission)
 
     app = FastAPI()
 
@@ -93,6 +119,40 @@ def _template_body() -> dict:
     }
 
 
+def _evaluated_assessment(state: dict, vendor_ref: str) -> None:
+    """Give ``vendor_ref`` the complete, evaluated assessment activation needs."""
+    acting = {"principal": "author"}
+    store = lifecycle.ThirdPartyLifecycleStore(
+        state["database"], config_gate=lambda: None,
+        principal_resolver=lambda: acting["principal"],
+    )
+    tenant = str(state["tenant"])
+    body = _template_body()
+    body.pop("idempotency_key")
+    store.create_template_version(tenant, "activation", idempotency_key="activation-template", **body)
+    acting["principal"] = "reviewer"
+    store.approve_template_version(tenant, "activation", 1, expected_revision=1,
+                                   idempotency_key="activation-approve")
+    acting["principal"] = "creator"
+    store.create_assessment(
+        tenant, "activation-assessment", vendor_ref=vendor_ref, template_id="activation",
+        template_version=1, owner_ref="owner",
+        respondent_assignments={"security-control": "respondent"},
+        retention_seconds=DAY, idempotency_key="activation-assessment",
+    )
+    acting["principal"] = "respondent"
+    answered = store.record_response(
+        tenant, "activation-assessment", "security-control", value=True,
+        evidence_sha256="b" * 64, evidence_refs=["evidence.security"],
+        expected_revision=1, idempotency_key="activation-response",
+    )
+    acting["principal"] = "owner"
+    result = store.evaluate_assessment(tenant, "activation-assessment",
+                                       expected_revision=answered.revision,
+                                       idempotency_key="activation-evaluate")
+    assert result.route == "owner_review"
+
+
 def test_status_is_honest_store_free_and_feature_off_is_403(environment) -> None:
     client, state = environment
     response = client.get(f"{API}/status")
@@ -123,10 +183,17 @@ def test_exact_tenant_and_stable_principal_resolver_binding(environment) -> None
     )
     assert status["principal_ref"] == expected
 
+    # A free-text vendor slug is not a registered vendor: nothing is created.
+    unregistered = client.put(
+        f"{API}/lifecycles/lifecycle-1",
+        json={"vendor_ref": "vendor-1", "owner_ref": expected, "dependencies": [],
+              "retention_seconds": DAY, "idempotency_key": "lifecycle-unregistered"},
+    )
+    assert unregistered.status_code == 409
     created = client.put(
         f"{API}/lifecycles/lifecycle-1",
         json={
-            "vendor_ref": "vendor-1",
+            "vendor_ref": VENDOR_1,
             "owner_ref": expected,
             "dependencies": [],
             "retention_seconds": DAY,
@@ -210,7 +277,7 @@ def test_callback_claim_fail_uses_core_integer_contract_and_redacts_get(
     lifecycle_response = client.put(
         f"{API}/lifecycles/lifecycle-callback",
         json={
-            "vendor_ref": "vendor-callback",
+            "vendor_ref": VENDOR_CALLBACK,
             "owner_ref": principal,
             "dependencies": [
                 {
@@ -331,7 +398,7 @@ def test_view_operate_and_admin_permission_floors(environment) -> None:
     created = client.put(
         f"{API}/lifecycles/lifecycle-role",
         json={
-            "vendor_ref": "vendor-role",
+            "vendor_ref": VENDOR_ROLE,
             "owner_ref": principal,
             "dependencies": [],
             "retention_seconds": DAY,
@@ -339,6 +406,7 @@ def test_view_operate_and_admin_permission_floors(environment) -> None:
         },
     )
     assert created.status_code == 200
+    _evaluated_assessment(state, VENDOR_ROLE)
     active = client.post(
         f"{API}/lifecycles/lifecycle-role/transition",
         json={
@@ -372,7 +440,7 @@ def test_lists_load_every_record_kind_for_the_workspace(environment) -> None:
     assert client.put(f"{API}/templates/standard", json=_template_body()).status_code == 200
     assert client.put(
         f"{API}/lifecycles/lifecycle-list",
-        json={"vendor_ref": "vendor-list", "owner_ref": principal, "dependencies": [],
+        json={"vendor_ref": VENDOR_LIST, "owner_ref": principal, "dependencies": [],
               "retention_seconds": DAY, "idempotency_key": "list-create"},
     ).status_code == 200
     templates = client.get(f"{API}/templates").json()["items"]

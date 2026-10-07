@@ -441,6 +441,7 @@ class TestDsar:
 
         def crash_after_artifact(
             cls, path, record, previous, *, bump_revision=True,
+            effect_guard=None,
         ):
             if path.stem == opened["id"] and record.get("status") == "fulfilled":
                 raise OSError("simulated crash before record commit")
@@ -449,6 +450,7 @@ class TestDsar:
                 record,
                 previous,
                 bump_revision=bump_revision,
+                effect_guard=effect_guard,
             )
 
         with monkeypatch.context() as crash:
@@ -701,11 +703,14 @@ def test_audit_outbox_is_at_least_once_with_stable_event_id(monkeypatch):
     )
     original_write = privacy_ops._RecordStore._write_path
 
-    def crash_before_clear(cls, path, record, previous, *, bump_revision=True):
+    def crash_before_clear(
+        cls, path, record, previous, *, bump_revision=True, effect_guard=None,
+    ):
         if not bump_revision:
             raise OSError("simulated crash after signed append")
         return original_write(
             path, record, previous, bump_revision=bump_revision,
+            effect_guard=effect_guard,
         )
 
     with monkeypatch.context() as crash:

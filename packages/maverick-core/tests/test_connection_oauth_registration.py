@@ -25,7 +25,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SECURE_DEFAULT", "0")
     config.config_path().write_text("[connections]\nenable=true\n[oauth]\nvault=true\n")
     monkeypatch.setattr(oauth, "_post_token", lambda *a: pytest.fail("Unexpected provider request"))
-    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token: {
+    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token, **_identity_inputs: {
         "provider": provider, "subject": "fixture-account", "display_name": "Fixture Account",
         "email": "fixture@example.test", "email_verified": True, "hosted_domain": "example.test",
     })

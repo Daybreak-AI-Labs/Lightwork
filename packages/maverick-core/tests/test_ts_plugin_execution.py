@@ -33,6 +33,17 @@ def _plugin(tmp_path, body, protocol=host.PROTOCOL):
     return host.load_ts_plugin([sys.executable, "-I", "-u", str(script)], call_timeout=0.5)[0]
 
 
+def _child(tool):
+    """The native child a loaded tool owns, which the exit-time index tracks.
+
+    ``host._CHILDREN`` is a WeakSet (it must not keep discarded registries
+    alive), so it has no order; the tool's own closure names its child."""
+    cells = tool.fn.__closure__ or ()
+    child = next(c.cell_contents for c in cells if isinstance(c.cell_contents, host._PluginChild))
+    assert child in host._CHILDREN
+    return child
+
+
 def _threads_for(child):
     return list(child._threads)
 
@@ -73,7 +84,7 @@ def test_blocked_or_unbounded_pipes_have_one_deadline_and_no_orphan_threads(tmp_
     result = tool.fn({"text": "a" * 200_000})
     assert time.monotonic() - started < 2
     assert result.startswith("ERROR:") and result.attempt.outcome_unknown
-    assert host._CHILDREN[-1]._proc is None
+    assert _child(tool)._lease.process is None
     assert not [thread for thread in threading.enumerate() if thread.name.startswith("owned-child-")]
 
 
@@ -82,12 +93,12 @@ def test_queue_deadline_cannot_kill_another_active_request(tmp_path):
         "for line in sys.stdin:\n"
         " req=json.loads(line); time.sleep(.3)\n"
         " print(json.dumps({'id':req['id'],'attempt':1,'effect':'completed','result':'ok'}),flush=True)\n")
-    child = host._CHILDREN[-1]
+    child = _child(tool)
     results = []
     first = threading.Thread(target=lambda: results.append(tool.fn({})))
     first.start()
     deadline = time.monotonic() + 3
-    while child._proc is None:
+    while child._lease.process is None:
         assert time.monotonic() < deadline
         time.sleep(.005)
     child.call_timeout = .05
@@ -103,16 +114,16 @@ def test_success_reuses_single_bounded_reader_and_pre_dispatch_restart(tmp_path)
         "for line in sys.stdin:\n"
         " req=json.loads(line); print(json.dumps({'id':req['id'],'attempt':1,'effect':'completed','result':'ok'}),flush=True)\n")
     assert tool.fn({}) == "ok"
-    child = host._CHILDREN[-1]
-    first_process = child._proc
+    child = _child(tool)
+    first_process = child._lease.process
     threads = _threads_for(first_process)
     for _ in range(20):
         assert tool.fn({}) == "ok"
-    assert child._proc is first_process and _threads_for(first_process) == threads
+    assert child._lease.process is first_process and _threads_for(first_process) == threads
     first_process.proc.kill()
     first_process.proc.wait(timeout=5)
     assert tool.fn({}) == "ok"  # No bytes of this new request were dispatched to the dead child.
-    assert child._proc is not first_process
+    assert child._lease.process is not first_process
     assert all(not thread.is_alive() for thread in threads)
 
 
@@ -121,9 +132,9 @@ async def test_cancelled_invocation_owns_child_and_preserves_control_exception(t
     tool = _plugin(tmp_path, "sys.stdin.readline(); time.sleep(60)\n")
     with invocation_scope() as invocation:
         task = asyncio.create_task(asyncio.to_thread(tool.fn, {}))
-        while host._CHILDREN[-1]._proc is None:
+        while _child(tool)._lease.process is None:
             await asyncio.sleep(.005)
-        proc = host._CHILDREN[-1]._proc
+        proc = _child(tool)._lease.process
         invocation.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -153,12 +164,12 @@ def test_oversized_request_never_starts_child(tmp_path):
     result = tool.fn({"text": "x" * host.MAX_FRAME_BYTES})
     assert "request frame too large" in result
     assert not result.attempt.dispatch_may_have_happened
-    assert host._CHILDREN[-1]._proc is None
+    assert _child(tool)._lease.process is None
 
 
 def test_pinning_still_blocks_replacement_after_describe(tmp_path):
     tool = _plugin(tmp_path, "time.sleep(60)\n")
-    script = Path(host._CHILDREN[-1].command[-1])
+    script = Path(_child(tool).command[-1])
     script.write_text("raise SystemExit()")
     result = tool.fn({})
     assert "changed after manifest discovery" in result

@@ -44,7 +44,6 @@ def rows(monkeypatch):
 
 @pytest.mark.parametrize("path,data,section,key", [
     ("/settings/capabilities", {"web_search": "on"}, "capabilities", "all"),
-    ("/settings/features", {"skills": "on"}, "features", "all"),
     ("/settings/models", {"model": "openai:gpt-4o"}, "models", "default"),
     ("/settings/models/roles", {"coder": "openai:gpt-4o"}, "models", "roles"),
     ("/settings/models/allowed", {"models": "openai:gpt-4o"}, "models", "allowed"),
@@ -64,6 +63,15 @@ def test_settings_routes_record_before_and_after(
     assert rows[0]["old"] == rows[1]["old"]
     assert rows[0]["new"] == rows[1]["new"]
     assert all(r["actor"] for r in rows)
+
+
+def test_retired_whole_feature_form_records_no_change(client, rows):
+    """Feature switches are saved one at a time (see the switches API below);
+    the old whole-form route refuses, so its receipt must not claim a change."""
+    response = client.post("/settings/features", data={"skills": "on"}, follow_redirects=False)
+    assert response.status_code == 409, response.text
+    assert "was not saved" in response.json()["detail"]
+    assert rows == []
 
 
 def test_provider_rotation_and_clear_are_redacted(client, rows, monkeypatch):

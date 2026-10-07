@@ -40,7 +40,15 @@
   // release decisions are the source of truth.
   async function readJSON(url, method = 'GET', body, action = 'read the saved release') {
     try { return await window.mvFetchJSON(url, {method, cache: 'no-store', body, timeout: 20000}, action); }
-    catch (_) { throw new Error('Lightwork could not confirm this reply. Refresh saved release decisions before continuing.'); }
+    catch (error) {
+      // A definite refusal (a read that failed, or a change the server
+      // declined) says plainly what did not happen. A lost or unreadable
+      // reply, or a server failure during a change, stays unconfirmed.
+      if (error && error.status > 0 && !error.unreadable && (method === 'GET' || error.status < 500)) throw error;
+      const unconfirmed = new Error('Lightwork could not confirm this reply. Refresh saved release decisions before continuing.');
+      unconfirmed.unconfirmed = true;
+      throw unconfirmed;
+    }
   }
 
   // The shared in-page dialog; the browser's own box only when it is missing.
@@ -89,8 +97,11 @@
       await refresh();
       message(candidate.local_release ? (candidate.local_release.name || 'Selected workflow') + ': ' + label(result.state) + '.' : 'Candidate ' + candidate.candidate_id + ' is now updated.');
     } catch (error) {
-      try { await refresh(); message('The reply could not be confirmed. Current release decisions were refreshed; inspect the saved result before trying another action.', true); }
-      catch (_) { message(error.message || 'That didn\'t work. Refresh the page and try again.', true); }
+      try {
+        await refresh();
+        message(error && !error.unconfirmed && error.message ? error.message :
+          'The reply could not be confirmed. Current release decisions were refreshed; inspect the saved result before trying another action.', true);
+      } catch (_) { message(error.message || 'That didn\'t work. Refresh the page and try again.', true); }
     } finally {
       setBusy(false);
     }

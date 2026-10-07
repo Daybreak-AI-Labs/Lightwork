@@ -163,6 +163,8 @@ def harden_execute(request, selection, _arguments, native_review, _operation_id)
 def soften_snapshot(request, selection):
     flow_id = _flow_id(selection)
     node_id = selection.get("node_id")
+    # The flow is read first: a person who cannot open it never sees this action.
+    native.get_flow_endpoint(request, flow_id)
     if not node_id:
         raise HTTPException(409, "Select the fixed action you want to review in the workflow designer.")
     review = native.flow_apply_review_endpoint(request, flow_id, node_id)
