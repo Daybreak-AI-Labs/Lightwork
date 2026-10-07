@@ -2008,6 +2008,7 @@ from . import (  # noqa: E402
     governed_rule_evolution_api,
     grc_draft_changes_api,
     learning_distinctions_api,
+    learning_transfers_api,
     operator_acquisition_api,
     private_task_computation_api,
     procedure_interactions_api,
@@ -2023,6 +2024,7 @@ from . import (  # noqa: E402
 app.include_router(shared_decision_evidence_api.router)
 app.include_router(flow_requalification_api.router)
 app.include_router(learning_distinctions_api.router)
+app.include_router(learning_transfers_api.router)
 app.include_router(commitment_capability_api.router)
 app.include_router(commitment_economic_alternatives_api.router)
 app.include_router(competence_transport_api.router)

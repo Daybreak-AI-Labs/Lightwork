@@ -605,31 +605,8 @@ def clash_check(request: Request, body: ClashIn) -> dict:
 @router.post("/self-harness/transfer")
 async def transfer(request: Request, body: TransferIn) -> dict:
     require_global_permission(request, "admin")
-    from maverick import self_harness
-    from maverick import self_improvement_runner as runner
-    if not self_harness.enabled():
-        raise HTTPException(status_code=409, detail=f"Turn on {switch_place('self_harness')} first.")
-    if not self_harness.settings().get("eval_corpus"):
-        raise HTTPException(status_code=409, detail=(
-            "Trying lessons on other models needs test cases. Set them up first."))
-    fleet = await run_in_threadpool(_fleet)
-    if body.source not in fleet or (body.target and body.target not in fleet):
-        raise HTTPException(status_code=422, detail="Choose models from the list.")
-    targets = [body.target] if body.target else [m for m in runner.harness_fleet_models() if m != body.source]
-    targets = [t for t in targets if t != body.source]
-    if not targets:
-        raise HTTPException(status_code=409, detail="There is no other model to try these lessons on.")
     _halt_preflight("self-harness")
-    await run_in_threadpool(lambda: _record(request, "self_harness_transfer", source=body.source,
-                                            targets=targets, retry_judged=body.retry_judged))
-
-    def _run(job: jobs.Job) -> dict:
-        report = runner.run_self_harness_transfer(body.source, targets=targets, force=body.retry_judged,
-                                                  raise_errors=True)
-        return {"targets": [{"model": t, "tried": len(r.get("attempted") or []),
-                             "on_trial": [_clip(x) for x in (r.get("promoted") or [])[:20]]}
-                            for t, r in sorted(report.items())][:20]}
-    return start_job(request, "self_harness_transfer", "Trying proven lessons on other models", _run)
+    raise HTTPException(409, "Open Learned and choose Test lessons on another model. Review its complete current lessons, questions, standing instructions and spending before starting. No lesson test was started.")
 
 
 def _corpus_path() -> str:

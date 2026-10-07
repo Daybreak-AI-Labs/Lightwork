@@ -1092,6 +1092,14 @@ class _SealedHoldoutAuthorizer:
         return self._finish_pending()
 
 
+def _holdout_resource_limit(budget, name, default):
+    value = getattr(budget, name, None)
+    value = default if value is None else value
+    if type(value) not in {int, float} or not math.isfinite(value) or value < 0:
+        raise ValueError("self-harness holdout resource allowance is invalid")
+    return value
+
+
 def _build_holdout_authorizer(
     settings: Mapping[str, object], *, corpus_path: str,
     model_id: str, evaluation_system: str,
@@ -1141,15 +1149,10 @@ def _build_holdout_authorizer(
         "ledger_id": ledger_status.ledger_id,
     })
     max_queries = int(settings.get("holdout_max_queries", 2))
-    eval_max_input = int(getattr(evaluation_budget, "max_input_tokens", 10**9))
-    eval_max_output = int(getattr(evaluation_budget, "max_output_tokens", 10**9))
-    eval_max_dollars = str(getattr(
-        evaluation_budget, "max_dollars",
-        settings.get("eval_budget_dollars", 5.0),
-    ))
-    eval_max_compute = math.ceil(float(getattr(
-        evaluation_budget, "max_wall_seconds", 3600.0,
-    )) * 1000)
+    eval_max_input = int(_holdout_resource_limit(evaluation_budget, "max_input_tokens", 10**9))
+    eval_max_output = int(_holdout_resource_limit(evaluation_budget, "max_output_tokens", 10**9))
+    eval_max_dollars = str(_holdout_resource_limit(evaluation_budget, "max_dollars", settings.get("eval_budget_dollars", 5.0)))
+    eval_max_compute = math.ceil(_holdout_resource_limit(evaluation_budget, "max_wall_seconds", 3600.0) * 1000)
     policy = AlphaBudget(
         family_alpha=float(settings.get("holdout_family_alpha", 0.05)),
         query_alpha=float(settings.get("holdout_query_alpha", 0.025)),
@@ -1787,7 +1790,8 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
                               controller=None, force: bool = False,
                               raise_errors: bool = False,
                               work_item_id: str | None = None,
-                              _context=None) -> dict:
+                              _context=None, dispatch_guard=None,
+                              effect_scope=None, promotion_authorize=None) -> dict:
     """Driver entry for a governed cross-model transfer trial: try
     ``source_model``'s graduated lines on ``targets`` (default: the whole
     fleet) against each target's corpus-built A/B, applying the configured
@@ -1824,10 +1828,15 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
             else f"self-harness-transfer:{uuid.uuid4().hex}"
         )
         with work_item_scope(provider_work_item):
+            guarded = {} if dispatch_guard is None and effect_scope is None and promotion_authorize is None else {
+                "dispatch_guard": dispatch_guard, "effect_scope": effect_scope,
+                "promotion_authorize": promotion_authorize, "raise_errors": raise_errors,
+                "max_promotions": int(st.get("max_promotions_per_cycle", 0))}
             return self_harness.run_transfer(
                 str(source_model), list(targets), eval_for_target=eval_for_target,
                 controller=controller, force=force, validate_kwargs=validate_kwargs,
-                holdout_rotations=int(st.get("holdout_rotations", 1) or 1))
+                holdout_rotations=1 if guarded and st.get("risk_limited") else int(st.get("holdout_rotations", 1) or 1),
+                **guarded)
     except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
         if raise_errors:
             raise

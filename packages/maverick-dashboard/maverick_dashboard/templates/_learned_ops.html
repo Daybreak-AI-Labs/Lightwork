@@ -27,19 +27,7 @@
     <p class="muted" id="lpo-clash-status" role="status" aria-live="polite"></p>
     <div id="lpo-clash-out" style="overflow-wrap:anywhere"></div>
 
-    <h3 id="lpo-transfer-h">Try proven lessons on other models</h3>
-    <p class="muted">Lessons that proved themselves for one model are tested on another. Any that pass start on trial,
-      and real results decide whether they stay.</p>
-    <div class="lpo-row">
-      <label for="lpo-transfer-source">From</label>
-      <select id="lpo-transfer-source" class="select"></select>
-      <label for="lpo-transfer-target">To</label>
-      <select id="lpo-transfer-target" class="select"><option value="">Every other model</option></select>
-      <label><input type="checkbox" id="lpo-transfer-retry"> Try again even for lessons already tried</label>
-      <button type="button" class="btn btn--ghost" id="lpo-transfer-run">Try the lessons</button>
-    </div>
-    <p class="muted" id="lpo-transfer-status" role="status" aria-live="polite"></p>
-    <div id="lpo-transfer-out"></div>
+    {% include "_learning_transfers.html" %}
 
     <h3 id="lpo-cases-h">Test cases</h3>
     <p class="muted">Test questions help compare how Lightwork responds before and after a proposed change.</p>

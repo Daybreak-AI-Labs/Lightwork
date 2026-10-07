@@ -2904,12 +2904,39 @@ def transferable_lines(source_model: str, path: Path | None = None, *,
     return out
 
 
+def _transfer_queue(lines, target, store, tried):
+    block = _bullets(store.get(target, ""))
+    existing = {_norm_line(line) for line in block}
+    result = {"attempted": [], "promoted": [], "skipped": []}
+    todo = []
+    for line in lines:
+        if _norm_line(line) in existing:
+            result["skipped"].append(f"already present: {line}")
+        elif _line_id(target, line) in tried:
+            result["skipped"].append(f"already tried: {line}")
+        else:
+            todo.append(line)
+    return result, todo, _MAX_LINES_PER_MODEL - len(block)
+
+
+def _transfer_evaluator(eval_for_target, target, raise_errors):
+    try:
+        return eval_for_target(target)
+    except Exception:
+        if raise_errors:
+            raise
+        log.debug("self_harness: transfer evaluator failed for %s", target, exc_info=True)
+        return None
+
+
 def run_transfer(source_model: str, targets: list[str], *,
                  eval_for_target: Callable[[str], tuple | None],
                  controller=None, path: Path | None = None,
                  force: bool = False,
                  validate_kwargs: dict | None = None,
-                 holdout_rotations: int = 1) -> dict:
+                 holdout_rotations: int = 1, dispatch_guard=None,
+                 effect_scope=None, promotion_authorize=None,
+                 raise_errors: bool = False, max_promotions: int = 0) -> dict:
     """Try ``source_model``'s graduated model-wide lines on each target model
     through the FULL validation + governed gate, landing survivors as CANARIES.
 
@@ -2931,9 +2958,12 @@ def run_transfer(source_model: str, targets: list[str], *,
     any evaluation spend -- a transfer canary must never evict a proven line.
     Returns ``{target: {"attempted": [...], "promoted": [...],
     "skipped": [...]}}``. Never raises -- a transfer trial must not perturb
-    anything."""
+    anything by default. Reviewed native callers may request propagated errors
+    and current-source guards without changing legacy transfer behavior."""
     report: dict[str, dict] = {}
     try:
+        if dispatch_guard is not None:
+            dispatch_guard()
         if not enabled():
             return report
         store = load_addenda(path)  # preserve capacity of retained/quarantined records
@@ -2945,21 +2975,10 @@ def run_transfer(source_model: str, targets: list[str], *,
         for tgt in dict.fromkeys(str(t) for t in targets or []):
             if tgt == str(source_model):
                 continue
-            res = {"attempted": [], "promoted": [], "skipped": []}
+            res, todo, free = _transfer_queue(lines, tgt, store, tried)
             report[tgt] = res
             if not lines:
                 continue
-            block = _bullets(store.get(tgt, ""))
-            existing = {_norm_line(x) for x in block}
-            free = _MAX_LINES_PER_MODEL - len(block)
-            todo = []
-            for ln in lines:
-                if _norm_line(ln) in existing:
-                    res["skipped"].append(f"already present: {ln}")
-                elif _line_id(tgt, ln) in tried:
-                    res["skipped"].append(f"already tried: {ln}")
-                else:
-                    todo.append(ln)
             if not todo:
                 continue
             if free <= 0:
@@ -2968,12 +2987,7 @@ def run_transfer(source_model: str, targets: list[str], *,
                 # skip before spending a single evaluation dollar.
                 res["skipped"].append("target addendum at capacity")
                 continue
-            try:
-                quad = eval_for_target(tgt)
-            except Exception:  # a bad seam skips the target, never the sweep
-                log.debug("self_harness: transfer evaluator failed for %s",
-                          tgt, exc_info=True)
-                quad = None
+            quad = _transfer_evaluator(eval_for_target, tgt, raise_errors)
             if quad is None:
                 res["skipped"].append("no evaluator/corpus for target")
                 continue
@@ -2981,7 +2995,9 @@ def run_transfer(source_model: str, targets: list[str], *,
             judged_keys: list[str] = []
             try:
                 for ln in todo:
-                    if free <= 0:
+                    if dispatch_guard is not None:
+                        dispatch_guard()
+                    if free <= 0 or (max_promotions > 0 and len(res["promoted"]) >= max_promotions):
                         res["skipped"].append(f"target addendum at capacity: {ln}")
                         continue
                     proposal = HarnessProposal(
@@ -3004,11 +3020,13 @@ def run_transfer(source_model: str, targets: list[str], *,
                             **(validate_kwargs or {}))
                     if not vr.accepted:
                         res["skipped"].append(f"rejected ({vr.reason}): {ln}")
-                        if _INDETERMINATE_REASON not in vr.reason:
+                        if _INDETERMINATE_REASON not in vr.reason and "sealed holdout authorization failed" not in vr.reason:
                             judged_keys.append(_line_id(tgt, ln))
                         continue
+                    guarded = {} if effect_scope is None and promotion_authorize is None else {
+                        "effect_scope": effect_scope, "promotion_authorize": promotion_authorize}
                     ok, why = _gate_and_apply(proposal, vr, controller=controller,
-                                              path=path, canary=True)
+                                              path=path, canary=True, **guarded)
                     if ok:
                         res["promoted"].append(ln)
                         judged_keys.append(_line_id(tgt, ln))
@@ -3017,8 +3035,16 @@ def run_transfer(source_model: str, targets: list[str], *,
                         res["skipped"].append(f"gate refused ({why}): {ln}")
             finally:
                 if judged_keys:
-                    _record_transfer_tried(judged_keys, path=path)
+                    if effect_scope is None:
+                        _record_transfer_tried(judged_keys, path=path)
+                    else:
+                        with effect_scope() as advance:
+                            _record_transfer_tried(judged_keys, path=path, strict=True,
+                                                   effect_guard=dispatch_guard)
+                            advance()
     except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
+        if raise_errors:
+            raise
         log.warning("self_harness: transfer failed", exc_info=True)
     return report
 
