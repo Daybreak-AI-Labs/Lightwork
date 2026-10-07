@@ -391,7 +391,6 @@ def test_client_binding_accepts_explicit_static_operator_token(monkeypatch):
 
 def test_self_authenticated_webhook_set_matches_middleware_and_is_exact(monkeypatch):
     from maverick_dashboard import app as app_mod
-
     from maverick_dashboard import voice_receiver_api
 
     # Exactly the reviewed self-authenticating receivers bypass the middleware:
