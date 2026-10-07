@@ -975,7 +975,7 @@ def _switches(S) -> tuple:
         S("thinking", "adaptive_floor", "Reply room when thinking is automatic",
           "The reply length, in tokens, allowed when a model decides for itself how much to "
           "think. Thinking is billed like written text.", "number", "AI models", 8192,
-          "maverick.providers.anthropic_provider", subgroup="How agents work", minimum=2048,
+          "maverick.providers.anthropic_limits", subgroup="How agents work", minimum=2048,
           maximum=128000, integer=True, unit="tokens",
           env=("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR",)),
         S("voice", "only_mode", "Talk to agents by voice only",

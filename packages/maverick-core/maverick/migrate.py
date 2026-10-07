@@ -107,6 +107,9 @@ KNOWN_SECTIONS = frozenset({
     "shoring",
     "system", "telemetry", "template_registries", "tenancy", "thinking",
     "tools", "tui", "value", "verification", "voice", "webhooks", "workforce",
+    # [work_details] enable: reviewed business fields and stages
+    # (maverick.work_record_details), changeable on All settings.
+    "work_details",
     "workspace", "world_model", "threat_hunt", "env_hunt",
     "chat", "connector_limits", "query_limits",
     "immune", "swarm", "ifc", "codebase",
