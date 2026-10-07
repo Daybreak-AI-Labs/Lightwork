@@ -589,10 +589,11 @@ def test_privacy_queue_and_callback_leases_are_held(tmp_path: Path) -> None:
 
 
 def test_installation_passphrases_and_link_signing_key_are_protected_authority() -> None:
-    """Colleague sign-in passphrases and the mute-link signing key are retained
+    """Colleague sign-in passphrases, their reset links and the mute-link signing key are retained
     restore blockers, never ordinary data, replayed state or discarded bytes."""
     expected = {
         "dashboard-passphrases.json": "dashboard_local_passphrases",
+        "dashboard-passphrase-resets.json": "dashboard_passphrase_resets",
         "notification-links/signing.key": "notification_link_signing_key",
         "privacy_automation/discovery-data-use-key.sealed": "privacy_discovery_data_use_key",
     }

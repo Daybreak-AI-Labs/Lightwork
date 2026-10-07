@@ -1136,7 +1136,21 @@ def _users_context(request: Request) -> dict:
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
         "workspace_names": workspace_names,
+        "passphrase_resets": _passphrase_resets(request),
     }
+
+
+def _passphrase_resets(request: Request) -> dict | None:
+    """Colleagues whose passphrase this caller may reset, or None when the
+    caller may not reset any (only the owner or an installation administrator)."""
+    from . import passphrase_resets
+    caller = passphrase_resets.can_reset(request)
+    if caller is None:
+        return None
+    try:
+        return {"accounts": passphrase_resets.accounts(caller), "unavailable": False}
+    except HTTPException:
+        return {"accounts": [], "unavailable": True}
 
 
 def _people_filter(request: Request, role_map: dict, labels: dict) -> dict:
@@ -1252,6 +1266,30 @@ def users_roster_reset(request: Request, confirm: str = Form("")) -> RedirectRes
     if not rbac.reset_missing_rosters(actor=auth.caller_principal(request) or "local"):
         raise HTTPException(status_code=409, detail="No missing role list was found. Nothing was changed.")
     return RedirectResponse("/users?saved=roster_reset", status_code=303)
+
+
+@router.post("/users/passphrase-reset", response_class=HTMLResponse)
+def users_passphrase_reset(request: Request, email: str = Form(...), confirm: str = Form("")) -> HTMLResponse:
+    """Reset a colleague's forgotten passphrase and show its one-time link ONCE.
+
+    Only the installation owner or a configured installation administrator;
+    never a workspace administrator (see :mod:`passphrase_resets`)."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import local_passphrases, passphrase_resets
+    if not local_passphrases.available():
+        raise HTTPException(status_code=404, detail="Passphrase sign-in is not used in this workspace.")
+    passphrase_resets.actor(request)
+    if confirm != "reset":
+        raise HTTPException(status_code=422, detail=(
+            "Confirm the reset: it removes this person's passphrase and signs them out everywhere."))
+    step_up.require_recent_mfa(request, "reset_passphrase")
+    token, record = passphrase_resets.issue(request, email)
+    link = str(request.base_url).rstrip("/") + f"/auth/invite/reset/{token}"
+    return _app().templates.TemplateResponse(request, "users.html", {
+        **_users_context(request), "passphrase_reset_link": link,
+        "passphrase_reset_email": record["email"], "passphrase_reset_expires_at": record["expires_at"],
+    }, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/users/access", response_class=HTMLResponse)

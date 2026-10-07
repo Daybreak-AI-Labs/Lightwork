@@ -13,7 +13,9 @@ attempts a minute (refused before any hashing). Only the
 hash is stored, in ``~/.maverick/dashboard-passphrases.json`` (0600). There is
 no reset by email, and an invitation never replaces an existing passphrase:
 otherwise anyone who can invite could set a colleague's passphrase and sign in
-as them. Any unreadable or malformed store fails closed.
+as them. Only the installation owner, or a configured installation
+administrator, can reset a forgotten one (:mod:`passphrase_resets`). Any
+unreadable or malformed store fails closed.
 """
 from __future__ import annotations
 
@@ -41,7 +43,7 @@ _DUMMY_SALT = secrets.token_hex(16)
 NOT_ACCEPTED = (
     "The email or passphrase was not accepted. If you have not set a passphrase yet, ask your "
     "administrator for an invitation. An invitation cannot replace a passphrase you already "
-    "have; if you have forgotten it, ask the installation owner for help."
+    "have; if you have forgotten it, ask the installation owner to reset it."
 )
 LOCKED = "Wait one minute before trying to sign in again."
 UNAVAILABLE = "Sign-in is unavailable right now. Ask your administrator to check Lightwork."
@@ -50,7 +52,8 @@ NO_ACCESS = ("This account no longer has access to this workspace. "
 # Refusal shown when an invitation names someone who can already sign in here.
 ACCOUNT_EXISTS = (
     "This email already has a sign-in on this installation, so it cannot be invited: accepting "
-    "would replace that person's passphrase. They keep signing in with their current passphrase. "
+    "would replace that person's passphrase. They keep signing in with their current passphrase; "
+    "if they have forgotten it, the installation owner can reset it on the Users page. "
     "To change their access, change their role on the Users page or add them to the workspace there."
 )
 TOO_MANY = "Too many sign-in attempts. Wait a minute and try again."
@@ -150,6 +153,29 @@ def has_account(email: str) -> bool:
     file_lock.ensure_private_directory(maverick_home())
     with _LOCK, file_lock.cross_process_lock(path(), strict=True):
         return _normal(email) in _read()
+
+
+def emails() -> list[str]:
+    """Everyone who signs in here with a passphrase, sorted (unreadable store: 503)."""
+    file_lock.ensure_private_directory(maverick_home())
+    with _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        return sorted(_read())
+
+
+def revoke(email: str, *, before_commit) -> dict | None:
+    """Remove one colleague's passphrase so it no longer signs in (a reset).
+
+    ``before_commit(row)`` runs under the store lock with the row about to be
+    removed (``None`` when there is none); if it raises, nothing is removed.
+    Returns the removed row."""
+    file_lock.ensure_private_directory(maverick_home())
+    with _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        accounts = _read()
+        row = accounts.pop(_normal(email), None)
+        before_commit(None if row is None else dict(row))
+        if row is not None:
+            _write(accounts)
+        return row
 
 
 def store(prepared: dict, *, tenant: str = "") -> None:
@@ -263,5 +289,6 @@ def reset_attempt_limit() -> None:
         _ATTEMPTS.reset()
 
 
-__all__ = ["ACCOUNT_EXISTS", "NOT_ACCEPTED", "TOO_MANY", "available", "has_account", "limit_attempts",
-           "login", "owner_of", "prepare", "require_same_origin", "reset_attempt_limit", "store"]
+__all__ = ["ACCOUNT_EXISTS", "NOT_ACCEPTED", "TOO_MANY", "available", "emails", "has_account",
+           "limit_attempts", "login", "owner_of", "prepare", "require_same_origin", "reset_attempt_limit",
+           "revoke", "store"]

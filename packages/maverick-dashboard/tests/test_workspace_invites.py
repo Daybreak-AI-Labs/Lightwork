@@ -334,6 +334,32 @@ def test_principal_less_and_legacy_invites_keep_their_existing_contract(monkeypa
     assert rbac.get_stored_role("user:legacy@example.com") == "viewer"
 
 
+def test_a_workspace_admin_cannot_reset_a_members_passphrase(monkeypatch, tmp_path):
+    """Whoever resets a passphrase chooses who sets the next one, so only the
+    installation owner or an installation administrator may; never a workspace
+    administrator."""
+    import json
+
+    client = _client(monkeypatch, tmp_path)
+    from maverick.tenant import registry
+    from maverick_dashboard import invites, local_passphrases, passphrase_resets
+
+    registry.create_tenant("acme", display_name="Acme")
+    _inv, token = invites.create_invite("member@example.com", "operator",
+                                        created_by="local-admin", tenant="acme")
+    assert _accept(_invitee(client), f"/auth/invite/{token}", follow_redirects=False).status_code == 303
+    before = json.loads(local_passphrases.path().read_text(encoding="utf-8"))
+    _as_workspace_admin(client)
+    page = client.get("/users")
+    assert page.status_code == 200 and 'action="/users/passphrase-reset"' not in page.text
+    refused = client.post("/users/passphrase-reset", data={
+        "_expected_tenant": "acme", "email": "member@example.com", "confirm": "reset",
+    })
+    assert refused.status_code == 403, refused.text
+    assert json.loads(local_passphrases.path().read_text(encoding="utf-8")) == before
+    assert not passphrase_resets.path().exists()
+
+
 def test_scoped_admin_cannot_invite_an_existing_member_to_take_over_their_account(monkeypatch, tmp_path):
     """Accepting a local invitation sets a passphrase and signs in as the invited
     email, so an invitation for someone who can already sign in is refused."""
