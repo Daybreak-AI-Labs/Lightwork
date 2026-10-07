@@ -184,6 +184,19 @@ def _global_invite_issuer_allowed(inv) -> bool:
         return False
 
 
+def _audit_existing_account_refusal(inv) -> None:
+    """Record a refused takeover attempt; the refusal stands even if logging fails."""
+    try:
+        from maverick.audit import audit_event
+
+        audit_event("control_plane_action", agent="dashboard", action="invite_acceptance_refused",
+                    actor="invitation-link", invite_id=inv.id, email=inv.email,
+                    workspace=inv.tenant or "", created_by=inv.created_by,
+                    reason="existing_local_account")
+    except Exception:
+        log.warning("refused invitation acceptance could not be recorded", exc_info=True)
+
+
 def _consume_and_bind(token: str, principal=None, *, prepared_passphrase: dict | None = None):
     """Redeem under the role-change fence, including the issuing admin check."""
     from maverick.authority_effects import authority_effect_fence
@@ -204,7 +217,17 @@ def _consume_and_bind(token: str, principal=None, *, prepared_passphrase: dict |
                 return
             if prepared_passphrase["email"].casefold() != current.email.casefold():
                 raise HTTPException(409, "This invitation changed. Open the link again.")
-            local_passphrases.store(prepared_passphrase, tenant=current.tenant)
+            # An account may have appeared after the invitation was issued:
+            # never set a passphrase over an existing identity.
+            if invites.existing_local_account(current.email):
+                _audit_existing_account_refusal(current)
+                raise HTTPException(409, local_passphrases.ACCOUNT_EXISTS)
+            try:
+                local_passphrases.store(prepared_passphrase, tenant=current.tenant)
+            except HTTPException as exc:
+                if exc.status_code == 409:
+                    _audit_existing_account_refusal(current)
+                raise
 
         consumed = invites.consume_invite(
             token, used_by=target,
