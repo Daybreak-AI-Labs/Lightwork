@@ -75,12 +75,17 @@ class _AssetParser(HTMLParser):
         attrs: list[tuple[str, str | None]],
     ) -> None:
         attributes = dict(attrs)
-        candidate = attributes.get("href" if tag == "link" else "src")
-        if candidate and candidate.startswith("/static/"):
-            # Shell assets carry a content-hash query (W3-77); count by path.
-            candidate = candidate.split("?")[0]
-            self.assets.add(candidate)
-            self.asset_counts[candidate] += 1
+        candidates = [attributes.get("href" if tag == "link" else "src")]
+        # The Copilot's scripts are named on its button and loaded after the
+        # first paint (d2ae8bd8); they are still shell assets that must be
+        # mounted and served.
+        candidates += [attributes.get("data-copilot-src"), attributes.get("data-operations-src")]
+        for candidate in candidates:
+            if candidate and candidate.startswith("/static/"):
+                # Shell assets carry a content-hash query (W3-77); count by path.
+                candidate = candidate.split("?")[0]
+                self.assets.add(candidate)
+                self.asset_counts[candidate] += 1
 
 
 def _effective_routes(routes: Iterable[object]) -> list[object]:
