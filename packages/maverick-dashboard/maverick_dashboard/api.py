@@ -4826,11 +4826,14 @@ async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
     the API never constructs or executes a shell command."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.fulfill_dsar,
-        request_id[:64],
-        fulfilled_by=_request_actor(request),
-    )
+    try:
+        record = await run_in_threadpool(
+            ops.fulfill_dsar,
+            request_id[:64],
+            fulfilled_by=_request_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such open request")
     return record
@@ -4890,11 +4893,12 @@ async def close_dsar_request(request: Request, request_id: str,
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     try:
+        from .dsar_handling_api import close
         record = await run_in_threadpool(
-            ops.close_dsar,
+            close,
+            request,
             request_id[:64],
-            closed_by=_request_actor(request),
-            outcome=None if body is None else body.model_dump(),
+            body,
         )
     except ops.RecordConflict as exc:
         raise HTTPException(

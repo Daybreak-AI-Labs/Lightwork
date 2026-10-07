@@ -1953,6 +1953,7 @@ def execute(
     *,
     shield: Any | None = None,
     runtime_revalidator: Callable[[], bool] | None = None,
+    enforcement_observer: Callable[[str, str], None] | None = None,
 ) -> dict:
     """Perform one outbound action ON THE AGENT'S BEHALF through a governed
     connector — the enforcement tier above :func:`screen`.
@@ -2082,6 +2083,7 @@ def execute(
                               body if isinstance(body, dict) else None,
                               goal_id=gid, digest=digest, tool=tool,
                               approved=False,
+                              enforcement_observer=enforcement_observer,
                               final_authority=_final_authority)
 
 
@@ -2640,6 +2642,7 @@ def execute_commit(
     *,
     shield: Any | None = None,
     runtime_revalidator: Callable[[], bool] | None = None,
+    enforcement_observer: Callable[[str, str], None] | None = None,
 ) -> dict:
     """Commit one approved execution — a digest-bound replay.
 
@@ -2696,7 +2699,8 @@ def execute_commit(
             # void — report the live state instead of acting on the stale one.
             return execute_commit(agent_id, execution_id, request,
                                   shield=shield,
-                                  runtime_revalidator=runtime_revalidator)
+                                  runtime_revalidator=runtime_revalidator,
+                                  enforcement_observer=enforcement_observer)
         return _screen_verdict(
             agent_id, tool, False, "execution_expired",
             "the parked execution expired before any effect; submit it "
@@ -2783,6 +2787,7 @@ def execute_commit(
         body if isinstance(body, dict) else None,
         goal_id=parked_goal_id, digest=digest, tool=tool,
         approved=True,
+        enforcement_observer=enforcement_observer,
         final_authority=lambda: _revalidate_claimed_execution(
             agent_id,
             str(execution_id),
@@ -2868,10 +2873,40 @@ def _set_execution_status(agent_id: str, execution_id: str,
     return True
 
 
+class _ExecutionEnforcement:
+    """Default-inert receipt observer around a physical external attempt."""
+
+    def __init__(self, callback):
+        self.callback = callback
+        self.started = False
+
+    def prepare(self, final_authority):
+        if self.callback is None:
+            return None
+        try:
+            self.callback("prepare", "prepared")
+            self.started = True
+            return final_authority()
+        except Exception:
+            return {"allowed": False, "rule": "receipt_unavailable", "status": "refused",
+                "reason": "Safeguard activity could not be retained; no action occurred."}
+
+    def observed(self, verdict, *, effect_started):
+        if self.callback is not None and self.started:
+            try:
+                self.callback("outcome", str(verdict.get("status") or "refused"))
+            except Exception:
+                return {"allowed": effect_started, "rule": "indeterminate" if effect_started else "receipt_unavailable",
+                    "status": "indeterminate" if effect_started else "refused",
+                    "reason": "Safeguard activity could not confirm this result. Read the original; do not send the action again."}
+        return verdict
+
+
 def _perform_execution(agent_id: str, connector: str, op: str, path: str,
                        body: dict | None, *, goal_id: int | None,
                        digest: str, tool: str, approved: bool,
-                       final_authority: Callable[[], dict | None]) -> dict:
+                       final_authority: Callable[[], dict | None],
+                       enforcement_observer: Callable[[str, str], None] | None = None) -> dict:
     """The effect itself, receipted.
 
     PREPARE is fsynced tamper-evident BEFORE any network I/O (no receipt =
@@ -2899,6 +2934,7 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
             "could not persist the PREPARE receipt; refusing to act "
             "(fail-closed)")
     effect_started = False
+    enforcement = _ExecutionEnforcement(enforcement_observer)
     try:
         from .authority_effects import authority_effect_fence
         from .governed_rest import GOVERNED_REST_FACTORIES
@@ -2962,6 +2998,9 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
                     force=True,
                 )
                 return verdict
+            boundary_verdict = enforcement.prepare(final_authority)
+            if boundary_verdict is not None:
+                return enforcement.observed(boundary_verdict, effect_started=False)
             effect_started = True
             if op == "get":
                 raw = conn.read({"path": path})
@@ -3002,10 +3041,10 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
                         exc_info=True)
         _audit_execution(agent_id, connector, op, "indeterminate", digest,
                          approved=approved, goal_id=goal_id)
-        return {"allowed": True, "rule": "indeterminate", "status": "indeterminate",
+        return enforcement.observed({"allowed": True, "rule": "indeterminate", "status": "indeterminate",
                 "result": "The connection ended before the result was confirmed. "
                           "The change may already have happened. Check the connected "
-                          "service before submitting another request."}
+                          "service before submitting another request."}, effect_started=effect_started)
     from .connector_attempts import ConnectorResult
 
     unknown = (
@@ -3058,8 +3097,8 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
         log.warning("external_agents: execution meter failed", exc_info=True)
     _audit_execution(agent_id, connector, op, outcome, digest,
                      approved=approved, goal_id=goal_id)
-    return {"allowed": True, "rule": outcome if unknown or accepted else "executed", "status": outcome,
-            "result": result}
+    return enforcement.observed({"allowed": True, "rule": outcome if unknown or accepted else "executed", "status": outcome,
+            "result": result}, effect_started=effect_started)
 
 
 def _audit_execution(agent_id: str, connector: str, op: str, outcome: str,

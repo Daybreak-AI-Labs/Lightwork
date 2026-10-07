@@ -2068,6 +2068,11 @@ from .privacy_discovery_data_use_api import (  # noqa: E402
 )
 
 app.include_router(privacy_discovery_data_use_router, prefix="/api/v1")
+from .dsar_handling_api import router as dsar_handling_router  # noqa: E402
+from .runtime_enforcement_api import router as runtime_enforcement_router  # noqa: E402
+
+app.include_router(dsar_handling_router)
+app.include_router(runtime_enforcement_router, prefix="/api/v1")
 app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
@@ -13860,6 +13865,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-learning-question-checks.js")
 @app.get("/static/lightwork-task-model-selection.js")
 @app.get("/static/lightwork-privacy-discovery-data-use.js")
+@app.get("/static/lightwork-runtime-enforcement.js")
 @app.get("/static/lightwork-draft-recovery.css")
 @app.get("/static/lightwork-ai-cloud-agent-governance.js")
 @app.get("/static/lightwork-governance-agents.js")

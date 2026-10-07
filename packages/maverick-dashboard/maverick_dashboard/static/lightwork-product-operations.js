@@ -285,6 +285,28 @@
               ? function (isCurrent) { return discoveryUseControls.openReview(discoveryUseReview.context, isCurrent); } : null);
           return;
         }
+        if (entry[0] === 'runtime_enforcement_form') {
+          var safeguardReview = entry[1], safeguardControls = window.LightworkRuntimeEnforcement;
+          if (!safeguardReview || Array.isArray(safeguardReview) ||
+              Object.keys(safeguardReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(safeguardReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Read actual safeguard activity',
+            '/security/governance#runtime-enforcement',
+            safeguardControls && typeof safeguardControls.open === 'function'
+              ? function (isCurrent) { return safeguardControls.open(safeguardReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'dsar_handling_review') {
+          var privacyHandlingReview = entry[1], privacyHandlingControls = window.LightworkDSARHandling;
+          if (!privacyHandlingReview || Array.isArray(privacyHandlingReview) ||
+              Object.keys(privacyHandlingReview).sort().join(',') !== 'context,scope' ||
+              privacyHandlingReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(privacyHandlingReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review the complete action and response',
+            window.location.pathname + '#dsar-status',
+            privacyHandlingControls && typeof privacyHandlingControls.openReview === 'function'
+              ? function (isCurrent) { return privacyHandlingControls.openReview({}, {isCurrent: isCurrent, context: privacyHandlingReview.context}); } : null);
+          return;
+        }
         if (entry[0] === 'learning_task_question_review') {
           var taskQuestionReview = entry[1], taskQuestionControls = window.LightworkLearningQuestions;
           if (!taskQuestionReview || Array.isArray(taskQuestionReview) ||

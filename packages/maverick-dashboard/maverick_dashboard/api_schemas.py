@@ -1133,6 +1133,7 @@ class DsarCloseIn(BaseModel):
     erasure: str = Field("", pattern="^(|erased|not_erased)$")
     lawful_basis: str = Field("", max_length=2000)
     note: str = Field("", max_length=2000)
+    review_token: str = Field("", max_length=2097152)
 
 
 class IncidentIn(BaseModel):

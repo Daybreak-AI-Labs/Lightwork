@@ -1,5 +1,19 @@
 # Post-install operation coverage
 
+October 7 privacy outcome follow-through: manually handled correction, opt-out,
+objection and similar requests no longer become Answered through an unsupported
+fulfillment call. Ordinary action/response review requires the action and affected
+systems, answer date and proof; the separate confirmation uses the existing native
+close writer with the exact current revision and an immutable original identity.
+Copilot opens the same controls without changing or sending anything. An actual
+opt-out confirmation recovered its original after an interrupted reply and reload
+with one outcome, while another review with identical fields did not qualify as
+that original. Changed revisions and genuine current-role withdrawal refused.
+Legacy unproved manual fulfillment remains unanswered and its deadline stays
+active. These are operator-recorded statements, not independent verification of
+external corrections or requester receipt; the generalized rectification module
+is not exposed by this delivery.
+
 October 7 discovery follow-through: Data discovery offers a reviewed update from
 one independently approved report to a named existing dataset. The ordinary form
 and Copilot preserve the selected report and dataset, show current and proposed
@@ -2377,3 +2391,9 @@ The native ordinary form saved an owned FRED account, and the stock lazy tool us
 Each supported saved code block has its own labelled Copy code action. Current answers, prose/code files and retained earlier messages use exact native selected-source and result-release checks immediately before local copying. The complete rendered snippet, including whitespace, tabs and Unicode, must match that current source. Changed, unavailable or unapproved content refuses the copy. Earlier retained messages remain available while newer work runs. An unavailable clipboard offers selectable text and never falsely says Copied. Copilot opens these same controls without copying or executing code, keeping the message draft.
 
 Selected historical Markdown and Word downloads now resolve the exact retained turn through the existing owner-, thread- and tenant-scoped reader. The previous latest-two-hundred lookup stopped finding earlier answers after a longer conversation, including answers loaded by the ordinary history pager. A native signed download after 201 later turns returned the complete original in both formats and refused a turn from another conversation. The ordinary all-turn reader keeps its existing separate limit. Actual current/historical clipboard and Copilot journeys preserved the composer; a fixture-injected clipboard rejection exercised selectable fallback. No browser permission or external code execution is claimed.
+
+## Actual connected-agent safeguard activity (UX160)
+
+Governance's **Actual safeguard activity** and Copilot read protected native connector attempts and their exact originals. The retained record precedes connector entry; current agent, independently approved system declaration and native policy authority are checked again at the physical boundary. Returned results, accepted requests, stopped sends and unknown effects remain distinct. An interrupted post-effect receipt update stays unconfirmed, and original readback never sends again. Current permission loss clears private activity; disabling new checks does not erase authorized originals.
+
+The default governance loop now reconciles actual inventory, declarations, model risk, runtime policy, retained enforcement and evidence, with independent generations for complete source material, expiry and removal. A local native connector exercised successful reads, an uncertain write, current-authority withdrawal during a writer wait and failed post-effect recording; the ordinary controls worked at phone width. Reads are bounded to 10,000 enforcement records and 5,000 governance assets. This qualification establishes local execution and readback, not external custody, outside-effect rollback or large-inventory latency.
