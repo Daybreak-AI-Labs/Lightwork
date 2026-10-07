@@ -246,11 +246,14 @@ def login(request: Request, *, email: str, password: str) -> str:
         current.update(failures=0, locked_until=0)
         _write(accounts)
     principal = "user:" + email
-    from . import rbac
+    from . import auth, rbac
 
     # The default role for a signed-in person with no assignment is not
-    # "nothing", so a removed colleague must not get a session at all.
-    if rbac.get_stored_role(principal) is None and not (tenant and rbac.get_tenant_role(tenant, principal)):
+    # "nothing", so a removed colleague must not get a session at all. A
+    # configured administrator is always an administrator, whatever the role
+    # list says, so a lost list cannot lock them out of starting a new one.
+    if (not auth.is_dashboard_admin(principal) and rbac.get_stored_role(principal) is None
+            and not (tenant and rbac.get_tenant_role(tenant, principal))):
         raise HTTPException(403, NO_ACCESS)
     from maverick.oidc import VerifiedPrincipal
 

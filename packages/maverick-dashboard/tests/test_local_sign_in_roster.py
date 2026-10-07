@@ -9,6 +9,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -101,3 +102,106 @@ def test_owner_setup_survives_a_failed_first_roster_write(home, monkeypatch):
     assert rbac.get_stored_role("user:" + OWNER) == "admin"
     assert local_owner._read()["status"] == "ready"
     assert owner.get("/users", headers={"Accept": "text/html"}).status_code == 200
+
+
+def _sign_in(browser, email, password):
+    return browser.post("/auth/local-login", data={"email": email, "password": password})
+
+
+def _invite_and_accept(owner, email=COLLEAGUE, role="operator"):
+    made = owner.post("/users/invite", data={"email": email, "role": role})
+    assert made.status_code == 200, made.text
+    link = re.search(r"/auth/invite/(inv_[A-Za-z0-9_-]+)", made.text)[0]
+    colleague = _elsewhere()
+    accepted = colleague.post(link, data={"password": GOOD, "password2": GOOD})
+    assert accepted.status_code == 303, accepted.text
+    return colleague
+
+
+def _lose_the_roster(home):
+    (home / "dashboard-users.json").unlink()
+    assert (home / "dashboard-users.json.present").exists()
+
+
+def test_a_configured_admin_who_is_the_owner_signs_in_with_the_roster_lost_and_starts_a_new_one(home, monkeypatch):
+    from maverick_dashboard import rbac
+
+    owner = _on_this_computer()
+    assert _claim(owner).status_code == 303
+    _lose_the_roster(home)
+
+    # Without a configured administrator nobody can sign in, and the page says what to do.
+    refused = _sign_in(_on_this_computer(), OWNER, OWNER_PASS)
+    assert refused.status_code == 503
+    for needle in ("role list is missing", "[dashboard] admins", "MAVERICK_DASHBOARD_ADMINS", "backup"):
+        assert needle in refused.text, needle
+    assert "mvk_session" not in refused.cookies
+
+    # Naming the owner in configuration is the file-level recovery.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:" + OWNER)
+    browser = _on_this_computer()
+    signed_in = _sign_in(browser, OWNER, OWNER_PASS)
+    assert signed_in.status_code == 303, signed_in.text
+    assert "mvk_session" in browser.cookies
+    page = browser.get("/users", headers={"Accept": "text/html"})
+    assert page.status_code == 503 and 'action="/users/roster/reset"' in page.text
+    done = browser.post("/users/roster/reset", data={"confirm": "reset"})
+    assert done.status_code == 303, done.text
+    assert rbac.list_users() == {}
+    assert browser.get("/users", headers={"Accept": "text/html"}).status_code == 200
+
+
+def test_a_wrong_passphrase_is_still_refused_with_the_roster_lost(home, monkeypatch):
+    owner = _on_this_computer()
+    assert _claim(owner).status_code == 303
+    _lose_the_roster(home)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:" + OWNER)
+    refused = _sign_in(_on_this_computer(), OWNER, "not the owner passphrase")
+    assert refused.status_code == 401 and "mvk_session" not in refused.cookies
+
+
+def test_a_configured_admin_colleague_signs_in_with_the_roster_lost_and_others_do_not(home, monkeypatch):
+    from maverick_dashboard import rbac
+
+    owner = _on_this_computer()
+    assert _claim(owner).status_code == 303
+    _invite_and_accept(owner)
+    _lose_the_roster(home)
+
+    refused = _sign_in(_elsewhere(), COLLEAGUE, GOOD)
+    assert refused.status_code == 503 and "role list is missing" in refused.text
+    assert "mvk_session" not in refused.cookies
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:" + COLLEAGUE)
+    browser = _elsewhere()
+    signed_in = _sign_in(browser, COLLEAGUE, GOOD)
+    assert signed_in.status_code == 303, signed_in.text
+    page = browser.get("/users", headers={"Accept": "text/html"})
+    assert page.status_code == 503 and 'action="/users/roster/reset"' in page.text
+    assert browser.post("/users/roster/reset", data={"confirm": "reset"}).status_code == 303
+    assert rbac.list_users() == {}
+    # The owner still has no stored role and is not a configured administrator.
+    gone = _sign_in(_on_this_computer(), OWNER, OWNER_PASS)
+    assert gone.status_code == 403 and "no longer has an assigned role" in gone.text
+
+
+def test_a_pending_owner_claim_with_a_lost_roster_finishes_for_a_configured_admin(home, monkeypatch):
+    """The state an older build could leave after one failed first roster write."""
+    from maverick_dashboard import local_owner, rbac
+
+    fault = _break_writes_of(monkeypatch, "dashboard-users.json")
+    assert _claim(_on_this_computer()).status_code == 503
+    fault["armed"] = False
+    rbac._record_roster(rbac.store_path())  # the marker an older build left behind
+    assert not rbac.store_path().exists()
+
+    refused = _sign_in(_on_this_computer(), OWNER, OWNER_PASS)
+    assert refused.status_code == 503 and "role list is missing" in refused.text
+    assert local_owner._read()["status"] == "pending"
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:" + OWNER)
+    browser = _on_this_computer()
+    assert _sign_in(browser, OWNER, OWNER_PASS).status_code == 303
+    assert local_owner._read()["status"] == "ready"
+    assert browser.post("/users/roster/reset", data={"confirm": "reset"}).status_code == 303
+    assert rbac.list_users() == {}
