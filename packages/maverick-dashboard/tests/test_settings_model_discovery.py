@@ -176,7 +176,7 @@ def test_allow_listed_models_are_offered_before_their_key_is_saved(monkeypatch, 
     set_allowed_models(["claude-sonnet-4-6", "openai:gpt-5.4"])
     text = _client().get("/settings").text
     picker = text.split('name="model"', 1)[1].split("</select>", 1)[0]
-    assert '<optgroup label="Anthropic (Claude) (no key yet)">' in picker
+    assert '<optgroup label="Anthropic (Claude) (not set up)">' in picker
     assert 'value="claude-sonnet-4-6"' in picker and 'value="openai:gpt-5.4"' in picker
     assert 'value="claude-opus-4-8"' not in picker
     # Without an allow-list an unconfigured provider is still not offered.
