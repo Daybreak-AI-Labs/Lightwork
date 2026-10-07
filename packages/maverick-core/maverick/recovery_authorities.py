@@ -482,6 +482,9 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         "oidc-retired-subjects.json": "oidc_subject_tombstone",
         "channel-oidc-bridge.json": "channel_oidc_identity_link_authority",
         "dashboard-users.json": "dashboard_user_roles",
+        # Presence markers: a roster existed, so its absence denies access.
+        "dashboard-users.json.present": "dashboard_user_roles",
+        "dashboard-tenant-roles.json.present": "dashboard_tenant_roles",
         "dashboard-custom-roles.json": "dashboard_custom_roles",
         "dashboard-tenant-roles.json": "dashboard_tenant_roles",
         "dashboard-invites.json": "dashboard_invites",
@@ -756,6 +759,8 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "oidc-retired-subjects.json": "oidc_subject_tombstone",
     "channel-oidc-bridge.json": "channel_oidc_identity_link_authority",
     "dashboard-users.json": "dashboard_user_roles",
+    "dashboard-users.json.present": "dashboard_user_roles",
+    "dashboard-tenant-roles.json.present": "dashboard_tenant_roles",
     "dashboard-custom-roles.json": "dashboard_custom_roles",
     "dashboard-tenant-roles.json": "dashboard_tenant_roles",
     "dashboard-invites.json": "dashboard_invites",

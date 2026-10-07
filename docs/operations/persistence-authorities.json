@@ -20458,7 +20458,9 @@
       "literal_path_hints": [
         "dashboard-custom-roles.json",
         "dashboard-tenant-roles.json",
-        "dashboard-users.json"
+        "dashboard-tenant-roles.json.present",
+        "dashboard-users.json",
+        "dashboard-users.json.present"
       ],
       "observed_mechanism_markers": {
         "cross_process_lock": 1,
@@ -20530,6 +20532,18 @@
           "function": "_locked",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(path)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard-users.json.present",
+          "recovery_policy": "dashboard_user_roles",
+          "disposition": "Records that the global role roster existed. Retained with the roster; while it exists a missing roster denies access instead of returning everyone to the default role."
+        },
+        {
+          "sample_path": "dashboard-tenant-roles.json.present",
+          "recovery_policy": "dashboard_tenant_roles",
+          "disposition": "Records that workspace memberships existed. Retained with them; a missing membership roster denies instead of falling back to the global role."
         }
       ]
     },
