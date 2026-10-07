@@ -25,7 +25,7 @@
     function say(text) {
       var message = container.querySelector('[data-source-message]');
       if (!message) { message = document.createElement('p'); message.dataset.sourceMessage = ''; message.className = 'auto__hint'; message.setAttribute('role', 'status'); container.appendChild(message); }
-      message.textContent = text;
+      window.mvStatus(message, text);
     }
     function choices() { return {context: catalog.context, source: source, connection: draft.connection || '', selection: draft.selection || {}}; }
     function call(path, body) { return window.mvFetchJSON(API + path, {method: body ? 'POST' : 'GET', body: body}, 'review the connected source'); }
