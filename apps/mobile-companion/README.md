@@ -66,6 +66,9 @@ npm run build:android:local  # JDK 17 + Android SDK; produces a debug APK
 npm run build:ios:local      # macOS + Xcode + CocoaPods; unsigned simulator app
 ```
 
+To generate a native project without building it, run `npm run prebuild:android`
+or `npm run prebuild:ios`.
+
 Expo Go does not contain the Lightwork transport module. The app fails closed
 before sending a credential there. Use the locally built preview; its native
 bridge caps response bytes before crossing into JavaScript and refuses redirects.

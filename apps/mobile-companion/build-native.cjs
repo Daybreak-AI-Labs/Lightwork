@@ -15,7 +15,9 @@ function run(command, args, cwd = root) {
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);
 }
-if (platform === 'ios' && process.platform !== 'darwin') throw Error('iOS builds require macOS and Xcode. No build was started.');
+const generateOnly = process.argv.includes('--generate-only');
+// Generating either project works on any OS; building the iOS one needs a Mac.
+if (platform === 'ios' && process.platform !== 'darwin' && !generateOnly) throw Error('iOS builds require macOS and Xcode. No build was started.');
 const template = require('./native-template.json');
 const templateDir = path.join(root, '.native-template');
 fs.mkdirSync(templateDir, {recursive: true});
@@ -29,7 +31,7 @@ const integrity = 'sha512-' + crypto.createHash('sha512').update(fs.readFileSync
 if (integrity !== template.integrity) throw Error('Native template integrity does not match the reviewed pin.');
 run(process.execPath, [require.resolve('expo/bin/cli'), 'prebuild', '--platform', platform, '--no-install',
   '--template', archive, '--skip-dependency-update', 'react,react-native,expo']);
-if (process.argv.includes('--generate-only')) process.exit(0);
+if (generateOnly) process.exit(0);
 if (platform === 'android') {
   if (!process.env.JAVA_HOME || !(process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT)) {
     throw Error('Install JDK 17 and Android SDK, then set JAVA_HOME and ANDROID_HOME. No signed build or upload is attempted.');

@@ -10,7 +10,8 @@
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
     "test": "npm --prefix tests test",
-    "prebuild": "node build-native.cjs --generate-only",
+    "prebuild:android": "node build-native.cjs android --generate-only",
+    "prebuild:ios": "node build-native.cjs ios --generate-only",
     "build:android:local": "node build-native.cjs android",
     "build:ios:local": "node build-native.cjs ios"
   },

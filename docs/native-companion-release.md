@@ -25,7 +25,8 @@ installed status. The Zed development install rebuilds its bundled sources.
 In `apps/mobile-companion`, run `npm ci --ignore-scripts`, then
 `npm run build:android:local` or `npm run build:ios:local`. These generate native
 projects from locked sources and build an Android **debug APK** or an **unsigned
-iOS simulator app**, respectively. They do not upload. Inspect generated
+iOS simulator app**, respectively. They do not upload. `npm run prebuild:android`
+and `npm run prebuild:ios` only generate the project (no build). Inspect generated
 manifests before producing a distributable artifact. The native transport is a
 local Expo module; Expo Go cannot load it and fails closed before a request.
 
