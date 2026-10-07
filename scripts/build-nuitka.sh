@@ -100,11 +100,16 @@ python -m nuitka \
   --include-package=maverick_installer \
   --include-package=pywhispercpp \
   --include-package=openai \
+  --include-package=boto3 \
+  --include-package=botocore \
+  --include-package=s3transfer \
   --include-package-data=maverick \
   --include-package-data=maverick_shield \
   --include-package-data=maverick_evolve \
   --include-package-data=maverick_dashboard \
   --include-package-data=maverick_knowledge \
+  --include-package-data=boto3 \
+  --include-package-data=botocore \
   --nofollow-import-to='*.tests' \
   --nofollow-import-to='*.test_*' \
   --assume-yes-for-downloads \

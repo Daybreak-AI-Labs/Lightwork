@@ -6,7 +6,7 @@ Lightwork wraps its agent loop in [Agent Shield](https://github.com/cdayAI/agent
 2. **Tool-call scan** — every `tool_use` request goes through `shield.scan_tool_call(name, args)` before the sandbox executes it.
 3. **Output scan** — every final answer goes through `shield.scan_output()` before reaching the user.
 
-All three chokepoints additionally run a **decode/defang pre-pass** (`maverick_shield/deobfuscate.py`): base64 / hex / percent-encoded payloads are decoded and Unicode homoglyphs (Cyrillic/Greek lookalikes NFKC leaves alone) plus zero-width/bidi chars are folded, then the detectors re-run over each variant — so an *encoded* `rm -rf /` is caught even when the literal surface form hides it. This is part of the **built-in** shield (not the optional SDK), is monotonic (it can only turn an allowed scan into a block, never the reverse), bounded against decode bombs, and fail-open. Escape hatch: `MAVERICK_SHIELD_NO_DECODE=1`.
+All three chokepoints additionally run a **decode/defang pre-pass** (`maverick_shield/deobfuscate.py`): base64 / hex / percent-encoded payloads are decoded and Unicode homoglyphs (Cyrillic/Greek lookalikes NFKC leaves alone) plus zero-width/bidi chars are folded, then the detectors re-run over each variant — so an *encoded* `rm -rf /` is caught even when the literal surface form hides it. This is part of the **built-in** shield (not the optional SDK), is monotonic (it can only turn an allowed scan into a block, never the reverse), and is bounded against decode bombs. Detector failures, including decoding and phishing checks, retain a scan-error result: strict or required policies refuse; optional policies may allow while retaining the error and any existing block. Escape hatch: `MAVERICK_SHIELD_NO_DECODE=1`; disabling a required scan does not establish that the input is safe.
 
 ## Profiles
 
@@ -27,8 +27,8 @@ block_threshold = "high"
 
 ## What gets caught
 
-The **built-in ~20-pattern** layer is what runs in every environment we ship: the
-full Agent Shield SDK (~115 patterns) is **not published on PyPI and not vendored
+The **bundled built-in rules** are what run in the standard release: the
+full Agent Shield SDK is **not published on PyPI and not vendored
 here**, so the public package name is not an installation path and the fallback
 is not a fallback in practice — it is the product. The current internal, reproducible
 diagnostic is reported with its corpus size and confidence intervals on the
@@ -71,8 +71,8 @@ interactively.
 
 Two layers can be missing, and they degrade differently:
 
-- **Full `agent-shield` SDK absent** (but the `maverick-shield` wrapper present): detection uses the **built-in** layer — ~20 high-impact rules, the decode/defang pre-pass, and a cheap-probe (regex + Unicode heuristics, optionally ensembled with a trained linear model via `[shield] probe_model`). No SDK efficacy number is attributed to this built-in backend; scans — including obfuscation-decoding — still run.
-- **Shield wrapper absent entirely**: scans are **skipped (fail-open)** with a startup warning, per the kernel's "runs without the shield" rule.
+- **Full `agent-shield` SDK absent** (but the `maverick-shield` wrapper present): detection uses the **bundled built-in rules**, the decode/defang pre-pass, and a cheap-probe (regex + Unicode heuristics, optionally ensembled with a trained linear model via `[shield] probe_model`). The startup warning and health check count the actual installed rules rather than an approximate historical count. No SDK efficacy number is attributed to this built-in backend; scans — including obfuscation-decoding — still run. Detector errors follow the selected strict/required or optional failure policy.
+- **Shield wrapper absent entirely**: optional kernel-only operation warns and skips unavailable scans. A required deployment refuses external traffic; the health check reports that failure. The core remains importable without the optional wrapper.
 
 The complete Lightwork release cohort includes the `maverick-shield` wrapper.
 Core-only source installs must add `packages/maverick-shield` explicitly. The

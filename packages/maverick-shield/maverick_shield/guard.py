@@ -12,7 +12,7 @@ Backends (chosen automatically in order):
      it: the only measured backends are the in-repository layers benchmarked in
      ``benchmarks/security/RESULTS.md``. That generated artifact is authoritative;
      do not copy a score into this module docstring where it can drift.
-  2. ``builtin_rules`` (~20 high-impact rules bundled with maverick-shield)
+  2. ``builtin_rules`` (the rules bundled with this maverick-shield release)
   3. No-op (only if the user explicitly disabled safety via [safety] profile=off)
 
 Optional balanced/permissive policies allow detector failures with an explicit
@@ -26,7 +26,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from .builtin_rules import SEVERITY_ORDER
+from .builtin_rules import RULES, SEVERITY_ORDER
 from .builtin_rules import scan as builtin_scan
 from .constitutional import parse_rules as _parse_constitution
 from .constitutional import scan as _constitutional_scan
@@ -196,8 +196,8 @@ class Shield:
             _WARNED_SDK_MISSING = True
             log.warning(
                 "Shield: agent-shield SDK not installed; using built-in rules "
-                "(~20 high-impact patterns vs. ~115 in the full SDK). "
-                "The full SDK is not available from public PyPI"
+                "(%d bundled patterns). The full SDK is not available from public PyPI",
+                len(RULES),
             )
 
     @property

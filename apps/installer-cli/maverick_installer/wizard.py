@@ -6993,6 +6993,10 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     )
     personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass,
                        "personal_background": personal_background}
+    personal_config["metric_alerts"] = personal_alerts and _q_confirm(
+        "Show each person task performance and recorded usage alerts? By default, alert when fewer than 80% of at least ten of their recent recorded runs finish successfully. This measures completion, not answer accuracy. Uses up to 5,000 current-access runs completed in the last seven days; recorded usage may not include every provider charge. Change thresholds in All settings; personal Needs attention choices and quiet hours still apply.",
+        default=False,
+    )
     if personal_background and _q_confirm(
         "Allow people to opt into alerts in their verified Slack, Telegram or Teams private conversations? Requires My data identity verification and configured channel access.", default=False,
     ):

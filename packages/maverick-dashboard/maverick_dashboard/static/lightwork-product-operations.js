@@ -318,6 +318,17 @@
               ? function (isCurrent) { return researchExecutionControls.openReview({}, {isCurrent: isCurrent, context: researchExecutionReview.context}); } : null);
           return;
         }
+        if (entry[0] === 'audit_checkpoint_custody_form') {
+          var checkpointCustodyForm = entry[1], checkpointCustodyControls = window.LightworkAuditCheckpointCustody;
+          if (!checkpointCustodyForm || Array.isArray(checkpointCustodyForm) ||
+              Object.keys(checkpointCustodyForm).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(checkpointCustodyForm.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review independent history protection',
+            '/audit#independent-checkpoint-custody',
+            checkpointCustodyControls && typeof checkpointCustodyControls.openReview === 'function'
+              ? function (isCurrent) { return checkpointCustodyControls.openReview(checkpointCustodyForm.context, {isCurrent: isCurrent}); } : null);
+          return;
+        }
         if (entry[0] === 'personal_push_setup') {
           var privatePushSetup = entry[1], privatePushControls = window.LightworkPersonalPush;
           if (!privatePushSetup || Array.isArray(privatePushSetup) ||
@@ -327,6 +338,17 @@
             '/notifications#private-device-setup',
             privatePushControls && typeof privatePushControls.openReview === 'function'
               ? function (isCurrent) { return privatePushControls.openReview(privatePushSetup.context, {isCurrent: isCurrent}); } : null);
+          return;
+        }
+        if (entry[0] === 'report_schedule_form') {
+          var reportScheduleForm = entry[1], reportScheduleControls = window.LightworkExecutiveReportSchedules;
+          if (!reportScheduleForm || Array.isArray(reportScheduleForm) ||
+              Object.keys(reportScheduleForm).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(reportScheduleForm.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review recurring report setup',
+            '/third-party/executive-reports#tper-schedules',
+            reportScheduleControls && typeof reportScheduleControls.open === 'function'
+              ? function (isCurrent) { return reportScheduleControls.open(reportScheduleForm.context, isCurrent); } : null);
           return;
         }
         if (entry[0] === 'report_starting_point') {

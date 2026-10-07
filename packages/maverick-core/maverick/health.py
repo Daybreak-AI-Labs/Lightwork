@@ -607,9 +607,10 @@ def _check_shield() -> None:
     # itself, so the raw "SDK not installed" log line would just bleed into the
     # health-check output mid-table.
     s = Shield.from_config(warn_if_missing=False)
+    from maverick_shield.builtin_rules import RULES
     backend_label = {
-        "agent-shield": "agent-shield SDK (full ~115 patterns)",
-        "builtin": "builtin rules (~20 high-impact patterns)",
+        "agent-shield": "agent-shield SDK",
+        "builtin": f"builtin rules ({len(RULES)} bundled patterns)",
         "none": "DISABLED -- [safety] profile=off in config",
     }.get(s.backend, s.backend)
     if s.backend == "agent-shield":

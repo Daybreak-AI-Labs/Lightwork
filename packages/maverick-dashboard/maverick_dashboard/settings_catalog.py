@@ -640,10 +640,14 @@ SETTINGS: tuple[Setting, ...] = (
       "Let Lightwork choose how much reasoning effort each task needs.",
       "toggle", "AI models", False, "maverick.effort", env=("MAVERICK_EFFORT_ENABLED",)),
     S("context", "compaction_strategy", "How long conversations are shortened",
-      "The method used to shorten long conversations so they fit.",
+      "The method used to shorten long conversations so they fit. Written summaries use "
+      "extra AI calls within the task's spending limit, reuse the earlier summary in the same "
+      "run, and add older turns at the configured summary interval. Their style learns from "
+      "agents that returned a complete answer and continued turns; this does not measure "
+      "answer accuracy or whether the team's final review accepted it.",
       "select", "AI models", "", "maverick.compaction.strategies",
       choices=(("", "Keep recent turns and trim long tool results (default)"),
-               ("learned", "Written summary that improves over time"),
+               ("learned", "Written summary that learns from completed answers"),
                ("multimodal", "Replace large images and audio with short notes"),
                ("streaming", "Running summary for very long chats"),
                ("graph", "Summary of people, things and how they relate")),
@@ -971,6 +975,33 @@ SETTINGS: tuple[Setting, ...] = (
     S("notifications", "personal_critical_bypass", "Allow personal approval and deadline exceptions",
       "Let people explicitly allow approval and deadline alerts to bypass their personal quiet hours and summary timing. Organization operational alerts are unchanged.",
       "toggle", "Integrations", False, "maverick_dashboard.personal_notifications_api"),
+    S("notifications", "metric_alerts", "Task performance and usage alerts",
+      "Show each signed-in person an in-app alert when their recorded runs reach the thresholds below. "
+      "Uses up to 5,000 of their latest runs completed in the last seven days that they can still open; "
+      "older history is explicitly excluded. Finish rate measures completion, not answer accuracy. "
+      "Recorded usage is not a complete provider invoice. Follows personal Needs attention alert choices, "
+      "quiet hours and delivery settings; never changes spending limits. Off by default.",
+      "toggle", "Integrations", False, "maverick.task_metric_alerts",
+      subgroup="Task performance alerts", aliases="metric quality performance usage threshold alerts"),
+    S("notifications", "metric_min_runs", "Runs needed before a finish-rate alert",
+      "Require this many included completed runs before checking the finish-rate threshold. Usage alerts do not need this minimum.",
+      "number", "Integrations", 10, "maverick.task_metric_alerts", minimum=1, maximum=1000,
+      integer=True, unit="recorded runs", subgroup="Task performance alerts"),
+    S("notifications", "metric_finish_below", "Alert below this finish rate",
+      "Alert when fewer than this percentage of included runs finished successfully. Zero turns off this check. "
+      "Stopped and failed completed runs lower the rate; this does not judge whether answers are correct.",
+      "number", "Integrations", 80, "maverick.task_metric_alerts", minimum=0, maximum=100,
+      integer=True, unit="percent", subgroup="Task performance alerts"),
+    S("notifications", "metric_spend_above", "Alert at this recorded weekly spending",
+      "Alert when included runs record at least this many US dollars. Zero turns off this check. "
+      "Uses recorded usage, which may not include every provider charge; does not stop or authorize spending.",
+      "number", "Integrations", 0.0, "maverick.task_metric_alerts", minimum=0, maximum=1000000,
+      unit="US dollars", subgroup="Task performance alerts"),
+    S("notifications", "metric_tokens_above", "Alert at this recorded weekly text usage",
+      "Alert when included runs record at least this many text units (tokens) read and written. "
+      "Zero turns off this check. This is recorded usage, not a complete invoice or a new spending limit.",
+      "number", "Integrations", 0, "maverick.task_metric_alerts", minimum=0, maximum=10000000000,
+      integer=True, unit="text units", subgroup="Task performance alerts"),
     S("notifications", "personal_background", "Refresh personal alerts while pages are closed",
       "Run a bounded dashboard observer for explicitly enrolled named accounts. It rechecks current identity and owned work, observes changes about every 30 seconds, and releases eligible digests while the dashboard is running.",
       "toggle", "Integrations", False, "maverick_dashboard.personal_notification_scheduler"),

@@ -279,13 +279,23 @@ Template-rendered title overrides the empty one supplied in `title`.
 
 ## Error responses
 
-All errors use the FastAPI default `{"detail": "..."}` shape with
-HTTP status codes:
+API errors use a `detail` field. It can be a message string, a structured
+business error, or a list of field-validation objects with `loc`, `msg` and
+`type`. Do not assume it is always a string or parse its English wording to
+decide whether an uncertain operation should be repeated. Some responses
+also include recovery information such as `reauthenticate`; browser page
+navigation can instead receive an actionable HTML page or sign-in redirect.
+Use the HTTP status and the operation's documented Original/recovery control:
 
 - `400` malformed input (missing API key, invalid template params)
 - `401` missing / wrong bearer token
+- `403` current access refused or the feature is disabled
 - `404` no such goal / question / skill
+- `409` current state changed, or the reviewed operation cannot proceed
 - `422` Pydantic validation (e.g., a negative or non-finite spending limit)
+- `429` request limit reached
+- `503` required service or configuration unavailable; this does not establish
+  that an earlier uncertain external effect did not happen
 - `500` internal error (server bug -- file an issue with `maverick doctor` output)
 
 ## Mobile / external app integrations

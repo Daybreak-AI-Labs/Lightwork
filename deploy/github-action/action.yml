@@ -76,6 +76,21 @@ outputs:
   result-file:
     description: "Path to a private file containing the sanitized, bounded run output."
     value: ${{ steps.run.outputs.result-file }}
+  goal-id:
+    description: "Actual saved task ID, or empty when native task admission is unavailable."
+    value: ${{ steps.run.outputs.goal-id }}
+  status:
+    description: "Actual saved task status, or unavailable when no native result was retained."
+    value: ${{ steps.run.outputs.status }}
+  spend-recorded-usd:
+    description: "Recorded model usage in USD; not a complete provider invoice. Empty when unavailable."
+    value: ${{ steps.run.outputs.spend-recorded-usd }}
+  release-status:
+    description: "released, pending_signoff, not_completed, policy_unavailable, or unavailable."
+    value: ${{ steps.run.outputs.release-status }}
+  deliverable-file:
+    description: "Private sanitized answer.md file for a completed, releasable answer; empty otherwise."
+    value: ${{ steps.run.outputs.deliverable-file }}
 
 runs:
   using: "composite"
@@ -199,13 +214,16 @@ runs:
         umask 077
         private_root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lightwork-action.XXXXXX")"
         raw_file="$private_root/raw.log"
+        native_result="$private_root/native-result.json"
+        result_key="$private_root/result-key"
+        answer_file="$private_root/answer.md"
         out_file="$private_root/result.log"
         summary_file="$private_root/summary.html"
         secret_snapshot="$private_root/secret-files.snapshot"
         secure_config="$private_root/config.toml"
         cleanup_private_capture() {
           rm -f -- \
-            "$raw_file" "$summary_file" "$secret_snapshot" "$secure_config"
+            "$raw_file" "$native_result" "$result_key" "$summary_file" "$secret_snapshot" "$secure_config"
           if [ ! -e "$out_file" ]; then
             rmdir -- "$private_root" 2>/dev/null || true
           fi
@@ -265,6 +283,7 @@ runs:
           echo "dry-run: not invoking the swarm (no LLM calls, no spend)."
           exit 0
         fi
+        args+=( --result-file "$native_result" --result-key-file "$result_key" )
 
         case "$IN_SANDBOX" in
           docker|gvisor)
@@ -286,6 +305,8 @@ runs:
         # fresh read, covering rotation or deletion while the swarm runs.
         python -I -S "$GITHUB_ACTION_PATH/sanitize_output.py" \
           --write-secret-file-snapshot "$secret_snapshot"
+        python -I -S "$GITHUB_ACTION_PATH/sanitize_output.py" \
+          --write-result-key "$result_key" --workspace-root "$PWD"
 
         # Never stream model/agent output into the Actions command parser.
         # Capture it with owner-only permissions, sanitize it, then discard the
@@ -299,8 +320,12 @@ runs:
           --output "$out_file" \
           --summary "$summary_file" \
           --secret-file-snapshot "$secret_snapshot" \
+          --run-result "$native_result" \
+          --result-key "$result_key" \
+          --deliverable "$answer_file" \
+          --github-output "$GITHUB_OUTPUT" \
           --max-chars 50000
-        rm -f -- "$raw_file" "$secret_snapshot"
+        rm -f -- "$raw_file" "$native_result" "$result_key" "$secret_snapshot"
 
         choose_absent_token() {
           local prefix="$1"

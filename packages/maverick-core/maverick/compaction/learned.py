@@ -20,6 +20,7 @@ choice; nothing here names a model). No llm, or any error, falls back to
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -31,7 +32,15 @@ from pathlib import Path
 from ..context_compactor import _message_text
 from ..llm import model_for_role
 from ..paths import data_dir
-from . import KEEP_RECENT_TURNS, compact_messages, digest_cutoff
+from ..run_outcome import GoalCancelled
+from . import (
+    DIGEST_EVERY,
+    KEEP_RECENT_TURNS,
+    MAX_TOOL_OUTPUT_BYTES,
+    MAX_TOTAL_BYTES,
+    compact_messages,
+    digest_cutoff,
+)
 from .requests import request, run_async, run_sync
 
 log = logging.getLogger(__name__)
@@ -224,6 +233,91 @@ def _transcript(messages: list[dict]) -> str:
     return text
 
 
+def _fingerprint(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+class LearnedRunState:
+    """Private, in-memory summary state owned by exactly one Agent.run.
+
+    It never stores a cross-run transcript. The only persisted feedback is an
+    operational completion/count in the existing tenant-scoped ledger, not an
+    assertion about answer accuracy. Waiting, failed and interrupted work is
+    deliberately unscored.
+    """
+
+    def __init__(self):
+        from ..env_setting import env_or_config_int
+
+        self._binding = None
+        self.summarizer = None
+        self.continuation_turns = 0
+        self.completed_turns = 0
+        self.last_summary_turn = 0
+        self._summary_count = 0
+        # Capture effective saved/operator/workspace controls for this run,
+        # without mutating import-time defaults used by other active runs.
+        self.keep_recent = max(1, env_or_config_int(
+            "MAVERICK_COMPACT_KEEP_RECENT", "compaction", "keep_recent", KEEP_RECENT_TURNS))
+        self.digest_every = max(1, env_or_config_int(
+            "MAVERICK_COMPACT_DIGEST_EVERY", "compaction", "digest_every", DIGEST_EVERY))
+        self.max_tool_bytes = max(1, env_or_config_int(
+            "MAVERICK_COMPACT_MAX_TOOL_BYTES", "compaction", "max_tool_bytes", MAX_TOOL_OUTPUT_BYTES))
+        self.max_total_bytes = max(0, env_or_config_int(
+            "MAVERICK_COMPACT_MAX_TOTAL_BYTES", "compaction", "max_total_bytes", MAX_TOTAL_BYTES))
+
+    def resolve(self, messages, *, llm, budget, scope, conversation_id):
+        from ..paths import current_tenant_id_strict
+
+        binding = (current_tenant_id_strict(), str(_ledger_path().resolve()),
+                   conversation_id, scope, model_for_role("summarizer"),
+                   id(llm), id(budget), _fingerprint(messages[0]))
+        displaced = (self.summarizer is not None and self.summarizer._digest is not None
+                     and (len(messages) < 2 or _fingerprint(messages[1]) != self.summarizer._digest))
+        if binding != self._binding or displaced:
+            if self._binding is not None:
+                self.last_summary_turn = self.completed_turns
+            self._binding = binding
+            self.summarizer = LearnedSummarizer(llm=llm, budget=budget, scope=scope,
+                                                incremental=True)
+            self.continuation_turns = 0
+            self._summary_count = 0
+        self.summarizer.elapsed_turns = self.completed_turns - self.last_summary_turn
+        self.summarizer.digest_every = self.digest_every
+        self.summarizer.max_total_bytes = self.max_total_bytes
+        self.summarizer.max_tool_bytes = self.max_tool_bytes
+        return self.summarizer
+
+    def remember(self, result):
+        if self.summarizer is not None:
+            self.summarizer.remember(result)
+            if self.summarizer.summary_count != self._summary_count:
+                self._summary_count = self.summarizer.summary_count
+                self.last_summary_turn = self.completed_turns
+
+    def note_turn(self):
+        self.completed_turns += 1
+        if self.summarizer is not None and self.summarizer.last_pick is not None:
+            self.continuation_turns += 1
+
+    def finish(self, *, completed: bool):
+        try:
+            from ..paths import current_tenant_id_strict
+            current = (current_tenant_id_strict(), str(_ledger_path().resolve()))
+            if (completed and self.continuation_turns and self.summarizer is not None
+                    and self._binding[:2] == current):
+                self.summarizer.record_outcome(
+                    success=True, continuation_turns=self.continuation_turns)
+        except Exception as exc:  # feedback must never change a native outcome
+            log.warning("learned compaction outcome unavailable: %s", exc)
+        finally:
+            self.summarizer = None
+            self._binding = None
+            self.continuation_turns = 0
+            self.completed_turns = 0
+
+
 class LearnedSummarizer:
     """v3 strategy: digest the old middle with the best-scoring template.
 
@@ -240,6 +334,7 @@ class LearnedSummarizer:
         clock=None,
         budget=None,
         scope: str | None = None,
+        incremental: bool = False,
     ):
         self.llm = llm
         self.budget = budget
@@ -251,6 +346,19 @@ class LearnedSummarizer:
         # finance transcripts stops competing with the global pool. None keeps
         # the original kind keys, so existing ledgers read unchanged.
         self.scope = (scope or "").strip() or None
+        self.incremental = incremental
+        self._digest = None
+        self._turns = 0
+        self.summary_count = 0
+        self.elapsed_turns = 0
+        self.digest_every = max(1, DIGEST_EVERY)
+        self.max_total_bytes = MAX_TOTAL_BYTES
+        self.max_tool_bytes = MAX_TOOL_OUTPUT_BYTES
+
+    def remember(self, result):
+        """Bind the actual digest after the shared structural byte ceiling."""
+        if self._digest is not None and len(result) > 1:
+            self._digest = _fingerprint(result[1])
 
     def compact(
         self, messages: list[dict], *, keep_recent: int = KEEP_RECENT_TURNS,
@@ -276,15 +384,48 @@ class LearnedSummarizer:
         if len(messages) <= keep_recent + 1:
             return list(messages)
         if self.llm is None:
-            return compact_messages(messages, keep_recent=keep_recent)
+            return compact_messages(messages, keep_recent=keep_recent,
+                                    max_tool_bytes=self.max_tool_bytes, max_total_bytes=self.max_total_bytes)
         cutoff = digest_cutoff(messages, keep_recent)
         if cutoff <= 1:
             return list(messages)
+        start = 1
+        if self.incremental and self._digest is not None:
+            if _fingerprint(messages[1]) == self._digest:
+                start = 2
+            else:
+                # A displaced/changed prefix is not this run's retained digest.
+                self._digest = None
+                self._turns = 0
+                self.last_pick = None
+        aged = cutoff - start
+        if aged <= 0:
+            return list(messages)
+        if self.incremental:
+            total = sum(len(_message_text(m)) for m in messages)
+            if self.elapsed_turns < self.digest_every and not (self.max_total_bytes > 0 and total >= self.max_total_bytes):
+                return list(messages)
+            # One bounded, complete prefix per call. Never silently clip the
+            # transcript or split a tool call/result across the digest boundary.
+            length = len(_transcript(messages[1:start]))
+            end = start
+            while end < cutoff:
+                length += len(str(messages[end].get("role", "?"))) + 2 + len(_message_text(messages[end])) + 1
+                if length > MAX_TRANSCRIPT_CHARS:
+                    break
+                end += 1
+            cutoff = digest_cutoff(messages, len(messages) - end)
+            if cutoff <= start:
+                return compact_messages(messages, keep_recent=keep_recent,
+                                        max_tool_bytes=self.max_tool_bytes, max_total_bytes=self.max_total_bytes)
         middle = messages[1:cutoff]
-        kind = classify_kind(middle)
-        if self.scope:
-            kind = f"{self.scope}|{kind}"
-        template_id = self.ledger.pick_template(kind, self._rng)
+        if self.incremental and self.last_pick is not None:
+            kind, template_id = self.last_pick
+        else:
+            kind = classify_kind(middle)
+            if self.scope:
+                kind = f"{self.scope}|{kind}"
+            template_id = self.ledger.pick_template(kind, self._rng)
         try:
             resp = yield request(self.llm,
                 system=TEMPLATES[template_id],
@@ -294,19 +435,26 @@ class LearnedSummarizer:
                 budget=self.budget,
             )
             digest = (getattr(resp, "text", "") or "").strip()
+        except GoalCancelled:
+            raise
         except Exception as e:
             log.warning("learned compaction summarize failed (%s); using default", e)
-            return compact_messages(messages, keep_recent=keep_recent)
-        if not digest:
-            return compact_messages(messages, keep_recent=keep_recent)
+            return compact_messages(messages, keep_recent=keep_recent,
+                                    max_tool_bytes=self.max_tool_bytes, max_total_bytes=self.max_total_bytes)
+        if not digest or len(digest) > MAX_TRANSCRIPT_CHARS:
+            return compact_messages(messages, keep_recent=keep_recent,
+                                    max_tool_bytes=self.max_tool_bytes, max_total_bytes=self.max_total_bytes)
         self.last_pick = (kind, template_id)
+        self.summary_count += 1
+        self._turns = self._turns + cutoff - start if self.incremental else len(middle)
         digest_msg = {
             "role": "user",
             "content": (
                 f'<learned-digest kind="{kind}" template="{template_id}" '
-                f'turns="{len(middle)}">\n{digest}\n</learned-digest>'
+                f'turns="{self._turns}">\n{digest}\n</learned-digest>'
             ),
         }
+        self._digest = _fingerprint(digest_msg)
         return [messages[0], digest_msg, *messages[cutoff:]]
 
     def record_outcome(
@@ -332,4 +480,5 @@ __all__ = [
     "reward",
     "OutcomeLedger",
     "LearnedSummarizer",
+    "LearnedRunState",
 ]

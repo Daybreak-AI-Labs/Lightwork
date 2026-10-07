@@ -147,10 +147,14 @@ hardened config; an auditor should still try to escalate each.
 - **Default `local` backend = host exec.** By design (see `SECURITY.md`).
   Injection on the default config reaches the host. Mitigation is operator
   choice of a container backend; the consumer wizard fails closed.
-- **Shield fails open.** If `agent-shield` isn't installed, only the ~20-rule
-  built-in fallback applies (the full SDK is ~115 patterns). The fallback is
-  weaker on novel obfuscation; `test_injection_corpus.py` documents exactly
-  what it does/doesn't catch, including `xfail`-tracked gaps.
+- **Shield coverage remains bounded.** The shipped `maverick-shield` package
+  uses its bundled rules when the separate Agent Shield SDK is absent. Health
+  and startup output count the actual installed patterns. Decode and phishing
+  detector failures retain scan-error evidence: strict/required policies refuse;
+  optional policies may allow while preserving any existing block. The kernel
+  remains importable without the wrapper, but a required deployment refuses
+  external traffic. The repository corpus records supported cases and gaps;
+  rule counts do not establish general detection accuracy.
 - **`jailbreak_heuristics` precision.** The weighted scorer over-flags some
   benign instruction-shaped text (e.g. "ignore the instructions in the old
   README"); a false-positive-tuning pass is outstanding.

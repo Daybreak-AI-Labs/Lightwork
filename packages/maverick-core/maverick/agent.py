@@ -21,6 +21,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -4625,8 +4626,14 @@ class Agent:
             _call, in_flight_note="mid-generation")
 
     async def run(self) -> AgentResult:
+        from .compaction.learned import LearnedRunState
+        # A new run/resume never inherits another run's private digest or grant.
+        self._learned_compaction_state = LearnedRunState()
+        self._compaction_completion = SimpleNamespace(complete_async=self._complete_guarded)
+        result = None
         try:
-            return await self._run_traced()
+            result = await self._run_traced()
+            return result
         except GoalCancelled as exc:
             # Keep Agent.run's structured-result contract for parents and
             # standalone callers. The root orchestrator preserves this stop
@@ -4636,6 +4643,17 @@ class Agent:
                 stop_kind="cancelled", stop_detail=str(exc),
                 tool_execution_unknown=bool(getattr(exc, "tool_execution_unknown", False)),
             )
+        finally:
+            # An Agent returned a complete answer and continued after its
+            # summary. This is not the parent's verdict or correctness proof.
+            self._learned_compaction_state.finish(completed=bool(
+                result is not None and not result.error and not result.blocked_on_user
+                and not result.stop_kind and not result.tool_execution_unknown
+                # Zero is an explicit unavailable native checker result.
+                # Other values (including the default) do not prove accuracy.
+                and type(result.verifier_confidence) in (int, float) and result.verifier_confidence > 0
+                and (result.final or result.final_patch)))
+            self._compaction_completion = None
 
     async def _run_traced(self) -> AgentResult:
         # OTel GenAI semconv: every agent execution is an ``invoke_agent``
@@ -4909,9 +4927,10 @@ class Agent:
                 self.ctx.budget.check()
                 messages = await self._await_wall_clock_guarded(
                     lambda messages=messages: compact_with_async(
-                        messages, llm=self.ctx.llm,
+                        messages, llm=getattr(self, "_compaction_completion", None) or self.ctx.llm,
                         conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
                         budget=self.ctx.budget, scope=self.domain,
+                        run_state=getattr(self, "_learned_compaction_state", None),
                     ),
                     in_flight_note="compacting context",
                 )
@@ -4968,6 +4987,8 @@ class Agent:
                 return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
                                    stop_kind="killswitch", stop_detail=str(e))
             self._note_model_fallback(resp)
+            if (compaction_state := getattr(self, "_learned_compaction_state", None)) is not None:
+                compaction_state.note_turn()
 
             # A provider token cutoff is not a completed answer, even if its
             # partial text already contains FINAL. Incomplete tool arguments

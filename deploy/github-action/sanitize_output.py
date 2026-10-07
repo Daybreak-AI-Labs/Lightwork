@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
+import hmac
 import html
 import json
+import math
 import os
 import re
 import runpy
+import secrets as random_secrets
 import stat
 import unicodedata
 from pathlib import Path
@@ -429,6 +433,10 @@ def sanitize_files(
     *,
     max_chars: int,
     secret_file_snapshot: Path | None = None,
+    run_result: Path | None = None,
+    deliverable: Path | None = None,
+    github_output: Path | None = None,
+    result_key: Path | None = None,
 ) -> None:
     snapshot_values: tuple[str, ...] = ()
     snapshot_blobs: tuple[bytes, ...] = ()
@@ -437,11 +445,16 @@ def sanitize_files(
             secret_file_snapshot
         )
     secrets = _environment_secrets(snapshot_values, snapshot_blobs)
-    raw_text, source_truncated = _read_bounded(
-        input_path,
-        max_chars,
-        secret_overlap_bytes=_SECRET_BOUNDARY_OVERLAP_BYTES,
-    )
+    native = _load_run_result(run_result, result_key) if run_result is not None else None
+    if native is not None and native["release_status"] != "released":
+        # Runtime logs can contain a retained draft or private source bytes.
+        # An unsuccessful/held run publishes only fixed native status facts.
+        raw_text = f"Task status: {native['status']}. Output release: {native['release_status']}."
+        source_truncated = False
+    else:
+        raw_text, source_truncated = _read_bounded(
+            input_path, max_chars, secret_overlap_bytes=_SECRET_BOUNDARY_OVERLAP_BYTES,
+        )
     sanitized = _bound_text(
         sanitize_text(raw_text, secrets=secrets),
         max_chars=max_chars,
@@ -452,6 +465,71 @@ def sanitize_files(
         summary_path,
         f"<pre>\n{html.escape(sanitized, quote=False)}</pre>\n",
     )
+    if native is not None:
+        path = ""
+        if native["release_status"] == "released":
+            answer = _bound_text(sanitize_text(native["answer"], secrets=secrets), max_chars, False)
+            _write_private(deliverable, answer)
+            path = str(deliverable)
+        values = {"goal-id": str(native["goal_id"]) if native["goal_id"] is not None else "",
+                  "status": native["status"],
+                  "spend-recorded-usd": format(native["spend_recorded_usd"], ".12g") if native["spend_recorded_usd"] is not None else "",
+                  "release-status": native["release_status"], "deliverable-file": path}
+        if any(any(ord(char) < 32 or ord(char) == 127 for char in value) for value in values.values()):
+            raise ValueError("structured output paths must fit one ordinary line")
+        with github_output.open("a", encoding="utf-8", newline="\n") as stream:
+            for name, value in values.items():
+                stream.write(f"{name}={value}\n")
+
+
+def _unique_object(pairs):
+    result = {}
+    for name, value in pairs:
+        if name in result:
+            raise ValueError("duplicate native result property")
+        result[name] = value
+    return result
+
+
+def _load_run_result(path: Path, key_path: Path) -> dict:
+    """Validate private CLI facts; never trust a log or model-authored envelope."""
+    if not os.path.lexists(path):
+        # Preflight refusal/interruption before goal/result admission. Unknown
+        # spending is not silently represented as zero or a complete invoice.
+        return {"goal_id": None, "status": "unavailable", "spend_recorded_usd": None,
+                "release_status": "unavailable", "answer": None}
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+        raise ValueError("native result must be a regular private file")
+    raw = _read_bounded_regular_file(str(path), 32 * 1024 * 1024)
+    if raw is None:
+        raise ValueError("native result is unavailable or exceeds 32 MiB")
+    result = json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=_unique_object)
+    if not isinstance(result, dict) or set(result) != {"schema", "goal_id", "status", "spend_recorded_usd", "release_status", "answer", "signature"}:
+        raise ValueError("native result has an unsupported schema")
+    key = _read_bounded_regular_file(str(key_path), 32)
+    signature = result.pop("signature")
+    if key is None or len(key) != 32 or not isinstance(signature, str) or not re.fullmatch(r"[a-f0-9]{64}", signature):
+        raise ValueError("native result origin is unavailable")
+    encoded = json.dumps(result, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if not hmac.compare_digest(signature, hmac.new(key, encoded, hashlib.sha256).hexdigest()):
+        raise ValueError("native result does not belong to this action run")
+    if result["schema"] != "lightwork.cli-run-result.v1" or type(result["goal_id"]) is not int or not 1 <= result["goal_id"] < 2**63:
+        raise ValueError("native result identity is invalid")
+    if not isinstance(result["status"], str) or result["status"] not in {"pending", "draft", "active", "running", "blocked", "done", "failed", "cancelled", "paused", "waiting", "unavailable"}:
+        raise ValueError("native task status is invalid")
+    amount = result["spend_recorded_usd"]
+    if type(amount) not in {int, float} or amount < 0 or amount > 1e18 or not math.isfinite(amount):
+        raise ValueError("native recorded spending is invalid")
+    if not isinstance(result["release_status"], str) or result["release_status"] not in {"released", "not_completed", "pending_signoff", "policy_unavailable"}:
+        raise ValueError("native output release is invalid")
+    if result["release_status"] == "released":
+        if result["status"] != "done" or not isinstance(result["answer"], str):
+            raise ValueError("only a completed released answer is available")
+    elif result["answer"] is not None:
+        raise ValueError("unreleased native results must not contain answer bytes")
+    return result
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -462,11 +540,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-chars", type=int, default=50_000)
     parser.add_argument("--write-secret-file-snapshot", type=Path)
     parser.add_argument("--secret-file-snapshot", type=Path)
+    parser.add_argument("--run-result", type=Path)
+    parser.add_argument("--deliverable", type=Path)
+    parser.add_argument("--github-output", type=Path)
+    parser.add_argument("--result-key", type=Path)
+    parser.add_argument("--write-result-key", type=Path)
+    parser.add_argument("--workspace-root", type=Path)
     return parser
 
 
 def main() -> int:
     args = _parser().parse_args()
+    if args.write_result_key is not None:
+        if any(value is not None for value in (args.input, args.output, args.summary, args.write_secret_file_snapshot, args.secret_file_snapshot, args.run_result, args.deliverable, args.github_output, args.result_key)):
+            raise SystemExit("--write-result-key cannot be combined with capture arguments")
+        if args.workspace_root is not None and args.write_result_key.parent.resolve().is_relative_to(args.workspace_root.resolve()):
+            raise SystemExit("private action capture must be outside the container workspace")
+        with os.fdopen(os.open(str(args.write_result_key), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600), "wb") as stream:
+            stream.write(random_secrets.token_bytes(32))
+        return 0
     if args.write_secret_file_snapshot is not None:
         if any(
             value is not None
@@ -475,6 +567,11 @@ def main() -> int:
                 args.output,
                 args.summary,
                 args.secret_file_snapshot,
+                args.run_result,
+                args.deliverable,
+                args.github_output,
+                args.result_key,
+                args.workspace_root,
             )
         ):
             raise SystemExit(
@@ -499,8 +596,13 @@ def main() -> int:
     ]
     if missing:
         raise SystemExit(f"missing required arguments: {', '.join(missing)}")
+    if args.workspace_root is not None:
+        raise SystemExit("--workspace-root is valid only with --write-result-key")
     if args.max_chars < 256:
         raise SystemExit("--max-chars must be at least 256")
+    structured = (args.run_result, args.deliverable, args.github_output, args.result_key)
+    if any(value is not None for value in structured) and not all(value is not None for value in structured):
+        raise SystemExit("--run-result, --deliverable, --github-output and --result-key must be supplied together")
     try:
         sanitize_files(
             args.input,
@@ -508,9 +610,11 @@ def main() -> int:
             args.summary,
             max_chars=args.max_chars,
             secret_file_snapshot=args.secret_file_snapshot,
+            run_result=args.run_result, deliverable=args.deliverable, github_output=args.github_output,
+            result_key=args.result_key,
         )
     except ValueError as exc:
-        raise SystemExit(f"secret snapshot validation failed: {exc}") from exc
+        raise SystemExit(f"private capture validation failed: {exc}") from exc
     return 0
 
 

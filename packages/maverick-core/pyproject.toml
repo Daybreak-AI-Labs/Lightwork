@@ -57,6 +57,8 @@ release-runtime = [
     "sqlalchemy>=2.0,<3", "psycopg[binary,pool]>=3.3.5,<4",
     "latex2mathml>=3.77", "prometheus-client>=0.20",
     "jsonschema>=4.18,<5",
+    # Reviewed independent checkpoint retention must work without pip access.
+    "boto3>=1.40,<2",
     # Guided company sign-in must work in frozen installations without a shell.
     "pyjwt[crypto]>=2.13.0", "pysaml2>=7.5.5", "pyXMLSecurity>=1.0.0",
 ]

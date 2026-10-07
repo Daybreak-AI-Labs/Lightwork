@@ -148,11 +148,40 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
     sources.extend(warning_sources(actor))
     from maverick.spending_alerts import sources as spending_alert_sources
     sources.extend(spending_alert_sources(actor, admin=admin))
+    metric_sources, metric_partial = _metric_sources(request, actor, world)
+    sources.extend(metric_sources)
+    limited = limited or metric_partial
     # Someone named this person in a comment they can still open (NOT-4).
     from .comments_api import mention_sources
     sources.extend(mention_sources(actor))
     # Every alert says why, what is needed and by when, whatever produced it.
     return [explain(source) for source in sources], tasks, list(projects.values()), limited
+
+
+def _metric_sources(request, actor, world):
+    from maverick.task_metric_alerts import MetricAlertUnavailable, sources
+
+    def readable(goal):
+        if request is not None:
+            return auth.can_access_goal(request, goal)
+        from maverick.domain import suites_for_domain
+        from maverick.paths import current_tenant_id_strict
+        from maverick.personal_identity import principal_current
+
+        from . import rbac, suite_grants
+        if not principal_current(actor):
+            raise PermissionError("Personal alert account no longer has access.")
+        tenant = current_tenant_id_strict()
+        role = rbac.get_tenant_role(tenant, actor) if tenant else auth.global_role_for_principal(actor)
+        if "view" not in rbac.permissions_for(role) and not auth.is_dashboard_admin(actor):
+            raise PermissionError("Personal alert account no longer has access.")
+        suites = None if auth.is_dashboard_admin(actor) else suite_grants.granted_suites(actor)
+        return suites is None or all(suite in suites for suite in suites_for_domain(goal.domain))
+
+    try:
+        return sources(actor, world, can_read_goal=readable)
+    except MetricAlertUnavailable as exc:
+        raise HTTPException(503, "Task performance alerts could not be checked. Review All settings or refresh later.") from exc
 
 
 def _number(value) -> float | None:

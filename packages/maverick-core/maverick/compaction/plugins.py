@@ -38,7 +38,10 @@ import threading
 from collections import OrderedDict
 from typing import Protocol, runtime_checkable
 
+from ..run_outcome import GoalCancelled
 from .requests import STOP_ERRORS
+
+STOP_ERRORS = (*STOP_ERRORS, GoalCancelled)
 
 log = logging.getLogger(__name__)
 
@@ -297,7 +300,7 @@ class _StrategyAdapter:
         from .strategies import compact_with_strategy
         allowed = {k: kwargs[k] for k in
                    ("llm", "conversation_id", "keep_recent", "max_tool_bytes",
-                    "budget", "scope")
+                    "budget", "scope", "run_state")
                    if k in kwargs}
         return compact_with_strategy(messages, strategy=self.name, **allowed)
 
@@ -306,7 +309,7 @@ class _StrategyAdapter:
         from .strategies import compact_with_strategy_async
         allowed = {k: kwargs[k] for k in
                    ("llm", "conversation_id", "keep_recent", "max_tool_bytes",
-                    "budget", "scope") if k in kwargs}
+                    "budget", "scope", "run_state") if k in kwargs}
         return await compact_with_strategy_async(messages, strategy=self.name, **allowed)
 
 

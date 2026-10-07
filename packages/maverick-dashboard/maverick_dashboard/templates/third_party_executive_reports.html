@@ -128,6 +128,7 @@
     <div id="tper-admin-list"></div>
   </details>
 
+  {% include '_executive_report_schedules.html' %}
   <p class="muted" id="tper-operation-status" role="status" aria-live="polite"></p>
   <details class="panel">
     <summary>Technical details</summary>
@@ -139,4 +140,5 @@
 {% block scripts_extra %}
   <script src="/static/lightwork-record-workflows.js" defer></script>
   <script src="/static/lightwork-third-party-executive-reports.js" defer></script>
+  <script src="/static/lightwork-executive-report-schedules.js" defer></script>
 {% endblock %}

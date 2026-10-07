@@ -2291,8 +2291,19 @@ def start() -> bool:
     global _worker, _worker_threads, _worker_stopping
     from maverick import automation_events, data_engine, dreaming, flow
     from maverick.self_improvement_runner import nightly_self_harness_enabled
+    from maverick.tenant.registry import list_tenants
+
+    from .executive_report_schedules import KIND as report_kind
+    from .executive_report_schedules import execute as execute_report
+    from .third_party_executive_reports_composition import third_party_executive_reports_enabled
+
+    try:
+        report_enabled = any(third_party_executive_reports_enabled(row.id) for row in list_tenants()
+                             if row.status == "active")
+    except Exception:
+        report_enabled = False
     if not (automation_events.enabled() or dreaming.enabled()
-            or data_engine.enabled() or flow.enabled() or nightly_self_harness_enabled()):
+            or data_engine.enabled() or flow.enabled() or nightly_self_harness_enabled() or report_enabled):
         return False
     with _LOCK:
         if any(thread.is_alive() for thread in _worker_threads):
@@ -2309,6 +2320,8 @@ def start() -> bool:
         w.register(FLOW_EVOLVE_KIND, _handle_flow_evolve)
         w.register(FLOW_CRON_KIND, _handle_flow_cron)
         w.register(ASSESS_SWEEP_KIND, _handle_assess_sweep)
+        from .app import app
+        w.register(report_kind, lambda job: execute_report(app, job))
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged

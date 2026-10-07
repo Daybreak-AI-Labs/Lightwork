@@ -7,13 +7,17 @@ that seam. The wire protocol is NDJSON, one JSON object per line:
 
   - ``<command> --describe`` prints a one-line manifest and exits::
 
-        {"protocol": "maverick-plugin/1",
+        {"protocol": "maverick-plugin/2",
          "tools": [{"name": ..., "description": ..., "inputSchema": {...}}]}
 
   - otherwise the child reads requests on stdin and answers on stdout::
 
         {"id": 1, "tool": "echo", "args": {...}}
         -> {"id": 1, "result": "..."}  |  {"id": 1, "error": "..."}
+
+The current SDK emits ``maverick-plugin/2``; ``maverick-plugin/1`` remains an
+accepted legacy contract. These stdio versions are separate from the Python
+plugin manifest's API major.
 
 ``load_ts_plugin(command)`` runs the describe step and returns one
 ``maverick.tools.Tool`` per manifest entry; calls share a single persistent

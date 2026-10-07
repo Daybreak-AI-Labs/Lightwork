@@ -2070,8 +2070,12 @@ from .privacy_discovery_data_use_api import (  # noqa: E402
 )
 
 app.include_router(privacy_discovery_data_use_router, prefix="/api/v1")
+from .audit_checkpoint_custody_api import router as audit_checkpoint_custody_router  # noqa: E402
 from .consent_delivery_managed_api import router as consent_delivery_managed_router  # noqa: E402
 from .dsar_handling_api import router as dsar_handling_router  # noqa: E402
+from .executive_report_schedules_api import (  # noqa: E402
+    router as executive_report_schedules_router,
+)
 from .personal_push_devices_api import router as personal_push_devices_router  # noqa: E402
 from .product_tour import router as product_tour_router  # noqa: E402
 from .runtime_enforcement_api import router as runtime_enforcement_router  # noqa: E402
@@ -2083,6 +2087,8 @@ app.include_router(consent_delivery_managed_router, prefix="/api/v1")
 app.include_router(voice_receiver_router)
 app.include_router(personal_push_devices_router)
 app.include_router(product_tour_router)
+app.include_router(audit_checkpoint_custody_router)
+app.include_router(executive_report_schedules_router)
 app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
@@ -13851,6 +13857,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-guided-actions.css")
 @app.get("/static/lightwork-product-tour.css")
 @app.get("/static/lightwork-product-tour.js")
+@app.get("/static/lightwork-audit-checkpoint-custody.js")
 @app.get("/static/lightwork-draft-recovery.js")
 @app.get("/static/lightwork-support.js")
 @app.get("/static/lightwork-support.css")
@@ -14067,6 +14074,16 @@ async def third_party_executive_reports_client() -> FileResponse:
 
     return FileResponse(
         _STATIC_DIR / "lightwork-third-party-executive-reports.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-executive-report-schedules.js")
+async def executive_report_schedules_client() -> FileResponse:
+    """Ordinary controls for current reviewed recurring executive reports."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-executive-report-schedules.js",
         media_type="application/javascript; charset=utf-8",
         headers={"Cache-Control": "public, max-age=300"},
     )
