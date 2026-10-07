@@ -311,6 +311,12 @@ def test_every_suite_spawns_with_workflow_and_envelope(tmp_path, monkeypatch):
         return registry
 
     monkeypatch.setattr(Agent, '_build_tools', provisioned_tools)
+    # Provisioning an adapter includes the operator's reviewed risk rating;
+    # an unrated one keeps the high floor and its pack refuses to deploy.
+    import importlib
+    risk = importlib.import_module('maverick.safety.tool_risk')
+    monkeypatch.setattr(risk, '_load_overrides', lambda: {
+        name: 'low' for name in required if not risk.tool_risk_is_classified(name, {})})
     for name, profile in sample:
         agent = agent_from_profile(profile, ctx, "Do your job for the period.")
         assert agent.role == name
