@@ -11,15 +11,16 @@ applies, a same-origin form post and an explicit confirmation.
 
 What a reset does, in this order:
 
-1. records a one-time link (only a SHA-256 of its token is stored) bound to
+1. checks the request, then writes an audit row naming who reset whom. If the
+   activity log refuses it, nothing has changed: the passphrase and every
+   session stay as they were and no link exists;
+2. records a one-time link (only a SHA-256 of its token is stored) bound to
    that exact account: its installation role, workspace memberships,
    department access and administrator status, including any the identity
    provider's groups confer;
-2. removes the colleague's passphrase, so it no longer signs in;
-3. ends every session they hold: the Sessions record and the revocation
-   epoch, which also stops older cookies and bearers;
-4. writes an audit row naming who reset whom. If the activity log refuses
-   it, the link is never shown.
+3. removes the colleague's passphrase, so it no longer signs in;
+4. ends every session they hold: the Sessions record and the revocation
+   epoch, which also stops older cookies and bearers.
 
 The link (``/auth/invite/reset/<token>``, under the same token-is-the-
 credential exemption as invitation links) works once, for one hour, and only
@@ -288,6 +289,11 @@ def issue(request: Request, email: str) -> tuple[str, dict]:
             if len(resets) >= _MAX_RECORDS:
                 raise HTTPException(409, "Too many passphrase resets are waiting. Try again later.")
             resets[_digest(token)] = record
+            # The row comes before anything is saved or removed (complete() does
+            # the same): a refusal leaves the person signed in with their
+            # passphrase, and nobody can be locked out without a record of who did it.
+            _audit_event(request, "passphrase_reset_issued", principal="user:" + email, email=email,
+                         reset_by=caller, expires_at=record["expires_at"])
             _write(resets)
 
         local_passphrases.revoke(email, before_commit=save_link)
@@ -300,8 +306,6 @@ def issue(request: Request, email: str) -> tuple[str, dict]:
         except (RevocationStoreError, session_registry.SessionStoreError) as exc:
             raise HTTPException(503, "The session record cannot be read right now. "
                                      "Reset the passphrase again in a moment.") from exc
-    _audit_event(request, "passphrase_reset_issued", principal=principal, email=email,
-                 reset_by=caller, expires_at=record["expires_at"])
     return token, dict(record)
 
 

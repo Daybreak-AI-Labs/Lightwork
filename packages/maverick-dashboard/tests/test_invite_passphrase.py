@@ -574,6 +574,35 @@ def test_a_reset_link_is_refused_after_the_account_changes(workspace, tmp_path, 
     assert _accept(_remote(), link, OTHER).status_code == 410
 
 
+def test_a_reset_the_activity_log_refuses_changes_nothing(workspace, tmp_path, monkeypatch):
+    import maverick.audit as audit
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import passphrase_resets
+
+    signed_in = _colleague_with_session(workspace)
+    before = _passphrase_row(tmp_path)
+    real = audit.audit_event
+
+    def refuse(kind, **fields):
+        if fields.get("action") == "passphrase_reset_issued":
+            raise AuditRefused("custody unavailable")
+        return real(kind, **fields)
+
+    monkeypatch.setattr(audit, "audit_event", refuse)
+    refused = _reset(workspace)
+    assert refused.status_code == 503 and "activity log refused" in refused.text
+    # The refusal is true: the person is not locked out and no link exists.
+    assert _passphrase_row(tmp_path) == before
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+    assert not passphrase_resets.pending_for(COLLEAGUE)
+    assert signed_in.get("/api/v1/features/modules").status_code == 200
+    assert _sign_in(_remote(), password=GOOD).status_code == 303
+
+    monkeypatch.setattr(audit, "audit_event", real)         # the log recovers
+    assert _reset_link(_reset(workspace))
+    assert _sign_in(_remote(), password=GOOD).status_code == 401
+
+
 # -- authority the identity provider's groups confer is part of the account ----
 
 _SCIM_TOKEN = "scim-secret-token-xyz"  # pragma: allowlist secret
