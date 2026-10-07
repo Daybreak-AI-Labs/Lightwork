@@ -754,6 +754,9 @@ MIGRATIONS.append((48, _APPROVAL_CHECK_SCHEMA_PG))
 # The authoritative messages table, its contents and tenant policies remain.
 MIGRATIONS.append((49, ["DROP INDEX IF EXISTS idx_pg_messages_fts"]))
 
+# Questions inherit tenant scope through their goal; keep that guarded join.
+MIGRATIONS.append((50, ["CREATE INDEX IF NOT EXISTS idx_pg_questions_goal_id ON questions(goal_id, id)"]))
+
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 _MIGRATIONS_TABLE = (

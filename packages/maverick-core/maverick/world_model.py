@@ -61,7 +61,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 49
+SCHEMA_VERSION = 50
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -447,6 +447,8 @@ def _bootstrap_schema(conn: sqlite3.Connection) -> str:
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    # v50: ordered per-task question reads avoid scanning unrelated history.
+    50: ["CREATE INDEX IF NOT EXISTS idx_questions_goal_id ON questions(goal_id, id)"],
     # v49: retire only unused derived message-search storage. Authoritative
     # messages and conversation turns are untouched; the exact SQL is governed.
     49: [

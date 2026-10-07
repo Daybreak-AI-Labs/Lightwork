@@ -21,6 +21,40 @@ class DecisionInput(StrictInput):
     proposal: str = Field(pattern=r"^[0-9a-f]{16}$")
 
 
+def _code_practice_state(request):
+    from maverick import config
+
+    from . import learning_ops_api, training_ops_api
+
+    context = training_ops_api._planning_context(request)
+    auth.require_global_permission(request, "admin")
+    if config.config_source_errors(include_tenant=True):
+        raise HTTPException(503, "Current practice settings are unavailable. Review All settings before continuing.")
+    try:
+        status = learning_ops_api._modify_status()
+    except Exception as exc:
+        raise HTTPException(503, "Current practice controls could not be checked. Refresh Learning before continuing.") from exc
+    if training_ops_api._planning_context(request) != context:
+        raise HTTPException(409, "Your account or workspace changed. Reload Learning before continuing.")
+    auth.require_global_permission(request, "admin")
+    if config.config_source_errors(include_tenant=True):
+        raise HTTPException(503, "Current practice settings are unavailable. Review All settings before continuing.")
+    return {"context": context, "status": status}
+
+
+def code_practice_snapshot(request, _selection):
+    state = _code_practice_state(request)
+    return Snapshot(digest(state), "Current access and settings for code practice",
+                    "Open the complete practice controls. Your entered objective and rounds stay private and are kept. Opening starts no work and installs no change.",
+                    details={"learning_code_practice_form": {"context": state["context"]}})
+
+
+def code_practice_prepare(request, _selection, _arguments):
+    state = _code_practice_state(request)
+    return Preview("Review the current practice status, spending allowance and blockers, then choose an objective and rounds. A separate confirmation is required to start; opening starts nothing.",
+                   native={"learning_code_practice_form": {"context": state["context"]}})
+
+
 def _suggestion_state(request):
     from maverick import config
 
@@ -166,7 +200,11 @@ def decision_recover(request, _selection, arguments, prepared, _operation, *, un
 
 def entries():
     common = {"family": "learning", "direct_ui": "/learned", "pages": ("/learned",)}
-    result = [Adapter("learning.instruction_suggestion_form", "Suggest an instruction change", input_model=EmptyInput,
+    result = [Adapter("learning.code_practice_form", "Review code-practice controls", input_model=EmptyInput,
+                      snapshot=code_practice_snapshot, prepare=code_practice_prepare,
+                      direct_ui="/learning#lo-modify", family="learning", pages=("/learning",),
+                      aliases=("open code practice", "practice improvements to Lightwork", "review self improvement practice")),
+              Adapter("learning.instruction_suggestion_form", "Suggest an instruction change", input_model=EmptyInput,
                       snapshot=suggestion_snapshot, prepare=suggestion_prepare,
                       direct_ui="/learned#llp-propose-box", family="learning", pages=("/learned",),
                       aliases=("suggest a learning improvement", "open instruction suggestion", "suggest a change")),

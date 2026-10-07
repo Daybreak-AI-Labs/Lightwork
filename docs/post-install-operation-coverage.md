@@ -1,5 +1,29 @@
 # Post-install operation coverage
 
+October 7 Learning continuity follow-through: model recommendations bind the
+exact selected role, resources and current account/workspace. Older replies are
+discarded when those choices or their offered options change. Native planning
+reads recheck the signed session, page permission and workspace after the read;
+access withdrawal clears private choices and results. Copilot opens the complete
+ordinary code-practice form through current native review, preserving a newer
+objective and round count. Opening starts no work and installs no change.
+
+Learning task displays now settle their waiting control after an initial or
+polled result renderer fails. Partial results clear; a separate Read recorded
+progress uses the exact native job, without repeating admission or the failed
+renderer. Malformed replies remain unconfirmed. A missing active worker retains
+its actual last recorded state rather than claiming completion. One free native
+shorthand-learning task with no messages exercised retained custody and recovery;
+its empty result is not evidence of improved learning or savings.
+
+W1-23 task question reads now use an additive version-50 index on task and
+question order in SQLite and PostgreSQL. Actual version-49 upgrade, fresh open
+and reopen preserved all 12,003 question rows, answers, task ciphertext and
+results in the isolated qualification. Query plans changed from unrelated-row
+scans to indexed task reads. PostgreSQL keeps its existing parent-task join,
+forced tenant policies and owner checks. Earlier migration checksums and
+bootstrap SQL are unchanged; no general response-time claim follows.
+
 October 7 Knowledge follow-through: adding information keeps newer text, source,
 type, business area and collection choices while an earlier native save is
 pending. Overlapping submissions are blocked. Delayed or superseded file reads

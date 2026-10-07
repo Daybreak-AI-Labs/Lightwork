@@ -103,6 +103,57 @@
     stopped: 'Stopped early. Here is what was done before it stopped.',
     failed: ''
   };
+  var JOB_STATES = new Set(['admitted', 'running', 'stopping', 'done', 'stopped', 'failed', 'not_started']);
+  function jobReference(job) {
+    return job && typeof job.id === 'string' && /^[a-f0-9]{16}$/.test(job.id) ? { id: job.id,
+      kind: typeof job.kind === 'string' && job.kind ? job.kind : null } : null;
+  }
+  function validJob(job, original) {
+    return job && typeof job === 'object' && !Array.isArray(job) &&
+      typeof job.id === 'string' && /^[a-f0-9]{16}$/.test(job.id) &&
+      typeof job.kind === 'string' && job.kind.trim().length > 0 && JOB_STATES.has(job.state) &&
+      (job.result == null || typeof job.result === 'object' && !Array.isArray(job.result)) &&
+      (!original || job.id === original.id && (!original.kind || job.kind === original.kind));
+  }
+  function unsupportedReply() {
+    return { status: 503, detail: 'The task reply could not be confirmed. Read its recorded progress before deciding what to do next.' };
+  }
+  function recordedProblem(failure, fallback) {
+    if (failure && [404, 409, 413, 422, 503].includes(failure.status) && window.mvPlainDetail) {
+      try { return window.mvPlainDetail(failure.detail) || fallback; } catch (_) { /* keep the safe wording */ }
+    }
+    return fallback;
+  }
+  function recovery(ui, original, epoch) {
+    var link = el('a', null, 'Open recorded tasks');
+    var learning = original && (LEARNING_KINDS.has(original.kind) ||
+      ['factory_guidance_check', 'factory_guidance_adopt', 'factory_guidance_restore'].includes(original.kind));
+    link.href = learning ? '/learned?learning_task=' + encodeURIComponent(original.id) + '#learning-job-history' : '/learning#lo-jobs-panel';
+    if (original) {
+      var read = el('button', 'btn btn--ghost', 'Read recorded progress');
+      read.type = 'button';
+      read.addEventListener('click', async function () {
+        if (epoch !== contextEpoch || read.disabled) return;
+        read.disabled = true;
+        try {
+          var reply = await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(original.id));
+          if (epoch !== contextEpoch) return;
+          if (!validJob(reply && reply.job, original)) throw unsupportedReply();
+          // Read native progress without calling the renderer that failed.
+          await follow(reply.job, { status: ui.status, out: ui.out, action: ui.action });
+          if (epoch === contextEpoch) { ui.status.appendChild(document.createTextNode(' ')); ui.status.appendChild(link); }
+        } catch (failure) {
+          if (failure && [401, 403].includes(failure.status)) { contextChanged(); return; }
+          if (epoch !== contextEpoch) return;
+          var message = recordedProblem(failure, 'The latest progress could not be confirmed.') +
+            ' Do not start this work again to find out.';
+          if (epoch === contextEpoch) { ui.status.textContent = message; recovery(ui, original, epoch); }
+        } finally { read.disabled = false; }
+      });
+      ui.status.appendChild(document.createTextNode(' ')); ui.status.appendChild(read);
+    }
+    ui.status.appendChild(document.createTextNode(' ')); ui.status.appendChild(link);
+  }
 
   // Start a job (POST ``url``), then poll it until it ends. ``ui`` holds:
   // status (element for the progress line), out (element for the result),
@@ -114,12 +165,17 @@
     ui.status.textContent = 'Starting…';
     var job;
     try {
-      job = (await request(url, init)).job;
+      var reply = await request(url, init);
+      job = reply && reply.job;
       if (epoch !== contextEpoch) return null;
     } catch (failure) {
       if (epoch !== contextEpoch) return null;
-      var startProblem = await problem(failure, ui.action);
-      if (epoch === contextEpoch) ui.status.textContent = startProblem;
+      if (failure && [401, 403].includes(failure.status)) { contextChanged(); return null; }
+      var startProblem = recordedProblem(failure, 'The task start could not be confirmed.');
+      if (epoch === contextEpoch) {
+        ui.status.textContent = startProblem + ' Read recorded tasks before deciding what to do next. Work is never repeated automatically.';
+        recovery(ui, null, epoch);
+      }
       return null;
     }
     return follow(job, ui);
@@ -129,7 +185,23 @@
     var epoch = contextEpoch;
     surfaces.set(ui.status, ui.out);
     return new Promise(function (resolve) {
-      var stop = null;
+      var stop = null, original = jobReference(job), settled = false, timer = null;
+      function finish(value) {
+        if (settled) return;
+        settled = true; clearTimeout(timer); resolve(value);
+      }
+      async function unconfirmed(failure) {
+        try {
+          if (epoch !== contextEpoch) return;
+          if (failure && [401, 403].includes(failure.status)) { contextChanged(); return; }
+          var message = recordedProblem(failure, 'The latest task view could not be confirmed.') +
+            ' Work may already be recorded. Do not start it again to find out.';
+          if (epoch !== contextEpoch) return;
+          ui.out.replaceChildren(); ui.status.textContent = message;
+          recovery(ui, original, epoch);
+        } catch (_) { /* a broken display must still settle the waiting control */
+        } finally { finish(null); }
+      }
       function show(j) {
         ui.status.textContent = j.state === 'failed' ? (j.problem || 'This task could not finish. Read its recorded result before deciding what to do next; do not repeat work automatically.') : STATE_TEXT[j.state] || '';
         if (j.observation_saved === false || j.retention_problem) {
@@ -165,34 +237,37 @@
         }
       }
       async function tick(j) {
-        if (epoch !== contextEpoch) { resolve(null); return; }
+        if (settled) return;
+        if (epoch !== contextEpoch) { finish(null); return; }
+        if (!validJob(j, original)) throw unsupportedReply();
+        original = jobReference(j);
         show(j);
         if (['admitted', 'running', 'stopping'].includes(j.state) && j.worker_available === false) {
           ui.status.textContent = STATE_TEXT.unavailable + (j.retention_problem ? ' ' + j.retention_problem : '');
-          resolve(null);
+          recovery(ui, original, epoch);
+          finish(null);
           return;
         }
         if (j.state === 'admitted' || j.state === 'running' || j.state === 'stopping') {
-          setTimeout(async function () {
+          timer = setTimeout(async function () {
             try {
-              tick((await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id))).job);
+              var reply = await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id));
+              await tick(reply && reply.job);
             } catch (failure) {
-              if (epoch !== contextEpoch) { resolve(null); return; }
-              var progressProblem = await problem(failure, 'check on the task');
-              if (epoch === contextEpoch) ui.status.textContent = progressProblem;
-              resolve(null);
+              await unconfirmed(failure);
             }
           }, POLL_MS);
           return;
         }
         ui.out.textContent = '';
         if (j.result && j.state !== 'failed' && ui.render) {
-          var nodes = ui.render(j.result, j);
+          var nodes = await ui.render(j.result, j);
+          if (epoch !== contextEpoch) { finish(null); return; }
           (Array.isArray(nodes) ? nodes : [nodes]).forEach(function (n) { if (n) ui.out.appendChild(n); });
         }
-        resolve(j);
+        finish(j);
       }
-      tick(job);
+      tick(job).catch(unconfirmed);
     });
   }
 

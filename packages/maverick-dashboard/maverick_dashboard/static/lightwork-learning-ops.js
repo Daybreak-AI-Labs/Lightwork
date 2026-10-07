@@ -194,9 +194,21 @@
   }
 
   // ---- practise changes to its own code -------------------------------------------
+  var smGeneration = 0, smLocked = false;
+  function lockCodePractice() {
+    smGeneration++; smLocked = true;
+    var form = $('lo-sm-form');
+    if (form) Array.from(form.elements).forEach(function (field) { if ('value' in field && field.tagName !== 'BUTTON') field.value = ''; field.disabled = true; });
+    if (form) delete form.dataset.limit;
+    ['lo-sm-state', 'lo-sm-results', 'lo-sm-out'].forEach(function (id) { if ($(id)) fill(id, []); });
+    if ($('lo-sm-status')) $('lo-sm-status').textContent = 'Your account, workspace or access changed. Reload Learning before reviewing practice work.';
+  }
+  function practiceStamp() { return JSON.stringify([$('lo-sm-objective')?.value, $('lo-sm-cycles')?.value]); }
   function loadModify() {
-    if (!$('lo-sm-state')) return;
-    J.request(LO + '/self-modify').then(function (d) {
+    if (!$('lo-sm-state') || smLocked) return Promise.resolve(false);
+    var started = smGeneration;
+    return Promise.all([J.request(LO + '/self-modify').then(function (d) {
+      if (smLocked || started !== smGeneration) return false;
       var nodes = [];
       var badge = el('span', 'badge' + (d.state === 'ready' ? ' active' : ''), d.state === 'ready' ? 'On and ready' : (d.state === 'blocked' ? 'On, but something is blocking it' : 'Off'));
       var head = el('p');
@@ -211,24 +223,60 @@
       fill('lo-sm-state', nodes);
       var form = $('lo-sm-form');
       if (form) form.dataset.limit = d.spending_limit != null ? String(d.spending_limit) : '';
+      return true;
     }).catch(async function (failure) {
-      fill('lo-sm-state', el('p', null, await J.problem(failure, 'load the experiment')));
-    });
-    J.request(LO + '/self-modify/results?limit=20').then(function (d) {
-      if (!d.results.length) { fill('lo-sm-results', el('p', 'muted', 'No results yet. Start practice rounds below.')); return; }
+      if (smLocked || started !== smGeneration) return false;
+      if ([401, 403].includes(failure.status)) { lockCodePractice(); return false; }
+      var problem = await J.problem(failure, 'load the experiment');
+      if (!smLocked && started === smGeneration) fill('lo-sm-state', el('p', null, problem));
+      return false;
+    }), J.request(LO + '/self-modify/results?limit=20').then(function (d) {
+      if (smLocked || started !== smGeneration) return false;
+      if (!d.results.length) { fill('lo-sm-results', el('p', 'muted', 'No results yet. Start practice rounds below.')); return true; }
       fill('lo-sm-results', J.table(['When', 'Round', 'Score before', 'Score after', 'What it tried', 'Notes'], d.results.map(function (r) {
         var notes = [];
         if (r.undone) notes.push('undone');
         if (r.widens) notes.push('would need more access');
         return [J.when(r.when), String(r.round), r.before.toFixed(3), r.score.toFixed(3), r.summary, notes.join(', ') || '—'];
       })));
+      return true;
     }).catch(async function (failure) {
-      fill('lo-sm-results', el('p', null, await J.problem(failure, 'load the results')));
-    });
+      if (smLocked || started !== smGeneration) return false;
+      if ([401, 403].includes(failure.status)) { lockCodePractice(); return false; }
+      var problem = await J.problem(failure, 'load the results');
+      if (!smLocked && started === smGeneration) fill('lo-sm-results', el('p', null, problem));
+      return false;
+    })]).then(function (results) { return !smLocked && started === smGeneration && results.every(Boolean); });
   }
   var smForm = $('lo-sm-form');
+  window.LightworkLearningOps = {
+    openCodePractice: async function (context, isCurrent) {
+      if (!smForm || !admin || smLocked || $('lo-sm-run').disabled || !/^[a-f0-9]{64}$/.test(context) ||
+          typeof isCurrent !== 'function' || !isCurrent()) return false;
+      var started = smGeneration, entered = practiceStamp();
+      try {
+        if (!await loadModify() || !isCurrent() || started !== smGeneration) return false;
+        var catalog = await J.request('/api/v1/copilot/product-operations/catalog', {method:'POST', json:{page:'/learning', selection:{}}});
+        if (smLocked || !isCurrent() || started !== smGeneration) return false;
+        var operation = catalog.operations.find(function (row) { return row.id === 'learning.code_practice_form' && row.available; });
+        if (!operation) return false;
+        var prepared = await J.request('/api/v1/copilot/product-operations/prepare', {method:'POST', json:{page:'/learning', selection:{},
+          operation:operation.id, context:catalog.context, revision:operation.revision, arguments:{}}});
+        var checked = prepared.details?.learning_code_practice_form;
+        if (smLocked || started !== smGeneration || !isCurrent() || !checked || Object.keys(checked).join(',') !== 'context' || checked.context !== context) return false;
+        if (practiceStamp() !== entered) { $('lo-sm-status').textContent = 'Your practice objective or rounds changed while access was checked. They were kept; open the form again when ready.'; return false; }
+        for (var section = smForm.parentElement; section && section !== root; section = section.parentElement) if (section.tagName === 'DETAILS') section.open = true;
+        $('lo-sm-objective').focus();
+        return true;
+      } catch (failure) {
+        if (!smLocked && started === smGeneration && [401, 403].includes(failure.status)) lockCodePractice();
+        return false;
+      }
+    }
+  };
   if (smForm) smForm.addEventListener('submit', async function (ev) {
     ev.preventDefault();
+    if (smLocked) return;
     var objective = $('lo-sm-objective').value.trim();
     if (objective.length < 10) { $('lo-sm-status').textContent = 'Describe what it should try to improve, in a sentence.'; return; }
     var cycles = Number($('lo-sm-cycles').value);
@@ -248,13 +296,29 @@
         })));
         return out;
       }));
-    btn.disabled = false;
+    btn.disabled = smLocked;
     if (job) loadModify();
   });
 
   // ---- plan a specialist model ------------------------------------------------------
+  var planningGeneration = 0, planningContext = '', planningLocked = false;
+  var planningFields = ['lo-mi-role', 'lo-mi-memory', 'lo-mi-context', 'lo-mi-concurrency'];
+  function planningStamp() { return JSON.stringify(planningFields.map(function (id) {
+    var field = $(id); return [field.value, Array.from(field.options).map(function (option) { return [option.value, option.text, option.disabled]; })];
+  })); }
+  function lockPlanning() {
+    planningGeneration++; planningLocked = true; planningContext = '';
+    planningFields.forEach(function (id) { $(id).replaceChildren(); $(id).disabled = true; });
+    if ($('lo-mi-find')) $('lo-mi-find').disabled = true;
+    fill('lo-mi-state', el('p', null, 'Your account, workspace or access changed. Reload Learning before reading model choices.'));
+    fill('lo-mi-models', []);
+  }
   function loadPlanning() {
+    var started = ++planningGeneration, entered = planningStamp();
     J.request(TO + '/model-improvement').then(function (d) {
+      if (planningLocked || started !== planningGeneration || planningStamp() !== entered) return;
+      if (!/^[a-f0-9]{64}$/.test(d.context || '') || planningContext && d.context !== planningContext) { lockPlanning(); lockCodePractice(); return; }
+      planningContext = d.context;
       var nodes = [el('p', null, (d.on ? 'Model improvement is on.' : 'Model improvement is off; planning still works.') +
         ' The model list is from ' + d.catalog.as_of + ' and has ' + plural(d.catalog.candidates, 'model') + '.')];
       if (d.task_sets.length) nodes.push(J.table(['Task set', 'Ready to prove a model', 'Practice groups', 'Kept-aside groups'],
@@ -274,25 +338,49 @@
       if (scoringChoice.get('scoring_split')) $('lo-mi-split').value = scoringChoice.get('scoring_split');
       if (scoringChoice.get('scoring_task_set') && window.LightworkModelAnswerScoring) window.LightworkModelAnswerScoring.loadSelected();
     }).catch(async function (failure) {
-      fill('lo-mi-state', el('p', null, await J.problem(failure, 'load model planning')));
+      if (planningLocked || started !== planningGeneration) return;
+      if ([401, 403, 409].includes(failure.status)) { lockPlanning(); lockCodePractice(); return; }
+      var problem = await J.problem(failure, 'load model planning');
+      if (!planningLocked && started === planningGeneration) fill('lo-mi-state', el('p', null, problem));
     });
   }
   var find = $('lo-mi-find');
+  planningFields.forEach(function (id) { $(id).addEventListener('change', function () {
+    planningGeneration++; fill('lo-mi-models', el('p', 'muted', 'Choices changed. Find models again to read their current fit.')); find.disabled = planningLocked;
+  }); });
   if (find) find.addEventListener('click', async function () {
+    if (find.disabled || planningLocked || !planningContext) return;
+    var started = ++planningGeneration, entered = planningStamp(), bound = planningContext;
+    var query = {role:$('lo-mi-role').value, memory_gib:Number($('lo-mi-memory').value),
+      context_tokens:Number($('lo-mi-context').value), concurrency:Number($('lo-mi-concurrency').value)};
     find.disabled = true;
     fill('lo-mi-models', el('p', 'muted', 'Looking…'));
     try {
       var q = '?role=' + encodeURIComponent($('lo-mi-role').value) + '&memory_gib=' + encodeURIComponent($('lo-mi-memory').value) +
         '&context_tokens=' + encodeURIComponent($('lo-mi-context').value) + '&concurrency=' + encodeURIComponent($('lo-mi-concurrency').value);
       var d = await J.request(TO + '/model-improvement/models' + q);
+      if (planningLocked || started !== planningGeneration) return;
+      if (planningStamp() !== entered) { fill('lo-mi-models', el('p', 'muted', 'Choices changed. Find models again to read their current fit.')); return; }
+      if (d.context !== bound) { lockPlanning(); lockCodePractice(); return; }
+      if (!d.query || Object.keys(query).some(function (key) { return query[key] !== d.query[key]; })) {
+        fill('lo-mi-models', el('p', null, 'The returned model fit does not match your choices. Find models again.')); return;
+      }
       if (!d.models.length) { fill('lo-mi-models', el('p', 'muted', 'No model in the list is meant for this role.')); return; }
       fill('lo-mi-models', [J.table(['Model', 'Fits', 'Memory it needs', 'Licence', 'Status'], d.models.map(function (m) {
         return [m.name, m.fits ? 'Yes' : 'No', m.memory_needed_gib + ' GB', m.licence, m.status];
       })), el('p', 'muted', 'For planning only. No model is switched.')]);
     } catch (failure) {
-      fill('lo-mi-models', el('p', null, await J.problem(failure, 'find models')));
-    } finally { find.disabled = false; }
+      if (!planningLocked && planningContext === bound && [401, 403, 409].includes(failure.status)) { lockPlanning(); lockCodePractice(); return; }
+      if (planningLocked || started !== planningGeneration) return;
+      var problem = await J.problem(failure, 'find models');
+      if (!planningLocked && started === planningGeneration && planningStamp() === entered) fill('lo-mi-models', el('p', null, problem));
+    } finally { if (!planningLocked && started === planningGeneration) find.disabled = false; }
   });
+  function changedLearningContext() { lockPlanning(); lockCodePractice(); }
+  document.addEventListener('lightwork:workspace-changed', changedLearningContext);
+  document.addEventListener('lightwork:account-context-changed', changedLearningContext);
+  window.addEventListener('lightwork:context-changed', function (event) { if (event.detail?.reason !== 'selection') changedLearningContext(); });
+  document.addEventListener('lightwork:copilot-context-changed', function (event) { if (event.detail?.reason !== 'selection') changedLearningContext(); });
   J.wire($('lo-mi-score'), async function () {
     var body = await fileBody($('lo-mi-file'), 'Choose the answers file first.');
     if (!body) return null;
