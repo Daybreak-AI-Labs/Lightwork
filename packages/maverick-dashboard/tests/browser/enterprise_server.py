@@ -1,12 +1,15 @@
 """Disposable local invitation/lifecycle qualification; never a product entry point.
 
-All five roles use real single-use invites and signed cookies. Source evidence
-and the provider token exchange are synthetic; every outbound socket is blocked.
+The administrator already has a passphrase and signs in with it; the four new
+colleagues join through real single-use invites. Everyone gets signed cookies.
+Source evidence and the provider token exchange are synthetic; every outbound
+socket is blocked.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -26,7 +29,8 @@ def build(directory):
         "[features]", "[features]\npersonal_data_controls=true\nemployee_departures=true",
     ).replace("[connections]\nenable = true", "[connections]\nenable = true"
               "\nallow_self_connect=true\nself_connect_profiles='google-drive'")
-    settings += "\n[dashboard]\ninvites=true\ninvite_email=false\n[oauth]\nvault=true\n"
+    # default_role keeps the global fallback view-only (deny by default).
+    settings += "\n[dashboard]\ninvites=true\ninvite_email=false\ndefault_role=\"viewer\"\n[oauth]\nvault=true\n"
     path.write_text(settings, encoding="utf-8")
     os.environ["MAVERICK_TENANT"] = "browser-enterprise"
     os.environ["MAVERICK_DASHBOARD_ADMINS"] = "user:admin@browser.example.test"
@@ -42,20 +46,23 @@ def build(directory):
     from maverick import config, connection_oauth, world_model
     from maverick.paths import tenant_scope
     from maverick_dashboard import app as dashboard
-    from maverick_dashboard import auth, invites, rbac, session_revocation
+    from maverick_dashboard import auth, invites, local_passphrases, rbac, session_revocation
 
     config.reset_config_cache()
     employee, manager = "employee@browser.example.test", "manager@browser.example.test"
     auditor, tenant_admin = "auditor@browser.example.test", "workspace-admin@browser.example.test"
     rbac.set_role(admin, "admin")
     rbac.set_tenant_role(tenant, admin, "admin", actor=admin)
-    _, administrator_invite = invites.create_invite("admin@browser.example.test", "admin", created_by=admin, tenant=tenant)
-    print("FIXTURE_ADMIN_INVITE=/auth/invite/" + administrator_invite, flush=True)
+    # An existing account is never invited (accepting would replace its
+    # passphrase), so the administrator signs in with the passphrase they have.
+    administrator_passphrase = secrets.token_urlsafe(24)
+    local_passphrases.store(local_passphrases.prepare("admin@browser.example.test", administrator_passphrase), tenant=tenant)
+    print("FIXTURE_ADMIN_PASSPHRASE=" + administrator_passphrase, flush=True)
     links = {}
     for email, role in ((employee, "operator"), (manager, "operator"), (auditor, "auditor"), (tenant_admin, "admin")):
-        # The global fallback is view-only; each accepted invite grants only
-        # its role in this exact workspace, never installation controls.
-        rbac.set_role("user:" + email, "viewer")
+        # Each colleague is new here. With the view-only global fallback, an
+        # accepted invite grants only its role in this exact workspace, never
+        # installation controls.
         _, token = invites.create_invite(email, role, created_by=admin, tenant=tenant)
         links[email.split("@")[0]] = "/auth/invite/" + token
     _, expired = invites.create_invite("expired@browser.example.test", "viewer", created_by=admin, ttl_hours=-1, tenant=tenant)

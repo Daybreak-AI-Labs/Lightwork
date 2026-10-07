@@ -32,9 +32,10 @@ The fixture binds only `127.0.0.1`, uses a new temporary home/configuration
 Lightwork configuration and provider-key environment aliases, and blocks
 outbound sockets before importing the product. Browser requests are
 restricted to that local origin. Explicitly synthetic named identities exercise
-real current permission checks. The enterprise lifecycle fixture instead uses
-real single-use invitations and signed local-session cookies for an administrator,
-employee and manager; neither fixture establishes IdP login acceptance.
+real current permission checks. The enterprise lifecycle fixture instead signs
+its existing administrator in with a passphrase and brings the new employee and
+manager in through real single-use invitations, all with signed local-session
+cookies; neither fixture establishes IdP login acceptance.
 Drive evidence, ticket execution and privacy reads are local test adapters.
 Billing receipts are explicitly synthetic admissions. No model is run, no
 provider is contacted, and no customer data is used.

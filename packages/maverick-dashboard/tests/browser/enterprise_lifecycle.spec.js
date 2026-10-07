@@ -36,12 +36,22 @@ test('invited employee connects only an approved own account, shares a captured 
     expect((await value.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     return page;
   }
+  async function signIn(value,email,passphrase){
+    const page=await value.newPage();page.on('pageerror',error=>errors.push(error.message));
+    await page.goto('/auth/local-login');
+    await page.locator('input[name="email"]').fill(email);await page.locator('input[name="password"]').fill(passphrase);
+    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    await expect(page).not.toHaveURL(/\/auth\/local-login/);
+    expect((await value.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
+    return page;
+  }
   try{
     await expect.poll(async()=>{if(child.exitCode!==null)throw Error('Fixture failed: '+serverLog);try{return(await fetch(origin+'/livez')).status;}catch(_){return 0;}},{timeout:120000,message:'Isolated enterprise fixture starts: '+serverLog}).toBe(200);
     const admin=await context({Origin:origin});
-    const administratorInvite=serverLog.match(/FIXTURE_ADMIN_INVITE=(\S+)/);
-    expect(administratorInvite).toBeTruthy();
-    await accept(admin,administratorInvite[1]);
+    // The administrator already has an account, so they sign in; an invitation could never replace it.
+    const administratorPassphrase=serverLog.match(/FIXTURE_ADMIN_PASSPHRASE=(\S+)/);
+    expect(administratorPassphrase).toBeTruthy();
+    await signIn(admin,'admin@browser.example.test',administratorPassphrase[1]);
     const fixtureResponse=await admin.request.get('/__enterprise_fixture');
     expect(fixtureResponse.status(),await fixtureResponse.text()).toBe(200);
     const fixture=await fixtureResponse.json();
@@ -54,6 +64,15 @@ test('invited employee connects only an approved own account, shares a captured 
     const receipt=await reopened.text();expect(receipt).toContain('Invitation accepted');expect(receipt).not.toContain('Accept invitation');
     expect((await (await context()).request.get(fixture.invites.employee)).status()).toBe(410);
     expect((await employee.request.get(fixture.invites.expired)).status()).toBe(410);
+    // The invitation granted only a workspace role. The administrator records the
+    // employee's view-only installation role on the Users page, as for anyone who
+    // will later be offboarded from Departures.
+    const users=await admin.newPage();await users.goto('/users');
+    const give=users.locator('form[action="/users/set"]').filter({has:users.getByRole('button',{name:'Give role',exact:true})});
+    await give.locator('select[name=principal]').selectOption(fixture.employee);await give.locator('select[name=role]').selectOption('viewer');
+    const granted=users.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname==='/users/set');
+    await give.getByRole('button',{name:'Give role',exact:true}).click();
+    expect((await granted).status()).toBe(303);await users.close();
     console.info('Enterprise journey: invitation and least privilege');
     for(const forbidden of ['/settings','/users','/users/departures']){
       const denied=await employee.request.get(forbidden);expect(denied.status(),forbidden).toBe(403);

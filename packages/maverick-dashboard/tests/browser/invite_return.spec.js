@@ -73,7 +73,7 @@ test('invited colleague sets a passphrase, signs out and signs back in on a phon
     await page.goto(origin+'/goals');
     await expect(page).toHaveURL(/\/auth\/local-login/);
     await looksRight(page);
-    await expect(page.locator('main')).toContainText('Ask your administrator for a new invite');
+    await expect(page.locator('main')).toContainText('Ask your administrator for an invitation');
     await page.screenshot({path:info.outputPath('sign-in-phone.png'),fullPage:true});
     await page.locator('input[name="email"]').fill('colleague@example.test');
     await page.locator('input[name="password"]').fill(passphrase);

@@ -1,8 +1,9 @@
-"""Two real workspace stores and one invited account; synthetic, loopback only."""
+"""Two real workspace stores and one administrator account; synthetic, loopback only."""
 from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -23,7 +24,13 @@ def build(directory: Path, *, fixed: bool = False):
     from maverick.paths import tenant_scope
     from maverick.tenant.registry import create_tenant
     from maverick_dashboard import app as dashboard
-    from maverick_dashboard import auth, invites, rbac, subject_directory, workspace_tenants
+    from maverick_dashboard import (
+        auth,
+        local_passphrases,
+        rbac,
+        subject_directory,
+        workspace_tenants,
+    )
 
     config.reset_config_cache()
     rbac.set_role(admin, "admin")
@@ -40,12 +47,15 @@ def build(directory: Path, *, fixed: bool = False):
                                                       detail="Deny-only fixture; never dispatches an effect.",
                                                       requested_by=admin)
     workspace_tenants.set_selection(admin, "workspace-a")
-    _, invite = invites.create_invite("acceptance-admin@example.test", "admin", created_by=admin, tenant="workspace-a")
+    # An existing account is never invited (accepting would replace its
+    # passphrase), so the administrator signs in with the passphrase they have.
+    passphrase = secrets.token_urlsafe(24)
+    local_passphrases.store(local_passphrases.prepare("acceptance-admin@example.test", passphrase), tenant="workspace-a")
     unassigned = "unassigned@example.test"
     subject_directory.record_login(unassigned, [unassigned])
     if fixed:
         os.environ["MAVERICK_TENANT"] = "workspace-a"
-    print("FIXTURE_ADMIN_INVITE=/auth/invite/" + invite, flush=True)
+    print("FIXTURE_ADMIN_PASSPHRASE=" + passphrase, flush=True)
 
     @dashboard.app.get("/__workspace_acceptance", include_in_schema=False)
     def state(request: Request):
