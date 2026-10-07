@@ -480,13 +480,40 @@
     } catch (failure) { fail(failure, "send the removal for approval"); }
   }
 
+  var reviewGeneration = 0, reviewing = false;
+  function clearReview() {
+    reviewGeneration += 1;
+    if (reviewing) { var cancel = byId("mv-confirm-cancel"); if (cancel) cancel.click(); }
+  }
+  [window, document].forEach(function (target) { ["lightwork:workspace-changed", "lightwork:account-context-changed"].forEach(function (name) { target.addEventListener(name, clearReview); }); });
+  async function confirmReview(text) {
+    var dialog = byId("mv-confirm"), message = byId("mv-confirm-msg");
+    if (dialog && dialog.open) return false;
+    var previous = message ? message.style.cssText : "";
+    var answer = R.confirm(text, "Approve this exact change"); reviewing = true;
+    if (message) { message.style.whiteSpace = "pre-wrap"; message.style.overflowWrap = "anywhere"; message.style.maxHeight = "60vh"; message.style.overflowY = "auto"; }
+    try { return await answer; }
+    finally { reviewing = false; if (message) { message.textContent = ""; message.style.cssText = previous; } }
+  }
   async function approve(change) {
-    var text = "Approve “" + (CHANGE[change.kind] || R.human(change.kind)) + "”" + (describe(change) ? " (" + describe(change) + ")" : "") +
-      "? Only approve changes you have checked yourself. It takes effect straight away.";
-    if (!(await R.confirm(text, "Approve"))) return;
+    var generation = reviewGeneration;
     try {
+      var review = await request("/authority/proposals/" + encodeURIComponent(change.proposal_id) + "/review");
+      if (generation !== reviewGeneration) return;
+      if (review.proposal.revision !== change.revision || review.proposal.kind !== change.kind || review.proposed_by_you) {
+        say("The change is no longer available for your independent approval. Refresh the list."); return;
+      }
+      var labels = {action: "Change", broker_ref: "Data broker", drop_id: "DROP request", status: "Result", request_type: "Requested action", language: "Reply language", valid_until: "Valid until", observed_at: "Evidence recorded on", expected_version: "Current source version", record_revision: "Request version", evidence_revision: "Evidence version", deletion_verified: "Deletion checked", opt_out_verified: "Opt-out checked", search_complete: "Search completed", exemption_approved: "Exemption approved", provider_operations_complete: "Work in connected services completed", expected_current_revision: "Current signing key version", key_revision: "Signing key version", from_revision: "Previous key version", to_revision: "New key version", objects_migrated: "Records moved", remaining_dependencies: "Records still depending on the old key", template_id: "Privacy request form", migration_id: "Key change record", registration_sha256: "Registration file identity", evidence_sha256: "Evidence file identity", broker_registration_sha256: "Broker registration file identity", subject_binding_sha256: "Protected person identity", new_key_ref: "Protected signing key reference"};
+      var text = "Review “" + (CHANGE[change.kind] || R.human(change.kind)) + "”\n\n" + Object.keys(review.contents).map(function (key) {
+        if (!labels[key]) throw new Error("This change contains information this view cannot explain. Nothing was approved.");
+        var value = review.contents[key];
+        if (value && typeof value === "object") throw new Error("The complete change could not be shown. Nothing was approved.");
+        return labels[key] + ": " + (value === true ? "Yes" : value === false ? "No" : value === null ? "Not provided" : key === "valid_until" || key === "observed_at" ? R.when(value) : key === "action" && CHANGE[value] ? CHANGE[value] : typeof value === "number" || /sha256$/.test(key) || key === "new_key_ref" || key === "template_id" ? String(value) : R.human(value));
+      }).join("\n") + "\nKeep this review until: " + R.when(review.proposal.retained_until) +
+        "\n\nRecorded file identities do not show the original files. Check those files through your organization's approved channel. Approval records a local decision and can take effect immediately; it does not prove an outside result.";
+      if (!(await confirmReview(text)) || generation !== reviewGeneration) return;
       await request("/authority/proposals/" + encodeURIComponent(change.proposal_id) + "/approve", "POST",
-        { expected_revision: change.revision, idempotency_key: R.newKey() });
+        { expected_revision: review.proposal.revision, idempotency_key: R.newKey() });
       say("Approved. The change is now in effect.");
       await load();
     } catch (failure) {

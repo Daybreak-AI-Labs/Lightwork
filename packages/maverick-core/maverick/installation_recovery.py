@@ -116,7 +116,10 @@ def _directory(identifier: str) -> Path:
 
 
 def _write(path: Path, record: dict) -> None:
-    file_lock.atomic_write_text(path, json.dumps(backup._authenticate_for_write(record, _key())))
+    encoded = json.dumps(backup._authenticate_for_write(record, _key()))
+    if len(encoded.encode("utf-8")) > 128 * 1024:
+        raise MaintenanceError("The saved recovery details, including separate key files, exceed this installation's record limit. Existing recovery points have been kept.")
+    file_lock.atomic_write_text(path, encoded)
 
 
 def _read(path: Path) -> dict:
@@ -745,7 +748,8 @@ def _snapshot(directory: Path, name: str, runtime_sha256: str) -> dict:
                               "target": _target(), "runtime_sha256": runtime_sha256,
                               "coverage": "all-local-workspaces-and-shared-administration"})
         manifest = backup.verify_backup(destination)
-    return {"name": destination.name, "sha256": backup._sha256(destination), "files": len(manifest["files"])}
+    return {"name": destination.name, "sha256": backup._sha256(destination), "files": len(manifest["files"]),
+            "withheld_key_files": manifest.get("withheld_key_files")}
 
 
 def _retained_identity(info: os.stat_result) -> tuple[int, int, int]:
@@ -1530,6 +1534,8 @@ def status() -> dict:
                     continue
                 reason = _retirement_blocker(record, active_id, installed)
                 records.append(row | {"new_version": record.get("new", {}).get("version"),
+                                      "snapshot_saved": bool(record.get("before")),
+                                      "withheld_key_files": (record.get("before") or {}).get("withheld_key_files"),
                                       "pending_finalization": record.get("id") == active_id,
                                       "can_retire": reason is None, "retirement_blocker": reason,
                                       "record_sha256": record.get("retirement_sha256") or _record_sha256(record),

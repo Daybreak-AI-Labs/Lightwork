@@ -415,15 +415,44 @@
         ],
         empty: {title: "No access requested yet.", body: "Use “Ask for access” on a connected person."}});
     }
-    function contextRevision(ref) { var c = state.contexts.filter(function (x) { return x.context_ref === ref; })[0]; return c ? c.revision : 1; }
+    var reviewGeneration = 0, reviewing = false;
+    function clearReview() {
+      reviewGeneration += 1;
+      if (reviewing) { var cancel = $("mv-confirm-cancel"); if (cancel) cancel.click(); }
+    }
+    [window, document].forEach(function (target) { ["lightwork:workspace-changed", "lightwork:account-context-changed"].forEach(function (name) { target.addEventListener(name, clearReview); }); });
+    async function confirmReview(message, label) {
+      var dialog = $("mv-confirm"), text = $("mv-confirm-msg");
+      if (dialog && dialog.open) return false;
+      var previous = text ? text.style.cssText : "";
+      var answer = CW.confirm(message, label); reviewing = true;
+      if (text) { text.style.whiteSpace = "pre-wrap"; text.style.overflowWrap = "anywhere"; text.style.maxHeight = "60vh"; text.style.overflowY = "auto"; }
+      try { return await answer; }
+      finally { reviewing = false; if (text) { text.textContent = ""; text.style.cssText = previous; } }
+    }
     async function decide(row, action) {
+      var generation = reviewGeneration;
+      var overview;
+      try { overview = await run("GET", "/overview"); }
+      catch (error) { fail(error, "read the current access request"); return; }
+      if (generation !== reviewGeneration) return;
+      var current = (row.kind === "grant" ? overview.grants : overview.rights_authorizations).filter(function (item) { return (item.grant_ref || item.authorization_ref) === row.ref; })[0];
+      var parent = overview.contexts.filter(function (item) { return item.context_ref === row.item.context_ref; })[0];
+      var previous = state.contexts.filter(function (item) { return item.context_ref === row.item.context_ref; })[0];
+      if (!current || !parent || !previous || JSON.stringify(current) !== JSON.stringify(row.item) || JSON.stringify(parent) !== JSON.stringify(previous)) {
+        say("This request or the person's connection changed. Refresh and read its current details before deciding.", true); return;
+      }
       var path = (row.kind === "grant" ? "/capability-grants/" : "/rights-authorizations/") + encodeURIComponent(row.ref) + "/" + action;
-      var message = action === "approve"
-        ? "Approve “" + row.what + "” for " + contextName(row.item.context_ref) + "?" + (row.item.approval_count === 1 ? " This is the second approval, so the access starts now." : " One more person must approve after you.")
-        : "Remove “" + row.what + "” for " + contextName(row.item.context_ref) + "? It ends straight away and cannot be restored.";
-      if (!(await CW.confirm(message, action === "approve" ? "Approve" : "Remove"))) return;
+      var message = "Person: " + (parent.profile_label || "Name unavailable in this view") + "\nWebsite or app: " + (parent.property_label ? CW.human(parent.property_label) : "Name unavailable in this view") +
+        "\nRequested access: " + row.what + "\nAccess until: " + CW.when(current.valid_until) +
+        "\nConnection valid until: " + CW.when(parent.valid_until) + "\nKeep connection records until: " + CW.when(parent.retained_until) +
+        "\nNotice versions this person may read: up to " + parent.publication_history_limit + "\nConsent records this person may read: up to " + parent.receipt_limit +
+        "\nApprovals already recorded: " + current.approval_count + " of 2\nRequested on: " + CW.when(current.created_at) +
+        (current.case_id ? "\nLinked privacy request: " + current.case_id + ". Read its complete request from Privacy before approving this access." : "") +
+        (action === "approve" ? "\n\nApprove this exact access?" + (current.approval_count === 1 ? " This is the second approval, so the access starts now." : " One more person must approve after you.") : "\n\nRemove this exact access? It ends straight away and cannot be restored.");
+      if (!(await confirmReview(message, action === "approve" ? "Approve" : "Remove")) || generation !== reviewGeneration) return;
       try {
-        await run("POST", path, {expected_revision: row.item.revision, expected_context_revision: contextRevision(row.item.context_ref), idempotency_key: CW.reference()});
+        await run("POST", path, {expected_revision: current.revision, expected_context_revision: parent.revision, idempotency_key: CW.reference()});
         say(action === "approve" ? "Approval recorded." : "Access removed."); await load();
       } catch (error) {
         if (error && error.status === 409) { say("Could not record this. The person who asked, or someone who already approved, cannot approve again; or it changed since you opened the page.", true); return; }

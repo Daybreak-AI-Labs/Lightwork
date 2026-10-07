@@ -9,16 +9,23 @@ actor identity, raw provider credentials, or raw vendor profile values.
 from __future__ import annotations
 
 import hashlib
+import hmac
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi import Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_global_permission, require_permission
+from .auth import (
+    require_global_permission,
+    require_page_permission,
+    require_permission,
+    require_principal,
+)
+from .draft_api import context_for
 
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
 _OP_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$"
@@ -308,9 +315,29 @@ class ClaimOutboxIn(_StrictModel):
     lease_seconds: float = Field(default=60.0, ge=1.0, le=3_600.0)
 
 
+class RecipientIn(_StrictModel):
+    name: str = Field(min_length=1, max_length=120)
+    address: str = Field(min_length=3, max_length=320)
+    external_use_reviewed: bool
+    context: Digest
+    idempotency_key: IdempotencyKey
+
+
+class RecipientWithdrawIn(RevisionIn):
+    context: Digest
+
+
+class ReviewedDeliveryIn(_StrictModel):
+    delivery_id: OpaqueId
+    pin: Digest
+
+
 class RunOutboxIn(_StrictModel):
+    context: Digest
+    review_sha256: Digest
+    items: list[ReviewedDeliveryIn] = Field(min_length=1, max_length=10)
     limit: int = Field(default=10, ge=1, le=100)
-    lease_seconds: float = Field(default=60.0, ge=1.0, le=3_600.0)
+    lease_seconds: float = Field(default=120.0, ge=1.0, le=3_600.0)
     base_backoff_seconds: float = Field(default=30.0, gt=0.0, le=604_800.0)
     maximum_backoff_seconds: float = Field(
         default=86_400.0,
@@ -432,6 +459,29 @@ def _default_store_for(tenant_id: str):
     )
 
 
+def _mail_access(request: Request, permission: str = "operate") -> str:
+    require_principal(request)
+    require_permission(request, permission)
+    require_page_permission(request, "/third-party/intelligence")
+    from .app import require_page_visible
+
+    require_page_visible(request, "/third-party/intelligence")
+    _ops()
+    return _tenant_id()
+
+
+def alert_setup_overview(request: Request) -> dict[str, Any]:
+    """Current native authority for the protected, read-only recipient opener."""
+    tenant = _mail_access(request)
+    require_global_permission(request, "admin")
+    factory = getattr(request.app.state, "third_party_intelligence_store_factory", None)
+    store = factory(tenant_id=tenant, request=request) if callable(factory) else _default_store_for(tenant)
+    recipients = store.list_alert_recipients(tenant)
+    _mail_access(request)
+    require_global_permission(request, "admin")
+    return {"context": context_for(request), "saved_recipients": len(recipients)}
+
+
 class ThirdPartyIntelligenceDependencies:
     """Explicit store factory seam for alternate runtimes and tests."""
 
@@ -499,6 +549,70 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
                 status_code=503,
                 detail="third-party intelligence operation failed",
             ) from exc
+
+    def mail_guard(request, tenant, *, context=None, admin=False):
+        expected_context = context or context_for(request)
+        actor = _principal(request, tenant)
+
+        def check():
+            if _mail_access(request) != tenant or _principal(request, tenant) != actor:
+                raise HTTPException(409, "Your account or workspace changed. Reload the current controls.")
+            if admin:
+                require_global_permission(request, "admin")
+            if not hmac.compare_digest(context_for(request), expected_context):
+                raise HTTPException(409, "Your account or workspace changed. Reload the current controls.")
+        check()
+        return check
+
+    def mail_review(request, tenant, store, selected=None):
+        from maverick import mailer
+        from maverick.governed_operations import digest
+        from maverick.third_party_intelligence_delivery import _message
+
+        ops_error = _ops()
+        _mail_access(request)
+        if not mailer.configured():
+            raise HTTPException(409, "Set up a sending account in Settings → All settings → Email, then review the alerts again.")
+        now = store._clock()
+        if selected is None:
+            items = store.ready_outbox(tenant, limit=10)
+        else:
+            if len(set(selected)) != len(selected):
+                raise HTTPException(422, "Choose one distinct reviewed batch.")
+            items = [store.get_outbox(tenant, delivery_id) for delivery_id in selected]
+        values = []
+        for item in items:
+            if not ((item.state == "pending" and item.next_attempt_at <= now)
+                    or (item.state == "leased" and float(item.lease_until or 0) <= now)):
+                raise HTTPException(409, "One of these alerts was already reserved or sent. Reload its saved outcome before sending more.")
+            alert = store.get_monitoring_alert(tenant, item.alert_id)
+            monitor = store.get_monitor(tenant, alert.monitor_id)
+            if monitor.state != "active":
+                continue
+            sources = [store.get_source(tenant, source_id) for source_id in monitor.source_bindings.values()]
+            if any(source.state != "active" or "monitoring" not in source.purposes for source in sources):
+                continue
+            try:
+                recipient = store.resolve_alert_recipient(tenant, item.destination_ref)
+            except ops_error.ThirdPartyIntelligenceNotFound as exc:
+                raise HTTPException(409, "An older watch has no saved recipient. Stop that watch and start it again with a saved recipient.") from exc
+            except ops_error.ThirdPartyIntelligencePermissionDenied:
+                continue
+            values.append({"delivery_id": item.delivery_id, "pin": item.integrity_sha256,
+                           "recipient": recipient["name"], "address": recipient["address"],
+                           "recipient_pin": recipient["integrity_sha256"],
+                           "monitor_id": monitor.monitor_id, "monitor_pin": monitor.integrity_sha256,
+                           "alert_pin": alert.integrity_sha256,
+                           "vendor_pin": store.get_vendor(tenant, alert.vendor_id).integrity_sha256,
+                           "source_pins": {source.source_id: source.integrity_sha256 for source in sources},
+                           "subject": "Lightwork third-party risk change",
+                           "body": _message(store, item) + f"\n\nLightwork delivery reference: {item.delivery_id}\n"})
+        scope = mailer.sending_scope()
+        value = {"context": context_for(request), "items": values,
+                 "sender": scope["from"] or scope["user"], "provider": scope["provider"].lower(),
+                 "external_use": "Email leaves Lightwork. Each named recipient receives the vendor name, a change notice and saved review references. Licensed source contents are not attached. Accepted means the mail service accepted the message; it does not prove inbox receipt. Unconfirmed sends are retained and are not sent again automatically."}
+        mail_guard(request, tenant, context=value["context"])()
+        return {**value, "review_sha256": digest(value)}
 
     def provider_runtime(request: Request):
         runtime = getattr(
@@ -646,13 +760,7 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
             ),
             "provider_source_credential_checked": False,
             "outbound_delivery_runs_only_on_explicit_post": True,
-            "delivery_destination_resolver_configured": callable(
-                getattr(
-                    request.app.state,
-                    "third_party_intelligence_destination_resolver",
-                    None,
-                )
-            ),
+            "delivery_destination_resolver_configured": True,
             "smtp_sender_configured": mailer.configured(),
             "raw_credentials_accepted": False,
             "raw_profile_values_accepted": False,
@@ -1172,6 +1280,7 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
     ) -> dict[str, Any]:
         require_permission(request, "operate")
         ops, tenant, store = authority(request)
+        await call(ops, store.resolve_alert_recipient, tenant, body.destination_ref)
         return _jsonable(
             await call(
                 ops,
@@ -1222,6 +1331,61 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
         ops, tenant, store = authority(request)
         return _jsonable(await call(ops, store.get_monitoring_alert, tenant, alert_id))
 
+    @router.get("/alert-recipients")
+    async def alert_recipients(request: Request, response: Response) -> dict[str, Any]:
+        _mail_access(request)
+        ops, tenant, store = authority(request)
+        response.headers["Cache-Control"] = "private, no-store"
+        rows = await call(ops, store.list_alert_recipients, tenant)
+        mail_guard(request, tenant)()
+        return {"context": context_for(request), "items": rows, "count": len(rows)}
+
+    @router.get("/alert-recipients/{recipient_id}")
+    async def alert_recipient(request: Request, recipient_id: ObjectPath, response: Response) -> dict[str, Any]:
+        _mail_access(request)
+        require_global_permission(request, "admin")
+        ops, tenant, store = authority(request)
+        response.headers["Cache-Control"] = "private, no-store"
+        result = await call(ops, store.get_alert_recipient, tenant, recipient_id)
+        mail_guard(request, tenant, admin=True)()
+        return _jsonable(result)
+
+    @router.put("/alert-recipients/{recipient_id}")
+    async def save_alert_recipient(request: Request, recipient_id: ObjectPath, body: RecipientIn) -> dict[str, Any]:
+        _mail_access(request)
+        require_global_permission(request, "admin")
+        ops, tenant, store = authority(request)
+        guard = mail_guard(request, tenant, context=body.context, admin=True)
+        return await call(ops, store.save_alert_recipient, tenant, recipient_id=recipient_id,
+                          actor_ref=_principal(request, tenant), effect_guard=guard,
+                          **body.model_dump(exclude={"context"}))
+
+    @router.post("/alert-recipients/{recipient_id}/withdraw")
+    async def withdraw_alert_recipient(request: Request, recipient_id: ObjectPath, body: RecipientWithdrawIn) -> dict[str, Any]:
+        _mail_access(request)
+        require_global_permission(request, "admin")
+        ops, tenant, store = authority(request)
+        guard = mail_guard(request, tenant, context=body.context, admin=True)
+        return await call(ops, store.withdraw_alert_recipient, tenant, recipient_id,
+                          actor_ref=_principal(request, tenant), effect_guard=guard,
+                          **body.model_dump(exclude={"context"}))
+
+    @router.get("/outbox")
+    async def outbox(request: Request, response: Response) -> dict[str, Any]:
+        require_permission(request, "view")
+        ops, tenant, store = authority(request)
+        response.headers["Cache-Control"] = "private, no-store"
+        rows = await call(ops, store.list_outbox, tenant)
+        return {"items": [{key: value for key, value in _jsonable(row).items() if key != "lease_token"}
+                          for row in rows], "count": len(rows), "limit": 500}
+
+    @router.get("/outbox/review")
+    async def outbox_review(request: Request, response: Response) -> dict[str, Any]:
+        _mail_access(request)
+        ops, tenant, store = authority(request)
+        response.headers["Cache-Control"] = "private, no-store"
+        return await call(ops, mail_review, request, tenant, store)
+
     @router.post("/outbox/claim")
     async def claim_outbox(request: Request, body: ClaimOutboxIn) -> dict[str, Any]:
         require_permission(request, "operate")
@@ -1242,20 +1406,47 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
     ) -> dict[str, Any]:
         """Run the explicit external alert-delivery side-effect boundary."""
 
-        require_permission(request, "operate")
+        _mail_access(request)
         ops, tenant, store = authority(request)
-        resolver = getattr(
-            request.app.state,
-            "third_party_intelligence_destination_resolver",
-            None,
-        )
-        if not callable(resolver):
-            raise HTTPException(
-                status_code=503,
-                detail="third-party-intelligence destination resolver is not configured",
-            )
-
+        from maverick import mailer
         from maverick import third_party_intelligence_delivery as delivery
+
+        ids = tuple(item.delivery_id for item in body.items)
+        pins = {item.delivery_id: item.pin for item in body.items}
+        access = mail_guard(request, tenant, context=body.context)
+        reviewed = await call(ops, mail_review, request, tenant, store, ids)
+        if (reviewed["review_sha256"] != body.review_sha256 or reviewed["context"] != body.context
+                or {item["delivery_id"]: item["pin"] for item in reviewed["items"]} != pins):
+            raise HTTPException(409, "The alerts, recipients or source permissions changed. Review the current alerts before sending.")
+        reviewed_items = {item["delivery_id"]: item for item in reviewed["items"]}
+        sender_scope = mailer.sending_scope()
+
+        def resolver(current_tenant, reference):
+            access()
+            if current_tenant != tenant:
+                raise HTTPException(403, "The alert belongs to a different workspace.")
+            return store.resolve_alert_recipient(tenant, reference)["address"]
+
+        def claim_guard():
+            access()
+            current = mail_review(request, tenant, store, ids)
+            if current["review_sha256"] != body.review_sha256:
+                raise HTTPException(409, "This reviewed batch changed before sending. Review the current alerts.")
+
+        def effect_guard(item):
+            access()
+            saved = reviewed_items[item.delivery_id]
+            recipient = store.resolve_alert_recipient(tenant, item.destination_ref)
+            alert = store.get_monitoring_alert(tenant, item.alert_id)
+            monitor = store.get_monitor(tenant, alert.monitor_id)
+            if (recipient["integrity_sha256"] != saved["recipient_pin"]
+                    or alert.integrity_sha256 != saved["alert_pin"]
+                    or monitor.integrity_sha256 != saved["monitor_pin"]
+                    or store.get_vendor(tenant, alert.vendor_id).integrity_sha256 != saved["vendor_pin"]
+                    or mailer.sending_scope() != sender_scope
+                    or any(store.get_source(tenant, source).integrity_sha256 != pin
+                           for source, pin in saved["source_pins"].items())):
+                raise HTTPException(409, "The reviewed recipient, sending account or source permission changed before sending.")
 
         transport = (
             getattr(
@@ -1273,7 +1464,8 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
                 worker_id=_principal(request, tenant),
                 resolve_destination=resolver,
                 transport=transport,
-                **body.model_dump(),
+                delivery_ids=ids, claim_guard=claim_guard, effect_guard=effect_guard,
+                **body.model_dump(exclude={"items", "context", "review_sha256"}),
             )
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

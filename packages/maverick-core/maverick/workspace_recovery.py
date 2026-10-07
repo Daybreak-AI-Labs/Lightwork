@@ -485,7 +485,8 @@ def _inspect(identifier: str) -> dict:
             "tenant": context.get("tenant_id"),
             "application_version": context.get("application_version"),
             "authenticated": True, "payload_verified": True, "compatibility": compatibility,
-            "contains_encryption_key": any(name.startswith("keys/") for name in files),
+            "withheld_key_files": manifest.get("withheld_key_files"),
+            "contains_encryption_key": any(name.startswith("keys/") and backup._is_key_material(Path(name)) for name in files),
             "contains_drafts": any(name.startswith("draft-recovery/") for name in files)}
     file_lock.atomic_write_text(_store() / (identifier + ".json"), json.dumps(backup._authenticate_for_write(result, _key())))
     return result

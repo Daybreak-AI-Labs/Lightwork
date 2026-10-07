@@ -170,10 +170,14 @@ def _model(request):
     def connection_attention():
         from .connection_dependencies import connection_attention as owned_connections
         return owned_connections(request)
+    def governance_reviews():
+        from .action_center_governance_sources import collect
+        return collect(request)
     return action_center.collect(_world(), principal=principal, owner=goal_owner_filter(request),
         specs=specs, assessments=list_saved, assessment_allowed=allowed,
         project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations,
         evidence_source_approvals=lambda: _evidence_source_approvals(request),
+        governance_reviews=governance_reviews,
         connection_attention=connection_attention,
         flow_approvals=lambda: pending_for_request(request, limit=action_center.SOURCE_LIMIT),
         approval_allowed=lambda row: (
@@ -194,6 +198,12 @@ async def _snapshot(request):
         preference = await run_in_threadpool(action_center.preferences, context)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Attention preferences are unavailable; no read or snooze state was changed.") from exc
+    from . import auth
+
+    with auth.fresh_configuration():
+        require_enabled(request)
+        if context_for(request) != context:
+            raise HTTPException(409, "Your account or workspace changed. Reload current decisions.")
     return action_center.apply_preferences({**model, "context": context}, preference, now=time.time())
 
 
@@ -203,6 +213,7 @@ async def inbox(request: Request, response: Response,
                     "all", "approval", "signoff", "assessment", "project_review",
                     "vendor_reconciliation", "task_attention", "connection_attention",
                     "evidence_source_approval",
+                    "lifecycle_review", "drop_authority_review", "trust_center_review", "disclosure_review",
                 ] = "all",
                 view: Literal["active", "unread", "snoozed", "overdue", "all"] = "active",
                 assignment: Literal["all", "mine", "available"] = "all",

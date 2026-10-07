@@ -56,10 +56,30 @@
     <div id="tpi-case-detail" hidden></div>
   </section>
 
-  <div class="section-head"><h2>Watching for changes</h2><button type="button" class="btn" id="tpi-send-alerts">Send waiting alerts now</button></div>
+  <div class="section-head"><h2>Alert recipients</h2></div>
+  <section class="panel" aria-label="Alert recipients" id="tpi-recipient-setup">
+    <p class="muted">Choose a saved recipient when you start watching a vendor. Addresses are protected in this workspace. Withdrawing a recipient stops future sends to that saved address; it cannot recall messages already accepted by the mail service.</p>
+    <div id="tpi-recipients"><p class="muted">Loading recipients…</p></div>
+    {% if intelligence_can_admin %}
+    <form id="tpi-recipient-form">
+      <div class="tpi-actions">
+        <label class="tpi-field">Name<input id="tpi-recipient-name" maxlength="120" required autocomplete="off" placeholder="Vendor risk team"></label>
+        <label class="tpi-field">Email address<input id="tpi-recipient-address" type="email" maxlength="320" required autocomplete="off" placeholder="risk@example.com"></label>
+        <button type="submit" class="btn btn--primary" id="tpi-save-recipient">Review recipient</button>
+        <button type="button" class="btn" id="tpi-recipient-original" hidden>Read saved recipient</button>
+      </div>
+      <p class="muted" id="tpi-recipient-result" role="status" aria-live="polite"></p>
+    </form>
+    {% endif %}
+    <p class="muted">Use your platform sending account. <a href="/settings/all?q=email">Set up email in Settings</a>.</p>
+  </section>
+
+  <div class="section-head"><h2>Watching for changes</h2><button type="button" class="btn" id="tpi-send-alerts">Review waiting alerts</button></div>
   <section class="panel" aria-label="Monitoring">
     <h3>Vendors being watched</h3><div id="tpi-monitors"><p class="muted">Loading…</p></div>
     <h3>Change alerts</h3><div id="tpi-alerts"><p class="muted">Loading…</p></div>
+    <h3>Email outcomes</h3><div id="tpi-deliveries"><p class="muted">Loading…</p></div>
+    <p class="muted">Accepted means the mail service accepted a message, not that it reached an inbox. If a send cannot be confirmed, Lightwork keeps its outcome here and does not send it again automatically. Read up to 500 saved outcomes; each reviewed send handles up to 10 waiting alerts.</p>
   </section>
 
   <div class="section-head"><h2>Sharing with partners</h2><button type="button" class="btn" id="tpi-see-shared">See what partners shared</button></div>

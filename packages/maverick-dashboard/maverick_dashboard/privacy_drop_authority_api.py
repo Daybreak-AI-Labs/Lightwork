@@ -292,6 +292,47 @@ def _proposal_out(value: object) -> Mapping[str, object]:
 def create_privacy_drop_authority_router() -> APIRouter:  # noqa: C901,PLR0915
     router = APIRouter(prefix="/privacy/drop/authority", tags=["privacy-drop-authority"])
 
+    @router.get("/proposals/{proposal_id}/review")
+    async def review_proposal(request: Request, response: Response, proposal_id: ClosedRef):
+        from . import auth
+        from .action_center_governance_sources import _access
+        from .privacy_drop_authority_proposals import _canonical
+
+        _reject_query(request)
+        with auth.fresh_configuration():
+            context = _access(request, "/privacy/drop")
+            tenant = _tenant_id()
+            actor = _principal(request, tenant)
+            _registry, _keys, store, _factory = _factories(request, tenant)
+
+        def read():
+            with store._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM drop_authority_proposals WHERE tenant_id=? AND proposal_id=?",
+                    (tenant, proposal_id),
+                ).fetchone()
+                if row is None:
+                    raise DROPManagementNotFound("proposal unavailable")
+                retained = store._body(row)
+                if retained["state"] != "proposed" or retained["retained_until"] <= store._now():
+                    raise DROPManagementConflict("proposal no longer pending")
+                payload = json.loads(retained["payload_json"])
+                if hashlib.sha256(_canonical(payload)).hexdigest() != retained["payload_sha256"]:
+                    raise DROPManagementIntegrityError("proposal contents changed")
+                return {
+                    "proposal": _proposal_out(store._public(retained)),
+                    "proposed_by_you": retained["proposer_ref"] == actor,
+                    "contents": payload,
+                    "context": context,
+                }
+
+        result = await _call(read)
+        with auth.fresh_configuration():
+            if _access(request, "/privacy/drop") != context or _tenant_id() != tenant:
+                raise HTTPException(409, "Your account or workspace changed. Open the current review again.")
+        _secure(response)
+        return result
+
     @router.get("/authorities")
     async def authorities(request: Request, response: Response) -> Mapping[str, object]:
         require_global_permission(request, "audit")

@@ -2281,6 +2281,10 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "disabled until separately enrolled.",
             default=False,
         )
+        consent_delivery_worker = consent_delivery and _q_confirm(
+            "Run automatic consent delivery for subscriptions separately reviewed in Lightwork? "
+            "No destination is authorized by this installation choice.", default=False,
+        )
         consent_destination_config: dict[str, Any] | None = None
         if consent_delivery and _q_confirm(
             "Configure named Salesforce, Marketo, Adobe Experience Platform, "
@@ -2528,6 +2532,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             **({"native_sdk": consent_native_sdk} if consent_native_sdk is not None else {}),
             "delivery": {
                 "enable": consent_delivery,
+                "worker": {"enable": bool(consent_delivery_worker)},
                 **(
                     {"destinations": consent_destination_config}
                     if consent_destination_config is not None

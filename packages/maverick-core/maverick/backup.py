@@ -531,6 +531,18 @@ def _manifest_files(
         expected[rel] = (digest, size)
     if total > _expanded_limit():
         raise BackupError("manifest declares too much expanded data")
+    if "withheld_key_files" in manifest:
+        withheld = manifest["withheld_key_files"]
+        if not isinstance(withheld, list) or len(withheld) > MAX_ARCHIVE_MEMBERS:
+            raise BackupError("backup excluded-key list is missing or oversized")
+        seen = set()
+        for name in withheld:
+            relative = _safe_relative_path(name, label="excluded key path")
+            normalized = relative.as_posix()
+            folded = unicodedata.normalize("NFC", normalized).casefold()
+            if not _is_key_material(relative) or folded in seen or folded in portable:
+                raise BackupError("backup excluded-key list conflicts with its payload")
+            seen.add(folded)
     return expected
 
 
@@ -887,7 +899,8 @@ def _is_sqlite_file(path: Path) -> bool:
         raise BackupError("could not inspect a possible SQLite database") from exc
 
 
-def _stage(root: Path, stage: Path, *, include_keys: bool | frozenset) -> dict[str, dict[str, Any]]:
+def _stage(root: Path, stage: Path, *, include_keys: bool | frozenset,
+           withheld_keys: list[str] | None = None) -> dict[str, dict[str, Any]]:
     root, stage = _filesystem_path(root), _filesystem_path(stage)
     files: dict[str, dict[str, Any]] = {}
     total = 0
@@ -895,6 +908,15 @@ def _stage(root: Path, stage: Path, *, include_keys: bool | frozenset) -> dict[s
     for source in sorted(root.rglob("*")):
         relative = source.relative_to(root)
         if _excluded_from_snapshot(relative, include_keys=include_keys):
+            if withheld_keys is not None and _is_key_material(relative) and not _keys_included(relative, include_keys):
+                try:
+                    info = source.lstat()
+                except OSError as exc:
+                    raise BackupError("An excluded key file could not be inspected.") from exc
+                if not stat.S_ISDIR(info.st_mode):
+                    withheld_keys.append(_safe_relative_path(relative.as_posix(), label="excluded key path").as_posix())
+                    if len(withheld_keys) > MAX_ARCHIVE_MEMBERS:
+                        raise BackupError("The excluded-key list exceeds the backup limit.")
             continue
         try:
             info = source.lstat()
@@ -1002,7 +1024,8 @@ def create_backup(
     with _temporary_directory(prefix="mvk-backup-") as temporary:
         temp_root = file_lock.ensure_private_directory(temporary)
         stage = file_lock.ensure_private_directory(temp_root / "data")
-        files = _stage(root, stage, include_keys=include_keys)
+        withheld_keys: list[str] = []
+        files = _stage(root, stage, include_keys=include_keys, withheld_keys=withheld_keys)
         schema_version = _world_schema_version(stage / "world.db")
         if not files:
             raise BackupError(f"no data files to back up at {root}")
@@ -1012,12 +1035,16 @@ def create_backup(
             "created_at": time.time(),
             "world_schema_version": schema_version,
             "files": files,
+            "withheld_key_files": withheld_keys,
             **({"recovery": recovery_metadata} if recovery_metadata is not None else {}),
         }, key)
+        encoded_manifest = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False)
+        if len(encoded_manifest.encode("utf-8")) > MAX_MANIFEST_BYTES:
+            raise BackupError("The complete backup manifest exceeds its supported size.")
         manifest_path = temp_root / MANIFEST
         file_lock.atomic_create_text(
             manifest_path,
-            json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False),
+            encoded_manifest,
         )
 
         staged_archive = _unique_private_empty(destination.parent, destination.name)

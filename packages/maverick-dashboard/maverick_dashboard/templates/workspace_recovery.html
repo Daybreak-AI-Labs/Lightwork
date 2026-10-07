@@ -41,6 +41,7 @@
     <label for="wrec-snapshot">Saved snapshot</label><select id="wrec-snapshot" class="select" disabled><option value="">Choose a snapshot</option></select>
     <div class="wrec-actions"><button id="wrec-inspect" type="button" class="btn" disabled>Check snapshot</button><button id="wrec-download" type="button" class="btn" disabled>Download snapshot</button><button id="wrec-drill" type="button" class="btn" disabled>Test restore safely</button></div>
     <p id="wrec-result" role="status" aria-live="polite"></p><p class="muted">A check confirms every file is complete and unchanged and that the workspace database opens cleanly. It does not check encrypted contents, business rules or outside services.</p>
+    <div id="wrec-excluded-keys" hidden><h3>Keys to keep separately</h3><p id="wrec-excluded-keys-status"></p><ul id="wrec-excluded-keys-list"></ul><p class="muted">These are file names, not key contents. Keep the actual keys separately in your company's approved vault. Keys managed by an outside service stay with that service.</p></div>
     <button id="wrec-drill-report-load" type="button" class="btn btn--ghost" disabled>View last restore test</button>
     <p id="wrec-drill-report-status" role="status" aria-live="polite"></p>
     <div id="wrec-drill-report" hidden>
@@ -136,6 +137,9 @@
     <details><summary>Delete an unused approval or an old update copy</summary>
       <p>This permanently deletes the chosen copy's saved installers, snapshots and logs, and cancels any unused approval. Check how long you must keep records first. Unfinished work and the copy needed to go back from the current version stay protected.</p>
       <p id="wrec-installation-retention-status" role="status"></p><ul id="wrec-installation-retention-list"></ul>
+      <div id="wrec-installation-key-custody" hidden><h3>Keys for saved update copies</h3>
+      <p class="muted">These file names were recorded when each copy was made. Keep the actual keys separately in your company's approved vault. This list does not verify your separate key copy or keys held by an outside service.</p>
+      <ul id="wrec-installation-key-custody-list"></ul></div>
       <label for="wrec-installation-retire-point">Approval or update copy to delete</label><select id="wrec-installation-retire-point" class="select" disabled><option value="">Choose a point to retire</option></select>
       <label class="wrec-confirm"><input id="wrec-installation-retire-confirm" type="checkbox">I checked how long records must be kept and want to permanently delete this copy.</label>
       <button id="wrec-installation-retire" type="button" class="btn btn--danger" disabled>Delete selected copy</button>

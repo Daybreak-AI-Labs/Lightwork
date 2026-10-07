@@ -285,6 +285,28 @@
               ? function (isCurrent) { return discoveryUseControls.openReview(discoveryUseReview.context, isCurrent); } : null);
           return;
         }
+        if (entry[0] === 'third_party_alert_setup_form') {
+          var vendorAlertReview = entry[1], vendorAlertControls = window.LightworkThirdPartyAlerts;
+          if (!vendorAlertReview || Array.isArray(vendorAlertReview) ||
+              Object.keys(vendorAlertReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(vendorAlertReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open vendor-alert recipient setup',
+            '/third-party/intelligence#tpi-recipient-setup',
+            vendorAlertControls && typeof vendorAlertControls.openReview === 'function'
+              ? function (isCurrent) { return vendorAlertControls.openReview(vendorAlertReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'consent_delivery_review') {
+          var consentDeliveryReview = entry[1], consentDeliveryControls = window.LightworkConsentDelivery;
+          if (!consentDeliveryReview || Array.isArray(consentDeliveryReview) ||
+              Object.keys(consentDeliveryReview).sort().join(',') !== 'context,scope' ||
+              consentDeliveryReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(consentDeliveryReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open complete consent delivery controls',
+            '/consent/delivery#cd-managed',
+            consentDeliveryControls && typeof consentDeliveryControls.openReview === 'function'
+              ? function (isCurrent) { return consentDeliveryControls.openReview({}, {isCurrent: isCurrent, context: consentDeliveryReview.context}); } : null);
+          return;
+        }
         if (entry[0] === 'runtime_enforcement_form') {
           var safeguardReview = entry[1], safeguardControls = window.LightworkRuntimeEnforcement;
           if (!safeguardReview || Array.isArray(safeguardReview) ||

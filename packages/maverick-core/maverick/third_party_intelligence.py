@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .authority_effects import authority_effect_fence
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -101,7 +102,7 @@ RISK_FACTOR_KEYS = frozenset(
 )
 EDD_DECISIONS = frozenset({"approved", "rejected", "escalated"})
 OUTBOX_STATES = frozenset(
-    {"pending", "leased", "delivered", "cancelled", "dead_letter"}
+    {"pending", "leased", "dispatching", "ambiguous", "delivered", "cancelled", "dead_letter"}
 )
 
 
@@ -789,6 +790,11 @@ class ThirdPartyIntelligenceStore:
                 );
                 CREATE INDEX IF NOT EXISTS outbox_claim
                     ON outbox(tenant_id,state,next_attempt_at,lease_until);
+                CREATE TABLE IF NOT EXISTS alert_recipients(
+                    tenant_id TEXT NOT NULL,recipient_id TEXT NOT NULL,destination_ref TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,integrity_sha256 TEXT NOT NULL,
+                    PRIMARY KEY(tenant_id,recipient_id),UNIQUE(tenant_id,destination_ref)
+                );
                 CREATE TABLE IF NOT EXISTS exchange_consents(
                     tenant_id TEXT NOT NULL,consent_id TEXT NOT NULL,vendor_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL,integrity_sha256 TEXT NOT NULL,
@@ -1051,6 +1057,7 @@ class ThirdPartyIntelligenceStore:
             ("monitors", "monitor_id"),
             ("monitoring_alerts", "alert_id"),
             ("outbox", "delivery_id"),
+            ("alert_recipients", "recipient_id"),
             ("exchange_consents", "consent_id"),
             ("exchange_contributions", "contribution_id"),
         }
@@ -1083,6 +1090,8 @@ class ThirdPartyIntelligenceStore:
             ("edd_cases", "case_id"),
             ("monitors", "monitor_id"),
             ("monitoring_alerts", "alert_id"),
+            ("outbox", "delivery_id"),
+            ("alert_recipients", "recipient_id"),
         }
         if (table, id_column) not in allowed:
             raise ThirdPartyIntelligenceIntegrityError(
@@ -1314,7 +1323,7 @@ class ThirdPartyIntelligenceStore:
             "actor_ref": actor,
             "expected_revision": expected,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -1410,7 +1419,7 @@ class ThirdPartyIntelligenceStore:
             "approved": approved,
             "rationale": reason,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -1486,7 +1495,7 @@ class ThirdPartyIntelligenceStore:
             "actor_ref": actor,
             "rationale": reason,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -1789,7 +1798,7 @@ class ThirdPartyIntelligenceStore:
         }
         if registered is not None:
             request["register_vendor_id"] = registered
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -3700,7 +3709,7 @@ class ThirdPartyIntelligenceStore:
             "cadence_seconds": cadence,
             "created_by": creator,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -3838,7 +3847,7 @@ class ThirdPartyIntelligenceStore:
             "actor_ref": actor,
         }
         alert: MonitoringAlert | None = None
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -3982,6 +3991,213 @@ class ThirdPartyIntelligenceStore:
         )
         return self._alert_from(payload, digest)
 
+    def _recipient_record(self, row: sqlite3.Row) -> dict[str, Any]:
+        from .tenant.kms import unseal_text_for_tenant
+
+        payload = self._row(row, "alert recipient")
+        try:
+            private = json.loads(unseal_text_for_tenant(
+                row["tenant_id"], bytes.fromhex(payload["sealed_address"])))
+            if (private["tenant_id"] != row["tenant_id"]
+                    or private["recipient_id"] != row["recipient_id"]
+                    or private["destination_ref"] != payload["destination_ref"]
+                    or private["destination_ref"] != row["destination_ref"]
+                    or private["revision"] != payload["revision"]
+                    or private["state"] != payload["state"]):
+                raise ValueError("recipient binding changed")
+        except Exception as exc:
+            raise ThirdPartyIntelligenceIntegrityError(
+                "The saved alert recipient could not be opened.") from exc
+        return {**private, "integrity_sha256": row["integrity_sha256"]}
+
+    def get_alert_recipient(self, tenant_id: str, recipient_id: str) -> dict[str, Any]:
+        tenant, recipient = _tenant(tenant_id), _id(recipient_id, "recipient_id")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM alert_recipients WHERE tenant_id=? AND recipient_id=?",
+                (tenant, recipient)).fetchone()
+        if row is None:
+            raise ThirdPartyIntelligenceNotFound("Alert recipient not found.")
+        return self._recipient_record(row)
+
+    def list_alert_recipients(self, tenant_id: str, *, limit: int = 500) -> tuple[dict[str, Any], ...]:
+        tenant, bounded = _tenant(tenant_id), _integer(limit, "limit", 1, 1000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM alert_recipients WHERE tenant_id=? ORDER BY recipient_id LIMIT ?",
+                (tenant, bounded)).fetchall()
+        return tuple(self._recipient_record(row) for row in rows)
+
+    def resolve_alert_recipient(self, tenant_id: str, destination_ref: str) -> dict[str, Any]:
+        tenant, reference = _tenant(tenant_id), _id(destination_ref, "destination_ref")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM alert_recipients WHERE tenant_id=? AND destination_ref=?", (tenant, reference)).fetchall()
+        for row in rows:
+            payload = self._row(row, "alert recipient")
+            if payload["destination_ref"] == reference:
+                recipient = self._recipient_record(row)
+                if recipient["state"] != "active":
+                    raise ThirdPartyIntelligencePermissionDenied("This alert recipient was withdrawn. Choose a current recipient.")
+                return recipient
+        raise ThirdPartyIntelligenceNotFound("Choose a saved alert recipient.")
+
+    def save_alert_recipient(self, tenant_id: str, *, recipient_id: str, name: str,
+                             address: str, actor_ref: str, idempotency_key: str,
+                             external_use_reviewed: bool,
+                             effect_guard: Callable[[], None] | None = None) -> dict[str, Any]:
+        """An address is immutable under its opaque reference; changes require a new choice."""
+        from .tenant.kms import seal_text_for_tenant
+        from .third_party_intelligence_delivery import DestinationResolutionError, _recipient
+
+        tenant, recipient = _tenant(tenant_id), _id(recipient_id, "recipient_id")
+        label, actor = _text(name, "name", 120), _id(actor_ref, "actor_ref")
+        try:
+            email = _recipient(address)
+        except DestinationResolutionError as exc:
+            raise ThirdPartyIntelligenceValidationError("Enter one complete email address, such as team@example.com.") from exc
+        if external_use_reviewed is not True:
+            raise ThirdPartyIntelligencePermissionDenied("Review who will receive vendor change alerts before saving.")
+        request = {"action": "save_alert_recipient", "recipient_id": recipient,
+                   "name": label, "address": email, "actor_ref": actor, "external_use_reviewed": True}
+        with authority_effect_fence(), self._connect() as connection:
+            self._begin(connection)
+            if effect_guard:
+                effect_guard()
+            request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
+            if operation is not None:
+                connection.commit()
+                return self.get_alert_recipient(tenant, recipient)
+            if connection.execute("SELECT 1 FROM alert_recipients WHERE tenant_id=? AND recipient_id=?",
+                                  (tenant, recipient)).fetchone():
+                raise ThirdPartyIntelligenceConflict("This recipient already exists. Withdraw it and add a new recipient to change its address.")
+            private = {"tenant_id": tenant, "recipient_id": recipient, "name": label,
+                       "address": email, "destination_ref": "recipient-" + secrets.token_hex(24),
+                       "revision": 1, "state": "active", "created_by": actor, "created_at": self._clock()}
+            payload = {key: private[key] for key in ("tenant_id", "recipient_id", "destination_ref", "revision", "state")}
+            payload["sealed_address"] = seal_text_for_tenant(tenant, _canonical(private).decode("ascii")).hex()
+            connection.execute("INSERT INTO alert_recipients VALUES(?,?,?,?,?)",
+                               (tenant, recipient, private["destination_ref"], _canonical(payload).decode("ascii"), _sha256(payload)))
+            self._record_operation(connection, tenant, idempotency_key, request_sha, "alert_recipient", recipient)
+            self._audit(connection, tenant, "alert_recipient_saved", recipient, actor, {"revision": 1}, self._clock())
+            if effect_guard:
+                effect_guard()
+            connection.commit()
+        return self.get_alert_recipient(tenant, recipient)
+
+    def withdraw_alert_recipient(self, tenant_id: str, recipient_id: str, *, expected_revision: int,
+                                 actor_ref: str, idempotency_key: str,
+                                 effect_guard: Callable[[], None] | None = None) -> dict[str, Any]:
+        from .tenant.kms import seal_text_for_tenant
+
+        tenant, recipient = _tenant(tenant_id), _id(recipient_id, "recipient_id")
+        expected, actor = _integer(expected_revision, "expected_revision", 1, 2**31 - 1), _id(actor_ref, "actor_ref")
+        request = {"action": "withdraw_alert_recipient", "recipient_id": recipient,
+                   "expected_revision": expected, "actor_ref": actor}
+        with authority_effect_fence(), self._connect() as connection:
+            self._begin(connection)
+            if effect_guard:
+                effect_guard()
+            request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
+            if operation is not None:
+                connection.commit()
+                return self.get_alert_recipient(tenant, recipient)
+            row = connection.execute("SELECT * FROM alert_recipients WHERE tenant_id=? AND recipient_id=?",
+                                     (tenant, recipient)).fetchone()
+            if row is None:
+                raise ThirdPartyIntelligenceNotFound("Alert recipient not found.")
+            private = self._recipient_record(row)
+            if private["state"] != "active" or private["revision"] != expected:
+                raise ThirdPartyIntelligenceConflict("This recipient changed. Reload the current recipients.")
+            private.pop("integrity_sha256")
+            private.update(state="withdrawn", revision=expected + 1)
+            payload = {key: private[key] for key in ("tenant_id", "recipient_id", "destination_ref", "revision", "state")}
+            payload["sealed_address"] = seal_text_for_tenant(tenant, _canonical(private).decode("ascii")).hex()
+            connection.execute("UPDATE alert_recipients SET payload_json=?,integrity_sha256=? WHERE tenant_id=? AND recipient_id=?",
+                               (_canonical(payload).decode("ascii"), _sha256(payload), tenant, recipient))
+            for delivery_row in connection.execute("SELECT * FROM outbox WHERE tenant_id=? AND state IN ('pending','leased')", (tenant,)).fetchall():
+                delivery = self._row(delivery_row, "outbox item")
+                if delivery["destination_ref"] == private["destination_ref"]:
+                    delivery.update(state="cancelled", lease_token=None, lease_until=None, revision=delivery["revision"] + 1)
+                    connection.execute("UPDATE outbox SET state='cancelled',lease_until=NULL,payload_json=?,integrity_sha256=? WHERE tenant_id=? AND delivery_id=?",
+                                       (_canonical(delivery).decode("ascii"), _sha256(delivery), tenant, delivery["delivery_id"]))
+            self._record_operation(connection, tenant, idempotency_key, request_sha, "alert_recipient", recipient)
+            self._audit(connection, tenant, "alert_recipient_withdrawn", recipient, actor, {"revision": expected + 1}, self._clock())
+            if effect_guard:
+                effect_guard()
+            connection.commit()
+        return self.get_alert_recipient(tenant, recipient)
+
+    def list_outbox(self, tenant_id: str, *, limit: int = 500) -> tuple[OutboxItem, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM outbox WHERE tenant_id=? ORDER BY "
+                "CASE WHEN state IN ('dispatching','ambiguous') THEN 0 WHEN state IN ('pending','leased') THEN 1 ELSE 2 END,"
+                "next_attempt_at DESC,delivery_id LIMIT ?",
+                (_tenant(tenant_id), _integer(limit, "limit", 1, 1000))).fetchall()
+        return tuple(self._outbox_from(self._row(row, "outbox item"), row["integrity_sha256"]) for row in rows)
+
+    def ready_outbox(self, tenant_id: str, *, limit: int = 10) -> tuple[OutboxItem, ...]:
+        """Bound matching waiting work, so retained history cannot starve new alerts."""
+        moment = self._clock()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT o.* FROM outbox o JOIN monitoring_alerts a ON a.tenant_id=o.tenant_id AND a.alert_id=o.alert_id "
+                "JOIN monitors m ON m.tenant_id=a.tenant_id AND m.monitor_id=a.monitor_id WHERE o.tenant_id=? "
+                "AND ((o.state='pending' AND o.next_attempt_at<=?) OR (o.state='leased' AND o.lease_until<=?)) "
+                "AND json_extract(m.payload_json,'$.state')='active' AND NOT EXISTS ("
+                "SELECT 1 FROM json_each(m.payload_json,'$.source_bindings') b LEFT JOIN sources s "
+                "ON s.tenant_id=m.tenant_id AND s.source_id=b.value WHERE s.source_id IS NULL "
+                "OR json_extract(s.payload_json,'$.state')!='active' OR NOT EXISTS "
+                "(SELECT 1 FROM json_each(s.payload_json,'$.purposes') p WHERE p.value='monitoring')) "
+                "AND (json_extract(o.payload_json,'$.destination_ref') NOT LIKE 'recipient-%' OR EXISTS "
+                "(SELECT 1 FROM alert_recipients r WHERE r.tenant_id=o.tenant_id "
+                "AND r.destination_ref=json_extract(o.payload_json,'$.destination_ref') AND json_extract(r.payload_json,'$.state')='active')) "
+                "ORDER BY o.next_attempt_at,o.delivery_id LIMIT ?",
+                (_tenant(tenant_id), moment, moment, _integer(limit, "limit", 1, 100))).fetchall()
+        return tuple(self._outbox_from(self._row(row, "outbox item"), row["integrity_sha256"]) for row in rows)
+
+    def get_outbox(self, tenant_id: str, delivery_id: str) -> OutboxItem:
+        payload, digest = self._get_payload("outbox", _tenant(tenant_id), "delivery_id",
+                                           _id(delivery_id, "delivery_id"), "outbox item")
+        return self._outbox_from(payload, digest)
+
+    def assert_delivery_authority(self, item: OutboxItem) -> None:
+        current = self.get_outbox(item.tenant_id, item.delivery_id)
+        if (current.state not in {"leased", "dispatching"} or current.lease_token != item.lease_token
+                or float(current.lease_until or 0) < self._clock()):
+            raise ThirdPartyIntelligenceConflict("The alert's send reservation expired or changed.")
+        alert = self.get_monitoring_alert(item.tenant_id, item.alert_id)
+        monitor = self.get_monitor(item.tenant_id, alert.monitor_id)
+        if monitor.state != "active" or monitor.destination_ref != item.destination_ref:
+            raise ThirdPartyIntelligencePermissionDenied("This vendor watch was stopped or changed.")
+        vendor = self.get_vendor(item.tenant_id, alert.vendor_id)
+        for kind, source_id in monitor.source_bindings.items():
+            source = self.get_source(item.tenant_id, source_id)
+            if (source.state != "active" or source.kind != kind or "monitoring" not in source.purposes
+                    or not set(vendor.territories).issubset(source.territories)):
+                raise ThirdPartyIntelligencePermissionDenied("A source's permission to watch for changes was withdrawn.")
+
+    def mark_outbox_dispatch(self, item: OutboxItem, *, ambiguous: bool = False) -> OutboxItem:
+        """Retain admission before network effect; never automatically reclaim an uncertain send."""
+        with authority_effect_fence(), self._connect() as connection:
+            self._begin(connection)
+            row = connection.execute("SELECT * FROM outbox WHERE tenant_id=? AND delivery_id=?",
+                                     (item.tenant_id, item.delivery_id)).fetchone()
+            if row is None:
+                raise ThirdPartyIntelligenceNotFound("Alert delivery not found.")
+            payload = self._row(row, "outbox item")
+            if payload["state"] != ("dispatching" if ambiguous else "leased") or payload["lease_token"] != item.lease_token:
+                raise ThirdPartyIntelligenceConflict("The alert's send reservation changed.")
+            if not ambiguous:
+                self.assert_delivery_authority(item)
+            payload.update(state="ambiguous" if ambiguous else "dispatching", revision=payload["revision"] + 1)
+            digest = _sha256(payload)
+            connection.execute("UPDATE outbox SET state=?,payload_json=?,integrity_sha256=? WHERE tenant_id=? AND delivery_id=?",
+                               (payload["state"], _canonical(payload).decode("ascii"), digest, item.tenant_id, item.delivery_id))
+            connection.commit()
+        return self._outbox_from(payload, digest)
+
     def claim_outbox(
         self,
         tenant_id: str,
@@ -3990,6 +4206,8 @@ class ThirdPartyIntelligenceStore:
         limit: int = 10,
         lease_seconds: float = 60.0,
         now: float | None = None,
+        delivery_ids: Sequence[str] | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> tuple[OutboxItem, ...]:
         tenant = _tenant(tenant_id)
         worker = _id(worker_id, "worker_id")
@@ -3998,15 +4216,22 @@ class ThirdPartyIntelligenceStore:
         if lease > _MAX_LEASE_SECONDS:
             raise ThirdPartyIntelligenceValidationError("lease_seconds is too large")
         moment = _timestamp(self._clock() if now is None else now, "now")
+        selected = tuple(_id(value, "delivery_id") for value in delivery_ids) if delivery_ids is not None else None
+        if selected is not None and (not selected or len(set(selected)) != len(selected) or len(selected) > limit_value):
+            raise ThirdPartyIntelligenceValidationError("Choose one bounded, distinct reviewed batch.")
+        selection_sql = " AND delivery_id IN (" + ",".join("?" for _ in selected) + ")" if selected else ""
         claimed: list[OutboxItem] = []
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
+            if effect_guard:
+                effect_guard()
+            moment = _timestamp(self._clock() if now is None else now, "now")
             rows = connection.execute(
                 "SELECT * FROM outbox WHERE tenant_id=? AND "
                 "((state='pending' AND next_attempt_at<=?) OR "
                 "(state='leased' AND lease_until<=?)) "
-                "ORDER BY next_attempt_at,delivery_id LIMIT ?",
-                (tenant, moment, moment, limit_value),
+                + selection_sql + " ORDER BY next_attempt_at,delivery_id LIMIT ?",
+                (tenant, moment, moment, *(selected or ()), limit_value),
             ).fetchall()
             for row in rows:
                 payload = self._row(row, "outbox item")
@@ -4029,7 +4254,8 @@ class ThirdPartyIntelligenceStore:
                     )
                 monitor_payload = self._row(monitor_row, "monitor")
                 source_rights_current = monitor_payload["state"] == "active"
-                for source_id in monitor_payload["source_bindings"].values():
+                vendor = self.get_vendor(tenant, monitor_payload["vendor_id"])
+                for kind, source_id in monitor_payload["source_bindings"].items():
                     source_row = connection.execute(
                         "SELECT * FROM sources WHERE tenant_id=? AND source_id=?",
                         (tenant, source_id),
@@ -4040,10 +4266,17 @@ class ThirdPartyIntelligenceStore:
                     source_payload = self._row(source_row, "source")
                     if (
                         source_payload["state"] != "active"
+                        or source_payload["kind"] != kind
+                        or not set(vendor.territories).issubset(source_payload["territories"])
                         or "monitoring" not in source_payload["purposes"]
                     ):
                         source_rights_current = False
                         break
+                if source_rights_current and payload["destination_ref"].startswith("recipient-"):
+                    try:
+                        self.resolve_alert_recipient(tenant, payload["destination_ref"])
+                    except (ThirdPartyIntelligenceNotFound, ThirdPartyIntelligencePermissionDenied):
+                        source_rights_current = False
                 if not source_rights_current:
                     payload.update(
                         {
@@ -4111,7 +4344,7 @@ class ThirdPartyIntelligenceStore:
         if backoff > _MAX_BACKOFF_SECONDS:
             raise ThirdPartyIntelligenceValidationError("backoff_seconds is too large")
         moment = _timestamp(self._clock() if now is None else now, "now")
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             row = connection.execute(
                 "SELECT * FROM outbox WHERE tenant_id=? AND delivery_id=?",
@@ -4121,17 +4354,22 @@ class ThirdPartyIntelligenceStore:
                 raise ThirdPartyIntelligenceNotFound("outbox item not found")
             payload = self._row(row, "outbox item")
             if (
-                payload["state"] != "leased"
+                payload["state"] not in {"leased", "dispatching"}
                 or not hmac.compare_digest(payload["lease_token"] or "", token)
                 or float(payload["lease_until"] or 0) < moment
             ):
                 raise ThirdPartyIntelligenceConflict("outbox lease was lost")
             attempt = int(payload["attempt"]) + 1
+            retry_state = "dead_letter" if attempt >= int(payload["maximum_attempts"]) else "pending"
+            try:
+                self.assert_delivery_authority(self._outbox_from(payload, row["integrity_sha256"]))
+                if payload["destination_ref"].startswith("recipient-"):
+                    self.resolve_alert_recipient(tenant, payload["destination_ref"])
+            except (ThirdPartyIntelligencePermissionDenied, ThirdPartyIntelligenceNotFound):
+                retry_state = "cancelled"
             payload.update(
                 {
-                    "state": "dead_letter"
-                    if attempt >= int(payload["maximum_attempts"])
-                    else "pending",
+                    "state": retry_state,
                     "attempt": attempt,
                     "next_attempt_at": moment + backoff,
                     "lease_token": None,
@@ -4168,7 +4406,7 @@ class ThirdPartyIntelligenceStore:
         delivery = _id(delivery_id, "delivery_id")
         token = _digest(lease_token, "lease_token")
         moment = _timestamp(self._clock() if now is None else now, "now")
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             row = connection.execute(
                 "SELECT * FROM outbox WHERE tenant_id=? AND delivery_id=?",
@@ -4178,7 +4416,7 @@ class ThirdPartyIntelligenceStore:
                 raise ThirdPartyIntelligenceNotFound("outbox item not found")
             payload = self._row(row, "outbox item")
             if (
-                payload["state"] != "leased"
+                payload["state"] not in {"leased", "dispatching"}
                 or not hmac.compare_digest(payload["lease_token"] or "", token)
                 or float(payload["lease_until"] or 0) < moment
             ):
@@ -4221,7 +4459,7 @@ class ThirdPartyIntelligenceStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -4904,7 +5142,7 @@ class ThirdPartyIntelligenceStore:
         actor = _id(actor_ref, "actor_ref")
         moment = _timestamp(self._clock() if now is None else now, "now")
         counts = {"source_snapshots": 0, "exchange_contributions": 0}
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             snapshot_rows = connection.execute(
                 "SELECT * FROM source_snapshots WHERE tenant_id=?", (tenant,)
@@ -4954,6 +5192,7 @@ class ThirdPartyIntelligenceStore:
             ("monitors", "monitor"),
             ("monitoring_alerts", "monitoring alert"),
             ("outbox", "outbox item"),
+            ("alert_recipients", "alert recipient"),
             ("exchange_consents", "exchange consent"),
             ("exchange_contributions", "exchange contribution"),
         )
@@ -4966,6 +5205,8 @@ class ThirdPartyIntelligenceStore:
                 ).fetchall()
                 for row in rows:
                     self._row(row, label)
+                    if table == "alert_recipients":
+                        self._recipient_record(row)
                     verified += 1
             operation_rows = connection.execute(
                 "SELECT * FROM operations WHERE tenant_id=?", (tenant,)

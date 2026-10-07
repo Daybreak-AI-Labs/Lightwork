@@ -9,6 +9,8 @@
   let model = null, offset = 0, busy = false, generation = 0, expired = false;
   const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",evidence_source_approval:"Evidence source approvals",signoff:"Result approvals",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
   const ACTIONS = {"jira.create":"Create a Jira issue"};
+  Object.assign(labels, {lifecycle_review:"Vendor lifecycle reviews",drop_authority_review:"DROP authority reviews",
+    trust_center_review:"Trust Center access reviews",disclosure_review:"Privacy notice update reviews"});
   const OBSERVATIONS = {
     execution_attempt: { recorded: "Lightwork recorded the attempt" },
     provider_receipt: { recorded: "Jira confirmed it received the request", not_recorded: "No confirmation from Jira was recorded" },
@@ -132,6 +134,14 @@
     list.replaceChildren(); coverage.replaceChildren();
     summary.textContent = `${model.counts.unread} unread · ${model.counts.overdue} overdue · ${model.counts.snoozed} snoozed`;
     model.coverage.forEach(source => {
+      if (source.limit === 99) {
+        const states = {current:"Current available records checked.",disabled:"Turned off in Settings.",
+          denied:"Not available with your current access. Open the full page or ask its administrator.",
+          partial:"At most 99 records in each group were checked. Open the full review page for the remaining records; this list is incomplete.",
+          unavailable:"Could not be checked. Refresh or open the full page; this list is incomplete."};
+        coverage.append(node("li", `${labels[source.kind]}: ${states[source.status] || states.unavailable}`));
+        return;
+      }
       // A module that is turned off is not a load error.
       if (source.status !== "current" && source.status !== "disabled") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? (source.kind === "evidence_source_approval" ? "cover only the first 64 saved source setups. Open Continuous evidence to review the current sources." : "include only the most recent 2,000 source records. Open the full module for older records.") : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
     });
