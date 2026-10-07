@@ -293,44 +293,6 @@ def validate_collector_bindings(request: Request, blueprint: Mapping, previous: 
     return current or []
 
 
-def _linked_collectors(rows: object) -> list[dict[str, object]]:
-    """Distinct collectors already linked in this workspace's blueprints.
-
-    People pick one of these instead of copying a collector's name, version
-    and fingerprint by hand; the exact values travel with the choice.
-    """
-    seen: dict[tuple[str, int, str], dict[str, object]] = {}
-    for row in rows if isinstance(rows, (list, tuple)) else ():
-        blueprint = getattr(row, "blueprint", None)
-        if not isinstance(blueprint, Mapping):
-            continue
-        bindings = blueprint.get("collector_bindings")
-        for binding in bindings if isinstance(bindings, (list, tuple)) else ():
-            if not isinstance(binding, Mapping):
-                continue
-            collector = binding.get("collector_id")
-            version = binding.get("collector_version")
-            digest = binding.get("collector_integrity_sha256")
-            if (
-                not isinstance(collector, str)
-                or not _ID_RE.fullmatch(collector)
-                or isinstance(version, bool)
-                or not isinstance(version, int)
-                or version < 1
-                or not isinstance(digest, str)
-                or not _DIGEST_RE.fullmatch(digest)
-            ):
-                continue
-            key = (collector, version, digest)
-            if key not in seen and len(seen) < _MAX_SOURCES:
-                seen[key] = {
-                    "collector_id": collector,
-                    "collector_version": version,
-                    "collector_integrity_sha256": digest,
-                }
-    return sorted(seen.values(), key=lambda item: (item["collector_id"], -item["collector_version"]))
-
-
 def _listed_targets(resolver: object, tenant: str) -> tuple[list[dict[str, object]], bool]:
     """Destinations the deployment's target adapter chooses to list.
 
