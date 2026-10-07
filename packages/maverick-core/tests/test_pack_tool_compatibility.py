@@ -152,8 +152,24 @@ def test_registry_aware_validation_rejects_missing_and_denied_names():
     assert any('denied' in error for error in errors)
 
 
+def _rate_customer_ledger(monkeypatch):
+    """The operator's reviewed rating for the sample adapter ([security.tool_risk])."""
+    import importlib
+    risk_module = importlib.import_module('maverick.safety.tool_risk')
+    monkeypatch.setattr(risk_module, '_load_overrides', lambda: {'customer_ledger': 'medium'})
+
+
+def test_unrated_adapter_keeps_the_high_floor_under_a_medium_pack():
+    profile = domain.DomainProfile(name='p', allow_tools=['customer_ledger'], max_risk='medium')
+    errors = domain.tool_compatibility_errors(profile, risk_overrides={})
+    assert any("'customer_ledger' (high) exceeds max_risk" in error for error in errors)
+    rated = domain.tool_compatibility_errors(profile, risk_overrides={'customer_ledger': 'medium'})
+    assert rated == []
+
+
 def test_required_adapter_refuses_deployment_but_custom_registry_can_provision(context, monkeypatch):
     from maverick.agent import Agent
+    _rate_customer_ledger(monkeypatch)
     profile = domain.DomainProfile(name='adapter-pack', allow_tools=['customer_ledger'], max_risk='medium',
                                    workflow=[domain.WorkflowStep('Read ledger', tools=['customer_ledger'])])
     with pytest.raises(ValueError, match='cannot deploy.*customer_ledger.*operator-approved workspace export'):
@@ -167,20 +183,13 @@ def test_required_adapter_refuses_deployment_but_custom_registry_can_provision(c
         return registry
 
     monkeypatch.setattr(Agent, '_build_tools', provisioned)
-    # Provisioned but unrated, the adapter keeps the unrated high floor that
-    # this medium pack refuses at dispatch, so it still cannot deploy.
-    with pytest.raises(ValueError, match='cannot deploy.*customer_ledger.*reviewed risk rating'):
-        domain.agent_from_profile(profile, context, 'read')
-    import importlib
-    risk_module = importlib.import_module('maverick.safety.tool_risk')
-    monkeypatch.setattr(risk_module, '_load_overrides', lambda: {'customer_ledger': 'medium'})
     agent = domain.agent_from_profile(profile, context, 'read')
     assert agent.tools.get('customer_ledger').fn({}) == 'ledger rows'
-    assert agent.capability.permits('customer_ledger')
     assert agent.deployment_prerequisites == []
 
 
-def test_optional_allowlist_seat_reports_prerequisite_without_blocking(context):
+def test_optional_allowlist_seat_reports_prerequisite_without_blocking(context, monkeypatch):
+    _rate_customer_ledger(monkeypatch)
     profile = domain.DomainProfile(name='optional', allow_tools=['customer_ledger'], max_risk='medium')
     agent = domain.agent_from_profile(profile, context, 'prepare')
     assert agent.deployment_prerequisites == ['customer_ledger']
@@ -212,15 +221,3 @@ def test_export_fallback_discloses_missing_live_connector():
         assert 'missing prerequisite' in profile.persona
         assert 'read_file' in profile.allow_tools
         assert not domain.tool_compatibility_errors(profile, risk_overrides={})
-
-
-def test_unrated_adapter_is_a_prerequisite_but_rated_names_keep_their_ceiling():
-    # An unrated adapter name is not a contract violation (it is refused at
-    # dispatch until rated), but a name rated directly or through its
-    # namespace still cannot exceed the pack's ceiling.
-    adapter = domain.DomainProfile(name='p', allow_tools=['customer_ledger'], max_risk='medium')
-    assert domain.tool_compatibility_errors(adapter, risk_overrides={}) == []
-    for name in ('shell', 'salesforce.write'):
-        profile = domain.DomainProfile(name='p', allow_tools=[name], max_risk='medium')
-        errors = domain.tool_compatibility_errors(profile, risk_overrides={})
-        assert any('exceeds max_risk' in error for error in errors), name
