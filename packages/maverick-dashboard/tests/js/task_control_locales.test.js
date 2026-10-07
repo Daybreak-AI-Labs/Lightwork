@@ -39,7 +39,8 @@ for (const language of ['fr','de','ja','zh']) {
     assert.ok(sources.some(node=>node.textContent==='The plan' && node.lang==='und'));
     assert.ok(sources.some(node=>node.textContent==='<img src=x> Saving.'));
     assert.equal(p.d.querySelector('#ps-result img'),null);
-    assert.equal(p.d.getElementById('ps-status').textContent,p.catalog['The planning steps are ready below.'].text);
+    assert.equal(p.d.getElementById('ps-status').textContent,p.catalog['The planning attempt is ready below.'].text);
+    assert.match(p.d.querySelector('#ps-result').textContent,new RegExp(p.catalog['The AI review considered the request met.'].text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
   });
   test(language + ': viewpoints retain source labels and text under translated controls', async t=>{
     const p=page('<main>'+viewpointsPanel+'</main>',language);

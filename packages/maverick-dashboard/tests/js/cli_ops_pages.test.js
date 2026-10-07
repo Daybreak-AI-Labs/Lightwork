@@ -21,7 +21,7 @@ function slice(template, start, end) {
   return text.slice(from, to + end.length);
 }
 
-async function page(markup, script, reply, { confirm = true, shell = true, before = [] } = {}) {
+async function page(markup, script, reply, { confirm = true, shell = true, before = [], realTimers = false } = {}) {
   const dom = new JSDOM('<main>' + strip(markup) + '</main>', { url: 'https://app.example/x', runScripts: 'outside-only' });
   const w = dom.window, calls = [], asked = [];
   // shell: the page script uses the shell's shared helpers (mvFetchJSON,
@@ -34,7 +34,9 @@ async function page(markup, script, reply, { confirm = true, shell = true, befor
   w.mvErrorText = (failure, action) => 'Could not ' + action + '. Plain message.';
   w.mvConfirm = async message => { asked.push(message); return confirm; };
   w.mvWhen = () => 'soon';
-  w.setTimeout = fn => { fn(); return 0; };
+  // Waits run at once, unless the page bounds its requests with a timeout
+  // (mvFetchJSON's timeout would otherwise expire before the reply).
+  if (!realTimers) w.setTimeout = fn => { fn(); return 0; };
   // jsdom has no layout: scrolling a review into view does nothing here.
   w.Element.prototype.scrollIntoView = function () {};
   w.fetch = async (url, options = {}) => {
@@ -104,12 +106,17 @@ test('sharing a task on GitHub reviews exact content before uploading and shows 
 });
 
 test('the schedule picker sends plain choices and a chosen time zone, never a typed timetable', async t => {
-  const markup = slice('automations.html', '<details id="auto-new-sched"', '</details>\n  </section>');
+  // The original-creation panel the picker reports to, then the form.
+  const markup = slice('automations.html', '<section class="auto__section panel auto__original" id="auto-create-original"', '</section>') +
+    slice('automations.html', '<details id="auto-new-sched"', '</details>\n  </section>');
+  const context = 'c'.repeat(64);
   const ui = await page(markup, 'lightwork-schedule-picker.js', (url, options) => {
-    if (url.endsWith('/options')) return { zones: ['UTC', 'Europe/Paris'], workflows: [], tasks: [{ id: 4, title: 'Weekly notes' }] };
+    if (url.endsWith('/options')) return { context, zones: ['UTC', 'Europe/Paris'], workflows: [], tasks: [{ id: 4, title: 'Weekly notes' }] };
     if (url.endsWith('/preview')) return { cron: '0 9 * * *', zone: 'UTC', next_runs: [1, 2, 3] };
-    return { id: 1, next_run: 5 };
-  }, { shell: true });
+    if (url.endsWith('/create-review')) return { context, title: 'Weekly notes', earlier_task: 'Weekly notes', work: 'Run the earlier task again',
+      inputs: {}, next_runs: [1, 2], notice: 'Nothing runs until the first time shown.', reference: 'r'.repeat(32), operation: 'o'.repeat(32) };
+    return { context, found: true, title: 'Weekly notes', message: 'Schedule created.', execution: 'It first runs at its next time.' };
+  }, { shell: true, realTimers: true });
   t.after(() => ui.w.close());
   ui.$('auto-new-sched').open = true;
   ui.$('auto-new-sched').dispatchEvent(new ui.w.Event('toggle'));
@@ -121,15 +128,21 @@ test('the schedule picker sends plain choices and a chosen time zone, never a ty
   ui.$('auto-new-zone').value = 'Europe/Paris';
   ui.$('auto-new-form').dispatchEvent(new ui.w.Event('submit', { cancelable: true }));
   await ui.settle();
+  assert.equal(ui.calls.some(c => c.url === '/api/v1/schedules/add'), false, 'a review comes first');
+  assert.equal(ui.$('auto-new-review').hidden, false);
+  ui.$('auto-new-confirm').click();
+  await ui.settle();
   const add = ui.calls.find(c => c.url === '/api/v1/schedules/add');
   const body = JSON.parse(add.options.body);
+  assert.equal(body.review_reference, 'r'.repeat(32));
+  assert.equal(body.confirmed, true);
   assert.equal(body.what, 'rerun');
   assert.equal(body.goal_id, 4);
   assert.equal(body.timetable.repeat, 'weekly');
   assert.equal(body.timetable.zone, 'Europe/Paris');
   assert.deepEqual(body.timetable.days, [1]);
   assert.equal(body.timetable.advanced, undefined);
-  assert.match(ui.$('auto-new-preview').textContent, /Schedule created/);
+  assert.match(ui.$('auto-create-original-message').textContent, /Schedule created/);
 });
 
 test('library templates are added only by administrators after a confirmation', async t => {

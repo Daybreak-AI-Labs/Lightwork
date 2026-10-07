@@ -451,15 +451,19 @@ def test_factory_learning_preview_and_adopt_with_evidence(client, monkeypatch, a
     pv = client.get(f"{LO}/factory/preview?min_support=5").json()
     assert pv["corrections"] == [{"guidance": "Always add a deny list.", "seen_in": 5, "area": "provisioning"}]
     assert client.get(f"{LO}/factory/preview?min_support=4").status_code == 422
-    assert client.post(f"{LO}/factory/promote", content=b"{}").status_code == 422
-    bad = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 1}')
-    assert bad.status_code == 422 and "version 2" in bad.json()["detail"]
+    # Adoption now goes through Improve how new agents are built (one
+    # suggestion, a complete comparison, then a separate Adopt review). The old
+    # bulk shortcut refuses, even with evidence and a confirmation, and adopts nothing.
     monkeypatch.setattr(factory_learning, "load_measured_evidence", lambda path: "scorer")
-    monkeypatch.setattr(factory_learning, "review_and_promote",
-                        lambda *, min_support, scorer: ["one", "two"] if scorer == "scorer" else [])
-    ok = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 2}')
-    assert ok.json() == {"adopted": 2}
-    assert [r["action"] for r in audit_rows] == ["factory_learning_promote", "factory_learning_promote"]
+
+    def adopt(**_kwargs):
+        raise AssertionError("the retired shortcut must not adopt guidance")
+    monkeypatch.setattr(factory_learning, "review_and_promote", adopt)
+    for query, body in (("", b"{}"), ("?confirm=true", b'{"version": 2}')):
+        refused = client.post(f"{LO}/factory/promote{query}", content=body)
+        assert refused.status_code == 409
+        assert "review a complete comparison" in refused.json()["detail"]
+    assert audit_rows == []
 
 
 # ---- practising changes to its own code -----------------------------------------------------
@@ -650,7 +654,7 @@ def test_learning_page_stays_closed_to_non_admins(client, monkeypatch):
 def test_learned_page_has_the_extra_self_coaching_tools(client, monkeypatch):
     page = client.get("/learned").text
     for control in ("lpo-clash-run", "lt-review", "lpo-harvest", "lpo-export", "lpo-import-check",
-                    "lp-trial", "lp-instructions", "llp-quality-remove"):
+                    "lp-trial", "lp-instructions", "lqc-load"):
         assert f'id="{control}"' in page, control
     visible = _visible(page, 'id="lpo-root"')
     assert "Check lessons for clashes by meaning" in visible
