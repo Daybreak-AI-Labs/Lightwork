@@ -1956,13 +1956,8 @@ def pick_flows() -> dict[str, Any]:
         "Let flows self-correct (autonomous revert of a regressed rewrite)?", default=False
     ):
         out["auto_evolve"] = True
-        # Full autonomy: also APPLY a proposal forward (soften a failing action to
-        # an agent), not just revert. Strictly opt-in on top of self-correction,
-        # since a bad apply is auto-reverted only if the revert side is on.
-        if _q_confirm(
-            "Also let flows autonomously APPLY a learned rewrite (not just revert)?", default=False
-        ):
-            out["auto_apply"] = True
+        # Workflow suggestions always need a person's review; automatic forward
+        # apply was retired, so the wizard no longer offers [flows] auto_apply.
     return out
 
 

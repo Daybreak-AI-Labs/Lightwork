@@ -17629,11 +17629,18 @@ def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) -> dic
     kept off the blanket learning button because autonomously rewriting a live
     workflow is a heavier consequence than passive learning.
 
-    Two independent knobs: ``auto_evolve`` lets the loop revert a rewrite it
-    measures as a regression; ``auto_apply`` (which needs auto_evolve on for the
-    revert safety net) lets it apply an improvement forward without a human. Same
-    admin gate + deployment-wide overlay as the blanket toggle."""
+    ``auto_evolve`` lets the loop revert a rewrite it measures as a regression.
+    Automatic forward apply was retired: workflow suggestions always need a
+    person's review, so ``auto_apply: true`` is refused (false or absent is
+    accepted and keeps it off). Same admin gate + deployment-wide overlay as the
+    blanket toggle."""
     require_global_permission(request, "admin")
+    if payload.auto_apply is True:
+        raise HTTPException(
+            status_code=422,
+            detail="Workflow suggestions always need a person's review, so they cannot be "
+                   "applied automatically. Nothing was changed.",
+        )
     from maverick_dashboard import settings_store
 
     settings_store.set_flow_autonomy(auto_evolve=payload.auto_evolve, auto_apply=payload.auto_apply)

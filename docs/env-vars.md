@@ -89,7 +89,7 @@ explicit limits, retry behavior and unknown provider charges.
 | `MAVERICK_CONSEQUENCE` | config `[consequence] enable` (on) | Override default-on grounding in real downstream outcomes (`maverick record-outcome`). |
 | `MAVERICK_SELF_MODIFY` | config `[self_modify] enable` (off) | Arm/disarm the research-only DGM gate. Setting this env var makes the deployment environment authoritative, so the dashboard control is read-only. Arming never starts a cycle or permits live code adoption. |
 | `MAVERICK_FLOWS` | config `[flows] enable` (off) | Enable the visual flow-automation engine (deterministic graph of agent/action/branch/… nodes; the dashboard designer + triggers). |
-| `MAVERICK_FLOWS_AUTO` | config `[flows] auto_evolve` (off) | Let the flow self-rewrite loop act autonomously: revert a node rewrite it measures as a regression. Pairs with `[flows] auto_apply` (apply an improvement forward) — both are also toggleable from the dashboard Learning page. |
+| `MAVERICK_FLOWS_AUTO` | config `[flows] auto_evolve` (off) | Let the flow self-rewrite loop act autonomously: revert a node rewrite it measures as a regression. Also toggleable from the dashboard Learning page. Improvements are never applied forward automatically; workflow suggestions always need review. |
 | `MAVERICK_EMERGENT_PROTOCOL` | config `[emergent_protocol] enable` (off) | Enable the auditable coordination codec (sentinel form; `maverick codebook`). |
 | `MAVERICK_EMERGENT_CODEC` | config `[emergent_codec] enable` (off) | Measure the token-aware codec on the live coordination stream (telemetry only; `maverick codec-learn`). |
 | `MAVERICK_DOMAIN_DISCIPLINE` | config `[domains] discipline` (on) | Append suite operating discipline to specialist personas at spawn. |
