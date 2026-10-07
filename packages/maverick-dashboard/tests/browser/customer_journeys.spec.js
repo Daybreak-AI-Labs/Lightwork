@@ -57,7 +57,7 @@ test('record search uses the actual API and keyboard opens the exact task at pho
   await page.keyboard.press('Control+k');
   await expect(page.locator('#navfinder-dialog')).toBeVisible();
   await page.locator('#navfinder-input').fill('Browser search task');
-  await expect(page.locator('#navfinder-record-status')).toContainText('matching records');
+  await expect(page.locator('#navfinder-record-status')).toContainText('matching business records');
   await expect(page.locator('#navfinder-record-0')).toContainText('Browser search task');
   await fits(page);
   await page.locator('#navfinder-input').press('Enter');
@@ -68,18 +68,25 @@ test('record search uses the actual API and keyboard opens the exact task at pho
 test('display preferences and keyboard dismissal remain usable in a short high-contrast viewport',async({page},info)=>{
   await page.setViewportSize({width:375,height:480});await page.goto('/goals');
   await page.locator('#prefs-menu > summary').click();await fits(page);
-  // Each preference navigates. Server-rendered body classes precede deferred
-  // keyboard handlers, so wait for the matching new document's DOM readiness.
-  await Promise.all([page.waitForURL(url=>url.searchParams.get('theme')==='hicontrast',{waitUntil:'domcontentloaded'}),page.locator('#theme-select').selectOption('hicontrast')]);
+  // Appearance saves in place: preserve the document and unfinished work.
+  await page.evaluate(() => { window.__appearanceDocument = 'same-document'; });
+  const locationBefore = page.url();
+  await page.locator('#theme-select').selectOption('hicontrast');
+  await expect(page.locator('#prefs-status')).toContainText('Saved. Your editor and unsaved work remain open.');
   await expect(page.locator('body')).toHaveClass(/theme-hicontrast/);
-  await page.locator('#prefs-menu > summary').click();
-  await Promise.all([page.waitForURL(url=>url.searchParams.get('font')==='dyslexic',{waitUntil:'domcontentloaded'}),page.locator('#font-select').selectOption('dyslexic')]);
+  await page.locator('#font-select').selectOption('dyslexic');
+  await expect(page.locator('#prefs-status')).toContainText('Saved. Your editor and unsaved work remain open.');
+  await expect(page.locator('body')).toHaveClass(/font-dyslexic/);
+  expect(page.url()).toBe(locationBefore);
+  expect(await page.evaluate(() => window.__appearanceDocument)).toBe('same-document');
+  await page.reload();
+  await expect(page.locator('body')).toHaveClass(/theme-hicontrast/);
   await expect(page.locator('body')).toHaveClass(/font-dyslexic/);
   await page.locator('#prefs-menu > summary').click();await page.keyboard.press('Escape');
   await expect(page.locator('#prefs-menu')).not.toHaveAttribute('open','');await expect(page.locator('#prefs-menu > summary')).toBeFocused();
   await expect(page.locator('#navfinder-dialog')).toHaveAttribute('data-navfinder-ready','true');
   await page.keyboard.press('Control+k');await expect(page.locator('#navfinder-input')).toBeFocused();
-  await page.locator('#navfinder-input').fill('Browser');await expect(page.locator('#navfinder-record-status')).toContainText('matching records');
+  await page.locator('#navfinder-input').fill('Browser');await expect(page.locator('#navfinder-record-status')).toContainText('matching business records');
   const statusBox=await page.locator('#navfinder-record-status').boundingBox(),resultsBox=await page.locator('#navfinder-results').boundingBox();
   expect(statusBox.y+statusBox.height).toBeLessThanOrEqual(resultsBox.y);
   expect(await page.locator('#navfinder-record-status').evaluate(el=>el.scrollHeight<=el.clientHeight+1)).toBeTruthy();

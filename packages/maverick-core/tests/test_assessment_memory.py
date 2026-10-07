@@ -150,3 +150,44 @@ class TestConfig:
         assert cfg["doc_discovery"] is False
         assert cfg["sources"] == ["slack"]
         assert cfg["learn"] is True
+
+
+def test_winning_answer_note_and_sources_do_not_come_from_dissent(monkeypatch):
+    from maverick import assessment
+    losing = _saved_pia("Acme CRM", {"pia_necessity": "no"})
+    winning = [_saved_pia("Acme CRM", {"pia_necessity": "yes"}) for _ in range(2)]
+    records = {}
+    for session, note in [(losing, "Dissenting rationale"), (winning[0], "Winning rationale"), (winning[1], "")]:
+        record = assessment.load_saved(session.id)
+        record["answers"]["pia_necessity"]["note"] = note
+        records[session.id] = record
+    monkeypatch.setattr(assessment_memory, "similar", lambda *args, **kwargs: [{"id": session.id} for session in [losing, *winning]])
+    monkeypatch.setattr(assessment, "load_saved", lambda identifier: records[identifier])
+    value = assessment_memory.suggest_answers("pia", "Acme CRM")["pia_necessity"]
+    assert value["note"] == "Winning rationale"
+    assert value["based_on"] == [session.id for session in winning]
+    assert value["conflicts"][0]["assessment_id"] == losing.id
+    assert value["state"] == "unreviewed_precedent"
+    assert "not factual certainty" in value["confidence_meaning"]
+
+
+def test_approved_source_becomes_stale_when_policy_or_review_expiry_changes(monkeypatch):
+    from maverick import assessment
+    session = _saved_pia("Acme CRM", {"pia_necessity": "yes"})
+    record = assessment.decide_assessment(session.id, "approved", decided_by="user:reviewer", expected_revision=1)
+    value = assessment_memory.source_evidence(record, "pia_necessity")
+    assert value["state"] == "current_approved" and value["approval_owner"] == "user:reviewer"
+    assert value["policy_digest"] == record["template_digest"]
+    record["next_review_at"] = 1
+    assert assessment_memory.source_evidence(record, "pia_necessity")["state"] == "stale_precedent"
+    record["next_review_at"] = None
+    monkeypatch.setattr(assessment, "template_state", lambda kind: {"digest": "a"*64,"revision": 7})
+    value = assessment_memory.source_evidence(record, "pia_necessity")
+    assert value["state"] == "stale_precedent" and value["current_policy_version"] == 7
+
+
+def test_department_filter_and_exclude_current_before_ranking():
+    session = _saved_pia("Acme CRM", {"pia_necessity": "yes"})
+    assert assessment_memory.similar("Acme CRM", allowed_types={"vendor_risk"}) == []
+    assert assessment_memory.suggest_answers("pia", "Acme CRM", allowed_types={"vendor_risk"}) == {}
+    assert assessment_memory.suggest_answers("pia", "Acme CRM", exclude_id=session.id) == {}

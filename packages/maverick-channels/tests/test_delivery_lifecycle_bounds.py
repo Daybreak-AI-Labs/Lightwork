@@ -60,6 +60,54 @@ def test_old_delivered_receipts_are_released_so_intake_never_fills(journal, monk
     assert _run(journal, 99, handler)["delivery"] == "delivered"
 
 
+def test_automatic_maintenance_frees_expired_receipts_without_replaying_unknowns(journal, monkeypatch):
+    monkeypatch.setattr(delivery, "MAX_RECORDS", 2)
+    monkeypatch.setattr(delivery, "MAINTENANCE_INTERVAL_SECONDS", 0)
+    delivery._maintenance_last.clear()
+
+    async def handler(message):
+        return "answered"
+
+    delivered = _run(journal, 1, handler)
+    uncertain = journal.admit(_msg(2), external_id="e2", account="acct")
+    uncertain = journal.change(uncertain, execution="execution_unknown", delivery="delivered")
+    future = delivered["updated_at"] + delivery.RETENTION_SECONDS + delivery.TOMBSTONE_SECONDS + 1
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(time=lambda: future))
+
+    assert _run(journal, 3, handler)["delivery"] == "delivered"
+    assert journal.get(uncertain["id"])["execution"] == "execution_unknown"
+    assert journal.get(delivered["id"]) is None
+
+
+@pytest.mark.parametrize("ids,expected_used,exact,full", [
+    (("a", "b"), 2, True, False),
+    (("a", "b", "c"), 3, True, True),
+    (("a", "b", "c", "d"), 4, False, True),
+])
+def test_capacity_status_pages_past_short_backend_windows(monkeypatch, ids, expected_used, exact, full):
+    class ShortPages:
+        def iter_record_ids(self, *, start_after="", limit=100):
+            pivot = next((i for i, key in enumerate(ids) if key > start_after), len(ids))
+            for key in (ids[pivot:] + ids[:pivot])[:min(limit, 2)]:
+                yield key, key
+
+    monkeypatch.setattr(delivery, "intake_record_limit", lambda: 3)
+    status = delivery.DeliveryJournal(store=ShortPages()).capacity_status()
+    assert status["used"] == expected_used and status["limit"] == 3
+    assert status["count_exact"] is exact and status["full"] is full
+
+
+def test_intake_capacity_reads_current_setting_and_rejects_invalid_limits(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda: {"channels": {"max_intake_records": 50000}})
+    assert delivery.intake_record_limit() == 50000
+    for bad in (True, 50000.5, "50000", 100001, 999):
+        monkeypatch.setattr(config, "load_config", lambda bad=bad: {"channels": {"max_intake_records": bad}})
+        with pytest.raises(ValueError, match="intake capacity"):
+            delivery.intake_record_limit()
+
+
 def test_a_failed_world_mark_hands_the_message_back_to_recovery(journal, monkeypatch):
     row = journal.admit(_msg(1), external_id="e1", account="acct")
     real = world_model.WorldModel.mark_message_processed

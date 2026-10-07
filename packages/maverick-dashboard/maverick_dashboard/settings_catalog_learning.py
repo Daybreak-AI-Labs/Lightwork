@@ -67,13 +67,13 @@ def _systems(S) -> tuple:
           "Give a newly approved agent the catalog skills and tools its work needs. Each new "
           "tool still needs approval.", "toggle", group, True, "maverick.provision",
           subgroup=_LEARN),
-        S("self_learning", "distill_local", "Turn repeated successes into skills",
-          "Write a reusable skill from work that went well, on this server, without asking "
-          "an AI model.", "toggle", group, True, "maverick.skill.distillation_local",
+        S("self_learning", "distill_local", "Suggest skills from repeated successes",
+          "Prepare a reusable skill suggestion from completed work on this server, without "
+          "asking an AI model. Review and add it from Skills before future tasks use it.", "toggle", group, True, "maverick.skill.distillation_local",
           subgroup=_LEARN, env=("MAVERICK_DISTILL_LOCAL",)),
         S("self_learning", "auto_distill", "Let an AI model write skills from finished tasks",
           "After each finished task, an AI model writes a new saved skill from it straight "
-          "away, without the overnight checks.", "toggle", group, False,
+          "away, without the overnight checks. It cannot replace a saved or built-in skill.", "toggle", group, False,
           "maverick.orchestrator", subgroup=_LEARN, env=("MAVERICK_AUTO_DISTILL",),
           weaker=True,
           warning="An AI model will write new saved skills straight from finished tasks, and "
@@ -108,13 +108,14 @@ def _systems(S) -> tuple:
           "Save an outline of each task's steps, with secrets removed, as the material "
           "learning works from.", "toggle", group, True, "maverick.trajectory_store",
           subgroup=_LEARN, env=("MAVERICK_TRAJECTORY_CAPTURE",)),
-        S("self_improvement", "causal_promotion", "Check an improvement really caused the gain",
-          "Before a learned change is adopted, check that it caused the improvement rather "
-          "than something else that changed at the same time.", "toggle", group, True,
+        S("self_improvement", "causal_promotion", "Require a controlled comparison before adopting changes",
+          "Only adopt a learned change automatically when a prospectively controlled "
+          "comparison has enough evidence. Ordinary task history can suggest what to try, "
+          "but cannot prove what caused the result.", "toggle", group, True,
           "maverick.promotion_effect", subgroup=_LEARN, env=("MAVERICK_CAUSAL_PROMOTION",),
           weaker=False,
-          warning="Learned changes could be adopted because results improved at the same "
-                  "time, without checking that the change caused it."),
+          warning="Automatic adoption can mistake a coincidental improvement for one "
+                  "caused by the change."),
         S("self_improvement", "factory_learning", "Improve how new agents are built",
           "Learn from the gaps found when new agents are set up, so the next ones start "
           "better. Needs governed improvement on.", "toggle", group, True,
@@ -219,15 +220,15 @@ def _overnight(S) -> tuple:
         S("dreaming", "cron", "When overnight learning runs",
           "How often Lightwork reviews recent work to write lessons and skills.", "select",
           group, "0 */6 * * *", "maverick_dashboard.automation_queue", subgroup=_NIGHT,
-          choices=_EVERY, restart=True),
+          choices=_EVERY),
         S("data_engine", "cron", "When the improvement flywheel runs",
           "How often the flywheel looks for costly failures and tests fixes.", "select",
           group, "30 */6 * * *", "maverick_dashboard.automation_queue", subgroup=_NIGHT,
-          choices=_EVERY_HALF, restart=True),
+          choices=_EVERY_HALF),
         S("dreaming", "snapshots", "Save a restore point before learning",
-          "Save what Lightwork knows before each learning run, so you can go back.",
+          "Keep a checked copy of the covered learned information before each improvement cycle. Customer work and activity stay current.",
           "toggle", group, True, "maverick.config", subgroup=_NIGHT, weaker=False,
-          warning="You will not be able to go back to before a learning run."),
+          warning="Scheduled and manual learning cycles will stop until restore points are turned on again."),
         S("dreaming", "benchmark_gate", "Hold back new skills while test results slip",
           "Keep newly learned skills on hold while the tracked test results are getting "
           "worse.", "toggle", group, True, "maverick.config", subgroup=_NIGHT, weaker=False,
@@ -474,17 +475,25 @@ def _flows(S) -> tuple:
               "Learned workflows will keep and use running totals on their own."),
         learn("action_episode_capture", "Keep workflow examples for learning",
               "Keep copies of real workflow runs, including business data, to learn from. "
-              "Each run needs enrolment, encrypted storage, an expiry and a person's review.",
-              "Copies of real workflow runs, including business data, will be kept."),
+              "Each run needs enrolment, encrypted storage, an expiry and a person's review. "
+              "Turning this on also requires signed evidence for learned action flows.",
+              "Copies of real workflow runs will be kept. Older learned flows without signed "
+              "examples may stop until rebuilt from reviewed runs allowed for learning."),
         S("flows", "action_recipe_lineage", "Sign reviewed examples",
           "Sign each reviewed example so learned steps can show where they came from. The "
-          "signature confirms the review was recorded, not who reviewed it.", "toggle",
-          group, False, "maverick.config", subgroup=_FLOWS),
-        S("flows", "require_action_recipe_lineage", "Only use learned steps with a signed history",
+          "signature confirms the review was recorded, not who reviewed it. "
+          "Turning this on requires signed evidence for learned action flows.", "toggle",
+          group, False, "maverick.config", subgroup=_FLOWS, weaker=True,
+          warning="Older learned flows without signed examples may stop until rebuilt "
+                  "from reviewed runs allowed for learning."),
+        S("flows", "require_action_recipe_lineage", "Always require signed history for learned steps",
           "Refuse to save, publish or run a learned step without a signed record of its "
-          "reviewed examples.", "toggle", group, False, "maverick.config", subgroup=_FLOWS,
+          "reviewed examples, even when example collection and signing are off. This is "
+          "already required while either of those features is on.", "toggle", group, False,
+          "maverick.config", subgroup=_FLOWS,
           weaker=False,
-          warning="Learned steps without a signed history will be saved and run again."),
+          warning="Unsigned learned steps remain blocked while workflow example capture or "
+                  "signed examples are on. If both are off, older unsigned steps may run again."),
         S("flows", "action_evidence_issuer", "Name that signs reviewed examples",
           "A short, stable name for this installation, used when it signs reviewed examples. "
           "Letters, numbers, dots, dashes, underscores and colons only.", "text", group, "",
@@ -625,16 +634,30 @@ def _benchmarks(S) -> tuple:
 def _elsewhere(S) -> tuple:
     """Learning-related settings that sit with their neighbours in other groups."""
     return (
+        S("rehearsal", "enable", "Observe high-impact action predictions",
+          "Compare high-impact actions with past work. The mode below controls "
+          "whether predictions can stop an action. Shield, permissions, and "
+          "required approvals still apply.",
+          "toggle", "Safety", True, "maverick.rehearsal",
+          env=("MAVERICK_REHEARSAL",), weaker=False,
+          warning="Lightwork will stop recording practice predictions for high-impact actions."),
+        S("rehearsal", "mode", "What practice predictions do",
+          "Watch only lets normal tool checks decide. Hold can stop unfamiliar or "
+          "poorly predicted actions until a person reviews the exact step in Approvals. "
+          "An unanswered or rejected request does not run. Other safety checks still apply.",
+          "select", "Safety", "observe", "maverick.config",
+          choices=(("observe", "Watch only (default)"),
+                   ("hold", "Hold high-impact actions for review"))),
         S("autonomy", "escalate_verification", "Second check on uncertain answers",
           "When agents disagree about a final answer, have other AI models check it too. "
           "Needs extra checks on uncertain work on.", "toggle", "Safety", True,
           "maverick.config", weaker=False,
           warning="Final answers agents disagree about will no longer get a second check."),
-        S("autonomy", "tighten_on_low_trust", "Limit risky tools when a run looks unreliable",
-          "When a run looks unreliable, lower the risk level its tools may reach. Needs "
+        S("autonomy", "tighten_on_low_trust", "Limit risky tools when a task looks unreliable",
+          "When a task looks unreliable, lower the risk level its tools may reach. Needs "
           "extra checks on uncertain work on.", "toggle", "Safety", True, "maverick.config",
           weaker=False,
-          warning="Risky tools will keep their usual limits even when a run looks "
+          warning="Risky tools will keep their usual limits even when a task looks "
                   "unreliable."),
         S("harness_refine", "max_pending", "Instruction changes waiting at once",
           "The most suggested instruction changes that can wait for a decision at one time.",

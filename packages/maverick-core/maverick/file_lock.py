@@ -37,7 +37,7 @@ import stat
 import tempfile
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -85,6 +85,10 @@ _WINDOWS_LOCK_INITIALIZATION_SECONDS = 2.0
 
 
 def _canonical_lock_path(path: Path) -> str:
+    # Plain and extended Win32 spellings of one sidecar must share the same
+    # process-local lock and recursion state.
+    if os.name == "nt":
+        path = Path(_windows_extended_path(path))
     return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
 
@@ -833,25 +837,29 @@ def harden_path_permissions(path: str | Path, mode: int = 0o600) -> None:
 def ensure_private_directory(path: str | Path) -> Path:
     """Create/tighten a directory to an owner-only security boundary."""
     path = Path(path)
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # The native private-file writer already uses extended paths on Windows.
+    # Its parent can exceed Win32's shorter CreateDirectory path limit, even
+    # when the configured home and each individual path component are valid.
+    io_path = Path(_windows_extended_path(path) if os.name == "nt" else path)
+    io_path.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
-        before = path.lstat()
+        before = io_path.lstat()
     except OSError as exc:
         raise PermissionError(f"directory could not be inspected: {path}") from exc
-    if _unsafe_lock_alias(path, before) or not stat.S_ISDIR(before.st_mode):
+    if _unsafe_lock_alias(io_path, before) or not stat.S_ISDIR(before.st_mode):
         raise PermissionError(f"private directory path is an alias: {path}")
-    harden_path_permissions(path, 0o700)
+    harden_path_permissions(io_path, 0o700)
     try:
-        after = path.lstat()
+        after = io_path.lstat()
     except OSError as exc:
         raise PermissionError(f"directory could not be verified: {path}") from exc
     if (
-        _unsafe_lock_alias(path, after)
+        _unsafe_lock_alias(io_path, after)
         or not stat.S_ISDIR(after.st_mode)
         or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
     ):
         raise PermissionError(f"private directory identity changed: {path}")
-    if not private_path_is_restricted(path, 0o700):
+    if not private_path_is_restricted(io_path, 0o700):
         raise PermissionError(f"directory could not be made private: {path}")
     return path
 
@@ -866,16 +874,17 @@ def require_private_directory(path: str | Path) -> Path:
     their mode or DACL.
     """
     path = Path(path)
+    io_path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     try:
-        info = path.lstat()
+        info = io_path.lstat()
     except OSError as exc:
         raise PermissionError(
             f"parent directory must already be private: {path}"
         ) from exc
     if (
-        _unsafe_lock_alias(path, info)
+        _unsafe_lock_alias(io_path, info)
         or not stat.S_ISDIR(info.st_mode)
-        or not private_path_is_restricted(path, 0o700)
+        or not private_path_is_restricted(io_path, 0o700)
     ):
         raise PermissionError(f"parent directory must already be private: {path}")
     return path
@@ -891,16 +900,17 @@ def _prepare_parent_directory(path: str | Path) -> Path:
     for a safe directory type.
     """
     path = Path(path)
+    io_path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=False)
+        io_path.mkdir(mode=0o700, parents=True, exist_ok=False)
     except FileExistsError:
         try:
-            info = path.lstat()
+            info = io_path.lstat()
         except OSError as exc:
             raise PermissionError(
                 f"parent directory could not be inspected: {path}"
             ) from exc
-        if _unsafe_lock_alias(path, info) or not stat.S_ISDIR(info.st_mode):
+        if _unsafe_lock_alias(io_path, info) or not stat.S_ISDIR(info.st_mode):
             raise PermissionError(
                 f"parent directory path is an alias: {path}"
             ) from None
@@ -1010,6 +1020,10 @@ def ensure_private_file(path: str | Path, mode: int = 0o600) -> Path:
     # that mutation without weakening alias, hard-link, owner, or ABA checks.
     if os.name == "nt" and _windows_open_private_file_is_restricted(path, info, mode):
         return path
+    # On POSIX a chmod to the same mode still moves ctime, which readers that
+    # bind a file's identity see as a change; an exact private mode is kept.
+    if os.name != "nt" and stat.S_IMODE(info.st_mode) == mode:
+        return path
     harden_path_permissions(path, mode)
     try:
         after = path.lstat()
@@ -1050,9 +1064,12 @@ def private_path_is_restricted(path: str | Path, mode: int = 0o600) -> bool:
         return False
 
 
-def _replace_with_retry(source: str | Path, target: str | Path) -> None:
+def _replace_with_retry(source: str | Path, target: str | Path, *,
+                        effect_guard: Callable[[], None] | None = None) -> None:
     """Replace atomically, tolerating brief Windows sharing violations."""
     if os.name != "nt":
+        if effect_guard is not None:
+            effect_guard()
         os.replace(source, target)
         # The file contents were fsync'd before rename; persist the directory
         # entry too so replay/policy state survives an abrupt power loss.
@@ -1077,6 +1094,8 @@ def _replace_with_retry(source: str | Path, target: str | Path) -> None:
     move_file.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
     move_file.restype = wintypes.BOOL
     while True:
+        if effect_guard is not None:
+            effect_guard()
         if move_file(
             _windows_extended_path(source),
             _windows_extended_path(target),
@@ -1095,6 +1114,7 @@ def _windows_replace_open_fd(
     target: str | Path,
     *,
     replace: bool = True,
+    effect_guard: Callable[[], None] | None = None,
 ) -> None:
     """Rename the still-open source object, binding publication to its handle.
 
@@ -1144,7 +1164,11 @@ def _windows_replace_open_fd(
     handle = msvcrt.get_osfhandle(fd)
     deadline = time.monotonic() + 5.0
     delay = 0.002
-    while not set_info(handle, 3, ctypes.byref(info), ctypes.sizeof(info)):
+    while True:
+        if effect_guard is not None:
+            effect_guard()
+        if set_info(handle, 3, ctypes.byref(info), ctypes.sizeof(info)):
+            break
         error = ctypes.get_last_error()
         if (
             not replace
@@ -1188,7 +1212,7 @@ def atomic_read_text(
     retry_seconds: float = 1.0,
 ) -> str:
     """Read an atomically-published text file across Windows rename races."""
-    path = Path(path)
+    path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     return _read_with_windows_retry(
         lambda: path.read_text(encoding=encoding),
         retry_seconds=retry_seconds,
@@ -1201,7 +1225,7 @@ def atomic_read_bytes(
     retry_seconds: float = 1.0,
 ) -> bytes:
     """Read an atomically-published binary file across Windows rename races."""
-    path = Path(path)
+    path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     return _read_with_windows_retry(
         path.read_bytes,
         retry_seconds=retry_seconds,
@@ -1402,6 +1426,10 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
     """
     target = Path(target)
     lock_path = target.parent / (target.name + ".lock")
+    if os.name == "nt":
+        # Use one spelling for creation, descriptor/path identity checks, and
+        # ACL verification when the sidecar exceeds Win32's legacy limit.
+        lock_path = Path(_windows_extended_path(lock_path))
     canonical = _canonical_lock_path(lock_path)
     with _exclusive_local_lock(lock_path):
         held: dict[str, tuple[int, bool]] = getattr(
@@ -1508,7 +1536,8 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
 
 
 def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
-                      encoding: str = "utf-8") -> None:
+                      encoding: str = "utf-8", newline: str | None = None,
+                      effect_guard: Callable[[], None] | None = None) -> None:
     """Write ``text`` to ``path`` atomically: a *unique* temp file in the same
     directory, then ``os.replace`` into position.
 
@@ -1516,7 +1545,9 @@ def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
     whole file — never a truncated one. The temp name is unique (``mkstemp``) so
     two concurrent writers don't collide on a shared ``.tmp`` (one ``os.replace``
     would otherwise move the temp out from under the other). The temp is cleaned
-    up on any failure so a crashed write leaves no stray files.
+    up on any failure so a crashed write leaves no stray files. An optional
+    caller guard runs after the temp is flushed, immediately before every
+    physical replacement attempt, including Windows sharing retries.
     """
     path = Path(path)
     _prepare_parent_directory(path.parent)
@@ -1527,15 +1558,21 @@ def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
         mode=mode,
     )
     try:
-        with os.fdopen(fd, "w", encoding=encoding) as f:
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
             fd = -1  # ownership transferred to the file object
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
             if os.name == "nt":
-                _windows_replace_open_fd(f.fileno(), path)
+                if effect_guard is None:
+                    _windows_replace_open_fd(f.fileno(), path)
+                else:
+                    _windows_replace_open_fd(f.fileno(), path, effect_guard=effect_guard)
             else:
-                _replace_with_retry(tmp, path)
+                if effect_guard is None:
+                    _replace_with_retry(tmp, path)
+                else:
+                    _replace_with_retry(tmp, path, effect_guard=effect_guard)
     except BaseException:
         if fd >= 0:
             try:
@@ -1599,15 +1636,20 @@ def atomic_write_text_chunks(
     return count
 
 
-def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> None:
+def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600,
+                       effect_guard: Callable[[], None] | None = None) -> None:
     """Byte-for-byte sibling of :func:`atomic_write_text` for binary payloads
     (e.g. an at-rest-sealed blob): unique temp in the same directory, then
     ``os.replace`` into position; the temp is cleaned up on any failure."""
-    atomic_write_bytes_chunks(path, (data,), mode=mode)
+    if effect_guard is None:
+        atomic_write_bytes_chunks(path, (data,), mode=mode)
+    else:
+        atomic_write_bytes_chunks(path, (data,), mode=mode, effect_guard=effect_guard)
 
 
 def atomic_write_bytes_chunks(
     path: str | Path, chunks: Iterable[bytes], *, mode: int = 0o600,
+    effect_guard: Callable[[], None] | None = None,
 ) -> int:
     """Publish a private binary stream atomically after all chunks and fsync.
 
@@ -1632,9 +1674,15 @@ def atomic_write_bytes_chunks(
             f.flush()
             os.fsync(f.fileno())
             if os.name == "nt":
-                _windows_replace_open_fd(f.fileno(), path)
+                if effect_guard is None:
+                    _windows_replace_open_fd(f.fileno(), path)
+                else:
+                    _windows_replace_open_fd(f.fileno(), path, effect_guard=effect_guard)
             else:
-                _replace_with_retry(tmp, path)
+                if effect_guard is None:
+                    _replace_with_retry(tmp, path)
+                else:
+                    _replace_with_retry(tmp, path, effect_guard=effect_guard)
     except BaseException:
         if fd >= 0:
             try:

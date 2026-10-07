@@ -8,7 +8,10 @@
   var activeStates = ['checking', 'downloading', 'cancelling'];
   function active() { return state && state.job && activeStates.includes(state.job.state); }
   function plainError(message) { var error = new Error(message); error.plain = true; return error; }
-  function text(name, value) { el(name).textContent = value; }
+  function text(name, value, values) { var node=el(name); delete node.dataset.userContent; if(window.LightworkI18n) window.LightworkI18n.set(node,value,values); else { node.textContent=value.replace(/\{(\w+)\}/g,function(_,key){return String((values||{})[key]??'');}); node.lang='en'; node.dir='ltr'; } }
+  function raw(name, value) { var node=el(name); node.textContent=value; node.lang='und'; node.dir='auto'; node.dataset.userContent=''; }
+  function formatted(source) { return window.LightworkI18n?window.LightworkI18n.text(source):source; }
+  function number(value, options) { return window.LightworkI18n?window.LightworkI18n.number(value,options):new Intl.NumberFormat('en',options).format(value); }
   function stopTimer() { window.clearTimeout(timer); timer = null; }
   function controls() {
     var allowed = !locked && !writing && state && state.enabled && state.can_download && state.model && !active();
@@ -26,7 +29,7 @@
   }
   function problem(message) {
     state = null; stopTimer(); el('confirm').checked = false; el('progress').hidden = true; el('try').hidden = true;
-    text('progress-text', ''); text('status', message + ' Refresh setup status before trying again; an earlier download may still be running.'); controls();
+    text('progress-text', ''); text('status', '{reason} Refresh setup status before trying again; an earlier download may still be running.', {reason:formatted(message)}); controls();
   }
   function valid(data) {
     function object(value) { return value && typeof value === 'object' && !Array.isArray(value); }
@@ -50,20 +53,22 @@
     return true;
   }
   async function request(path, body, signal) {
-    var response = await window.fetch(base + path, {method:body ? 'POST' : 'GET', cache:'no-store',
-      headers:{'Content-Type':'application/json', ...(context ? {'X-Lightwork-Voice-Context':context} : {})},
-      ...(body ? {body:JSON.stringify(body)} : {}), ...(signal ? {signal:signal} : {})});
-    if (response.status === 401 || response.status === 403) {
-      clearPrivate('Voice setup access is no longer available. Sign in with an administrator account and reload this page.');
-      throw new Error('Access changed');
+    var data;
+    try {
+      data = await window.mvFetchJSON(base + path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body || undefined, signal: signal || undefined,
+        headers: context ? {'X-Lightwork-Voice-Context': context} : {},
+        onAccess: function () { clearPrivate('Voice setup access is no longer available. Sign in with an administrator account and reload this page.'); }},
+        'confirm this voice setup request');
+    } catch (error) {
+      if (error.accessChanged) throw new Error('Access changed');
+      if (error.status === 409) {
+        clearPrivate('The account, workspace or voice setup changed. Please reload this page and review its current status.');
+        throw new Error('Setup changed');
+      }
+      error.plain = error.status > 0 || error.unreadable === true;
+      throw error;
     }
-    if (response.status === 409) {
-      clearPrivate('The account, workspace or voice setup changed. Please reload this page and review its current status.');
-      throw new Error('Setup changed');
-    }
-    var data; try { data = await response.json(); } catch (_error) { throw plainError('Voice setup returned an unreadable response.'); }
-    if (!response.ok) throw plainError(window.mvErrorText ? window.mvErrorText(response, 'confirm this voice setup request') : 'Voice setup could not confirm this request.');
-    if (!valid(data)) throw plainError('Voice setup information could not be verified.');
+    if (!valid(data)) throw plainError('Voice setup information could not be verified. Refresh the page and try again.');
     if (context && context !== data.context) {
       clearPrivate('The account, workspace or voice configuration changed. Please reload this page before continuing.');
       throw new Error('Context changed');
@@ -77,25 +82,28 @@
       small:'Larger multilingual model', 'small.en':'Larger English model', medium:'Advanced multilingual model', 'medium.en':'Advanced English model',
       'large-v3':'Largest multilingual model', 'large-v3-turbo':'Fast large multilingual model'};
     text('model', model ? names[model.id] : 'Managed by your deployment');
-    text('model-details', model ? 'About ' + (model.size_bytes / 1e6).toFixed(1) + ' MB. Download source: Hugging Face, whisper.cpp model catalog.' : 'This setup supports the configured model from Lightwork’s fixed catalog.');
-    text('technical', model ? model.id + ' · ' + model.size_bytes.toLocaleString() + ' bytes · ' + model.source_url + ' · SHA-256: ' + model.sha256 + ' · Configured speech backend: ' + data.configuration.backend : '');
+    text('model-details', model ? 'About {size} MB. Download source: Hugging Face, whisper.cpp model catalog.' : "This setup supports the configured model from Lightwork’s fixed catalog.", {size:model?number(model.size_bytes / 1e6,{minimumFractionDigits:1,maximumFractionDigits:1}):''});
+    text('technical', model ? '{model} · {bytes} bytes · {source} · SHA-256: {hash} · Configured speech backend: {backend}' : '', model?{model:model.id,bytes:number(model.size_bytes),source:model.source_url,hash:model.sha256,backend:data.configuration.backend}:{});
     text('policy', data.configuration.auto_fetch ? 'Your deployment allows automatic model downloads. This setup uses the same policy.' : 'Automatic model downloads are off. This setup downloads only after you confirm.');
-    text('readiness', data.engine_available ? 'The local speech engine is installed. ' + (data.configuration.backend === 'local' ? 'Dictation is configured to run on this computer.' : 'Dictation follows your selected speech provider and may use a configured cloud service.') :
+    text('readiness', data.engine_available ? (data.configuration.backend === 'local' ? 'The local speech engine is installed. Dictation is configured to run on this computer.' : 'The local speech engine is installed. Dictation follows your selected speech provider and may use a configured cloud service.') :
       'The speech engine is not available in this installation. Downloading the voice model alone won’t turn on dictation on this computer; your selected speech provider is used instead.');
     var messages = {checking:'Checking the existing model file and verifying its bytes…', downloading:'Downloading model…',
       cancelling:'Cancelling… Stopping the download and cleaning up.', cancelled:'Download cancelled. Review the model and confirm again to retry.',
-      ready:'Model file verified during the last setup.' + (data.engine_available ? ' Try dictation using the microphone in Chat.' : ''), failed:'Setup failed. ' + (job && job.error || 'Review the connection and available disk space, then confirm again to retry.')};
-    var status = !data.enabled || !data.can_download || data.configuration.managed_path || !model ? (data.reason || 'Voice model setup is unavailable for this deployment.') :
+      ready:data.engine_available ? 'Model file verified during the last setup. Try dictation using the microphone in Chat.' : 'Model file verified during the last setup.', failed:'Setup failed. Review the connection and available disk space, then confirm again to retry.'};
+    var unavailable = !data.enabled || !data.can_download || data.configuration.managed_path || !model;
+    var status = unavailable ? 'Voice model setup is unavailable for this deployment. Ask your administrator if you need it.' :
       job && job.state === 'ready' && data.model_state !== 'verified' ? 'The previously verified model file has changed or is missing. Confirm below to check it again.' :
       job ? messages[job.state] : data.model_state === 'verified' ? messages.ready :
         data.model_state === 'present_unverified' ? 'A model file is present but has not been verified by setup. Confirm below to check it and repair it if needed.' :
           'The configured model is not installed. Review the source and download size before confirming.';
-    text('status', status);
+    if(unavailable && data.reason) raw('status',data.reason);
+    else if(!unavailable && job && job.state==='failed' && job.error) text('status','Setup failed. {reason}',{reason:job.error});
+    else text('status', status);
     el('try').hidden = !(data.enabled && data.engine_available && data.model_state === 'verified' && ['auto', 'local'].includes(data.configuration.backend));
     el('progress').hidden = !active();
     if (active() && job.total_bytes > 0) { el('progress').max = job.total_bytes; el('progress').value = job.received_bytes; }
     else el('progress').removeAttribute('value');
-    text('progress-text', active() ? (job.received_bytes / 1e6).toFixed(1) + ' MB of ' + (job.total_bytes / 1e6).toFixed(1) + ' MB (' + (job.total_bytes ? Math.floor(job.received_bytes * 100 / job.total_bytes) : 0) + '%). Lightwork checks the file before using it.' : '');
+    text('progress-text', active() ? '{received} MB of {total} MB ({percent}). Lightwork checks the file before using it.' : '',active()?{received:number(job.received_bytes / 1e6,{minimumFractionDigits:1,maximumFractionDigits:1}),total:number(job.total_bytes / 1e6,{minimumFractionDigits:1,maximumFractionDigits:1}),percent:number(job.total_bytes?Math.floor(job.received_bytes*100/job.total_bytes)/100:0,{style:'percent',maximumFractionDigits:0})}:{});
     controls(); schedule();
   }
   function schedule() {
@@ -105,7 +113,7 @@
     if (locked || reading || writing) return;
     reading = true; var expected = generation, controller = new AbortController(); readController = controller; controls();
     try { var data = await request('', null, controller.signal); if (!locked && expected === generation) render(data); }
-    catch (error) { if (!locked && expected === generation) problem(error && error.plain ? error.message : 'Voice setup status is unavailable. Lightwork may not be responding.'); }
+    catch (error) { if (!locked && expected === generation) problem(error && error.plain ? error.message : 'Voice setup status is unavailable. Lightwork may not be responding. Try again in a minute.'); }
     finally { if (readController === controller) { readController = null; reading = false; } controls(); }
   }
   async function mutate(path, body) {
@@ -114,7 +122,7 @@
     if (readController) { readController.abort(); readController = null; reading = false; }
     el('confirm').checked = false; controls();
     try { var data = await request(path, body); if (!locked) render(data); }
-    catch (error) { if (!locked) problem(error && error.plain ? error.message : 'Voice setup could not confirm the action. Lightwork may not be responding.'); }
+    catch (error) { if (!locked) problem(error && error.plain ? error.message : 'Voice setup could not confirm the action. Lightwork may not be responding. Try again in a minute.'); }
     finally { writing = false; controls(); }
   }
   el('confirm').addEventListener('change', controls);

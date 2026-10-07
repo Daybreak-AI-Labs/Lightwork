@@ -1846,6 +1846,25 @@ class Article73IncidentRegister:
             key=lambda item: (float(item["clock"]["outer_limit_at"]), item["incident_id"]),
         )
 
+    def reporting_inventory(self, *, now: float | None = None) -> list[dict[str, Any]]:
+        """Complete retained reporting projections, refusing an over-capacity store."""
+        _require_enabled()
+        _require_tenant()
+        observed_at = (float(self._store.authoritative_time()) if now is None
+                       else _timestamp(now, "now"))
+        records = self._store.list(limit=_MAX_INCIDENTS + 1)
+        if len(records) > _MAX_INCIDENTS:
+            raise Article73StateError("Article 73 incident inventory exceeds its supported capacity")
+        projections = []
+        for record in records:
+            validated = _validate_record(record)
+            projection = self.safe_projection(validated["id"], now=observed_at)
+            if projection is None:
+                raise Article73StateError("Article 73 incident inventory changed while reading")
+            projections.append(projection)
+        return sorted(projections, key=lambda item: (
+            float(item["clock"]["outer_limit_at"]), item["incident_id"]))
+
 
 _DEFAULT = Article73IncidentRegister()
 
@@ -1932,6 +1951,11 @@ def list_incidents(
     return _DEFAULT.list_safe(limit=limit, now=now)
 
 
+def reporting_inventory(*, now: float | None = None) -> list[dict[str, Any]]:
+    """Read all supported retained incident clocks for reporting summaries."""
+    return _DEFAULT.reporting_inventory(now=now)
+
+
 __all__ = [
     "ARTICLE_73_SOURCE_URL",
     "Article73ConfigurationError",
@@ -1957,5 +1981,6 @@ __all__ = [
     "open_incident",
     "record_routing_decision",
     "record_submission",
+    "reporting_inventory",
     "report_template",
 ]

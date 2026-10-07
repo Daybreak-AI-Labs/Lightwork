@@ -4,10 +4,12 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {webcrypto,createHash}=require("node:crypto");
 const {JSDOM}=require("jsdom");
+const {shell} = require('./_shell');
 const source=fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-consent-workbench.js"),"utf8");
 function load(){
   const dom=new JSDOM('<div id="host"></div><p id="msg"></p>',{url:"https://lightwork.test/consent",runScripts:"outside-only"});
   Object.defineProperty(dom.window,"crypto",{value:webcrypto});dom.window.TextEncoder=TextEncoder;
+  shell(dom.window);
   dom.window.eval(source);
   return {dom,w:dom.window,CW:dom.window.LightworkConsentWorkbench};
 }

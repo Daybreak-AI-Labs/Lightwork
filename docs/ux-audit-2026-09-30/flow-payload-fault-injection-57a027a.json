@@ -1,0 +1,244 @@
+{
+  "status": "Exact retained fixture proved original corruption was a no-op; deterministic test repair passed the entire 18-case payload module in ordinary and secure modes. Full final-09 qualification remains separate.",
+  "source_sha": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+  "original_failure": {
+    "nodeid": "packages/maverick-core/tests/test_flow_payloads.py::test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+    "when": "call",
+    "worker": "gw1",
+    "duration_seconds": 0.17903149999619927,
+    "wall_time": 1790844389.1158323,
+    "reason": "DID NOT RAISE FlowPayloadError",
+    "local_failure_log": "audit/qualification-final-08-ordinary-native-02.failures.jsonl",
+    "failure_log_snapshot_sha256": "1f094dab05b60a48b7add9568d1bc80aa05da13b288c281523295a18ecb30db4",
+    "completed_full_suite": {
+      "passed": 40098,
+      "failed": 1,
+      "skipped": 597,
+      "warnings": 23,
+      "pytest_seconds": 3049.04,
+      "controller_seconds": 3053.92,
+      "source_unchanged": true
+    }
+  },
+  "retained_fixture": {
+    "path": "C:/Users/Cstep/AppData/Local/Temp/lw-pu7xan1y/t/popen-gw1/test_unavailable_or_mismatched1",
+    "read_only": true,
+    "payload_decrypted": false,
+    "keys_read": false,
+    "row_bytes": 33332,
+    "row_sha256": "185e03655dc7480e341095e8b4b8f3eb408c7e4c0511b07bf19b50c653d835a2",
+    "artifact_bytes": 35159,
+    "artifact_last_byte_decimal": 88,
+    "artifact_last_byte_hex": "58",
+    "reference_sha256": "ac70f2c20dcae1f529f2ee9d1bcbd248eb16ef92492ba606edf5ff2aa620ce63",
+    "artifact_sha256": "ac70f2c20dcae1f529f2ee9d1bcbd248eb16ef92492ba606edf5ff2aa620ce63",
+    "artifact_matches_reference": true,
+    "original_injection_changes_bytes": false,
+    "original_injection_sha256": "ac70f2c20dcae1f529f2ee9d1bcbd248eb16ef92492ba606edf5ff2aa620ce63",
+    "corrected_injection_changes_bytes": true,
+    "corrected_injection_sha256": "448c44e5a756bb8314ee9401ef7528f958cba4d51a22be59a0343d3e401c0c8a",
+    "fixture_unchanged_during_read": true,
+    "probe_path": "audit/probe-flow-payload-fault-57a027a.py",
+    "probe_sha256": "3cf2904719d73ef0dbd30fd7c8f64a5ebc2f1cbe32584b617b21c9217fb60983"
+  },
+  "reviewed_sources": {
+    "production_path": "packages/maverick-core/maverick/flow/payloads.py",
+    "production_git_blob": "ceb2f9216ee1fc37ead8e22c5f3587528453aabe",
+    "production_disk_sha256": "399e5a420c32ec7dc83d99510b12c8ba5361442da8ac8a0378b2b565bc21bcb5",
+    "original_test_git_blob": "ed3d65a84e63a56fd5fafd998102c72c726589ed",
+    "original_test_disk_sha256": "60cb444f3bc270b6d4f99fc2996137d4120348cbe5169f940c44f8e970ec7b23",
+    "production_guard": "Artifact length and SHA-256 must match the stored reference before decryption."
+  },
+  "repair": {
+    "path": "packages/maverick-core/tests/test_flow_payloads.py",
+    "expression": "original[:-1] + bytes([original[-1] ^ 1])",
+    "explicit_assertion": "damaged != original",
+    "production_changed": false,
+    "original_denial_assertion_preserved": true,
+    "test_budgets_unchanged": true,
+    "commit": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+    "corrected_test_git_blob": "088c100deade0506b007ebea8b466b92cac3c8e4"
+  },
+  "validation": {
+    "focused_execution": "passed: 18 cases ordinary and the same 18 secure",
+    "full_suite_closure_claimed": false,
+    "related_pattern_scan": "No additional unsafe fixed-byte suffix replacement on randomized/encrypted blobs in the targeted read-only search.",
+    "focused_runs": [
+      {
+        "posture": "ordinary",
+        "source_sha": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "source_unchanged": true,
+        "tests": 18,
+        "passed": 18,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "warnings": 0,
+        "pytest_seconds": 8.08,
+        "junit_seconds": 7.938,
+        "controller_seconds": 9.97,
+        "secure_flags": {
+          "MAVERICK_TEST_SECURE_DEFAULT": null,
+          "MAVERICK_SECURE_DEFAULT": null
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-09\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "audit_local_failure_reporter",
+          "-q",
+          "--tb=short",
+          "--durations=40",
+          "--timeout-method=thread",
+          "--basetemp",
+          "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-ek1nt4b8\\t",
+          "--junitxml",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-09-probe-payload.xml",
+          "-o",
+          "faulthandler_timeout=0",
+          "packages/maverick-core/tests/test_flow_payloads.py",
+          "-x",
+          "--timeout=90"
+        ],
+        "test_identities": [
+          "test_complete_checkpoint_private_artifact_and_bounded_api",
+          "test_delay_restart_resume_matches_uninterrupted_business_values",
+          "test_secret_redaction_covers_tail_and_structured_values_before_encryption",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[missing]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[owner]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[flow]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[reference]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[tenant]",
+          "test_failed_publication_preserves_previous_complete_generation",
+          "test_metadata_only_save_reuses_artifact_and_delete_reclaims",
+          "test_redaction_failure_and_quotas_do_not_commit_partial_data",
+          "test_legacy_complete_data_upgrades_but_loss_markers_require_recovery",
+          "test_approval_card_binds_tail_beyond_preview_without_exposing_it",
+          "test_complete_values_survive_authenticated_approval_resume",
+          "test_checkpoint_read_excludes_reclaim_until_its_generation_is_loaded",
+          "test_corrupt_row_never_reclaims_its_artifact_or_overwrites_it",
+          "test_deep_complete_json_and_tuple_normalization_survive_storage"
+        ],
+        "artifacts": {
+          ".source.json": {
+            "path": "audit/qualification-final-09-probe-payload.source.json",
+            "sha256": "dfaf9e73a13a3bd53cbdb30821b59df9d18ef1dcc762ee3130d0e4f2a02df440"
+          },
+          ".result.json": {
+            "path": "audit/qualification-final-09-probe-payload.result.json",
+            "sha256": "a6a1932f97c0e2d7937b260e8748f9780a16ad780af3ae74f14b17784f9a66c2"
+          },
+          ".xml": {
+            "path": "audit/qualification-final-09-probe-payload.xml",
+            "sha256": "820507d41e25f71ce34c3312b9ed122d9b67c56a4cb75dcbc566b10c17510163"
+          },
+          ".log": {
+            "path": "audit/qualification-final-09-probe-payload.log",
+            "sha256": "c733c85d00802351aa1fd31e639b507f3cc9ebd5ef6e330c73c53d5e7cc5d62f"
+          },
+          ".failures.jsonl": {
+            "path": "audit/qualification-final-09-probe-payload.failures.jsonl",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          ".failures.jsonl.reports": {
+            "path": "audit/qualification-final-09-probe-payload.failures.jsonl.reports",
+            "sha256": "f54774d3170ca8e515fddeaacfe334f0a966b1ae55ede1a0658f8555e87e4b29"
+          }
+        }
+      },
+      {
+        "posture": "secure",
+        "source_sha": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "source_unchanged": true,
+        "tests": 18,
+        "passed": 18,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "warnings": 0,
+        "pytest_seconds": 5.16,
+        "junit_seconds": 5.084,
+        "controller_seconds": 6.36,
+        "secure_flags": {
+          "MAVERICK_TEST_SECURE_DEFAULT": "1",
+          "MAVERICK_SECURE_DEFAULT": "1"
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-09\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "audit_local_failure_reporter",
+          "-q",
+          "--tb=short",
+          "--durations=40",
+          "--timeout-method=thread",
+          "--basetemp",
+          "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-h_27e1dj\\t",
+          "--junitxml",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-09-probe-secure-payload.xml",
+          "-o",
+          "faulthandler_timeout=0",
+          "packages/maverick-core/tests/test_flow_payloads.py",
+          "-x",
+          "--timeout=90"
+        ],
+        "test_identities": [
+          "test_complete_checkpoint_private_artifact_and_bounded_api",
+          "test_delay_restart_resume_matches_uninterrupted_business_values",
+          "test_secret_redaction_covers_tail_and_structured_values_before_encryption",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[missing]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[owner]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[flow]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[reference]",
+          "test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[tenant]",
+          "test_failed_publication_preserves_previous_complete_generation",
+          "test_metadata_only_save_reuses_artifact_and_delete_reclaims",
+          "test_redaction_failure_and_quotas_do_not_commit_partial_data",
+          "test_legacy_complete_data_upgrades_but_loss_markers_require_recovery",
+          "test_approval_card_binds_tail_beyond_preview_without_exposing_it",
+          "test_complete_values_survive_authenticated_approval_resume",
+          "test_checkpoint_read_excludes_reclaim_until_its_generation_is_loaded",
+          "test_corrupt_row_never_reclaims_its_artifact_or_overwrites_it",
+          "test_deep_complete_json_and_tuple_normalization_survive_storage"
+        ],
+        "artifacts": {
+          ".source.json": {
+            "path": "audit/qualification-final-09-probe-secure-payload.source.json",
+            "sha256": "b5075d6f369f3bb4d517873c36754fc99e964ead4c4c3a7ea5018adee3895ecc"
+          },
+          ".result.json": {
+            "path": "audit/qualification-final-09-probe-secure-payload.result.json",
+            "sha256": "6c8369b8a8bd365fc58e6514567c6a252fd99740016fbb334c8040a9acb4e75d"
+          },
+          ".xml": {
+            "path": "audit/qualification-final-09-probe-secure-payload.xml",
+            "sha256": "d3ad0b0613d7ef2b24504895a42f35bd294ad6ebce9391cacc964c29056bbfc1"
+          },
+          ".log": {
+            "path": "audit/qualification-final-09-probe-secure-payload.log",
+            "sha256": "cad4a48b55c8c780f0d5776a577b0e6a7756400e7b535e8459c3b8b063f10b32"
+          },
+          ".failures.jsonl": {
+            "path": "audit/qualification-final-09-probe-secure-payload.failures.jsonl",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          ".failures.jsonl.reports": {
+            "path": "audit/qualification-final-09-probe-secure-payload.failures.jsonl.reports",
+            "sha256": "1c464851b6929802e8386f3ea15bfab8727ed06056608444e89563ac429eeaf7"
+          }
+        }
+      }
+    ],
+    "runner": {
+      "path": "run-local-qualification.py",
+      "sha256": "038712315e83df2352b9c09cb2c14e8afc86d431fc3bcd085c957984bbe9fc4c",
+      "preserved_previous_path": "audit/run-local-qualification-before-final09.py",
+      "preserved_previous_sha256": "6e8f57ce3eff57232a5222ea90c44b9f15a620e386d5d07481bea31dcfd07047",
+      "reviewed_delta": "Only adds probe-secure to phase choices, secure flag selection, and existing probe target branch; existing probe timeout stays 90 seconds."
+    }
+  }
+}

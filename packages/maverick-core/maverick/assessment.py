@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -50,6 +51,8 @@ from .security_framework_catalog import (
     SECURITY_CATALOG_PROVENANCE,
     SecurityPractice,
 )
+
+_log = logging.getLogger(__name__)
 
 # Answer vocabulary. ``na`` = not applicable (clears the question); ``unknown`` =
 # the assessor could not confirm it (a diligence gap, scored as "unverified").
@@ -4697,6 +4700,24 @@ def answer_followup(
 DECISIONS = ("approved", "rejected")
 
 
+def _emit_assessment_event(event: str, record: dict | None, payload: dict) -> None:
+    """Tell webhook subscribers; never raises, nothing sent without subscribers."""
+    if not isinstance(record, dict) or not record.get("id"):
+        return
+    try:
+        from .webhook_events import emit, record_link
+
+        rid = str(record.get("id"))
+        emit(event, record_type="assessment", record_id=rid,
+             title=f"{record.get('subject') or 'assessment'} ({record.get('type') or 'assessment'})",
+             summary={"status": record.get("status"), "assignee": record.get("assignee", ""),
+                      "next_review_at": record.get("next_review_at"),
+                      "renewal_at": record.get("renewal_at")},
+             link=record_link(f"/assessments#{rid}"), payload=payload)
+    except Exception:  # pragma: no cover - webhooks never block a record change
+        pass
+
+
 def assign_assessment(
     assessment_id: str,
     assignee: str,
@@ -4731,12 +4752,14 @@ def assign_assessment(
         assessment=assessment_id,
         assignee=who,
     )
-    return _rewrite_saved(
+    saved = _rewrite_saved(
         assessment_id,
         _mutate,
         expected_revision=expected_revision,
         audit_receipt=receipt,
     )
+    _emit_assessment_event("assessment.assigned", saved, {"assignee": who})
+    return saved
 
 
 def set_assessment_answer_ai_metadata(
@@ -4879,12 +4902,14 @@ def decide_assessment(
         decision=decision,
         cadence_days=int(cadence_days or 0),
     )
-    return _rewrite_saved(
+    saved = _rewrite_saved(
         assessment_id,
         _mutate,
         expected_revision=expected_revision,
         audit_receipt=receipt,
     )
+    _emit_assessment_event("assessment.decided", saved, {"decision": decision})
+    return saved
 
 
 def accept_risk(
@@ -5116,7 +5141,18 @@ def _iter_saved_raw():
     for p in d.glob("*.json"):
         if not _ASSESSMENT_ID_RE.fullmatch(p.stem):
             continue
-        data = _load_saved_raw(p.stem)
+        try:
+            data = _load_saved_raw(p.stem)
+        except AssessmentStateError as exc:
+            # Same tolerance as list_saved(): a file whose name passes the
+            # id pattern but which is not a genuine per-assessment record
+            # (the capability-review register.json shares this directory)
+            # must not take down the metrics, the audit binder or the
+            # finance board that read this iterator. Say so in the log.
+            _log.warning(
+                "skipping %s in the assessments directory: %s", p.name, exc,
+            )
+            continue
         if data is not None:
             yield data
 
@@ -5309,6 +5345,48 @@ def list_saved_heads(
         if record is not None:
             records.append(_public_assessment_record(record))
     return tuple(records), len(identifiers)
+
+
+def history_heads(*, offset=0, after=None, before=None, oldest=False, allowed_types=None):
+    """Bounded current metadata, authorized by type before matching/counts.
+
+    Native file windows can be empty after authorization. Their private scan
+    positions must remain in sealed cursors; they are never accessible counts.
+    No answers/notes leave the adapter and no audit outbox is drained.
+    """
+    import time
+
+    from .metadata_history import WINDOW, HistoryChanged, Window, check_scan, digest
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise ValueError("Invalid history position")
+    directory = _assessments_dir()
+    started = time.monotonic()
+
+    def heads():
+        result = []
+        for count, path in enumerate(directory.glob("*.json"), 1):
+            check_scan(count, started)
+            if not _ASSESSMENT_ID_RE.fullmatch(path.stem):
+                continue
+            stat = path.stat()
+            if (after is not None and stat.st_mtime < after) or (before is not None and stat.st_mtime >= before):
+                continue
+            result.append((path.stem, stat.st_mtime_ns, stat.st_size))
+        return sorted(result, key=lambda row: (row[1] if oldest else -row[1], row[0]))
+
+    selected = heads()
+    snapshot = digest(selected)
+    rows = []
+    for identifier, modified, _ in selected[offset:offset + WINDOW]:
+        check_scan(len(selected), started)
+        raw = _load_saved_raw(identifier)
+        if raw is not None and (allowed_types is None or raw.get("type") in allowed_types):
+            rows.append({**{key: raw.get(key) for key in ("id", "type", "subject", "status", "revision")},
+                         "date": modified / 1_000_000_000})
+    if snapshot != digest(heads()):
+        raise HistoryChanged("Questionnaires changed during search. Start a fresh search.")
+    return Window(rows, snapshot, offset + WINDOW if offset + WINDOW < len(selected) else None)
+
 
 
 def assessment_score_profile(record: dict) -> dict:

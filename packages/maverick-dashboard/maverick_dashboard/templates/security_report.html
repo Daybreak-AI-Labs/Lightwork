@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Security readiness report · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   @media print { .sidebar,.topbar,.rpt-actions,#mv-sidebar,header { display:none!important; }
                  .content { margin:0!important; max-width:none!important; } }
@@ -19,9 +20,9 @@
 
 {% from "_hero.html" import hero, state %}
 {% set readiness = r.get('readiness', {}) or {} %}
-{% call hero('Governed workspaces', 'Security &amp; GRC readiness',
+{% call hero('Governed workspaces', 'Security readiness report',
              subtitle='Board pack',
-             lede='Made ' ~ r.get('generated','unknown') ~ ' from your security records: every control, what it
+             lede='Made ' ~ (r.generated_at | datetime('absolute') if r.get('generated_at') is number else 'at an unknown time') ~ ' from your security records: every control, what it
                    does, how far it is put in place, the reviewed evidence behind that, and who owns it.') %}
   {{ state('Current state',
            readiness.get('coverage_percent', 0) ~ '% of controls covered',
@@ -36,7 +37,7 @@
 <div class="rpt-actions">
   <button class="btn btn--primary" type="button" id="rpt-print">Print or save as PDF</button>
   <a class="btn btn--ghost" href="/api/v1/security/report" download="security-report.json">Download data (for other tools)</a>
-  <a class="btn btn--ghost" href="/security">Back to the workspace</a>
+  {{ back_link('/security', 'Security & GRC') }}
 </div>
 <p class="rpt-note"><strong>Readiness, not certification.</strong> Lightwork’s suggestions help your review.
   People still decide which rules apply, whether evidence is enough, which risks to accept and what auditors conclude.</p>
@@ -67,7 +68,7 @@
 <div class="panel">
   <p class="rpt-muted">What each control does, whether it is in scope and why,
     who owns it, and the reviewed evidence cited behind its status.</p>
-  <div class="rpt-scroll"><table>
+  <div class="rpt-scroll" tabindex="0" role="region" aria-label="Control register detail"><table>
     <thead><tr><th scope="col">Control</th><th scope="col">Framework</th><th scope="col">Status</th><th scope="col">Applies?</th><th scope="col">Owner</th><th scope="col">Evidence</th></tr></thead>
     <tbody>
     {% for row in controls %}
@@ -108,7 +109,7 @@
     <div class="stat"><div class="num">{{ r.get('poam',{}).get('overdue',0) }}</div><div class="label">Overdue fix plans</div></div>
     <div class="stat"><div class="num">{{ r.get('vendors',{}).get('pending_review',0) }}</div><div class="label">Vendors waiting for review</div></div>
     <div class="stat"><div class="num">{{ r.get('vendors',{}).get('high_risk',0) }}</div><div class="label">High-risk vendors</div></div>
-    <div class="stat"><div class="num">{{ r.get('policies',{}).get('approved_or_attested',0) }}</div><div class="label">Policies approved or signed off</div></div>
+    <div class="stat"><div class="num">{{ r.get('policies',{}).get('approved_or_attested',0) }}</div><div class="label">Policies approved or confirmed</div></div>
     <div class="stat"><div class="num">{{ r.get('policies',{}).get('review_due',0) }}</div><div class="label">Policies due for review</div></div>
     <div class="stat"><div class="num">{{ r.get('incidents',{}).get('open',0) }}</div><div class="label">Open incidents</div></div>
     <div class="stat"><div class="num">{{ r.get('incidents',{}).get('clock_breached',0) }}</div><div class="label">Missed reporting deadlines</div></div>
@@ -128,7 +129,7 @@
         {% if row.get('declared_status') and row.get('declared_status') != row.get('status') %}
           <span class="rpt-muted">(marked {{ row.get('declared_status') | humanize | lower }})</span>
         {% endif %}</td></tr>
-  {% else %}<tr><td colspan="4" class="muted">No gaps to show.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="4" class="muted">No gaps to show. Gaps appear here when a control fails its check.</td></tr>{% endfor %}
   </tbody></table>
 </div>
 <script>

@@ -3,6 +3,9 @@
 var FDRecipeInputs = (function () {
   'use strict';
   var TYPES = ['object', 'array', 'string', 'integer', 'number', 'boolean', 'null'];
+  // The native v1 recipe language admits 512 scalar leaves. Do not reject a
+  // valid retained workflow just because the browser form once stopped at 64.
+  var MAX_FIELDS = 512, MAX_NODES = 8192;
   var DOMAINS = ['lightwork.action-recipe.v2', 'lightwork.action-choice.v1',
     'lightwork.workflow-transducer.v1', 'lightwork.workflow-memory.v1'];
   function fail(message) { throw new Error('Workflow inputs: ' + message); }
@@ -24,9 +27,23 @@ var FDRecipeInputs = (function () {
   }
   // Keep the original signed evidence opaque. JSON.parse/JSON.stringify alone
   // changes Python float 1.0 into integer 1 and rounds large integer literals.
-  // This bounded scanner only finds top-level value spans AFTER JSON.parse;
-  // it never evaluates input or substitutes a changed evidence object.
-  var evidenceWire = new Map(), wireSize = 0;
+  // Custody stays with its exact holder through history and encrypted recovery;
+  // never look up original evidence by an already-rounded global fingerprint.
+  var EVIDENCE = ['learned_recipe', 'recipe_lineage', 'recipe_teaching', 'learned_operator'];
+  var RESPONSE_FIELDS = ['artifact', 'value', 'question', 'predictions', 'output'];
+  var CUSTODY = '_fdEvidence';
+  function projection(value) {
+    var remaining = 262144;
+    function encode(item, depth) {
+      if (--remaining < 0 || depth > 128) fail('the learning evidence is too complex to submit safely.');
+      if (Array.isArray(item)) return '[' + item.map(function (child) { return encode(child, depth + 1); }).join(',') + ']';
+      if (object(item)) return '{' + Object.keys(item).sort().map(function (key) {
+        return JSON.stringify(key) + ':' + encode(item[key], depth + 1);
+      }).join(',') + '}';
+      return JSON.stringify(item);
+    }
+    return encode(value, 0);
+  }
   function members(raw) {
     var found = new Map(), i = 0;
     function space() { while (/\s/.test(raw.charAt(i)) && i < raw.length) i++; }
@@ -49,10 +66,13 @@ var FDRecipeInputs = (function () {
         i++;
       }
     }
-    space(); if (raw[i++] !== '{') return found;
+    space(); var array = raw[i] === '[';
+    if (raw[i++] !== (array ? '[' : '{')) return found;
     while (i < raw.length) {
-      space(); if (raw[i] === '}') break;
-      var key = JSON.parse(quoted()); space(); i++; space(); var start = i;
+      space(); if (raw[i] === (array ? ']' : '}')) break;
+      var key = array ? found.size : JSON.parse(quoted());
+      if (!array) { space(); i++; }
+      space(); var start = i;
       valueEnd();
       if (found.has(key)) fail('the saved workflow repeats a field. Reopen a valid copy.');
       found.set(key, raw.slice(start, i).trim());
@@ -63,32 +83,96 @@ var FDRecipeInputs = (function () {
   function parseText(raw) {
     if (typeof raw !== 'string' || raw.length > 4 * 1024 * 1024) fail('this workflow is too large to open safely.');
     var parsed = JSON.parse(raw), flow = parsed, parts = object(parsed) ? members(raw) : new Map();
-    if (object(parsed) && object(parsed.flow)) { flow = parsed.flow; parts = members(parts.get('flow')); }
-    if (object(flow) && flow.learned_recipe != null) {
-      var exact = parts.get('learned_recipe'), fingerprint = JSON.stringify(flow.learned_recipe);
-      if (typeof exact !== 'string' || exact.length > 2 * 1024 * 1024 || JSON.stringify(JSON.parse(exact)) !== fingerprint)
-        fail('the saved learning evidence could not be read. Reopen the workflow.');
-      if (evidenceWire.has(fingerprint)) wireSize -= evidenceWire.get(fingerprint).length;
-      evidenceWire.delete(fingerprint); evidenceWire.set(fingerprint, exact); wireSize += exact.length;
-      while (evidenceWire.size > 16 || wireSize > 8 * 1024 * 1024) {
-        var first = evidenceWire.keys().next().value;
-        wireSize -= evidenceWire.get(first).length; evidenceWire.delete(first);
+    var remaining = 8192, retained = 0;
+    function bind(holder, source, extra) {
+      if (!object(holder) || --remaining < 0) fail('the saved workflow has too many nested steps to open safely.');
+      var spans = members(source), prior = holder[CUSTODY], custody = {}, fields = EVIDENCE.concat(extra || []);
+      if (prior != null && (!object(prior) || Object.keys(prior).some(function (key) { return fields.indexOf(key) < 0; })))
+        fail('the original learning evidence is unavailable or changed. Reopen the saved workflow before continuing.');
+      fields.forEach(function (key) {
+        if (holder[key] == null) return;
+        var exact = prior && prior[key] != null ? prior[key] : spans.get(key);
+        if (typeof exact !== 'string' || exact.length > 2 * 1024 * 1024 ||
+            projection(JSON.parse(exact)) !== projection(holder[key]) || (retained += exact.length) > 4 * 1024 * 1024)
+          fail('the original learning evidence is unavailable or changed. Reopen the saved workflow before continuing.');
+        custody[key] = exact;
+      });
+      if (Object.keys(custody).length) holder[CUSTODY] = custody; else delete holder[CUSTODY];
+      if (Array.isArray(holder.nodes)) {
+        var nodes = members(spans.get('nodes'));
+        holder.nodes.forEach(function (node, index) { bind(node, nodes.get(index)); });
+      }
+      if (object(holder.body)) bind(holder.body, spans.get('body'));
+      if (Array.isArray(holder.branches)) {
+        var branches = members(spans.get('branches'));
+        holder.branches.forEach(function (branch, index) { bind(branch, branches.get(index)); });
       }
     }
+    if (object(parsed) && !Array.isArray(parsed.nodes)) bind(parsed, raw, RESPONSE_FIELDS);
+    else if (Array.isArray(parsed)) {
+      var items = members(raw);
+      parsed.forEach(function (item, index) { if (object(item)) bind(item, items.get(index), RESPONSE_FIELDS); });
+    }
+    if (object(parsed) && object(parsed.flow)) { flow = parsed.flow; raw = parts.get('flow'); }
+    else if (object(parsed) && object(parsed.draft)) { flow = parsed.draft; raw = parts.get('draft'); }
+    if (object(flow) && flow !== parsed) bind(flow, raw);
+    else if (object(flow) && Array.isArray(flow.nodes)) bind(flow, raw);
     return parsed;
   }
+  function fieldText(holder, key) {
+    var exact = holder && holder[CUSTODY] && holder[CUSTODY][key];
+    if (EVIDENCE.concat(RESPONSE_FIELDS).indexOf(key) < 0 || typeof exact !== 'string' ||
+        exact.length > 2 * 1024 * 1024 || projection(JSON.parse(exact)) !== projection(holder[key]))
+      fail('the original learning evidence is unavailable or changed. Reopen the saved workflow before continuing.');
+    return exact;
+  }
   function flowText(flow) {
-    if (!object(flow) || flow.learned_recipe == null) return JSON.stringify(flow);
-    var exact = evidenceWire.get(JSON.stringify(flow.learned_recipe));
-    if (!exact) fail('the original learning evidence is unavailable or changed. Reopen the saved workflow before continuing.');
-    return '{' + Object.keys(flow).map(function (key) {
-      return JSON.stringify(key) + ':' + (key === 'learned_recipe' ? exact : JSON.stringify(flow[key]));
-    }).join(',') + '}';
+    var remaining = 8192, retained = 0;
+    function encode(holder) {
+      if (!object(holder)) return JSON.stringify(holder);
+      if (--remaining < 0) fail('this workflow has too many nested steps to submit safely.');
+      return '{' + Object.keys(holder).filter(function (key) { return key !== CUSTODY && holder[key] !== undefined; }).map(function (key) {
+        var value = holder[key], exact;
+        if (EVIDENCE.indexOf(key) >= 0 && value != null) {
+          exact = holder[CUSTODY] && holder[CUSTODY][key];
+          if (typeof exact !== 'string' || exact.length > 2 * 1024 * 1024 ||
+              projection(JSON.parse(exact)) !== projection(value) || (retained += exact.length) > 4 * 1024 * 1024)
+            fail('the original learning evidence is unavailable or changed. Reopen the saved workflow before continuing.');
+        } else if ((key === 'nodes' || key === 'branches') && Array.isArray(value)) exact = '[' + value.map(encode).join(',') + ']';
+        else if (key === 'body' && object(value)) exact = encode(value);
+        else exact = JSON.stringify(value);
+        return JSON.stringify(key) + ':' + exact;
+      }).join(',') + '}';
+    }
+    return encode(flow);
   }
   function responseJson(response) { return response.text().then(parseText); }
+  // Legacy encrypted drafts can recover custody only from the freshly read,
+  // authorized SAME base version, never by reconstructing rounded numbers.
+  function inheritEvidence(target, source) {
+    var remaining = 8192;
+    function visit(left, right) {
+      if (!object(left) || !object(right) || --remaining < 0) return;
+      EVIDENCE.forEach(function (key) {
+        if (left[key] == null || (left[CUSTODY] && left[CUSTODY][key] != null) ||
+            !right[CUSTODY] || typeof right[CUSTODY][key] !== 'string' ||
+            projection(left[key]) !== projection(right[key])) return;
+        if (!left[CUSTODY]) left[CUSTODY] = {};
+        left[CUSTODY][key] = right[CUSTODY][key];
+      });
+      if (Array.isArray(left.nodes) && Array.isArray(right.nodes)) {
+        var byId = new Map(right.nodes.map(function (node) { return [node.id, node]; }));
+        left.nodes.forEach(function (node) { visit(node, byId.get(node.id)); });
+      }
+      if (object(left.body)) visit(left.body, right.body);
+      if (Array.isArray(left.branches) && Array.isArray(right.branches))
+        left.branches.forEach(function (branch, index) { visit(branch, right.branches[index]); });
+    }
+    visit(target, source);
+  }
   function plan(artifact) {
     if (!object(artifact)) fail('the saved workflow is unavailable. Reopen it and try again.');
-    var fields = [], remaining = 256, rows, consumed = new Set();
+    var fields = [], remaining = MAX_NODES, rows, consumed = new Set();
     function visit(source, path, legacy) {
       if (--remaining < 0 || path.length > 12) fail('this workflow has too many nested fields for this form. Ask your workspace administrator to review it.');
       var type, children = [], node;
@@ -111,7 +195,8 @@ var FDRecipeInputs = (function () {
       node = { type: type, path: path.slice(), label: label(path), children: children, declared: !legacy };
       if (type === 'object') {
         var names = legacy ? source.keys : object(source.properties) && Object.keys(source.properties);
-        if (!strings(names) || names.length > 64 || names.some(function (key) { return key.length > 1024; }))
+        if (!strings(names) || names.length > (legacy ? MAX_FIELDS : 64) ||
+            names.some(function (key) { return key.length > 1024; }))
           fail('the saved field names cannot be displayed safely. Ask your workspace administrator to review them.');
         if (!legacy && (source.additionalProperties !== false || !strings(source.required) ||
             JSON.stringify(source.required.slice().sort()) !== JSON.stringify(names.slice().sort())))
@@ -121,8 +206,9 @@ var FDRecipeInputs = (function () {
         });
       } else if (type === 'array') {
         var count = legacy ? source.length : source.minItems;
-        if (!Number.isSafeInteger(count) || count < 0 || count > 64 || (!legacy && count !== source.maxItems))
-          fail('this form needs a list with a fixed length of at most 64 items. Ask your workspace administrator to review it.');
+        if (!Number.isSafeInteger(count) || count < 0 || count > (legacy ? MAX_FIELDS : 64) ||
+            (!legacy && count !== source.maxItems))
+          fail('this workflow has a list this form cannot display safely. Ask your workspace administrator to review it.');
         // Validate an empty list's declared item schema too; never ignore an unsupported keyword.
         if (!legacy && count === 0) {
           var before = fields.length;
@@ -131,7 +217,8 @@ var FDRecipeInputs = (function () {
         }
         for (var i = 0; i < count; i++) children.push({ key: i, node: visit(legacy ? null : source.items, path.concat(i), legacy) });
       } else {
-        if (fields.length >= 64) fail('this workflow needs more than 64 values. Ask your workspace administrator to review it.');
+        if (fields.length >= MAX_FIELDS)
+          fail('this workflow needs more than ' + MAX_FIELDS + ' values. Ask your workspace administrator to review it.');
         if (type === 'string') {
           node.min = legacy ? 0 : (source.minLength === undefined ? 0 : source.minLength);
           node.max = legacy ? 1024 : source.maxLength;
@@ -152,7 +239,8 @@ var FDRecipeInputs = (function () {
     }
     var tree;
     if (artifact.schema === 'lightwork.action-recipe.v1') {
-      if (!Array.isArray(artifact.input_shape) || artifact.input_shape.length > 256) fail('the saved fields cannot be displayed. Ask your workspace administrator to review them.');
+      if (!Array.isArray(artifact.input_shape) || artifact.input_shape.length > MAX_NODES)
+        fail('the saved fields cannot be displayed. Ask your workspace administrator to review them.');
       rows = new Map();
       artifact.input_shape.forEach(function (row) {
         if (!object(row) || !Array.isArray(row.path) || row.path.length > 12 || row.path.some(function (part) {
@@ -234,7 +322,7 @@ var FDRecipeInputs = (function () {
   }
   function payloadText(model, payload) {
     return '{' + Object.keys(payload).map(function (key) {
-      return JSON.stringify(key) + ':' + (key === 'data' ? wireData(model, payload.data) : key === 'flow' ? flowText(payload.flow) : JSON.stringify(payload[key]));
+      return JSON.stringify(key) + ':' + (key === 'data' && model ? wireData(model, payload.data) : key === 'flow' ? flowText(payload.flow) : JSON.stringify(payload[key]));
     }).join(',') + '}';
   }
   var open = false;
@@ -251,7 +339,9 @@ var FDRecipeInputs = (function () {
     var heading = document.createElement('h2'); heading.id = 'recipe-input-title'; heading.className = 'mv-form__title'; heading.textContent = options.title || 'Workflow inputs';
     form.appendChild(heading);
     var help = document.createElement('p');
-    help.textContent = 'Enter this case’s values. The saved learned rules determine the fields. Actions still require their normal approvals.';
+    var inputCount = model.fields.filter(function (field) { return field.type !== 'null'; }).length;
+    help.textContent = (inputCount ? 'Enter ' + inputCount + ' value' + (inputCount === 1 ? '' : 's') +
+      ' for this case. ' : '') + 'The saved workflow determines the fields. Actions still require their normal approvals.';
     form.appendChild(help);
     var controls = Object.create(null), errors = Object.create(null);
     var fields = document.createElement('div'); fields.className = 'fd-recipe-fields';
@@ -271,10 +361,12 @@ var FDRecipeInputs = (function () {
           var option = document.createElement('option'); option.value = entry[0]; option.textContent = entry[1]; control.appendChild(option);
         });
         control.required = true;
+      } else if (field.type === 'string') {
+        control = document.createElement('textarea'); control.rows = 3; control.autocomplete = 'off';
+        control.required = field.min > 0;
       } else {
         control = document.createElement('input'); control.type = 'text'; control.autocomplete = 'off';
-        if (field.type !== 'string') { control.inputMode = 'decimal'; control.required = true; }
-        else control.required = field.min > 0;
+        control.inputMode = 'decimal'; control.required = true;
       }
       control.id = field.id; control.className = 'input'; wrap.appendChild(control);
       if (field.type !== 'null') controls[field.id] = control;
@@ -328,6 +420,6 @@ var FDRecipeInputs = (function () {
     });
   }
   return { plan: plan, read: read, wireData: wireData, payloadText: payloadText, prompt: prompt,
-    parseText: parseText, flowText: flowText, responseJson: responseJson };
+    parseText: parseText, flowText: flowText, fieldText: fieldText, responseJson: responseJson, inheritEvidence: inheritEvidence };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = FDRecipeInputs;

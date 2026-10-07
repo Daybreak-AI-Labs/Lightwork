@@ -6,11 +6,13 @@ const first = { ...connection, cacheScope: '11111111-1111-4111-8111-111111111111
 const second = { ...connection, token: newer.token, cacheScope: '22222222-2222-4222-8222-222222222222' };
 const save = (cache, value, settings) => cache.saveBundle(value, settings.baseUrl, settings.cacheScope);
 const readCache = (cache, settings) => cache.loadBundle(settings.baseUrl, settings.cacheScope);
-const bundle = title => ({ schema: 'maverick-offline/1', goals: [{id:1,title,status:'active'}], glance: {counts:{active:1,pending_approvals:0,open_questions:0},spend:{dollars:0},active:[{id:1,title}]} });
+const policy = {allowed:true, max_age_seconds:86400, max_bytes:2097152, revision:'a'.repeat(64)};
+const bundle = title => ({ schema: 'maverick-offline/1', as_of:Date.now()/1000, cache_policy:policy, goals: [{id:1,title,status:'active'}], glance: {counts:{active:1,pending_approvals:0,open_questions:0},spend:{dollars:0},active:[{id:1,title}]} });
 function fixture() {
   const values = new Map();
   const storage = {
     getItem: async key => values.get(key) ?? null,
+    removeItem: async key => {values.delete(key);},
     setItem: async (key, value) => { values.set(key, value); },
   };
   const cache = source('src/offlineCache.ts', {'@react-native-async-storage/async-storage':storage});
@@ -75,3 +77,33 @@ for (const screenName of ['RunsListScreen', 'GlanceScreen']) {
     });
   }
 }
+
+
+test('server disablement removes a saved copy and missing policy cannot create one', async () => {
+  const {cache, values} = fixture();
+  await save(cache, bundle('PRIVATE'), first);
+  assert.ok(await readCache(cache, first));
+  await save(cache, {...bundle('PRIVATE'), cache_policy:{...policy,allowed:false}}, first);
+  assert.equal(await readCache(cache, first), null);
+  assert.equal(values.size, 0);
+  assert.equal(await save(cache, {...bundle('UNVERIFIED'),cache_policy:undefined}, first), false);
+});
+
+test('organization retention ceiling rejects an old snapshot even when just downloaded', async () => {
+  const {cache} = fixture();
+  const old = {...bundle('EXPIRED'),as_of:Date.now()/1000-61,cache_policy:{...policy,max_age_seconds:60}};
+  assert.equal(await save(cache, old, first), false);
+  assert.equal(await readCache(cache, first), null);
+});
+
+test('late cache write cannot survive policy clearing or delete a newer permitted snapshot', async () => {
+  const {cache, storage} = fixture();
+  const pending = deferred(), write = storage.setItem; let calls = 0;
+  storage.setItem = async (...args) => { if (++calls === 1) await pending.promise; await write(...args); };
+  const old = save(cache,bundle('OLD'),first);
+  await Promise.resolve();
+  const clearing = save(cache,{...bundle('DISABLED'),cache_policy:{...policy,allowed:false}},first);
+  const current = save(cache,bundle('CURRENT'),first);
+  pending.resolve(); await Promise.all([old,clearing,current]);
+  assert.equal((await readCache(cache,first)).bundle.goals[0].title,'CURRENT');
+});

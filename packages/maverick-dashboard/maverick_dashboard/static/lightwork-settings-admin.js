@@ -9,18 +9,14 @@
     return node;
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function badge(ok, yes, no) {
     return el('span', 'badge ' + (ok ? 'active' : 'blocked'), ok ? yes : no);
   }
-  async function call(path, method) {
-    var response = await window.fetch(path, {
-      method: method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'}
-    });
-    if (!response.ok) throw response;
-    return response.json();
+  async function call(path, method, body) {
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store',
+      body: body == null ? undefined : body, timeout: 30000});
   }
 
   // Forms marked data-confirm ask first (remove a key, reset visibility...).
@@ -31,7 +27,7 @@
         return;
       }
       event.preventDefault();
-      window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Confirm'}).then(function (ok) {
+      window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Save this change'}).then(function (ok) {
         if (!ok) return;
         form.dataset.confirmed = 'true';
         if (form.requestSubmit) form.requestSubmit(); else form.submit();
@@ -41,10 +37,10 @@
 
   // ---- Maintenance tab -------------------------------------------------------
   var base = '/api/v1/admin/system';
+  var runs = {}, encryptionContext = null;
   function out(name) { return document.querySelector('[data-maintenance-out="' + name + '"]'); }
   function say(name, text) {
-    var node = document.querySelector('[data-maintenance-status="' + name + '"]');
-    if (node) node.textContent = text;
+    window.mvStatus(document.querySelector('[data-maintenance-status="' + name + '"]'), text);
   }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ''; }
 
@@ -104,7 +100,7 @@
       fact('Status', data.status_label);
       fact('Plan', data.plan);
       fact('Licensed to', data.customer);
-      fact('Renews or ends', data.expires ? new Date(data.expires + 'T00:00:00').toLocaleDateString() : '');
+      fact('Renews or ends', data.expires ? (window.mvDateAbsolute ? window.mvDateAbsolute(data.expires) : new Date(data.expires + 'T00:00:00').toLocaleDateString()) : '');
       fact('Add-ons', data.add_ons.join(', '));
       box.appendChild(dl);
       var list = el('ul', 'maintenance-list');
@@ -129,10 +125,10 @@
       });
       box.appendChild(summary);
       if (!data.stopped.length) return 'Nothing has stopped.';
-      box.appendChild(el('h3', null, 'Stopped jobs'));
+      box.appendChild(el('h3', null, 'Stopped tasks'));
       var table = el('table');
       var head = el('tr');
-      ['Job', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
+      ['Task', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
       var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
       var body = el('tbody');
       data.stopped.forEach(function (job) {
@@ -141,27 +137,9 @@
         tr.appendChild(el('td', null, when(job.when)));
         var action = el('td');
         if (job.needs_decision) {
-          var button = el('button', 'btn btn--primary', 'Resume schedule');
-          button.type = 'button';
-          button.addEventListener('click', async function () {
-            var ok = await window.mvConfirm('Let this schedule run again from its next time? The run that could not be confirmed will not be repeated.', {okText: 'Resume schedule'});
-            if (!ok) return;
-            button.disabled = true;
-            try {
-              var response = await window.fetch(base + '/queue/' + encodeURIComponent(job.id) + '/resume', {
-                method: 'POST', credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({attempts: job.attempts})
-              });
-              if (!response.ok) throw response;
-              say('queue', 'The schedule will run again at its next time.');
-              run('queue');
-            } catch (failure) {
-              say('queue', errorText(failure, 'resume the schedule'));
-              button.disabled = false;
-            }
-          });
-          action.appendChild(button);
+          var review = el('a', 'btn btn--primary', 'Review this schedule');
+          review.href = '/automations?recover_schedule=' + encodeURIComponent(job.id);
+          action.appendChild(review);
         } else {
           action.appendChild(el('span', 'muted', 'Nothing to do. It will not run again.'));
         }
@@ -179,41 +157,103 @@
       return data.stopped.length + ' job' + (data.stopped.length === 1 ? '' : 's') + ' stopped.';
     },
     encryption: function (data) {
+      encryptionContext = data.context;
       var box = out('encryption'); box.textContent = '';
       var p = el('p');
-      p.appendChild(badge(data.enabled, 'Encrypted', 'Not encrypted'));
+      p.appendChild(badge(data.enabled, 'New records protected', 'Protection is off'));
       p.appendChild(document.createTextNode(' ' + (data.enabled
-        ? 'Saved records are encrypted on this computer.'
+        ? 'Stored-data protection is on. Older records are checked separately below.'
         : 'Saved records are not encrypted. Whoever installed Lightwork can turn encryption on.')));
       box.appendChild(p);
+      if (data.blocked) box.appendChild(el('p', 'muted', data.blocked));
       if (!data.enabled) return '';
       var actions = el('p', 'settings-row-form');
+      var pendingKey = 'lightwork.encryption.action.' + data.context;
+      var pending;
+      try { pending = JSON.parse(window.sessionStorage.getItem(pendingKey) || 'null'); } catch (_) { pending = null; }
+      async function readOriginal() {
+        if (!pending) return;
+        say('encryption', 'Reading the original result…');
+        try {
+          var saved = await call(base + '/encryption/actions/' + pending.operation);
+          if (encryptionContext !== data.context || (saved.receipt && saved.receipt.context !== data.context)) return;
+          if (saved.receipt && saved.receipt.state === 'confirmed') {
+            window.sessionStorage.removeItem(pendingKey); pending = null;
+            await run('encryption'); if (encryptionContext === data.context) say('encryption', saved.receipt.message);
+          } else {
+            say('encryption', saved.receipt && saved.receipt.message ? saved.receipt.message : 'The original result is unconfirmed. It has not been repeated. Read it again, or keep this result and review a separate action.');
+          }
+        } catch (failure) { if (encryptionContext === data.context) say('encryption', await plainFailure(failure, 'read the original result')); }
+      }
+      var busy = false;
+      async function reviewedAction(action) {
+        if (busy || pending) return;
+        busy = true;
+        actions.querySelectorAll('button').forEach(function (button) { button.disabled = true; });
+        try {
+          var review = await call(base + '/encryption/review', 'POST', {action: action});
+          if (encryptionContext !== data.context) return;
+          if (review.context !== data.context) throw new Error('Your account or workspace changed. Refresh before continuing.');
+          if (!await window.mvConfirm(review.summary, {okText: action === 'rotate' ? 'Create key' : 'Protect records'})) return;
+          if (encryptionContext !== data.context) return;
+          var bytes = new Uint8Array(16); window.crypto.getRandomValues(bytes);
+          var operation = Array.from(bytes, function (value) { return value.toString(16).padStart(2, '0'); }).join('');
+          pending = {operation: operation, action: action};
+          window.sessionStorage.setItem(pendingKey, JSON.stringify(pending));
+          say('encryption', 'Applying this reviewed action…');
+          var result = await call(base + (action === 'rotate' ? '/encryption/new-key' : '/encryption/protect-older'), 'POST',
+            {context: data.context, review: review.token, operation: operation, confirm: true});
+          if (encryptionContext !== data.context || result.context !== data.context) return;
+          if (result.state === 'confirmed') {
+            window.sessionStorage.removeItem(pendingKey); pending = null;
+            await run('encryption'); if (encryptionContext === data.context) say('encryption', result.message);
+          } else { await run('encryption'); await readOriginal(); }
+        } catch (failure) {
+          if (encryptionContext !== data.context) return;
+          if (pending) { await run('encryption'); await readOriginal(); }
+          else say('encryption', await plainFailure(failure, 'prepare this encryption change'));
+        } finally {
+          busy = false;
+          actions.querySelectorAll('button').forEach(function (button) { button.disabled = Boolean(pending); });
+        }
+      }
+      if (pending) {
+        var read = el('button', 'btn', 'Read original result'); read.type = 'button';
+        read.addEventListener('click', readOriginal); box.appendChild(read);
+        var keep = el('button', 'btn btn--ghost', 'Keep result and check again'); keep.type = 'button';
+        keep.addEventListener('click', async function () {
+          if (!await window.mvConfirm('The original result stays unconfirmed in the activity history. Keep it and check current protection before reviewing a separate action?', {okText: 'Keep and check'})) return;
+          window.sessionStorage.removeItem(pendingKey); pending = null; await run('encryption');
+        }); box.appendChild(keep);
+        box.appendChild(el('p', 'muted', 'An earlier action needs readback. No action will repeat automatically.'));
+      }
       if (data.older_unprotected) {
         box.appendChild(el('p', null, data.older_unprotected + ' older record' + (data.older_unprotected === 1 ? ' was' : 's were') + ' saved before encryption was turned on.'));
         var protect = el('button', 'btn btn--primary', 'Encrypt older records');
         protect.type = 'button';
         protect.addEventListener('click', function () {
-          mutate('encryption', '/encryption/protect-older',
-            'Encrypt the older records now? This can take a few minutes. Keep a backup of your encryption key first.',
-            'Encrypt records', function (res) { return res.protected + ' record' + (res.protected === 1 ? '' : 's') + ' encrypted.'; });
+          reviewedAction('protect');
         });
+        protect.disabled = Boolean(pending) || !data.can_protect;
         actions.appendChild(protect);
       } else if (data.older_note) {
         // Records kept in a shared database cannot be checked from here:
         // say so instead of claiming they are encrypted.
         box.appendChild(el('p', 'muted', data.older_note));
       } else if (data.older_unprotected === 0) {
-        box.appendChild(el('p', 'muted', 'All older records are encrypted.'));
+        box.appendChild(el('p', 'muted', 'No unprotected fields were found among the supported older records in this workspace.'));
       }
       var rotate = el('button', 'btn', 'Make a new encryption key');
       rotate.type = 'button';
       rotate.addEventListener('click', function () {
-        mutate('encryption', '/encryption/new-key',
-          'Make a new encryption key? New records use it straight away. Older keys are kept so existing records stay readable.',
-          'Make new key', function () { return 'New encryption key in use.'; });
+        reviewedAction('rotate');
       });
+      rotate.disabled = Boolean(pending) || !data.can_rotate;
+      if (!data.can_rotate) box.appendChild(el('p', 'muted', 'Workspace keys and keys held by another key service need their own coordinated change. A local key cannot replace them.'));
       actions.appendChild(rotate);
       box.appendChild(actions);
+      var backup = el('a', 'btn btn--ghost', 'Keep a separate key backup'); backup.href = '/workspace/recovery';
+      box.appendChild(backup);
       return '';
     },
     diagnostics: function (data) {
@@ -238,8 +278,8 @@
         });
         box.appendChild(calls);
       }
-      if (!data.paused_services.length && !data.recent_calls.length) return 'No AI services have been called since Lightwork started.';
-      return data.paused_services.length ? 'Some services are paused after errors. Lightwork retries them automatically.' : 'All services are working.';
+      if (!data.paused_services.length && !data.recent_calls.length) return 'No connection pauses or recent requests are recorded on this server.';
+      return data.paused_services.length ? 'These recorded connections were paused after errors. After cooldown, the next request may check a connection. An older connection can remain listed after settings change.' : 'No connection pauses are recorded. This does not confirm that every connected service is available.';
     }
   };
   // Technical rows (kernel wording) stay inside the collapsed details.
@@ -292,14 +332,8 @@
   async function plainFailure(failure, action) {
     // A server sentence written for people is shown as is; anything else
     // falls back to the shared plain message.
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
-    return errorText(failure, action);
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    return plain || errorText(failure, action);
   }
   function waitForExport(job, done) {
     // The file is prepared in the background; ask for its status until it is
@@ -310,7 +344,7 @@
       try {
         var state = await call(base + '/client/export/' + encodeURIComponent(job), 'GET');
         if (state.state === 'ready') { done(null, base + '/client/export/' + encodeURIComponent(job) + '/download'); return; }
-        if (state.state === 'failed') { done(state.message || 'The export could not be prepared.'); return; }
+        if (state.state === 'failed') { done(state.message || 'The export could not be prepared. Try again.'); return; }
       } catch (failure) { done(await plainFailure(failure, 'prepare the download')); return; }
       if (tries > 400) { done('The export is taking too long. Try again later.'); return; }
       setTimeout(poll, 3000);
@@ -361,52 +395,29 @@
       var keepLabel = el('label', 'settings-field');
       var keep = el('input'); keep.type = 'checkbox'; keep.checked = true; keep.name = 'keep_activity_record';
       var keepRow = el('span'); keepRow.appendChild(keep);
-      keepRow.appendChild(document.createTextNode(' Keep the activity record (needed if the law requires you to keep it)'));
+      keepRow.appendChild(document.createTextNode(' Preview with the activity record kept'));
       keepLabel.appendChild(keepRow);
-      var erase = el('button', 'btn btn--danger', 'Erase all data');
-      erase.type = 'button';
+      var review = el('button', 'btn btn--ghost', 'Review local data');
+      review.type = 'button';
       var previewBox = el('div');
-      erase.addEventListener('click', async function () {
-        erase.disabled = true;
+      review.addEventListener('click', async function () {
+        review.disabled = true;
         previewBox.textContent = '';
-        say('client', 'Counting what would be erased…');
+        say('client', 'Counting local files…');
         var preview;
         try {
           preview = await call(base + '/client/erase/preview?keep_activity_record=' + (keep.checked ? 'true' : 'false'), 'GET');
         } catch (failure) {
-          say('client', await plainFailure(failure, 'count what would be erased'));
-          erase.disabled = false;
+          say('client', await plainFailure(failure, 'count local files'));
+          review.disabled = false;
           return;
         }
-        previewBox.appendChild(el('p', null, 'Erasing removes ' + preview.files + ' file' + (preview.files === 1 ? '' : 's') + ':'));
+        previewBox.appendChild(el('p', null, 'This installation has ' + preview.files + ' local file' + (preview.files === 1 ? '' : 's') + ' in the selected scope:'));
         previewBox.appendChild(areaList(preview));
-        say('client', preview.keeps_activity_record ? 'The activity record is kept.' : 'The activity record is erased too.');
-        var ok = await window.mvConfirm('Erase all data for ' + data.organisation + '? Every task, conversation, lesson and saved file for this organisation is deleted for good and cannot be brought back. Download a copy first if you may need it.', {okText: 'Erase everything'});
-        if (!ok) { erase.disabled = false; return; }
-        var typed = window.mvForm ? await window.mvForm('Type the organisation name to confirm', [
-          {key: 'organisation', label: 'Organisation name (' + data.organisation + ')', type: 'text', required: true}],
-          {okText: 'Erase everything'}) : {organisation: data.organisation};
-        if (!typed) { erase.disabled = false; return; }
-        if (String(typed.organisation || '').trim() !== data.organisation) {
-          say('client', 'The name you typed does not match ' + data.organisation + '. Nothing was erased.');
-          erase.disabled = false;
-          return;
-        }
-        say('client', 'Erasing…');
-        try {
-          var response = await window.fetch(base + '/client/erase', {
-            method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({organisation: String(typed.organisation).trim(), keep_activity_record: keep.checked, confirm: true})
-          });
-          if (!response.ok) throw response;
-          var result = await response.json();
-          say('client', 'All data was erased (' + result.files_removed + ' file' + (result.files_removed === 1 ? '' : 's') + ' removed).');
-        } catch (failure) {
-          say('client', await plainFailure(failure, 'erase the data'));
-          erase.disabled = false;
-        }
+        say('client', 'This preview ' + (preview.keeps_activity_record ? 'keeps' : 'includes') + ' the activity record. This running page cannot safely erase local data. An administrator must complete removal while Lightwork is stopped. Connected services and exported copies need separate removal.');
+        review.disabled = false;
       });
-      row.appendChild(erase);
+      row.appendChild(review);
       box.appendChild(row);
       box.appendChild(keepLabel);
       box.appendChild(previewBox);
@@ -449,17 +460,13 @@
         var go = el('button', 'btn btn--danger', 'Remove these records');
         go.type = 'button';
         go.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Remove these old records from this workspace? They cannot be brought back.', {okText: 'Remove'});
+          var ok = await window.mvConfirm('Remove these old records from this workspace? They cannot be brought back.', {okText: 'Remove old records'});
           if (!ok) return;
           go.disabled = true;
           say('cleanup', 'Removing…');
           try {
-            var response = await window.fetch(base + '/cleanup', {
-              method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({days: days, activity_days: activityDays, confirm: true})
-            });
-            if (!response.ok) throw response;
-            var done = await response.json();
+            var done = await window.mvFetchJSON(base + '/cleanup',
+              {method: 'POST', body: {days: days, activity_days: activityDays, confirm: true}});
             box.textContent = '';
             say('cleanup', 'Removed ' + done.conversations + ' conversation' + (done.conversations === 1 ? '' : 's') +
               ' and ' + done.activity + ' activity entr' + (done.activity === 1 ? 'y' : 'ies') + '.');
@@ -476,16 +483,18 @@
   }
 
   async function run(name) {
+    var sequence = runs[name] = (runs[name] || 0) + 1;
     var button = document.querySelector('[data-maintenance-run="' + name + '"]');
     if (button) button.disabled = true;
     say(name, 'Checking…');
     try {
       var data = await call(base + paths[name][0], paths[name][1]);
+      if (runs[name] !== sequence) return;
       say(name, renderers[name](data) || '');
     } catch (failure) {
-      say(name, errorText(failure, actions[name]));
+      if (runs[name] === sequence) say(name, errorText(failure, actions[name]));
     } finally {
-      if (button) button.disabled = false;
+      if (button && runs[name] === sequence) button.disabled = false;
     }
   }
   async function mutate(name, path, question, okText, done) {

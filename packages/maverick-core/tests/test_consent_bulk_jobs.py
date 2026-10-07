@@ -142,8 +142,15 @@ def test_create_is_idempotent_and_rebinding_is_rejected(tmp_path: Path) -> None:
         "idempotency_key": "export-request-0002",
     }
     first = store.create_job("tenant-a", **kwargs)
+    now[0] += 60
     replay = store.create_job("tenant-a", **kwargs)
     assert replay == first
+    assert store.created_job_for_request("tenant-a", idempotency_key=kwargs["idempotency_key"],
+                                         actor_sha256=kwargs["actor_sha256"]) == first
+    assert store.created_job_for_request("tenant-a", idempotency_key=kwargs["idempotency_key"],
+                                         actor_sha256=_digest("another operator")) is None
+    assert store.created_job_for_request("tenant-b", idempotency_key=kwargs["idempotency_key"],
+                                         actor_sha256=kwargs["actor_sha256"]) is None
     assert store.credit_detail("tenant-a")["reserved"] == 1
     with pytest.raises(ConsentBulkJobConflict, match="different content"):
         store.create_job(
@@ -292,6 +299,61 @@ def test_closed_item_contract_and_credit_quota(tmp_path: Path) -> None:
             scheduled_for=None,
             idempotency_key="export-request-0006",
         )
+
+
+@pytest.mark.parametrize("receipt_limit", [0, 501, 100_000, True])
+def test_unsupported_export_size_is_rejected_before_job_or_credit_reservation(
+    tmp_path: Path, receipt_limit: object,
+) -> None:
+    now = [1_800_000_000.0]
+    store = _store(tmp_path, now)
+    store.ensure_credit_account("tenant-a", initial_credits=1)
+    before = store.credit_detail("tenant-a")
+
+    with pytest.raises(ConsentBulkJobValidationError, match="receipt_limit"):
+        store.create_job(
+            "tenant-a",
+            kind="export",
+            operation="export_receipts",
+            items=[{
+                "item_id": "export-too-wide",
+                "profile_id": "profile-a",
+                "receipt_limit": receipt_limit,
+            }],
+            actor_sha256=_digest("operator"),
+            scheduled_for=None,
+            idempotency_key="unsupported-export-size",
+        )
+
+    assert store.list_jobs("tenant-a")["jobs"] == []
+    assert store.credit_detail("tenant-a") == before
+
+
+def test_unsupported_export_position_is_rejected_before_job_or_credit_reservation(
+    tmp_path: Path,
+) -> None:
+    now = [1_800_000_000.0]
+    store = _store(tmp_path, now)
+    store.ensure_credit_account("tenant-a", initial_credits=1)
+    before = store.credit_detail("tenant-a")
+
+    with pytest.raises(ConsentBulkJobValidationError, match="saved position"):
+        store.create_job(
+            "tenant-a",
+            kind="export",
+            operation="export_receipts",
+            items=[{
+                "item_id": "export-position",
+                "profile_id": "profile-a",
+                "after_sequence": 0,
+            }],
+            actor_sha256=_digest("operator"),
+            scheduled_for=None,
+            idempotency_key="unsupported-export-position",
+        )
+
+    assert store.list_jobs("tenant-a")["jobs"] == []
+    assert store.credit_detail("tenant-a") == before
 
 
 def test_receipt_reactivation_has_a_closed_lifecycle_item_contract(tmp_path: Path) -> None:

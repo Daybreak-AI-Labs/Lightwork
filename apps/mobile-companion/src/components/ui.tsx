@@ -2,8 +2,8 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { statusLabel, statusTone } from "../format";
-import { theme } from "../theme";
+import { statusLabel, statusLanguage, statusTone } from "../format";
+import { useTheme, type Palette } from "../theme";
 
 export function Button(props: {
   label: string;
@@ -12,7 +12,9 @@ export function Button(props: {
   disabled?: boolean;
   busy?: boolean;
   hint?: string;
+  language?: string;
 }): React.JSX.Element {
+  const theme = useTheme(), styles = stylesFor(theme);
   const primary = (props.kind ?? "primary") === "primary";
   return (
     <Pressable
@@ -23,7 +25,7 @@ export function Button(props: {
       disabled={props.disabled}
       onPress={props.onPress}
     >
-      <Text style={primary ? styles.primaryText : styles.secondaryText}>{props.label}</Text>
+      <Text style={primary ? styles.primaryText : styles.secondaryText} accessibilityLanguage={props.language}>{props.label}</Text>
     </Pressable>
   );
 }
@@ -34,6 +36,7 @@ export function EmptyState(props: {
   actionLabel?: string;
   onAction?: () => void;
 }): React.JSX.Element {
+  const theme = useTheme(), styles = stylesFor(theme);
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyTitle} accessibilityRole="header">{props.title}</Text>
@@ -46,28 +49,32 @@ export function EmptyState(props: {
 }
 
 export function StatusPill(props: { status: string }): React.JSX.Element {
-  const tone = statusTone(props.status);
+  const theme = useTheme(), styles = stylesFor(theme);
+  const baseTone = statusTone(props.status);
+  const tone = ({"#1a7f37": theme.success, "#9a6700": theme.text, "#cf222e": theme.danger} as Record<string, string>)[baseTone] || theme.muted;
   return (
     <View style={[styles.pill, { borderColor: tone }]}>
-      <Text style={[styles.pillText, { color: tone }]}>{statusLabel(props.status)}</Text>
+      <Text style={[styles.pillText, { color: tone }]} accessibilityLanguage={statusLanguage(props.status)}>{statusLabel(props.status)}</Text>
     </View>
   );
 }
 
 export function Banner(props: { text: string }): React.JSX.Element {
+  const theme = useTheme(), styles = stylesFor(theme);
   return <Text style={styles.banner} accessibilityRole="text" accessibilityLiveRegion="polite">{props.text}</Text>;
 }
 
 export function Loading(props: { text?: string }): React.JSX.Element {
+  const theme = useTheme(), styles = stylesFor(theme);
   return <Text style={styles.loading} accessibilityLiveRegion="polite">{props.text ?? "Loading…"}</Text>;
 }
 
-const styles = StyleSheet.create({
-  button: { marginTop: 12, borderRadius: 6, paddingVertical: 10, paddingHorizontal: 16, alignItems: "center" },
-  primary: { backgroundColor: theme.accent },
-  secondary: { borderWidth: 1, borderColor: theme.border, backgroundColor: "#ffffff" },
+const stylesFor = (theme: Palette) => StyleSheet.create({
+  button: { minHeight: 48, justifyContent: "center", marginTop: 12, borderRadius: 6, paddingVertical: 10, paddingHorizontal: 16, alignItems: "center" },
+  primary: { minHeight: 48, justifyContent: "center", backgroundColor: theme.accent },
+  secondary: { borderWidth: 1, borderColor: theme.border, backgroundColor: theme.background },
   disabled: { opacity: 0.55 },
-  primaryText: { color: "#ffffff", fontSize: 15, fontWeight: "600" },
+  primaryText: { color: theme.onAccent, fontSize: 15, fontWeight: "600" },
   secondaryText: { color: theme.accent, fontSize: 15, fontWeight: "600" },
   empty: { padding: 24, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: theme.text, textAlign: "center" },

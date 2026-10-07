@@ -67,13 +67,16 @@ def test_questions_are_answered_from_the_tasks_a_person_may_see(client, monkeypa
     pytest.importorskip("duckdb")
     _task("user:ada", "Ada's report", 2.5)
     _task("user:bob", "Bob's report", 4.0, status="failed")
+    unidentified = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "none"}).json()
+    assert unidentified["rows"] == []
+    _as(monkeypatch, "admin", "user:ada")
     whole = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "none"}).json()
-    assert whole["rows"] == [{"group": "all", "value": 6.5}]
+    assert whole["rows"] == [{"group": "all", "value": 2.5}]
     by_status = client.post("/api/v1/analytics/ask", json={"metric": "tasks", "group": "status"}).json()
-    assert {r["group"]: r["value"] for r in by_status["rows"]} == {"done": 1, "failed": 1}
-    _as(monkeypatch, "operator", "user:ada")
+    assert {r["group"]: r["value"] for r in by_status["rows"]} == {"done": 1}
+    _as(monkeypatch, "operator", "user:bob")
     mine = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "task"}).json()
-    assert len(mine["rows"]) == 1 and "Ada's report" in mine["rows"][0]["group"] and mine["rows"][0]["value"] == 2.5
+    assert len(mine["rows"]) == 1 and "Bob's report" in mine["rows"][0]["group"] and mine["rows"][0]["value"] == 4.0
     today = dt.date.today().isoformat()
     ranged = client.post("/api/v1/analytics/ask", json={"metric": "runs", "group": "day", "since": today, "until": today}).json()
     assert ranged["rows"] == [{"group": today, "value": 1.0}] or ranged["rows"][0]["value"] == 1.0
@@ -88,6 +91,28 @@ def test_questions_accept_only_the_listed_choices(client):
         assert client.post("/api/v1/analytics/ask", json=bad).status_code == 422, bad
 
 
+@pytest.mark.parametrize("principal, title, spend", [
+    (None, None, None),
+    ("user:ada", "Ada's report", "2.5"),
+    ("user:bob", "Bob's report", "4.0"),
+])
+def test_admin_sql_keeps_the_same_employee_content_scope(client, monkeypatch, principal, title, spend):
+    pytest.importorskip("duckdb")
+    _task("user:ada", "Ada's report", 2.5)
+    _task("user:bob", "Bob's report", 4.0, status="failed")
+    if principal is not None:
+        _as(monkeypatch, "admin", principal)
+    response = client.post("/api/v1/analytics/query", json={
+        "query": "SELECT g.title, sum(e.cost) AS spend FROM goals g JOIN episodes e ON e.goal_id=g.id GROUP BY g.title ORDER BY g.title",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["rows"] == ([[title, spend]] if title is not None else [])
+    if title is not None:
+        assert data["columns"] == ["title", "spend"]
+    assert data["more"] is False
+
+
 def test_questions_say_plainly_when_the_add_on_is_missing(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "duckdb", None)
     r = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "none"})
@@ -98,6 +123,7 @@ def test_questions_say_plainly_when_the_add_on_is_missing(client, monkeypatch):
 def test_typed_questions_are_for_installation_administrators_and_read_only(client, monkeypatch):
     pytest.importorskip("duckdb")
     _task("user:ada", "Ada's report", 1.0)
+    _as(monkeypatch, "admin", "user:ada")
     choices = client.get("/api/v1/analytics/choices").json()
     assert choices["can_write_queries"] is True
     r = client.post("/api/v1/analytics/query", json={"query": "SELECT count(*) AS n FROM goals"})
@@ -107,7 +133,7 @@ def test_typed_questions_are_for_installation_administrators_and_read_only(clien
         assert r.status_code == 422, bad
         assert "SELECT" in r.json()["detail"]
     assert client.post("/api/v1/analytics/query", json={"query": "x" * 4001}).status_code == 422
-    _as(monkeypatch, "operator", "user:ada")
+    _as(monkeypatch, "operator", "user:bob")
     assert client.get("/api/v1/analytics/choices").json()["can_write_queries"] is False
     assert client.post("/api/v1/analytics/query", json={"query": "SELECT 1"}).status_code == 403
 
@@ -135,7 +161,11 @@ def test_typed_questions_are_stopped_at_the_time_limit(client, monkeypatch):
 
 def test_health_uses_the_kernel_score_and_the_task_access_check(client, monkeypatch):
     gid = _task("user:ada", "Ada's report", 1.0)
-    h = client.get(f"/api/v1/goals/{gid}/health").json()
+    assert client.get(f"/api/v1/goals/{gid}/health").status_code == 404
+    _as(monkeypatch, "operator", "user:ada")
+    response = client.get(f"/api/v1/goals/{gid}/health")
+    assert response.status_code == 200, response.text
+    h = response.json()
     from maverick.health_score import goal_health
     _goal, kernel = goal_health(_world(), gid)
     assert h["score"] == kernel.score and h["grade"] == kernel.grade and h["finished"] is True
@@ -149,6 +179,8 @@ def test_health_uses_the_kernel_score_and_the_task_access_check(client, monkeypa
 
 def test_recorded_steps_are_read_through_the_verified_reader(client, monkeypatch, tmp_path):
     gid = _task("user:ada", "Ada's report", 1.0)
+    assert client.get(f"/api/v1/goals/{gid}/recorded-steps").status_code == 404
+    _as(monkeypatch, "operator", "user:ada")
     off = client.get(f"/api/v1/goals/{gid}/recorded-steps").json()
     assert off["recording"] is False
     traces = tmp_path / "traces"
@@ -179,14 +211,16 @@ def test_spend_replay_and_task_pages_carry_the_new_controls(client):
     from test_support.plain_language import developer_terms, visible_text
     gid = _task("", "Weekly report", 1.0)
     spend = client.get("/spend").text
-    assert "Questions About Your Tasks" in visible_text(spend) and 'id="io-ask-form"' in spend
+    assert "Questions about your tasks" in visible_text(spend) and 'id="io-ask-form"' in spend
     replay = client.get(f"/replay?goal={gid}").text
-    assert "Recorded Steps" in visible_text(replay) and 'id="io-steps-show"' in replay
+    assert "Recorded steps" in visible_text(replay) and 'id="io-steps-show"' in replay
     task = client.get(f"/chat/goal/{gid}").text
     text = visible_text(task)
     assert "Check this task's health" in text and "Run code for this task" in text
     assert "lightwork-insight-ops.js" in task and "lightwork-code-sandbox.js" in task
     for page, marker, end in ((spend, 'id="io-ask-title"', "</section>"), (replay, 'id="io-steps-title"', "</section>"),
-                              (task, '<div class="task-ops">', 'id="halt-card"')):
+                              # The task controls (health check, code sandbox) now sit after the
+                              # stop card, just before the reply composer.
+                              (task, '<div class="task-ops">', 'id="composer"')):
         start = page.index(marker)
         assert developer_terms("<main>" + page[start:page.index(end, start)] + "</main>") == []

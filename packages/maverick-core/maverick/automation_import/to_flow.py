@@ -16,7 +16,8 @@ this is a superset, not a replacement.
 
 Source-graph branch/loop capture, per importer:
 
-* n8n ``IF``/``Filter`` -> ``branch`` (arms wired);
+* n8n ``IF``/``Filter`` -> ``branch`` (arms wired); multiple outgoing
+  connections -> ``parallel`` branch flows (execution order is approximated);
 * Power Automate (WDL) ``If`` -> ``branch``, ``Foreach`` -> ``foreach``,
   ``Switch`` -> ``switch``, ``Until`` -> ``while`` (negated exit), ``Scope`` ->
   ``scope`` (bodies wired);
@@ -51,7 +52,7 @@ from ..flow.ir import (
     partition_draft_validation_errors,
 )
 from .ir import ImportedAutomation, ImportedStep, _safe_line, operational_inputs, operational_params
-from .predicates import branches, n8n_predicate, repair, wdl_predicate
+from .predicates import branches, make_predicate, n8n_predicate, repair, wdl_predicate
 
 
 def _has_blocking_draft_errors(
@@ -139,53 +140,141 @@ def _node_for_step(step: ImportedStep, node_id: str, nxt: str | None) -> FlowNod
                     next=nxt, output=f"{node_id}_out", label=label)
 
 
-def _n8n_targets(connections: dict, node_name: str, idmap: dict):
-    """(true-target, false-target) flow ids for an n8n node's first two output
-    groups (IF: group 0 = true, group 1 = false)."""
-    groups = (connections.get(node_name, {}) or {}).get("main", []) or []
+def _n8n_targets(connections: dict, node_name: str, names: set[str]) -> list[list[str]]:
+    """All named targets, grouped by the source's ``main`` output socket.
 
-    def first(gi):
-        if gi < len(groups):
-            for edge in groups[gi] or []:
-                tgt = edge.get("node") if isinstance(edge, dict) else None
-                if tgt in idmap:
-                    return idmap[tgt]
-        return None
-    return first(0), first(1)
+    A missing destination or unsupported output type must not turn into a
+    successful import with an action that never runs.
+    """
+    outgoing = connections.get(node_name, {}) or {}
+    if not isinstance(outgoing, dict):
+        raise ValueError("n8n import needs repair: invalid workflow connections")
+    if any(edges for output, edges in outgoing.items() if output != "main"):
+        raise ValueError("n8n import needs repair: non-main output connections are not supported")
+    groups = outgoing.get("main", []) or []
+    if not isinstance(groups, list):
+        raise ValueError("n8n import needs repair: invalid main output connections")
+    targets: list[list[str]] = []
+    for group in groups:
+        if not isinstance(group, list):
+            raise ValueError("n8n import needs repair: invalid main output group")
+        current = []
+        for edge in group:
+            target = edge.get("node") if isinstance(edge, dict) else None
+            if not isinstance(target, str) or target not in names:
+                raise ValueError("n8n import needs repair: a connection has no imported destination")
+            current.append(target)
+        targets.append(current)
+    return targets
+
+
+class _N8nGraphBuilder:
+    """Compile a tree-shaped n8n graph; reject joins rather than duplicate work."""
+
+    def __init__(self, by_name: dict, connections: dict, action_names: list[str]):
+        self.by_name = by_name
+        self.connections = connections
+        self.idmap = {name: f"n{i}" for i, name in enumerate(action_names)}
+        self.seen: set[str] = set()
+
+    def lower_targets(self, targets: list[str], destination: dict[str, FlowNode],
+                      fork_id: str) -> str | None:
+        if not targets:
+            return None
+        if len(targets) == 1:
+            return self.lower_node(targets[0], destination)
+        paths: list[Flow] = []
+        for index, target in enumerate(targets):
+            path_nodes: dict[str, FlowNode] = {}
+            path_start = self.lower_node(target, path_nodes)
+            paths.append(Flow(
+                id=f"{fork_id}_{index}", name=f"n8n path {index + 1}",
+                start=path_start, nodes=path_nodes,
+            ))
+        destination[fork_id] = FlowNode(
+            id=fork_id, kind=NODE_PARALLEL, branches=paths,
+            label="Run all connected paths",
+        )
+        return fork_id
+
+    def lower_node(self, name: str, destination: dict[str, FlowNode]) -> str:
+        from .n8n import _short_type, _step_from_node
+
+        if name in self.seen:
+            raise ValueError(
+                "n8n import needs repair: paths rejoin or loop; review the routing "
+                "before this flow can run"
+            )
+        self.seen.add(name)
+        node, nid = self.by_name[name], self.idmap[name]
+        groups = _n8n_targets(self.connections, name, set(self.idmap))
+        kind = _short_type(node.get("type", ""))
+        if kind in ("if", "filter"):
+            if any(groups[2:]):
+                raise ValueError("n8n import needs repair: decision has unsupported outputs")
+            yes = self.lower_targets(groups[0] if groups else [], destination,
+                                     f"{nid}_true_paths")
+            no = self.lower_targets(groups[1] if len(groups) > 1 else [], destination,
+                                    f"{nid}_false_paths")
+            destination.update(branches(n8n_predicate(node), nid, yes, no, name))
+        else:
+            if any(groups[1:]):
+                raise ValueError("n8n import needs repair: step has unsupported output sockets")
+            nxt = self.lower_targets(groups[0] if groups else [], destination, f"{nid}_paths")
+            destination[nid] = _node_for_step(_step_from_node(node), nid, nxt)
+        return nid
 
 
 def _n8n_to_flow(automation: ImportedAutomation) -> Flow | None:
-    """Lower an n8n workflow's raw graph to a Flow, capturing IF/Filter nodes as
-    real ``branch`` nodes (true/false wired to their downstream nodes) instead of
-    flattening them. Returns ``None`` if the raw graph isn't usable (caller falls
-    back to the linear lowering)."""
-    from .n8n import _is_trigger_node, _short_type, _step_from_node
+    """Lower supported n8n graph trees without dropping outgoing connections.
+
+    A shared successor, cycle, unsupported socket, or disconnected source step
+    requires repair. The ordered-chain fallback is only for absent raw graphs;
+    it must never quietly replace a graph whose routing cannot be represented.
+    """
+    from .n8n import _is_trigger_node
+
     raw = automation.raw if isinstance(automation.raw, dict) else {}
-    nodes = [n for n in (raw.get("nodes") or []) if isinstance(n, dict) and n.get("name")]
+    nodes = raw.get("nodes") or []
+    if not isinstance(nodes, list) or any(
+        not isinstance(n, dict) or not isinstance(n.get("name"), str) or not n["name"]
+        for n in nodes
+    ):
+        raise ValueError("n8n import needs repair: every workflow step needs a name")
     connections = raw.get("connections") if isinstance(raw.get("connections"), dict) else {}
-    if not nodes or not connections:
+    if not nodes:
+        return None
+    if not connections:
+        if len(nodes) > 1:
+            raise ValueError("n8n import needs repair: workflow steps have no connections")
         return None
     by_name = {n["name"]: n for n in nodes}
-    action_names = [nm for nm, n in by_name.items() if not _is_trigger_node(n)]
+    if len(by_name) != len(nodes):
+        raise ValueError("n8n import needs repair: workflow step names must be unique")
+    action_names = [name for name, node in by_name.items() if not _is_trigger_node(node)]
     if not action_names:
         return None
-    idmap = {nm: f"n{i}" for i, nm in enumerate(action_names)}
+    if len(action_names) > 256:
+        raise ValueError("n8n import needs repair: workflow exceeds 256 supported steps")
+    builder = _N8nGraphBuilder(by_name, connections, action_names)
+    trigger_node = next((node for node in nodes if _is_trigger_node(node)), None)
     fnodes: dict[str, FlowNode] = {}
-    for nm in action_names:
-        node, nid = by_name[nm], idmap[nm]
-        t_tgt, f_tgt = _n8n_targets(connections, nm, idmap)
-        if _short_type(node.get("type", "")) in ("if", "filter"):
-            fnodes.update(branches(n8n_predicate(node), nid, t_tgt, f_tgt, nm))
-        else:
-            fnodes[nid] = _node_for_step(_step_from_node(node), nid, t_tgt)
-    trigger_node = next((n for n in nodes if _is_trigger_node(n)), None)
-    start = None
     if trigger_node:
-        start = _n8n_targets(connections, trigger_node["name"], idmap)[0]
-    start = start or idmap[action_names[0]]
+        groups = _n8n_targets(connections, trigger_node["name"], set(builder.idmap))
+        if any(groups[1:]):
+            raise ValueError("n8n import needs repair: trigger has unsupported output sockets")
+        start = builder.lower_targets(groups[0] if groups else [], fnodes, "entry_paths")
+        if start is None:
+            raise ValueError("n8n import needs repair: trigger is not connected to its steps")
+    else:
+        start = builder.lower_node(action_names[0], fnodes)
+    if builder.seen != set(action_names):
+        raise ValueError("n8n import needs repair: source contains disconnected steps")
     flow = Flow(id=automation.template_name(), name=automation.name, start=start, nodes=fnodes)
     flow = _govern_imported(flow)
-    return flow if not _has_blocking_draft_errors(flow) else None
+    if _has_blocking_draft_errors(flow) or flow.reachability_errors():
+        raise ValueError("n8n import needs repair: lowered flow has unreachable or invalid steps")
+    return flow
 
 
 # ---- Power Automate (WDL) graph capture --------------------------------------
@@ -650,33 +739,6 @@ _STRUCTURAL_LOWERERS = {
 
 # ---- Make (Integromat) router capture ----------------------------------------
 
-# Make filter operator tokens (`text:equal`, `number:greater`, ...) -> the flow
-# condition-evaluator's operators. We key on the part after the colon.
-_MAKE_OPS = {"equal": "==", "notequal": "!=", "greater": ">", "greaterorequal": ">=",
-             "less": "<", "lessorequal": "<=", "contain": "contains", "contains": "contains"}
-
-
-def _make_condition(route: dict) -> str | None:
-    """A route filter reduced to the flow condition grammar, or ``None`` when the
-    route has no filter (Make's unconditional fallback route). A Make filter is
-    ``{name, conditions: [[{a, o, b}]]}`` -- an OR of AND-groups; we take the
-    first leaf as the representative test (the operator refines it in the
-    designer, exactly like the n8n/WDL paths)."""
-    filt = route.get("filter") if isinstance(route.get("filter"), dict) else None
-    if not filt:
-        return None
-    groups = filt.get("conditions")
-    if isinstance(groups, list):
-        for grp in groups:
-            if isinstance(grp, list) and grp and isinstance(grp[0], dict):
-                c = grp[0]
-                left = _safe_line(c.get("a", ""), max_chars=40)
-                raw_op = str(c.get("o", "")).rsplit(":", 1)[-1].lower()
-                right = _safe_line(c.get("b", ""), max_chars=40)
-                return f"{left} {_MAKE_OPS.get(raw_op, '==')} {right}".strip()
-    return "result == true"
-
-
 def _has_router(modules: list) -> bool:
     """Whether any module (or nested route) is a router -- if not, the flat
     fallback already captures the scenario faithfully, so we skip this path."""
@@ -718,14 +780,13 @@ def _make_route_flow(route: dict, idx: int, report: list[dict]) -> Flow | None:
     ctr = {"i": 0}
     nodes: dict[str, FlowNode] = {}
     body = _make_seq(route.get("flow", []) or [], nodes, ctr, report, None)
-    cond = _make_condition(route)
-    if cond is not None:
+    predicate = make_predicate(route)
+    if predicate is not None:
         bid = f"r{idx}_guard"
-        nodes[bid] = FlowNode(id=bid, kind=NODE_BRANCH, condition=cond,
-                              if_true=body, if_false=None, label="router route")
+        nodes.update(branches(predicate, bid, body, None, "router route"))
         report.append({"step": "router route", "node": bid, "kind": NODE_BRANCH,
                        "fidelity": "preserved",
-                       "note": "Make router route filter -> branch guard"})
+                       "note": "Make route filter -> complete OR-of-AND branch guards"})
         body = bid
     if not nodes or body is None:
         return None
@@ -812,12 +873,18 @@ def _linear_report(flow: Flow, report: list[dict], source: str = "") -> None:
         elif n.kind == NODE_APPROVAL:
             entry = ("approximated",
                      "human approval gate inserted before high-risk imported work")
+        elif n.kind == NODE_PARALLEL:
+            entry = ("approximated",
+                     "all outgoing paths retained and run together; source execution "
+                     "order and shared-data effects need review")
         elif n.kind == NODE_ACTION:
             entry = ("preserved", "connector call -> action node")
         else:
             entry = ("approximated", "no structural/tool mapping -> agent step")
         report.append({"step": n.label or n.id, "node": n.id, "kind": n.kind,
                        "fidelity": entry[0], "note": entry[1]})
+        for path in n.branches:
+            _linear_report(path, report, source=source)
 
 
 def to_flow_with_report(automation: ImportedAutomation) -> tuple[Flow, list[dict]]:

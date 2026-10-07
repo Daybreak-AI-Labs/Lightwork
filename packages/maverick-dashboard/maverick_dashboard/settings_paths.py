@@ -108,6 +108,15 @@ def _others_can_replace(info: os.stat_result, *folders: Path) -> bool:
     return False
 
 
+def _check_program(real: Path, normalized: Path, info) -> None:
+    if os.name == "nt" and real.suffix.lower() not in {".exe", ".com", ".cmd", ".bat"}:
+        raise PathRefused("choose a Windows program, not a document. Put script files in the separate script field.")
+    if not os.access(real, os.X_OK):
+        raise PathRefused("that file is not a program Lightwork is allowed to run.")
+    if os.name != "nt" and _others_can_replace(info, real.parent, normalized.parent):
+        raise PathRefused("anyone on the server can change that program or its folder. Limit who can change them, then try again.")
+
+
 def check(value: str, *, kind: str, writable: bool = False, private: bool = False,
           new_ok: bool = False, scope: str = "", program: bool = False) -> str:
     """Validate one location; return it as it will be stored.
@@ -159,13 +168,8 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
             raise PathRefused("Lightwork isn't allowed to read that file.")
         if writable and not os.access(real, os.W_OK):
             raise PathRefused("Lightwork isn't allowed to save changes to that file.")
-        if program and not os.access(real, os.X_OK):
-            raise PathRefused("that file is not a program Lightwork is allowed to run.")
-        if program and os.name != "nt" and _others_can_replace(info, real.parent, normalized.parent):
-            raise PathRefused(
-                "anyone on the server can change that program or its folder. Limit who can "
-                "change them, then try again."
-            )
+        if program:
+            _check_program(real, normalized, info)
         if private and os.name != "nt" and info.st_mode & stat.S_IROTH:
             raise PathRefused(
                 "anyone on the server can read that key file. Limit who can read it, "

@@ -140,7 +140,7 @@ test("tracker assignments and geolocation rules are unique and closed", () => {
   assert.throws(() => api.buildCreatePayload({
     ...validInput(),
     common_trackers: ["caller_tracker"],
-  }), /Common trackers/);
+  }), /common trackers are listed twice or not recognized/);
 });
 
 test("boolean and semver fields remain strict", () => {

@@ -54,11 +54,11 @@ def test_page_renders_pieces():
     assert resp.status_code == 200
     html = resp.text
     assert html.count("<h1") == 1                       # exactly one page title
-    assert "Autonomous Shoring" in html                 # hero title
-    assert "Savings Summary" in html                    # the P&L summary
+    assert "Autonomous shoring" in html                 # hero title
+    assert "Savings estimate" in html                    # the P&L summary
     assert "Book of Work" in html
     assert 'id="sh-form"' in html                       # add-a-function form
-    assert "Waiting for a Person" in html
+    assert "Waiting for a person" in html
     assert "/approvals" in html                         # exception desk links out
     # No slug, free-text department or free-text owner to type.
     assert 'id="sh-department"' in html and '<select class="select" id="sh-department"' in html
@@ -127,7 +127,7 @@ def test_page_in_nav_registry_after_savings():
     entry = next(p for p in ui_visibility.PAGES if p["path"] == "/shoring")
     assert entry["group"] == "Observe"
     assert entry["floor"] == "view"
-    assert entry["label"] == "Autonomous Shoring"
+    assert entry["label"] == "Autonomous shoring"
     # Ordered immediately after /savings (nav order = registry order).
     assert paths.index("/shoring") == paths.index("/savings") + 1
 

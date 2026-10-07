@@ -60,7 +60,14 @@ class QuotaPolicyError(RuntimeError):
 
 
 def _ledger_path():
-    """Tenant-scoped ledger location: ``<data>/usage/ledger.json``."""
+    """Tenant-scoped ledger location: ``<data>/usage/ledger.json``.
+
+    Practice runs (:mod:`maverick.practice`) keep their own ledger beside it,
+    so practice spending never counts toward real quotas or spending limits."""
+    from . import practice
+
+    if practice.active():
+        return data_dir("practice", "usage", "ledger.json")
     return data_dir("usage", "ledger.json")
 
 
@@ -332,7 +339,7 @@ class UsageLedger:
         return out
 
     def prune(self, keep_days: int, *, now: float | None = None,
-              dry_run: bool = False) -> dict:
+              dry_run: bool = False, review_binding: dict | None = None) -> dict:
         """Drop ``(principal, day)`` buckets older than ``keep_days`` days.
 
         The ledger accrues a row per ``(principal, UTC day)`` forever; this is
@@ -352,6 +359,18 @@ class UsageLedger:
         removed_principals = 0
         with _RECORD_LOCK, _cross_process_lock(self.path):
             data, receipts = self._load_state()
+            if review_binding is not None:
+                from .retention_review_bindings import check, seal
+
+                candidates = ([principal, day, data[principal][day]]
+                    for principal in sorted(data)
+                    for day in sorted(data[principal]) if isinstance(day, str) and day <= cutoff_day)
+                bucket_seal = seal(candidates)
+                charges = ([identity, day, receipts[identity]["charges"][day]]
+                    for identity in sorted(receipts)
+                    for day in sorted(receipts[identity]["charges"]) if day <= cutoff_day)
+                charge_seal = seal(charges)
+                check(review_binding, {"buckets": bucket_seal, "charges": charge_seal}, dry_run=dry_run)
             for principal in list(data.keys()):
                 days = data.get(principal) or {}
                 expired = [d for d in days if isinstance(d, str) and d <= cutoff_day]
@@ -505,6 +524,21 @@ def record_usage(
         except Exception as e:  # pragma: no cover -- reservation release is fail-soft
             log.warning("quotas: failed to release reservation %r: %s",
                         reservation_id, e)
+    if recorded:
+        try:
+            from .budget_guidance import observe_warnings
+            observe_warnings(principal)
+        except Exception:
+            # Warnings must never turn an acknowledged charge into a failed
+            # settlement. The interactive preview can recover the same notice.
+            log.warning("Budget warning observation unavailable; usage remains recorded.")
+        try:
+            from .spending_alerts import observe as observe_spending_alerts
+            observe_spending_alerts(principal)
+        except Exception:
+            # Same rule: an alert is never a reason to fail a recorded charge,
+            # and the spending limit itself still stops paid work.
+            log.warning("Spending limit alert observation unavailable; usage remains recorded.")
     return recorded
 
 

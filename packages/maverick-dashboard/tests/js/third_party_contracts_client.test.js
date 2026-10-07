@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
 const markup = fs.readFileSync(path.join(folder, "templates/third_party_contracts.html"), "utf8")
@@ -20,11 +21,11 @@ function record(extra = {}) {
     field_schema: [], field_values: {}, formulas: [], computed_values: {} }, extra);
 }
 
-async function fixture({ ready = true, records = [record()], intercept = () => undefined, roles = { canOperate: "true", canAudit: "true", canAdmin: "true" } } = {}) {
+async function fixture({ ready = true, records = [record()], intercept = () => undefined, roles = { canOperate: "true", canAudit: "true", canAdmin: "true" }, moduleEnabled = "true" } = {}) {
   const dom = new JSDOM(markup, { url: "https://lightwork.example/third-party/contracts", runScripts: "outside-only" });
   const { window } = dom;
   const shell = window.document.getElementById("third-party-contracts-shell");
-  Object.assign(shell.dataset, roles, { apiBase: "/api/v1/third-party/contracts" });
+  Object.assign(shell.dataset, roles, { apiBase: "/api/v1/third-party/contracts", moduleEnabled });
   const ui = { answer: true, confirms: [], formValues: [], calls: [] };
   window.mvConfirm = async (m) => { ui.confirms.push(m); return ui.answer; };
   window.mvForm = async () => ui.formValues.shift() || null;
@@ -46,6 +47,7 @@ async function fixture({ ready = true, records = [record()], intercept = () => u
     const status = reply.__status || 200;
     return new Response(JSON.stringify(reply), { status, headers: { "Content-Type": "application/json" } });
   };
+  loadShell(window);
   window.eval(helpers);
   window.eval(source);
   async function settle() { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); }
@@ -138,4 +140,21 @@ test("a failed save is a plain sentence", async (t) => {
   form.dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
   await ui.settle();
   assert.equal(ui.el("tpc-form-status").textContent, "Could not save it.");
+});
+
+test("contracts that aren't set up say when records will appear instead of loading", async (t) => {
+  const ui = await fixture({ ready: false }); t.after(() => ui.window.close());
+  assert.equal(ui.el("tpc-list-status").textContent, "Contracts and engagements appear here once the setup is finished.");
+});
+
+test("a failed availability check replaces the list's Loading with what happened", async (t) => {
+  const ui = await fixture({ intercept: (call) => (call.url.pathname.endsWith("/status") ? { __status: 503, detail: "unavailable" } : undefined) });
+  t.after(() => ui.window.close());
+  assert.equal(ui.el("tpc-readiness").textContent, "Not available");
+  assert.equal(ui.el("tpc-list-status").textContent, "Could not load the contracts.");
+});
+
+test("a turned-off contracts module starts no checks or loads behind its gate", async (t) => {
+  const ui = await fixture({ moduleEnabled: "false" }); t.after(() => ui.window.close());
+  assert.deepEqual(ui.calls, []);
 });

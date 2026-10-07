@@ -1,0 +1,72 @@
+{
+  "date": "2026-09-30",
+  "host": "Windows-11-10.0.26100-SP0",
+  "python": "3.12.12",
+  "source_base": "f008354f9c9185f83a9379aa8ac51c777ca7b803",
+  "scope": [
+    "apps/installer-msi/test_wxs.py",
+    "packages/maverick-core/tests/test_crypto_at_rest.py",
+    "packages/maverick-core/tests/test_store_lock_acquisition.py",
+    "packages/maverick-core/tests/test_customer_deployment_paths.py",
+    "packages/maverick-core/tests/test_sandbox_pool_policy.py",
+    "packages/maverick-core/tests/test_codebase.py",
+    "packages/maverick-core/tests/test_offline_bundle.py",
+    "packages/maverick-core/tests/test_kubernetes_workspace_transfer.py",
+    "packages/maverick-core/tests/test_training_backends.py",
+    "packages/maverick-core/tests/test_document_job_contract.py"
+  ],
+  "runs": [
+    {
+      "posture": "legacy-default",
+      "total": 261,
+      "passed": 259,
+      "skipped": [
+        {
+          "test": "test_backup_key_material_refuses_destination_symlink",
+          "reason": "Windows symlink privilege is unavailable"
+        },
+        {
+          "test": "test_backup_key_material_refuses_directory_symlink",
+          "reason": "Windows symlink privilege is unavailable"
+        }
+      ],
+      "failures": 0,
+      "junit": "native-platform-tests-02.xml"
+    },
+    {
+      "posture": "secure-default",
+      "total": 261,
+      "passed": 259,
+      "skipped": [
+        {
+          "test": "test_backup_key_material_refuses_destination_symlink",
+          "reason": "Windows symlink privilege is unavailable"
+        },
+        {
+          "test": "test_backup_key_material_refuses_directory_symlink",
+          "reason": "Windows symlink privilege is unavailable"
+        }
+      ],
+      "failures": 0,
+      "junit": "native-platform-tests-03.xml"
+    }
+  ],
+  "execution": {
+    "runner": "python -m pytest -q --tb=short <scope files> --basetemp=<unique short Windows Temp root> --junitxml=<report>",
+    "posture_switch": "MAVERICK_TEST_SECURE_DEFAULT=1 for secure repeat",
+    "environment": "All eight project packages available from reviewed checkout; pytest9.1.1; task-local pip25.0.1 prerequisite restored with bundled ensurepip using workspace TEMP.",
+    "filesystem": "Authorized local execution preserved real Win32 parent-handle guards; no reparse, locking or authority check bypasses."
+  },
+  "corrections": [
+    "Memory encryption fixtures inspect the current owner-scoped store; legacy plaintext is only accepted inside that scope and unrelated shared-root content remains unreadable.",
+    "Grant-store lock fixture now requires the current global authority fence while asserting unwind on ordinary error and BaseException.",
+    "Runner lifecycle uses a real transactional WorldModel for current handoff/identity checks; daemon and LLM effects remain synthetic.",
+    "Code-vault synthetic backend uses the active test interpreter for Python commands instead of Windows bare-name executable search.",
+    "Offline bundle exact-shape test includes explicit bounded cache policy and its revision."
+  ],
+  "limits": [
+    "Two existing symlink tests remain skipped because this Windows host does not provide symlink privilege.",
+    "Synthetic backends and local throwaway repositories only: no live provider, Docker/Kubernetes cluster, cloud deployment, host systemd unit, signing or publication.",
+    "This validates the listed platform group, not the entire repository or installed native clients."
+  ]
+}

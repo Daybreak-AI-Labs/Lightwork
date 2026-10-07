@@ -1,7 +1,7 @@
-"""The Cognitive Data Engine -- causal failure triage (the crank's first stage).
+"""The Cognitive Data Engine -- outcome-pattern triage (the crank's first stage).
 
 The Tesla autopilot data engine, reborn for a governed AI workforce: production
-failures become causally-prioritised, simulation-validated, governance-gated
+failures become evidence-prioritised, simulation-reviewed, governance-gated
 improvements. This module is the crank's first stage -- turn the raw governed
 trajectory corpus into a RANKED queue of failure classes, ordered by how much
 fixing each would lift *real outcomes*.
@@ -9,10 +9,9 @@ fixing each would lift *real outcomes*.
 The whole value of a data engine is **triage**: you can't fix everything, so you
 fix the failure that moves reality most. The naive move -- rank by frequency --
 is a trap (the most common failure is often harmless noise). So this ranks by
-**causal impact**: for each candidate action, estimate its confounder-adjusted
-effect on the episode outcome (reusing ``promotion_effect``); the actions that
-*provably lower* outcomes, by the most, with confidence, are the top of the
-queue. Each class carries failing exemplars for the downstream fix-miner.
+an observed outcome gap within recorded context groups. Such a gap is a
+hypothesis, not proof of causation: unrecorded task difficulty may explain it.
+Each class carries failing exemplars for downstream review.
 
 Pure + dependency-free + ON by default (reads only the governed trajectory store;
 ``triage`` on an empty corpus returns ``[]``). The later crank stages
@@ -28,15 +27,15 @@ from .config import governed_learning_env_flag
 
 @dataclass(frozen=True)
 class FailureClass:
-    """A causally-harmful action pattern, ranked for the fix-miner."""
+    """An observed harmful-looking action pattern, ranked for review."""
 
     action: str                 # the tool/action that characterises the class
     count: int                  # failing episodes (outcome < threshold) using it
     mean_outcome: float         # mean terminal outcome of episodes using it
-    causal_effect: float        # confounder-adjusted effect on outcome (<0 = hurts)
+    causal_effect: float        # legacy field name: stratified association, not proof
     ci_low: float
     ci_high: float
-    trustworthy: bool           # the estimate cleared the calibration bar
+    trustworthy: bool           # controlled evidence cleared the calibration bar
     exemplars: tuple = field(default_factory=tuple)  # (goal_id, episode_id) for fix-mining
 
 
@@ -70,13 +69,12 @@ def _episode_role(ep) -> str:
 
 def triage(steps, *, failure_threshold: float = 0.5, min_support: int = 8,
            top_k: int = 10, outcome_fn=None) -> list[FailureClass]:
-    """Rank candidate actions by how much they causally hurt task outcome.
+    """Rank candidate actions by observed outcome gaps within recorded contexts.
 
     For each distinct tool, estimate the confounder-adjusted effect of using it on
     the episode outcome (treatment = episode used the tool, stratum = domain).
-    Classes with a *negative* effect are causally harmful; they're ranked by their
-    upper confidence bound ascending (most confidently harmful first), with
-    trustworthy estimates ahead of untrustworthy ones.
+    Classes with a negative association are ranked by their upper confidence
+    bound, with controlled evidence ahead of observational hypotheses.
 
     ``outcome_fn`` (default ``_terminal_outcome``) maps an episode to its outcome;
     the flywheel injects a *grounded* one that prefers real consequences over the
@@ -104,7 +102,7 @@ def triage(steps, *, failure_threshold: float = 0.5, min_support: int = 8,
         )
         est = pe.estimate_effect(units, adjusted_for=("domain",), min_used=min_support)
         if est.effect >= 0:
-            continue  # this action doesn't causally lower outcomes -> not a failure class
+            continue  # no negative observed association
 
         used, fail_outcomes, exemplars = 0, [], []
         for key, ep in ordered.items():

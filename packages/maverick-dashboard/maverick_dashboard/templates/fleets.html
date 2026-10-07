@@ -1,17 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Fleets · Lightwork{% endblock %}
+{% block title %}Teams · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% call hero('Human in command', 'Fleets',
+  {% from "_typical_cost.html" import typical_cost_text %}
+  {% call hero('Human in command', 'Teams',
                subtitle='Each person\'s own team of agents',
                lede='Give someone a small team of agents, each with a job
                      role that limits what it may do. Your company rules can
                      stop an action or hold it for a person to approve
                      (the EU AI Act human-oversight requirement); holds wait
                      in <a href="/approvals">Approvals</a> and every decision
-                     is listed below.') %}
+                     is listed below.' | safe) %}
     {{ state('Current state', (fleets | length) ~ (' team' if fleets | length == 1 else ' teams'),
-             badge=((pending_count ~ ' awaiting sign-off') if pending_count
+             badge=((pending_count ~ ' awaiting approval') if pending_count
                     else 'nothing waiting'),
              badge_class='warn' if pending_count else 'ok',
              copy='Create a team, give its agents tasks, and review every
@@ -55,7 +56,7 @@
 
   {% if fleets %}
     {% for fleet in fleets %}
-      <div class="panel">
+      <div class="panel" id="team-{{ fleet.name }}" tabindex="-1">
         <div class="fl-head">
           <h2 class="fl-title">{{ fleet.name|humanize }}</h2>
           <span class="muted">Owner: {{ fleet.owner|identity if fleet.owner else 'No one' }}</span>
@@ -66,8 +67,8 @@
         {% if fleet.agents %}
           <table style="margin-top: 0.75rem;">
             <thead><tr>
-              <th scope="col">Agent</th><th scope="col">Job role</th>
-              <th scope="col">What it does</th>
+              <th scope="col">Agent or specialist</th><th scope="col">Job role</th>
+              <th scope="col">What it does</th><th scope="col">Can it start?</th>
             </tr></thead>
             <tbody>
             {% for agent in fleet.agents %}
@@ -75,27 +76,37 @@
                 <td>{{ agent.name|humanize }}</td>
                 <td><span class="badge active">{{ agent.role|role_label if agent.role else 'No role' }}</span></td>
                 <td class="muted">{{ agent.description or '' }}</td>
+                {% set check = specialist_readiness.get(agent.domain) if agent.domain else none %}
+                <td>{% if check %}
+                  {{ check.label }}{% if check.state != 'action_ready' %} · <a href="{{ check.fix_url }}">Review setup</a>{% endif %}
+                {% else %}Checked when the task starts{% endif %}</td>
               </tr>
             {% endfor %}
             </tbody>
           </table>
           <form class="fleet-run-form fl-run" data-fleet="{{ fleet.name }}">
             <label>Give it to
-              <select class="input" name="agent">
+              <select class="input" name="agent" required>
+                <option value="">Choose an agent or specialist</option>
                 {% for agent in fleet.agents %}
-                  <option value="{{ agent.name }}">{{ agent.name|humanize }} ({{ agent.role|role_label if agent.role else 'no role' }})</option>
+                  {% set check = specialist_readiness.get(agent.domain) if agent.domain else none %}
+                  <option value="{{ agent.name }}"{% if check and check.state != 'action_ready' %} disabled{% endif %} data-typical="{{ typical_cost_text(typical_costs.get(fleet.name ~ '/' ~ agent.name)) | striptags }}">{{ agent.name|humanize }} ({{ agent.role|role_label if agent.role else 'no role' }}){% if check %} · {{ check.label }}{% endif %}</option>
                 {% endfor %}
               </select>
             </label>
             <label class="fl-grow">Task
               <input class="input" name="prompt" type="text" maxlength="4000"
-                     placeholder="What should this agent do?" />
+                     placeholder="What should it do?" />
             </label>
-            <button type="submit" class="btn btn--primary">Start task</button>
+            <button type="submit" class="btn btn--primary"{% if not fleet_can_start[fleet.name] %} disabled{% endif %}>Start task</button>
             <span class="fleet-run-msg muted" role="status" aria-live="polite"></span>
           </form>
+          <p class="muted fl-typical" aria-live="polite">Choose an agent or specialist to see what its past tasks usually cost.</p>
+          {% if workspace_limit %}<p class="muted fl-remaining">The whole workspace has {{ workspace_limit.remaining | money }} left of {{ workspace_limit.limit.amount | money }} {{ 'today' if workspace_limit.limit.period == 'day' else 'this month' }}.</p>{% endif %}
+          <p class="muted fl-help">“Can it start?” checks required actions. Connections, permissions and the AI service are checked when work starts.</p>
+          {% if not fleet_can_start[fleet.name] %}<p class="muted">No one on this team passed the action check. Review setup above, then return to this team.</p>{% endif %}
         {% else %}
-          <p class="muted" style="margin-bottom: 0;">No agents on this team yet.</p>
+          <p class="muted" style="margin-bottom: 0;">No agents on this team yet. Add agents when you create or edit the team.</p>
         {% endif %}
         {% set runs = runs_by_fleet.get(fleet.name) %}
         <h3 class="fl-sub">Recent tasks</h3>
@@ -166,13 +177,14 @@
   <style>
     .fl-form { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; max-width: 52rem; }
     .fl-help { margin: 0; font-size: 0.85rem; }
-    .fl-agents { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; }
+    .fl-agents { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; }
     #agent-rows { display: flex; flex-direction: column; gap: 0.5rem; }
     .agent-row, .fl-run { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: end; }
     .agent-row label, .fl-run label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; }
     .fl-grow { flex: 1; min-width: 12rem; }
     .fl-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
     .fl-head { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
+    .panel[id^="team-"] { scroll-margin-top: 6rem; }
     .fl-title { margin: 0; font-size: 1.1rem; }
     .fl-sub { margin: 0.9rem 0 0; font-size: 0.9rem; }
     .fl-run { margin-top: 0.75rem; }
@@ -185,7 +197,7 @@
     (function() {
       function problem(r, j, action) {
         if (window.mvErrorText) return window.mvErrorText({ status: r && r.status, body: j }, action);
-        return 'Could not ' + action + '. Please try again.';
+        return 'Could not ' + action + '. Try again.';
       }
       function offline(action) {
         return 'Could not ' + action + ' — check your connection and try again.';
@@ -197,9 +209,17 @@
       }
       function say(el, text, bad) {
         el.style.color = bad ? 'var(--danger)' : 'var(--muted)';
-        el.textContent = text;
+        if (window.mvStatus) window.mvStatus(el, text, {error: !!bad}); else el.textContent = text;
       }
       document.querySelectorAll('form.fleet-run-form').forEach(function(form) {
+        // Past runs of the chosen agent, from the recorded costs on its option.
+        const typical = form.parentNode.querySelector('.fl-typical');
+        const pick = form.querySelector('[name=agent]');
+        if (typical && pick) pick.addEventListener('change', function() {
+          const option = pick.options[pick.selectedIndex];
+          typical.textContent = option && option.dataset.typical ? option.dataset.typical
+            : 'Choose an agent or specialist to see what its past tasks usually cost.';
+        });
         form.addEventListener('submit', async function(e) {
           e.preventDefault();
           const fleet = form.dataset.fleet;
@@ -207,6 +227,7 @@
           const prompt = form.querySelector('[name=prompt]').value.trim();
           const msg = form.querySelector('.fleet-run-msg');
           const btn = form.querySelector('button[type=submit]');
+          if (!agent) { say(msg, 'Choose an available agent first.', true); return; }
           if (!prompt) { say(msg, 'Describe the task first.', true); return; }
           btn.disabled = true; say(msg, 'Starting…');
           try {
@@ -291,14 +312,16 @@
       document.querySelectorAll('button.fleet-remove-btn').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           const label = btn.dataset.label || btn.dataset.fleet;
-          if (!(await mvConfirm('Remove the team "' + label + '"? Its agents and task history list are deleted. Past tasks stay in your task list.', { okText: 'Remove team' }))) return;
-          btn.disabled = true;
-          try {
-            const r = await fetch('/api/v1/fleets/' + encodeURIComponent(btn.dataset.fleet), { method: 'DELETE' });
-            if (r.ok || r.status === 204) { window.location.reload(); return; }
-            const j = await r.json().catch(function() { return {}; });
-            btn.disabled = false; mvToast(problem(r, j, 'remove the team'), { error: true });
-          } catch (err) { btn.disabled = false; mvToast(offline('remove the team'), { error: true }); }
+          // One action with a way back (CTL-1): the team leaves the list at
+          // once and is deleted when the Undo time is up.
+          const row = btn.closest('.panel');
+          if (row) row.hidden = true;
+          mvUndo('Team “{name}” removed. Past tasks stay in your task list.', { values: {name: label},
+            action: 'remove the team',
+            run: function (keepalive) { return fetch('/api/v1/fleets/' + encodeURIComponent(btn.dataset.fleet), { method: 'DELETE', keepalive: keepalive }); },
+            undo: function () { if (row) row.hidden = false; btn.focus(); },
+            done: function () { window.location.reload(); }
+          });
         });
       });
     })();

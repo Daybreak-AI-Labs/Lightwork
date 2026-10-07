@@ -18,18 +18,21 @@ def environment(monkeypatch, tmp_path):
         runs.append(msg.text)
         return "saved answer"
     channel = EmailChannel(handler, "imap.example.test", "bot@example.test", "fixture",
-                           "smtp.example.test", "bot@example.test", "fixture", allowed_user_ids=["alice@example.test"])
+                           "smtp.example.test", "bot@example.test", "fixture",
+                           allowed_user_ids=["alice@example.test"],
+                           trusted_authserv_id="mx.example.test")
     return channel, runs
 
 
 def _mail():
     msg = email.message.EmailMessage()
     msg["From"], msg["Subject"] = "alice@example.test", "Review"
+    msg["Authentication-Results"] = "mx.example.test; dmarc=pass header.from=example.test"
     msg.set_content("Question")
     return msg.as_bytes()
 
 
-def _imap(monkeypatch, on_seen):
+def _imap(monkeypatch, on_seen, message=_mail):
     class IMAP:
         def __init__(self, *args, **kwargs):
             pass
@@ -47,11 +50,45 @@ def _imap(monkeypatch, on_seen):
             if command == "search":
                 return "OK", [b"7"]
             if command == "fetch":
-                return "OK", [(b"7", _mail())]
+                return "OK", [(b"7", message())]
             assert command == "store" and args == (b"7", "+FLAGS", "\\Seen")
             on_seen()
             return "OK", []
     monkeypatch.setattr("maverick_channels.email.imaplib.IMAP4_SSL", IMAP)
+
+
+def test_unauthenticated_sender_never_enters_durable_work(environment, monkeypatch):
+    channel, runs = environment
+    seen = []
+    def unverified_mail():
+        msg = email.message.EmailMessage()
+        msg["From"] = "alice@example.test"
+        msg.set_content("Start work")
+        return msg.as_bytes()
+    _imap(monkeypatch, lambda: seen.append(True), unverified_mail)
+    assert channel._fetch_unseen() == []
+    assert seen == [True]
+    assert delivery.DeliveryJournal().store.list(limit=2) == []
+    assert runs == []
+
+
+def test_pre_upgrade_email_receipt_is_held_before_recovery(environment, monkeypatch):
+    channel, runs = environment
+    journal = delivery.DeliveryJournal()
+    message = delivery.IncomingMessage(
+        user_id="alice@example.test", text="Old request", channel="email", message_id="legacy-1",
+    )
+    old = journal.admit(message, external_id="legacy-1", account=channel._account(),
+                        route={"subject": "Old reply"})
+    monkeypatch.setattr(channel, "_fetch_unseen", list)
+    async def no_sleep(*args):
+        channel._stop = True
+    monkeypatch.setattr("maverick_channels.email.asyncio.sleep", no_sleep)
+    asyncio.run(channel.start())
+    held = journal.get(old["id"])
+    assert held["restore_hold"] is True
+    assert held["execution"] == "received"
+    assert runs == []
 
 
 def test_seen_ack_occurs_after_durable_intake_and_restart_recovers(environment, monkeypatch):
@@ -75,6 +112,49 @@ def test_seen_ack_occurs_after_durable_intake_and_restart_recovers(environment, 
     asyncio.run(channel.start())
     assert len(runs) == 1 and sent == [("alice@example.test", "saved answer", "Re: Review")]
     assert delivery.DeliveryJournal().get(rows[0]["id"])["delivery"] == "delivered"
+
+
+def test_queued_email_question_is_sent_after_ack_from_saved_sender(environment, monkeypatch):
+    from maverick import server as server_mod
+
+    channel, _ = environment
+
+    async def handler(msg):
+        msg._channel_question_watch = {
+            "goal_id": 4, "conversation_id": 8, "tenant": None,
+            "owner": "user:email:alice@example.test",
+            "execution_principal": "user:email:alice@example.test",
+        }
+        return "Task queued"
+
+    channel.handler = handler
+    journal = delivery.DeliveryJournal()
+    message = delivery.IncomingMessage(
+        user_id="alice@example.test", text="Prepare report", channel="email",
+        message_id="42:7",
+    )
+    row = journal.admit(message, external_id="42:7", account=channel._account(),
+                        route={"subject": "Re: Review", "sender_auth": "trusted_dmarc_pass"})
+    monkeypatch.setattr(channel, "_fetch_unseen", list)
+    monkeypatch.setattr(server_mod, "queued_channel_question",
+                        lambda *a: ("Question #9 for task #4: Which customer?", False))
+    sent = []
+
+    async def send(user_id, text, subject):
+        sent.append((user_id, text, subject))
+
+    monkeypatch.setattr(channel, "send", send)
+
+    async def no_sleep(*args):
+        channel._stop = True
+
+    monkeypatch.setattr("maverick_channels.email.asyncio.sleep", no_sleep)
+    asyncio.run(channel.start())
+    assert sent == [
+        ("alice@example.test", "Task queued", "Re: Review"),
+        ("alice@example.test", "Question #9 for task #4: Which customer?", "Re: Review"),
+    ]
+    assert journal.get(row["id"])["question_watch"] is None
 
 
 def test_failed_intake_does_not_ack_seen(environment, monkeypatch):
@@ -109,6 +189,31 @@ def test_smtp_failure_classification_retains_ambiguity(environment, monkeypatch,
     expected = smtplib.SMTPServerDisconnected if phase == "accepted_then_disconnect" else delivery.DeliveryNotSent
     with pytest.raises(expected):
         channel._send_sync("alice@example.test", "reply", "subject", message_id="<stable@fixture>")
+
+
+def test_port_587_uses_tls_before_sign_in_or_sending(environment, monkeypatch):
+    channel, _ = environment
+    channel.smtp_port = 587
+    steps = []
+    class SMTP:
+        def __init__(self, *args, **kwargs):
+            assert args == ("smtp.example.test", 587)
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def starttls(self, *, context):
+            assert context is not None
+            steps.append("tls")
+        def login(self, *args):
+            steps.append("login")
+        def send_message(self, message):
+            steps.append("send")
+            return {}
+    monkeypatch.setattr("maverick_channels.email.smtplib.SMTP", SMTP)
+    monkeypatch.setattr("maverick_channels.email.smtplib.SMTP_SSL", lambda *a, **kw: pytest.fail("wrong TLS mode"))
+    channel._send_sync("alice@example.test", "reply", "subject")
+    assert steps == ["tls", "login", "send"]
 
 
 def test_rotating_recovery_window_finds_later_records_and_preserves_failed_cursor(environment):

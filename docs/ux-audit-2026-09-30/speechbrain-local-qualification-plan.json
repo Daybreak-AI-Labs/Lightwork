@@ -1,0 +1,1084 @@
+{
+  "status": "prepared_not_downloaded_installed_or_executed",
+  "test": "packages/maverick-core/tests/test_voice_unlock_real_model.py",
+  "records": {
+    "speechbrain-fixture-manifest.json": {
+      "schema": "lightwork.speechbrain-fixture-plan.v1",
+      "status": "prepared_not_downloaded_installed_or_executed",
+      "model_id": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_revision": "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286",
+      "sample_repository_revision": "89ead74d163463d30c62329a09cfdb4c54f5abc1",
+      "speechbrain_release": "1.1.1",
+      "speechbrain_release_revision": "89ead74d163463d30c62329a09cfdb4c54f5abc1",
+      "model_card_license": "apache-2.0",
+      "upstream_sample_repository_license": "Apache-2.0",
+      "asset_entries": [
+        {
+          "relative_path": "model/README.md",
+          "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/README.md",
+          "bytes": 5377,
+          "git_blob_sha1": "6023cecccb30eba7ed77fea84a9e47d334dd3a6c"
+        },
+        {
+          "relative_path": "model/classifier.ckpt",
+          "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/classifier.ckpt",
+          "bytes": 5534328,
+          "sha256": "fd9e3634fe68bd0a427c95e354c0c677374f62b3f434e45b78599950d860d535"
+        },
+        {
+          "relative_path": "model/embedding_model.ckpt",
+          "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/embedding_model.ckpt",
+          "bytes": 83316686,
+          "sha256": "0575cb64845e6b9a10db9bcb74d5ac32b326b8dc90352671d345e2ee3d0126a2"
+        },
+        {
+          "relative_path": "model/hyperparams.yaml",
+          "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/hyperparams.yaml",
+          "bytes": 1919,
+          "git_blob_sha1": "70e4cd0beb74ca08a2df9de6bd79d938670a4d15"
+        },
+        {
+          "relative_path": "model/label_encoder.txt",
+          "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/label_encoder.txt",
+          "bytes": 128619,
+          "git_blob_sha1": "72c6fa7b170cbfd169df5e09326cd97febdf086a"
+        },
+        {
+          "relative_path": "model/mean_var_norm_emb.ckpt",
+          "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/mean_var_norm_emb.ckpt",
+          "bytes": 1921,
+          "git_blob_sha1": "1978c5e7f20d5ffd14c8a932a7e85a09816f3da9"
+        },
+        {
+          "relative_path": "samples/spk1_snt1.wav",
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/tests/samples/ASR/spk1_snt1.wav",
+          "bytes": 91884,
+          "git_blob_sha1": "589c636da71be77f7d9ba070b0872637a86ebd07"
+        },
+        {
+          "relative_path": "samples/spk1_snt2.wav",
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/tests/samples/ASR/spk1_snt2.wav",
+          "bytes": 100844,
+          "git_blob_sha1": "be860e28917fbdec3192f0fad23d35317e14877b"
+        },
+        {
+          "relative_path": "samples/spk1_snt3.wav",
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/tests/samples/ASR/spk1_snt3.wav",
+          "bytes": 87084,
+          "git_blob_sha1": "aba0c8d84b7c8dd31dba290fab2a0530965b8296"
+        },
+        {
+          "relative_path": "samples/spk1_snt4.wav",
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/tests/samples/ASR/spk1_snt4.wav",
+          "bytes": 81004,
+          "git_blob_sha1": "a7bb643eee60c35edf57ef2e1be915ae4fa1a880"
+        },
+        {
+          "relative_path": "samples/spk2_snt1.wav",
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/tests/samples/ASR/spk2_snt1.wav",
+          "bytes": 64364,
+          "git_blob_sha1": "a9b83a9b7396164abdc7f509ed9dae123a43f92e"
+        },
+        {
+          "relative_path": "samples/LICENSE",
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/LICENSE",
+          "bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "asset_total_bytes": 89425387,
+      "runtime_manifest": "audit/speechbrain-runtime-manifest.json",
+      "runtime_manifest_sha256": "57f45e7920968bf6eea2b03a0d89f2c41962182881685eae8ceed4ccb10f4293",
+      "runtime_download_bytes": 171943356,
+      "total_planned_download_bytes": 261368743,
+      "hyperparams_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "yaml_constructors": [
+        "speechbrain.lobes.features.Fbank",
+        "speechbrain.processing.features.InputNormalization",
+        "speechbrain.lobes.models.ECAPA_TDNN.ECAPA_TDNN",
+        "speechbrain.lobes.models.ECAPA_TDNN.Classifier",
+        "speechbrain.processing.features.InputNormalization",
+        "speechbrain.dataio.encoder.CategoricalEncoder",
+        "speechbrain.utils.parameter_transfer.Pretrainer"
+      ],
+      "reviewed_speechbrain_sources": {
+        "speechbrain/inference/interfaces.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/inference/interfaces.py",
+          "sha256": "814d796c894e35e90e98ea33ff23e1ef8035b6a1a1cb77e444a8593e18172b09"
+        },
+        "speechbrain/inference/classifiers.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/inference/classifiers.py",
+          "sha256": "10815262636325b4e546a2699b3c2cf908dd7fe6fc11fd3acd7a89db3d47313f"
+        },
+        "speechbrain/inference/speaker.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/inference/speaker.py",
+          "sha256": "8d9b3da17b363353c754ff0f2ebd66606545c74af6b0e36d6db13bd2f6a49ee3"
+        },
+        "speechbrain/utils/fetching.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/utils/fetching.py",
+          "sha256": "e6cc552a7a2a588903a9c9f7c2705d0b9f474f85b306f8f2eb70bcc8e7e530f4"
+        },
+        "speechbrain/utils/parameter_transfer.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/utils/parameter_transfer.py",
+          "sha256": "9ef59c7141e6aad15d11dd184957054e758baf3537bc71ffe3079753715d4f65"
+        },
+        "speechbrain/utils/checkpoints.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/utils/checkpoints.py",
+          "sha256": "a5432a97068f71ad267e49a6e64303e5740116baf18a2a6445287ebbdb0f6761"
+        },
+        "speechbrain/utils/torch_audio_backend.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/utils/torch_audio_backend.py",
+          "sha256": "6df50dbf50b62fb6b66f04d72b1767cf310d435811bd592259e8a07cee081b61"
+        },
+        "speechbrain/utils/importutils.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/utils/importutils.py",
+          "sha256": "1fc06c9c051297ba73ff033583e372266486eb821b8a6a8db7a38184ef7719f4"
+        },
+        "speechbrain/processing/features.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/processing/features.py",
+          "sha256": "1dd596e9cd2fd76af3154a927afa9e2f4ab7077d0332ad65b69d85ac8f37de97"
+        },
+        "speechbrain/dataio/encoder.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/dataio/encoder.py",
+          "sha256": "dfaaea47aa869279fc1b8bd5510c5d31b77d90443dcb5cc0a7ae54fc1bd714fc"
+        },
+        "speechbrain/lobes/features.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/lobes/features.py",
+          "sha256": "06697948b119d82de3e17c91d799b0ba40c7d45c7a3410ccc179633de0527a12"
+        },
+        "speechbrain/lobes/models/ECAPA_TDNN.py": {
+          "url": "https://raw.githubusercontent.com/speechbrain/speechbrain/89ead74d163463d30c62329a09cfdb4c54f5abc1/speechbrain/lobes/models/ECAPA_TDNN.py",
+          "sha256": "5d1eec5fb66b8778962e7e97c923e423593bed2c82107197624be4874fd5a2d6"
+        }
+      },
+      "required_runtime_env": {
+        "TORCH_FORCE_WEIGHTS_ONLY_LOAD": "1",
+        "HF_HUB_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "MAVERICK_VOICE_AUTO_FETCH": "0"
+      },
+      "compatibility_note": "Official TorchAudio 2.11 documentation explicitly supports PyTorch 2.11 and later via stable ABI. The private 2.11 pair is an isolation choice, not a claim that installed 2.14.1 is incompatible.",
+      "primary_sources": [
+        "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/tree/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286",
+        "https://github.com/speechbrain/speechbrain/tree/89ead74d163463d30c62329a09cfdb4c54f5abc1/tests/samples/ASR",
+        "https://docs.pytorch.org/audio/2.11.0/installation.html",
+        "https://docs.pytorch.org/docs/2.11/notes/serialization.html#environment-variables"
+      ]
+    },
+    "speechbrain-runtime-manifest.json": {
+      "status": "metadata_plan_only_no_packages_downloaded_or_installed",
+      "python": "CPython 3.12 Windows amd64",
+      "private_environment": ".venv-speechbrain-qualification",
+      "excluded_environment": ".venv-slice-optional-sdk-final04 (torch 2.14.1)",
+      "packages": {
+        "speechbrain": {
+          "version": "1.1.1",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "hyperpyyaml>=0.0.1",
+            "joblib>=0.14.1",
+            "numpy>=1.17.0",
+            "packaging",
+            "requests>=2.20.0",
+            "scipy>=1.4.1",
+            "sentencepiece>=0.1.91",
+            "soundfile>=0.12.1",
+            "torch>=2.1.0",
+            "torchaudio>=2.1.0",
+            "tqdm>=4.42.0",
+            "huggingface_hub>=0.8.0",
+            "ruff==0.12.4; extra == \"dev\"",
+            "pytest==7.4.0; extra == \"dev\"",
+            "yamllint==1.35.1; extra == \"dev\"",
+            "pre-commit>=2.3.0; extra == \"dev\"",
+            "pandas>=1.0.1; extra == \"dev\"",
+            "transformers>=4.30.0; extra == \"dev\"",
+            "codespell>=2.3.0; extra == \"dev\""
+          ],
+          "license_expression": null,
+          "filename": "speechbrain-1.1.1-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/08/bd/cb7befa5c2a6bc97b2d260a3481a7b2360c47db0f56ea2d1d2e2816bc3d5/speechbrain-1.1.1-py3-none-any.whl",
+          "bytes": 2313069,
+          "sha256": "de4f78d3564d40443e11e01648b00b4c47a6f942558c7ab08b5c350264ffcd7c"
+        },
+        "torch": {
+          "version": "2.11.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "filelock",
+            "typing-extensions>=4.10.0",
+            "setuptools<82",
+            "sympy>=1.13.3",
+            "networkx>=2.5.1",
+            "jinja2",
+            "fsspec>=0.8.5",
+            "cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.2; platform_system == \"Linux\"",
+            "cuda-bindings<14,>=13.0.3; platform_system == \"Linux\"",
+            "nvidia-cudnn-cu13==9.19.0.56; platform_system == \"Linux\"",
+            "nvidia-cusparselt-cu13==0.8.0; platform_system == \"Linux\"",
+            "nvidia-nccl-cu13==2.28.9; platform_system == \"Linux\"",
+            "nvidia-nvshmem-cu13==3.4.5; platform_system == \"Linux\"",
+            "triton==3.6.0; platform_system == \"Linux\"",
+            "optree>=0.13.0; extra == \"optree\"",
+            "opt-einsum>=3.3; extra == \"opt-einsum\"",
+            "pyyaml; extra == \"pyyaml\""
+          ],
+          "license_expression": null,
+          "filename": "torch-2.11.0-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/1c/ff/6756f1c7ee302f6d202120e0f4f05b432b839908f9071157302cedfc5232/torch-2.11.0-cp312-cp312-win_amd64.whl",
+          "bytes": 114556047,
+          "sha256": "fbf39280699d1b869f55eac536deceaa1b60bd6788ba74f399cc67e60a5fab10"
+        },
+        "torchaudio": {
+          "version": "2.11.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [],
+          "license_expression": null,
+          "filename": "torchaudio-2.11.0-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/23/a8/941277ecc39f7a0a169d554302a1f1afd87c1d94a8aec828891916cea59a/torchaudio-2.11.0-cp312-cp312-win_amd64.whl",
+          "bytes": 328663,
+          "sha256": "478110f981e5d40a8d82221732c57a56c85a1d5895fb8fe646e86ee15eded3bd"
+        },
+        "hyperpyyaml": {
+          "version": "1.2.3",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "pyyaml>=5.1",
+            "ruamel.yaml<0.19.0,>=0.17.28"
+          ],
+          "license_expression": null,
+          "filename": "hyperpyyaml-1.2.3-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/7d/a5/98e20cc4365e293dfc1382e2f8dbf44b1cb14d75658ab5147cb0d6d8718e/hyperpyyaml-1.2.3-py3-none-any.whl",
+          "bytes": 16456,
+          "sha256": "0088c8ce97dc7c7d3460112b6ccc92dca46fade4d0320bc39f58b1fdda60f7f1"
+        },
+        "joblib": {
+          "version": "1.6.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "cloudpickle>=3.0",
+            "distributed; extra == \"test\"",
+            "lz4; extra == \"test\"",
+            "numpy; extra == \"test\"",
+            "memory_profiler; extra == \"test\"",
+            "pytest; extra == \"test\"",
+            "pytest-asyncio; extra == \"test\"",
+            "pytest-cov; extra == \"test\"",
+            "pytest-run-parallel; extra == \"test\"",
+            "pytest-timeout; extra == \"test\"",
+            "threadpoolctl; extra == \"test\"",
+            "distributed; extra == \"docs\"",
+            "lz4; extra == \"docs\"",
+            "numpy; extra == \"docs\"",
+            "numpydoc; extra == \"docs\"",
+            "matplotlib; extra == \"docs\"",
+            "pandas; extra == \"docs\"",
+            "psutil; extra == \"docs\"",
+            "sphinx; extra == \"docs\"",
+            "pydata-sphinx-theme; extra == \"docs\"",
+            "sphinx-gallery; extra == \"docs\"",
+            "sphinx-copybutton; extra == \"docs\"",
+            "sphinx-design; extra == \"docs\"",
+            "tqdm; extra == \"docs\""
+          ],
+          "license_expression": "BSD-3-Clause",
+          "filename": "joblib-1.6.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl",
+          "bytes": 306115,
+          "sha256": "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba"
+        },
+        "numpy": {
+          "version": "2.2.6",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "packaging": {
+          "version": "26.3",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "requests": {
+          "version": "2.34.2",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "charset_normalizer<4,>=2",
+            "idna<4,>=2.5",
+            "urllib3<3,>=1.26",
+            "certifi>=2023.5.7",
+            "PySocks!=1.5.7,>=1.5.6; extra == \"socks\"",
+            "chardet<8,>=3.0.2; extra == \"use-chardet-on-py3\""
+          ]
+        },
+        "scipy": {
+          "version": "1.18.1",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "numpy<2.8,>=2.0.0",
+            "pytest>=8.0.0; extra == \"test\"",
+            "pytest-cov; extra == \"test\"",
+            "pytest-timeout; extra == \"test\"",
+            "pytest-xdist; extra == \"test\"",
+            "asv; extra == \"test\"",
+            "mpmath; extra == \"test\"",
+            "gmpy2; extra == \"test\"",
+            "threadpoolctl; extra == \"test\"",
+            "scikit-umfpack; extra == \"test\"",
+            "pooch; extra == \"test\"",
+            "hypothesis>=6.30; extra == \"test\"",
+            "array-api-strict>=2.3.1; extra == \"test\"",
+            "Cython; extra == \"test\"",
+            "meson; extra == \"test\"",
+            "ninja; sys_platform != \"emscripten\" and extra == \"test\"",
+            "scipy-doctest>=2.0.0; extra == \"test\"",
+            "sphinx<8.2.0,>=5.0.0; extra == \"doc\"",
+            "intersphinx_registry; extra == \"doc\"",
+            "pydata-sphinx-theme>=0.15.2; extra == \"doc\"",
+            "sphinx-copybutton; extra == \"doc\"",
+            "sphinx-design>=0.4.0; extra == \"doc\"",
+            "matplotlib>=3.5; extra == \"doc\"",
+            "numpydoc; extra == \"doc\"",
+            "jupytext; extra == \"doc\"",
+            "myst-nb>=1.2.0; extra == \"doc\"",
+            "pooch; extra == \"doc\"",
+            "jupyterlite-sphinx>=0.19.1; extra == \"doc\"",
+            "jupyterlite-pyodide-kernel; extra == \"doc\"",
+            "linkify-it-py; extra == \"doc\"",
+            "tabulate; extra == \"doc\"",
+            "click<8.3.0; extra == \"dev\"",
+            "spin; extra == \"dev\"",
+            "mypy==1.19.1; extra == \"dev\"",
+            "pyrefly==0.63.0; extra == \"dev\"",
+            "typing_extensions; extra == \"dev\"",
+            "types-psutil; extra == \"dev\"",
+            "pycodestyle; extra == \"dev\"",
+            "ruff>=0.12.0; extra == \"dev\"",
+            "cython-lint>=0.12.2; extra == \"dev\""
+          ],
+          "license_expression": null,
+          "filename": "scipy-1.18.1-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/39/e7/979fd14e75008623df31ba70d6bb144700f68feadcea042021c06a05bf82/scipy-1.18.1-cp312-cp312-win_amd64.whl",
+          "bytes": 36658278,
+          "sha256": "5e4d44984abc0020154ea81b247adeddcc3ac5527b975ff798bd1ba0adc513c2"
+        },
+        "sentencepiece": {
+          "version": "0.2.2",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "numpy; extra == \"numpy\"",
+            "protobuf; extra == \"protobuf\"",
+            "pytest; extra == \"test\"",
+            "numpy; extra == \"test\"",
+            "protobuf; extra == \"test\""
+          ],
+          "license_expression": "Apache-2.0",
+          "filename": "sentencepiece-0.2.2-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/8d/11/753fca2e6b109be3ab7867abf357dfe48677fe726ae5a5363d0b54ca9450/sentencepiece-0.2.2-cp312-cp312-win_amd64.whl",
+          "bytes": 1248030,
+          "sha256": "7c6e7bf684dc12145bfa685d3060beaea55139134ba848289bee514ed42e7383"
+        },
+        "soundfile": {
+          "version": "0.14.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "cffi>=1.0",
+            "numpy",
+            "typing-extensions"
+          ],
+          "license_expression": null,
+          "filename": "soundfile-0.14.0-py2.py3-none-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/ed/97/b39c18ac1df45e755ca22b8b00e872929da5d107998a207a5e4ac831bfda/soundfile-0.14.0-py2.py3-none-win_amd64.whl",
+          "bytes": 1021480,
+          "sha256": "299491d3499460fb1b74bb4bd78b57ffc2d243a5fafa7b6ec1b264875c78453e"
+        },
+        "tqdm": {
+          "version": "4.70.1",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "colorama; platform_system == \"Windows\"",
+            "requests; extra == \"discord\"",
+            "envwrap; extra == \"discord\"",
+            "slack-sdk; extra == \"slack\"",
+            "envwrap; extra == \"slack\"",
+            "requests; extra == \"telegram\"",
+            "envwrap; extra == \"telegram\"",
+            "ipywidgets>=6; extra == \"notebook\""
+          ]
+        },
+        "huggingface-hub": {
+          "version": "2.0.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "click<9.0.0,>=8.4.2",
+            "filelock>=3.10.0",
+            "fsspec>=2023.5.0",
+            "hf-xet<2.0.0,>=1.6.0; platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"arm64\" or platform_machine == \"aarch64\"",
+            "httpx2<3,>=2.0.0",
+            "packaging>=20.9",
+            "pyyaml>=5.1",
+            "tomli>=1.1.0; python_version < \"3.11\"",
+            "tqdm>=4.42.1",
+            "typing-extensions>=4.1.0",
+            "authlib>=1.8.0; extra == \"oauth\"",
+            "fastapi; extra == \"oauth\"",
+            "itsdangerous; extra == \"oauth\"",
+            "torch; extra == \"torch\"",
+            "safetensors[torch]; extra == \"torch\"",
+            "toml; extra == \"fastai\"",
+            "fastai>=2.4; extra == \"fastai\"",
+            "fastcore>=1.3.27; extra == \"fastai\"",
+            "hf-xet<2.0.0,>=1.6.0; extra == \"hf-xet\"",
+            "mcp<2.0.0,>=1.9.4; extra == \"mcp\"",
+            "authlib>=1.8.0; extra == \"testing\"",
+            "fastapi; extra == \"testing\"",
+            "itsdangerous; extra == \"testing\"",
+            "jedi; extra == \"testing\"",
+            "Jinja2; extra == \"testing\"",
+            "pytest>=8.4.2; extra == \"testing\"",
+            "pytest-cov; extra == \"testing\"",
+            "pytest-env; extra == \"testing\"",
+            "pytest-xdist; extra == \"testing\"",
+            "pytest-vcr; extra == \"testing\"",
+            "pytest-asyncio; extra == \"testing\"",
+            "pytest-rerunfailures>=16.2; extra == \"testing\"",
+            "pytest-mock; extra == \"testing\"",
+            "urllib3<2.0; extra == \"testing\"",
+            "soundfile; extra == \"testing\"",
+            "Pillow; extra == \"testing\"",
+            "numpy; extra == \"testing\"",
+            "duckdb; extra == \"testing\"",
+            "fastapi; extra == \"testing\"",
+            "gradio>=5.0.0; extra == \"gradio\"",
+            "requests; extra == \"gradio\"",
+            "typing-extensions>=4.8.0; extra == \"typing\"",
+            "types-PyYAML; extra == \"typing\"",
+            "types-simplejson; extra == \"typing\"",
+            "types-toml; extra == \"typing\"",
+            "types-tqdm; extra == \"typing\"",
+            "types-urllib3; extra == \"typing\"",
+            "ruff>=0.9.0; extra == \"quality\"",
+            "mypy==1.15.0; extra == \"quality\"",
+            "libcst>=1.4.0; extra == \"quality\"",
+            "ty; extra == \"quality\"",
+            "authlib>=1.8.0; extra == \"all\"",
+            "fastapi; extra == \"all\"",
+            "itsdangerous; extra == \"all\"",
+            "jedi; extra == \"all\"",
+            "Jinja2; extra == \"all\"",
+            "pytest>=8.4.2; extra == \"all\"",
+            "pytest-cov; extra == \"all\"",
+            "pytest-env; extra == \"all\"",
+            "pytest-xdist; extra == \"all\"",
+            "pytest-vcr; extra == \"all\"",
+            "pytest-asyncio; extra == \"all\"",
+            "pytest-rerunfailures>=16.2; extra == \"all\"",
+            "pytest-mock; extra == \"all\"",
+            "urllib3<2.0; extra == \"all\"",
+            "soundfile; extra == \"all\"",
+            "Pillow; extra == \"all\"",
+            "numpy; extra == \"all\"",
+            "duckdb; extra == \"all\"",
+            "fastapi; extra == \"all\"",
+            "ruff>=0.9.0; extra == \"all\"",
+            "mypy==1.15.0; extra == \"all\"",
+            "libcst>=1.4.0; extra == \"all\"",
+            "ty; extra == \"all\"",
+            "typing-extensions>=4.8.0; extra == \"all\"",
+            "types-PyYAML; extra == \"all\"",
+            "types-simplejson; extra == \"all\"",
+            "types-toml; extra == \"all\"",
+            "types-tqdm; extra == \"all\"",
+            "types-urllib3; extra == \"all\"",
+            "authlib>=1.8.0; extra == \"dev\"",
+            "fastapi; extra == \"dev\"",
+            "itsdangerous; extra == \"dev\"",
+            "jedi; extra == \"dev\"",
+            "Jinja2; extra == \"dev\"",
+            "pytest>=8.4.2; extra == \"dev\"",
+            "pytest-cov; extra == \"dev\"",
+            "pytest-env; extra == \"dev\"",
+            "pytest-xdist; extra == \"dev\"",
+            "pytest-vcr; extra == \"dev\"",
+            "pytest-asyncio; extra == \"dev\"",
+            "pytest-rerunfailures>=16.2; extra == \"dev\"",
+            "pytest-mock; extra == \"dev\"",
+            "urllib3<2.0; extra == \"dev\"",
+            "soundfile; extra == \"dev\"",
+            "Pillow; extra == \"dev\"",
+            "numpy; extra == \"dev\"",
+            "duckdb; extra == \"dev\"",
+            "fastapi; extra == \"dev\"",
+            "ruff>=0.9.0; extra == \"dev\"",
+            "mypy==1.15.0; extra == \"dev\"",
+            "libcst>=1.4.0; extra == \"dev\"",
+            "ty; extra == \"dev\"",
+            "typing-extensions>=4.8.0; extra == \"dev\"",
+            "types-PyYAML; extra == \"dev\"",
+            "types-simplejson; extra == \"dev\"",
+            "types-toml; extra == \"dev\"",
+            "types-tqdm; extra == \"dev\"",
+            "types-urllib3; extra == \"dev\""
+          ],
+          "license_expression": null,
+          "filename": "huggingface_hub-2.0.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/5f/f9/d752d5756ce0405ba29405b65517b287d2baf9f77a1cf5329266f3d577f0/huggingface_hub-2.0.0-py3-none-any.whl",
+          "bytes": 828498,
+          "sha256": "b3eecb60540c17e8ef94c187104f4a5c0c451afcb9510ba8e17739bedcc2d6dd"
+        },
+        "filelock": {
+          "version": "4.0.7",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [],
+          "license_expression": "MIT",
+          "filename": "filelock-4.0.7-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/06/cf/1731c0dd182ee35f80a39e63afb3d03056ea0dd561b7498932b10b2e34d9/filelock-4.0.7-py3-none-any.whl",
+          "bytes": 109242,
+          "sha256": "a93c4d93269b339a6af4848342c7e940d0f9928ad95eff64764699e5f1bf8a6a"
+        },
+        "typing-extensions": {
+          "version": "4.16.0",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "setuptools": {
+          "version": "81.0.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "pytest!=8.1.*,>=6; extra == \"test\"",
+            "virtualenv>=13.0.0; extra == \"test\"",
+            "wheel>=0.44.0; extra == \"test\"",
+            "pip>=19.1; extra == \"test\"",
+            "packaging>=24.2; extra == \"test\"",
+            "jaraco.envs>=2.2; extra == \"test\"",
+            "pytest-xdist>=3; extra == \"test\"",
+            "jaraco.path>=3.7.2; extra == \"test\"",
+            "build[virtualenv]>=1.0.3; extra == \"test\"",
+            "filelock>=3.4.0; extra == \"test\"",
+            "ini2toml[lite]>=0.14; extra == \"test\"",
+            "tomli-w>=1.0.0; extra == \"test\"",
+            "pytest-timeout; extra == \"test\"",
+            "pytest-perf; sys_platform != \"cygwin\" and extra == \"test\"",
+            "jaraco.develop>=7.21; (python_version >= \"3.9\" and sys_platform != \"cygwin\") and extra == \"test\"",
+            "pytest-home>=0.5; extra == \"test\"",
+            "pytest-subprocess; extra == \"test\"",
+            "pyproject-hooks!=1.1; extra == \"test\"",
+            "jaraco.test>=5.5; extra == \"test\"",
+            "sphinx>=3.5; extra == \"doc\"",
+            "jaraco.packaging>=9.3; extra == \"doc\"",
+            "rst.linker>=1.9; extra == \"doc\"",
+            "furo; extra == \"doc\"",
+            "sphinx-lint; extra == \"doc\"",
+            "jaraco.tidelift>=1.4; extra == \"doc\"",
+            "pygments-github-lexers==0.0.5; extra == \"doc\"",
+            "sphinx-favicon; extra == \"doc\"",
+            "sphinx-inline-tabs; extra == \"doc\"",
+            "sphinx-reredirects; extra == \"doc\"",
+            "sphinxcontrib-towncrier; extra == \"doc\"",
+            "sphinx-notfound-page<2,>=1; extra == \"doc\"",
+            "pyproject-hooks!=1.1; extra == \"doc\"",
+            "towncrier<24.7; extra == \"doc\"",
+            "packaging>=24.2; extra == \"core\"",
+            "more_itertools>=8.8; extra == \"core\"",
+            "jaraco.text>=3.7; extra == \"core\"",
+            "importlib_metadata>=6; python_version < \"3.10\" and extra == \"core\"",
+            "tomli>=2.0.1; python_version < \"3.11\" and extra == \"core\"",
+            "wheel>=0.43.0; extra == \"core\"",
+            "platformdirs>=4.2.2; extra == \"core\"",
+            "jaraco.functools>=4; extra == \"core\"",
+            "more_itertools; extra == \"core\"",
+            "pytest-checkdocs>=2.4; extra == \"check\"",
+            "pytest-ruff>=0.2.1; sys_platform != \"cygwin\" and extra == \"check\"",
+            "ruff>=0.13.0; sys_platform != \"cygwin\" and extra == \"check\"",
+            "pytest-cov; extra == \"cover\"",
+            "pytest-enabler>=2.2; extra == \"enabler\"",
+            "pytest-mypy; extra == \"type\"",
+            "mypy==1.18.*; extra == \"type\"",
+            "importlib_metadata>=7.0.2; python_version < \"3.10\" and extra == \"type\"",
+            "jaraco.develop>=7.21; sys_platform != \"cygwin\" and extra == \"type\""
+          ],
+          "license_expression": "MIT",
+          "filename": "setuptools-81.0.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl",
+          "bytes": 1062021,
+          "sha256": "fdd925d5c5d9f62e4b74b30d6dd7828ce236fd6ed998a08d81de62ce5a6310d6"
+        },
+        "sympy": {
+          "version": "1.14.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "mpmath<1.4,>=1.1.0",
+            "pytest>=7.1.0; extra == \"dev\"",
+            "hypothesis>=6.70.0; extra == \"dev\""
+          ],
+          "license_expression": null,
+          "filename": "sympy-1.14.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+          "bytes": 6299353,
+          "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+        },
+        "networkx": {
+          "version": "3.7",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "asv>=0.6.5; extra == \"benchmarking\"",
+            "py-rattler<0.22,>=0.21; extra == \"benchmarking\"",
+            "virtualenv; extra == \"benchmarking\"",
+            "numpy>=2.2; extra == \"default\"",
+            "scipy>=1.15; extra == \"default\"",
+            "matplotlib>=3.10; extra == \"default\"",
+            "pandas>=2.3; extra == \"default\"",
+            "pre-commit>=4.1; extra == \"developer\"",
+            "mypy>=1.15; extra == \"developer\"",
+            "sphinx>=8.0; extra == \"doc\"",
+            "pydata-sphinx-theme>=0.16; extra == \"doc\"",
+            "sphinx-gallery>=0.18; extra == \"doc\"",
+            "numpydoc>=1.8.0; extra == \"doc\"",
+            "pillow>=10; extra == \"doc\"",
+            "texext>=0.6.7; extra == \"doc\"",
+            "myst-nb>=1.1; extra == \"doc\"",
+            "intersphinx-registry; extra == \"doc\"",
+            "osmnx>=2.0.0; extra == \"example\"",
+            "momepy>=0.7.2; extra == \"example\"",
+            "contextily>=1.6; extra == \"example\"",
+            "seaborn>=0.13; extra == \"example\"",
+            "cairocffi>=1.7; extra == \"example\"",
+            "igraph>=0.11; extra == \"example\"",
+            "scikit-learn>=1.6; extra == \"example\"",
+            "iplotx>=0.9.0; extra == \"example\"",
+            "hiveplotlib>=0.28; extra == \"example\"",
+            "lxml>=4.6; extra == \"extra\"",
+            "pygraphviz>=2.0; extra == \"extra\"",
+            "pydot>=3.0.1; extra == \"extra\"",
+            "sympy>=1.10; extra == \"extra\"",
+            "build>=0.10; extra == \"release\"",
+            "twine>=4.0; extra == \"release\"",
+            "wheel>=0.40; extra == \"release\"",
+            "changelist==0.5; extra == \"release\"",
+            "pytest>=7.2; extra == \"test\"",
+            "pytest-cov>=4.0; extra == \"test\"",
+            "pytest-xdist>=3.0; extra == \"test\"",
+            "pytest-mpl; extra == \"test-extras\"",
+            "pytest-randomly; extra == \"test-extras\""
+          ],
+          "license_expression": "BSD-3-Clause",
+          "filename": "networkx-3.7-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/7e/cd/fe58041e9011f307c490e3e17dd48cc516448f7c698a3f2d9d9d65d7e6a8/networkx-3.7-py3-none-any.whl",
+          "bytes": 2142205,
+          "sha256": "e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0"
+        },
+        "jinja2": {
+          "version": "3.1.6",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "MarkupSafe>=2.0",
+            "Babel>=2.7 ; extra == \"i18n\""
+          ]
+        },
+        "fsspec": {
+          "version": "2026.9.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "adlfs; extra == \"abfs\"",
+            "adlfs; extra == \"adl\"",
+            "pyarrow>=1; extra == \"arrow\"",
+            "dask; extra == \"dask\"",
+            "distributed; extra == \"dask\"",
+            "pre-commit; extra == \"dev\"",
+            "ruff>=0.5; extra == \"dev\"",
+            "numpydoc; extra == \"doc\"",
+            "sphinx; extra == \"doc\"",
+            "sphinx-design; extra == \"doc\"",
+            "sphinx-rtd-theme; extra == \"doc\"",
+            "yarl; extra == \"doc\"",
+            "dropbox; extra == \"dropbox\"",
+            "dropboxdrivefs; extra == \"dropbox\"",
+            "requests; extra == \"dropbox\"",
+            "adlfs; extra == \"full\"",
+            "aiohttp!=4.0.0a0,!=4.0.0a1; extra == \"full\"",
+            "dask; extra == \"full\"",
+            "distributed; extra == \"full\"",
+            "dropbox; extra == \"full\"",
+            "dropboxdrivefs; extra == \"full\"",
+            "fusepy; extra == \"full\"",
+            "gcsfs>=2026.4.0; extra == \"full\"",
+            "libarchive-c; extra == \"full\"",
+            "ocifs; extra == \"full\"",
+            "panel; extra == \"full\"",
+            "paramiko; extra == \"full\"",
+            "pyarrow>=1; extra == \"full\"",
+            "pygit2; extra == \"full\"",
+            "requests; extra == \"full\"",
+            "s3fs>=2026.6.0; extra == \"full\"",
+            "smbprotocol; extra == \"full\"",
+            "tqdm; extra == \"full\"",
+            "fusepy; extra == \"fuse\"",
+            "gcsfs>=2026.4.0; extra == \"gcs\"",
+            "pygit2; extra == \"git\"",
+            "requests; extra == \"github\"",
+            "gcsfs>=2026.4.0; extra == \"gs\"",
+            "panel; extra == \"gui\"",
+            "pyarrow>=1; extra == \"hdfs\"",
+            "aiohttp!=4.0.0a0,!=4.0.0a1; extra == \"http\"",
+            "libarchive-c; extra == \"libarchive\"",
+            "ocifs; extra == \"oci\"",
+            "s3fs>=2026.6.0; extra == \"s3\"",
+            "paramiko; extra == \"sftp\"",
+            "smbprotocol; extra == \"smb\"",
+            "paramiko; extra == \"ssh\"",
+            "aiohttp!=4.0.0a0,!=4.0.0a1; extra == \"test\"",
+            "numpy; extra == \"test\"",
+            "pytest; extra == \"test\"",
+            "pytest-asyncio!=0.22.0; extra == \"test\"",
+            "pytest-benchmark; extra == \"test\"",
+            "pytest-cov; extra == \"test\"",
+            "pytest-mock; extra == \"test\"",
+            "pytest-recording; extra == \"test\"",
+            "pytest-rerunfailures; extra == \"test\"",
+            "requests; extra == \"test\"",
+            "aiobotocore<3.0.0,>=2.5.4; extra == \"test-downstream\"",
+            "dask[dataframe,test]; extra == \"test-downstream\"",
+            "moto[server]<5,>4; extra == \"test-downstream\"",
+            "pytest-timeout; extra == \"test-downstream\"",
+            "xarray; extra == \"test-downstream\"",
+            "zarr; extra == \"test-downstream\"",
+            "adlfs; extra == \"test-full\"",
+            "aiohttp!=4.0.0a0,!=4.0.0a1; extra == \"test-full\"",
+            "backports-zstd; python_version < \"3.14\" and extra == \"test-full\"",
+            "cloudpickle; extra == \"test-full\"",
+            "dask; extra == \"test-full\"",
+            "distributed; extra == \"test-full\"",
+            "dropbox; extra == \"test-full\"",
+            "dropboxdrivefs; extra == \"test-full\"",
+            "fastparquet; extra == \"test-full\"",
+            "fusepy; extra == \"test-full\"",
+            "gcsfs>=2026.4.0; extra == \"test-full\"",
+            "jinja2; extra == \"test-full\"",
+            "kerchunk; extra == \"test-full\"",
+            "libarchive-c; extra == \"test-full\"",
+            "lz4; extra == \"test-full\"",
+            "notebook; extra == \"test-full\"",
+            "numpy; extra == \"test-full\"",
+            "ocifs; extra == \"test-full\"",
+            "pandas<3.0.0; extra == \"test-full\"",
+            "panel; extra == \"test-full\"",
+            "paramiko; extra == \"test-full\"",
+            "pyarrow>=1; extra == \"test-full\"",
+            "pyftpdlib; extra == \"test-full\"",
+            "pygit2; extra == \"test-full\"",
+            "pytest; extra == \"test-full\"",
+            "pytest-asyncio!=0.22.0; extra == \"test-full\"",
+            "pytest-benchmark; extra == \"test-full\"",
+            "pytest-cov; extra == \"test-full\"",
+            "pytest-mock; extra == \"test-full\"",
+            "pytest-recording; extra == \"test-full\"",
+            "pytest-rerunfailures; extra == \"test-full\"",
+            "python-snappy; extra == \"test-full\"",
+            "requests; extra == \"test-full\"",
+            "s3fs>=2026.6.0; extra == \"test-full\"",
+            "smbprotocol; extra == \"test-full\"",
+            "tqdm; extra == \"test-full\"",
+            "urllib3; extra == \"test-full\"",
+            "zarr<3.2.0; extra == \"test-full\"",
+            "zstandard; python_version < \"3.14\" and extra == \"test-full\"",
+            "tqdm; extra == \"tqdm\""
+          ],
+          "license_expression": "BSD-3-Clause",
+          "filename": "fsspec-2026.9.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl",
+          "bytes": 221738,
+          "sha256": "8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f"
+        },
+        "pyyaml": {
+          "version": "6.0.3",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "ruamel-yaml": {
+          "version": "0.18.17",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "ruamel.yaml.clib>=0.2.15; platform_python_implementation == \"CPython\" and python_version < \"3.15\"",
+            "ruamel.yaml.jinja2>=0.2; extra == \"jinja2\"",
+            "ryd; extra == \"docs\"",
+            "mercurial>5.7; extra == \"docs\""
+          ],
+          "license_expression": null,
+          "filename": "ruamel_yaml-0.18.17-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/af/fe/b6045c782f1fd1ae317d2a6ca1884857ce5c20f59befe6ab25a8603c43a7/ruamel_yaml-0.18.17-py3-none-any.whl",
+          "bytes": 121594,
+          "sha256": "9c8ba9eb3e793efdf924b60d521820869d5bf0cb9c6f1b82d82de8295e290b9d"
+        },
+        "cloudpickle": {
+          "version": "3.1.2",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [],
+          "license_expression": null,
+          "filename": "cloudpickle-3.1.2-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl",
+          "bytes": 22228,
+          "sha256": "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a"
+        },
+        "charset-normalizer": {
+          "version": "3.5.1",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "idna": {
+          "version": "3.19",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "ruff >= 0.16.0 ; extra == \"all\"",
+            "mypy >= 1.11.2 ; extra == \"all\"",
+            "ty >= 0.0.37 ; extra == \"all\"",
+            "pytest >= 8.3.2 ; extra == \"all\"",
+            "hypothesis >= 6.141.1 ; extra == \"all\"",
+            "coverage >= 7.10.0 ; extra == \"all\""
+          ]
+        },
+        "urllib3": {
+          "version": "2.8.0",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "brotli>=1.2.0; (platform_python_implementation == 'CPython') and extra == 'brotli'",
+            "brotlicffi>=1.2.0.0; (platform_python_implementation != 'CPython') and extra == 'brotli'",
+            "h2<5,>=4; extra == 'h2'",
+            "pysocks!=1.5.7,<2.0,>=1.5.6; extra == 'socks'",
+            "backports-zstd>=1.0.0; (python_version < '3.14') and extra == 'zstd'"
+          ]
+        },
+        "certifi": {
+          "version": "2026.7.22",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "cffi": {
+          "version": "2.1.1",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "pycparser; implementation_name != \"PyPy\""
+          ]
+        },
+        "colorama": {
+          "version": "0.4.6",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "click": {
+          "version": "8.5.0",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "hf-xet": {
+          "version": "1.6.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "pytest; extra == \"tests\""
+          ],
+          "license_expression": "Apache-2.0",
+          "filename": "hf_xet-1.6.0-cp38-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/98/b7/8c59a66d15205024662f1d66968136f13893f96df1ddc5087e2e281fc95f/hf_xet-1.6.0-cp38-abi3-win_amd64.whl",
+          "bytes": 4033128,
+          "sha256": "fb4fadde1b2b70bf4c0c14a6dccbe7194b1c28947fefd5bbe3fed9d940676c3b"
+        },
+        "httpx2": {
+          "version": "2.13.0",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "anyio>=4.10; sys_platform != 'emscripten'",
+            "httpcore2==2.13.0; sys_platform != 'emscripten'",
+            "httpx2-jsfetch; sys_platform == 'emscripten' and python_version >= '3.12'",
+            "idna>=3.18",
+            "truststore>=0.10; sys_platform != 'emscripten'",
+            "typing-extensions>=4.5.0; python_version < '3.13'",
+            "brotli>=1.2.0; (platform_python_implementation == 'CPython') and extra == 'brotli'",
+            "brotlicffi>=1.2.0.2; (platform_python_implementation != 'CPython') and extra == 'brotli'",
+            "click>=8.4.2; extra == 'cli'",
+            "pygments==2.*; extra == 'cli'",
+            "rich<16,>=10; extra == 'cli'",
+            "h2<5,>=3; extra == 'http2'",
+            "socksio==1.*; extra == 'socks'",
+            "wsproto>=1.2; extra == 'ws'",
+            "backports-zstd>=1.0.0; (python_version <= '3.13') and extra == 'zstd'"
+          ]
+        },
+        "mpmath": {
+          "version": "1.3.0",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [
+            "pytest (>=4.6) ; extra == 'develop'",
+            "pycodestyle ; extra == 'develop'",
+            "pytest-cov ; extra == 'develop'",
+            "codecov ; extra == 'develop'",
+            "wheel ; extra == 'develop'",
+            "sphinx ; extra == 'docs'",
+            "gmpy2 (>=2.1.0a4) ; (platform_python_implementation != \"PyPy\") and extra == 'gmpy'",
+            "pytest (>=4.6) ; extra == 'tests'"
+          ],
+          "license_expression": null,
+          "filename": "mpmath-1.3.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+          "bytes": 536198,
+          "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+        },
+        "markupsafe": {
+          "version": "3.0.3",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "ruamel-yaml-clib": {
+          "version": "0.2.15",
+          "source": "pinned_official_pypi_wheel",
+          "requires_dist": [],
+          "license_expression": null,
+          "filename": "ruamel_yaml_clib-0.2.15-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/b3/e5/8925a4208f131b218f9a7e459c0d6fcac8324ae35da269cb437894576366/ruamel_yaml_clib-0.2.15-cp312-cp312-win_amd64.whl",
+          "bytes": 119013,
+          "sha256": "2b216904750889133d9222b7b873c199d48ecbb12912aca78970f84a5aa1a4bc"
+        },
+        "pycparser": {
+          "version": "3.0",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "anyio": {
+          "version": "4.15.1",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "exceptiongroup>=1.0.2; python_version < \"3.11\"",
+            "idna>=2.8",
+            "typing_extensions>=4.16.0; python_version < \"3.15\"",
+            "trio>=0.32.0; extra == \"trio\""
+          ]
+        },
+        "httpcore2": {
+          "version": "2.13.0",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": [
+            "h11>=0.16",
+            "truststore>=0.10",
+            "anyio<5.0,>=4.5.0; extra == 'asyncio'",
+            "h2<5,>=3; extra == 'http2'",
+            "socksio==1.*; extra == 'socks'",
+            "trio<1.0,>=0.34.0; extra == 'trio'"
+          ]
+        },
+        "truststore": {
+          "version": "0.10.4",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        },
+        "h11": {
+          "version": "0.16.0",
+          "source": "read_only_shared_audit_environment",
+          "requires_dist": []
+        }
+      },
+      "metadata_urls": [
+        "https://pypi.org/pypi/speechbrain/1.1.1/json",
+        "https://pypi.org/pypi/torch/2.11.0/json",
+        "https://pypi.org/pypi/torchaudio/2.11.0/json",
+        "https://pypi.org/pypi/hyperpyyaml/json",
+        "https://pypi.org/pypi/joblib/json",
+        "https://pypi.org/pypi/scipy/json",
+        "https://pypi.org/pypi/sentencepiece/json",
+        "https://pypi.org/pypi/soundfile/json",
+        "https://pypi.org/pypi/huggingface-hub/json",
+        "https://pypi.org/pypi/filelock/json",
+        "https://pypi.org/pypi/setuptools/81.0.0/json",
+        "https://pypi.org/pypi/sympy/json",
+        "https://pypi.org/pypi/networkx/json",
+        "https://pypi.org/pypi/fsspec/json",
+        "https://pypi.org/pypi/ruamel-yaml/json",
+        "https://pypi.org/pypi/ruamel-yaml/0.18.17/json",
+        "https://pypi.org/pypi/cloudpickle/json",
+        "https://pypi.org/pypi/hf-xet/json",
+        "https://pypi.org/pypi/mpmath/json",
+        "https://pypi.org/pypi/mpmath/1.3.0/json",
+        "https://pypi.org/pypi/ruamel-yaml-clib/json"
+      ],
+      "planned_download_bytes": 171943356
+    },
+    "speechbrain-preparation-helper-hashes.json": [
+      {
+        "path": "resolve_speechbrain_runtime_metadata.py",
+        "sha256": "c2db642b69300e58099eeb68fb0d5ad061c5753939a110f2a313b3dbfec2540f",
+        "bytes": 4784
+      },
+      {
+        "path": "speechbrain_qualification_setup.py",
+        "sha256": "29300d1de8901563580003196009516a0a2da71080522e4d799604848116736b",
+        "bytes": 11633
+      },
+      {
+        "path": "speechbrain_qualification_guard.py",
+        "sha256": "3d8cd3fbcf11a6fc0ca2582b03a4965aa4be62e86eeced8deb472f713c842061",
+        "bytes": 4568
+      },
+      {
+        "path": "run_speechbrain_qualification.py",
+        "sha256": "b240d23531ec5ccc6f404e2ea45273e7d3d27c8901f2db157225ee8798e547f1",
+        "bytes": 6218
+      }
+    ]
+  },
+  "private_artifacts": [
+    {
+      "path": "audit/speechbrain-fixture-manifest.json",
+      "bytes": 9414,
+      "sha256": "5cb90a2a3172defb16911ea645439d6467408b49836c1aaa6010f1f456458dff"
+    },
+    {
+      "path": "audit/speechbrain-runtime-manifest.json",
+      "bytes": 36030,
+      "sha256": "57f45e7920968bf6eea2b03a0d89f2c41962182881685eae8ceed4ccb10f4293"
+    },
+    {
+      "path": "audit/speechbrain-preparation-helper-hashes.json",
+      "bytes": 665,
+      "sha256": "d40a35768f125507fc12db5dd4c6ee835be3494ac1cbbd57717fc85249050717"
+    },
+    {
+      "path": "audit/speechbrain-public-metadata.json",
+      "bytes": 8015,
+      "sha256": "3fd3d5894a859df9dbe562acc565abc6dd8da592de4808b9667b0fa9bf218ec1"
+    },
+    {
+      "path": "audit/speechbrain-public-runtime-metadata.json",
+      "bytes": 17606,
+      "sha256": "57eca6a6b0286760c2bf22b15a46b0403d8e26021ccfcba41aa5db4564488917"
+    },
+    {
+      "path": "audit/speechbrain-source-review-ref.json",
+      "bytes": 6317,
+      "sha256": "491afa523a43c1df76fcb4701cb4517c4da14e1a1f6bb4a8dbcb771f3a724589"
+    },
+    {
+      "path": "audit/speechbrain-pinned-loading-source.json",
+      "bytes": 142636,
+      "sha256": "0772fef840fc8ff82eb8cce6248f169b241e8252420d80b37b87a6a6ba7b6961"
+    },
+    {
+      "path": "audit/speechbrain-pinned-model-callables.json",
+      "bytes": 162126,
+      "sha256": "c70c0e9510b38796555df353b9a7eeda82d7299a77aa7e45c627cc307f185cc1"
+    },
+    {
+      "path": "audit/speechbrain-shared-runtime-inventory.json",
+      "bytes": 6130,
+      "sha256": "5fd966d0b81a8d5f1d2372766b2cec9a717ba5015dfe693d06aea63b04465f75"
+    }
+  ],
+  "static_checks": [
+    "Python 3.10 AST parsing passed for four private helpers",
+    "Inspect mode passed without asset downloads, installations or model execution"
+  ],
+  "limits": [
+    "No real-model pass is claimed.",
+    "Current historical/full07 skip disposition remains unchanged until real ordinary and secure runs pass.",
+    "Python socket guard does not claim native operating-system network isolation."
+  ]
+}

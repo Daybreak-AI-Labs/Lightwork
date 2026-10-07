@@ -112,12 +112,18 @@ class TestValidation:
                    for e in tax_constants.validate_payload(unknown))
 
 
+def _trust(monkeypatch, *pubs):
+    """Configure the publisher keys the active bundle is re-verified against."""
+    monkeypatch.setattr(tax_constants, "trusted_pubkeys", lambda: list(pubs))
+
+
 @crypto
 class TestApply:
-    def test_signed_bundle_applies_and_wins_over_builtins(self, store):
+    def test_signed_bundle_applies_and_wins_over_builtins(self, store, monkeypatch):
         p = _payload()
         p["federal"]["standard_deduction"]["single"] = 16000.0  # "new law"
         env, pub = _sign(p)
+        _trust(monkeypatch, pub)
         ok, reason = tax_constants.apply_bundle(env, trusted=[pub])
         assert ok, reason
         federal, state, prov = tax_constants.active_constants()
@@ -125,13 +131,16 @@ class TestApply:
         assert state["flat"]["PA"]["rate"] == STATE_TY2025["flat"]["PA"]["rate"]
         assert "bundle v1" in prov
         assert tax_constants.active_version() == 1
+        # A key no longer trusted today stops the retained bundle from applying.
+        _trust(monkeypatch)
+        assert tax_constants.active_version() == 0
 
     def test_fail_closed_no_anchors_untrusted_tampered(self, store):
         env, pub = _sign(_payload())
         ok, reason = tax_constants.apply_bundle(env, trusted=[])
-        assert not ok and "no trust anchors" in reason
+        assert not ok and "no trusted publisher keys" in reason
         ok, reason = tax_constants.apply_bundle(env, trusted=["ab" * 32])
-        assert not ok and "untrusted" in reason
+        assert not ok and "not currently trusted" in reason
         env["payload"]["federal"]["ctc_per_child"] = 99999.0  # tamper
         ok, reason = tax_constants.apply_bundle(env, trusted=[pub])
         assert not ok and "FAILED" in reason
@@ -143,9 +152,10 @@ class TestApply:
         ok, reason = tax_constants.apply_bundle(env, trusted=[pub])
         assert not ok and "sanity validation" in reason
 
-    def test_downgrade_refused_and_rollback_restores(self, store):
+    def test_downgrade_refused_and_rollback_restores(self, store, monkeypatch):
         env1, pub1 = _sign(_payload(version=1))
         env2, pub2 = _sign(_payload(version=2))
+        _trust(monkeypatch, pub1, pub2)
         assert tax_constants.apply_bundle(env1, trusted=[pub1])[0]
         assert tax_constants.apply_bundle(env2, trusted=[pub2])[0]
         assert tax_constants.active_version() == 2
@@ -192,13 +202,14 @@ class TestUpdateChannel:
         monkeypatch.setattr(cfg_mod, "load_config", dict)
         assert tax_constants.check_for_update()[0] == "disabled"
 
-    def test_prepare_computes_from_the_applied_bundle(self, store, tmp_path):
+    def test_prepare_computes_from_the_applied_bundle(self, store, tmp_path, monkeypatch):
         # The whole point: a published law change reaches the next prep run.
         from click.testing import CliRunner
         from maverick.cli import main
         p = _payload()
         p["federal"]["standard_deduction"]["single"] = 20000.0
         env, pub = _sign(p)
+        _trust(monkeypatch, pub)
         assert tax_constants.apply_bundle(env, trusted=[pub])[0]
         docs = tmp_path / "docs"
         docs.mkdir()
@@ -241,7 +252,7 @@ def test_validate_payload_rejects_non_finite_numeric_header():
     assert errs == ["malformed header fields"]
 
 
-def test_concurrent_apply_preserves_rollback_copy(store):
+def test_concurrent_apply_preserves_rollback_copy(store, monkeypatch):
     """Two concurrent applies of newer bundles must not interleave the .prev
     backup + write: the bundle stays valid, a .prev rollback copy exists, and no
     fixed-".tmp" residue is left."""
@@ -252,6 +263,7 @@ def test_concurrent_apply_preserves_rollback_copy(store):
 
     env2, pub2 = _sign(_payload(version=2))
     env3, pub3 = _sign(_payload(version=3))
+    _trust(monkeypatch, pub1, pub2, pub3)
 
     def apply(env, pub):
         tax_constants.apply_bundle(env, trusted=[pub])

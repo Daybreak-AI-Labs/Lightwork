@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ class FakeLLM:
     """Stands in at the model boundary; spends through the real Budget."""
 
     made: list = []
+    calls: list = []
     budgets: list = []
     fail: Exception | None = None
 
@@ -28,7 +30,12 @@ class FakeLLM:
         self.model = model
         FakeLLM.made.append(model)
 
+    def _provider_client_config(self, provider):
+        # The review binds the current connection's identity, not its secret.
+        return SimpleNamespace(fingerprint="test-connection:" + provider)
+
     def complete(self, *, system, messages, budget=None, max_tokens=4096, model=None, **_):
+        FakeLLM.calls.append(self.model)
         if FakeLLM.fail is not None:
             raise FakeLLM.fail
         FakeLLM.budgets.append(budget)
@@ -58,11 +65,15 @@ def env(tmp_path, monkeypatch):
     from maverick_dashboard import app as dashboard
     dashboard._goal_times.clear()
     dashboard._goal_times_global.clear()
-    FakeLLM.made, FakeLLM.budgets, FakeLLM.fail = [], [], None
+    FakeLLM.made, FakeLLM.calls, FakeLLM.budgets, FakeLLM.fail = [], [], [], None
     roles, rows = [], []
     monkeypatch.setattr(llm, "LLM", FakeLLM)
     monkeypatch.setattr(llm, "model_for_role", lambda role: roles.append(role) or "anthropic:configured-analyst")
+    from maverick_dashboard import _shared
+    from maverick_dashboard import viewpoints_requests as native
+    monkeypatch.setattr(native, "model_for_role", llm.model_for_role)
     monkeypatch.setattr(api, "require_provider_or_400", lambda role=None: None)
+    monkeypatch.setattr(_shared, "require_provider_or_400", lambda role=None: None)
     monkeypatch.setattr(audit, "audit_event", lambda kind, **data: rows.append({"kind": kind, **data}) or True)
     application = FastAPI()
 
@@ -79,8 +90,45 @@ def env(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
-def _ask(env, **extra):
-    return env.client.post("/api/v1/viewpoints", json={"question": "Should we move the team meeting to Mondays?", **extra})
+class _Answer:
+    """The saved answer of an original request, read like a response."""
+
+    def __init__(self, body):
+        self.status_code, self._body = 200, body
+        self.text = json.dumps(body)
+
+    def json(self):
+        return self._body
+
+
+def _ask(env, *, headers=None, question="Should we move the team meeting to Mondays?", **extra):
+    """Review and start a viewpoints request as Chat does, then read its saved answer."""
+    import time
+
+    client = env.client
+    current = client.get("/api/v1/viewpoints", headers=headers)
+    if current.status_code != 200:
+        return current
+    state = current.json()
+    review = client.post("/api/v1/viewpoints/review", headers=headers, json={
+        "question": question, **extra, "context": state["context"], "revision": state.get("revision", "0" * 64)})
+    if review.status_code != 200:
+        return review
+    started = client.post("/api/v1/viewpoints/apply", headers=headers,
+                          json={"token": review.json()["token"], "confirmed": True})
+    if started.status_code != 200:
+        return started
+    original = "/api/v1/viewpoints/requests/" + review.json()["operation"]
+    body, deadline = started.json(), time.time() + 15
+    while not body["confirmed"]:
+        assert time.time() < deadline, body
+        time.sleep(0.02)
+        body = client.get(original, headers=headers).json()
+    return _Answer(body["result"])
+
+
+def _runs(env):
+    return [row for row in env.audit if row["kind"] == "viewpoints_run"]
 
 
 def test_debate_runs_on_role_model_under_capped_bound_budget_and_is_settled(env):
@@ -93,14 +141,15 @@ def test_debate_runs_on_role_model_under_capped_bound_budget_and_is_settled(env)
     assert [turn["side"] for turn in data["turns"]] == ["for", "against"]
     assert data["reason"] == "The risks outweigh the gain." and data["key_point"] == "Mondays are busy."
     assert data["cost"] > 0
-    assert env.roles == ["analyst"] and FakeLLM.made == ["anthropic:configured-analyst"]
+    assert set(env.roles) == {"analyst"} and set(FakeLLM.made) == {"anthropic:configured-analyst"}
+    assert FakeLLM.calls == ["anthropic:configured-analyst"] * 3
     budget = FakeLLM.budgets[0]
     assert len(FakeLLM.budgets) == 3 and all(b is budget for b in FakeLLM.budgets)
     assert budget.max_dollars == api.MAX_DOLLARS
     assert budget._organization_principal == "user:owner"
-    assert [row["phase"] for row in env.audit] == ["start", "end"]
-    assert all(row["kind"] == "viewpoints_run" and row["actor"] == "user:owner" for row in env.audit)
-    assert env.audit[1]["outcome"] == "finished"
+    assert [row["phase"] for row in _runs(env)] == ["start", "end"]
+    assert all(row["actor"] == "user:owner" for row in _runs(env))
+    assert _runs(env)[1]["outcome"] == "finished"
     # Settled to the usage ledger that spending limits read, in this workspace only.
     with tenant_scope(tenant=TENANT):
         assert UsageLedger().usage("user:owner")["dollars"] == pytest.approx(budget.dollars)
@@ -120,9 +169,9 @@ def test_spending_limit_reached_before_start_runs_nothing(env, monkeypatch):
 
     message = "Your spending limit of $5.00 per day has been reached ($5.00 spent today)."
     monkeypatch.setattr(limits, "start_refusal", lambda principal: message)
-    data = _ask(env).json()
-    assert data == {"ran": False, "message": message}
-    assert FakeLLM.made == [] and env.audit == []
+    refused = _ask(env)
+    assert refused.status_code == 409 and refused.json() == {"detail": message}
+    assert FakeLLM.calls == [] and _runs(env) == []
 
 
 def test_limits_and_caps_hit_mid_run_stop_it_plainly(env):
@@ -134,7 +183,7 @@ def test_limits_and_caps_hit_mid_run_stop_it_plainly(env):
     FakeLLM.fail = BudgetExceeded("projected $1.20 > $1.00")
     data = _ask(env).json()
     assert data["ran"] is False and "at most $1.00" in data["message"]
-    assert [row["outcome"] for row in env.audit if row["phase"] == "end"] == ["stopped", "stopped"]
+    assert [row["outcome"] for row in _runs(env) if row["phase"] == "end"] == ["stopped", "stopped"]
 
 
 def test_emergency_stop_and_audit_refusal_start_nothing(env, monkeypatch):
@@ -146,7 +195,8 @@ def test_emergency_stop_and_audit_refusal_start_nothing(env, monkeypatch):
         raise killswitch.Halted("synthetic stop", "manual")
 
     monkeypatch.setattr(killswitch, "check", halted)
-    assert "emergency stop" in _ask(env).json()["message"]
+    halted_answer = _ask(env)
+    assert halted_answer.status_code == 409 and "emergency stop" in halted_answer.json()["detail"]
     monkeypatch.setattr(killswitch, "check", lambda **_: None)
 
     def refuse(kind, **data):
@@ -155,29 +205,29 @@ def test_emergency_stop_and_audit_refusal_start_nothing(env, monkeypatch):
     monkeypatch.setattr(audit, "audit_event", refuse)
     data = _ask(env).json()
     assert data["ran"] is False and "activity log" in data["message"]
-    assert FakeLLM.made == []
+    assert FakeLLM.calls == []
 
 
 def test_permission_origin_validation_and_provider_setup(env, monkeypatch):
     assert _ask(env, **{}).status_code == 200
-    FakeLLM.made.clear()
-    viewer = env.client.post("/api/v1/viewpoints", json={"question": "Is this wise?"}, headers={"X-Test-User": "viewer"})
+    FakeLLM.calls.clear()
+    viewer = _ask(env, question="Is this wise?", headers={"X-Test-User": "viewer"})
     assert viewer.status_code == 403
-    foreign = env.client.post("/api/v1/viewpoints", json={"question": "Is this wise?"},
-                              headers={"Origin": "https://elsewhere.example"})
+    foreign = _ask(env, question="Is this wise?", headers={"Origin": "https://elsewhere.example"})
     assert foreign.status_code == 403
-    assert env.client.post("/api/v1/viewpoints", json={"question": "  \n   "}).status_code == 422
+    assert _ask(env, question="  \n   ").status_code == 422
     assert _ask(env, rounds=4).status_code == 422
     assert _ask(env, model="anthropic:chosen-by-browser").status_code == 422
-    assert FakeLLM.made == []
+    assert FakeLLM.calls == []
 
     def missing(role=None):
         raise HTTPException(400, "anthropic route missing: api_key")
 
-    monkeypatch.setattr(api, "require_provider_or_400", missing)
+    from maverick_dashboard import _shared
+    monkeypatch.setattr(_shared, "require_provider_or_400", missing)
     response = _ask(env)
     assert response.status_code == 400 and "api_key" not in response.text
-    assert "Finish connecting AI" in response.json()["detail"]
+    assert "AI is not connected for viewpoints" in response.json()["detail"]
 
 
 def test_failed_turns_and_unreadable_verdicts_read_plainly(env, monkeypatch):
@@ -208,7 +258,11 @@ def test_chat_page_offers_two_viewpoints_plainly(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     dashboard._world_cache.clear()
-    monkeypatch.setattr(onboarding_state, "selected_model_routes_ready", lambda: True)
+    def verdict(name):
+        return lambda: {"verdict": name, "verdict_label": "", "badge_class": "ok", "reason": "", "next_action": None,
+                        "summary": "", "providers": [], "configured_count": 0, "connected_count": 0, "total": 0}
+
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", verdict("ready"))
     client = TestClient(dashboard.app)
     page = client.get("/chat")
     assert page.status_code == 200
@@ -218,5 +272,9 @@ def test_chat_page_offers_two_viewpoints_plainly(monkeypatch, tmp_path):
     assert developer_terms(page.text) == []
     script = client.get("/static/lightwork-viewpoints.js")
     assert script.status_code == 200 and "/api/v1/viewpoints" in script.text
-    monkeypatch.setattr(onboarding_state, "selected_model_routes_ready", lambda: False)
-    assert 'id="vp-form"' not in client.get("/chat").text
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", verdict("not_ready"))
+    # Without a ready AI connection the saved answers stay readable, but nothing
+    # can start until the page reads a ready connection; setup is offered.
+    not_ready = client.get("/chat").text
+    assert 'id="vp-saved"' in not_ready and 'id="vp-setup"' in not_ready
+    assert re.search(r'<button type="submit" class="btn btn--primary" id="vp-run" disabled>', not_ready)

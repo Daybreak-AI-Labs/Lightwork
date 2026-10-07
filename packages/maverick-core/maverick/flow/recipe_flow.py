@@ -137,7 +137,14 @@ def check_lineage(artifact, reference, *, owner, live=True):
         if reference is None:
             raise ValueError("learned workflow requires admitted signed evidence")
     if reference is None:
-        if settings.get("require_action_recipe_lineage", False) is not False:
+        # A customer installation that collects or admits examples must never
+        # execute an unbound derivative, even if its older optional-policy
+        # setting still reads false. Otherwise withdrawing a source only stops
+        # recipes created through the signed Teach page, while a raw artifact
+        # saved through another entrance keeps running.
+        if (settings.get("require_action_recipe_lineage", False) is not False
+                or settings.get("action_episode_capture") is True
+                or settings.get("action_recipe_lineage") is True):
             raise ValueError("learned action requires admitted signed evidence")
         return None
     if settings.get("action_recipe_lineage") is not True:

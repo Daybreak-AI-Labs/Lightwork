@@ -34,13 +34,25 @@ import secrets
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from ..approval_checks import POSTGRES_SCHEMA as _APPROVAL_CHECK_SCHEMA_PG
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from ..deadline_alerts import POSTGRES_SCHEMA as _DEADLINE_ALERT_SCHEMA_PG
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
+from ..event_admission import (
+    EventRegistryUnavailable,
+    LegacyEventGoalHeld,
+    compatible_event_goal,
+    execution_binding_lock,
+)
+from ..goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
+from ..metadata_history import POSTGRES_INDEXES as _HISTORY_INDEXES
+from ..personal_alert_revisions import POSTGRES_MIGRATION as _PERSONAL_ALERT_MIGRATION
+from ..webhook_subscriptions import POSTGRES_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCHEMA_PG
 
 log = logging.getLogger(__name__)
 
@@ -242,7 +254,19 @@ _RLS_TABLES = (
     "attachment_submissions",
     "event_goal_admissions",
     "event_trigger_batches",
+    "webhook_subscriptions",
+    "webhook_deliveries",
+    "deadline_alerts",
 )
+# Tables whose tenant column is not called ``tenant_id``. The webhook and
+# deadline-alert tables (v42) scope rows by ``workspace`` (the same active
+# tenant id, written by ``paths.current_tenant_id``), so their RLS policy keys
+# on that column; the policy itself is identical.
+_RLS_TENANT_COLUMN: dict[str, str] = {
+    "webhook_subscriptions": "workspace",
+    "webhook_deliveries": "workspace",
+    "deadline_alerts": "workspace",
+}
 _TENANT_MIGRATION: list[str] = [
     f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS tenant_id TEXT;" for t in _TENANT_TABLES
 ] + [
@@ -708,7 +732,31 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     ]),
 ]
 
+MIGRATIONS.append((42, [_GOAL_MUTATION_SCHEMA]))
+MIGRATIONS.append((43, ["ALTER TABLE facts ADD COLUMN IF NOT EXISTS tags_json TEXT NOT NULL DEFAULT '[]'"]))
+
 # Highest migration version = the reported schema version.
+MIGRATIONS.append((44, _PERSONAL_ALERT_MIGRATION))
+MIGRATIONS.append((45, _HISTORY_INDEXES))
+MIGRATIONS.append((46, ["ALTER TABLE goals ADD COLUMN IF NOT EXISTS connection_selection TEXT NOT NULL DEFAULT ''"]))
+MIGRATIONS.append((47, [
+    # The teardown draft assigned v42 to webhook/alert tables. Its existing
+    # databases can therefore lack the companion draft's v42 receipt table.
+    # Idempotently ensure both draft additions without rewriting v42..v46.
+    _GOAL_MUTATION_SCHEMA,
+    *_WEBHOOK_SUBSCRIPTION_SCHEMA_PG,
+    *_DEADLINE_ALERT_SCHEMA_PG,
+]))
+# v48: approval-gate decisions without content (maverick.approval_checks).
+MIGRATIONS.append((48, _APPROVAL_CHECK_SCHEMA_PG))
+
+# v49: retire only the unused ciphertext-derived message-search index.
+# The authoritative messages table, its contents and tenant policies remain.
+MIGRATIONS.append((49, ["DROP INDEX IF EXISTS idx_pg_messages_fts"]))
+
+# Questions inherit tenant scope through their goal; keep that guarded join.
+MIGRATIONS.append((50, ["CREATE INDEX IF NOT EXISTS idx_pg_questions_goal_id ON questions(goal_id, id)"]))
+
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 _MIGRATIONS_TABLE = (
@@ -1180,14 +1228,14 @@ class PostgresWorldModel:
             raise ImportError(
                 "psycopg not installed. Run: python -m pip install -e './packages/maverick-core[postgres]'"
             ) from e
-        from ..postgres_io import BoundedConnection, postgres_io_timeout_seconds
-
         self._dsn = dsn or os.environ.get("MAVERICK_PG_DSN") or _configured_dsn()
         if not self._dsn:
             raise RuntimeError(
                 "Postgres world model requires MAVERICK_PG_DSN or "
                 "[world_model] dsn in config.toml."
             )
+        from ..postgres_io import BoundedConnection, postgres_io_timeout_seconds
+
         self._rls = _rls_enabled()
         # Optional connection pool (opt-in via [world_model] pool_size). Pooled
         # mode hands each transaction its own connection from the pool, so the
@@ -1228,10 +1276,15 @@ class PostgresWorldModel:
         # gives each tx its own connection, so the lock is a no-op contention
         # point there but harmless.
         self._lock = threading.RLock()
-        self._migrate()
-        if self._rls:
-            self._preflight_rls_or_die()
-            self._apply_rls()
+        self._tx_depth = threading.local()
+        try:
+            self._migrate()
+            if self._rls:
+                self._preflight_rls_or_die()
+                self._apply_rls()
+        except BaseException:
+            self.close()
+            raise
 
     def __enter__(self) -> PostgresWorldModel:
         return self
@@ -1262,7 +1315,7 @@ class PostgresWorldModel:
         )
 
     @contextmanager
-    def _tx(self) -> Iterator:
+    def _tx(self, *, snapshot: bool = False) -> Iterator:
         """Cursor scope that commits on success and ROLLS BACK on error.
 
         Critical for autocommit=False: a single failed statement aborts
@@ -1286,8 +1339,14 @@ class PostgresWorldModel:
             with self._pool.connection() as conn:
                 cur = conn.cursor()
                 try:
+                    if snapshot:
+                        cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                     self._set_tenant_guc(cur)
-                    yield cur
+                    self._tx_depth.value = getattr(self._tx_depth, "value", 0) + 1
+                    try:
+                        yield cur
+                    finally:
+                        self._tx_depth.value -= 1
                 finally:
                     cur.close()
             return
@@ -1297,8 +1356,14 @@ class PostgresWorldModel:
             cur = None
             try:
                 cur = self.conn.cursor()
+                if snapshot:
+                    cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                 self._set_tenant_guc(cur)
-                yield cur
+                self._tx_depth.value = getattr(self._tx_depth, "value", 0) + 1
+                try:
+                    yield cur
+                finally:
+                    self._tx_depth.value -= 1
                 self.conn.commit()
             except (psycopg.OperationalError, psycopg.InterfaceError):
                 try:
@@ -1384,8 +1449,8 @@ class PostgresWorldModel:
 
         Policy: a row is visible/writable only when its ``tenant_id`` equals the
         transaction-local ``maverick.tenant`` GUC set by ``_tx``. Unset, empty,
-        or no-active-tenant GUC values match no rows. Idempotent
-        (drop-then-create the policy; ENABLE/FORCE are no-ops if already set).
+        or no-active-tenant GUC values match no rows. Current exact policies
+        need only a catalog read; bootstrap/repair retains serialized DDL.
 
         Only a table's **owner** may ALTER it. A non-owner connection may start
         only if the owner/migration has already installed and forced the exact
@@ -1393,12 +1458,21 @@ class PostgresWorldModel:
         running without database-enforced tenant isolation.
         """
         for table in _RLS_TABLES:
+            if self._rls_policy_is_active(table):
+                continue
             try:
                 with self._tx() as cur:
+                    cur.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATION_ADVISORY_LOCK,))
+                    # Another replica may have installed the policy while this
+                    # connection waited. Inspect again on the writer's cursor.
+                    if self._rls_policy_is_active(table, cursor=cur):
+                        continue
                     cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
                     cur.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
                     cur.execute(f"DROP POLICY IF EXISTS mvk_tenant_isolation ON {table}")
                     cur.execute(self._rls_policy_sql(table))
+                    if not self._rls_policy_is_active(table, cursor=cur):
+                        raise RuntimeError("The exact tenant policy could not be verified.")
             except Exception as e:  # non-owner / insufficient privilege
                 if self._rls_policy_is_active(table):
                     log.info(
@@ -1413,61 +1487,81 @@ class PostgresWorldModel:
 
     @staticmethod
     def _rls_policy_sql(table: str) -> str:
+        column = _RLS_TENANT_COLUMN.get(table, "tenant_id")
         return (
             f"CREATE POLICY mvk_tenant_isolation ON {table} "
             "USING ("
-            "  tenant_id = nullif(current_setting('maverick.tenant', true), '')"
+            f"  {column} = nullif(current_setting('maverick.tenant', true), '')"
             ") WITH CHECK ("
-            "  tenant_id = nullif(current_setting('maverick.tenant', true), '')"
+            f"  {column} = nullif(current_setting('maverick.tenant', true), '')"
             ")"
         )
 
-    def _rls_policy_is_active(self, table: str) -> bool:
-        """Verify the fail-closed RLS policy is already installed and forced."""
+    def _rls_policy_is_active(self, table: str, *, cursor=None) -> bool:
+        """Verify FORCE and the complete stock policy before skipping DDL.
+
+        Extra restrictive policies can narrow access. Another permissive policy
+        can OR around isolation, so it is never evidence of a safe fast path.
+        """
+        sql = (
+            "SELECT c.relrowsecurity,c.relforcerowsecurity,p.polname,p.polcmd,"
+            "p.polpermissive,p.polroles,pg_get_expr(p.polqual,p.polrelid),"
+            "pg_get_expr(p.polwithcheck,p.polrelid) FROM pg_class c "
+            "LEFT JOIN pg_policy p ON p.polrelid=c.oid WHERE c.oid=%s::regclass"
+        )
         try:
+            if cursor is not None:
+                cursor.execute(sql, (table,))
+                return self._rls_policy_rows_are_active(table, cursor.fetchall())
             with self._tx() as cur:
-                cur.execute(
-                    "SELECT relrowsecurity, relforcerowsecurity "
-                    "FROM pg_class WHERE oid = %s::regclass",
-                    (table,),
-                )
-                row = cur.fetchone()
-                if not row or not (row[0] and row[1]):
-                    return False
-                cur.execute(
-                    "SELECT qual, with_check FROM pg_policies "
-                    "WHERE schemaname = current_schema() "
-                    "AND tablename = %s AND policyname = 'mvk_tenant_isolation'",
-                    (table,),
-                )
-                policy = cur.fetchone()
+                cur.execute(sql, (table,))
+                rows = cur.fetchall()
         except Exception:
             return False
-        if not policy:
-            return False
-        def fail_closed(expr: object) -> bool:
-            text = " ".join(str(expr).lower().split())
-            return (
-                "tenant_id" in text
-                and "current_setting" in text
-                and "maverick.tenant" in text
-                and "nullif" in text
-                and " or " not in text
-                and "is null" not in text
-            )
+        return self._rls_policy_rows_are_active(table, rows)
 
-        return fail_closed(policy[0]) and fail_closed(policy[1])
+    @staticmethod
+    def _rls_policy_rows_are_active(table, rows) -> bool:
+        if not rows or not all(row[0] and row[1] for row in rows):
+            return False
+        policies = [row for row in rows if row[2] == "mvk_tenant_isolation"]
+        if len(policies) != 1 or any(row[4] for row in rows if row[2] != "mvk_tenant_isolation"):
+            return False
+        policy = policies[0]
+        if policy[3] != "*" or policy[4] is not True or list(policy[5] or ()) != [0]:
+            return False
+        column = _RLS_TENANT_COLUMN.get(table, "tenant_id")
+        expected = f"({column}=nullif(current_setting('maverick.tenant'::text,true),''::text))"
+        return all("".join(str(expr).lower().split()) == expected for expr in policy[6:8])
+
+    @staticmethod
+    def _migration_version(cur) -> int | None:
+        cur.execute("SELECT to_regclass('schema_migrations')")
+        if not cur.fetchone()[0]:
+            return None
+        cur.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
+        current = int((cur.fetchone() or [0])[0])
+        if current > _PG_SCHEMA_VERSION:
+            raise RuntimeError("The Postgres database schema is newer than this Lightwork installation.")
+        return current
 
     def _migrate(self) -> None:
         """Apply pending migrations atomically, recording each in
         ``schema_migrations`` so a statement runs at most once.
 
-        Takes a transaction-scoped advisory lock first so that concurrent
+        A current native migration record requires only a read. Bootstrap and
+        upgrades take a transaction-scoped advisory lock so that concurrent
         replica startup serializes -- the second waiter re-reads the version
         after the first commits and applies nothing, rather than racing the
         non-concurrency-safe DDL."""
         with self._tx() as cur:
+            if self._migration_version(cur) == _PG_SCHEMA_VERSION:
+                return
+        with self._tx() as cur:
             cur.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATION_ADVISORY_LOCK,))
+            # Re-read after waiting; an earlier replica may have upgraded it.
+            if self._migration_version(cur) == _PG_SCHEMA_VERSION:
+                return
             cur.execute(_MIGRATIONS_TABLE)
             cur.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
             current = int((cur.fetchone() or [0])[0])
@@ -1492,6 +1586,7 @@ class PostgresWorldModel:
         execution_principal: str = "",
         domain: str = "",
         project_id: int | None = None,
+        connection_references: list | None = None,
     ) -> int:
         # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
         # `project_id` mirror the SQLite backend's create_goal signature. Both
@@ -1509,14 +1604,16 @@ class PostgresWorldModel:
 
             if not valid_principal(execution_principal):
                 raise ValueError("invalid execution principal")
+        from ..template_connections import packed
+        selection = packed(owner, connection_references or [])
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
             cur.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
                 "created_at, updated_at, owner, execution_principal, domain, "
-                "project_id, tenant_id) "
-                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "project_id, tenant_id, connection_selection) "
+                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     parent_id,
                     _seal(title),
@@ -1528,10 +1625,22 @@ class PostgresWorldModel:
                     domain or "",
                     project_id,
                     tenant,
+                    _seal(selection),
                 ),
             )
             row = cur.fetchone()
         return int(row[0])
+
+    def goal_connection_selection(self, goal_id: int) -> str:
+        frag, params = _tenant_scope()
+        sql, args = "SELECT connection_selection FROM goals WHERE id=%s", [goal_id]
+        if frag:
+            sql += " AND " + frag
+            args += params
+        with self._tx() as cur:
+            cur.execute(sql, args)
+            row = cur.fetchone()
+        return _unseal(row[0]) if row and row[0] else ""
 
     def get_goal(self, goal_id: int) -> PGGoal | None:
         frag, params = _tenant_scope()
@@ -1557,7 +1666,7 @@ class PostgresWorldModel:
         # GREATEST is evaluated against the row under the UPDATE lock, not a
         # stale client-side SELECT, including on a stalled/backwards clock.
         now = time.time()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = (
             # COALESCE so a status-only update (result=None) doesn't wipe
             # an existing result -- matches the SQLite backend.
@@ -1571,13 +1680,57 @@ class PostgresWorldModel:
         if frag:
             sql += " AND " + frag
             params += fparams
-        with self._tx() as cur:
-            cur.execute(sql, tuple(params))
+        legacy_refused = False
+        binding_scope = (execution_binding_lock(self, goal_id)
+                         if status in {"active", "running"}
+                         else nullcontext(False))
+        with binding_scope as binding_locked, self._tx() as cur:
+            if status in {"active", "running"}:
+                scoped, scoped_params = _mutation_tenant_scope("g.tenant_id")
+                current_sql = (
+                    "SELECT g.status,g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                    "JOIN goal_origins o ON o.goal_id=g.id "
+                    "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                    "AND a.tenant_id=COALESCE(g.tenant_id,'') "
+                    "WHERE g.id=%s AND o.kind IN ('event','event_v2')"
+                )
+                if scoped:
+                    current_sql += " AND " + scoped
+                current_sql += " FOR UPDATE OF g,o"
+                cur.execute(current_sql, (int(goal_id), *scoped_params))
+                prior = cur.fetchone()
+                if prior is None and binding_locked:
+                    cur.execute("SELECT g.status FROM goals g WHERE g.id=%s" +
+                                (" AND " + scoped if scoped else "") +
+                                " FOR UPDATE OF g", (int(goal_id), *scoped_params))
+                    current = cur.fetchone()
+                    if current is not None and current[0] not in {"active", "running"}:
+                        raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not binding_locked):
+                    raise EventRegistryUnavailable("Event binding changed during execution claim")
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not compatible_event_goal(prior[2], prior[3], prior[1], prior[4])):
+                    legacy_refused = True
+                    if prior[0] == "pending":
+                        cur.execute(
+                            "UPDATE goals SET status='blocked', completed_at=NULL, "
+                            "updated_at=GREATEST(updated_at + 0.000001, %s), "
+                            "result=%s WHERE id=%s AND status='pending'"
+                            + (" AND " + frag if frag else ""),
+                            (now, _seal("Earlier event request held for review"),
+                             int(goal_id), *fparams),
+                        )
+                        cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+            if not legacy_refused:
+                cur.execute(sql, tuple(params))
             # Approval is bound to one terminal payload.  Invalidate it in the
             # same transaction on every rerun/non-terminal transition or result
             # mutation, after tenant-scoped UPDATE proves this goal is ours.
-            if cur.rowcount == 1 and (status != "done" or result is not None):
+            if not legacy_refused and cur.rowcount == 1 and (status != "done" or result is not None):
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+        if legacy_refused:
+            raise LegacyEventGoalHeld("Earlier event request held for review")
 
     def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
         """Refuse only an exact-tenant, non-terminal goal before dispatch."""
@@ -1612,7 +1765,7 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(params))
             return cur.rowcount == 1
 
-    def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
+    def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
         """Complete department totals, bound to this request's tenant."""
         from ..shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
 
@@ -1620,8 +1773,10 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         if frag:
             sql += " AND " + frag
+        if owner is not None:
+            sql += " AND owner = %s"
         with self._tx() as cur:
-            cur.execute(sql, tuple([department, since, until, *fparams]))
+            cur.execute(sql, tuple([department, since, until, *fparams, *([owner] if owner is not None else [])]))
             row = cur.fetchone()
         return measurements(row)
 
@@ -1696,7 +1851,43 @@ class PostgresWorldModel:
             params.append(str(expected_owner))
         sql += " AND " + frag
         params += fparams
-        with self._tx() as cur:
+        with execution_binding_lock(self, goal_id) as binding_locked, self._tx() as cur:
+            scoped, scoped_params = _mutation_tenant_scope("g.tenant_id")
+            owner_sql = " AND g.owner=%s" if expected_owner is not None else ""
+            cur.execute(
+                "SELECT g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                "JOIN goal_origins o ON o.goal_id=g.id "
+                "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                "AND a.tenant_id=COALESCE(g.tenant_id,'') "
+                "WHERE g.id=%s AND g.status='pending' "
+                "AND o.kind IN ('event','event_v2') "
+                "AND " + scoped + owner_sql + " FOR UPDATE OF g,o",
+                (int(goal_id), *scoped_params,
+                 *((str(expected_owner),) if expected_owner is not None else ())),
+            )
+            legacy = cur.fetchone()
+            if legacy is None and binding_locked:
+                cur.execute(
+                    "SELECT 1 FROM goals g WHERE g.id=%s AND g.status='pending' "
+                    "AND " + scoped + owner_sql + " FOR UPDATE OF g",
+                    (int(goal_id), *scoped_params,
+                     *((str(expected_owner),) if expected_owner is not None else ())),
+                )
+                if cur.fetchone() is not None:
+                    raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+            if legacy is not None and not binding_locked:
+                raise EventRegistryUnavailable("Event binding changed during execution claim")
+            if legacy is not None and not compatible_event_goal(
+                    legacy[1], legacy[2], legacy[0], legacy[3]):
+                cur.execute(
+                    "UPDATE goals SET status='blocked', completed_at=NULL, "
+                    "updated_at=GREATEST(updated_at + 0.000001, %s), result=%s "
+                    "WHERE id=%s AND status='pending' AND " + frag,
+                    (time.time(), _seal("Earlier event request held for review"),
+                     int(goal_id), *fparams),
+                )
+                cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+                return False
             cur.execute(sql, tuple(params))
             return cur.rowcount == 1
 
@@ -2160,11 +2351,13 @@ class PostgresWorldModel:
     # ---- Share links (migration v17) ----------------------------------------
 
     def create_share_link(
-        self, goal_id: int, *, created_by: str = "", ttl_seconds: float | None = None,
+        self, goal_id: int, *, created_by: str = "", ttl_seconds: float | None = None, token_prefix: str = "",
     ) -> tuple[int, str]:
         """Mint a read-only share link; returns ``(id, clear_token)``. Only the
         token's SHA-256 is persisted, so the clear token is shown exactly once."""
-        token = secrets.token_urlsafe(32)
+        if token_prefix not in {"", "r1_"}:
+            raise ValueError("Unsupported share token version")
+        token = token_prefix + secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = time.time()
         exp = now + float(ttl_seconds) if ttl_seconds else None
@@ -2270,7 +2463,7 @@ class PostgresWorldModel:
 
     def record_signoff(
         self, goal_id: int, decision: str, *, decided_by: str = "",
-        note: str | None = None, expected_updated_at: float | None = None,
+        note: str | None = None, expected_updated_at: float | None = None, _cursor=None,
     ) -> bool:
         """Record a human's certify/reject decision on a deliverable. One row per
         goal (a later decision replaces an earlier one).
@@ -2284,7 +2477,7 @@ class PostgresWorldModel:
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be 'approved' or 'rejected'")
         frag, fparams = _tenant_scope()
-        with self._tx() as cur:
+        with (self._tx() if _cursor is None else nullcontext(_cursor)) as cur:
             check_sql = (
                 "SELECT status, updated_at FROM goals WHERE id=%s"
             )
@@ -2450,6 +2643,46 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
 
+    def recent_goals_by_domain(self, domains: list[str], *, owner: str | None = None,
+                               per_domain: int = 5) -> dict[str, list[PGGoal]]:
+        """The newest ``per_domain`` goals of each listed domain, newest first.
+
+        Mirrors SQLite: the same answer as one ``list_goals(domain=...,
+        limit=per_domain, order="desc")`` per domain, from one grouped query.
+        The Results page asks about every deliverable pack (2,031 on a full
+        catalog) and each separate query is a network round trip here. A domain
+        with no goals is absent from the result.
+        """
+        wanted = sorted({str(d) for d in domains if d})
+        if not wanted:
+            return {}
+        conds = ["domain = ANY(%s)"]
+        params: list = [wanted]
+        if owner is not None:
+            conds.append("owner = %s")
+            params.append(str(owner))
+        frag, fparams = _tenant_scope()
+        if frag:
+            conds.append(frag)
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT id, parent_id, title, description, status, "
+                "created_at, updated_at, deadline, result, owner, execution_principal, "
+                "domain, project_id FROM goals WHERE id IN ("
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER "
+                "(PARTITION BY domain ORDER BY id DESC) AS n "
+                f"FROM goals WHERE {' AND '.join(conds)}) ranked WHERE n <= %s) "
+                "ORDER BY id DESC",
+                (*params, max(1, int(per_domain))),
+            )
+            rows = cur.fetchall()
+        found: dict[str, list[PGGoal]] = {}
+        for row in rows:
+            goal = _dec_goal_row(row)
+            found.setdefault(goal.domain, []).append(goal)
+        return found
+
     def list_goals(
         self,
         status: str | None = None,
@@ -2460,6 +2693,7 @@ class PostgresWorldModel:
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
+        before_id: int | None = None,
     ) -> list[PGGoal]:
         """List goals, optionally filtered by status + paginated (mirrors SQLite).
 
@@ -2468,7 +2702,12 @@ class PostgresWorldModel:
         domain-scoped inbox both 500 on this backend --
         ``list_goals(project_id=...)`` / ``list_goals(domain=...)`` raised
         ``TypeError`` for a keyword this method didn't accept.
+        ``before_id`` is an exclusive immutable ID bound, combined with all
+        current tenant/owner filters without reading its anchor. Descending
+        order provides continuation; ascending order only applies the bound.
         """
+        if before_id is not None and not 0 < int(before_id) <= 2**63 - 1:
+            raise ValueError("before_id must be a positive signed 64-bit goal ID")
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         sql = (
             "SELECT id, parent_id, title, description, status, "
@@ -2490,6 +2729,9 @@ class PostgresWorldModel:
         if project_id is not None:
             conds.append("project_id = %s")
             params.append(int(project_id))
+        if before_id is not None:
+            conds.append("id < %s")
+            params.append(int(before_id))
         frag, fparams = _tenant_scope()
         if frag:
             conds.append(frag)
@@ -2504,6 +2746,26 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
+
+    def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,
+                             limit: int = 250) -> list[tuple]:
+        """Tenant and owner predicates precede the bounded keyset page."""
+        sql = ("SELECT id,parent_id,title,description,status,created_at,updated_at,deadline,"
+               "result,owner,execution_principal,domain,project_id,alert_state_revision,"
+               "alert_result_revision FROM goals WHERE owner=%s AND id>%s AND "
+               "(status NOT IN ('done','cancelled') OR updated_at>=%s OR "
+               "EXISTS(SELECT 1 FROM questions q WHERE q.goal_id=goals.id AND q.answer IS NULL))")
+        params = [owner, after_id, since]
+        fragment, tenant_params = _tenant_scope()
+        if fragment:
+            sql += " AND " + fragment
+            params.extend(tenant_params)
+        sql += " ORDER BY id LIMIT %s"
+        params.append(max(1, min(500, limit)))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [(_dec_goal_row(row[:13]), int(row[13]), int(row[14])) for row in rows]
 
     def conversation_summaries(self, *, owner: str | None = None,
                                limit: int = 25, before_id: int | None = None):
@@ -2606,12 +2868,12 @@ class PostgresWorldModel:
             row = cur.fetchone()
         return _dec_goal_row(row) if row else None
 
-    def candidate_goals(self, include_running: bool, limit: int = 500) -> list[PGGoal]:
+    def candidate_goals(self, include_running: bool, limit: int = 500, *, owner: str = "") -> list[PGGoal]:
         """Goals with comparable text for recall (mirrors SQLite). Finished set
         is the written vocabulary done/blocked/cancelled, not the never-written
         succeeded/failed the old query used."""
-        conds = ["(COALESCE(title, '') != '' OR COALESCE(description, '') != '')"]
-        params: list = []
+        conds = ["(COALESCE(title, '') != '' OR COALESCE(description, '') != '')", "owner = %s"]
+        params: list = [owner]
         if not include_running:
             conds.insert(0, "status IN ('done', 'blocked', 'cancelled')")
         frag, fparams = _tenant_scope()
@@ -2651,7 +2913,12 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
 
-    def reclaim_orphan_goals(self, *, max_age_seconds: float = 60.0) -> int:
+    def reclaim_orphan_goals(
+        self, *, max_age_seconds: float = 60.0,
+        statuses: tuple[str, ...] = ("active", "pending"),
+        resolved_window_seconds: float | None = None,
+        exact_tenant: bool = False,
+    ) -> int:
         """Mark stale active/pending goals as 'blocked' after a crash.
 
         Called on startup to recover from SIGKILL/OOM mid-run. Only rows whose
@@ -2661,23 +2928,39 @@ class PostgresWorldModel:
         A resolved zero window explicitly reclaims every active/pending goal
         in scope, including monotonic review timestamps ahead of the wall clock.
         Positive windows continue to require the full stale interval.
+        The periodic dashboard sweep passes only ``("active",)`` so queued
+        ``pending`` goals are left for their dispatcher. ``exact_tenant``
+        excludes compatibility-mode NULL rows from that background sweep.
         Returns the number of rows reclaimed.
         """
+        statuses = tuple(statuses)
+        if not statuses or not set(statuses) <= {"active", "pending"}:
+            raise ValueError("orphan reclaim statuses must be active and/or pending")
+        marks = ", ".join("%s" for _ in statuses)
         from ..world_model import reclaim_window_seconds
-        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
+        max_age_seconds = (reclaim_window_seconds(default=max_age_seconds)
+                           if resolved_window_seconds is None else float(resolved_window_seconds))
+        if not math.isfinite(max_age_seconds) or max_age_seconds < 0:
+            raise ValueError("orphan reclaim window must be nonnegative and finite")
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"
-        frag, fparams = _tenant_scope()
+        if exact_tenant:
+            tenant = _active_tenant()
+            if tenant is None:
+                raise ValueError("exact orphan reclaim requires a configured tenant")
+            frag, fparams = "tenant_id = %s", [tenant]
+        else:
+            frag, fparams = _tenant_scope()
         from ..crypto_at_rest import at_rest_enabled
         if not at_rest_enabled():
             sql = (
                 "UPDATE goals SET status = 'blocked', "
                 "result = COALESCE(result, '') || %s, "
                 "updated_at = GREATEST(updated_at + 0.000001, %s) "
-                "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
+                f"WHERE status IN ({marks}) AND (%s = 0 OR updated_at <= %s)"
             )
-            params: list = [marker, now, max_age_seconds, cutoff]
+            params: list = [marker, now, *statuses, max_age_seconds, cutoff]
             if frag:
                 sql += " AND " + frag
                 params += fparams
@@ -2691,9 +2974,9 @@ class PostgresWorldModel:
         # set on startup is tiny, so the row-by-row cost is negligible.
         sel = (
             "SELECT id, result FROM goals "
-            "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
+            f"WHERE status IN ({marks}) AND (%s = 0 OR updated_at <= %s)"
         )
-        sparams: list = [max_age_seconds, cutoff]
+        sparams: list = [*statuses, max_age_seconds, cutoff]
         if frag:
             sel += " AND " + frag
             sparams += fparams
@@ -2702,6 +2985,7 @@ class PostgresWorldModel:
             rows = cur.fetchall()
             from ..crypto_at_rest import EncryptionUnavailable
             from ..world_model import _UNSEALED_WITHHELD
+            reclaimed = 0
             for row in rows:
                 try:
                     dec = _unseal(row[1])
@@ -2722,18 +3006,27 @@ class PostgresWorldModel:
                     # mode -- must not abort crash-recovery for every other
                     # stuck goal. Reclaim the status; leave the result intact
                     # rather than corrupting or dropping it.
-                    cur.execute(
+                    update = (
                         "UPDATE goals SET status = 'blocked', updated_at = GREATEST(updated_at + 0.000001, %s) "
-                        "WHERE id = %s",
-                        (now, row[0]),
+                        f"WHERE id = %s AND status IN ({marks}) "
+                        "AND (%s = 0 OR updated_at <= %s)"
                     )
+                    if frag:
+                        update += " AND " + frag
+                    cur.execute(update, (now, row[0], *statuses, max_age_seconds, cutoff, *fparams))
+                    reclaimed += cur.rowcount
                     continue
-                cur.execute(
+                update = (
                     "UPDATE goals SET status = 'blocked', result = %s, "
-                    "updated_at = GREATEST(updated_at + 0.000001, %s) WHERE id = %s",
-                    (new_result, now, row[0]),
+                    "updated_at = GREATEST(updated_at + 0.000001, %s) "
+                    f"WHERE id = %s AND status IN ({marks}) "
+                    "AND (%s = 0 OR updated_at <= %s)"
                 )
-            return len(rows)
+                if frag:
+                    update += " AND " + frag
+                cur.execute(update, (new_result, now, row[0], *statuses, max_age_seconds, cutoff, *fparams))
+                reclaimed += cur.rowcount
+            return reclaimed
 
     # ----- episodes -----
 
@@ -2869,6 +3162,47 @@ class PostgresWorldModel:
         # outcome (index 4) is sealed at rest; the rest are numeric/timestamps.
         return [EpisodeSpend(r[0], r[1], r[2], r[3], _unseal(r[4]),
                              r[5], r[6], r[7], r[8], r[9], r[10]) for r in rows]
+
+    def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
+        """Finished runs that ended at or after ``since``, oldest first, as
+        ``(owner, ended_at, cost_dollars)`` -- the SQLite backend's contract,
+        inside the active tenant."""
+        frag, fparams = _tenant_scope("g.tenant_id")
+        sql = ("SELECT COALESCE(g.owner, ''), e.ended_at, COALESCE(e.cost_dollars, 0) "
+               "FROM episodes e JOIN goals g ON g.id = e.goal_id "
+               "WHERE e.ended_at IS NOT NULL AND e.ended_at >= %s")
+        params: list = [float(since)]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        sql += " ORDER BY e.ended_at ASC, e.id ASC LIMIT %s"
+        params.append(int(limit))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [(str(r[0] or ""), float(r[1]), float(r[2] or 0.0)) for r in rows]
+
+    def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
+                       limit: int = 500, owner: str = "") -> list[float]:
+        """The SQLite backend's contract, inside the active tenant."""
+        column, value = (("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+                         if execution_principal else ("g.owner", owner))
+        if not value:
+            return []
+        frag, fparams = _tenant_scope("g.tenant_id")
+        sql = ("SELECT SUM(COALESCE(e.cost_dollars, 0)), MAX(e.ended_at) "
+               f"FROM episodes e JOIN goals g ON g.id = e.goal_id WHERE {column} = %s "
+               "AND e.ended_at IS NOT NULL")
+        params: list = [str(value)]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        sql += " GROUP BY e.goal_id ORDER BY 2 DESC LIMIT %s"
+        params.append(int(limit))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [float(r[0] or 0.0) for r in rows]
 
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         frag, fparams = _tenant_scope("g.tenant_id")
@@ -3007,10 +3341,70 @@ class PostgresWorldModel:
         cur.execute(sql, tuple(p))
         return cur.fetchone(), frag, params
 
+    def _check_fact_revision(self, cur, key: str, expected: int | None) -> None:
+        from ..fact_revision import check_expected_revision
+        # Also lock unconditional writers so a compare-and-write cannot race
+        # an agent or background write when temporal history is disabled.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"fact:{_active_tenant() or ''}:{key}",))
+        frag, params = _mutation_tenant_scope()
+        cur.execute(f"SELECT write_seq FROM facts WHERE key = %s AND {frag}",
+                    (key, *params))
+        row = cur.fetchone()
+        check_expected_revision(expected, int(row[0]) if row else 0)
+
+    def fact_record(self, key: str) -> dict | None:
+        rows = self.fact_records(query=key, exact=True, limit=1)
+        return rows[0] if rows else None
+
+    def fact_records(self, *, query: str = "", source: str = "", tag: str = "",
+                     updated_before: float | None = None, limit: int = 50,
+                     offset: int = 0, exact: bool = False,
+                     shared_only: bool = False) -> list[dict]:
+        # Interactive fact editing uses exact tenant ownership, including in
+        # legacy compatibility mode. It never offers another tenant's record.
+        frag, params = _mutation_tenant_scope()
+        clauses, values = [frag], list(params)
+        if shared_only:
+            clauses.extend(("LOWER(key) NOT LIKE 'goal:%%'", "LOWER(key) NOT LIKE 'user:%%'"))
+        if query:
+            clauses.append("key = %s" if exact else "key ILIKE %s ESCAPE '\\'")
+            values.append(query if exact else "%" + self._like_escape(query) + "%")
+        if source:
+            clauses.append("source ILIKE %s ESCAPE '\\'")
+            values.append("%" + self._like_escape(source) + "%")
+        if updated_before is not None:
+            clauses.append("updated_at < %s")
+            values.append(float(updated_before))
+        if tag:
+            clauses.append("tags_json::jsonb @> %s::jsonb")
+            values.append(json.dumps([tag.strip().casefold()]))
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT key, value, write_seq, updated_at, source, source_episode_id, "
+                "trust_tier, sensitivity, tags_json FROM facts WHERE " + " AND ".join(clauses)
+                + " ORDER BY key LIMIT %s OFFSET %s",
+                (*values, max(1, min(limit, 101)), max(0, offset)),
+            )
+            rows = cur.fetchall()
+        names = ("key", "value", "revision", "updated_at", "source", "source_episode_id",
+                 "trust_tier", "sensitivity", "tags")
+        return [{**dict(zip(names, row, strict=True)), "value": _unseal(row[1]),
+                 "tags": json.loads(row[8])} for row in rows]
+
+    def fact_catalog_revision(self) -> str:
+        frag, params = _mutation_tenant_scope()
+        with self._tx() as cur:
+            cur.execute("SELECT COUNT(*), COALESCE(MAX(write_seq),0) FROM facts WHERE "
+                        + frag + " AND LOWER(key) NOT LIKE 'goal:%%' AND LOWER(key) NOT LIKE 'user:%%'", tuple(params))
+            row = cur.fetchone()
+        return f"{row[0]}:{row[1]}"
+
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
-    ) -> None:
+        expected_revision: int | None = None, tags: list[str] | None = None,
+    ) -> int:
         """Write the current value of ``key``.
 
         When ``[memory] temporal`` is on, a *changed* value (or a changed trust
@@ -3020,10 +3414,13 @@ class PostgresWorldModel:
         live ``facts`` row keeps its existing columns (the write-time screen in
         kv_memory, the primary ASI06 control, runs regardless of backend).
         """
+        from ..fact_revision import normalize_tags
         from ..world_model import _temporal_memory_enabled
+        encoded_tags = json.dumps(normalize_tags(tags)) if tags is not None else None
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
+            self._check_fact_revision(cur, key, expected_revision)
             if _temporal_memory_enabled():
                 # Serialize concurrent writers for THIS key across replicas: the
                 # close-prior-window/open-new-window sequence is a read-modify-
@@ -3071,10 +3468,16 @@ class PostgresWorldModel:
                 "updated_at = EXCLUDED.updated_at, "
                 "source = EXCLUDED.source, "
                 "trust_tier = EXCLUDED.trust_tier, "
-                "sensitivity = EXCLUDED.sensitivity",
+                "sensitivity = EXCLUDED.sensitivity RETURNING write_seq",
                 (key, _seal(value), episode_id, now, source,
                  int(trust_tier), sensitivity, tenant),
             )
+            revision = int(cur.fetchone()[0])
+            if encoded_tags is not None:
+                frag, params = _mutation_tenant_scope()
+                cur.execute("UPDATE facts SET tags_json = %s WHERE key = %s AND " + frag,
+                            (encoded_tags, key, *params))
+            return revision
 
     def get_facts(self) -> dict[str, str]:
         frag, params = _tenant_scope()
@@ -3259,15 +3662,16 @@ class PostgresWorldModel:
             row = cur.fetchone()
         return _unseal(row[0]) if row else None
 
-    def fact_history(self, key: str, *, limit: int = 50) -> list:
+    def fact_history(self, key: str, *, limit: int = 50,
+                     owned_only: bool = False) -> list:
         """Every recorded version of ``key``, newest first (requires ``[memory]
         temporal``). The row whose ``valid_to is None`` is the current value."""
         from ..world_model import FactVersion
-        frag, params = _tenant_scope()
+        frag, params = _mutation_tenant_scope() if owned_only else _tenant_scope()
         tenant = _active_tenant()
         row_limit = max(1, int(limit))
         compatibility_tenant = (
-            tenant if tenant is not None and not _strict_tenant_isolation()
+            tenant if not owned_only and tenant is not None and not _strict_tenant_isolation()
             else None
         )
         columns = (
@@ -3346,7 +3750,7 @@ class PostgresWorldModel:
             for r in rows
         ]
 
-    def delete_fact(self, key: str) -> int:
+    def delete_fact(self, key: str, *, expected_revision: int | None = None) -> int:
         """Delete one fact by exact key; return rows removed (0 or 1).
 
         When ``[memory] temporal`` is on, the open ``fact_history`` window is
@@ -3356,6 +3760,7 @@ class PostgresWorldModel:
         frag, params = _mutation_tenant_scope()
         tenant = _active_tenant()
         with self._tx() as cur:
+            self._check_fact_revision(cur, key, expected_revision)
             if _temporal_memory_enabled():
                 open_row, frag, params = self._locked_open_fact_history(
                     cur, key, tenant
@@ -3533,6 +3938,46 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_question_row(r) for r in rows]
 
+    def open_channel_questions(
+        self, conversation_id: int, owner: str, execution_principal: str,
+    ) -> list:
+        """Only blocked questions bound to this tenant's exact conversation."""
+        frag, fparams = _tenant_scope("g.tenant_id")
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT q.id, q.goal_id, q.question, q.asked_at, q.answer, q.answered_at "
+                "FROM questions q JOIN goals g ON g.id = q.goal_id "
+                "WHERE q.answer IS NULL AND g.status = 'blocked' "
+                "AND g.owner = %s AND g.execution_principal = %s "
+                "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+                "AND t.conversation_id = %s AND t.role = 'user')"
+                + (" AND " + frag if frag else "") + " ORDER BY q.id",
+                (owner, execution_principal, conversation_id, *fparams),
+            )
+            rows = cur.fetchall()
+        return [_dec_question_row(r) for r in rows]
+
+    def answer_open_channel_question(
+        self, question_id: int, goal_id: int, answer: str, *,
+        conversation_id: int, owner: str, execution_principal: str,
+    ) -> bool:
+        """Claim one open question under its owner, thread, and tenant."""
+        frag, fparams = _tenant_scope("g.tenant_id")
+        with self._tx() as cur:
+            cur.execute(
+                "UPDATE questions SET answer = %s, answered_at = %s "
+                "WHERE id = %s AND goal_id = %s AND answer IS NULL "
+                "AND EXISTS (SELECT 1 FROM goals g WHERE g.id = questions.goal_id "
+                "AND g.status = 'blocked' AND g.owner = %s "
+                "AND g.execution_principal = %s "
+                "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+                "AND t.conversation_id = %s AND t.role = 'user')"
+                + (" AND " + frag if frag else "") + ")",
+                (_seal(answer), time.time(), question_id, goal_id, owner,
+                 execution_principal, conversation_id, *fparams),
+            )
+            return cur.rowcount == 1
+
     def all_questions(self, goal_id: int) -> list:
         frag, fparams = _tenant_scope("g.tenant_id")
         table = "questions q"
@@ -3587,6 +4032,9 @@ class PostgresWorldModel:
                  (requested_by or None), goal[0] if goal else None, goal[1] if goal else ""),
             )
             row = cur.fetchone()
+        from ..world_model import _notify_approval_created
+
+        _notify_approval_created(self, int(row[0]), provenance)
         return int(row[0])
 
     def get_approval(self, approval_id: int):
@@ -3630,12 +4078,92 @@ class PostgresWorldModel:
     ) -> str:
         from ..world_model import _approval_audit_event_id
 
+        with self._tx() as cur:
+            undo_round = self._approval_undo_round(cur, approval_id)
         return _approval_audit_event_id(
             _active_tenant(),
             approval_id,
             status,
             (decided_by or "").strip(),
+            undo_round,
         )
+
+    def _approval_undo_round(self, cur, approval_id: int) -> int:
+        """How many times this approval was undone (mirrors SQLite)."""
+        from ..world_model import APPROVAL_UNDO_STATUS
+
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        cur.execute(
+            "SELECT COUNT(*) FROM approval_audit_outbox "
+            f"WHERE approval_id = %s AND status = %s AND {outbox_scope}",
+            tuple([int(approval_id), APPROVAL_UNDO_STATUS, *outbox_params]),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def undo_approval_decision(
+        self,
+        approval_id: int,
+        *,
+        undone_by: str,
+        within_seconds: float,
+    ) -> str:
+        """Return a just-decided approval to pending (mirrors SQLite; see there)."""
+        from ..world_model import (
+            APPROVAL_UNDO_STATUS,
+            _approval_undo_marker_id,
+        )
+
+        tenant = _active_tenant()
+        approval_scope, approval_params = _tenant_scope()
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        sql = "SELECT status, decided_at FROM approvals WHERE id = %s"
+        values: list = [int(approval_id)]
+        if approval_scope:
+            sql += " AND " + approval_scope
+            values += approval_params
+        sql += " FOR UPDATE"
+        with self._tx() as cur:
+            cur.execute(sql, tuple(values))
+            row = cur.fetchone()
+            if row is None:
+                return "not_found"
+            if row[0] == "pending":
+                return "not_decided"
+            if row[1] is None or time.time() - float(row[1]) > float(within_seconds):
+                return "too_late"
+            cur.execute(
+                "UPDATE approvals SET status = 'pending', decided_at = NULL, "
+                "decided_by = NULL WHERE id = %s AND status = %s",
+                (int(approval_id), row[0]),
+            )
+            cur.execute(
+                "DELETE FROM approval_signoffs WHERE approval_id = %s",
+                (int(approval_id),),
+            )
+            cur.execute(
+                "UPDATE approval_audit_outbox SET final_status = NULL "
+                f"WHERE approval_id = %s AND status IN ('approved', 'denied') AND {outbox_scope}",
+                tuple([int(approval_id), *outbox_params]),
+            )
+            undo_round = self._approval_undo_round(cur, approval_id) + 1
+            now = time.time()
+            cur.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at, tenant_id) "
+                "VALUES(%s, %s, %s, %s, NULL, %s, %s, %s)",
+                (
+                    _approval_undo_marker_id(tenant, approval_id, undo_round),
+                    int(approval_id),
+                    APPROVAL_UNDO_STATUS,
+                    (undone_by or "").strip(),
+                    now,
+                    now,
+                    tenant,
+                ),
+            )
+            return "undone"
 
     def get_approval_audit_event(self, event_id: str):
         scope, params = _approval_outbox_scope()
@@ -3684,12 +4212,51 @@ class PostgresWorldModel:
             row = cur.fetchone()
         return row is not None
 
+    def _require_locked_approval_review(self, cur, approval_id: int, status: str,
+                                        approver: str, event_id: str, review: dict, effect_guard=None) -> None:
+        """Read reviewed card, quorum and content owner under the held row lock."""
+        from ..approval_vote_review import require_locked_vote_review
+        from ..world_model import _single_approver
+
+        approval_scope, approval_params = _tenant_scope()
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        sql = ("SELECT id, action, risk, scope, detail, provenance, status, requested_at, decided_at, claimed_by, claimed_at, decided_by, approvals_required, requested_by, goal_id, department FROM approvals WHERE id = %s")
+        values = [int(approval_id)]
+        if approval_scope:
+            sql += " AND " + approval_scope
+            values += approval_params
+        cur.execute(sql, tuple(values))
+        locked = cur.fetchone()
+        exact = _dec_approval_row(locked) if locked is not None else None
+        cur.execute("SELECT approver, decision FROM approval_signoffs WHERE approval_id = %s ORDER BY decided_at", (int(approval_id),))
+        approvers = _single_approver(exact, [row[0] for row in cur.fetchall() if row[1] == "approved"]) if exact is not None else []
+        cur.execute(f"SELECT COUNT(*) FROM approval_audit_outbox WHERE approval_id = %s AND delivered_at IS NULL AND {outbox_scope}", tuple([int(approval_id), *outbox_params]))
+        audit_pending = int(cur.fetchone()[0])
+        content_owner = (exact.requested_by or "") if exact is not None else None
+        if exact is not None and exact.goal_id:
+            owner_sql = "SELECT owner,domain FROM goals WHERE id = %s"
+            owner_values = [exact.goal_id]
+            if approval_scope:
+                owner_sql += " AND " + approval_scope
+                owner_values += approval_params
+            cur.execute(owner_sql + " FOR SHARE", tuple(owner_values))
+            source = cur.fetchone()
+            content_owner = (source[0] or "") if source is not None else None
+            source_guard = getattr(effect_guard, "approval_source", None)
+            if source_guard is not None:
+                source_guard(exact.goal_id, content_owner, source[1] if source is not None else None)
+        require_locked_vote_review(exact, review, status=status, actor=approver,
+                                   event_id=event_id, approvers=approvers, audit_pending=audit_pending,
+                                   content_owner=content_owner)
+
     def decide_approval_audited(
         self,
         approval_id: int,
         status: str,
         *,
         decided_by: str,
+        reviewed_card: dict | None = None,
+        effect_guard=None,
     ):
         """Atomically accept a vote and queue its signed-audit delivery."""
         if status not in ("approved", "denied"):
@@ -3698,13 +4265,8 @@ class PostgresWorldModel:
         if not approver:
             return None
 
-        from ..world_model import ApprovalAuditEvent
+        from ..world_model import ApprovalAuditEvent, _approval_audit_event_id
 
-        event_id = self.approval_audit_event_id(
-            approval_id,
-            status,
-            approver,
-        )
         tenant = _active_tenant()
         approval_scope, approval_params = _tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
@@ -3722,6 +4284,15 @@ class PostgresWorldModel:
             # Row lock serializes duplicate and competing votes across replicas.
             cur.execute(approval_sql, tuple(approval_values))
             approval = cur.fetchone()
+            if effect_guard:
+                effect_guard()
+            undo_round = self._approval_undo_round(cur, approval_id)
+            event_id = _approval_audit_event_id(
+                tenant, approval_id, status, approver, undo_round,
+            )
+
+            if reviewed_card is not None:
+                self._require_locked_approval_review(cur, approval_id, status, approver, event_id, reviewed_card, effect_guard)
 
             cur.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3777,10 +4348,8 @@ class PostgresWorldModel:
                     (int(approval_id),),
                 )
                 for legacy in cur.fetchall():
-                    legacy_event_id = self.approval_audit_event_id(
-                        approval_id,
-                        legacy[1],
-                        legacy[0],
+                    legacy_event_id = _approval_audit_event_id(
+                        tenant, approval_id, legacy[1], legacy[0], undo_round,
                     )
                     cur.execute(
                         "INSERT INTO approval_audit_outbox("
@@ -3855,7 +4424,7 @@ class PostgresWorldModel:
                     tenant,
                 ),
             )
-            return ApprovalAuditEvent(
+            result = ApprovalAuditEvent(
                 event_id=event_id,
                 approval_id=int(approval_id),
                 status=status,
@@ -3864,12 +4433,16 @@ class PostgresWorldModel:
                 created_at=now,
                 delivered_at=None,
             )
+            if effect_guard:
+                effect_guard()
+            return result
 
     def mark_approval_audit_delivered(
         self,
         event_id: str,
         *,
         delivered_at: float | None = None,
+        effect_guard=None,
     ) -> bool:
         """Acknowledge signed delivery and apply any now-safe final outcome."""
         outbox_scope, outbox_params = _approval_outbox_scope()
@@ -3882,8 +4455,18 @@ class PostgresWorldModel:
                 tuple([str(event_id), *outbox_params]),
             )
             event = cur.fetchone()
+            if effect_guard is not None:
+                effect_guard()
             if event is None:
                 return False
+            source_guard = getattr(effect_guard, "approval_source", None)
+            if source_guard is not None:
+                goal_scope, goal_params = _tenant_scope("g.tenant_id")
+                cur.execute("SELECT g.id,g.owner,g.domain FROM approvals a JOIN goals g ON g.id=a.goal_id WHERE a.id=%s" + (" AND " + goal_scope if goal_scope else "") + " FOR SHARE OF g", tuple([event[1], *goal_params]))
+                source = cur.fetchone()
+                if source is None:
+                    raise PermissionError("The original approval task is unavailable")
+                source_guard(source[0], source[1] or "", source[2])
             if event[6] is None:
                 cur.execute(
                     "UPDATE approval_audit_outbox SET delivered_at = %s "
@@ -3929,6 +4512,8 @@ class PostgresWorldModel:
                         sql += " AND " + approval_scope
                         values += approval_params
                     cur.execute(sql, tuple(values))
+            if effect_guard is not None:
+                effect_guard()
             return True
 
     def decide_approval(self, approval_id: int, status: str,
@@ -4035,7 +4620,9 @@ class PostgresWorldModel:
                 "WHERE approval_id = %s ORDER BY decided_at", (approval_id,),
             )
             rows = cur.fetchall()
-        approvers = [r[0] for r in rows if r[1] == "approved"]
+        from ..world_model import _single_approver
+
+        approvers = _single_approver(appr, [r[0] for r in rows if r[1] == "approved"])
         scope, params = _approval_outbox_scope()
         with self._tx() as cur:
             cur.execute(
@@ -4563,7 +5150,7 @@ class PostgresWorldModel:
             # after receipt issuance but before its table's DELETE.
             cur.execute(
                 "LOCK TABLE conversations, turns, goals, episodes, artifacts, "
-                "attachments, goal_events, goal_origins, messages, "
+                "attachments, goal_events, goal_origins, goal_mutation_receipts, messages, "
                 "processed_messages, questions, share_links, signoffs, "
                 "fact_history, facts IN SHARE ROW EXCLUSIVE MODE"
             )
@@ -4606,6 +5193,7 @@ class PostgresWorldModel:
                     "attachments",
                     "goal_events",
                     "goal_origins",
+                    "goal_mutation_receipts",
                     "messages",
                     "processed_messages",
                     "questions",
@@ -4692,23 +5280,11 @@ class PostgresWorldModel:
 
         return set(gids), list(plan["attachment_paths"]), removed_turns
 
-    # ----- messages (goal-scoped log + full-text search) -----
+    # ----- messages (goal-scoped log) -----
 
     def append_message(self, goal_id: int, role: str, content: str) -> None:
-        # W1-53: idx_pg_messages_fts (a GIN index on to_tsvector(content), see
-        # SCHEMA above) is built and maintained on every insert here, INCLUDING
-        # ciphertext once at_rest_enabled() is on (the default) -- the same
-        # ciphertext-indexing cost the SQLite messages_fts drop targets.
-        # search_messages(), the index's one reader, has been removed (zero
-        # production callers -- only its own definition and tests referenced
-        # it, confirmed by grep). The index itself could not be dropped in the
-        # same pass: migration_governance.py's additive-only policy for NEW
-        # migrations (old replicas must keep reading the old schema during a
-        # rolling deploy) refuses DROP INDEX, and SCHEMA is immutable once
-        # released (fingerprinted as the governance ladder's version 1) --
-        # editing it, even to remove this one statement, trips the checksum
-        # guard. Routed to INFRA_AND_POLICY_DECISIONS.md: dropping it needs
-        # either a policy exception or a different technical approach.
+        # v49 retires only the unused GIN message-search index. This log still
+        # stores complete content through the same authenticated at-rest codec.
         #
         # Gate on the parent goal being in the active tenant (see start_episode);
         # a cross-tenant write silently no-ops, like set_goal_status.
@@ -5186,7 +5762,7 @@ class PostgresWorldModel:
     # ----- pruning -----
 
     def purge_episodes_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete old completed episodes in the active tenant."""
         tenant = _required_retention_tenant("episode retention")
@@ -5197,6 +5773,12 @@ class PostgresWorldModel:
         params: list = [float(cutoff_ts), tenant]
         verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
         with self._tx() as cur:
+            if review_binding is not None:
+                from ..retention_review_bindings import guard_sql
+
+                guard_sql(cur, "episodes", predicate, tuple(params), review_binding, dry_run=dry_run, postgres=True)
+                if dry_run:
+                    return int(review_binding["count"])
             cur.execute(f"{verb} episodes WHERE {predicate}", tuple(params))
             if dry_run:
                 row = cur.fetchone()
@@ -5204,7 +5786,7 @@ class PostgresWorldModel:
             return int(cur.rowcount or 0)
 
     def purge_goal_events_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete old goal events in the active tenant."""
         tenant = _required_retention_tenant("goal-event retention")
@@ -5215,6 +5797,12 @@ class PostgresWorldModel:
         params: list = [float(cutoff_ts), tenant]
         verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
         with self._tx() as cur:
+            if review_binding is not None:
+                from ..retention_review_bindings import guard_sql
+
+                guard_sql(cur, "goal_events", predicate, tuple(params), review_binding, dry_run=dry_run, postgres=True)
+                if dry_run:
+                    return int(review_binding["count"])
             cur.execute(f"{verb} goal_events WHERE {predicate}", tuple(params))
             if dry_run:
                 row = cur.fetchone()
@@ -5222,7 +5810,7 @@ class PostgresWorldModel:
             return int(cur.rowcount or 0)
 
     def purge_messages_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete old conversation messages in the active tenant.
 
@@ -5237,6 +5825,12 @@ class PostgresWorldModel:
         params: list = [float(cutoff_ts), tenant]
         verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
         with self._tx() as cur:
+            if review_binding is not None:
+                from ..retention_review_bindings import guard_sql
+
+                guard_sql(cur, "messages", predicate, tuple(params), review_binding, dry_run=dry_run, postgres=True)
+                if dry_run:
+                    return int(review_binding["count"])
             cur.execute(f"{verb} messages WHERE {predicate}", tuple(params))
             if dry_run:
                 row = cur.fetchone()

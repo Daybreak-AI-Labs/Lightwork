@@ -1,7 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Compliance Scoping · Lightwork{% endblock %}
+{% block title %}Find which controls apply · Lightwork{% endblock %}
 {% block content %}
 <style>
+  #cs-questionnaire-head { flex-wrap:wrap; }
+  #cs-questionnaire-design { min-width:0; overflow-wrap:anywhere; }
+  #cs-questionnaire-design fieldset { min-width:0; }
+  #cs-questionnaire-design button { max-width:100%; white-space:normal; }
   .cs-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
              gap:var(--space-4); }
   .cs-stack { display:flex; flex-direction:column; gap:var(--space-3); }
@@ -10,9 +14,9 @@
   .cs-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
                word-break:break-word; }
   .cs-warning { border:2px solid var(--danger); padding:var(--space-3);
-                border-radius:8px; background:var(--surface-2); }
+                border-radius: var(--radius-md); background:var(--surface-2); }
   .cs-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
-  @media (max-width:900px) { .cs-grid { grid-template-columns:1fr; } }
+  @media (max-width:880px) { .cs-grid { grid-template-columns:1fr; } }
 </style>
 
 {% from "_hero.html" import hero %}
@@ -60,9 +64,11 @@
   <div class="section-head"><h2>Reports</h2></div>
   <div class="panel" id="cs-reports"><p class="muted">Loading…</p></div>
 
-  <div class="section-head"><h2>Questionnaires</h2>
-    <button type="button" class="btn btn--ghost" id="cs-add-questionnaire">Add a questionnaire from a file</button></div>
+  <div class="section-head" id="cs-questionnaire-head"><h2>Questionnaires</h2>
+    <div class="actions"><button type="button" class="btn btn--primary" id="cs-add-questionnaire">Build a questionnaire</button>
+    <button type="button" class="btn btn--ghost" id="cs-import-questionnaire">Import an existing file</button></div></div>
   <div class="panel" id="cs-questionnaires"><p class="muted">Loading…</p></div>
+  {% include "_compliance_questionnaire_builder.html" %}
 
   {% if can_audit or can_admin %}
   <div class="panel" style="display:flex; gap:.5rem; flex-wrap:wrap;">
@@ -78,7 +84,7 @@
 <div class="cs-grid">
   <section class="panel cs-stack">
     <h2>Choose an action</h2>
-    <p>Tenant and actor come only from the authenticated request. Unknown fields,
+    <p>The workspace and the person acting come only from your sign-in. Unknown fields,
       free-text framework or evidence content, and key values are rejected.</p>
     <label>Operation
       <select id="cs-operation" data-guided-api="/api/v1/compliance/scoping">
@@ -99,7 +105,7 @@
         <option value="scope-export" data-method="PUT" data-path="/scopes/{scope_id}/exports/{export_id}">Scope: create signed local export</option>
         <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Export: get and verify signature</option>
         <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: check this workspace’s records</option>
       </select>
     </label>
     <label>Record references (JSON)
@@ -144,6 +150,20 @@
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
+  // Failures read as plain sentences: never "HTTP 403", "Error:" or raw server text.
+  function requestProblem(status, detail) {
+    return window.mvPlainDetail(detail) || window.mvErrorText({status: status, detail: detail}, "complete the request");
+  }
+  function problemText(error) {
+    var kind = error && error.name;
+    if (kind === "SyntaxError") {
+      return "Record references and Action details must be valid JSON. Check the quotes, commas and brackets, then try again.";
+    }
+    if (kind === "TypeError" || kind === "AbortError") {
+      return window.mvErrorText(error, "complete the request");
+    }
+    return error && error.message ? error.message : window.mvErrorText(error, "complete the request");
+  }
   function selectedRoute() {
     return operation.options[operation.selectedIndex];
   }
@@ -162,7 +182,7 @@
     return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
       var value = values[key];
       if ((typeof value !== "string" && typeof value !== "number") || value === "") {
-        throw new Error("Missing path value: " + key);
+        throw new Error("Add \"" + key + "\" to Record references, then try again.");
       }
       return encodeURIComponent(String(value));
     });
@@ -180,16 +200,16 @@
       if (!responseText) { throw new Error("empty response"); }
       result = JSON.parse(responseText);
     } catch (_error) {
-      throw new Error("Request failed: the server returned an invalid JSON response.");
+      throw new Error("Lightwork's reply could not be read. Refresh the page and try again.");
     }
     if (!response.ok) {
-      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+      throw new Error(requestProblem(response.status, result && result.detail));
     }
     show({status: response.status, ok: response.ok, result: result});
   }
 
   document.getElementById("cs-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+    run("GET", "/status", {}).catch(function (error) { show(problemText(error)); });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("cs-submit").addEventListener("click", async function () {
@@ -201,17 +221,18 @@
       var pathValues = JSON.parse(paths.value || "{}");
       var payload = JSON.parse(body.value || "{}");
       if (containsForbiddenKey(payload)) {
-        throw new Error("Tenant, actor, raw text, evidence, and key values are never accepted.");
+        throw new Error("Workspace, person acting, raw text, evidence, and key values are never accepted. Remove them from Action details, then try again.");
       }
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);
-    } catch (error) { show(String(error)); }
+    } catch (error) { show(problemText(error)); }
   });
   updateConfirmation();
 }());
 </script>
 </details>
 <script src="/static/lightwork-record-workflows.js" defer></script>
+<script src="/static/lightwork-compliance-questionnaire-builder.js" defer></script>
 <script src="/static/lightwork-compliance-scoping.js" defer></script>
 {% endif %}
 {% endblock %}

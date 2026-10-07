@@ -36,6 +36,7 @@ LIFETIME = 600
 
 class PreviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    failure_reference: str | None = Field(default=None, pattern=r"^lw-failure-[0-9a-f]{32}$")
 
 
 class DownloadIn(BaseModel):
@@ -73,10 +74,14 @@ def _io_path(path) -> Path:
     return Path(_windows_extended_path(value)) if os.name == "nt" else value
 
 
-def _prepare(context):
+def _prepare(context, failure_reference=None):
     # Scrub every section, including recent errors and client status, before
     # either display or encrypted publication. Nothing is sent externally.
     bundle = json.loads(json.dumps(support_bundle._redact(support_bundle.collect()), default=str, allow_nan=False))
+    if failure_reference:
+        # An incident lookup hint supplied by the failure page, never evidence
+        # of permission or a replacement for the report's own identity.
+        bundle["reported_failure_reference"] = failure_reference
     payload = json.dumps(bundle, indent=2, ensure_ascii=False, allow_nan=False).encode()
     if len(payload) > MAX_BYTES:
         raise ValueError("The support report exceeds its supported size. No download was created.")
@@ -142,16 +147,21 @@ async def _call(function, *args):
 async def support_page(request: Request):
     require_permission(request, "view")
     from .app import templates
+    from .help_menu import help_request
+    from .help_topics import TOPICS
     response = templates.TemplateResponse(request, "support.html", {"support_context": context_for(request),
+        "can_check_installation": has_global_permission(request, "admin"),
         "can_prepare_support": has_global_permission(request, "admin") and _enabled(),
-        "support_enabled": _enabled()})
+        "support_enabled": _enabled(), "help_request": await run_in_threadpool(help_request, request),
+        "help_topics": TOPICS})
     response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
 @router.post("/api/v1/support/preview")
 async def preview_support(request: Request, body: PreviewIn):
-    result = await _call(_prepare, _admit(request))
+    context = _admit(request)
+    result = await _call(_prepare, context, body.failure_reference) if body.failure_reference else await _call(_prepare, context)
     return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
 
 

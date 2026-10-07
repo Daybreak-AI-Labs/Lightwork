@@ -377,8 +377,8 @@ def _configured_worker_ceilings() -> tuple[float | None, float | None, int]:
     """Return worker-local budget/depth ceilings independent of producers."""
     from .runner import (
         DEFAULT_MAX_DEPTH,
-        configured_max_dollars,
-        configured_max_wall_seconds,
+        configured_goal_ceiling_dollars,
+        configured_goal_ceiling_wall_seconds,
     )
 
     cfg = _queue_redis_config()
@@ -404,12 +404,12 @@ def _configured_worker_ceilings() -> tuple[float | None, float | None, int]:
     dollars = _float_limit(
         "MAVERICK_QUEUE_WORKER_MAX_DOLLARS",
         "worker_max_dollars",
-        configured_max_dollars(),
+        configured_goal_ceiling_dollars(),
     )
     wall = _float_limit(
         "MAVERICK_QUEUE_WORKER_MAX_WALL_SECONDS",
         "worker_max_wall_seconds",
-        configured_max_wall_seconds(),
+        configured_goal_ceiling_wall_seconds(),
     )
     depth_raw: Any = os.environ.get("MAVERICK_QUEUE_WORKER_MAX_DEPTH")
     if depth_raw is None or not depth_raw.strip():

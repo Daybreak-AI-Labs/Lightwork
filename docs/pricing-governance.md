@@ -9,15 +9,33 @@ scope, and verification status.
 
 Live accounting is fail-closed by default:
 
-- a verified row may affect a budget or spend cap;
-- an unverified row is available only for estimates;
-- a missing row stops accounting before token counters or dollar totals mutate;
+- a provider-verified row may affect a budget or spend cap;
+- an administrator may enter a dated USD ceiling for an exact provider/model
+route in Settings > Models > Prices. That ceiling can guard a task's spend,
+  but remains marked **estimated** in receipts; it is not vendor-verified
+  invoice evidence. Unknown gateway cache discounts are not assumed;
+- any other unverified row is available only for planning estimates;
+- a missing or expired usable rate stops the request before model dispatch;
 - `Budget.pricing_evidence` retains the exact quote used for each model.
 
+The administrator enters the highest applicable input and output rates per
+million tokens including cache charges, the provider price page or contract
+reference, effective date,
+and review deadline. The form requires an explicit attestation. The model's
+exact provider route is stored, so the same model name through another
+gateway does not inherit the ceiling. Rates expire at the deadline and can be
+withdrawn in Settings. Changing a model rate or a model selection applies to
+the next request; Settings shows each role's effective price status. The
+provider's invoice remains authoritative, and the entered ceiling must never
+be used for customer invoicing or chargeback.
+
 Set `[budget] strict_pricing = false` only when a legacy or custom
-OpenAI-compatible gateway has no current sourced price. This explicit
-compatibility mode emits warnings and labels its totals as unverified,
-estimate-only values. Do not use those totals for invoices or chargebacks.
+OpenAI-compatible gateway has no usable price and the operator explicitly
+accepts that dollar limits may be under-counted. This compatibility mode emits
+warnings and labels its totals as unverified, estimate-only values. A dated
+administrator ceiling in Settings is the safer route when the customer's
+contract supplies a defensible upper price. Do not use either estimate for
+invoices or chargebacks.
 
 ## Conservative context ceilings
 
@@ -58,4 +76,7 @@ The tracked primary sources are:
 Zero-dollar Codex CLI and self-hosted rows mean only that Lightwork sees no
 metered external API-token charge. Subscription, compute, energy, storage, and
 operations costs are outside that accounting scope and are stated explicitly
-in each row's applicability field.
+in each row's applicability field. An OpenAI-compatible address is not treated
+as free merely because it is on a loopback or private network: it could proxy
+a paid service. Use the reviewed-ceiling path for that route unless its
+no-charge terms can be independently established.

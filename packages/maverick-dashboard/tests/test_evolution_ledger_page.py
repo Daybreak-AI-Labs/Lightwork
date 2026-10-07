@@ -12,17 +12,14 @@ from maverick_dashboard import evolution_ledger_page as page
 
 
 def _templates() -> Jinja2Templates:
-    selected = Jinja2Templates(directory=Path(page.__file__).parent / "templates")
+    from maverick_dashboard.app import _theme_context
+
+    selected = Jinja2Templates(
+        directory=Path(page.__file__).parent / "templates",
+        context_processors=[_theme_context],
+    )
     selected.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
         nav_groups=[],
-        t=lambda key: key,
     )
     return selected
 
@@ -87,9 +84,11 @@ def test_nav_registry_and_copilot_use_the_audit_only_page_context() -> None:
     assert entry["default"] == "audit"
     assert entry["in_nav"] is True
     context = context_for_page(page.PAGE_PATH)
-    assert context.title == "Evolution Ledger"
-    assert "cannot start learning" in " ".join(context.boundaries).lower()
-    assert "human approval" in " ".join(context.boundaries).lower()
+    assert context.title == "Learning history"
+    boundaries = " ".join(context.boundaries).lower()
+    # The guide changes nothing, and an adoption is not proof of better results.
+    assert "page guide is read-only" in boundaries
+    assert "does not establish that it improved results" in boundaries
 
 
 def test_client_is_bounded_and_uses_safe_dom_only() -> None:

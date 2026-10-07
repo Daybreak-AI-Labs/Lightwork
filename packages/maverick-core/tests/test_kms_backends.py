@@ -127,6 +127,21 @@ def test_build_cloud_kms_dispatch(monkeypatch):
                       kms_backends.VaultTransitKMS)
 
 
+@pytest.mark.parametrize("provider", ["aws", "gcp", "vault"])
+def test_explicit_key_id_beats_the_server_wide_env_key(monkeypatch, provider):
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global")
+    kms = kms_backends.build_cloud_kms(
+        provider, {"key_id": "cfg-key"}, key_id="tenant-byok")
+    assert kms.key_id == "tenant-byok"
+
+
+@pytest.mark.parametrize("provider", ["aws", "gcp", "vault"])
+def test_env_key_is_used_when_no_explicit_key_id(monkeypatch, provider):
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global")
+    kms = kms_backends.build_cloud_kms(provider, {"key_id": "cfg-key"})
+    assert kms.key_id == "operator-global"
+
+
 def test_build_cloud_kms_unknown_fails():
     with pytest.raises(EncryptionUnavailable):
         kms_backends.build_cloud_kms("oracle")

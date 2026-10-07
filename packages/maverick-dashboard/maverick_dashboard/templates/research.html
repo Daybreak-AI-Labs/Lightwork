@@ -12,21 +12,22 @@
   .research-form .input { box-sizing:border-box;width:100%;max-width:100%; }
   .research-actions { display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center; }
   .research-list { display:grid;gap:var(--space-2);padding:0;list-style:none; }
-  .research-item { border:1px solid var(--border);border-radius:var(--radius);padding:var(--space-3);overflow-wrap:anywhere; }
+  .research-item { border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);overflow-wrap:anywhere; }
   .research-item p { margin:.35rem 0; }
   .research-evaluator { display:grid;grid-template-columns:1fr 1fr 2fr auto;gap:var(--space-2);align-items:end;margin-block:var(--space-2); }
-  .research-source { white-space:pre-wrap;overflow:auto;max-height:24rem;padding:var(--space-2);background:var(--surface-2);border-radius:var(--radius); }
+  .research-execution-review { max-width:min(90vw,58rem); max-height:85vh; overflow:auto; background:var(--surface-1); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-lg); padding:var(--space-4); }
+  .research-source { white-space:pre-wrap;overflow:auto;max-height:24rem;padding:var(--space-2);background:var(--surface-2);border-radius:var(--radius-md); }
   .research-workspace { margin-block:var(--space-4); }
   .research-workspace .panel { min-width:0; }
   .research-workspace select[multiple] { min-height:8rem; }
   .research-workspace code { overflow-wrap:anywhere; }
-  .research-badge { display:inline-block;padding:.15rem .5rem;border:1px solid var(--border);border-radius:999px;font-size:.85rem; }
+  .research-badge { display:inline-block;padding:.15rem .5rem;border:1px solid var(--border);border-radius: var(--radius-pill);font-size:.85rem; }
   .research-badge[data-state="approved"] { border-color:var(--success, #27864a); }
   .research-badge[data-state="revoked"], .research-badge[data-state="failed"] { border-color:var(--danger, #b42318); }
   .research-lineage { padding-inline-start:1.25rem; }
   .research-costs { margin-block:var(--space-2); }
   .research-advanced { border-block-start:1px solid var(--border);padding-block-start:var(--space-2); }
-  .research-checks { display:flex;flex-wrap:wrap;gap:.25rem 1rem;border:1px solid var(--border);border-radius:var(--radius);padding:var(--space-2); }
+  .research-checks { display:flex;flex-wrap:wrap;gap:.25rem 1rem;border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2); }
   .research-checks label { flex-direction:row;align-items:center;gap:.35rem; }
   .research-file-state { font-size:.85rem; }
   @media (max-width:720px) { .research-evaluator { grid-template-columns:1fr; } }
@@ -182,41 +183,28 @@
           <summary><strong>Run an experiment</strong></summary>
           <form id="research-run-form" class="research-form">
           <input type="hidden" name="run_id"><input type="hidden" name="run_version" value="v1">
-          <label>Experiment<select class="input" data-experiment required><option value="__new__">A new experiment</option></select></label>
-          <label data-experiment-name>Name of the new experiment<input class="input" data-slug-for="experiment_id" maxlength="120"></label>
-          <input type="hidden" name="experiment_id"><input type="hidden" name="experiment_version" value="v1">
-          <div class="research-grid">
-            <label>Purpose<select class="input" name="purpose" required><option value="">Choose a purpose</option></select></label>
-            <label>What to do<select class="input" name="action"><option value="analyze">Analyze</option><option value="train">Train a model</option></select></label>
-          </div>
+          <label>Saved program<select class="input" name="program_id" id="research-program-choice" required><option value="">Loading saved programs…</option></select></label>
+          <p id="research-program-notice" class="muted"></p>
+          <p class="muted">Use <a href="#research-submit">Send for review</a> below to save the actual program files first. This executor analyzes approved local text snapshots without an AI model. Training, remote files and other environments need a separately supported executor.</p>
+          <input type="hidden" name="experiment_id"><input type="hidden" name="experiment_version">
+          <input type="hidden" name="code_revision"><input type="hidden" name="code_sha256">
+          <input type="hidden" name="environment_id"><input type="hidden" name="environment_version"><input type="hidden" name="environment_sha256">
+          <input type="hidden" name="metric_protocol_sha256"><input type="hidden" name="seed" data-random-seed>
+          <label>Purpose<select class="input" name="purpose" required><option value="">Choose a purpose</option></select></label>
+          <label>What to do<select class="input" name="action"><option value="analyze">Analyze local text snapshots</option></select></label>
           <label>Approved datasets<select class="input" name="dataset_refs" multiple required></select></label>
-          <p class="muted">Only approved datasets allowed for this purpose are listed. Hold Ctrl (or Cmd) to choose more than one.</p>
-          <label>Approved model (optional)<select class="input" name="model_ref"><option value="">No model</option></select></label>
-          <details class="research-advanced" open>
-            <summary>The code and setup to run</summary>
-            <label>Code project<select class="input" data-code-project required><option value="">Choose a code project</option></select></label>
-            <input type="hidden" name="code_revision">
-            {{ fingerprint('code_sha256', 'Code package (the exact files to run)', required=true) }}
-            <div class="research-grid">
-              <label>Setup name<input class="input" data-slug-for="environment_id" maxlength="120" required placeholder="For example: Python 3.12 with pandas"></label>
-              <input type="hidden" name="environment_id"><input type="hidden" name="environment_version" value="1">
-            </div>
-            {{ fingerprint('environment_sha256', 'Setup file (for example a requirements or lock file)', required=true) }}
-            <input type="hidden" name="seed" data-random-seed>
-          </details>
+          <p class="muted">Only approved datasets allowed for this purpose are listed. Hold Ctrl (or Cmd) to choose more than one. The complete review identifies the exact text snapshots supplied to the program.</p>
+          <input type="hidden" name="model_ref" value="">
           <details class="research-advanced" open>
             <summary>Limits</summary>
             <div class="research-grid">
-              <label>Time limit<select class="input" data-scale-into="max_wall_seconds" data-scale="60"><option value="5" selected>5 minutes</option><option value="15">15 minutes</option><option value="60">1 hour</option><option value="240">4 hours</option></select></label>
-              <label>AI calls allowed<select class="input" data-scale-into="max_provider_calls" data-scale="1"><option value="0" selected>None</option><option value="10">Up to 10</option><option value="100">Up to 100</option><option value="1000">Up to 1,000</option></select></label>
-              <label>Storage limit<select class="input" data-scale-into="max_storage_bytes" data-scale="1048576"><option value="100" selected>100 MB</option><option value="1024">1 GB</option><option value="10240">10 GB</option></select></label>
-              <label>Spending limit<select class="input" name="max_cost"><option value="0" selected>No spending</option><option value="1">Up to 1</option><option value="10">Up to 10</option><option value="100">Up to 100</option></select></label>
-              <label>Currency<select class="input" name="currency"><option value="USD" selected>US dollars</option><option value="EUR">Euros</option><option value="GBP">Pounds sterling</option></select></label>
+              <label>Time limit<select class="input" data-scale-into="max_wall_seconds" data-scale="60"><option value="5" selected>5 minutes</option><option value="15">15 minutes</option></select></label>
+              <label>Storage limit<select class="input" data-scale-into="max_storage_bytes" data-scale="1048576"><option value="100" selected>100 MB</option><option value="1024">1 GB</option></select></label>
             </div>
-            <input type="hidden" name="max_wall_seconds" value="300"><input type="hidden" name="max_provider_calls" value="0"><input type="hidden" name="max_storage_bytes" value="104857600">
-            {{ fingerprint('metric_protocol_sha256', 'How results are measured (a document describing it)', required=true) }}
+            <p>No network or paid AI calls. Local compute has no independently metered financial price.</p>
+            <input type="hidden" name="max_wall_seconds" value="300"><input type="hidden" name="max_provider_calls" value="0"><input type="hidden" name="max_storage_bytes" value="104857600"><input type="hidden" name="max_cost" value="0"><input type="hidden" name="currency" value="USD">
           </details>
-          <label class="check"><input type="checkbox" name="confirm" required>I checked the datasets, purpose, code and limits. Queue this run.</label>
+          <label class="check"><input type="checkbox" name="confirm" required>I checked the datasets, purpose, code and limits. Queue this run for a different administrator’s complete review.</label>
           <button type="submit" class="btn btn--primary">Queue the run</button>
           </form>
         </details>
@@ -231,6 +219,7 @@
       </section>
       <section class="panel" aria-labelledby="research-runs-title">
         <h3 id="research-runs-title">Runs and their cost</h3>
+        <p id="research-original-status" role="status" aria-live="polite"></p><button type="button" class="btn btn--ghost" id="research-read-original" hidden>Read original run</button>
         <ul id="research-governed-runs" class="research-list"><li>Loading…</li></ul>
       </section>
     </div>
@@ -239,6 +228,7 @@
   <section class="panel" id="research-promotions" aria-labelledby="research-promotions-title">
     <h2 id="research-promotions-title">Put a result into use (or undo it)</h2>
     <p>A good result does not put itself into use. A person must approve it, and Lightwork checks the results, data rights and permissions again before every step.</p>
+    {% include "_local_flow_release.html" %}
     <p id="research-promotions-status" role="status" aria-live="polite">Loading candidate promotions…</p>
     <div class="research-actions">
       <button type="button" class="btn btn--ghost" id="research-promotions-refresh">Refresh</button>

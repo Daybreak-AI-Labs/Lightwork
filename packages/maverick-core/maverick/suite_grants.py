@@ -58,12 +58,16 @@ _GRANTS_LOCK = threading.Lock()
 def _locked(path: Path):
     from contextlib import ExitStack
 
+    from .authority_effects import authority_effect_fence
     from .file_lock import cross_process_lock, ensure_private_directory
     from .paths import maverick_home
 
     ensure_private_directory(maverick_home())
     ensure_private_directory(path.parent)
     with ExitStack() as stack:
+        # Revoke departments under the same fence used by authority-bound
+        # reads/effects, before taking the grant-store locks (RBAC lock order).
+        stack.enter_context(authority_effect_fence())
         stack.enter_context(_GRANTS_LOCK)
         stack.enter_context(cross_process_lock(path))
         return stack.pop_all()

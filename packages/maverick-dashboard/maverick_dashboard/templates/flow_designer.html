@@ -1,12 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Flow designer · Lightwork{% endblock %}
+{% block title %}{{ 'Step by step · Workflow builder' if builder_modes else 'Flow designer' }} · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   /* Mockup layout: a clean header + a hero Draft bar, then a workspace that is
      either the friendly Steps (cards + settings rail) or the full Canvas
      (palette + svg + props). Every engine control keeps its id; the layout
      just repositions them and shows/hides per view. */
   .fd { display: flex; flex-direction: column; gap: var(--space-3); }
+  #fd-draft-retry[hidden] { display: none; }
   .fdx-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
   .fdx-head .fd__name { flex: 0 1 260px; font-weight: var(--font-semibold); }
   .fdx-head__spacer { margin-inline-start: auto; }
@@ -25,7 +27,7 @@
   /* An editor surface is not prose: mid-drag the browser otherwise paints text
      selection across the palette/props while wiring or moving nodes. */
   .fd__canvas-wrap, .fd__palette { user-select: none; -webkit-user-select: none; }
-  @media (max-width: 900px) {
+  @media (max-width: 880px) {
     .fd[data-view="steps"] .fdx-work { grid-template-columns: 1fr; height: auto; }
   }
   /* Stack the canvas workspace before its middle column becomes cramped.
@@ -54,8 +56,8 @@
   .fdx-panel details > summary { cursor: pointer; font-weight: var(--font-semibold); }
   .fdx-panel details[open] > summary { margin-bottom: var(--space-3); }
   .fdx-mini { color: var(--muted); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
-  .fd__nl { flex: 1; min-width: 220px; display: flex; gap: var(--space-2); }
-  .fd__nl input { flex: 1; }
+  .fd__nl { flex: 1; min-width: 220px; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .fd__nl input { flex: 1; min-width: min(160px, 100%); }
   .fd__palette { display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; }
   .fd__palette button { justify-content: flex-start; text-align: left; }
   .fd__canvas-wrap { border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -63,7 +65,7 @@
   #fd-canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fd-canvas.panning { cursor: grabbing; }
   .fd__props { border: 1px solid var(--border); border-radius: var(--radius-lg);
-               padding: var(--space-4); overflow-y: auto; background: var(--surface); }
+               padding: var(--space-4); overflow-y: auto; background: var(--surface-1); }
   .fd__props .field { margin-bottom: var(--space-3); }
   .fd__props label { display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
   .fd__props textarea { width: 100%; min-height: 60px; font-family: var(--font-mono, monospace); font-size: 12px; }
@@ -73,44 +75,51 @@
   .fd-recipe-inputs .mv-confirm__row { flex-shrink: 0; flex-wrap: wrap; padding-top: var(--space-2); }
   .fd-recipe-inputs [aria-invalid="true"] { border-color: var(--danger); }
   .fd__props input, .fd__props select { width: 100%; }
+  .fd-action-group { min-width: 0; margin-block: var(--space-3); padding: var(--space-3);
+    border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--glass-soft); }
+  .fd-action-group legend { font-weight: var(--font-semibold); overflow-wrap: anywhere; }
+  .fd-action-group .btn { width: auto; margin-block: var(--space-2); }
+  .fd-action-group label:has(input[type="checkbox"]) { display: flex; gap: var(--space-2); align-items: center; }
+  .fd-action-group input[type="checkbox"] { width: auto; }
+  .fd-action-group [aria-invalid="true"] { border-color: var(--danger); }
   .fd__empty { color: var(--muted); font-size: var(--text-sm); }
   .fd__msg { font-size: var(--text-sm); color: var(--muted); }
   /* node cards (SVG) */
-  .fd-node rect.card { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; rx: 10; }
+  .fd-node rect.card { fill: var(--surface-1); stroke: var(--border); stroke-width: 1.5; rx: 10; }
   .fd-node.selected rect.card { stroke: var(--accent); stroke-width: 2.5; }
   .fd-node:focus { outline: none; }
   .fd-node:focus-visible rect.card { stroke: var(--ring); stroke-width: 3; }
-  .fd-node.start rect.card { stroke: var(--success, #16a34a); }
-  .fd-node text { font: 12px var(--font-sans, sans-serif); fill: var(--text); pointer-events: none; }
-  .fd-node text.kind { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
+  .fd-node.start rect.card { stroke: var(--success); }
+  .fd-node text { font: 12px var(--font-sans); fill: var(--text); pointer-events: none; }
+  .fd-node text.kind { font-weight: var(--font-bold); text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
   .fd-node .swatch { rx: 4; }
-  .fd-node .port { fill: var(--accent); stroke: var(--surface); stroke-width: 2; cursor: crosshair; }
+  .fd-node .port { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; cursor: crosshair; }
   .fd-edge { fill: none; stroke: var(--muted); stroke-width: 2; marker-end: url(#fd-arrow); }
-  .fd-edge.t { stroke: var(--success, #16a34a); }
-  .fd-edge.f { stroke: var(--danger, #dc2626); }
-  .fd-edge-label { font: 10px var(--font-sans, sans-serif); fill: var(--muted); }
-  .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
-  .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
-  .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
-  .k-switch { fill: #b45309; } .k-while { fill: #8b5cf6; } .k-wait_event { fill: #0369a1; }
-  .k-scope { fill: #4d7c0f; } .k-setvar { fill: #4f46e5; }
+  .fd-edge.t { stroke: var(--success); }
+  .fd-edge.f { stroke: var(--danger); }
+  .fd-edge-label { font: 10px var(--font-sans); fill: var(--muted); }
+  .k-agent { fill: var(--fd-kind-agent); } .k-action { fill: var(--fd-kind-action); } .k-branch { fill: var(--fd-kind-branch); }
+  .k-foreach { fill: var(--fd-kind-foreach); } .k-parallel { fill: var(--fd-kind-parallel); } .k-approval { fill: var(--fd-kind-approval); }
+  .k-delay { fill: var(--fd-kind-delay); } .k-subflow { fill: var(--fd-kind-subflow); }
+  .k-switch { fill: var(--fd-kind-switch); } .k-while { fill: var(--fd-kind-while); } .k-wait_event { fill: var(--fd-kind-wait-event); }
+  .k-scope { fill: var(--fd-kind-scope); } .k-setvar { fill: var(--fd-kind-setvar); }
   /* live run overlay */
-  .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
-  .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
-  .fd-node.run-info rect.card { stroke: #d97706; stroke-width: 2.5; }
+  .fd-node.run-ok rect.card { stroke: var(--success); stroke-width: 2.5; }
+  .fd-node.run-err rect.card { stroke: var(--danger); stroke-width: 2.5; }
+  .fd-node.run-info rect.card { stroke: var(--warn); stroke-width: 2.5; }
   .fd-node.run-active rect.card { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 5 3; }
   .fd-node .runbadge { font-size: 13px; }
   .fd__legend { font-size: var(--text-sm); color: var(--muted); display: none; gap: var(--space-3); }
   .fd__legend.on { display: inline-flex; }
   .fd__examples { flex-basis: 100%; display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .fd__chip { font-size: var(--text-sm); padding: 2px 10px; border: 1px solid var(--border);
-              border-radius: 999px; background: var(--surface); cursor: pointer; color: var(--muted); }
+  .fd__chip { font-size: var(--text-sm); padding: var(--space-0-5) 10px; border: 1px solid var(--border);
+              border-radius: var(--radius-pill); background: var(--surface-1); cursor: pointer; color: var(--muted); }
   .fd__chip:hover { border-color: var(--accent); color: var(--text); }
   .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
   /* breadcrumb: shown only while editing a nested sub-flow (foreach body / branch) */
   .fd__crumbs { display: none; position: absolute; top: 8px; inset-inline-start: 8px; z-index: 2;
-                background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-                padding: 4px 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
+                background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md);
+                padding: var(--space-1) 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
                 overflow-x: auto; white-space: nowrap; }
   .fd__crumbs.on { display: block; }
   .fd__crumb { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
@@ -119,9 +128,9 @@
   .fd-edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
   .fd-edge.selected { stroke: var(--accent); stroke-width: 3; }
   /* data pills: one-click {% raw %}{{key}}{% endraw %} insertion from upstream outputs */
-  .fd__pills { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 var(--space-2); }
-  .fd__pill { font-size: 11px; font-family: var(--font-mono, monospace); padding: 1px 8px;
-              border: 1px solid var(--border); border-radius: 999px; background: var(--surface-sunken);
+  .fd__pills { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: -4px 0 var(--space-2); }
+  .fd__pill { font-size: 11px; font-family: var(--font-mono, monospace); padding: 1px var(--space-2);
+              border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface-sunken);
               cursor: pointer; color: var(--muted); }
   .fd__pill:hover { border-color: var(--accent); color: var(--text); }
   /* marquee multi-select (shift-drag on empty canvas) */
@@ -129,7 +138,7 @@
                 stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
   /* minimap (bottom-left overview; click to jump) */
   .fd__minimap { position: absolute; inset-inline-start: 8px; bottom: 8px; z-index: 2; width: 160px; height: 110px;
-                 background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                 background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md);
                  opacity: .92; cursor: pointer; }
   .fd__minimap rect.mini-node { fill: var(--muted); }
   .fd__minimap rect.mini-view { fill: none; stroke: var(--accent); stroke-width: 1.5; }
@@ -152,10 +161,16 @@
   .fd__chat-log > * { flex-shrink: 0; }
   .fd__chat-msg { max-width: 92%; padding: 6px 10px; border-radius: 10px; font-size: var(--text-sm);
                   white-space: pre-wrap; word-break: break-word; }
-  .fd__chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+  .fd__chat-msg.user { align-self: flex-end; background: var(--brand); color: var(--brand-fg); }
   .fd__chat-msg.assistant { align-self: flex-start; background: var(--surface-sunken); border: 1px solid var(--border); }
-  .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 2px; }
+  .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 var(--space-0-5); }
   .fd__chat-form { display: flex; flex-shrink: 0; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
+  .fdx-more { position: relative; }
+  .fdx-more summary { list-style: none; cursor: pointer; }
+  .fdx-more summary::-webkit-details-marker { display: none; }
+  .fdx-more__menu { position: absolute; z-index: 6; right: 0; top: 100%; min-width: 11rem;
+    padding: var(--space-2); display: grid; gap: var(--space-1); border: 1px solid var(--border);
+    border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-md); }
   .fd__chat-form input { flex: 1; min-width: 0; }
   .fd__chat-msg .btn { max-width: 100%; white-space: normal; margin-top: var(--space-2); }
   @media (prefers-reduced-transparency: reduce) { .fd__chat { background: var(--panel); backdrop-filter: none; } }
@@ -169,7 +184,7 @@
     --glass: color-mix(in srgb, var(--panel) 68%, transparent);
     --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
     --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
-    --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
+    --glass-edge: inset 0 1px 0 0 color-mix(in srgb, white 8%, transparent);
   }
   .fd__canvas-wrap, .fd__props{
     border-color: var(--glass-border); background: var(--glass-soft);
@@ -215,26 +230,34 @@
   .fd-scard{ cursor: pointer; }
   .fd-scard.is-selected{ border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
   .fd-scard__main{ min-width: 0; flex: 1; background: none; border: 0; padding: 0; text-align: start; color: inherit; font: inherit; cursor: pointer; }
-  .fd-scard__tools{ display: flex; gap: 4px; flex: none; }
+  .fd-scard__tools{ display: flex; gap: var(--space-1); flex: none; }
   .fd-scard__tools .btn{ padding: 0.25rem 0.55rem; font-size: var(--text-xs); }
+  @media (max-width: 640px) {
+    .fd-scard { flex-wrap: wrap; }
+    .fd-scard__ic { flex: none; }
+    .fd-scard__main { flex: 1 1 0; }
+    .fd-scard__t { overflow-wrap: anywhere; }
+    .fd-scard__tools { flex-basis: 100%; flex-wrap: wrap; justify-content: flex-end; }
+    .fd-scard__tools .btn { max-width: 100%; white-space: normal; }
+  }
   .fd-simple__add{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
   /* In the Steps view the selected step's settings open in the side rail. */
   .fd[data-view="steps"] .fdx-rail .fd__props{ display: block; }
-  .fd__pair{ display: flex; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; align-items: center; }
+  .fd__pair{ display: flex; gap: var(--space-1); margin-bottom: var(--space-1); flex-wrap: wrap; align-items: center; }
   .fd__pair > .input, .fd__pair > select{ flex: 1 1 120px; min-width: 0; width: auto; }
   .fd__check{ display: inline-flex !important; align-items: center; gap: 6px; font-size: var(--text-sm); margin-bottom: var(--space-3); }
   .fd__check input{ width: auto !important; }
   .fd__label{ display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
   .fd__fails{ margin: var(--space-2) 0 var(--space-3); }
   .fd__fails > summary{ cursor: pointer; font-weight: var(--font-semibold); font-size: var(--text-sm); margin-bottom: var(--space-2); }
-  .fd__days{ border: 0; padding: 0; margin: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: var(--text-sm); }
-  .fd__days legend{ color: var(--muted); font-size: var(--text-sm); margin-bottom: 4px; }
-  .fd__days label{ display: inline-flex; align-items: center; gap: 4px; }
+  .fd__days{ border: 0; padding: 0; margin: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-1) 10px; font-size: var(--text-sm); }
+  .fd__days legend{ color: var(--muted); font-size: var(--text-sm); margin-bottom: var(--space-1); }
+  .fd__days label{ display: inline-flex; align-items: center; gap: var(--space-1); }
 </style>
 
 {% from "_hero.html" import hero, state %}
 <div class="fd-hero">
-  {% call hero('Your AI workforce', 'Flow designer',
+  {% call hero('Your AI workforce', 'Workflow builder' if builder_modes else 'Flow designer',
                subtitle='Draft · test · publish',
                lede='Describe the work in plain English, choose Draft, and
                      review the steps before saving or publishing.') %}
@@ -248,7 +271,10 @@
   {% endcall %}
 </div>
 
-<div class="fd" data-view="steps">
+{% if builder_modes %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Workflow builder modes', builder_modes, 'steps') }}{% endif %}
+<div class="fd" data-view="steps" data-flow-engine-on="{{ 'true' if flows_enabled else 'false' }}" data-can-manage-flows="{{ 'true' if can_manage_flows else 'false' }}"{% if builder_modes %} {{ panel_attrs('steps') }}{% endif %}>
+  <p>{{ back_link('/workflows', 'Workflows') }}</p>
+  <p class="muted">{{ ui('Connector credentials belong in Connections. Older flows using secret expressions must be reviewed before they can run; saved definitions and grants are not changed automatically.') }} <a href="/connections">{{ ui('Connections') }}</a></p>
   <!-- Header: name, the Steps/Canvas switch, and the primary actions. -->
   <div class="fdx-head">
     <input class="input fd__name" id="fd-name" placeholder="Untitled flow" aria-label="Flow name" />
@@ -266,6 +292,12 @@
     <button class="btn btn--ghost" type="button" id="fd-history">Earlier versions</button>
     <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">What starts it</button>
     {% if flow_id %}<a class="btn btn--ghost" id="fd-teach" href="/flows/{{ flow_id | urlencode }}/teach" title="Teach steps from examples, or build a flow from reviewed runs">Teach this flow</a>{% endif %}
+    <details class="fdx-more" id="fd-more" {% if not flow_id %}hidden{% endif %}><summary class="btn btn--ghost">More</summary>
+      <div class="fdx-more__menu">
+        <button class="btn btn--ghost" type="button" id="fd-turn-off">Turn off</button>
+        <button class="btn btn--ghost" type="button" id="fd-delete-flow">Delete flow</button>
+      </div>
+    </details>
     <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">Assistant</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
   </div>
@@ -273,7 +305,8 @@
   <!-- Hero: describe it in plain English, hit Draft. Present in both views. -->
   <div class="fd__nl">
     <input class="input" id="fd-nl" placeholder="Describe your workflow in plain English…" aria-label="Describe your workflow" />
-    <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
+    <button class="btn btn--primary" type="button" id="fd-draft"><span aria-hidden="true">✨</span> Draft workflow</button>
+    <button class="btn btn--ghost" type="button" id="fd-draft-retry" hidden>Try draft again</button>
   </div>
   <div class="fd__examples" id="fd-examples" aria-label="Example workflows"></div>
 
@@ -348,7 +381,7 @@
         <label for="fd-sched-freq">Repeat</label>
         <select class="input" id="fd-sched-freq">
           <option value="">No schedule</option>
-          <option value="hourly">Every hour</option>
+          <option value="hourly">Every hour or every few hours</option>
           <option value="daily">Every day</option>
           <option value="weekdays">Every weekday</option>
           <option value="weekly">On certain days each week</option>
@@ -369,14 +402,19 @@
       <div class="fdx-kv" id="fd-sched-dom-row" hidden>
         <label for="fd-sched-dom">Day</label>
         <select class="input" id="fd-sched-dom">
-          {% for d in range(1, 29) %}<option value="{{ d }}">{{ d }}{{ 'st' if d in (1, 21) else ('nd' if d in (2, 22) else ('rd' if d in (3, 23) else 'th')) }} of the month</option>{% endfor %}
+          {% for d in range(1, 32) %}<option value="{{ d }}">{{ d }}{{ 'st' if d in (1, 21, 31) else ('nd' if d in (2, 22) else ('rd' if d in (3, 23) else 'th')) }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="fdx-kv" id="fd-sched-every-row" hidden>
+        <label for="fd-sched-every">How often</label>
+        <select class="input" id="fd-sched-every">
+          {% for hours in (1, 2, 3, 4, 6, 8, 12) %}<option value="{{ hours }}">{{ 'Every hour' if hours == 1 else 'Every ' ~ hours ~ ' hours' }}</option>{% endfor %}
         </select>
       </div>
       <div class="fdx-kv" id="fd-sched-minute-row" hidden>
         <label for="fd-sched-minute">At</label>
         <select class="input" id="fd-sched-minute">
-          <option value="0">On the hour</option><option value="15">15 minutes past</option>
-          <option value="30">Half past</option><option value="45">45 minutes past</option>
+          {% for minute in range(60) %}<option value="{{ minute }}">{{ 'On the hour' if minute == 0 else minute ~ (' minute past' if minute == 1 else ' minutes past') }}</option>{% endfor %}
         </select>
       </div>
       <div class="fdx-kv" id="fd-sched-time-row" hidden>
@@ -388,13 +426,14 @@
         <select class="input" id="fd-tz"><option value="">UTC (world standard time)</option></select>
       </div>
       <p class="fdx-mini" id="fd-sched-words" role="status"></p>
+      <p class="fdx-mini" id="fd-sched-note" hidden></p>
     </div>
 
     <div class="fdx-panel">
       <h2 class="fdx-panel__t">Limits</h2>
       <div class="fdx-kv">
         <label for="fd-maxdollars">Spending limit ($)</label>
-        <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="No limit" title="The most one run may spend on AI. Leave empty for no limit." />
+        <input class="input" id="fd-maxdollars" type="number" min="0" step="0.01" placeholder="No limit" title="The most one run may spend on AI. Leave empty for no limit." />
       </div>
       <div class="fdx-kv">
         <label for="fd-maxsec">Time limit</label>
@@ -423,13 +462,32 @@
         <div id="fd-sample-fields"></div>
         <button class="btn btn--ghost" type="button" id="fd-sample-add">Add a sample value</button>
       </details>
+      <section id="fd-selected-step-check" aria-labelledby="fd-step-check-title">
+        <h3 id="fd-step-check-title">Try one taught step</h3>
+        <p class="fdx-mini">Select a taught local rule with AI fallback off. Check ordinary named values without running the rest of this workflow.</p>
+        <a class="btn btn--ghost" href="/settings#feature-workflow_step_checks">Manage one-step checks</a>
+        <p id="fd-step-check-status" class="fdx-mini" role="status" aria-live="polite"></p>
+        <button class="btn btn--ghost" type="button" id="fd-step-check-read" hidden>Read the original step check</button>
+        <div id="fd-step-check-result" style="min-width:0;overflow-wrap:anywhere;"></div>
+      </section>
       <label class="fdx-mini" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="fd-notify" /> Tell me when it needs approval or finishes
+        <input type="checkbox" id="fd-notify" /> Send alerts for this workflow
       </label>
+      <label class="fdx-mini" for="fd-notify-on">Which updates?</label>
+      <select class="input" id="fd-notify-on">
+        <option value="all">Approvals, problems and completion</option>
+        <option value="problems">Problems only</option>
+      </select>
+      <p class="fdx-mini">Problems include failed runs, spending limits and uncertain actions. Alerts use the service set up in Settings. Save and publish this workflow to change its alerts.</p>
     </div>
   </aside>
   </div>
 </div>
+
+{% if flow_id %}{% include "_workflow_explanation.html" %}{% endif %}
+{% if flow_id %}<a class="btn btn--ghost" href="/learning/flow-checks?workflow={{ flow_id|urlencode }}">Compare saved rules on real cases</a>{% endif %}
+{% if flow_id and can_open_page('/learning/applicability') %}<a class="btn btn--ghost" href="/learning/applicability?flow={{ flow_id|urlencode }}">Check where each answer works</a>{% endif %}
+{% if flow_id and can_open_page('/learning/rule-evolution') %}<a class="btn btn--ghost" href="/learning/rule-evolution?flow={{ flow_id|urlencode }}">Review another way to run this rule</a>{% endif %}
 
 <!-- Outside all view-specific containers: the same conversation is available
      from the default Steps view and the advanced Canvas. -->
@@ -443,7 +501,7 @@
   </div>
   <form id="fd-chat-form" class="fd__chat-form">
     <input class="input" id="fd-chat-input" placeholder="Ask or instruct…" aria-label="Message the workflow Copilot" autocomplete="off" />
-    <button class="btn btn--primary" type="submit">Send</button>
+    <button class="btn btn--primary" type="submit">Send message</button>
   </form>
 </aside>
 
@@ -454,6 +512,10 @@
 <script>
 {% include "flow_designer_inputs.js" %}
 </script>
+<script>{% include "flow_designer_action_fields.js" %}</script>
+<script src="{{ asset('lightwork-flow-retirement.js') }}"></script>
+<script src="{{ asset('lightwork-workflow-step-checks.js') }}" defer></script>
+<script>{% include "flow_hardening_review.js" %}</script>
 <script>
 {% include "flow_designer.js" %}
 </script>
@@ -500,7 +562,8 @@
         if (n.kind === 'action') return (n.tool || '').replace(/_/g, ' ');
         return '';
       }
-      return (n.brief || n.prompt || n.condition || (n.tool && n.tool.replace(/_/g, ' ')) || n.name
+      var condition = n.condition && engine() && engine().conditionText ? engine().conditionText(n.condition) : '';
+      return (n.brief || n.prompt || condition || (n.tool && n.tool.replace(/_/g, ' ')) || n.name
               || (n.params && Object.keys(n.params).length ? 'Input values configured' : '') || '').toString();
     }
     function render() {
@@ -532,12 +595,32 @@
         var description = original ? summarize(original, learned) : n.summary;
         var desc = document.createElement('div'); desc.className = 'fd-scard__d'; desc.textContent = description;
         main.appendChild(kind); main.appendChild(title); if (description && description !== n.title) main.appendChild(desc);
+        // Where a Decision's paths lead, and a plain warning for a step nothing leads to.
+        if (n.paths && n.paths.length) {
+          var where = n.paths.map(function (p) {
+            var at = steps.findIndex(function (s) { return s.id === p.to; });
+            return 'If ' + p.label.toLowerCase() + ': ' + (at >= 0 ? 'step ' + (at + 1) + ' “' + steps[at].title + '”' : 'ends the flow');
+          }).join(' · ');
+          var paths = document.createElement('div'); paths.className = 'fd-scard__d'; paths.textContent = where; main.appendChild(paths);
+        }
+        if (n.reachable === false) {
+          var lost = document.createElement('div'); lost.className = 'fd-scard__d'; lost.setAttribute('role', 'note');
+          lost.style.color = 'var(--danger)';
+          lost.textContent = 'Not connected, so this step never runs. Make it the next step of an earlier step, or remove it.';
+          main.appendChild(lost);
+        }
         main.addEventListener('click', function () { showProps(); engine().select(n.id); render(); });
         var tools = document.createElement('span'); tools.className = 'fd-scard__tools';
+        if (original && original.kind === 'agent' && original.learned_operator && original.learned_fallback === false) {
+          tools.appendChild(btn('Try', 'btn--ghost', 'Try only “' + n.title + '”', function () {
+            showProps(); engine().select(n.id);
+            if (window.LWWorkflowStepChecks) void window.LWWorkflowStepChecks.openSelected();
+          }));
+        }
         if (i > 0) tools.appendChild(btn('Move up', 'btn--ghost', 'Move “' + n.title + '” up', function () { if (engine().move(n.id, -1)) render(); }));
         if (i < steps.length - 1) tools.appendChild(btn('Move down', 'btn--ghost', 'Move “' + n.title + '” down', function () { if (engine().move(n.id, 1)) render(); }));
         tools.appendChild(btn('Remove', 'btn--ghost btn--danger', 'Remove “' + n.title + '”', async function () {
-          if (window.mvConfirm && !(await window.mvConfirm('Remove the step “' + n.title + '”? You can undo this with Undo on the Advanced canvas.', { okText: 'Remove' }))) return;
+          if (window.mvConfirm && !(await window.mvConfirm('Remove the step “' + n.title + '”? You can undo this with Undo on the Advanced canvas.', { okText: 'Remove step' }))) return;
           engine().remove(n.id); render();
         }));
         card.appendChild(ic); card.appendChild(main); card.appendChild(tools);
@@ -551,8 +634,21 @@
       addSel.setAttribute('aria-label', 'Kind of step to add');
       ADDABLE.forEach(function (k) { var o = document.createElement('option'); o.value = k[0]; o.textContent = k[1]; addSel.appendChild(o); });
       addWrap.appendChild(addSel);
+      // After a Decision (or any step with several open ends) the person says which one,
+      // so the new step is connected to it rather than left floating.
+      var ends = eng && eng.ends ? eng.ends() : [];
+      var whereSel = null;
+      if (ends.length > 1 || (ends.length === 1 && ends[0].port !== 'next')) {
+        whereSel = document.createElement('select'); whereSel.className = 'input'; whereSel.id = 'fd-steps-add-where';
+        whereSel.setAttribute('aria-label', 'Where the new step goes');
+        ends.forEach(function (e, i) { var o = document.createElement('option'); o.value = String(i); o.textContent = e.label; whereSel.appendChild(o); });
+        // Start on the open end of the step being worked on, so repeated adds keep extending one path.
+        var working = ends.findIndex(function (e) { return e.id === current; });
+        if (working >= 0) whereSel.value = String(working);
+        addWrap.appendChild(whereSel);
+      }
       addWrap.appendChild(btn('Add step', 'btn--primary', 'Add a step at the end', function () {
-        showProps(); engine().add(addSel.value); render();
+        showProps(); engine().add(addSel.value, whereSel ? ends[Number(whereSel.value)] : undefined); render();
       }));
       foot.appendChild(addWrap);
       foot.appendChild(btn('Open the Advanced canvas', 'btn--ghost', '', function () { setView('canvas'); }));

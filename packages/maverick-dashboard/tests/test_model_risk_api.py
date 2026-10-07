@@ -1304,7 +1304,7 @@ def test_generic_evidence_route_refuses_unverified_training_run():
 def test_model_risk_assurance_page_is_available():
     response = client.get("/security/assurance")
     assert response.status_code == 200
-    assert "Model Risk &amp; AI Assurance Officer" in response.text
+    assert "Model risk &amp; AI assurance officer" in response.text
 
 
 def test_ai_literacy_http_lifecycle_is_tenant_bound(monkeypatch):
@@ -1928,12 +1928,24 @@ def test_article_73_http_lifecycle_requires_human_authority(monkeypatch):
 
 
 def test_grc_outbound_http_preview_state_and_events(monkeypatch):
+    from dataclasses import dataclass
+    from types import SimpleNamespace
+
     from maverick import grc_outbound_sync as grc
-    from maverick import grc_vendor_transports
+    from maverick import grc_vendor_transports, model_risk_assurance
     from maverick_dashboard import model_risk_api
 
     monkeypatch.setenv("MAVERICK_TENANT", "alpha")
     calls = []
+    delivered = {}
+    finding = {
+        "id": "finding-one",
+        "asset_id": "asset-one",
+        "severity": "high",
+        "summary": "Evidence is stale.",
+        "finding_type": "stale_evidence",
+        "finding_sha256": "a" * 64,
+    }
 
     class Service:
         def preview(self, source, *, target):
@@ -1942,59 +1954,85 @@ def test_grc_outbound_http_preview_state_and_events(monkeypatch):
                 "target": target.value,
                 "source_kind": source.kind.value,
                 "payload_sha256": "c" * 64,
+                "idempotency_key": "grc-key-one",
             }
 
         def get_state(self, **kwargs):
             calls.append(("state", kwargs))
-            return {"status": "delivered", "external_reference": {"external_id": "one"}}
+            return dict(delivered) or None
 
         def sync(self, source, *, target, transport, actor):
             calls.append(("sync", source, target, transport, actor))
-            return {
+            delivered.update({
                 "status": "delivered",
-                "target": target.value,
-                "source": {"kind": source.kind.value, "id": source.source_id},
-                "receipt": {"status": "accepted"},
-            }
+                "idempotency_key": "grc-key-one",
+                "source": {"kind": source.kind.value, "id": source.source_id,
+                           "revision": source.source_revision,
+                           "digest": source.source_digest},
+                "receipt": {"status": "accepted", "idempotency_key": "grc-key-one",
+                            "source_revision": source.source_revision,
+                            "source_digest": source.source_digest},
+            })
+            return dict(delivered)
 
         def list_events(self, **kwargs):
             return [{"category": "transport_failure"}]
 
+    @dataclass(frozen=True)
+    class Limits:
+        timeout_seconds: float = 10.0
+
     service = Service()
-    transport = object()
+    transport = SimpleNamespace(
+        _base_url="https://irm.example.test",
+        _credential_secret_ref="secret:grc",
+        _limits=Limits(),
+        _http=object(),
+    )
     monkeypatch.setattr(grc, "enabled", lambda: True)
     monkeypatch.setattr(grc, "configured_sync", lambda: service)
     monkeypatch.setattr(
+        grc,
+        "policy_from_config",
+        lambda: SimpleNamespace(allowed_targets=(grc.GRCSystem.SERVICENOW_IRM,)),
+    )
+    monkeypatch.setattr(
         grc_vendor_transports,
         "transport_from_config",
-        lambda _target: transport,
+        lambda _target, **_kwargs: transport,
     )
+    monkeypatch.setattr(model_risk_assurance, "findings", lambda **_kwargs: [dict(finding)])
     monkeypatch.setattr(
         model_risk_api,
         "_human_principal",
         lambda _request: "user:grc-admin@example.test",
     )
     base = "/api/v1/security/assurance/grc-outbound"
-    body = {
-        "source_kind": "finding",
-        "source_id": "finding-one",
-        "asset_id": "asset-one",
-        "severity": "high",
-        "summary": "Evidence is stale.",
-        "source_revision": 1,
-        "source_digest": "a" * 64,
-        "finding_type": "stale_evidence",
-    }
+    # The browser names only the record; every sent value is resolved from
+    # the current native record on the server.
+    body = {"source_kind": "finding", "source_id": "finding-one"}
+    assert client.post(f"{base}/servicenow_irm/preview", json={
+        **body, "summary": "Typed by the browser."}).status_code == 422
     preview = _ok(client.post(f"{base}/servicenow_irm/preview", json=body))
-    assert preview["target"] == "servicenow_irm"
-    synced = _ok(client.post(f"{base}/servicenow_irm/sync", json=body))
+    assert preview["technical"]["target"] == "servicenow_irm"
+    assert {"label": "Complete summary", "value": "Evidence is stale."} in preview["details"]
+    review = {"review_token": preview["review_token"]}
+    # Nothing is sent without an explicit confirmation of the reviewed record.
+    assert client.post(f"{base}/servicenow_irm/sync", json=review).status_code == 409
+    assert not any(item[0] == "sync" for item in calls)
+    synced = _ok(client.post(f"{base}/servicenow_irm/sync", json={**review, "confirmed": True}))
     assert synced["status"] == "delivered"
     state = _ok(client.get(f"{base}/servicenow_irm/finding/finding-one"))
     assert state["status"] == "delivered"
     assert _ok(client.get(f"{base}/events"))["count"] == 1
-    assert calls[0][1].source_id == "finding-one"
+    previewed = next(item[1] for item in calls if item[0] == "preview")
+    assert previewed.source_id == "finding-one"
+    assert previewed.summary == "Evidence is stale."
     sync_call = next(item for item in calls if item[0] == "sync")
-    assert sync_call[3] is transport
+    # The configured transport is wrapped so each physical request rechecks
+    # the reviewed record, and the send is attributed to the human.
+    assert sync_call[3] is not transport
+    assert transport._http.__class__.__name__ == "CheckedHTTP"
     assert sync_call[4] == "user:grc-admin@example.test"
 
 

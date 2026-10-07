@@ -8,6 +8,10 @@ async function availablePort(){
 }
 
 test('fresh owner setup and login submit real browser origin without header injection',async({browser},info)=>{
+  // This journey owns a cold server (up to 30 seconds), two real password
+  // operations, screenshots and process cleanup. Keep ordinary assertions at
+  // ten seconds while bounding the complete lifecycle independently.
+  test.setTimeout(90000);
   const port=await availablePort(),origin=`http://127.0.0.1:${port}`;
   const child=spawn(pythonExecutable,[path.join(__dirname,'owner_server.py'),'--port',String(port)],{cwd:__dirname,stdio:'ignore',windowsHide:true});
   const exited=new Promise(resolve=>child.once('exit',resolve));
@@ -19,10 +23,17 @@ test('fresh owner setup and login submit real browser origin without header inje
     context=await browser.newContext({extraHTTPHeaders:{}});
     await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort('blockedbyclient'));
     const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
-    await page.goto(origin+'/start');await page.locator('a[href="/auth/local-owner"]').click();
+    // A fresh install sends Get started to owner creation itself.
+    await page.goto(origin+'/start');await expect(page).toHaveURL(origin+'/auth/local-owner');
     const password='Synthetic browser owner passphrase only'; // pragma: allowlist secret - disposable synthetic account fixture
     await page.locator('input[name="email"]').fill('native-owner@example.test');
-    await page.locator('input[name="password"]').fill(password);await page.locator('input[name="confirm"]').check();
+    await page.locator('input[name="password"]').fill(password);
+    // Mismatched passphrases are refused before anything is saved.
+    await page.locator('input[name="password2"]').fill(password+' typo');await page.locator('input[name="confirm"]').check();
+    await page.locator('button[type="submit"]').click();
+    await expect(page.locator('#owner-match')).toContainText('do not match');
+    expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(false);
+    await page.locator('input[name="password2"]').fill(password);
     const enrollment=page.waitForResponse(response=>response.request().method()==='POST'&&response.url()===origin+'/auth/local-owner');
     await page.locator('button[type="submit"]').press('Enter');
     const saved=await enrollment;expect(saved.status()).toBe(303);
@@ -42,6 +53,11 @@ test('fresh owner setup and login submit real browser origin without header inje
     expect(await signedIn.request().headerValue('origin')).toBe(origin);
     await expect(page).toHaveURL(origin+'/start');expect(errors).toEqual([]);
   }finally{
-    try{if(context)await context.close();}finally{child.kill();await exited;}
+    try{
+      await test.step('Close isolated browser context',async()=>{if(context)await context.close();});
+    }finally{
+      child.kill();
+      await test.step('Wait for owned fixture process to exit',async()=>{await exited;});
+    }
   }
 });

@@ -183,8 +183,13 @@ class ShutdownSupervisor:
 
 
 def register_main_components(app, supervisor):
+    from . import learning_jobs
+
+    learning_jobs.open_admission()
+    supervisor.register("learning_jobs", learning_jobs.stop, learning_jobs.workers_alive)
     entries = [
         ("automation", "automation_queue", "stop", "_worker_threads"),
+        ("orphan_recovery", "orphan_sweeper", "stop_orphan_sweeper", "_sweeper_thread"),
         ("security", "security_api", "stop_hunter_scheduler", "_hunter_scheduler_thread"),
         ("finance", "finance_scheduler", "stop_finance_scheduler", "_scheduler_thread"),
         ("red_team", "red_team_scheduler", "stop_red_team_scheduler", "_scheduler_thread"),
@@ -192,8 +197,16 @@ def register_main_components(app, supervisor):
          "_scheduler_thread"),
         ("ai_inventory", "ai_inventory_scheduler", "stop_ai_inventory_scheduler", "_scheduler_thread"),
         ("ai_cost", "ai_cost_scheduler", "stop_ai_cost_scheduler", "_scheduler_thread"),
+        ("conversation_inbox", "conversation_inbox_scheduler", "stop_conversation_inbox_scheduler", "_threads"),
+        ("knowledge_sources", "knowledge_sources_scheduler", "stop_knowledge_sources_scheduler", "_thread"),
+        ("consent_delivery", "consent_delivery_scheduler", "stop_consent_delivery_scheduler", "_thread"),
+        ("personal_notifications", "personal_notification_scheduler", "stop_personal_notification_scheduler", "_scheduler_thread"),
+        ("daily_digest", "daily_digest_scheduler", "stop_daily_digest_scheduler",
+         "_scheduler_thread"),
         ("identity", "identity_governance_scheduler", "stop_identity_governance_scheduler", "_scheduler_thread"),
         ("data_use_checks", "data_use_scheduler", "stop_data_use_scheduler", "_scheduler_thread"),
+        ("deadline_alerts", "deadline_alerts_scheduler", "stop_deadline_alerts_scheduler",
+         "_scheduler_thread"),
         ("code_watch", "code_ops_api", "stop_watchers", "_watch_threads"),
         ("code_sessions", "repl_ops_api", "close_all_sessions", "_threads"),
         # Every child program: the Maintenance services and the programs a

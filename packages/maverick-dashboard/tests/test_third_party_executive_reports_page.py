@@ -21,17 +21,14 @@ class Markup(HTMLParser):
 
 
 def templates() -> Jinja2Templates:
-    selected = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    from maverick_dashboard.app import _theme_context
+
+    selected = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
+    )
     selected.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
         nav_groups=[],
-        t=lambda key: key,
     )
     return selected
 
@@ -56,7 +53,7 @@ def test_page_is_store_free_private_csp_closed_and_copilot_enabled(monkeypatch) 
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
-    assert "Executive Vendor Reports" in response.text
+    assert "Executive vendor reports" in response.text
     assert 'src="/static/lightwork-record-workflows.js"' in response.text
     assert 'data-api-base="/api/v1/third-party/executive-reports"' in response.text
     assert 'data-copilot-page="/third-party/executive-reports"' in response.text

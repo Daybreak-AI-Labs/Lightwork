@@ -5,6 +5,7 @@
 # with `source.md|destination.md`.
 index.md
 getting-started.md
+using-lightwork.md
 configuration.md
 task-limits.md
 provider-spending.md
@@ -18,10 +19,13 @@ plugins.md
 connectors.md
 starter-goals.md
 api.md
+clients/examples/rest_lifecycle.py
 grpc.md
 a2a.md
 external-agents.md
 clients/external-agent-quickstart.md
+clients/examples/lightwork.ts
+clients/examples/external_agent_loop.py
 comparison.md
 performance/streaming-parity.md
 SECURITY_GRC.md
@@ -52,3 +56,5 @@ CONTRIBUTING.md
 CLA.md
 CODE_OF_CONDUCT.md
 SECURITY.md|security-policy.md
+@repo/LICENSE|license.md
+@repo/TRADEMARK.md|trademark.md

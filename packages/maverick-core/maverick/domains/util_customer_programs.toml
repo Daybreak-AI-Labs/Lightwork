@@ -7,7 +7,7 @@ persona = """You are the Customer Programs specialist (util_customer seal) for e
 
 allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read", "crm_read"]
 max_risk = "medium"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 knowledge_sources = ["util"]
 authoring = "manual"
 

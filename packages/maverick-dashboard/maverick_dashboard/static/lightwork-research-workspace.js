@@ -10,6 +10,9 @@
   const identifier = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value);
   let workspace = null;
   let busy = false;
+  let programs = [];
+  let executing = false;
+  let heldRun = sessionStorage.getItem(`research-original:${context}`) || "";
 
   function element(tag, text, className) {
     const item = document.createElement(tag);
@@ -26,30 +29,16 @@
   function setBusy(value) {
     busy = value;
     root.querySelectorAll('.research-workspace button, .research-workspace input, .research-workspace select, .research-workspace textarea')
-      .forEach(control => { control.disabled = value || control.dataset.permanentDisabled === 'true'; });
+      .forEach(control => { control.disabled = (value && !control.hasAttribute("data-live-execution-control")) || control.dataset.permanentDisabled === 'true'; });
     if (!value) syncConditionalFields();
   }
 
   async function api(path, method, body) {
-    const options = {method: method || 'GET', cache: 'no-store', headers: {'Accept': 'application/json'}};
-    if (body !== undefined) {
-      options.headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(body);
-    }
-    const response = await fetch('/api/v1/research' + path, options);
-    let value = null;
-    try { value = await response.json(); } catch (_) { value = null; }
-    if (!response.ok) {
-      const detail = value && typeof value.detail === 'string' && value.detail.length <= 512 ? value.detail : '';
-      const plain = detail && !/[_{}\[\]]|sha|revision|manifest/i.test(detail) ? detail : '';
-      const error = new Error(response.status === 409 ? (plain || 'Someone changed this. Refresh and check it again.') :
-        response.status === 403 ? 'You do not have permission to do this. Ask an administrator.' :
-        response.status === 422 ? (plain || 'Some details need fixing. Check what you entered and try again.') :
-        response.status === 404 ? 'That item is not available in this workspace.' :
-        'The research lab is not available right now. Try again in a minute.');
-      error.status = response.status;
-      throw error;
-    }
+    const value = await window.mvFetchJSON('/api/v1/research' + path, {method: method || 'GET', cache: 'no-store', body, plainDetail: true, messages: {
+      409: 'Someone changed this. Refresh and check it again.',
+      403: 'You do not have permission to do this. Ask an administrator.',
+      422: 'Some details need fixing. Check what you entered and try again.',
+      404: 'That item is not available in this workspace. Refresh the page to see the latest.'}});
     if (value && value.context && value.context !== context) {
       throw new Error('You switched account or workspace. Reload this page.');
     }
@@ -147,7 +136,7 @@
 
   function when(value) {
     const n = Number(value);
-    return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toLocaleString() : '';
+    return Number.isFinite(n) && n > 0 ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(n) : new Date(n * 1000).toLocaleString()) : '';
   }
 
   function technical(item, rows) {
@@ -179,11 +168,10 @@
       const chosen = file.files && file.files[0];
       if (!chosen) return;
       state.textContent = `Reading ${chosen.name}…`;
-      holder.pending = fetch('/api/v1/research-files/fingerprint', {method:'POST', credentials:'same-origin',
-        headers:{'Content-Type':'application/octet-stream'}, body:chosen})
-        .then(response => { if (!response.ok) throw response; return response.json(); })
+      holder.pending = window.mvFetchJSON('/api/v1/research-files/fingerprint', {method:'POST',
+        headers:{'Content-Type':'application/octet-stream'}, body:chosen}, 'read the file')
         .then(body => { holder.value = body.fingerprint; state.textContent = `Ready: ${chosen.name}`; })
-        .catch(error => { state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.'; });
+        .catch(error => { state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.'; });
     });
     label.append(file, state);
     return {label, holder};
@@ -234,7 +222,7 @@
       current(row) && row.data_use_action === action);
     const models = workspace.registry.models.filter(current);
     replaceOptions(form.elements.dataset_refs, datasets);
-    replaceOptions(form.elements.model_ref, models, {multiple:false, blank:'No model'});
+    if (form.elements.model_ref.tagName === 'SELECT') replaceOptions(form.elements.model_ref, models, {multiple:false, blank:'No model'});
   }
 
   function appendLineage(item, title, references) {
@@ -365,8 +353,8 @@
 
   function money(summary) {
     const values = Object.entries(summary.effective_amounts || {});
-    const known = values.length ? values.map(([currency, amount]) => `${currency} ${amount}`).join(', ') : 'nothing recorded';
-    return `${known}${summary.incomplete ? ' · some costs are not known yet (provider report pending)' : ' · all costs recorded'}`;
+    const known = values.length ? values.map(([currency, amount]) => `${currency} ${amount}`).join(', ') : 'no financial amount recorded';
+    return `${known}${summary.incomplete ? ' · some resource use has no verified financial price' : values.length ? ' · reported costs recorded' : ''}`;
   }
 
   function renderAttempt(run, attempt, item) {
@@ -453,24 +441,151 @@
         ['Setup', `${run.manifest.environment_id} ${run.manifest.environment_version}`], ['Starting number', run.manifest.seed]]);
       run.attempts.forEach(attempt => renderAttempt(run, attempt, item));
       const actions = element('div', undefined, 'research-actions');
-      runAction(actions, run, 'Queue run', 'queue', run.status === 'planned', 'btn btn--primary');
-      runAction(actions, run, 'Start run', 'start', run.status === 'queued', 'btn btn--primary');
-      runAction(actions, run, 'Try again', 'retry', run.status === 'failed');
+      runAction(actions, run, 'Queue run', 'queue', run.can_manage && run.status === 'planned', 'btn btn--primary');
+      executionActions(actions, run);
+      runAction(actions, run, 'Try again', 'retry', run.can_manage && run.status === 'failed');
+      const latest = run.attempts.at(-1);
+      if (latest?.execution) {
+        const facts = latest.execution;
+        item.appendChild(element('p', facts.state === 'container_prepared' ? 'Local container prepared; execution outcome is not yet confirmed.' : facts.state === 'cleanup_verified' ? 'Container cleanup verified. The execution outcome is not confirmed; this run is not automatically repeated.' : `Actual container run: ${human(facts.reason)}. Cleanup ${facts.cleanup_verified ? 'verified' : 'not confirmed'}.`));
+        if (facts.inspect_policy?.elapsed_seconds !== undefined) item.appendChild(element('p', `Observed local compute time: ${facts.inspect_policy.elapsed_seconds} seconds. Financial price is not independently metered.`));
+      }
+      if (latest?.stop_requested) item.appendChild(element('p', latest.execution?.cleanup_verified ?
+        'Stop honored. Container cleanup verified.' : 'Stop requested. Waiting for the execution owner to confirm cleanup.'));
       if (run.status !== 'planned') actions.appendChild(actionButton('Download run record',
         () => downloadRun(run.run_id)));
       item.appendChild(actions);
-      if (['planned', 'queued'].includes(run.status)) item.appendChild(cancellationForm(run));
+      if (run.can_manage && ['planned', 'queued'].includes(run.status)) item.appendChild(cancellationForm(run));
       list.appendChild(item);
     });
   }
 
+  function retainOriginal(runId) {
+    heldRun = runId;
+    sessionStorage.setItem(`research-original:${context}`, runId);
+    updateOriginal();
+  }
+  function updateOriginal() {
+    byId('research-read-original').hidden = !heldRun;
+  }
+  async function readOriginal() {
+    if (!heldRun) return;
+    const result = await api(`/governed-runs/${encodeURIComponent(heldRun)}/original`);
+    if (!validRun(result.run)) throw new Error('The original run could not be verified. Nothing was restarted.');
+    byId('research-original-status').textContent = `Original run: ${human(result.run.status)}. This read starts nothing and repeats no program.`;
+    await refresh();
+  }
+  async function loadPrograms() {
+    const result = await api('/execution-options');
+    const select = byId('research-program-choice');
+    const selected = select.value;
+    programs = result.programs || [];
+    select.replaceChildren(new Option(result.available ? 'Choose your saved program' : 'Complete Administrator setup first', ''));
+    programs.forEach(program => select.appendChild(new Option(program.label, program.id)));
+    if (programs.some(program => program.id === selected)) select.value = selected;
+    byId('research-program-notice').textContent = result.detail;
+    syncProgram();
+  }
+  function syncProgram() {
+    const form = byId('research-run-form');
+    const program = programs.find(value => value.id === form.elements.program_id.value);
+    ['experiment_id','experiment_version','code_revision','code_sha256','environment_id','environment_version','environment_sha256','metric_protocol_sha256'].forEach(key => {
+      form.elements[key].value = program?.[key] || '';
+    });
+  }
+  async function reviewExecution(run) {
+    const value = await api(`/governed-runs/${encodeURIComponent(run.run_id)}/execution-review`);
+    if (!sha(value.review_sha256) || !Array.isArray(value.files) || !value.summary) throw new Error('The complete review could not be loaded.');
+    const dialog = element('dialog', undefined, 'research-execution-review');
+    dialog.setAttribute('aria-label', 'Complete run review');
+    dialog.appendChild(element('h3', 'Complete run review'));
+    const summary = value.summary;
+    dialog.appendChild(element('p', `${summary.program} · ${summary.environment} · ${human(summary.purpose)}`));
+    dialog.appendChild(element('p', `Correct-output check: ${summary.check}. Input size: ${summary.input_bytes} bytes.`));
+    summary.datasets.forEach(dataset => dialog.appendChild(element('p', `Dataset: ${human(dataset.name)} · version ${dataset.version}`)));
+    dialog.appendChild(element('p', `Limits: ${summary.caps.max_wall_seconds} seconds; ${Math.ceil(summary.caps.max_storage_bytes/1048576)} MB. ${summary.limits}`));
+    dialog.appendChild(element('p', summary.data_format));
+    value.files.forEach(file => { dialog.appendChild(element('h4', file.path)); dialog.appendChild(element('pre', file.text, 'research-source')); });
+    const label = element('label', undefined, 'check');
+    const check = element('input'); check.type = 'checkbox';
+    label.append(check, document.createTextNode('I read every file and checked these exact datasets, limits and result check.'));
+    const approve = element('button', 'Approve this run', 'btn btn--primary'); approve.type = 'button'; approve.disabled = true;
+    const close = element('button', 'Close', 'btn btn--ghost'); close.type = 'button';
+    const result = element('p', '', 'muted'); result.setAttribute('role', 'status');
+    check.addEventListener('change', () => { approve.disabled = !check.checked || !value.can_approve; });
+    if (!value.can_approve) result.textContent = 'A different administrator must approve this run. Reading the review starts nothing.';
+    approve.addEventListener('click', async () => {
+      approve.disabled = true;
+      try {
+        retainOriginal(run.run_id);
+        await api(`/governed-runs/${encodeURIComponent(run.run_id)}/approve-execution`, 'POST', {context,confirm:true,expected_revision:value.revision,review_sha256:value.review_sha256});
+        dialog.close(); message('Approved. Choose Start run separately to begin actual execution.'); await refresh();
+      } catch (error) { result.textContent = `${error.message} Read the original run before repeating an uncertain request.`; }
+    });
+    close.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.append(label, approve, close, result); root.appendChild(dialog); dialog.showModal(); close.focus();
+  }
+  function executionActions(actions, run) {
+    const attempt = run.attempts.at(-1);
+    if (run.status === 'queued') {
+      if (workspace.registry.can_review) actions.appendChild(actionButton('Read complete run review', () => reviewExecution(run)));
+      if (run.can_start && attempt?.execution_approval && Number(attempt.execution_approval.expires_at)*1000 > Date.now()) {
+        actions.appendChild(actionButton('Start run', async () => {
+          if (executing) return;
+          const ok = await window.mvConfirm('Start the exact independently approved program and datasets in the installed local container?', {okText:'Start run'});
+          if (!ok) return;
+          retainOriginal(run.run_id); executing = true;
+          const timer = setInterval(() => { refresh().catch(error => message(error.message, true)); }, 1000);
+          try {
+            await api(`/governed-runs/${encodeURIComponent(run.run_id)}/start`, 'POST', {context,confirm:true,expected_revision:run.revision});
+            await readOriginal(); message('Actual execution result and cleanup are retained in the original run.');
+          } catch (error) { message(`${error.message} Read original run; an uncertain run is never started again automatically.`, true); }
+          finally { executing = false; clearInterval(timer); }
+        }, 'btn btn--primary'));
+      }
+    }
+    if (run.can_stop && !attempt?.stop_requested) {
+      const stop = element('button', 'Stop run', 'btn btn--danger'); stop.type = 'button'; stop.dataset.liveExecutionControl = 'true';
+      stop.addEventListener('click', async () => {
+        stop.disabled = true;
+        try {
+          const current = await api(`/governed-runs/${encodeURIComponent(run.run_id)}`);
+          const latest = current.attempts?.at(-1);
+          if (!validRun(current) || current.run_id !== run.run_id || current.manifest_sha256 !== run.manifest_sha256 ||
+              current.status !== 'running' || latest?.number !== attempt.number || latest?.execution_owner !== attempt.execution_owner) {
+            throw new Error('This run changed. Refresh its current status before choosing Stop.');
+          }
+          await api(`/governed-runs/${encodeURIComponent(run.run_id)}/stop`, 'POST', {context,confirm:true,expected_revision:current.revision});
+          await refresh();
+        }
+        catch (error) { message(error.message, true); stop.disabled = false; }
+      }); actions.appendChild(stop);
+    }
+    const original = element('button', 'Read original', 'btn btn--ghost'); original.type = 'button'; original.dataset.liveExecutionControl = 'true';
+    original.addEventListener('click', () => { retainOriginal(run.run_id); readOriginal().catch(error => message(error.message, true)); }); actions.appendChild(original);
+  }
+  byId('research-program-choice').addEventListener('change', syncProgram);
+  byId('research-read-original').dataset.liveExecutionControl = 'true';
+  byId('research-read-original').addEventListener('click', () => readOriginal().catch(error => message(error.message, true)));
+  byId('research-governed-refresh').dataset.liveExecutionControl = 'true';
+  window.LightworkResearchExecution = {openReview: async (_descriptor, options = {}) => {
+    const current = () => typeof options.isCurrent === 'function' && options.isCurrent() && location.pathname === '/research';
+    if (!current() || Object.keys(_descriptor || {}).length) return false;
+    const value = await api('/execution-options');
+    if (!current() || !value.available || options.context !== value.context || value.context !== context) return false;
+    const form = byId('research-run-form'); form.closest('details').open = true;
+    form.scrollIntoView({block:'center'}); byId('research-program-choice').focus(); return true;
+  }};
+
   async function downloadRun(runId) {
-    const response = await fetch(`/api/v1/research/governed-runs/${encodeURIComponent(runId)}/export`,
-      {method:'GET', cache:'no-store', headers:{'Accept':'application/json'}});
-    if (!response.ok) {
-      let detail = '';
-      try { detail = (await response.json()).detail || ''; } catch (_) { detail = ''; }
-      throw new Error('The run record is not available right now.');
+    let response;
+    try {
+      response = await window.mvFetchJSON(`/api/v1/research/governed-runs/${encodeURIComponent(runId)}/export`,
+        {cache:'no-store', raw:true}, 'download the run record');
+    } catch (error) {
+      if (error.status) throw new Error('The run record is not available right now. Try again in a minute.');
+      throw error;
     }
     const bytes = await boundedBytes(response, 2200000);
     let evidence;
@@ -526,7 +641,7 @@
     renderRuns();
     const execution = workspace.governed_execution;
     byId('research-materialization-state').textContent = execution.available ?
-      'Runs can start.' :
+      'The installed local executor is available. Each queued run needs a different administrator’s complete review and separate Start.' :
       'Runs can be planned and queued, but cannot start yet: starting is blocked before data access until an administrator connects where the data lives.';
     byId('research-registry-authority-state').textContent =
       (decisionsAvailable() ? 'Approved data uses: available. ' : 'Approved data uses: none yet. ') +
@@ -539,13 +654,15 @@
 
   async function refresh() {
     render(await api(''));
+    await loadPrograms();
+    updateOriginal();
   }
 
   async function act(work) {
     if (busy) return;
     setBusy(true);
     try { await work(); }
-    catch (error) { message(error.message || 'Something went wrong. Please try again.', true); }
+    catch (error) { message(error.message || 'Something went wrong. Try again.', true); }
     finally { setBusy(false); }
   }
 
@@ -579,7 +696,10 @@
     model.elements.reproducibility_limitation.required = !pinned;
   }
 
-  byId('research-governed-refresh').addEventListener('click', () => act(refresh));
+  byId('research-governed-refresh').addEventListener('click', () => {
+    if (executing) refresh().catch(error => message(error.message, true));
+    else act(refresh);
+  });
   byId('research-dataset-form').elements.data_use_decision_choice.addEventListener('change', event => {
     if (!event.currentTarget.value) return;
     const decision = JSON.parse(event.currentTarget.value);
@@ -676,7 +796,7 @@
     const payload = {context, confirm:true, run_id:form.elements.run_id.value.trim(),
       run_version:form.elements.run_version.value.trim(), experiment_id:form.elements.experiment_id.value.trim(),
       experiment_version:form.elements.experiment_version.value.trim(), purpose:form.elements.purpose.value.trim(),
-      action:form.elements.action.value, code_revision:form.elements.code_revision.value.trim(),
+      program_id:form.elements.program_id.value, action:form.elements.action.value, code_revision:form.elements.code_revision.value.trim(),
       code_sha256:form.elements.code_sha256.value.trim(), environment_id:form.elements.environment_id.value.trim(),
       environment_version:form.elements.environment_version.value.trim(),
       environment_sha256:form.elements.environment_sha256.value.trim(), seed:Number(form.elements.seed.value),
@@ -688,6 +808,7 @@
         currency:form.elements.currency.value.trim()},
       metric_protocol_sha256:form.elements.metric_protocol_sha256.value.trim()};
     act(async () => {
+      retainOriginal(payload.run_id);
       const planned = await api('/governed-runs', 'POST', payload);
       await api(`/governed-runs/${encodeURIComponent(planned.run_id)}/queue`, 'POST',
         {context, confirm:true, expected_revision:planned.revision});
@@ -695,7 +816,7 @@
       form.elements.max_wall_seconds.value = '300'; form.elements.max_provider_calls.value = '0';
       form.elements.max_storage_bytes.value = '104857600'; form.elements.max_cost.value = '0';
       form.elements.currency.value = 'USD';
-      message('Run queued.');
+      message('Run queued for independent review. No program has started.');
       await refresh();
     });
   });
@@ -704,5 +825,18 @@
     byId('research-run-form').elements.run_id.value = `run-${crypto.randomUUID()}`;
   }
   syncConditionalFields();
-  act(refresh);
+  // A failed first load leaves nothing to show: say so in each list instead of
+  // "Loading…" (the reason is also shown in the status line above them).
+  async function firstLoad() {
+    try {
+      await refresh();
+    } catch (error) {
+      const why = action => (typeof window.mvErrorText === 'function' ? window.mvErrorText(error, action)
+        : `Could not ${action}. Refresh the page to try again.`);
+      byId('research-registry-items').replaceChildren(element('li', why('load datasets and models')));
+      byId('research-governed-runs').replaceChildren(element('li', why('load runs')));
+      throw error;
+    }
+  }
+  act(firstLoad);
 })();

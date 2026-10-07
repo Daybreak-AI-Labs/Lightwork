@@ -34,10 +34,11 @@ function run() {
 }
 
 function fixture(snapshot, reply = { ok: true, body: {} }) {
-  const box = new Element("div"), messages = [], calls = [], polls = [];
+  const box = new Element("div"), messages = [], calls = [], polls = [], rendered = [];
   const context = { flowNodes: [], runId: "run/teaching", flowId: "flow", window: {}, document: {
     createElement: tag => new Element(tag), getElementById: id => id === "fr-actions" ? box : null,
   }, say: message => messages.push(message), poll: count => polls.push(count),
+  renderRun: run => rendered.push(run), assignedReviewOnly: false,
   api: async (url, options) => { calls.push({ url, method: options.method, body: JSON.parse(options.body) });
     if (reply.error) throw new Error(reply.error);
     return { ok: reply.ok, json: async () => reply.body }; },
@@ -45,10 +46,14 @@ function fixture(snapshot, reply = { ok: true, body: {} }) {
   const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/flow_run.html"), "utf8");
   const start = source.indexOf("  function renderActions("), end = source.indexOf("  function retry(", start);
   assert.ok(start >= 0 && end > start);
+  // The one-request-at-a-time guard every decision button now goes through.
+  const guardStart = source.indexOf("  var sending = false"), guardEnd = source.indexOf("  function say(", guardStart);
+  assert.ok(guardStart >= 0 && guardEnd > guardStart);
+  vm.runInNewContext(source.slice(guardStart, guardEnd), context, { filename: "flow_run.html" });
   vm.runInNewContext(source.slice(start, end), context, { filename: "flow_run.html" });
   context.renderActions(snapshot);
   function all(element = box) { return [element, ...element.children.flatMap(child => all(child))]; }
-  return { box, messages, calls, polls, context, all,
+  return { box, messages, calls, polls, rendered, context, all,
     buttons: () => all().filter(element => element.tag === "button"),
     async click(text) {
       const button = all().find(element => element.tag === "button" && element.textContent === text);
@@ -81,7 +86,9 @@ for (const [route, tool] of [["0", "approve_case"], ["1", "queue_review"]]) {
     await ui.click("Choose " + tool);
     assert.deepEqual(ui.calls, [{ url: "/api/v1/flows/runs/run%2Fteaching/resume", method: "POST",
       body: { decision: "route:" + route, inputs: {}, approval_binding_sha256: snapshot.approval_binding_sha256 } }]);
-    assert.deepEqual(ui.polls, [8]);
+    // The decided run stays on screen while the page follows it until its state changes.
+    assert.deepEqual(ui.rendered, [snapshot]);
+    assert.deepEqual(ui.polls, [60]);
     assert.match(ui.messages.at(-1), /continuing/);
   });
 }
@@ -124,13 +131,15 @@ test("a stale server rejection stays visible without claiming the route resumed"
   await ui.click("Choose approve_case");
   assert.equal(ui.messages.at(-1), "The reviewed prefix changed; request a fresh review.");
   assert.equal(ui.calls.length, 1);
-  assert.deepEqual(ui.polls, [8]);
+  // A refused decision does not follow the run as if it had resumed.
+  assert.deepEqual(ui.polls, []);
+  assert.deepEqual(ui.rendered, []);
 });
 
 test("network failure reports unavailable resume rather than success", async () => {
   const ui = fixture(run(), { error: "disconnected" });
   await ui.click("Choose queue_review");
-  assert.equal(ui.messages.at(-1), "Could not resume.");
+  assert.equal(ui.messages.at(-1), "Could not resume. Refresh the page and try again.");
   assert.deepEqual(ui.polls, []);
 });
 

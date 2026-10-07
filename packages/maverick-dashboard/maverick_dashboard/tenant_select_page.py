@@ -77,6 +77,11 @@ def _page_context(
         # A corrupt roster must not turn the picker into a 500: the page is
         # how an operator digs out of exactly this kind of state.
         tenants = []
+    from .workspace_display import duplicate_workspace_ids
+
+    duplicates = duplicate_workspace_ids((tenant["id"], tenant["name"]) for tenant in tenants)
+    for tenant in tenants:
+        tenant["reference"] = tenant["id"] if tenant["id"] in duplicates else ""
     selected = (
         workspace_tenants.get_selection(principal)
         if principal
@@ -89,7 +94,7 @@ def _page_context(
         "selected": selected,
         "env_tenant": os.environ.get("MAVERICK_TENANT", "").strip(),
         "is_admin": is_admin,
-        "can_select": not principal or is_admin or bool(tenants),
+        "can_select": not os.environ.get("MAVERICK_TENANT", "").strip() and (not principal or is_admin or bool(tenants)),
         "membership_filtered": principal is not None and not is_admin,
         "return_to": _safe_return_path(return_to),
     }
@@ -128,6 +133,7 @@ def first_workspace_for_admin(request: Request) -> RedirectResponse | None:
             FIRST_WORKSPACE["id"],
             plan=FIRST_WORKSPACE["plan"],
             display_name=FIRST_WORKSPACE["display_name"],
+            allocate_suffix=True,
         )
     except Exception:
         return None

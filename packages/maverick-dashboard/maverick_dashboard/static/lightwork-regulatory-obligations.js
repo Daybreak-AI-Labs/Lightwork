@@ -37,9 +37,9 @@
   }
   function regulationName(key, fallback) { return REGULATION_NAMES[key] || fallback || human(key); }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
+    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Try again.";
   }
-  function say(text) { operationState.textContent = text; }
+  function say(text) { window.mvStatus(operationState, text); }
 
   async function readJson(response) {
     if (!response.ok) { throw response; }
@@ -372,7 +372,7 @@
       });
     } catch (e) {
       gatewayPreviewState.textContent = e && e.status === 422
-        ? "Lightwork could not read that file as gateway rules."
+        ? "Lightwork could not read that file as gateway rules. Choose the file again, or try a different file."
         : errorText(e, "preview the file");
       return;
     }

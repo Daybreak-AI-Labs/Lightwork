@@ -1,5 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {JSDOM}=require('jsdom');const base=path.join(__dirname,'../../maverick_dashboard');
+const {shell: loadShell} = require("./_shell");
 const html=fs.readFileSync(path.join(base,'templates/_ai_business_intake.html'),'utf8');
 const source=fs.readFileSync(path.join(base,'static/lightwork-ai-business-intake.js'),'utf8');
 const context='a'.repeat(64),id='ABI-'+'b'.repeat(24);
@@ -26,7 +27,7 @@ async function fixture(t,{intercept=()=>undefined,initial=null,canEdit=true}={})
   const change=(name,value)=>{const control=field(name).querySelector('input:not([type=checkbox]),select,textarea');control.value=value;control.dispatchEvent(new w.Event('input',{bubbles:true}));control.dispatchEvent(new w.Event('change',{bubbles:true}));};
   const choose=(name,value)=>{const control=[...field(name).querySelectorAll('input[type=checkbox]')].find(item=>item.value===value);control.click();};
   const save=async()=>{el('answers').dispatchEvent(new w.Event('submit',{cancelable:true,bubbles:true}));await settle();};
-  w.eval(source);await settle();return{w,calls,el,field,settle,change,choose,save,record};
+  loadShell(w);w.eval(source);await settle();return{w,calls,el,field,settle,change,choose,save,record};
 }
 async function importText(h,text){const input=h.el('import');Object.defineProperty(input,'files',{configurable:true,value:[{name:'answers.json',text:async()=>text}]});input.dispatchEvent(new h.w.Event('change',{bubbles:true}));await h.settle();}
 async function fill(h){h.change('use_case_name','Support assistant');h.change('purpose','Help employees review public support documentation.');h.choose('data_context.categories','public');h.change('data_context.personal_data','false');h.change('deployment_context.stage','pilot');h.choose('regulatory_context.high_risk_domains','');}
@@ -44,3 +45,4 @@ for(const imported of [{unknown:{}},{data_context:{categories:[]}},{data_context
 
 test('an answers file that is not valid is refused in plain words and nothing changes',async t=>{const h=await fixture(t);h.change('use_case_name','Keep this');await importText(h,'not a file we know');assert.match(h.el('status').textContent,/isn't a Lightwork answers file/);assert.equal(h.field('use_case_name').querySelector('input').value,'Keep this');assert.equal(h.w.document.querySelector('pre'),null);assert.equal(h.w.document.querySelector('textarea#abi-import'),null);});
 test('a server refusal is shown as a plain sentence, never the raw server text',async t=>{const h=await fixture(t,{intercept:call=>call.options.method==='POST'?new Response('{"detail":"initial.purpose: String should have at most 4000 characters"}',{status:422}):undefined});await fill(h);await h.save();assert.doesNotMatch(h.el('status').textContent,/initial\.purpose|String should/);});
+test('a refused question load releases its response so the page can go quiet',async t=>{let released=0;const h=await fixture(t,{intercept:call=>call.url.endsWith('/form')?{ok:false,status:403,body:{cancel:async()=>{released+=1;}},json:async()=>({})}:undefined});assert.equal(released,1);assert.match(h.el('status').textContent,/Sign in again/);});

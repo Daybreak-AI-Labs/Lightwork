@@ -42,7 +42,7 @@ from typing import Any
 
 # Initialize encryption before a worker resolves sealed dashboard settings.
 from . import crypto_at_rest
-from .file_lock import atomic_read_bytes
+from .file_lock import _windows_extended_path, atomic_read_bytes
 
 try:
     import tomllib  # Python 3.11+
@@ -294,19 +294,30 @@ def _unseal_config_tree(value: object) -> object:
     Dashboard-managed credentials are deployment-global configuration, so they
     must use the process/deployment key even when a request currently carries a
     tenant context.  Legacy plaintext remains readable; a genuine ciphertext
-    that cannot be authenticated fails closed through ``unseal_from_str``.
+    that cannot be authenticated fails closed through ``unseal_many_from_str``.
+    Each key is resolved once within this read, never cached across config
+    reads, so rotations and key-file permission changes remain observable.
     Re-entrant loads (see ``_UNSEALING``) receive the tokens unopened.
     """
     if not _tree_contains_sealed_value(value) or _UNSEALING.get():
         return value
     token = _UNSEALING.set(True)
     try:
+        sealed: dict[str, None] = {}
+
+        def collect(item: object) -> None:
+            if isinstance(item, str) and crypto_at_rest.is_sealed_str(item):
+                sealed[item] = None
+            elif isinstance(item, dict):
+                for child in item.values():
+                    collect(child)
+            elif isinstance(item, (list, tuple)):
+                for child in item:
+                    collect(child)
+
         def walk(item: object) -> object:
             if isinstance(item, str):
-                return (
-                    crypto_at_rest.unseal_from_str(item)
-                    if crypto_at_rest.is_sealed_str(item) else item
-                )
+                return opened.get(item, item)
             if isinstance(item, dict):
                 return {key: walk(child) for key, child in item.items()}
             if isinstance(item, list):
@@ -316,6 +327,8 @@ def _unseal_config_tree(value: object) -> object:
             return item
 
         with crypto_at_rest.deployment_key_scope():
+            collect(value)
+            opened = dict(zip(sealed, crypto_at_rest.unseal_many_from_str(list(sealed)), strict=True))
             return walk(value)
     finally:
         _UNSEALING.reset(token)
@@ -483,7 +496,12 @@ def tenant_config_path() -> Path | None:
         tid = _TENANT.get() or os.environ.get("MAVERICK_TENANT", "").strip() or None
         if not tid:
             return None
-        return maverick_home() / "tenants" / _tenant_segment(tid) / "config.toml"
+        path = maverick_home() / "tenants" / _tenant_segment(tid) / "config.toml"
+        # Keep ordinary paths stable in config fingerprints and UI context
+        # tokens; only deep tenant paths need the Win32 extended spelling.
+        if os.name == "nt" and len(os.path.abspath(path)) >= 240:
+            return Path(_windows_extended_path(path))
+        return path
     except Exception:  # pragma: no cover -- config resolution never blocks a run
         return None
 
@@ -540,10 +558,13 @@ def load_global_config() -> dict:
     # keys / capability+feature toggles merge over config.toml without touching it.
     dash = dashboard_overrides_path()
     if dash.exists():
-        cfg = _deep_merge_config(cfg, _load_config_file(dash))
+        from .config_resets import merge_dashboard
+        cfg = merge_dashboard(cfg, _load_config_file(dash), _deep_merge_config)
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         cfg = _deep_merge_config(cfg, _load_config_file(Path(overlay).expanduser()))
+    from .runtime_configuration import remember
+    remember(cfg, valid=not bool(config_source_errors(include_tenant=False)))
     return cfg
 
 
@@ -560,6 +581,39 @@ def load_config(path: Path | None = None) -> dict:
     if tcfg is not None and tcfg.exists():
         cfg = _deep_merge_config(cfg, _load_config_file(tcfg))
     return cfg
+
+
+class AgentStepConfigError(ValueError):
+    """An invalid task-step setting, with no configured value in the message."""
+
+
+def get_agent_max_steps(fallback: int | None = None) -> int | None:
+    """Resolve the current task-step limit; malformed limits never become unlimited.
+
+    Preserve environment precedence, the explicit agent fallback, and the native
+    unlimited default. The ordinary Settings writer separately bounds its form.
+    """
+    message = (
+        "The task-step limit must be a positive whole number. "
+        "An administrator can review ‘Most steps an agent may take’ in All settings."
+    )
+    raw = os.environ.get("MAVERICK_MAX_STEPS")
+    if raw is None or not raw.strip():
+        table = load_config().get("agent", {})
+        if not isinstance(table, dict):
+            raise AgentStepConfigError(message)
+        raw = table.get("max_steps")
+    value = fallback
+    if raw is not None and not (isinstance(raw, str) and not raw.strip()):
+        if type(raw) not in (str, int):
+            raise AgentStepConfigError(message)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            raise AgentStepConfigError(message) from None
+    if value is not None and (type(value) is not int or value < 1):
+        raise AgentStepConfigError(message)
+    return value
 
 
 def get_role_model(
@@ -618,10 +672,18 @@ def provider_configuration_state(provider: str) -> dict[str, Any]:
     effective: dict[str, Any] = {}
     field_sources: dict[str, str] = {}
     dashboard_set = False
+    dashboard_path = dashboard_overrides_path()
+    dashboard_layer = _load_config_file(dashboard_path) if dashboard_path.exists() else {}
     for source, path in layers:
         if path is None or not path.exists():
             continue
-        loaded = _load_config_file(path)
+        loaded = dashboard_layer if source == "dashboard" else _load_config_file(path)
+        if source == "config.toml" and dashboard_layer:
+            # A dashboard reset masks the installer's value before the normal
+            # merge. Reflect that same effective source in Settings and health.
+            from .config_resets import apply_to_base
+
+            loaded = apply_to_base(loaded, dashboard_layer)
         providers = loaded.get("providers") if isinstance(loaded, dict) else None
         table = providers.get(name) if isinstance(providers, dict) else None
         if not isinstance(table, dict):
@@ -762,6 +824,27 @@ def providers_per_tenant_keys() -> bool:
     if not isinstance(providers, dict):
         return False
     return _strict_config_bool(providers, "per_tenant_keys", False)
+
+
+def provider_test_receipt_max_age_days() -> int:
+    """How many days a passing provider connection test stays valid
+    (``[providers] test_receipt_max_age_days``; env
+    ``MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS`` wins). Default 30, at
+    least 1. After that the provider reads "not tested yet" again with the
+    age of the last test, so a green badge can never be older than this.
+    Never raises."""
+    raw = os.environ.get("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS", "").strip()
+    if not raw:
+        try:
+            providers = load_global_config().get("providers") or {}
+        except Exception:  # pragma: no cover -- config never blocks a run
+            providers = {}
+        raw = providers.get("test_receipt_max_age_days", 30) if isinstance(providers, dict) else 30
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return 30
+    return max(1, days)
 
 
 def tenant_provider_key_env(tenant_id: str, provider: str) -> str:
@@ -958,11 +1041,33 @@ def get_budget_overrides() -> dict:
     return load_config().get("budget", {})
 
 
+def get_deferred_tools(*, config: dict | None = None, default: bool = True) -> bool:
+    """Resolve the one tool-discovery policy, including its older config name.
+
+    An explicit environment true/false wins. The current capabilities key then
+    wins over the legacy tools key; saving the current key can therefore turn
+    off an inherited legacy choice. Standalone registries retain their older
+    absent-setting default by passing ``default=False``.
+    """
+    environment = env_flag("MAVERICK_DEFERRED_TOOLS")
+    if environment is not None:
+        return environment
+    cfg = load_config() if config is None else config
+    capabilities = cfg.get("capabilities", {})
+    if isinstance(capabilities, dict) and "deferred_tools" in capabilities:
+        return _strict_config_bool(capabilities, "deferred_tools", default, invalid=True)
+    legacy = cfg.get("tools", {})
+    if isinstance(legacy, dict) and "deferred_loading" in legacy:
+        return _strict_config_bool(legacy, "deferred_loading", default, invalid=True)
+    return bool(default)
+
+
 def get_capabilities() -> dict:
     """Return the [capabilities] section (computer_use / browser / web_search /
     mobile_tools / ros). These gate the optional high-impact tools in
     ``tools.base_registry``; all default off."""
-    cfg = load_config().get("capabilities", {}) or {}
+    current = load_config()
+    cfg = current.get("capabilities", {}) or {}
     return {
         "computer_use": bool(cfg.get("computer_use", False)),
         "browser": bool(cfg.get("browser", False)),
@@ -974,8 +1079,34 @@ def get_capabilities() -> dict:
         "code_exec": bool(cfg.get("code_exec", False)),
         # Deferred connector loading (default on); agent.py reads it from this
         # dict, so without it here the documented knob could never turn it off.
-        "deferred_tools": _strict_config_bool(cfg, "deferred_tools", True, invalid=True),
+        "deferred_tools": get_deferred_tools(config=current),
     }
+
+
+TOOL_EXPOSURE_MODES = ("core", "full")
+
+
+def get_tool_exposure() -> dict:
+    """Return ``[tools] exposure`` and ``core_extra``.
+
+    ``exposure`` is how much of the tool catalog every model turn describes up
+    front: ``"core"`` (default) shows a short role-aware set (plus a selected
+    pack's ``allow_tools``) and lets the model look the rest up with
+    ``find_tools``; ``"full"`` offers every tool except the SaaS-connector long
+    tail up to the model's tool ceiling (overflow stays discoverable).
+    ``core_extra`` pins extra tool names into
+    the visible set. ``MAVERICK_TOOL_EXPOSURE`` overrides ``exposure``. An
+    unknown mode or a malformed list falls back to the lean default.
+    """
+    cfg = load_config().get("tools", {}) or {}
+    mode = os.environ.get("MAVERICK_TOOL_EXPOSURE", "").strip().lower() or str(
+        cfg.get("exposure", "core") or "core").strip().lower()
+    if mode not in TOOL_EXPOSURE_MODES:
+        mode = "core"
+    raw = cfg.get("core_extra", [])
+    extra = [str(t).strip() for t in raw if isinstance(t, str) and str(t).strip()] \
+        if isinstance(raw, list) else []
+    return {"exposure": mode, "core_extra": extra}
 
 
 def signing_identity_transition_enabled() -> bool:
@@ -1025,7 +1156,12 @@ def get_features() -> dict:
 
     Draft recovery, record search, Action Center, guided onboarding and workflow
     readiness default on. Workspace recovery, project reviews and outcome
-    measurement require explicit opt-in. The older switches default on.
+    measurement and employee companions require explicit opt-in. The older
+    switches default on. Employee companions expose the enrolled person's task
+    status, private companion history controls and optional administrator-permitted
+    AI drafts through the existing writer role. Drafts may use eligible retained
+    history and currently permitted own-task titles/status; they do not enable
+    model tools, task actions, connected sources or learned memory.
     """
     cfg = load_config().get("features", {}) or {}
     return {
@@ -1035,6 +1171,10 @@ def get_features() -> dict:
         "pack_editing": bool(cfg.get("pack_editing", True)),
         "role_editing": bool(cfg.get("role_editing", True)),
         "draft_recovery": cfg.get("draft_recovery", True) is True,
+        "personal_preferences": cfg.get("personal_preferences", True) is True,
+        "configuration_profiles": cfg.get("configuration_profiles", True) is True,
+        "employee_task_diagnostics": cfg.get("employee_task_diagnostics", True) is True,
+        "employee_activation": cfg.get("employee_activation", True) is True,
         "support_center": cfg.get("support_center", True) is True,
         "record_search": cfg.get("record_search", True) is True,
         "workspace_recovery": cfg.get("workspace_recovery", False) is True,
@@ -1043,10 +1183,68 @@ def get_features() -> dict:
         "guided_onboarding": cfg.get("guided_onboarding", True) is True,
         "workflow_readiness": cfg.get("workflow_readiness", True) is True,
         "project_reviews": cfg.get("project_reviews", False) is True,
+        "deliverable_bundles": cfg.get("deliverable_bundles", False) is True,
+        "project_workspaces": cfg.get("project_workspaces", False) is True,
+        "task_handoffs": cfg.get("task_handoffs", False) is True,
+        "human_conversation_handoffs": cfg.get("human_conversation_handoffs", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
+        "commitment_viability": cfg.get("commitment_viability", False) is True,
+        "commitment_capability_learning": cfg.get("commitment_capability_learning", False) is True,
+        "semantic_rule_reuse": cfg.get("semantic_rule_reuse", False) is True,
+        "procedure_interactions": cfg.get("procedure_interactions", False) is True,
+        "operational_competence_acquisition": cfg.get("operational_competence_acquisition", False) is True,
+        "request_program": cfg.get("request_program", False) is True,
+        "commitment_economic_alternatives": cfg.get("commitment_economic_alternatives", False) is True,
+        "workflow_step_checks": cfg.get("workflow_step_checks", False) is True,
+        "applicability_regions": cfg.get("applicability_regions", False) is True,
+        "governed_rule_evolution": cfg.get("governed_rule_evolution", False) is True,
+        "recovery_visibility": cfg.get("recovery_visibility", False) is True,
+        "private_task_computation": cfg.get("private_task_computation", False) is True,
+        "portable_competence": cfg.get("portable_competence", False) is True,
+        "work_restructuring": cfg.get("work_restructuring", False) is True,
+        "shared_decision_evidence": cfg.get("shared_decision_evidence", False) is True,
+        "employee_companions": (
+            not config_source_errors() and cfg.get("employee_companions", False) is True
+        ),
+        "employee_content_access_requests": (
+            not config_source_errors() and cfg.get("employee_content_access_requests", False) is True
+        ),
+        "permission_access_requests": (
+            not config_source_errors() and cfg.get("permission_access_requests", False) is True
+        ),
+        "employee_departures": (
+            not config_source_errors() and cfg.get("employee_departures", False) is True
+        ),
+        "personal_data_controls": (
+            not config_source_errors() and cfg.get("personal_data_controls", False) is True
+        ),
         "copilot_operations": (not config_source_errors() and cfg.get("copilot_operations", False) is True),
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),
+    }
+
+
+def get_chat_message_actions() -> dict:
+    """Conversation alternatives respect both workspace and organization controls."""
+    workspace = load_config().get("chat_message_actions", {})
+    organization = load_global_config().get("chat_message_actions", {})
+    return {"enabled": (
+        not config_source_errors(include_tenant=True)
+        and isinstance(workspace, dict) and isinstance(organization, dict)
+        and workspace.get("enabled", True) is True
+        and organization.get("enabled", True) is True
+    )}
+
+
+def get_first_outcome() -> dict:
+    """Return the ``[first_outcome]`` section written by setup: which
+    department's sample first task the user picked and whether its sample
+    workspace was created. Absent = nothing picked yet."""
+    cfg = load_config().get("first_outcome", {}) or {}
+    department = cfg.get("department")
+    return {
+        "department": str(department) if department else None,
+        "sample_workspace_created": cfg.get("sample_workspace_created", False) is True,
     }
 
 
@@ -1070,6 +1268,116 @@ def get_safety() -> dict:
         # | "both". Default human-only (safest for a security boundary).
         "compartment_unseal": cfg.get("compartment_unseal", "human"),
     }
+
+
+# RFC 8176 authentication-method values that mean a second factor was used,
+# plus "fido" (Okta/Auth0 emit it for WebAuthn). "pwd", "pin", "kba", "user"
+# and the plain biometric hints are single factors and deliberately absent;
+# an administrator extends this list in [auth.mfa] amr_values.
+DEFAULT_MFA_AMR_VALUES: tuple[str, ...] = (
+    "mfa", "mca", "otp", "hwk", "swk", "fido", "pop", "sms", "tel", "sc",
+)
+# SAML AuthnContextClassRef values that mean a second factor was used.
+DEFAULT_MFA_SAML_CONTEXTS: tuple[str, ...] = (
+    "http://schemas.microsoft.com/claims/multipleauthn",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorContract",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorUnregistered",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:SmartcardPKI",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:Smartcard",
+    "urn:okta:loa:2fa:any",
+)
+DEFAULT_STEP_UP_MINUTES = 15
+
+
+def _str_list(value: object, default: tuple[str, ...]) -> list[str]:
+    if isinstance(value, str):
+        value = [part for part in value.split(",")]
+    if not isinstance(value, (list, tuple)):
+        return list(default)
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def get_auth_mfa() -> dict:
+    """``[auth.mfa]``: require a second factor at sign-in, and step-up.
+
+    Off by default. ``require`` (``MAVERICK_MFA_REQUIRE``) accepts an OIDC
+    session only when the ID token's ``amr`` names one of ``amr_values`` or
+    its ``acr`` is in ``acr_values``, and a SAML session only when the
+    assertion's authentication context is in ``saml_authn_contexts``.
+    ``acr_values`` is also sent on the authorization request.
+    ``step_up_minutes`` (``MAVERICK_MFA_STEP_UP_MINUTES``) is how recent that
+    second factor must be for a sensitive action while ``require`` is on.
+    A workspace's own config.toml overlays these keys for its members.
+    """
+    cfg = (load_config().get("auth") or {}).get("mfa") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    require = env_flag("MAVERICK_MFA_REQUIRE")
+    if require is None:
+        # A present non-bool is uncertainty about a security policy: on.
+        require = _strict_config_bool(cfg, "require", False, invalid=True)
+    minutes_raw: object = os.environ.get("MAVERICK_MFA_STEP_UP_MINUTES") or cfg.get(
+        "step_up_minutes", DEFAULT_STEP_UP_MINUTES)
+    try:
+        minutes = int(float(str(minutes_raw)))
+    except (TypeError, ValueError):
+        minutes = DEFAULT_STEP_UP_MINUTES
+    if isinstance(minutes_raw, bool) or minutes < 1:
+        minutes = DEFAULT_STEP_UP_MINUTES
+    return {
+        "require": bool(require),
+        "step_up_minutes": minutes,
+        "amr_values": _str_list(cfg.get("amr_values"), DEFAULT_MFA_AMR_VALUES),
+        "acr_values": _str_list(cfg.get("acr_values"), ()),
+        "saml_authn_contexts": _str_list(
+            cfg.get("saml_authn_contexts"), DEFAULT_MFA_SAML_CONTEXTS),
+    }
+
+
+def get_ip_allowlist() -> dict:
+    """``[auth.ip_allowlist]``: network addresses allowed to use the dashboard.
+
+    ``cidrs`` (``MAVERICK_IP_ALLOWLIST``, comma-separated) is the installation
+    list, checked before sign-in; ``workspace_cidrs`` is read after a
+    workspace is chosen, so a workspace's own config.toml can narrow it for
+    its members. An empty list allows every address. Unparsable entries are
+    kept here as text; the dashboard's checker rejects them, never skips them.
+    """
+    cfg = (load_config().get("auth") or {}).get("ip_allowlist") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    env = os.environ.get("MAVERICK_IP_ALLOWLIST")
+    cidrs = _str_list(env, ()) if env is not None and env.strip() else _str_list(
+        cfg.get("cidrs"), ())
+    return {
+        "cidrs": cidrs,
+        "workspace_cidrs": _str_list(cfg.get("workspace_cidrs"), ()),
+    }
+
+
+def get_auth_sessions() -> dict:
+    """Installation-wide browser limits and ended-session retention."""
+    if config_source_errors(include_tenant=False):
+        raise ValueError("Sign-in settings cannot be read.")
+    authentication = load_global_config().get("auth", {})
+    if not isinstance(authentication, dict):
+        raise ValueError("Sign-in settings must contain named choices.")
+    cfg = authentication.get("sessions", {})
+    if not isinstance(cfg, dict):
+        raise ValueError("Sign-in settings must contain named choices.")
+    raw = cfg.get("retention_days", 30)
+    try:
+        days = int(raw) if not isinstance(raw, bool) else 30
+    except (TypeError, ValueError):
+        days = 30
+    limits = {}
+    for name, maximum in (("company_hours", 168), ("idle_minutes", 1440)):
+        value = cfg.get(name, 0)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+            raise ValueError(f"auth.sessions.{name} must be an integer from zero to {maximum}")
+        limits[name] = value
+    return {"retention_days": max(1, min(days, 3650)), **limits}
 
 
 def get_skills() -> dict:
@@ -1172,6 +1480,8 @@ def get_knowledge() -> dict:
         # Key for the hosted indexing service (build_embedder falls back to
         # MAVERICK_EMBED_API_KEY); without it here the documented setting was lost.
         "api_key": cfg.get("api_key", ""),
+        # Never reuse the embedding provider's key for the vector store.
+        "store_api_key": cfg.get("store_api_key", ""),
     }
 
 
@@ -1821,6 +2131,9 @@ def get_autonomy() -> dict:
 
     return {
         "enable": bool(cfg.get("enable", False)),
+        # AI-3: show the plan and wait for a person before a task's first
+        # action with an outside effect. Independent of ``enable``; off by default.
+        "confirm_plan": cfg.get("confirm_plan", False) is True,
         "min_confidence": _clamp01("min_confidence", 0.5),
         "disagreement_high": _clamp01("disagreement_high", 0.5),
         "escalate_verification": bool(cfg.get("escalate_verification", True)),
@@ -1998,6 +2311,63 @@ def get_skill_synthesis() -> dict:
     cfg = load_config().get("skill_synthesis", {})
     return {"enable": _strict_config_bool(
         cfg, "enable", governed_learning_default())}
+
+
+def get_my_work() -> dict:
+    """Return the ``[my_work]`` section with defaults filled in.
+
+    The personal "My work" page (``/me``) is always on. The daily summary it
+    feeds is OFF by default (``digest_enable``): it sends messages to people
+    on a timer, so the operator opts in. ``digest_hour`` is the default local
+    hour (each person can change it on /me), ``digest_poll_seconds`` how often
+    the scheduler looks for people whose summary is due, and
+    ``monthly_spend_limit_dollars`` the per-person monthly spending figure the
+    page compares against (0 = no limit shown). Env override:
+    ``MAVERICK_DAILY_DIGEST``.
+    """
+    cfg = load_config().get("my_work", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    env = env_flag("MAVERICK_DAILY_DIGEST")
+    enable = env if env is not None else _strict_config_bool(cfg, "digest_enable", False)
+
+    def _number(key: str, default: float, *, low: float, high: float) -> float:
+        raw = cfg.get(key, default)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ValueError(f"[my_work] {key} must be a number")
+        return float(min(high, max(low, raw)))
+
+    return {
+        "digest_enable": enable,
+        "digest_hour": int(_number("digest_hour", 8, low=0, high=23)),
+        "digest_poll_seconds": _number("digest_poll_seconds", 300, low=30, high=3600),
+        "monthly_spend_limit_dollars": _number(
+            "monthly_spend_limit_dollars", 0, low=0, high=1_000_000),
+        "send_when_empty": _strict_config_bool(cfg, "send_when_empty", False),
+    }
+
+
+_SUPPORT_URL_RE = re.compile(r"https://[^\s\"'<>]{1,300}\Z")
+_SUPPORT_EMAIL_RE = re.compile(r"[^@\s\"'<>,;]{1,64}@[^@\s\"'<>,;]{1,190}\.[A-Za-z]{2,24}\Z")
+
+
+def get_support() -> dict:
+    """Return the ``[support]`` section: where people go for help.
+
+    ``status_page_url`` is a public service-status page linked from the Help
+    menu (empty = no link). ``contact_email`` is the vendor or help-desk
+    address a "Get help from a person" request is addressed to (empty = the
+    request is for the workspace's administrators). Anything that is not a
+    secure web address or a plain email address reads as empty, so a bad
+    value hides the link rather than sending people somewhere unexpected.
+    """
+    cfg = load_config().get("support", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    url = str(cfg.get("status_page_url") or "").strip()
+    email = str(cfg.get("contact_email") or "").strip()
+    return {"status_page_url": url if _SUPPORT_URL_RE.fullmatch(url) else "",
+            "contact_email": email if _SUPPORT_EMAIL_RE.fullmatch(email) else ""}
 
 
 def get_fleet_memory() -> dict:
@@ -2890,18 +3260,18 @@ def get_model_improvement_mutation_policy() -> dict[str, bool | int]:
 
 
 def get_rehearsal() -> dict:
-    """Return the ``[rehearsal]`` section (pre-execution rehearsal gate).
+    """Return the ``[rehearsal]`` prediction settings.
 
-    The governance half of the Operating Twin: before a risky plan executes, it
-    is simulated against the learned world-model and gated on the prediction.
-    ON by default and uncertainty escalates. When explicitly disabled,
-    ``gate_action`` is a no-op that proceeds. ``outcome_floor``
-    is the predicted-outcome below which a *confident* rehearsal blocks;
-    ``min_support`` is the (state, action) observations the model needs before it
-    will vouch for a move (below it the action is escalated, never waved through);
-    ``max_uncertainty`` escalates an over-uncertain rollout.
+    Predictions are observed by default: they do not authorize or stop tools.
+    The explicit ``mode = "hold"`` setting retains the old experimental gate,
+    which has no in-product approval route. Shield, capabilities, consent, and
+    other tool policy checks remain independent of this setting.
     """
     cfg = load_config().get("rehearsal", {})
+
+    mode = str(cfg.get("mode", "observe")).strip().lower()
+    if mode not in {"observe", "hold"}:
+        mode = "observe"
 
     def _num(key: str, default: float, cast=float):
         try:
@@ -2912,6 +3282,7 @@ def get_rehearsal() -> dict:
     return {
         "enable": _strict_config_bool(
             cfg, "enable", governed_learning_default()),
+        "mode": mode,
         "outcome_floor": _num("outcome_floor", 0.5),
         "min_support": _num("min_support", 5, int),
         "max_uncertainty": _num("max_uncertainty", 0.25),
@@ -3098,6 +3469,64 @@ def knowledge_access_enabled(cfg: dict | None = None) -> bool:
     return isinstance(section, dict) and section.get("enable", True) is True
 
 
+API_KEY_DEFAULTS: dict = {
+    "enabled": True,
+    "default_days": 90,
+    "max_days": 365,
+    "rotation_grace_hours": 24,
+    "prefix": "lwk_",
+}
+
+_API_KEY_PREFIX_RE = re.compile(r"^[a-z][a-z0-9]{1,7}_$")
+
+
+def api_key_settings(cfg: dict | None = None) -> dict:
+    """Personal and service-account API keys for scripts and integrations.
+
+    Read from ``[dashboard]``: ``api_keys`` (on by default; a key only exists
+    once a signed-in person creates one), ``api_key_default_days`` (how long a
+    new key lasts unless the person picks a shorter time), ``api_key_max_days``
+    (the longest a key may last), ``api_key_rotation_grace_hours`` (how long
+    the old secret keeps working after a rotation) and ``api_key_prefix`` (the
+    first characters of every key, so logs and scanners recognise one).
+    ``MAVERICK_DASHBOARD_API_KEYS`` overrides the on/off switch. Malformed or
+    unreadable configuration fails closed: keys are off and every limit is
+    the default.
+    """
+    out = dict(API_KEY_DEFAULTS)
+    try:
+        loaded = cfg if cfg is not None else load_config()
+        if cfg is None and config_source_errors():
+            out["enabled"] = False
+            return out
+        table = loaded.get("dashboard") if isinstance(loaded, dict) else None
+        table = table if isinstance(table, dict) else {}
+        enabled = table.get("api_keys", True)
+        out["enabled"] = enabled is True
+        for key, name, low, high in (
+            ("api_key_default_days", "default_days", 1, 3650),
+            ("api_key_max_days", "max_days", 1, 3650),
+            ("api_key_rotation_grace_hours", "rotation_grace_hours", 0, 24 * 30),
+        ):
+            raw = table.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                continue
+            if low <= raw <= high:
+                out[name] = int(raw)
+        prefix = table.get("api_key_prefix")
+        if isinstance(prefix, str) and _API_KEY_PREFIX_RE.match(prefix):
+            out["prefix"] = prefix
+        if out["default_days"] > out["max_days"]:
+            out["default_days"] = out["max_days"]
+        override = env_flag("MAVERICK_DASHBOARD_API_KEYS")
+        if override is not None:
+            out["enabled"] = override
+    except Exception:  # pragma: no cover - authority reads fail closed
+        out = dict(API_KEY_DEFAULTS)
+        out["enabled"] = False
+    return out
+
+
 def candidate_promotion_enabled(cfg: dict | None = None) -> bool:
     """Whether guarded research-candidate promotion is enabled.
 
@@ -3133,7 +3562,7 @@ def get_flows() -> dict:
     if not isinstance(cfg, dict):
         cfg = {}
     try:
-        max_node_retries = int(cfg.get("max_node_retries", 5) or 5)
+        max_node_retries = int(cfg.get("max_node_retries", 5))
     except (TypeError, ValueError):
         max_node_retries = 5
     return {
@@ -3354,3 +3783,22 @@ def get_value(*, config: dict | None = None) -> dict:
         "currency": str(cfg.get("currency", "USD") or "USD").upper()[:8],
         "departments": departments,
     }
+
+
+EMPLOYEE_ACTIVATION_JOBS = {
+    "weekly_update": "Write a useful weekly update", "project_plan": "Turn notes into a project plan",
+    "privacy_evidence": "Prepare a privacy evidence summary", "security_review": "Prepare a security review brief",
+    "finance_variance": "Explain a simple budget variance",
+}
+
+
+def get_employee_activation_jobs() -> set[str]:
+    """Organization-approved first-job guides; a workspace may only narrow."""
+    key = "employee_activation_jobs"
+    ceiling = load_global_config().get("dashboard", {}).get(key, list(EMPLOYEE_ACTIVATION_JOBS))
+    selected = load_config().get("dashboard", {}).get(key, ceiling)
+    if not isinstance(ceiling, list) or not isinstance(selected, list):
+        return set()
+    if not all(isinstance(item, str) for item in [*ceiling, *selected]):
+        return set()
+    return set(ceiling) & set(selected) & EMPLOYEE_ACTIVATION_JOBS.keys()

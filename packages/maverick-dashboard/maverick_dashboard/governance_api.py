@@ -285,11 +285,28 @@ async def mark_substantial_modification(
 # --------------------------------------------------------------------------
 # AI literacy (Art. 4)
 # --------------------------------------------------------------------------
+async def _literacy_read(fn: Any) -> Any:
+    try:
+        return await _call(fn)
+    except HTTPException as exc:
+        if exc.status_code not in {404, 409, 422, 503}:
+            raise
+        raise HTTPException(
+            503,
+            "Training status is unknown because Lightwork could not check the complete record. "
+            "This view supports up to 500 roles, 2,000 people and 2,000 training completions. "
+            "No complete evidence report was produced.",
+        ) from exc
+
+
 async def _with_literacy_plane(
     literacy: Any,
     payload: dict[str, Any],
+    *,
+    read_only: bool = False,
 ) -> dict[str, Any]:
-    status = await _call(literacy.literacy_plane_status)
+    read = _literacy_read if read_only else _call
+    status = await read(literacy.literacy_plane_status)
     return {
         **payload,
         "data_plane": "role_compatibility",
@@ -306,19 +323,24 @@ async def _with_literacy_plane(
 async def literacy_gaps(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     literacy = _module("ai_literacy", "ai_literacy")
-    gaps = await _call(literacy.literacy_gaps)
-    return await _with_literacy_plane(literacy, gaps)
+    gaps = await _literacy_read(literacy.literacy_gaps)
+    result = await _with_literacy_plane(literacy, gaps, read_only=True)
+    require_permission(request, "view")
+    return result
 
 
 @router.get("/literacy/requirements")
 async def literacy_requirements(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     literacy = _module("ai_literacy", "ai_literacy")
-    rows = await _call(literacy.list_requirements)
-    return await _with_literacy_plane(
+    rows = await _literacy_read(literacy.list_requirements)
+    result = await _with_literacy_plane(
         literacy,
         {"requirements": rows, "count": len(rows)},
+        read_only=True,
     )
+    require_permission(request, "view")
+    return result
 
 
 @router.post("/literacy/requirements")
@@ -377,8 +399,10 @@ async def record_literacy_completion(
 async def literacy_evidence(request: Request) -> dict[str, Any]:
     require_permission(request, "operate")
     literacy = _module("ai_literacy", "ai_literacy")
-    exported = await _call(literacy.export_evidence)
-    return await _with_literacy_plane(literacy, {"evidence": exported})
+    exported = await _literacy_read(literacy.export_evidence)
+    result = await _with_literacy_plane(literacy, {"evidence": exported}, read_only=True)
+    require_permission(request, "operate")
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -538,7 +562,7 @@ async def record_fria_review(
     record_id: str,
     body: schemas.FRIAReviewIn,
 ) -> dict[str, Any]:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     conformity = _module("eu_conformity", "eu_conformity")
     return await _call(
         conformity.record_fria_review,
@@ -582,7 +606,7 @@ async def record_pmm_review(
     asset_id: str,
     body: schemas.PMMReviewIn,
 ) -> dict[str, Any]:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     conformity = _module("eu_conformity", "eu_conformity")
     return await _call(
         conformity.record_pmm_review,

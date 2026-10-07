@@ -30,6 +30,8 @@ def _post_audio(client, data: bytes = b"fake-webm-audio", **kw):
 
 def test_transcribe_returns_text(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
+    from pathlib import Path
+
     import maverick.tools.voice as voice_mod
 
     seen: dict = {}
@@ -37,6 +39,7 @@ def test_transcribe_returns_text(monkeypatch, tmp_path):
     def _fake_transcribe(args, sandbox=None):
         seen.update(args)
         assert sandbox is None
+        assert Path(args["source"]).read_bytes() == b"fake-webm-audio"
         return "  schedule a demo with acme on friday  "
 
     monkeypatch.setattr(voice_mod, "_run_transcribe", _fake_transcribe)
@@ -74,8 +77,9 @@ def test_transcribe_503_when_no_backend(monkeypatch, tmp_path):
     )
     r = _post_audio(_client())
     assert r.status_code == 503
-    assert "speech-to-text" in r.json()["detail"].lower()
-    assert "/settings#settings-voice" in r.json()["detail"]
+    assert "Voice dictation isn't ready" in r.json()["detail"]
+    assert "Settings > Models > Voice dictation on this computer" in r.json()["detail"]
+    assert "/settings?focus=voice-model-setup" in r.json()["detail"]
     assert "pip install" not in r.json()["detail"]
 
 

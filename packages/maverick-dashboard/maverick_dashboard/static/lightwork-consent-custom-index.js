@@ -231,7 +231,7 @@
           { label: "What happened", value: (e) => ACTIONS[e.action] || CW.human(e.action) },
           { label: "Question", value: (e) => { const x = state.indexes.find((i) => i.index_id === e.index_id); return x ? CW.human(x.element_name) : ""; } },
         ],
-        empty: { title: "Nothing has happened yet." },
+        empty: { title: "Nothing has happened yet.", body: "Changes to this index appear here once it is saved or used." },
       });
     } catch (error) { explain(operationStatus, error, "load the history"); }
   }));
@@ -254,11 +254,20 @@
         else $("custom-index-table").replaceChildren(CW.el("p", "muted", "Only an administrator can see searchable questions."));
       } else if (payload.enabled === true) {
         say(runtimeStatus, "Searching is turned on but not ready yet. Ask an administrator to finish setting it up.", true);
+        settleTable("Searchable questions appear here once an administrator finishes the setup.");
       } else {
         say(runtimeStatus, "Searching by preference is not turned on for this workspace. Ask an administrator to turn it on.", true);
+        settleTable("Searchable questions appear here once this is turned on.");
       }
-    } catch (error) { explain(runtimeStatus, error, "check availability"); }
+    } catch (error) {
+      explain(runtimeStatus, error, "check availability");
+      settleTable(CW.errorText(error, "load searchable questions"));
+    }
   }
+  // The list never loads while searching is unavailable; say why instead of "Loading…".
+  function settleTable(message) { $("custom-index-table").replaceChildren(CW.el("p", "muted", message)); }
   if (!CW) { runtimeStatus.textContent = "This page could not finish loading. Reload the page."; return; }
-  if (apiBase) refreshStatus();
+  // A turned-off module shows its gate instead: nothing is checked or loaded,
+  // and no second "not turned on" sentence appears under the banner.
+  if (apiBase && shell.dataset.moduleEnabled !== "false") refreshStatus();
 })();

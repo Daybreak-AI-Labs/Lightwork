@@ -14,7 +14,7 @@ from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_schema_version_is_current(tmp_path):
-    assert SCHEMA_VERSION == 41  # bump when adding a migration
+    assert SCHEMA_VERSION == 50  # bump when adding a migration
     assert WorldModel(tmp_path / "w.db").schema_version == SCHEMA_VERSION
 
 
@@ -118,7 +118,7 @@ def test_explicit_goal_selectors_preserve_both_principal_fields(tmp_path):
 
     selected = [
         world.search_goals("needle")[0],
-        next(goal for goal in world.candidate_goals(False) if goal.id == child),
+        next(goal for goal in world.candidate_goals(False, owner="user:human-owner") if goal.id == child),
         world.subgoals(root)[0],
     ]
 
@@ -317,6 +317,9 @@ def test_postgres_payload_version_contract_on_stalled_clock(tmp_path, monkeypatc
     w.record_signoff(gid, "approved", expected_updated_at=reviewed.updated_at)
     monkeypatch.setattr(postgres.time, "time", lambda: reviewed.updated_at + clock_delta)
     monkeypatch.setattr(postgres, "_tenant_scope", lambda: ("", []))
+    # This SQLite dialect shim has no tenant_id column; production mutations
+    # still use the exact-tenant predicate rather than the read predicate.
+    monkeypatch.setattr(postgres, "_mutation_tenant_scope", lambda column="tenant_id": ("", []))
 
     class Cursor:
         def __init__(self, cursor):

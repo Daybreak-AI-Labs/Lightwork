@@ -1,5 +1,6 @@
 /* Plain-language labels for values the dashboard stores in code form.
  * Screens show these instead of raw status words, event kinds or ids. */
+import {msg, messageLanguage, formatLocale} from './language';
 
 const STATUS_LABELS: Record<string, string> = {
   active: "In progress",
@@ -57,8 +58,10 @@ export function humanize(value: string | null | undefined): string {
 
 export function statusLabel(status: string | null | undefined): string {
   const key = String(status ?? "").toLowerCase();
-  return STATUS_LABELS[key] ?? (humanize(key) || "Unknown");
+  return STATUS_LABELS[key] ? msg(STATUS_LABELS[key]) : (humanize(key) || "Unknown");
 }
+
+export function statusLanguage(status: string): string {return messageLanguage(STATUS_LABELS[status.toLowerCase()] || '');}
 
 export function statusTone(status: string | null | undefined): string {
   return STATUS_TONES[String(status ?? "").toLowerCase()] ?? "#57606a";
@@ -72,7 +75,7 @@ export function taskTitle(title: string | null | undefined): string {
 
 export function money(dollars: number | null | undefined): string {
   const value = typeof dollars === "number" && Number.isFinite(dollars) ? dollars : 0;
-  return `$${value.toFixed(2)}`;
+  return new Intl.NumberFormat(formatLocale(), {style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2}).format(value);
 }
 
 export function plural(count: number, one: string, many: string): string {

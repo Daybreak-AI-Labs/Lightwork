@@ -48,6 +48,8 @@ _ROUTE_METHODS = ("get", "post", "put", "delete", "patch", "websocket", "api_rou
 _BLOCKING_HINTS = (
     "_world", "world", "sqlite3", "open", "load_config", "list_triggers",
     "store", "queue",
+    # Synchronous network clients: a catalog index fetch, urllib, httpx.
+    "load_catalog", "urlopen", "guarded_urlopen", "urllib", "httpx",
 )
 
 

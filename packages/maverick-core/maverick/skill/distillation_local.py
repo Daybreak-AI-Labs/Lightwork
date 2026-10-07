@@ -2,9 +2,10 @@
 
 After a run succeeds, its trajectory (goal + the tools it used) is evidence of a
 repeatable approach. This distills the top-k most recent successful trajectories
-into a single reusable micro-skill — a ``SKILL.md`` with frontmatter (name,
-triggers, tools_needed) and numbered steps — written to
-``~/.maverick/learned-skills/`` so it's picked up on later runs.
+into a proposed micro-skill — a ``SKILL.md`` with frontmatter (name,
+triggers, tools_needed) and numbered steps — written to the active tenant's
+``learned-skills/`` store. A proposal enters later-run recall only after an
+administrator reviews and admits its exact version on the Skills page.
 
 Enabled by default (``MAVERICK_DISTILL_LOCAL=0`` opts out). Dependency-free:
 ranking is by success + recency and the synthesis is
@@ -20,7 +21,6 @@ from pathlib import Path
 
 from ..paths import data_dir
 
-_STORE = data_dir("learned-skills", tenant=None)
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "from",
     "by", "at", "as", "is", "are", "be", "this", "that", "it", "your", "my",
@@ -178,11 +178,12 @@ def save_skill(skill: dict, store: Path | str | None = None) -> Path:
     name = str(skill.get("name") or "")
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or len(name) > 96:
         raise ValueError("distilled skill name must be bounded kebab-case")
-    from ..file_lock import atomic_write_text, ensure_private_directory
+    from ..file_lock import atomic_write_text, cross_process_lock, ensure_private_directory
     store = (Path(store) if store is not None else _default_store()).resolve()
     ensure_private_directory(store)
     path = store / f"{name}.md"
-    atomic_write_text(path, to_skill_markdown(skill), mode=0o600)
+    with cross_process_lock(path):
+        atomic_write_text(path, to_skill_markdown(skill), mode=0o600)
     return path
 
 

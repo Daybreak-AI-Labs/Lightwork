@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const dir = path.resolve(__dirname, "../../maverick_dashboard");
 const helpers = fs.readFileSync(path.join(dir, "static/lightwork-record-workflows.js"), "utf8");
@@ -33,6 +34,7 @@ async function fixture(reply, formValues = []) {
     if (url.endsWith("/records")) return json(records());
     return json({});
   };
+  shell(window);
   window.eval(helpers);
   window.eval(source);
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise((d) => setImmediate(d)); };
@@ -48,7 +50,7 @@ test("records load into tables with a button per row and plain labels", async (t
   assert.match(assessments, /Answer questions/);
   assert.match(assessments, /Work out scope/);
   const scopes = ui.doc.getElementById("cs-scopes").textContent;
-  assert.match(scopes, /Eu privacy/);
+  assert.match(scopes, /EU privacy/);
   assert.match(scopes, /Waiting for approval/);
   assert.match(scopes, /Approve/);
   assert.match(ui.doc.getElementById("cs-reports").textContent, /No reports yet/);

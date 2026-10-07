@@ -10,8 +10,11 @@ from maverick.cli import main
 from maverick.world_model import WorldModel
 
 
-def test_goal_bundle_is_what_the_export_command_writes(tmp_path):
+def test_goal_bundle_is_what_the_export_command_writes(tmp_path, monkeypatch):
     from maverick.goal_bundle import build_goal_bundle
+
+    # Compare the same snapshot preparation instant, including its receipt.
+    monkeypatch.setattr("maverick.goal_archive.time.time", lambda: 1_790_000_000.0)
 
     db = tmp_path / "world.db"
     world = WorldModel(db)
@@ -47,7 +50,7 @@ def test_timetable_cron(repeat, kwargs, expected):
 
 @pytest.mark.parametrize("repeat, kwargs", [
     ("yearly", {}), ("daily", {"at": "9:00"}), ("daily", {"at": "24:00"}), ("weekly", {"days": []}),
-    ("weekly", {"days": [7]}), ("monthly", {"day_of_month": 29}), ("hourly", {"every_hours": 13}),
+    ("weekly", {"days": [7]}), ("monthly", {"day_of_month": 32}), ("hourly", {"every_hours": 13}),
 ])
 def test_timetable_cron_refuses_bad_choices(repeat, kwargs):
     from maverick.scheduler import CronError, timetable_cron

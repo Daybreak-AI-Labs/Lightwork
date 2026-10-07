@@ -17,10 +17,35 @@ def test_new_install_budget_defaults_are_optional_and_explicit_choices_survive(m
 
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **kw: kw["default"])
     monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
-    assert wizard._consumer_budget() == {}
-    assert wizard.pick_budget() == {"strict_pricing": True}
+    assert wizard._consumer_budget() == {"max_dollars": 2.0, "max_wall_seconds": 1800.0}
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **kw: kw["default"])
+    assert wizard.pick_budget() == {"max_dollars": 2.0, "max_wall_seconds": 1800.0,
+                                    "max_tool_calls": 500, "strict_pricing": True,
+                                    "guidance": True, "warnings": True,
+                                    "warning_thresholds": [0.8, 0.95, 1.0]}
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "$5")
-    assert wizard._consumer_budget() == {"max_dollars": 5.0}
+    assert wizard._consumer_budget() == {"max_dollars": 5.0, "max_wall_seconds": 1800.0}
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "No task limit")
+    assert wizard._consumer_budget() == {"task_limits_enabled": False}
+
+
+def test_custom_spending_cap_reasks_instead_of_saving_a_different_or_invalid_limit(monkeypatch):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "custom")
+    answers = iter(["ten dollars", "-3", "NaN", "$10"])
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_kw: next(answers))
+    assert wizard._consumer_budget() == {"max_dollars": 10.0, "max_wall_seconds": 1800.0}
+
+
+def test_advanced_task_limits_reask_invalid_dollars_time_and_calls(monkeypatch):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
+    answers = iter(["nonsense", "$4.50", "-1", "600", "0", "20", "0.8, 1.0"])
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_kw: next(answers))
+    budget = wizard.pick_budget()
+    assert (budget["max_dollars"], budget["max_wall_seconds"], budget["max_tool_calls"]) == (4.5, 600.0, 20)
 
 def test_pick_mode_default_is_consumer(monkeypatch):
     from maverick_installer import wizard
@@ -82,6 +107,7 @@ def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
         "write_file",
         "apply_patch",
         "str_replace_editor",
+        "ast_edit",
     }
     # Self-learning is on WITHOUT executable-tool or external-MCP autonomy.
     assert config["self_learning"]["create_tools"] is False
@@ -178,10 +204,12 @@ def test_run_consumer_writes_safe_defaults(monkeypatch, tmp_path: Path):
     assert "browser" in config["security"]["denied_tools"]
     assert "shell" in config["security"]["denied_tools"]
     assert "write_file" in config["security"]["denied_tools"]
+    assert "ast_edit" in config["security"]["denied_tools"]
     assert config["retention"]["audit_days"] == 30
     assert config["rate_limits"]["web_search"] == "5/60"
     assert config["persona"]["user_name"] == "Alex"
     assert config["budget"]["max_dollars"] == 5.0
+    assert config["budget"]["max_wall_seconds"] == 1800.0
     assert config["capabilities"]["web_search"] is True
     assert config["self_learning"]["enable"] is True
     assert config["self_learning"]["create_tools"] is False
@@ -233,14 +261,20 @@ def test_run_consumer_docker_mode_keeps_host_mutation_tools_enabled(monkeypatch,
     assert "write_file" not in denied
 
 
-def test_run_consumer_demo_command_uses_haiku(monkeypatch, tmp_path: Path, capsys):
-    """Council perf seat: first-goal demo must route to Haiku for sub-2s TTFT."""
+def test_run_consumer_demo_command_runs_a_real_first_outcome(monkeypatch, tmp_path: Path, capsys):
+    """The closing panel prints a real first task on sample data for the
+    picked department, and never a hard-coded model (see
+    test_wizard_first_outcome.py for the full step)."""
     wizard = _stub_wizard_io(monkeypatch, tmp_path)
     wizard.run_consumer()
-    out = capsys.readouterr().out
-    # The closing panel prints the demo command.
-    assert "claude-haiku-4-5" in out
-    assert "haiku about Tuesday" in out  # the curated demo prompt
+    out = " ".join(capsys.readouterr().out.replace("│", " ").split())  # Rich wraps the panel
+    # Finance's sample runs the three-way match exception clerk, a specialist
+    # that reads the bundled sample files and starts on a fresh install.
+    assert "--domain proc_p2p_exceptions" in out
+    assert "--model" not in out
+    assert "File changes and program execution are off" in out
+    assert "Permissions" in out and "Allow file work" in out
+    assert "Setup complete" not in out
 
 
 def test_run_consumer_creates_workdir(monkeypatch, tmp_path: Path):
@@ -287,13 +321,19 @@ def test_run_resume_skips_mode_picker(monkeypatch, tmp_path: Path):
     assert called["run_consumer"] is False
 
 
-def test_run_aborts_with_guidance_when_not_a_tty(monkeypatch):
+def test_run_aborts_with_guidance_when_not_a_tty(monkeypatch, tmp_path):
     """Non-interactive stdin (CI / Docker / `... | maverick init`) must yield
     actionable guidance and a clean exit, not questionary's terse 'Aborted!'."""
     import io
 
     from maverick_installer import wizard
     from rich.console import Console
+
+    # A fresh installation: the config paths are resolved once at import, so a
+    # real saved setup on the test machine must not answer for this case.
+    monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path / ".maverick")
+    monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / ".maverick" / "config.toml")
+    monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".maverick" / ".env")
 
     monkeypatch.setattr(
         wizard, "console",

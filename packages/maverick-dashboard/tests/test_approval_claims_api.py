@@ -75,6 +75,7 @@ def test_decide_records_supervisor():
     aid, binding = _park()
     assert client.post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={"X-Lightwork-Approval-Binding": binding},
     ).status_code == 204
     a = app_mod._world().get_approval(aid)

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Website and App Keys · Lightwork{% endblock %}
+{% block title %}Website and app keys · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set pc_on = consent_public_clients_enabled %}
 {% set pc_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set pc_audit = consent_can_audit if consent_can_audit is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Consent integration', 'Website and App Keys',
+  {{ hero('Consent integration', 'Website and app keys',
           lede='Create a key that lets your website or app show your Lightwork consent banner and save people’s choices.') }}
   {% include "_consent_nav.html" %}
   {% if not pc_on %}
@@ -82,18 +82,13 @@
 (function () {
   "use strict";
   var API = "/api/v1/consent/public-clients";
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path, options) {
-    var opts = Object.assign({cache: "no-store"}, options || {});
-    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("pcc-root")) start();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (CW && document.getElementById("pcc-root")) { if (window.mvFetchJSON) start(); else document.addEventListener("DOMContentLoaded", start); }
 
   function start() {
     var $ = function (id) { return document.getElementById(id); };
@@ -206,12 +201,12 @@
             {label: "Since", value: function (x) { return CW.when(x.created_at); }},
           ],
           actions: [{label: "Revoke access", kind: "danger", when: function (x) { return can.admin && x.profile_status === "active"; }, run: function (x, b) { revokeProfile(x, b); }}],
-          empty: {title: "No one has signed in through your banner yet."},
+          empty: {title: "No one has signed in through your banner yet.", body: "Sign-ins appear here once a visitor uses your banner to sign in."},
         });
       } catch (error) { $("pcc-profiles").replaceChildren(); CW.fail(status, error, "load people"); }
     }
     async function revokeProfile(x, button) {
-      var answer = await window.mvForm("Revoke access for " + x.profile_id, [{key: "reason", label: "Why", type: "select", options: REASONS, required: true}], {okText: "Continue"});
+      var answer = await window.mvForm("Revoke access for " + x.profile_id, [{key: "reason", label: "Why", type: "select", options: REASONS, required: true}], {okText: "Review revocation"});
       if (!answer) return;
       CW.busy(button, async function () {
         if (!(await CW.confirm("Revoke " + x.profile_id + "’s access? Their saved choices are kept, but they will need to make them again on that website or app.", "Revoke access"))) return;

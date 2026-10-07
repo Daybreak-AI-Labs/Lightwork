@@ -10,11 +10,14 @@ from maverick_dashboard import trust_receipts_page as page
 
 
 def _templates() -> Jinja2Templates:
-    selected = Jinja2Templates(directory=Path(page.__file__).parent / "templates")
+    from maverick_dashboard.app import _theme_context
+
+    selected = Jinja2Templates(
+        directory=Path(page.__file__).parent / "templates",
+        context_processors=[_theme_context],
+    )
     selected.env.globals.update(
-        theme="dark", font="default", lang="en", density="comfortable",
-        custom_theme_css="", custom_theme_names=[], dir="ltr", nav_groups=[],
-        t=lambda key: key,
+        nav_groups=[],
     )
     return selected
 
@@ -38,7 +41,7 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     csp = response.headers["content-security-policy"]
     assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
     body = response.text
-    assert "Trust Receipts" in body
+    assert "Trust receipts" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert f'data-api-base="{page.API_BASE}"' in body
     assert page.ASSET_PATH in body

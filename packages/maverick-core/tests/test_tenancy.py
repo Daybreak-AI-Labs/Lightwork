@@ -111,10 +111,13 @@ def test_memory_root_follows_tenant(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_MEMORY_DIR", raising=False)
     from maverick.tools.memory import _memory_root
 
-    assert _memory_root() == tmp_path / ".maverick" / "memory"  # legacy default
+    shared = _memory_root()
+    assert shared.parent == paths.data_dir("memory") / "owned"
+    assert len(shared.name) == 64
     tok = set_tenant("acme")
     try:
-        assert _memory_root() == tmp_path / ".maverick" / "tenants" / "acme" / "memory"
+        assert _memory_root().parent == paths.data_dir("memory") / "owned"
+        assert _memory_root() != shared
     finally:
         reset_tenant(tok)
 
@@ -124,7 +127,8 @@ def test_explicit_memory_dir_override_wins(monkeypatch, tmp_path):
     tok = set_tenant("acme")
     try:
         from maverick.tools.memory import _memory_root
-        assert _memory_root() == tmp_path / "mem"  # override ignores tenant
+        assert _memory_root().parent == tmp_path / "mem" / "owned"
+        assert len(_memory_root().name) == 64
     finally:
         reset_tenant(tok)
 
@@ -160,7 +164,6 @@ def test_memory_isolated_across_tenants(monkeypatch, tmp_path):
 
 
 def test_memory_store_cannot_be_reopened_through_case_alias(monkeypatch, tmp_path):
-    from maverick.paths import TenantNamespaceCollision
     from maverick.tools.memory import _run
 
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -175,8 +178,9 @@ def test_memory_store_cannot_be_reopened_through_case_alias(monkeypatch, tmp_pat
 
     alias = set_tenant("acme")
     try:
-        with pytest.raises(TenantNamespaceCollision):
-            _run({"command": "view", "path": "private.md"})
+        result = _run({"command": "view", "path": "private.md"})
+        assert result == "ERROR: Current memory ownership could not be verified."
+        assert "secret" not in result
     finally:
         reset_tenant(alias)
 
@@ -266,13 +270,20 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
             self.seen_tenants = []
             self.created_goal = None
 
+        def latest_artifacts(self, goal_id):
+            return []  # the goal saved no output files
+
+        def open_channel_questions(self, conversation_id, owner, execution_principal):
+            return []  # no blocked question awaits a reply
+
         def get_or_create_conversation(self, channel, user_id):
             self.seen_tenants.append(current_tenant())
             self.conversation_key = (channel, user_id)
             return type("Conversation", (), {"id": 1})()
 
-        def append_turn(self, conversation_id, role, text):
+        def append_turn(self, conversation_id, role, text, *, goal_id=None):
             self.seen_tenants.append(current_tenant())
+            self.turn_goal_id = goal_id
             return None
 
         def create_goal(
@@ -288,7 +299,7 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
 
         def get_goal(self, goal_id):
             self.seen_tenants.append(current_tenant())
-            return type("Goal", (), {"result": "ok"})()
+            return type("Goal", (), {"result": "ok", "status": "done"})()
 
     captured = {}
 
@@ -313,14 +324,18 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
         principal_id = "UALICE"
         text = "hello"
 
-    assert asyncio.run(srv._handle_message(_RoomMessage())) == "ok"
+    assert _answer(asyncio.run(srv._handle_message(_RoomMessage()))) == "ok"
     assert world.conversation_key == ("slack", "UALICE")
     assert captured["kwargs"]["user_id"] == "slack:UALICE"
     assert captured["tenant"] == "slack%3AUALICE"
     assert world.created_goal == (
         "hello", "hello", "user:slack:UALICE", "user:slack:UALICE",
     )
-    assert world.seen_tenants == ["slack%3AUALICE"] * 4
+    # Every world read/write (conversation, turn, goal, status and the reply's
+    # result reads) happens inside the authenticated principal's tenant.
+    assert len(world.seen_tenants) >= 4
+    assert set(world.seen_tenants) == {"slack%3AUALICE"}
+    assert world.turn_goal_id == 7
     assert current_tenant() is None
 
 
@@ -341,12 +356,19 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
             self.seen_tenants = []
             self.created_goal = None
 
+        def latest_artifacts(self, goal_id):
+            return []  # the goal saved no output files
+
+        def open_channel_questions(self, conversation_id, owner, execution_principal):
+            return []  # no blocked question awaits a reply
+
         def get_or_create_conversation(self, channel, user_id):
             self.seen_tenants.append(("conversation", current_tenant()))
             return type("Conversation", (), {"id": 1})()
 
-        def append_turn(self, conversation_id, role, text):
+        def append_turn(self, conversation_id, role, text, *, goal_id=None):
             self.seen_tenants.append(("turn", current_tenant()))
+            self.turn_goal_id = goal_id
 
         def create_goal(
             self, title, text, *, owner="", execution_principal="",
@@ -360,7 +382,7 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
 
         def get_goal(self, goal_id):
             self.seen_tenants.append(("result", current_tenant()))
-            return type("Goal", (), {"result": "ok"})()
+            return type("Goal", (), {"result": "ok", "status": "done"})()
 
     def _sqlite_must_not_open(_tenant):
         raise AssertionError("configured Postgres path opened a tenant SQLite world")
@@ -384,14 +406,17 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
         principal_id = "UALICE"
         text = "hello"
 
-    assert asyncio.run(srv._handle_message(_Message())) == "ok"
+    assert _answer(asyncio.run(srv._handle_message(_Message()))) == "ok"
     expected_tenant = "slack%3AUALICE"
     assert world.seen_tenants == [
         ("conversation", expected_tenant),
-        ("turn", expected_tenant),
         ("goal", expected_tenant),
+        ("turn", expected_tenant),
+        ("result", expected_tenant),
+        # The reply re-reads the finished goal to attach its saved output.
         ("result", expected_tenant),
     ]
+    assert world.turn_goal_id == 7
     assert world.created_goal == (
         "hello", "hello", "user:slack:UALICE", "user:slack:UALICE",
     )
@@ -441,3 +466,10 @@ def test_lazy_skill_distillation_store_follows_active_tenant(monkeypatch, tmp_pa
         assert path_b.parent == tmp_path / "tenants" / "tenant-b" / "learned-skills"
         assert distillation_v2.signatures_from_store()
         assert not (tmp_path / "tenants" / "tenant-b" / "learned-skills" / "missing.md").exists()
+
+
+def _answer(reply):
+    """The goal's answer, without the agent-written label channels append (AI-2)."""
+    answer, label = reply.rsplit("\n\n", 1)
+    assert label.startswith("-- Written by an agent in Lightwork.")
+    return answer

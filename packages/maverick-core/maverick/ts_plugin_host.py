@@ -7,13 +7,17 @@ that seam. The wire protocol is NDJSON, one JSON object per line:
 
   - ``<command> --describe`` prints a one-line manifest and exits::
 
-        {"protocol": "maverick-plugin/1",
+        {"protocol": "maverick-plugin/2",
          "tools": [{"name": ..., "description": ..., "inputSchema": {...}}]}
 
   - otherwise the child reads requests on stdin and answers on stdout::
 
         {"id": 1, "tool": "echo", "args": {...}}
         -> {"id": 1, "result": "..."}  |  {"id": 1, "error": "..."}
+
+The current SDK emits ``maverick-plugin/2``; ``maverick-plugin/1`` remains an
+accepted legacy contract. These stdio versions are separate from the Python
+plugin manifest's API major.
 
 ``load_ts_plugin(command)`` runs the describe step and returns one
 ``maverick.tools.Tool`` per manifest entry; calls share a single persistent
@@ -40,6 +44,7 @@ import shutil
 import threading
 import time
 import uuid
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -131,6 +136,27 @@ class _PinnedCommand:
                 )
 
 
+@dataclass
+class _ChildLease:
+    """Process custody without retaining its tool or invocation owner."""
+
+    process: OwnedProcess | None = None
+
+    def close(self) -> None:
+        process, self.process = self.process, None
+        if process is not None:
+            process.close()
+
+
+def _release_child(lease: _ChildLease) -> None:
+    try:
+        lease.close()
+    except Exception:
+        # No invocation remains to receive this failure. Keep cleanup visible;
+        # never restart the process or repeat an earlier tool effect.
+        log.error("released ts plugin child cleanup incomplete")
+
+
 class _PluginChild:
     """One serialized invocation owner; restarting a process never replays work."""
 
@@ -141,23 +167,24 @@ class _PluginChild:
         self.call_timeout = call_timeout
         self.protocol = protocol
         self._pinned_command = command
-        self._proc: OwnedProcess | None = None
+        self._lease = _ChildLease()
+        # The finalizer must own only the lease. A bound method or this child
+        # in its arguments would retain the tools and recreate the leak.
+        self._finalizer = weakref.finalize(self, _release_child, self._lease)
         self._lock = threading.Lock()
         self._buffer = bytearray()
 
     def _ensure_started(self) -> OwnedProcess:
-        if self._proc is not None and self._proc.proc.poll() is not None:
+        if self._lease.process is not None and self._lease.process.proc.poll() is not None:
             self.close()
-        if self._proc is None:
+        if self._lease.process is None:
             self._pinned_command.verify()
-            self._proc = OwnedProcess(self.command, env=scrub_child_env())
-        return self._proc
+            self._lease.process = OwnedProcess(self.command, env=scrub_child_env())
+        return self._lease.process
 
     def close(self) -> None:
-        proc, self._proc = self._proc, None
         self._buffer.clear()
-        if proc is not None:
-            proc.close()
+        self._lease.close()
 
     def _response(self, child: OwnedProcess, rid: str, deadline: float, check) -> dict:
         received = len(self._buffer)
@@ -289,13 +316,17 @@ class _PluginChild:
             self._lock.release()
 
 
-# Children live as long as the process (tools have no lifecycle hooks); kill
-# them at interpreter exit so none outlive the host.
-_CHILDREN: list[_PluginChild] = []
+# Tool closures and active call frames retain their native child. Once the last
+# tool/call is released, its lease reaps the owned process; this index must not
+# keep discarded agent registries alive. Live children are also closed at exit.
+_CHILDREN: weakref.WeakSet[_PluginChild] = weakref.WeakSet()
+_CHILDREN_LOCK = threading.Lock()
 
 
 def _close_all_children() -> None:
-    for c in _CHILDREN:
+    with _CHILDREN_LOCK:
+        children = tuple(_CHILDREN)
+    for c in children:
         c.close()
 
 
@@ -329,6 +360,7 @@ def _fetch_manifest(command: _PinnedCommand) -> tuple[str, list[Any]]:
 
 def load_ts_plugin(
     command: list[str], *, call_timeout: float = DEFAULT_CALL_TIMEOUT,
+    expected_source_sha256: str | None = None,
 ) -> list[Tool]:
     """Load an NDJSON plugin; one Tool per manifest entry.
 
@@ -337,6 +369,8 @@ def load_ts_plugin(
     with an invalid name are skipped with a warning.
     """
     pinned_command = _PinnedCommand.from_command(command)
+    if expected_source_sha256 is not None and not any(item.arg_index == 1 and item.digest == expected_source_sha256 for item in pinned_command.files):
+        raise TsPluginError("Node plugin source changed before manifest discovery")
     protocol, manifest = _fetch_manifest(pinned_command)
     pinned_command.verify()
     child = _PluginChild(pinned_command, call_timeout, protocol)
@@ -362,7 +396,8 @@ def load_ts_plugin(
             fn=fn,
         ))
     if tools:
-        _CHILDREN.append(child)
+        with _CHILDREN_LOCK:
+            _CHILDREN.add(child)
     return tools
 
 
@@ -411,7 +446,16 @@ def load_configured_ts_plugins() -> list[Tool]:
             log.warning("[plugins] ts entry %r is not a list of strings; skipping", entry)
             continue
         try:
-            out.extend(load_ts_plugin(cmd))
-        except TsPluginError as e:
+            from .config import load_config
+            governed = (load_config().get("plugins") or {}).get("workbench", False) is True
+            if governed:
+                from .plugin_workbench_ts import admit, pin_tools
+                source_sha256 = admit(cmd)
+                tools = load_ts_plugin(cmd, expected_source_sha256=source_sha256)
+                tools = pin_tools(cmd, tools)
+            else:
+                tools = load_ts_plugin(cmd)
+            out.extend(tools)
+        except (TsPluginError, ValueError, PermissionError, OSError) as e:
             log.warning("ts plugin %s failed to load: %s", cmd, e)
     return out

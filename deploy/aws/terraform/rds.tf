@@ -4,6 +4,13 @@ resource "aws_db_subnet_group" "main" {
   tags       = { Name = "${local.name}-db" }
 }
 
+# Keep the final snapshot name stable across ordinary plans. Rotate this ID
+# before a separately reviewed second database retirement to avoid a name
+# collision with the first final snapshot.
+resource "random_id" "db_final_snapshot" {
+  byte_length = 8
+}
+
 resource "aws_db_instance" "main" {
   identifier     = "${local.name}-pg"
   engine         = "postgres"
@@ -25,10 +32,18 @@ resource "aws_db_instance" "main" {
   publicly_accessible    = false
   multi_az               = false
 
-  backup_retention_period = 7
-  deletion_protection     = false
-  skip_final_snapshot     = true
-  apply_immediately       = true
+  backup_retention_period   = 7
+  deletion_protection       = true
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${local.name}-pg-final-${random_id.db_final_snapshot.hex}"
+  apply_immediately         = true
 
   tags = { Name = "${local.name}-pg" }
+
+  # A surprising replacement must stop at the plan, not delete the live DB.
+  # Intentional retirement requires a separately reviewed config change and
+  # disabling AWS deletion protection before the final snapshot can be taken.
+  lifecycle {
+    prevent_destroy = true
+  }
 }

@@ -26,10 +26,12 @@ import email
 import email.utils
 import imaplib
 import logging
-import os
 import re
 import smtplib
+import ssl
 from email.message import EmailMessage
+
+from maverick.mail_auth import authenticated_from, valid_trusted_mail_server
 
 from .base import Channel, IncomingMessage, backoff_delay, is_allowed, normalize_allowlist
 
@@ -37,20 +39,6 @@ log = logging.getLogger(__name__)
 
 IMAP_TIMEOUT = 30.0
 SMTP_TIMEOUT = 30.0
-
-# Verdicts parsed out of the trusted `Authentication-Results` header the
-# receiving MX stamps on. We only act on an EXPLICIT negative (the strong spoof
-# signal); a domain that publishes no SPF/DKIM yields no verdict and is left to
-# the allowlist (that gap is inherent to IMAP -- there's no relay proof like the
-# Twilio/Meta HMAC channels have).
-_SPF_RE = re.compile(r"\bspf=(\w+)")
-_DKIM_RE = re.compile(r"\bdkim=(\w+)")
-# The authserv-id (first token before the first ';') identifies the ADMD that
-# stamped a given Authentication-Results header. Per RFC 8601 we may only trust
-# the header our own receiving MX added; lower headers are message body that any
-# upstream hop -- including the sender -- can forge.
-_AUTHSERV_RE = re.compile(r"\s*([^\s;]+)")
-
 
 # Reply-noise trimming: a reply carries the whole prior thread as quoted
 # text, re-ingested on EVERY message — the classic email token multiplier.
@@ -165,61 +153,6 @@ def _trim_reply_noise(body: str) -> str:
     return trimmed or text
 
 
-def _authentication_verdict(msg) -> str:
-    """Classify a message's inbound authentication as 'pass' | 'fail' | 'none'.
-
-    'fail' means the receiving server evaluated SPF/DKIM and the result was an
-    explicit failure (spf=fail/softfail or dkim=fail) with nothing passing --
-    i.e. the From is very likely forged. 'none' covers no Authentication-Results
-    header, or only neutral/none results (a domain without published records).
-
-    Only the TOPMOST Authentication-Results header is evaluated (RFC 8601):
-    the receiving MX prepends its own result, so the genuine verdict is first.
-    Lower headers are part of the message body and trivially forgeable -- joining
-    all of them let a forged ``spf=pass`` from an attacker-controlled relay mask
-    the trusted MX's ``spf=fail``. If ``EMAIL_TRUSTED_AUTHSERV_ID`` is set, the
-    topmost header is only trusted when its authserv-id matches (a stricter
-    guard against a hop that prepends a header above our own MX's).
-    """
-    headers = msg.get_all("Authentication-Results") or []
-    if not headers:
-        return "none"
-    trusted = _trusted_authserv_id()
-    header = None
-    if trusted:
-        for h in headers:
-            authserv = _AUTHSERV_RE.match(str(h))
-            if authserv and authserv.group(1).lower() == trusted:
-                header = str(h)
-                break
-        if header is None:
-            # No header carries our trusted authserv-id -- treat as unevaluated
-            # rather than trusting a stranger's verdict.
-            return "none"
-    else:
-        # No configured trust anchor: trust only the topmost header, which the
-        # receiving MX stamps on. Never join lower (forgeable) headers in.
-        header = str(headers[0])
-    text = header.lower()
-    spf = _SPF_RE.findall(text)
-    dkim = _DKIM_RE.findall(text)
-    if "pass" in spf or "pass" in dkim:
-        return "pass"
-    if any(v in ("fail", "softfail") for v in spf) or "fail" in dkim:
-        return "fail"
-    return "none"
-
-
-def _trusted_authserv_id() -> str:
-    """Optional configured authserv-id whose Authentication-Results we trust.
-
-    Defaults to empty (trust the topmost header). Set
-    ``EMAIL_TRUSTED_AUTHSERV_ID`` to the receiving MX's authserv-id to require an
-    exact match before any verdict is honored.
-    """
-    return (os.environ.get("EMAIL_TRUSTED_AUTHSERV_ID") or "").strip().lower()
-
-
 class EmailChannel(Channel):
     name = "email"
 
@@ -235,6 +168,8 @@ class EmailChannel(Channel):
         smtp_port: int = 465,
         poll_interval: int = 30,
         allowed_user_ids=None,
+        trusted_authserv_id: str = "",
+        oauth_config: dict | None = None,
     ):
         super().__init__(handler)
         # Without an allowlist, ANY inbound sender could drive the agent.
@@ -244,6 +179,9 @@ class EmailChannel(Channel):
         }
         if not self.allowed_user_ids:
             raise ValueError("Set EMAIL_ALLOWED_USER_IDS to restrict access")
+        if not valid_trusted_mail_server(trusted_authserv_id):
+            raise ValueError("Set the incoming mail server identity before email can start work")
+        self.trusted_authserv_id = trusted_authserv_id.strip()
         self.imap_host = imap_host
         self.imap_user = imap_user
         self.imap_password = imap_password
@@ -251,6 +189,12 @@ class EmailChannel(Channel):
         self.smtp_port = smtp_port
         self.smtp_user = smtp_user
         self.smtp_password = smtp_password
+        self._mail_cfg = {**(oauth_config or {}), "imap_host": imap_host,
+                          "imap_user": imap_user, "imap_password": imap_password,
+                          "smtp_host": smtp_host, "smtp_user": smtp_user,
+                          "smtp_password": smtp_password, "smtp_port": smtp_port,
+                          "trusted_authserv_id": self.trusted_authserv_id,
+                          "allowed_user_ids": sorted(self.allowed_user_ids)}
         self.poll_interval = poll_interval
         self._stop = False
 
@@ -279,6 +223,14 @@ class EmailChannel(Channel):
                 recovered, checkpoint = await asyncio.to_thread(journal.recovery_window, channel="email", account=self._account())
                 batch = {row["id"]: row for row in [*messages, *recovered]}
                 for row in batch.values():
+                    if row.get("restore_hold"):
+                        continue
+                    if row.get("route", {}).get("sender_auth") != "trusted_dmarc_pass":
+                        await asyncio.to_thread(
+                            journal.change, row, restore_hold=True,
+                            reason="Accepted before the inbound sender-authentication gate; review required",
+                        )
+                        continue
                     sender = row["message"]["user_id"]
                     if not is_allowed(sender.lower(), self.allowed_user_ids):
                         continue
@@ -292,6 +244,18 @@ class EmailChannel(Channel):
                         return None
                     await self.process_message(incoming, external_id=row["external_id"], account=self._account(),
                                                authorize=authority, send=send_saved, receipt=row, journal=journal)
+                    current = await asyncio.to_thread(journal.get, row["id"])
+                    if current and current.get("question_watch"):
+                        from .delivery import notify_queued_question
+
+                        async def send_question(message, reply, route):
+                            return await self.send(message.user_id, reply.text,
+                                                   subject=route["subject"])
+
+                        await notify_queued_question(
+                            current, authorize=lambda message: authority(),
+                            send=send_question, journal=journal,
+                        )
                 await asyncio.to_thread(journal.finish_recovery_window, checkpoint)
             except Exception:
                 log.warning("Email durable recovery window requires review")
@@ -334,50 +298,62 @@ class EmailChannel(Channel):
         return self.imap_host.lower() + ":" + self.imap_user.lower()
 
     def _fetch_unseen(self) -> list[dict]:
+        from maverick.microsoft_mail import authenticate_imap, mail_effect
+
         from .delivery import DeliveryJournal
 
         out = []
         journal = DeliveryJournal()
-        with imaplib.IMAP4_SSL(self.imap_host, timeout=IMAP_TIMEOUT) as mail:
-            mail.login(self.imap_user, self.imap_password)
-            status, _ = mail.select("INBOX")
+        with imaplib.IMAP4_SSL(self.imap_host, ssl_context=ssl.create_default_context(),
+                              timeout=IMAP_TIMEOUT) as mail:
+            authenticate_imap(mail, self._mail_cfg)
+            with mail_effect(self._mail_cfg):
+                status, _ = mail.select("INBOX")
             if status != "OK":
                 raise RuntimeError("Email inbox is unavailable")
-            _, validity = mail.response("UIDVALIDITY")
+            with mail_effect(self._mail_cfg):
+                _, validity = mail.response("UIDVALIDITY")
             epoch = validity[0].decode("ascii") if validity and isinstance(validity[0], bytes) else ""
             if not epoch.isdecimal():
                 raise RuntimeError("Email inbox identity is unavailable")
-            status, data = mail.uid("search", None, "UNSEEN")
+            with mail_effect(self._mail_cfg):
+                status, data = mail.uid("search", None, "UNSEEN")
             if status != "OK" or not data or not isinstance(data[0], bytes):
                 raise RuntimeError("Email unread-message query is unavailable")
             for uid in data[0].split()[:50]:
                 if not uid.isdigit():
                     raise RuntimeError("Email message identity is invalid")
-                status, msg_data = mail.uid("fetch", uid, "(BODY.PEEK[])")
+                with mail_effect(self._mail_cfg):
+                    status, msg_data = mail.uid("fetch", uid, "(BODY.PEEK[])")
                 if status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
                     raise RuntimeError("Email source message is unavailable")
                 payload = msg_data[0][1]
                 if not isinstance(payload, bytes):
                     raise RuntimeError("Email source message has no body")
                 parsed = email.message_from_bytes(payload)
-                sender = email.utils.parseaddr(parsed.get("From", ""))[1]
-                if (_authentication_verdict(parsed) == "fail"
-                        or not is_allowed(sender.lower(), self.allowed_user_ids)):
-                    mail.uid("store", uid, "+FLAGS", "\\Seen")
+                sender = authenticated_from(parsed, self.trusted_authserv_id)
+                if not sender or not is_allowed(sender.lower(), self.allowed_user_ids):
+                    log.warning("Incoming email refused: sender authentication or access failed")
+                    with mail_effect(self._mail_cfg):
+                        mail.uid("store", uid, "+FLAGS", "\\Seen")
                     continue
                 subject, body = str(parsed.get("Subject", "")), self._extract_body(parsed)
                 attachments = self._extract_attachments(parsed)
                 if not body and not attachments:
-                    mail.uid("store", uid, "+FLAGS", "\\Seen")
+                    with mail_effect(self._mail_cfg):
+                        mail.uid("store", uid, "+FLAGS", "\\Seen")
                     continue
                 external_id = epoch + ":" + uid.decode("ascii")
                 incoming = IncomingMessage(user_id=sender, text=f"Subject: {subject}\n\n{body}" if subject else (body or "Process the attached file(s)."),
                                            channel="email", message_id=external_id, attachments=attachments)
-                row = journal.admit(incoming, external_id=external_id, account=self._account(),
-                                    route={"subject": f"Re: {subject}" if subject else "Lightwork"})
+                with mail_effect(self._mail_cfg):
+                    row = journal.admit(incoming, external_id=external_id, account=self._account(),
+                                        route={"subject": f"Re: {subject}" if subject else "Lightwork",
+                                               "sender_auth": "trusted_dmarc_pass"})
                 # Crash after this acknowledgement is recovered from the
                 # bounded rotating journal window, never from a second run.
-                mail.uid("store", uid, "+FLAGS", "\\Seen")
+                with mail_effect(self._mail_cfg):
+                    mail.uid("store", uid, "+FLAGS", "\\Seen")
                 out.append(row)
         return out
 
@@ -431,10 +407,21 @@ class EmailChannel(Channel):
         msg.set_content(text)
         sending = False
         try:
-            with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=SMTP_TIMEOUT) as smtp:
-                smtp.login(self.smtp_user, self.smtp_password)
-                sending = True
-                refused = smtp.send_message(msg)
+            tls = ssl.create_default_context()
+            connection = (
+                smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=SMTP_TIMEOUT)
+                if self.smtp_port == 587 else
+                smtplib.SMTP_SSL(self.smtp_host, self.smtp_port,
+                                 context=tls, timeout=SMTP_TIMEOUT)
+            )
+            with connection as smtp:
+                if self.smtp_port == 587:
+                    smtp.starttls(context=tls)
+                from maverick.microsoft_mail import authenticate_smtp, mail_effect
+                authenticate_smtp(smtp, self._mail_cfg)
+                with mail_effect(self._mail_cfg):
+                    sending = True
+                    refused = smtp.send_message(msg)
                 if refused:
                     raise DeliveryNotSent("SMTP rejected the recipient")
         except (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError) as exc:

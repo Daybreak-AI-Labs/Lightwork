@@ -64,3 +64,34 @@ test("a delayed membership read cannot repaint after the page workspace changes"
   resolve(new Response('{"user:old-private-member":"operator"}'));await ui.settle();
   assert.equal(ui.el("list").textContent,"");assert.equal(ui.el("refresh").disabled,true);
 });
+
+test("workspace admin picker shows only the selected workspace's members and protects own role",async t=>{
+  const dom=new JSDOM('<section id="wm-root" data-tenant="acme" data-expected="acme"><select id="wm-tenant"><option value="acme" selected>Acme</option><option value="beta">Beta</option></select><p id="wm-status"></p><button id="wm-refresh">Refresh</button><ul id="wm-list"></ul><form id="wm-form"><select id="wm-principal"><option value="">Choose a colleague</option></select><select id="wm-role"><option value="">Choose a role</option></select><button>Save</button></form></section>',{url:"https://lightwork.example/users",runScripts:"outside-only"}),{window}=dom;
+  t.after(()=>window.close());const root=window.document.getElementById("wm-root"),el=id=>window.document.getElementById("wm-"+id);
+  root.dataset.globalAdmin="false";root.dataset.you="user:owner";
+  root.dataset.labels=JSON.stringify({"user:owner":"Owner","user:acme":"Acme member","user:beta":"Beta member"});
+  root.dataset.roleLabels=JSON.stringify({admin:"Administrator",viewer:"Viewer"});
+  root.dataset.rolePermissions=JSON.stringify({admin:["admin","view"],viewer:["view"]});
+  root.dataset.roleOptions=JSON.stringify({acme:["admin","viewer"],beta:["admin"]});
+  window.fetch=async url=>new Response(url.includes("/beta/")?'{"user:owner":"admin","user:beta":"viewer"}':'{"user:owner":"admin","user:acme":"viewer"}');
+  window.eval(fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-access-state.js"),"utf8"));window.eval(source);
+  const settle=async()=>{for(let i=0;i<10;i++)await new Promise(done=>setImmediate(done));};
+  el("refresh").click();await settle();
+  assert.deepEqual(Array.from(el("principal").options).map(option=>option.value),["","user:acme","user:owner"]);
+  assert.equal(el("list").querySelector("button[aria-label=\"Clear Owner's role in Acme\"]").disabled,true);
+  el("tenant").value="beta";el("tenant").dispatchEvent(new window.Event("change"));await settle();
+  assert.deepEqual(Array.from(el("principal").options).map(option=>option.value),["","user:beta","user:owner"]);
+  assert.deepEqual(Array.from(el("role").options).map(option=>option.value),["","admin"]);
+});
+
+test("workspace invite roles follow the selected workspace's authority",t=>{
+  const dom=new JSDOM('<select id="wi-tenant"><option value="acme" selected>Acme</option><option value="beta">Beta</option></select><select id="wi-role"><option value="viewer" selected>Viewer</option></select><section id="wm-root" data-tenant="acme" data-global-admin="false" data-role-options=\'{"acme":["viewer"],"beta":["admin","viewer"]}\' data-role-labels=\'{"admin":"Administrator","viewer":"Viewer"}\'><select id="wm-tenant"><option value="acme">Acme</option></select><p id="wm-status"></p><button id="wm-refresh">Refresh</button><ul id="wm-list"></ul><form id="wm-form"><select id="wm-principal"></select><select id="wm-role"></select></form></section>',{url:"https://lightwork.example/users",runScripts:"outside-only"}),{window}=dom;
+  t.after(()=>window.close());window.fetch=async()=>new Response("{}");
+  window.eval(fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-access-state.js"),"utf8"));window.eval(source);
+  const tenant=window.document.getElementById("wi-tenant"),role=window.document.getElementById("wi-role");
+  assert.deepEqual(Array.from(role.options).map(option=>option.value),["viewer"]);
+  tenant.value="beta";tenant.dispatchEvent(new window.Event("change"));
+  assert.deepEqual(Array.from(role.options).map(option=>option.value),["admin","viewer"]);
+  tenant.value="acme";tenant.dispatchEvent(new window.Event("change"));
+  assert.deepEqual(Array.from(role.options).map(option=>option.value),["viewer"]);
+});

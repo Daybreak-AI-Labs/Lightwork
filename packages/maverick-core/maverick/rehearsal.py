@@ -4,14 +4,11 @@ The same world-model that powers counterfactual *credit* (``counterfactual_rollo
 also powers counterfactual *foresight*: before an agent commits a risky plan,
 rehearse it against the model and gate on what the model predicts.
 
-The point is to flip governance from a brake into a capability. A blanket
-approval gate slows *every* high-risk action equally. Rehearsal lets the agent be
-**bold where the twin is confident it's safe**, and escalates only where the
-prediction is poor or -- crucially -- where the twin *doesn't know*. The
-world-model admitting its own ignorance is the whole safety case: an action in a
-state/with an action the model has never seen is not waved through and not
-silently blocked; it is escalated to a human / canary, because a simulator that
-bluffs is worse than no simulator.
+Rehearsal reports when the model supports an action, predicts a poor outcome,
+or lacks evidence. The default agent path observes this verdict while ordinary
+tool authorization continues. The experimental hold mode can use a poor or
+unknown verdict to stop a call, but it has no approval route in the product.
+The model must report uncertainty rather than imply it has evidence it lacks.
 
 ``rehearse`` is a pure function over a fitted
 :class:`~maverick.counterfactual_rollout.TransitionModel`: it Monte-Carlo rolls
@@ -19,12 +16,12 @@ the plan forward and returns a :class:`RehearsalVerdict` with the predicted
 outcome, an uncertainty (epistemic = no support; aleatoric = rollout spread), and
 a gate decision. ``gate_action`` is the governed entry point.
 
-Posture: ON by default with an explicit opt-out. When off, ``gate_action`` is a
-no-op that returns ``proceed`` (fail-open -- a disabled safety aid never blocks
-a run). When ON it fails toward caution: an unknown context, an over-uncertain rollout,
-or an internal error escalates rather than proceeding; a confidently-poor
-prediction blocks. Thresholds come from ``[rehearsal]`` config so the wizard can
-tune them. Pure, dependency-free, deterministic given a seed.
+Posture: predictions are on by default but observed without stopping tools.
+The pure ``gate_action`` function still returns an uncertainty/quality verdict;
+the agent only uses that verdict as a hold when ``[rehearsal] mode = "hold"``
+is explicitly configured. Other authorization checks remain separate.
+Thresholds come from ``[rehearsal]`` config. Pure, dependency-free,
+deterministic given a seed.
 """
 from __future__ import annotations
 
@@ -44,6 +41,7 @@ BLOCK = "block"
 
 _DEFAULTS = {
     "enable": False,
+    "mode": "observe",
     "outcome_floor": 0.5,    # predicted outcome below this (when confident) -> block
     "min_support": 5,        # (state, action) observations needed to "know"
     "max_uncertainty": 0.25, # rollout std above this -> escalate
@@ -78,11 +76,16 @@ def _settings() -> dict:
 
 
 def enabled() -> bool:
-    """Whether default-on rehearsal may gate actions; config uncertainty disables it."""
+    """Whether to calculate rehearsal predictions for high-risk actions."""
     _v = governed_learning_env_flag("MAVERICK_REHEARSAL")
     if _v is not None:
         return _v
     return bool(_settings().get("enable", False))
+
+
+def enforcing() -> bool:
+    """Whether an operator explicitly requested the experimental hold mode."""
+    return enabled() and _settings().get("mode", "observe") == "hold"
 
 
 def rehearse(
@@ -160,6 +163,7 @@ __all__ = [
     "ESCALATE",
     "BLOCK",
     "enabled",
+    "enforcing",
     "rehearse",
     "gate_action",
 ]

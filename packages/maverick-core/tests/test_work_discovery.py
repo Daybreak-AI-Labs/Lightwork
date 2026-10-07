@@ -4,6 +4,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from maverick.flow.runner import (
+    STATUS_COMPLETED,
+    STATUS_PAUSED_APPROVAL,
+    STATUS_REJECTED,
+    run_flow,
+)
 from maverick.work_discovery import (
     CapturePolicy,
     ObservedActivity,
@@ -159,8 +165,36 @@ def test_report_to_presentation_becomes_an_evidence_backed_unsaved_draft():
     assert bundle.flow.owner == "alice"
     assert bundle.flow.schedule == ""
     assert bundle.flow.nodes["human-review"].kind == "approval"
+    assert bundle.flow.start == "human-review"
+    assert bundle.flow.nodes["human-review"].next == "observed-1"
+    assert bundle.flow.nodes["observed-1"].next == "observed-2"
+    assert bundle.flow.nodes["observed-2"].next is None
     assert bundle.flow.validate() == []
     assert bundle.demonstration.source == "ekko-semantic-observation"
+
+    calls = []
+
+    def run_agent(node, brief, data):
+        calls.append(node.id)
+        return "draft", 0.9
+
+    flow = bundle.flow.copy()
+    paused = run_flow(flow, agent_fn=run_agent, action_fn=lambda *_: ("", 0.0))
+    assert paused.status == STATUS_PAUSED_APPROVAL
+    assert paused.cursor == "human-review"
+    assert calls == []
+
+    rejected = run_flow(flow, agent_fn=run_agent, action_fn=lambda *_: ("", 0.0),
+                        resume={"node_id": paused.cursor, "data": paused.data,
+                                "decision": "rejected"})
+    assert rejected.status == STATUS_REJECTED
+    assert calls == []
+
+    approved = run_flow(flow, agent_fn=run_agent, action_fn=lambda *_: ("", 0.0),
+                        resume={"node_id": paused.cursor, "data": paused.data,
+                                "decision": "approved"})
+    assert approved.status == STATUS_COMPLETED
+    assert calls == ["observed-1", "observed-2"]
 
 
 def test_discovery_deduplicates_event_ids_instead_of_double_counting():

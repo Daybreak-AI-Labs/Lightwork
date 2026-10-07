@@ -92,6 +92,45 @@ def _any_provider_key_set() -> bool:
         return False
 
 
+def task_step_readiness() -> dict[str, Any]:
+    """Plain current task-step readiness, without echoing invalid source values."""
+    from maverick import config
+
+    from . import settings_all_page as page
+    from . import settings_catalog as catalog
+
+    layers = page._sources()
+    setting = catalog.BY_ID["agent.max_steps"]
+    source = page._resolve(setting, layers)
+    tenant_present, _value = catalog.lookup(layers["tenant"], setting.path)
+    deployment = bool(source["locked"] or tenant_present)
+    try:
+        value = config.get_agent_max_steps()
+    except config.AgentStepConfigError:
+        remedy = (
+            "This limit is controlled by the installation’s deployment settings. "
+            "Ask the person responsible for this installation to correct it; saving here cannot override it."
+            if deployment else
+            "An administrator can open All settings → AI models → ‘Most steps an agent may take’ "
+            "and choose a positive whole number, or use Reset to product default for no step limit."
+        )
+        return {"ready": False, "max_steps": None, "deployment_managed": deployment,
+                "reason": "New tasks cannot start because the task-step limit is invalid. " + remedy,
+                "settings": {"label": "Review task-step limit", "href": "/settings/all?id=agent.max_steps"}}
+    return {"ready": True, "max_steps": value, "deployment_managed": deployment,
+            "reason": "No step limit is set; spending and time limits still apply." if value is None else
+                      f"Each agent can take up to {value} steps on a task.",
+            "settings": {"label": "Review task-step limit", "href": "/settings/all?id=agent.max_steps"}}
+
+
+def require_task_settings_or_400() -> None:
+    from fastapi import HTTPException
+
+    state = task_step_readiness()
+    if not state["ready"]:
+        raise HTTPException(400, state["reason"], headers={"X-Lightwork-Task-Settings": "agent.max_steps"})
+
+
 def require_provider_or_400(*, role: str | None = None) -> None:
     """Raise HTTP 400 unless the route(s) this operation uses are complete.
 
@@ -99,6 +138,8 @@ def require_provider_or_400(*, role: str | None = None) -> None:
     is created. A drafting endpoint can name its one role so an unrelated or
     incomplete worker route does not block a single bounded completion.
     """
+    if role is None:
+        require_task_settings_or_400()
     try:
         from maverick.config import load_config
         from maverick.operator_preflight import (

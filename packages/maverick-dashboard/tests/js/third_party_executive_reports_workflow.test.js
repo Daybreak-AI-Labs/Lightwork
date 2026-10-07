@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
 const markup = fs.readFileSync(path.join(folder, "templates/third_party_executive_reports.html"), "utf8")
@@ -61,6 +62,7 @@ async function fixture({ ready = true, admin = true } = {}) {
     const reply = call.method === "GET" && replies[call.url.pathname] ? replies[call.url.pathname] : { ok: true, count: 0 };
     return new Response(JSON.stringify(reply), { status: 200, headers: { "Content-Type": "application/json" } });
   };
+  shell(window);
   window.eval(helpers);
   window.eval(source);
   async function settle() { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); }

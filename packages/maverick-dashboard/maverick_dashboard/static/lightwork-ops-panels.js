@@ -16,39 +16,28 @@
     if (text != null) node.textContent = String(text);
     return node;
   }
-  function say(node, text) { if (node) node.textContent = String(text || ''); }
+  function say(node, text) { window.mvStatus(node, String(text || '')); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function human(value) { return window.mvHuman ? window.mvHuman(value) : String(value || ''); }
+  // A calendar day in the shared date format ("Oct 6, 2026"); the raw value stays the option value.
+  function dayText(day) { return (window.mvDateAbsolute && window.mvDateAbsolute(day)) || String(day || ''); }
   function when(stamp) {
     if (typeof stamp === 'number') return window.mvWhen ? window.mvWhen(stamp) : new Date(stamp * 1000).toLocaleString();
     var d = new Date(stamp);
-    return isNaN(d.getTime()) ? '' : d.toLocaleString();
+    return isNaN(d.getTime()) ? '' : window.mvTimeAbsolute ? window.mvTimeAbsolute(stamp) : d.toLocaleString();
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function failText(failure, action) {
     // A server sentence written for people is shown as is.
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return errorText(failure, action);
   }
   async function request(url, options) {
     options = options || {};
-    var init = {method: options.method || 'GET', credentials: 'same-origin', cache: 'no-store',
-      headers: {Accept: 'application/json'}};
-    if (options.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(options.json);
-    }
-    var response = await window.fetch(url, init);
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
   }
   async function confirmed(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, {okText: okText}) : false;
@@ -128,7 +117,7 @@
       try {
         var state = await request(statusUrl);
         if (state.state === 'ready') { done(null, statusUrl + '/download'); return; }
-        if (state.state === 'failed') { done(state.message || 'The download could not be prepared.'); return; }
+        if (state.state === 'failed') { done(state.message || 'The download could not be prepared. Try again.'); return; }
       } catch (failure) { done(await failText(failure, 'prepare the download')); return; }
       if (tries > 400) { done('This is taking too long. Try again later.'); return; }
       setTimeout(poll, 2000);
@@ -157,13 +146,16 @@
           daySel.textContent = '';
           if (!data.days.length) daySel.appendChild(el('option', null, 'No days recorded yet'));
           data.days.forEach(function (d) {
-            var o = el('option', null, d.day + (d.has_checkpoint ? ' (has a checkpoint)' : ''));
+            var o = el('option', null, dayText(d.day) + (d.has_checkpoint ? ' (has a checkpoint)' : ''));
             o.value = d.day;
             daySel.appendChild(o);
           });
         }
         if (!data.checkpoints.length) {
-          rows.appendChild(el('p', 'muted', 'No checkpoints yet. Choose a day and publish its checkpoint to start.'));
+          var how = daySel ? 'Choose a day above and publish its checkpoint to start.' : 'An administrator publishes them.';
+          rows.appendChild(window.mvEmpty
+            ? window.mvEmpty('No checkpoints yet', 'Published checkpoints appear here, one per day. ' + how, null, { compact: true })
+            : el('p', 'muted', 'No checkpoints yet. ' + how));
           return;
         }
         rows.appendChild(table(['Day', 'Kind', 'Entries covered', 'Published', 'Actions'],
@@ -172,23 +164,23 @@
             var keep = el('a', 'btn btn--ghost', 'Keep a receipt');
             keep.href = '/api/v1/audit/checkpoints/' + encodeURIComponent(c.sequence) + '/receipt';
             keep.setAttribute('download', '');
-            keep.setAttribute('aria-label', 'Keep a receipt for the checkpoint of ' + c.day);
+            keep.setAttribute('aria-label', 'Keep a receipt for the checkpoint of ' + dayText(c.day));
             actions.appendChild(keep);
             if (canAdmin && c.can_retire) {
               var retire = button('Retire', 'btn btn--danger');
               retire.setAttribute('data-sequence', String(c.sequence));
-              retire.setAttribute('aria-label', 'Retire the checkpoint of ' + c.day);
+              retire.setAttribute('aria-label', 'Retire the checkpoint of ' + dayText(c.day));
               retire.addEventListener('click', busy(retire, async function () {
-                if (!(await confirmed('Retire the checkpoint of ' + c.day + '? That day was deleted by your record-keeping policy; retiring records that on purpose so later checks do not flag it. This cannot be undone.', 'Retire'))) return;
+                if (!(await confirmed('Retire the checkpoint of ' + dayText(c.day) + '? That day was deleted by your record-keeping policy; retiring records that on purpose so later checks do not flag it. This cannot be undone.', 'Retire'))) return;
                 try {
                   await request('/api/v1/audit/checkpoints/retire', {method: 'POST', json: {sequence: c.sequence, confirm: true}});
-                  say(result, 'The checkpoint of ' + c.day + ' was retired.');
+                  say(result, 'The checkpoint of ' + dayText(c.day) + ' was retired.');
                   await load();
                 } catch (failure) { say(result, await failText(failure, 'retire the checkpoint')); }
               }));
               actions.appendChild(retire);
             }
-            return [c.day, c.kind, String(c.entries), when(c.created_at), actions];
+            return [dayText(c.day), c.kind, String(c.entries), when(c.created_at), actions];
           }), 'Published checkpoints, newest first'));
       } catch (failure) {
         say(rows, await failText(failure, 'load the checkpoints'));
@@ -202,12 +194,12 @@
       var erasure = $('ops-ckpt-erasure') && $('ops-ckpt-erasure').checked;
       var message = erasure
         ? 'Start a new checkpoint for ' + day + ' because its log changed after a person\'s data was erased? The earlier checkpoint stays on record.'
-        : 'Publish the checkpoint of ' + day + '? It is kept in a separate folder so a later change to that day can be proven.';
+        : 'Publish the checkpoint of ' + dayText(day) + '? It is kept in a separate folder so a later change to that day can be proven.';
       if (!(await confirmed(message, 'Publish'))) return;
       say(result, 'Publishing…');
       try {
         var done = await request('/api/v1/audit/checkpoints/publish', {method: 'POST', json: {day: day, after_erasure: !!erasure}});
-        say(result, 'Published checkpoint ' + done.sequence + ' for ' + done.day + '. Keep its receipt somewhere else, such as your email, so rolling it back can be caught.');
+        say(result, 'Published checkpoint ' + done.sequence + ' for ' + dayText(done.day) + '. Keep its receipt somewhere else, such as your email, so rolling it back can be caught.');
         await load();
       } catch (failure) { say(result, await failText(failure, 'publish the checkpoint')); }
     }));
@@ -218,18 +210,18 @@
       var receipt = null;
       if (file) {
         if (file.size > 4096) { say(result, 'That file is too large to be a checkpoint receipt.'); return; }
-        try { receipt = await readFile(file); } catch (e) { say(result, 'That file could not be read.'); return; }
+        try { receipt = await readFile(file); } catch (e) { say(result, 'That file could not be read. Choose it again, or try a different file.'); return; }
       }
       say(result, 'Checking…');
       try {
         var v = await request('/api/v1/audit/checkpoints/verify', {method: 'POST', json: {receipt: receipt}});
         result.textContent = '';
         if (v.intact) {
-          result.appendChild(el('p', null, 'Every checkpoint matches the activity log.' +
+          result.appendChild(el('p', null, 'The signed checkpoint commitments match the retained prefixes of the activity log. Later entries beyond those prefixes are outside this check.' +
             (v.keys_pinned ? ' Every checkpoint is signed with a pinned key.' : '') +
-            (v.pinned ? ' Your kept receipt matches too.' : ' Choose a kept receipt to also check nothing was rolled back.')));
+            (v.pinned ? ' Your kept receipt matches too.' : ' Choose a receipt you kept independently to compare checkpoint history through that receipt.')));
         } else if (v.none_yet) {
-          result.appendChild(el('p', null, 'No checkpoints have been published yet.'));
+          result.appendChild(el('p', null, 'No checkpoints have been published yet. Publish one above to fix the audit history at this point.'));
         } else {
           result.appendChild(el('p', null, 'Problems were found:'));
           var ul = el('ul');
@@ -263,7 +255,13 @@
         say($('ops-ckpt-where'), where);
         var list = $('ops-ckpt-keys');
         list.textContent = '';
-        if (!data.keys.length) list.appendChild(el('li', 'muted', 'No keys are pinned.'));
+        if (!data.keys.length) {
+          var none = el('li');
+          none.appendChild(window.mvEmpty
+            ? window.mvEmpty('No keys pinned', 'Pinned keys appear here. Until you pin one, checkpoints signed by any key this installation trusts are accepted. Pin a key below to accept only the checkpoints it signs.', null, { compact: true })
+            : el('span', 'muted', 'No keys are pinned.'));
+          list.appendChild(none);
+        }
         data.keys.forEach(function (k) {
           var li = el('li');
           li.appendChild(el('span', null, (k.own ? 'This installation\'s key' : 'Key') + ', fingerprint '));
@@ -327,7 +325,7 @@
       if (!f) return;
       if (f.size > 4096) { say(msg, 'That file is too large to be a public key.'); return; }
       var text;
-      try { text = await readFile(f); } catch (e) { say(msg, 'That file could not be read.'); return; }
+      try { text = await readFile(f); } catch (e) { say(msg, 'That file could not be read. Choose it again, or try a different file.'); return; }
       await pin({key: text.trim()});
       file.value = '';
     });
@@ -409,7 +407,7 @@
         out.appendChild(table(['Gap', 'Fix', 'Actions'], data.fixes.map(function (f) {
           var actions = el('span', 'ops-actions');
           if (f.can_apply && canInstall) {
-            var apply = button('Apply this fix', 'btn btn--primary');
+            var apply = button('Apply this fix', 'btn');
             apply.addEventListener('click', busy(apply, async function () {
               if (!(await confirmed('Apply this fix: ' + f.label + '? Lightwork\'s own settings change, the change is recorded in the activity log, and it takes effect after Lightwork restarts.', 'Apply'))) return;
               try {
@@ -449,7 +447,7 @@
       }
       if (!window.mvForm) return;
       var fields = regimes.map(function (r) { return {key: 'law:' + r.regime, label: r.name, type: 'bool'}; });
-      fields.push({key: 'people', label: 'About how many people are affected', type: 'number', default: 0});
+      fields.push({key: 'people', label: 'People affected (whole number, blank if unknown)', type: 'text'});
       fields.push({key: 'discovered', label: 'Day it was discovered', type: 'date'});
       fields.push({key: 'sensitive', label: 'It involves sensitive data (health, money, identity numbers)', type: 'bool'});
       fields.push({key: 'malicious', label: 'Someone did this on purpose', type: 'bool'});
@@ -458,7 +456,16 @@
       var chosen = Object.keys(values).filter(function (k) { return k.indexOf('law:') === 0 && values[k] === true; })
         .map(function (k) { return k.slice(4); });
       if (!chosen.length) { say(out, 'Choose at least one law.'); return; }
-      var people = Math.max(0, Math.floor(Number(values.people) || 0));
+      var rawPeople = values.people == null ? '' : String(values.people).trim();
+      if (rawPeople && !/^(0|[1-9][0-9]*)$/.test(rawPeople)) {
+        say(out, 'Enter a whole number of people, or leave the count blank if it is unknown.');
+        return;
+      }
+      var people = rawPeople ? Number(rawPeople) : null;
+      if (people !== null && !Number.isSafeInteger(people)) {
+        say(out, 'Enter a smaller whole number of people.');
+        return;
+      }
       var body = {jurisdictions: chosen, subjects_affected: people, sensitive: !!values.sensitive, malicious: !!values.malicious};
       if (values.discovered) {
         var t = Date.parse(values.discovered + 'T00:00:00');
@@ -468,6 +475,9 @@
       try {
         var plan = await request('/api/v1/breach/plan', {method: 'POST', json: body});
         out.textContent = '';
+        if (plan.subjects_affected == null) {
+          out.appendChild(el('p', 'muted', 'Affected-person count not provided. Check count-based reporting thresholds before relying on this plan.'));
+        }
         out.appendChild(table(['Law', 'Tell', 'Deadline', 'Notes'], (plan.obligations || []).map(function (o) {
           return [o.name || human(o.regime), o.authority, o.authority_due_at ? when(o.authority_due_at) : 'As the law sets out', o.threshold_note || ''];
         }), 'Who to tell and by when'));
@@ -559,7 +569,7 @@
         {key: 'name', label: 'Name (' + p.name + ')', type: 'text', required: true}], {okText: 'Erase documents'}) : null;
       if (!typed) return;
       if (String(typed.name || '').trim().toLowerCase() !== p.name.trim().toLowerCase()) {
-        say(out, 'The name you typed does not match. Nothing was erased.');
+        say(out, 'The name you typed does not match. Nothing was erased. Type the exact name to continue.');
         return;
       }
       say(out, 'Erasing…');
@@ -597,7 +607,7 @@
       var data = await request('/api/v1/governance-ops/gateway');
       box.textContent = '';
       box.appendChild(el('p', null, data.summary));
-      if (!data.callers.length) { box.appendChild(el('p', 'muted', 'No app has used the AI gateway yet.')); return; }
+      if (!data.callers.length) { box.appendChild(el('p', 'muted', 'No app has used the AI gateway yet. Apps appear here after their first request through the gateway.')); return; }
       box.appendChild(table(['App', 'Team', 'AI model', 'Requests', 'Last result', 'Last used'], data.callers.map(function (c) {
         return [c.app, c.team, c.model, String(c.calls), c.last_result, when(c.last_seen)];
       }), 'Apps that used the AI gateway, most recent first'));
@@ -665,7 +675,7 @@
       var f = file.files[0];
       if (!f) return;
       if (f.size > 2 * 1024 * 1024) { say(out, 'That spreadsheet is too large.'); return; }
-      try { sheetText = await readFile(f); } catch (e) { say(out, 'That file could not be read.'); return; }
+      try { sheetText = await readFile(f); } catch (e) { say(out, 'That file could not be read. Choose it again, or try a different file.'); return; }
       var lines = sheetText.split(/\r?\n/).filter(function (l) { return l.trim(); });
       header = (lines[0] || '').split(',').map(function (h) { return h.trim().replace(/^"|"$/g, ''); });
       rowCount = Math.max(0, lines.length - 1);
@@ -723,7 +733,7 @@
         var started = await request('/api/v1/governance-ops/underwriting-pack', {method: 'POST', json: {asset_id: asset || null}});
         waitForDownload('/api/v1/governance-ops/underwriting-pack/' + encodeURIComponent(started.job), function (problem, href) {
           if (problem) { say(out, problem); return; }
-          var a = el('a', 'btn btn--primary', 'Save the pack');
+          var a = el('a', 'btn', 'Save the pack');
           a.href = href; a.setAttribute('download', '');
           link.appendChild(a);
           say(out, 'The pack is ready.');
@@ -813,7 +823,7 @@
       var f = $('ops-network-file') && $('ops-network-file').files[0];
       if (f) {
         if (f.size > 512 * 1024) { say(out, 'That file is too large.'); return; }
-        try { body.graph = await readFile(f); } catch (e) { say(out, 'That file could not be read.'); return; }
+        try { body.graph = await readFile(f); } catch (e) { say(out, 'That file could not be read. Choose it again, or try a different file.'); return; }
       }
       say(out, 'Checking every assistant. This can take a little while…');
       try {

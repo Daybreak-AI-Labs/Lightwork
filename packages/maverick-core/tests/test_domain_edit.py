@@ -10,7 +10,14 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 import pytest
-from maverick.domain import available_domains, builtin_dir, lint_profile, load_domains
+from maverick.domain import (
+    DomainProfile,
+    WorkflowStep,
+    available_domains,
+    builtin_dir,
+    lint_profile,
+    load_domains,
+)
 from maverick.domain_edit import (
     list_agents,
     overlay_toml,
@@ -18,8 +25,36 @@ from maverick.domain_edit import (
     remove_override,
     resolved_view,
     validate_override,
+    workflow_readiness,
     write_override,
 )
+
+
+def test_workflow_readiness_names_missing_actions_without_claiming_live_service():
+    profile = DomainProfile(
+        name="example", allow_tools=["read_file", "web_search", "ledger_read"],
+        workflow=[WorkflowStep(name="research", tools=["web_search"])],
+    )
+    blocked = workflow_readiness(profile, frozenset({"read_file"}))
+    assert blocked["state"] == "needs_setup"
+    assert blocked["missing_tools"] == ["web_search"]
+    assert blocked["fix_url"] == "/settings/all?id=capabilities.web_search"
+    assert blocked["missing_optional_tools"] == ["ledger_read"]
+
+    can_start = workflow_readiness(profile, frozenset({"read_file", "web_search"}))
+    assert can_start["state"] == "action_ready"
+    assert can_start["missing_optional_tools"] == ["ledger_read"]
+    assert workflow_readiness(profile, None)["state"] == "unknown"
+
+
+def test_workflow_readiness_does_not_call_a_turned_off_department_ready():
+    profile = DomainProfile(name="gtm_example", allow_tools=["read_file"])
+    blocked = workflow_readiness(
+        profile, frozenset({"read_file"}), disabled_suites=frozenset({"sales_gtm"}),
+    )
+    assert blocked["state"] == "needs_setup"
+    assert blocked["label"] == "Department turned off"
+    assert "suites.%2A" in blocked["fix_url"]
 
 
 def _clean_builtin():
@@ -37,6 +72,19 @@ def tenant_dir(tmp_path, monkeypatch):
 
 
 class TestOverlayToml:
+    def test_autonomy_policy_round_trips_before_workflow_tables(self):
+        loaded = tomllib.loads(overlay_toml({
+            "name": "p",
+            "autonomy": {"default": "request", "low": "auto", "medium": None,
+                         "high": "suggest", "onboarding": False},
+            "workflow": [{"name": "review", "tools": ["read_file"]}],
+        }))
+        assert loaded["autonomy"] == {
+            "default": "request", "low": "auto", "high": "suggest",
+            "onboarding": False,
+        }
+        assert loaded["workflow"][0]["name"] == "review"
+
     def test_round_trips_through_loader(self):
         patch = {
             "name": "p",
@@ -175,6 +223,26 @@ class TestValidateAndList:
         errors, _ = validate_override("nope", {"persona": "x" * 250})
         assert errors                               # empty allow_tools etc.
         assert read_override("nope") == {}          # nothing was written
+
+    def test_inherited_path_and_host_scopes_cannot_be_removed(self, tenant_dir):
+        from maverick.domain import rejected_workspace_domains
+
+        write_override("a_parent", {
+            "allow_tools": ["read_file"], "max_risk": "low",
+            "allow_paths": ["C:/approved/*"],
+            "allow_hosts": ["approved.example"],
+        })
+        patch = {"extends": "a_parent", "allow_paths": [], "allow_hosts": []}
+        errors, _ = validate_override("z_child", patch)
+        assert any("allow_paths cannot broaden" in e for e in errors)
+        assert any("allow_hosts cannot broaden" in e for e in errors)
+
+        (tenant_dir / "z_child.toml").write_text(
+            'name = "z_child"\nextends = "a_parent"\n'
+            'allow_paths = []\nallow_hosts = []\n', encoding="utf-8",
+        )
+        assert "z_child" not in available_domains()
+        assert rejected_workspace_domains()["z_child"]
 
     def test_list_agents_flags_overrides(self, tenant_dir):
         name, _ = _clean_builtin()

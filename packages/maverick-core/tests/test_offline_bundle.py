@@ -104,7 +104,12 @@ def test_glance_truncates_titles():
 # ---------- bundle ----------
 
 
-def test_bundle_schema_and_determinism():
+def test_bundle_schema_and_determinism(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_global_config", dict)
+    monkeypatch.setattr(config, "load_config", dict)
+    monkeypatch.setattr(config, "config_source_errors", lambda **kwargs: {})
     w = make_world()
     a = build_bundle(w, now=1000.0)
     b = build_bundle(w, now=1000.0)
@@ -112,7 +117,13 @@ def test_bundle_schema_and_determinism():
     assert a["schema"] == SCHEMA == "maverick-offline/1"
     assert a["as_of"] == 1000.0
     assert a["glance"]["as_of"] == 1000.0
-    assert set(a) == {"schema", "as_of", "glance", "goals", "recent_events"}
+    assert set(a) == {"schema", "as_of", "glance", "goals", "recent_events", "cache_policy"}
+    policy = a["cache_policy"]
+    assert set(policy) == {"allowed", "max_age_seconds", "max_bytes", "revision", "message"}
+    assert policy["allowed"] is True
+    assert policy["max_age_seconds"] == 86400
+    assert policy["max_bytes"] == 2 * 1024 * 1024
+    assert len(policy["revision"]) == 64 and policy["message"]
 
 
 def test_bundle_exact_field_sets():

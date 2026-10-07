@@ -62,7 +62,8 @@ def test_theme_switch_preserves_query_params(monkeypatch, tmp_path):
     assert 'data-ui-preference="theme"' in r.text
     script = _client().get("/static/lightwork-ui.js")
     assert script.status_code == 200
-    assert "target.searchParams.set(key, select.value)" in script.text
+    assert "fetch('/api/v1/preferences/display'" in script.text
+    assert "window.mvApplyDisplayPreference(key, value)" in script.text
     # The old clobbering assignment is gone.
     assert "window.location.search = '?theme='" not in r.text
 

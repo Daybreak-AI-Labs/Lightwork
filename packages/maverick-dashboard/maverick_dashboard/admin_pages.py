@@ -9,15 +9,80 @@ templates.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from . import auth
+from . import _shared, auth, step_up
+from .notification_health import router as notification_health_router
 
 router = APIRouter()
+router.include_router(notification_health_router)
+
+
+def _admin_audit(request: Request, action: str, **payload) -> None:
+    """One activity-log row per administrator change made from these pages
+    (invites, department access, settings saves). A configured custody refusal
+    stops the change from looking recorded; ordinary writer trouble is logged
+    by the audit subsystem and never blocks the page."""
+    from .audit_actions_api import _audit_event
+
+    _audit_event(request, action, **payload)
+
+
+def _setting_write(request: Request, section: str, key: str, project,
+                   *, confirmed: bool = False, changed_fields=None):
+    from .settings_audit import bind_setting_write
+
+    return bind_setting_write(request, section=section, key=key,
+                              project=project, confirmed=confirmed,
+                              changed_fields=changed_fields)
+
+
+def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
+    """Record only credential presence; never put a key or endpoint in Activity."""
+    providers = data.get("providers") or {}
+    value = providers.get(name) if isinstance(providers, dict) else None
+    value = value if isinstance(value, dict) else {}
+    setup = {field: value.get(field) for field in
+             ("auth_mode", "deployment", "api_version", "endpoint", "region", "model_id")
+             if value.get(field)}
+    return {
+        "api_key": "set" if value.get("api_key") else "not set",  # pragma: allowlist secret
+        "base_url": "set" if value.get("base_url") else "not set",
+        "setup_sha256": hashlib.sha256(json.dumps(setup, sort_keys=True).encode()).hexdigest(),
+    }
+
+
+def _provider_changed_fields(old: dict, new: dict, name: str) -> list[str]:
+    """Name changed connection fields without recording their values or hashes."""
+    def provider(data: dict) -> dict:
+        providers = data.get("providers") or {}
+        value = providers.get(name) if isinstance(providers, dict) else None
+        return value if isinstance(value, dict) else {}
+
+    before, after = provider(old), provider(new)
+    labels = {
+        "api_key": "access key", "base_url": "service address",  # pragma: allowlist secret
+        "auth_mode": "sign-in method", "deployment": "deployment",
+        "api_version": "service version", "endpoint": "endpoint",
+        "region": "region", "model_id": "model",
+    }
+    return [label for field, label in labels.items() if before.get(field) != after.get(field)]
+
+
+def _rate_audit_value(data: dict, spec: str) -> dict[str, object]:
+    """Prove the exact rate changed without publishing contract references."""
+    row = (data.get("model_rates") or {}).get(spec)
+    if row is None:
+        return {"configured": False}
+    fingerprint = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
+    return {"configured": True, "sha256": fingerprint}
 
 
 def _app():
@@ -40,6 +105,15 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     return _settings_response(request, saved)
 
 
+def _api_keys_enabled() -> bool:
+    try:
+        from . import api_keys
+
+        return api_keys.enabled()
+    except Exception:
+        return False
+
+
 def _settings_response(request: Request, saved: str = "", *, notice: str = "",
                        status_code: int = 200) -> HTMLResponse:
     """The settings page; ``notice`` is a message shown instead of "Saved"
@@ -56,6 +130,7 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         allowed_models,
         budget_override,
         default_model_override,
+        model_rate_overrides,
         role_model_override,
         task_limits_override,
     )
@@ -68,6 +143,28 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
     role_models = [
         (label, role, model_for_role(role), role_model_override(role))
         for label, role in roles
+    ]
+    from maverick.budget import UnpricedModelError, _lookup_price_quote
+
+    route_prices = []
+    for label, spec in [("Default", model_for_role("default"))] + [
+        (label, effective) for label, _, effective, _ in role_models
+    ]:
+        try:
+            quote = _lookup_price_quote(spec)
+        except UnpricedModelError:
+            quote = None
+        route_prices.append({
+            "label": label, "spec": spec,
+            "status": ("Will stop before a paid request" if quote is None else
+                       "Administrator ceiling" if quote.rate_card_version == "operator-ceiling-v1" else
+                       "Tracked price" if quote.verified else "Estimate only"),
+            "ready": quote is not None,
+        })
+    today = datetime.now(timezone.utc).date()
+    operator_rates = [
+        {"spec": spec, **rate, "active": rate["valid_until"] >= today.isoformat()}
+        for spec, rate in sorted(model_rate_overrides().items())
     ]
     model_options = list(catalog_specs())
     seen = {s for s, _ in model_options}
@@ -112,6 +209,16 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         provider["readiness"] = provider_readiness(
             provider["name"], configured=provider["configured"]
         )
+    # The one truth about whether an AI service is connected: the header,
+    # each provider row and every other page read the same verdict.
+    from maverick_dashboard.provider_readiness import (
+        apply_to_rows,
+        attention_provider,
+        workspace_readiness,
+    )
+
+    workspace = workspace_readiness()
+    apply_to_rows(cfg_state["providers"], workspace)
     # Grouped pickers: every model the configured keys can reach (cached live
     # discovery) plus the shipped catalog, capped by the allow-list.
     from maverick_dashboard import model_pickers
@@ -129,6 +236,8 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "roles": "Role models updated.",
         "budget": "Task spending limit updated.",
         "allowed": "Approved models updated.",
+        "model_rate": "Model spending ceiling updated.",
+        "model_rate_removed": "Model spending ceiling removed.",
         "discover": "Model lists refreshed from your provider keys.",
         "providers": "Provider keys updated.",
         "provider_test": "Connection test finished. The result is shown next to the provider.",
@@ -145,6 +254,8 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "models": "models",
         "roles": "models",
         "allowed": "models",
+        "model_rate": "models",
+        "model_rate_removed": "models",
         "discover": "models",
         "discovery": "models",
         "providers": "integrations",
@@ -173,12 +284,19 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "visibility_matrix": ui_visibility.matrix(),
         "visibility_roles": list(rbac.known_roles()),
         "role_models": role_models,
+        "route_prices": route_prices,
+        "operator_rates": operator_rates,
+        "price_today": today.isoformat(),
+        "price_review_until": (today + timedelta(days=30)).isoformat(),
         "model_options": model_options,
         "picker_options": picker_options,
         "allowed_models": sorted(allow),
         "pinned_model": default_model_override(),
         **pickers,
         "providers": cfg_state["providers"],
+        "workspace": workspace,
+        # The row "Open AI provider keys" (?focus=ai-provider) lands on.
+        "ai_focus_provider": attention_provider(workspace),
         "capabilities": cfg_state["capabilities"],
         "features": cfg_state["features"],
         "budget": budget_override(),
@@ -187,6 +305,10 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
                                 else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
         "discovery_locked": bool(__import__("os").environ.get("MAVERICK_MODEL_DISCOVERY", "").strip()),
         "webhook_configured": webhook_configured,
+        # The static server token is the break-glass credential: it has no
+        # person behind it and no scopes, so Settings says so while it is set.
+        "static_token_set": bool(_shared.dashboard_token()),
+        "api_keys_enabled": _api_keys_enabled(),
         "saved": saved_msg,
         "saved_section": saved_section,
         "notice": notice,
@@ -204,6 +326,7 @@ async def settings_set_model(request: Request) -> RedirectResponse:
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
         allowed_models,
         clear_default_model,
         set_default_model,
@@ -214,14 +337,107 @@ async def settings_set_model(request: Request) -> RedirectResponse:
     allow = await run_in_threadpool(allowed_models)
     if model and allow and model not in allow:
         raise HTTPException(status_code=400, detail="model not in the allowed list")
+    from maverick.runtime_overrides import default_model_override
+    previous = await run_in_threadpool(default_model_override)
     try:
-        if model:
-            await run_in_threadpool(set_default_model, model)
-        else:
-            await run_in_threadpool(clear_default_model)
+        with _setting_write(request, "models", "default", lambda d:
+                            (d.get("models") or {}).get("default")):
+            if model:
+                await run_in_threadpool(set_default_model, model)
+            else:
+                await run_in_threadpool(clear_default_model)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Model settings could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_models")
+    from . import agent_changelog
+    agent_changelog.record(agent_changelog.EVERY_AGENT,
+                           agent_changelog.describe_default_model(previous, model or None),
+                           by=auth.caller_principal(request) or "")
     return RedirectResponse("/settings?saved=models", status_code=303)
+
+
+@router.post("/settings/models/rate")
+async def settings_set_model_rate(request: Request) -> RedirectResponse:
+    """Admin-attested ceiling for one exact provider route; never an invoice rate."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    from maverick.budget import UnpricedModelError, _lookup_price_quote
+    from maverick.llm import _parse_spec
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        model_rate_overrides,
+        set_model_rate,
+    )
+
+    from .model_pickers import chosen
+
+    form = await request.form()
+    spec = chosen(form, "rate_model")
+    if form.get("confirm") != "on":
+        raise HTTPException(status_code=400, detail="Confirm the source and ceiling before saving.")
+    try:
+        provider, model_id = _parse_spec(spec)
+        spec = f"{provider}:{model_id}"
+        try:
+            current_quote = _lookup_price_quote(spec)
+        except UnpricedModelError:
+            current_quote = None
+        if current_quote is not None and current_quote.verified:
+            raise HTTPException(status_code=409, detail=(
+                "This model already has a tracked price. Review its current rate in Models."
+            ))
+        actor = auth.caller_principal(request) or "local administrator"
+        with _setting_write(request, "model_rates", spec, lambda d:
+                            _rate_audit_value(d, spec)):
+            recorded = await run_in_threadpool(
+                set_model_rate, spec,
+                input_per_mtok=float(form.get("input_per_mtok", "")),
+                output_per_mtok=float(form.get("output_per_mtok", "")),
+                source=str(form.get("source", "")),
+                as_of=str(form.get("as_of", "")),
+                valid_until=str(form.get("valid_until", "")),
+                approved_by=actor,
+            )
+        if (await run_in_threadpool(model_rate_overrides)).get(spec) != recorded:
+            raise RuntimeOverridesSecurityError("model rate readback differs")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Review the model, USD amounts, source and dates.") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "The model price could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_model_rate", model=spec)
+    return RedirectResponse("/settings?saved=model_rate#settings-model-prices", status_code=303)
+
+
+@router.post("/settings/models/rate/remove")
+async def settings_remove_model_rate(request: Request, model: str = Form("")) -> RedirectResponse:
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        clear_model_rate,
+        model_rate_overrides,
+    )
+
+    try:
+        with _setting_write(request, "model_rates", model, lambda d:
+                            _rate_audit_value(d, model)):
+            await run_in_threadpool(clear_model_rate, model)
+        if model in await run_in_threadpool(model_rate_overrides):
+            raise RuntimeOverridesSecurityError("model rate removal readback differs")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Choose a saved model rate to remove.") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "The change could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_model_rate_removed", model=model)
+    return RedirectResponse("/settings?saved=model_rate_removed#settings-model-prices", status_code=303)
 
 
 @router.post("/settings/budget")
@@ -232,7 +448,12 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
     config.toml is never written."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import clear_budget, set_budget, set_task_limits
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        clear_budget,
+        set_budget,
+        set_task_limits,
+    )
     val = (max_dollars or "").strip()
     try:
         wanted = _budget_choice(mode, val)
@@ -254,23 +475,29 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
         if hold is not None:
             return _held(request, hold)
     try:
-        if mode == "disabled":
-            set_task_limits(False)
-        elif mode == "configured" and val:
-            set_budget(float(val))
-        else:
-            # "default" is the page's "use your installation's standard
-            # limits" choice: drop the Settings amount, keep limits on.
-            clear_budget()
-            set_task_limits(True)
+        with _setting_write(request, "budget", "task_limit", lambda d:
+                            d.get("budget") or {}, confirmed=approved is not None):
+            if mode == "disabled":
+                set_task_limits(False)
+            elif mode == "configured" and val:
+                set_budget(float(val))
+            else:
+                # Drop the Settings amount and keep task limits on.
+                clear_budget()
+                set_task_limits(True)
     except ValueError as exc:
         raise HTTPException(
             status_code=400, detail="spend cap must be a positive number",
         ) from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Spending settings could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
     if approved is not None:
         from . import settings_quorum
 
         settings_quorum.settle(approved)
+    _admin_audit(request, "settings_budget")
     return RedirectResponse("/settings?saved=budget", status_code=303)
 
 
@@ -325,7 +552,11 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
     form field is named for a role; an empty value clears that role's pin."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import allowed_models, set_role_models
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        allowed_models,
+        set_role_models,
+    )
     roles = ("orchestrator", "coder", "researcher", "writer",
              "analyst", "verifier", "summarizer")
     from maverick_dashboard.model_pickers import chosen
@@ -337,10 +568,25 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
             if spec and spec not in allow:
                 raise HTTPException(
                     status_code=400, detail="model not in the allowed list")
+    from maverick.runtime_overrides import role_model_override
+    previous = {r: await run_in_threadpool(role_model_override, r) for r in roles}
     try:
-        await run_in_threadpool(set_role_models, updates)
+        with _setting_write(request, "models", "roles", lambda d:
+                            {k: v for k, v in (d.get("models") or {}).items()
+                             if k != "default"}):
+            await run_in_threadpool(set_role_models, updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Role models could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_roles")
+    from . import agent_changelog
+    agent_changelog.record(agent_changelog.EVERY_AGENT,
+                           agent_changelog.describe_role_models(
+                               previous, {r: (spec or None) for r, spec in updates.items()}),
+                           by=auth.caller_principal(request) or "")
     return RedirectResponse("/settings?saved=roles", status_code=303)
 
 @router.post("/settings/models/allowed")
@@ -351,12 +597,19 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
     config.toml; ``llm.model_for_role`` then caps every role to this set."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import set_allowed_models
+    from maverick.runtime_overrides import RuntimeOverridesSecurityError, set_allowed_models
     form = await request.form()
     try:
-        await run_in_threadpool(set_allowed_models, form.getlist("models"))
+        with _setting_write(request, "models", "allowed", lambda d:
+                            (d.get("access") or {}).get("allowed_models", [])):
+            await run_in_threadpool(set_allowed_models, form.getlist("models"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Allowed models could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_allowed")
     return RedirectResponse("/settings?saved=allowed", status_code=303)
 
 
@@ -372,6 +625,7 @@ async def settings_discover_models(request: Request, provider: str = Form("")) -
     if name and name not in KNOWN_PROVIDERS:
         raise HTTPException(status_code=400, detail="unknown provider")
     await run_in_threadpool(model_discovery.refresh, [name] if name else None)
+    _admin_audit(request, "settings_discover")
     return RedirectResponse("/settings?saved=discover", status_code=303)
 
 
@@ -438,17 +692,20 @@ def settings_set_model_discovery(request: Request, enabled: str = Form("on")) ->
             detail="Automatic model lists are controlled by your installation, so this can't be changed here.",
         )
     try:
-        settings_store.set_model_discovery(enabled == "on")
+        with _setting_write(request, "models", "discovery", lambda d:
+                            (d.get("models") or {}).get("discovery")):
+            settings_store.set_model_discovery(enabled == "on")
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(
             status_code=503,
-            detail="Settings are unavailable. Retry after storage is restored.",
+            detail="Settings could not be confirmed. Refresh Settings and Activity before retrying.",
         ) from exc
     try:
         from maverick import config as _config
         _config.reset_config_cache()
     except Exception:  # pragma: no cover -- cache reset is best effort
         pass
+    _admin_audit(request, "settings_discovery")
     return RedirectResponse("/settings?saved=discovery", status_code=303)
 
 
@@ -458,6 +715,12 @@ async def settings_set_provider(
     provider: str = Form(...),
     api_key: str = Form(""),
     base_url: str = Form(""),
+    auth_mode: str = Form(""),
+    deployment: str = Form(""),
+    api_version: str = Form(""),
+    endpoint: str = Form(""),
+    region: str = Form(""),
+    model_id: str = Form(""),
 ) -> RedirectResponse:
     """Rotate only provider fields this dashboard can make effective.
 
@@ -471,13 +734,18 @@ async def settings_set_provider(
     provider_name = provider.strip()
     key_value = api_key.strip()
     base_value = base_url.strip()
+    setup = ({"auth_mode": auth_mode, "deployment": deployment, "api_version": api_version}
+             if provider_name == "azure" else
+             {"auth_mode": auth_mode, "endpoint": endpoint, "region": region, "model_id": model_id}
+             if provider_name == "bedrock" else None)
     try:
-        await run_in_threadpool(
-            settings_store.rotate_provider,
-            provider_name,
-            api_key=key_value,
-            base_url=base_value,
-        )
+        with _setting_write(request, "providers", provider_name, lambda d:
+                            _provider_audit_value(d, provider_name), changed_fields=lambda old, new:
+                            _provider_changed_fields(old, new, provider_name)):
+            values = {"api_key": key_value, "base_url": base_value}
+            if setup is not None:
+                values["details"] = setup
+            await run_in_threadpool(settings_store.rotate_provider, provider_name, **values)
     except settings_store.ProviderConfigurationUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except settings_store.SecuritySuiteConfigUnavailable as exc:
@@ -487,6 +755,7 @@ async def settings_set_provider(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await run_in_threadpool(_refresh_models_quietly, provider_name)
+    _admin_audit(request, "settings_providers")
     return RedirectResponse("/settings?saved=providers", status_code=303)
 
 
@@ -497,33 +766,38 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     try:
-        settings_store.clear_provider(provider.strip())
+        name = provider.strip()
+        with _setting_write(request, "providers", name, lambda d:
+                            _provider_audit_value(d, name), changed_fields=lambda old, new:
+                            _provider_changed_fields(old, new, name)):
+            settings_store.clear_provider(name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
+    _admin_audit(request, "settings_providers")
     return RedirectResponse("/settings?saved=providers", status_code=303)
 
 
 @router.post("/settings/providers/test")
 async def settings_test_provider(
-    request: Request, provider: str = Form(...), next: str = Form("")
+    request: Request, provider: str = Form(...), next_page: str = Form("", alias="next")
 ) -> RedirectResponse:
     """Run a bounded live provider probe and bind its receipt to this config."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick import config
-
     from maverick_dashboard.integration_readiness import test_provider
+    from maverick_dashboard.provider_readiness import workspace_readiness
 
     name = provider.strip().lower()
-    try:
-        state = await run_in_threadpool(config.provider_configuration_state, name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="unknown provider") from exc
-    if not state["configured"]:
-        raise HTTPException(status_code=409, detail="provider is not configured")
+    rows = (await run_in_threadpool(workspace_readiness))["providers"]
+    row = next((item for item in rows if item["name"] == name), None)
+    if row is None:
+        raise HTTPException(status_code=400, detail="unknown provider")
+    if not row["configured"]:
+        raise HTTPException(status_code=409, detail="finish the provider setup before testing")
     await run_in_threadpool(test_provider, name)
     await run_in_threadpool(_refresh_models_quietly, name)
-    if next == "providers":  # the Providers page's own Test connection button
+    _admin_audit(request, "settings_provider_test")
+    if next_page == "providers":  # the Providers page's own Test connection button
         return RedirectResponse("/providers?tested=1", status_code=303)
     return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
@@ -536,39 +810,28 @@ async def settings_set_capabilities(request: Request) -> RedirectResponse:
     from maverick_dashboard import settings_store
     form = await request.form()
     try:
-        await run_in_threadpool(settings_store.set_toggles, "capabilities", {
-            name: name in form for name in settings_store.CAPABILITY_DEFAULTS
-        })
+        with _setting_write(request, "capabilities", "all", lambda d:
+                            d.get("capabilities") or {}):
+            await run_in_threadpool(settings_store.set_toggles, "capabilities", {
+                name: name in form for name in settings_store.CAPABILITY_DEFAULTS
+            })
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(
             status_code=503,
-            detail="Settings are unavailable. Retry after storage is restored.",
+            detail="Settings could not be confirmed. Refresh Settings and Activity before retrying.",
         ) from exc
+    _admin_audit(request, "settings_capabilities")
     return RedirectResponse("/settings?saved=capabilities", status_code=303)
 
 
 @router.post("/settings/features")
 async def settings_set_features(request: Request) -> RedirectResponse:
-    """Activate/deactivate features via the dashboard config overlay."""
+    """Old whole-form submissions cannot overwrite current feature choices."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick_dashboard import settings_store
-    form = await request.form()
-    selected = {name: name in form for name in settings_store.FEATURE_DEFAULTS}
-    try:
-        await run_in_threadpool(settings_store.set_toggles, "features", selected)
-        await run_in_threadpool(
-            settings_store.assert_effective_copilot_operations,
-            selected["copilot_operations"],
-        )
-    except settings_store.FeatureSettingNotEffective as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Settings are unavailable. Retry after storage is restored.",
-        ) from exc
-    return RedirectResponse("/settings?saved=features", status_code=303)
+    raise HTTPException(409, "This older feature form was not saved. Your draft is kept. "
+                        "Open Settings, then All settings and Product features to review "
+                        "only the switches you want to change.")
 
 
 @router.post("/settings/ui-visibility")
@@ -582,7 +845,14 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     form = await request.form()
-    await run_in_threadpool(ui_visibility.apply_selection, set(form.getlist("cell")))
+    try:
+        with _setting_write(request, "ui_visibility", "matrix", lambda d: d):
+            await run_in_threadpool(ui_visibility.apply_selection, set(form.getlist("cell")))
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Page visibility could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_visibility")
     return RedirectResponse("/settings?saved=visibility#ui-visibility", status_code=303)
 
 
@@ -592,7 +862,14 @@ def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
-    ui_visibility.clear_overrides()
+    try:
+        with _setting_write(request, "ui_visibility", "matrix", lambda d: d):
+            ui_visibility.clear_overrides()
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Page visibility could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_visibility_reset")
     return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
 
 
@@ -623,11 +900,20 @@ def _workspace_options(request: Request) -> tuple[list[dict], str]:
         visible = None
         if principal and not auth.has_global_permission(request, "admin"):
             visible = workspace_tenants.accessible_tenant_ids(principal)
+            from . import rbac
+            visible = {tenant for tenant in (visible or ())
+                       if "admin" in rbac.permissions_for(rbac.get_tenant_role(tenant, principal))}
         options = [
             {"id": rec.id, "name": (getattr(rec, "display_name", "") or rec.id)}
             for rec in list_tenants()
             if rec.active and (visible is None or rec.id in visible)
         ]
+        from .workspace_display import duplicate_workspace_ids
+
+        duplicates = duplicate_workspace_ids((row["id"], row["name"]) for row in options)
+        for row in options:
+            if row["id"] in duplicates:
+                row["name"] += f" (Reference: {row['id']})"
     except Exception:
         options = []
     try:
@@ -685,6 +971,64 @@ def _users_context(request: Request) -> dict:
     from maverick.proxy_auth import proxy_auth_enabled
 
     from . import rbac
+    from .draft_api import context_for
+    people_context = context_for(request)
+    global_admin = auth.has_global_permission(request, "admin")
+    workspace_options, wm_tenant = _workspace_options(request)
+    workspace_names = {option["id"]: option["name"] for option in workspace_options}
+    if not global_admin:
+        # Never expose the installation roster, global invitations or department
+        # grants to a workspace administrator. Invitation labels and pending
+        # links are limited to workspaces they currently administer.
+        from . import invites
+        from .access_explanations import role_descriptions
+        from .identity_format import role_label
+
+        try:
+            workspace_invites = [inv for inv in invites.list_invites()
+                                 if inv.tenant in workspace_names]
+        except invites.InviteStoreError:
+            workspace_invites = []
+        member_rosters = {
+            option["id"]: rbac.list_tenant_roles(option["id"])
+            for option in workspace_options
+        }
+        members = {principal: role for roster in member_rosters.values()
+                   for principal, role in roster.items()}
+        labels = {principal: label for principal, label in _invite_labels(workspace_invites).items()
+                  if principal in members}
+        people = _people(members, labels, [])
+        role_permissions = {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()}
+        workspace_role_options = {}
+        for option in workspace_options:
+            actor_role = member_rosters[option["id"]].get(auth.caller_principal(request))
+            actor_permissions = rbac.permissions_for(actor_role)
+            workspace_role_options[option["id"]] = [
+                role for role in rbac.known_roles()
+                if rbac.permissions_for(role).issubset(actor_permissions)
+            ]
+        return {
+            "workspace_people_context": people_context,
+            "global_admin": False, "people": people,
+            "people_labels": {p["principal"]: p["label"] for p in people},
+            "role_labels": {r: role_label(r) for r in rbac.known_roles()},
+            "roles": rbac.known_roles(), "users": [], "invite_labels": labels,
+            "role_permissions": role_permissions,
+            "workspace_role_options": workspace_role_options,
+            "workspace_roles": workspace_role_options.get(wm_tenant, []),
+            "workspace_member_count": len(member_rosters.get(wm_tenant, {})),
+            "role_descriptions": role_descriptions(),
+            "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(),
+            "you": auth.caller_principal(request),
+            "saved": ("Workspace invitation revoked."
+                      if request.query_params.get("saved") == "workspace_invite_revoked" else ""),
+            "workspace_options": workspace_options, "wm_tenant": wm_tenant,
+            "workspace_names": workspace_names,
+            "invites_on": invites.invites_enabled(),
+            "invite_sso_on": invites.invites_enabled() and not invites.local_login_mode(),
+            "workspace_pending_invites": [inv for inv in workspace_invites if inv.pending],
+            "workspace_recent_invites": [inv for inv in workspace_invites if inv.used_at is not None][:20],
+        }
     auth_on = (auth.caller_principal(request) is not None
                or oidc_enabled() or proxy_auth_enabled())
     env = (_os.environ.get("MAVERICK_DASHBOARD_ADMINS") or "").strip()
@@ -698,13 +1042,24 @@ def _users_context(request: Request) -> dict:
             bootstrap = [str(a).strip() for a in seq if str(a).strip()]
         except Exception:
             bootstrap = []
-    saved = {"set": "Role updated.", "removed": "User removed.",
+    saved = {"set": "Role updated.", "removed": (
+                 "Explicit installation role cleared. Current group or standard-role rules now apply; "
+                 "this person's access has not been removed. Workspace memberships remain in effect."),
              "suites": "Department access updated.",
+             "first_login": "The effective installation fallback is now Viewer with no departments. Explicit roles, verified group mappings and workspace memberships remain in effect.",
              "suites_removed": "Department access removed.",
              "invite_revoked": "Invitation revoked.",
              "role_saved": "Custom role saved.",
-             "role_deleted": "Custom role deleted."}.get(
+             "role_deleted": "Custom role deleted.",
+             "channel_linked": "Chat account linked.",
+             "channel_unlinked": "Chat account unlinked."}.get(
         request.query_params.get("saved", ""), "")
+    if request.query_params.get("saved") == "removed" and request.query_params.get("reset_person"):
+        from .access_explanations import standard_role
+        effective = standard_role(request.query_params["reset_person"])
+        saved = (f"Explicit installation role cleared. {effective['label']} from {effective['source'].lower()} "
+                 f"now applies, with powers: {', '.join(effective['permissions']) or 'none'}. "
+                 "Access was not removed. Workspace memberships remain in effect.")
     from maverick.departments import department_title
 
     from . import invites, suite_grants
@@ -720,11 +1075,26 @@ def _users_context(request: Request) -> dict:
     workspace_options, wm_tenant = _workspace_options(request)
     role_map = rbac.list_users()
     labels = _invite_labels(all_invites)
+    from .company_signin_tests import verified_people
+    labels.update(verified_people(request))
     grants = suite_grants.list_grants()
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
+    from .access_explanations import role_descriptions, standard_role
+    from .first_login_defaults import preview as first_login_preview
     from .identity_format import role_label
     defaults = set(default_suites) if default_suites is not None else None
+    try:
+        from maverick import channel_identities
+        channel_links = sorted(channel_identities.all_links().items())
+    except Exception:  # noqa: BLE001 -- an unreadable store must not hide the roster
+        channel_links = []
     return {
+        "global_admin": True,
+        "workspace_people_context": people_context,
+        "first_login": first_login_preview(),
+        "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
+        "role_descriptions": role_descriptions(),
+        "channel_links": channel_links,
         "people": people,
         "people_labels": {p["principal"]: p["label"] for p in people},
         "role_labels": {r: role_label(r) for r in rbac.known_roles()},
@@ -733,7 +1103,12 @@ def _users_context(request: Request) -> dict:
             for principal, suites in grants.items()
         },
         "users": sorted(role_map.items()),
+        **_people_filter(request, role_map, labels),
+        "standard_roles": {principal: standard_role(principal) for principal in role_map},
         "roles": rbac.known_roles(),
+        "workspace_roles": rbac.known_roles(),
+        "workspace_role_options": {},
+        "workspace_member_count": len(rbac.list_tenant_roles(wm_tenant)) if wm_tenant else 0,
         "builtin_roles": rbac.ROLES,
         "custom_roles": custom_roles,
         "permission_atoms": rbac.PERMISSION_ATOMS,
@@ -749,11 +1124,92 @@ def _users_context(request: Request) -> dict:
         "default_suites": (sorted(default_suites)
                            if default_suites is not None else None),
         "invites_on": invites.invites_enabled(),
-        "pending_invites": [i for i in all_invites if i.pending],
+        "invite_sso_on": invites.invites_enabled() and not invites.local_login_mode(),
+        "pending_invites": [i for i in all_invites if i.pending and not i.tenant],
+        "workspace_pending_invites": [i for i in all_invites
+                                      if i.pending and i.tenant in workspace_names],
+        "workspace_recent_invites": [i for i in all_invites
+                                     if i.used_at is not None and i.tenant in workspace_names][:20],
         "invite_labels": labels,
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
+        "workspace_names": workspace_names,
     }
+
+
+def _people_filter(request: Request, role_map: dict, labels: dict) -> dict:
+    """The People list's filter (``?q=`` text, ``?has_role=``) and the rows it shows."""
+    from .users_bulk import matching
+    query = str(request.query_params.get("q", ""))[:200]
+    role_filter = str(request.query_params.get("has_role", ""))[:100]
+    shown = set(matching(role_map, labels, query, role_filter))
+    return {"users_filter": {"q": query, "role": role_filter, "active": bool(query.strip() or role_filter)},
+            "users_shown": [(p, r) for p, r in sorted(role_map.items()) if p in shown]}
+
+
+def _bulk_page(request: Request, **extra) -> HTMLResponse:
+    """The Users page with a bulk confirmation, change report or problem."""
+    context = _users_context(request)
+    context.update(extra)
+    return _app().templates.TemplateResponse(request, "users.html", context,
+                                             headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/users/bulk", response_class=HTMLResponse)
+def users_bulk_role(
+    request: Request, role: str = Form(""), scope: str = Form("selected"),
+    principals: list[str] = Form(default=[]), q: str = Form(""), role_filter: str = Form(""),
+    confirmed: str = Form(""), expected_count: int = Form(0),
+) -> HTMLResponse:
+    """Change the role of several people: first a confirmation that states the
+    count, then (``confirmed=yes``) the change and a report that can be undone."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites, rbac, users_bulk
+    try:
+        labels = _invite_labels(invites.list_invites())
+    except Exception:  # noqa: BLE001 -- labels only help the text filter
+        labels = {}
+    people = users_bulk.targets(rbac.list_users(), labels, scope=scope, chosen=principals,
+                                query=q, role_filter=role_filter)
+    problem = ""
+    if not rbac.is_known_role(role.strip()):
+        problem = "Choose the new role."
+    elif not people:
+        problem = "Select at least one person, or choose everyone matching the filter."
+    elif len(people) > users_bulk.MAX_PEOPLE:
+        problem = f"Change at most {users_bulk.MAX_PEOPLE} people at once. Narrow the filter first."
+    if problem:
+        return _bulk_page(request, bulk_problem=problem)
+    role = role.strip()
+    if confirmed != "yes" or expected_count != len(people):
+        changed_since = confirmed == "yes"
+        return _bulk_page(request, bulk_confirm={
+            "people": people, "role": role, "count": len(people), "changed_since": changed_since,
+            "current": rbac.list_users()})
+    step_up.require_recent_mfa(request, "change_role")
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        auth.require_global_permission(request, "admin")
+        report = users_bulk.apply(people, role, actor=auth.caller_principal(request) or "local")
+    return _bulk_page(request, bulk_report={"rows": report, "undo": users_bulk.undo_tokens(report),
+                                            "undone": False})
+
+
+@router.post("/users/bulk/undo", response_class=HTMLResponse)
+def users_bulk_undo(request: Request, restore: list[str] = Form(default=[])) -> HTMLResponse:
+    """Put the people from a bulk change back on the roles they had before."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import users_bulk
+    with authority_effect_fence():
+        auth.require_global_permission(request, "admin")
+        report = users_bulk.undo(restore, actor=auth.caller_principal(request) or "local")
+    return _bulk_page(request, bulk_report={"rows": report, "undo": [], "undone": True})
 
 
 @router.get("/users", response_class=HTMLResponse)
@@ -764,6 +1220,37 @@ def users_page(request: Request) -> HTMLResponse:
                                              _users_context(request))
 
 
+@router.get("/users/access", response_class=HTMLResponse)
+def users_access_page(request: Request, person: str = "") -> HTMLResponse:
+    """Admin: what one person can do and which rule allows each thing.
+
+    Read-only. Global administrators only: the answer reads the installation
+    roster, every workspace membership and the department grants."""
+    auth.require_global_permission(request, "admin")
+    principal = person.strip()
+    if not principal.startswith("user:") or len(principal) > 1024:
+        raise HTTPException(status_code=404, detail="Choose a person on the Users page to check their access.")
+    from . import effective_access, invites, rbac, suite_grants
+    try:
+        labels = _invite_labels(invites.list_invites())
+    except Exception:  # noqa: BLE001 -- an unreadable invite store only loses the email label
+        labels = {}
+    try:
+        known = (principal in rbac.list_users() or principal in labels
+                 or suite_grants.get_grant(principal) is not None
+                 or auth.is_dashboard_admin(principal)
+                 or principal in _signed_in_principals(limit=10_000))
+    except Exception:  # noqa: BLE001 -- the roster note is advisory
+        known = True
+    from maverick.oidc import oidc_enabled
+    from maverick.proxy_auth import proxy_auth_enabled
+    auth_on = auth.caller_principal(request) is not None or oidc_enabled() or proxy_auth_enabled()
+    return _app().templates.TemplateResponse(request, "user_access.html", {
+        "report": effective_access.person(principal), "name": labels.get(principal, ""),
+        "known": known, "auth_on": auth_on,
+    }, headers={"Cache-Control": "private, no-store"})
+
+
 @router.post("/users/set")
 def users_set_role(
     request: Request, principal: str = Form(...), role: str = Form(...),
@@ -771,6 +1258,7 @@ def users_set_role(
     """Assign a dashboard role to a user principal (admin only)."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
     from . import rbac
     try:
         rbac.set_role(principal.strip(), role.strip(),
@@ -778,23 +1266,46 @@ def users_set_role(
     except rbac.RecoveryAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        from .product_errors import background_save, product_error
+        if background_save(request):
+            message = "Choose a person and a role from the lists."
+            raise product_error(422, "role_invalid", message, field_errors={"role": message}) from exc
         raise HTTPException(status_code=400, detail="invalid principal or role") from exc
     return RedirectResponse("/users?saved=set", status_code=303)
 
 
 @router.post("/users/remove")
-def users_remove(request: Request, principal: str = Form(...)) -> RedirectResponse:
+def users_remove(request: Request, principal: str = Form(...), expected_standard: str = Form(...)) -> RedirectResponse:
     """Remove a user's explicit role assignment (admin only). A bootstrap admin
     pinned in config is unaffected — it can't be removed here."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
+    step_up.require_recent_mfa(request, "change_role")
     from . import rbac
+    from .access_explanations import standard_role
     try:
-        rbac.remove_user(principal.strip(),
-                         actor=auth.caller_principal(request) or "local")
+        with authority_effect_fence():
+            auth.require_global_permission(request, "admin")
+            if standard_role(principal.strip())["revision"] != expected_standard:
+                raise HTTPException(409, "The fallback role or its powers changed. Reload and review before resetting.")
+            rbac.remove_user(principal.strip(), actor=auth.caller_principal(request) or "local")
     except rbac.RecoveryAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse("/users?saved=removed", status_code=303)
+    from urllib.parse import urlencode
+    return RedirectResponse("/users?" + urlencode({"saved": "removed", "reset_person": principal.strip()}), status_code=303)
+
+
+@router.post("/users/first-login-baseline")
+def users_first_login_baseline(request: Request, expected_revision: str = Form(...), confirm: str = Form(...)):
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    if confirm != "existing-unassigned":
+        raise HTTPException(422, "Review how existing unassigned accounts will change.")
+    from .first_login_defaults import apply_conservative
+    apply_conservative(request, expected_revision)
+    return RedirectResponse("/users?saved=first_login", status_code=303)
 
 
 @router.post("/users/roles/save")
@@ -849,9 +1360,28 @@ def users_delete_custom_role(
     return RedirectResponse("/users?saved=role_deleted", status_code=303)
 
 
+def _invite_refusal(reason: str) -> HTTPException:
+    """An invite the store refused, in words for the person who typed it."""
+    from .product_errors import product_error
+    if "expiry" in reason:
+        message = "Choose when the invitation link should expire."
+        return product_error(422, "invite_expiry", message, field_errors={"expiry": message})
+    if "email" in reason:
+        message = "Enter a full email address. For example: name@company.com."
+        return product_error(422, "invite_email", message, field_errors={"email": message})
+    if "role" in reason:
+        message = "Choose a role from the list."
+        return product_error(422, "invite_role", message, field_errors={"role": message})
+    if "too many" in reason:
+        return product_error(409, "invite_full", "There are too many invitations waiting. "
+                             "Cancel some you no longer need, then try again.")
+    return product_error(422, "invite_invalid", "The invitation could not be created. Check the details and try again.")
+
+
 @router.post("/users/invite", response_class=HTMLResponse)
 def users_invite(request: Request, email: str = Form(...),
-                 role: str = Form(...)) -> HTMLResponse:
+                 role: str = Form(...), expiry: str = Form("7_days"),
+                 expected_context: str | None = Form(default=None)) -> HTMLResponse:
     """Mint a single-use invite link (admin only) and show it ONCE.
 
     The token is never stored (only its hash), so this response is the only
@@ -860,21 +1390,38 @@ def users_invite(request: Request, email: str = Form(...),
     redirect would drop the one-time link."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
     from . import invites
+    from .invite_routes import require_people_context
     if not invites.invites_enabled():
         raise HTTPException(status_code=404, detail="invites are not enabled")
     invited_by = auth.caller_principal(request) or "local-admin"
+    def guard() -> None:
+        auth.require_global_permission(request, "admin")
+        require_people_context(request, expected_context)
+        if not invites.invites_enabled():
+            raise HTTPException(404, "Invitations are not enabled.")
     try:
-        inv, token = invites.create_invite(email, role, created_by=invited_by)
+        ttl = invites.expiry_hours(expiry)
+        with authority_effect_fence():
+            guard()
+            inv, token = invites.create_invite(email, role, created_by=invited_by,
+                                              ttl_hours=ttl, before_effect=guard)
     except ValueError as exc:
+        from .product_errors import background_save
+        if background_save(request):
+            raise _invite_refusal(str(exc)) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
+    _admin_audit(request, "invite_created", email=inv.email, role=getattr(inv, "role", role),
+                 expires_at=inv.expires_at, expiry=expiry, ttl_hours=ttl)
     # Best-effort email (fail-soft): the copyable link below is always the
     # fallback, so a broken SMTP account can never strand an invite.
     sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
     return _app().templates.TemplateResponse(request, "users.html", {
         **_users_context(request), "invite_link": link, "invite_email": inv.email,
-        "invite_sent": sent, "invite_send_note": send_note,
+        "invite_sent": sent, "invite_send_note": send_note, "invite_expires_at": inv.expires_at,
     })
 
 
@@ -886,7 +1433,135 @@ def users_invite_revoke(request: Request,
     _app()._require_same_origin(request)
     from . import invites
     invites.revoke_invite(invite_id.strip())
+    _admin_audit(request, "invite_revoked", invite_id=invite_id.strip())
     return RedirectResponse("/users?saved=invite_revoked", status_code=303)
+
+
+def _workspace_invite_authority(request: Request, tenant: str, role: str | None = None) -> bool:
+    """Authorize a workspace invitation against its exact workspace.
+
+    Return whether the caller is an installation administrator. Scoped callers
+    may offer only a role no more powerful than their current direct role.
+    """
+    from . import api, rbac
+
+    installation_admin = api._require_tenant_roles_admin(request, tenant)
+    if not api._get_tenant_or_404(tenant).active:
+        raise HTTPException(403, "This workspace is not active.")
+    if role is not None:
+        if not rbac.is_known_role(role):
+            raise HTTPException(400, "Choose an available role.")
+        if not installation_admin:
+            actor_role = rbac.get_tenant_role(tenant, auth.caller_principal(request))
+            if not rbac.permissions_for(role).issubset(rbac.permissions_for(actor_role)):
+                raise HTTPException(409, "Your workspace role cannot invite this level of access.")
+    return installation_admin
+
+
+@router.post("/users/workspace-invite", response_class=HTMLResponse)
+def users_workspace_invite(
+    request: Request, tenant: str = Form(...), email: str = Form(...), role: str = Form(...),
+    expected_context: str | None = Form(default=None), expiry: str = Form("7_days"),
+) -> HTMLResponse:
+    """Create a single-use invitation for one existing workspace only."""
+    _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import api, invites
+
+    if not invites.invites_enabled():
+        raise HTTPException(404, "Invitations are not enabled.")
+    api._reject_tenant_role_assignment_under_per_user_tenancy()
+    _workspace_invite_authority(request, tenant, role)
+    step_up.require_recent_mfa(request, "change_role")
+    invited_by = auth.caller_principal(request) or "local-admin"
+    from .invite_routes import require_people_context
+
+    def guard() -> None:
+        require_people_context(request, expected_context)
+        _workspace_invite_authority(request, tenant, role)
+        step_up.require_recent_mfa(request, "change_role")
+        if not invites.invites_enabled():
+            raise HTTPException(404, "Invitations are not enabled.")
+    with authority_effect_fence():
+        guard()
+        installation_admin = _workspace_invite_authority(request, tenant, role)
+        try:
+            ttl = invites.expiry_hours(expiry)
+            inv, token = invites.create_invite(
+                email, role, created_by=invited_by, tenant=tenant,
+                workspace_admin_invite=not installation_admin,
+                ttl_hours=ttl, before_effect=guard,
+            )
+        except ValueError as exc:
+            from .product_errors import background_save
+            if background_save(request):
+                raise _invite_refusal(str(exc)) from exc
+            raise HTTPException(400, str(exc)) from exc
+    link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
+    _admin_audit(request, "workspace_invite_created", workspace=tenant,
+                 email=inv.email, role=inv.role, expires_at=inv.expires_at,
+                 expiry=expiry, ttl_hours=ttl)
+    sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
+    return _app().templates.TemplateResponse(request, "users.html", {
+        **_users_context(request), "workspace_invite_link": link,
+        "workspace_invite_email": inv.email, "workspace_invite_tenant": tenant,
+        "workspace_invite_sent": sent, "workspace_invite_send_note": send_note,
+        "workspace_invite_expires_at": inv.expires_at,
+    })
+
+
+@router.post("/users/workspace-invite/revoke")
+def users_workspace_invite_revoke(
+    request: Request, invite_id: str = Form(...),
+    expected_context: str | None = Form(default=None),
+) -> RedirectResponse:
+    """Cancel a pending invite only when the caller administers its workspace."""
+    _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import invites
+
+    if not invites.invites_enabled():
+        raise HTTPException(404, "Invitations are not enabled.")
+    with authority_effect_fence():
+        from .invite_routes import require_people_context
+        require_people_context(request, expected_context)
+        invite = next((item for item in invites.list_invites()
+                       if item.id == invite_id.strip() and item.tenant and item.pending), None)
+        if invite is None:
+            raise HTTPException(404, "Invitation not found.")
+        _workspace_invite_authority(request, invite.tenant)
+        if not invites.revoke_invite(invite.id):
+            raise HTTPException(404, "Invitation not found.")
+    _admin_audit(request, "workspace_invite_revoked", workspace=invite.tenant,
+                 invite_id=invite.id)
+    return RedirectResponse("/users?saved=workspace_invite_revoked", status_code=303)
+
+
+@router.post("/users/invite/bulk-revoke", response_class=HTMLResponse)
+def users_invite_bulk_revoke(
+    request: Request, scope: str = Form("selected"), invite_ids: list[str] = Form(default=[]),
+    confirmed: str = Form(""), expected_count: int = Form(0),
+) -> HTMLResponse:
+    """Cancel several pending invitations: confirm the count, then a report."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites
+    pending = [i for i in invites.list_invites() if i.pending]
+    chosen = {i.strip() for i in invite_ids if i and i.strip()}
+    picked = pending if scope == "all" else [i for i in pending if i.id in chosen]
+    if not picked:
+        return _bulk_page(request, bulk_problem="Select at least one waiting invitation.")
+    if confirmed != "yes" or expected_count != len(picked):
+        return _bulk_page(request, invite_confirm={"invites": picked, "changed_since": confirmed == "yes"})
+    report = []
+    for inv in picked:
+        cancelled = invites.revoke_invite(inv.id)
+        if cancelled:
+            _admin_audit(request, "invite_revoked", invite_id=inv.id)
+        report.append({"email": inv.email, "cancelled": cancelled})
+    return _bulk_page(request, invite_report=report)
 
 
 @router.post("/users/suites/set")
@@ -911,6 +1586,7 @@ async def users_set_suites(request: Request) -> RedirectResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or department") from exc
+    _admin_audit(request, "department_access_set", principal=principal, suites=sorted(suites))
     return RedirectResponse("/users?saved=suites", status_code=303)
 
 
@@ -928,6 +1604,7 @@ def users_remove_suites(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _admin_audit(request, "department_access_removed", principal=principal.strip())
     return RedirectResponse("/users?saved=suites_removed", status_code=303)
 
 
@@ -947,13 +1624,19 @@ _LIMIT_ERRORS = {
     "period": "Choose how often the limit resets.",
     "person": "Choose a person.",
     "full": "There are too many personal limits to add another.",
-    "unreadable": "The saved spending limits could not be read. Please try again.",
+    "unreadable": "The saved spending limits could not be read. Try again.",
 }
 
 
 @router.get("/spending-limits", response_class=HTMLResponse)
-def spending_limits_page(request: Request, saved: str = "", error: str = "") -> HTMLResponse:
-    """Admin: workspace and per-person spending limits (none by default)."""
+def spending_limits_page(request: Request, saved: str = "", error: str = "",
+                         preview: str = "", amount: str = "", period: str = "",
+                         principal: str = "") -> HTMLResponse:
+    """Admin: workspace and per-person spending limits (none by default).
+
+    ``?preview=workspace|default|person`` with an amount and period replays
+    the last 30 days of finished tasks against that limit, report-only:
+    nothing is saved until the administrator presses Save."""
     auth.require_permission(request, "admin")
     from maverick import spending_limits
     from maverick.paths import current_tenant_id
@@ -981,8 +1664,12 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
         organization_cap = float(record.max_daily_dollars) if record else 0.0
     except Exception:  # noqa: BLE001 -- the organization cap is informational here
         pass
+    replay, replay_error = _limit_preview(preview, amount, period, principal)
     return _app().templates.TemplateResponse(request, "spending_limits.html", {
         "view": view,
+        "alert_at": _alert_points(),
+        "preview": replay, "preview_error": replay_error,
+        "draft": {"scope": preview, "amount": amount, "period": period, "principal": principal},
         "periods": [(p, spending_limits.PERIOD_LABELS[p]) for p in spending_limits.PERIODS],
         "workspace_periods": [(p, spending_limits.PERIOD_LABELS[p])
                               for p in spending_limits.WORKSPACE_PERIODS],
@@ -994,10 +1681,52 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
     })
 
 
+def _limit_preview(scope: str, amount: str, period: str, principal: str) -> tuple[dict | None, str]:
+    """The report-only replay for a proposed limit, or a plain error."""
+    if scope not in ("workspace", "default", "person"):
+        return None, ""
+    from maverick import spending_limits
+    from maverick.spending_limit_preview import preview
+    try:
+        return preview(scope, amount, period, principal=principal, world=_app()._world()), ""
+    except spending_limits.SpendingLimitError as exc:
+        return None, _LIMIT_ERRORS.get(exc.code, _LIMIT_ERRORS["amount"])
+    except Exception:  # noqa: BLE001 -- the preview is advice; say it is unavailable
+        return None, "The task history could not be read, so there is no preview. Saving still works."
+
+
+def _alert_points() -> str:
+    """The spending-alert percentages in words ("50%, 75% and 100%"), or ""."""
+    from maverick.spending_alerts import alert_at
+    try:
+        points = [f"{p}%" for p in alert_at()]
+    except Exception:  # noqa: BLE001 -- unreadable settings keep the default points
+        points = ["50%", "75%", "100%"]
+    if len(points) < 2:
+        return "".join(points)
+    return ", ".join(points[:-1]) + " and " + points[-1]
+
+
 def _limit_redirect(saved: str = "", error: str = "") -> RedirectResponse:
     from urllib.parse import urlencode
     query = urlencode({"saved": saved} if saved else {"error": error})
     return RedirectResponse(f"/spending-limits?{query}", status_code=303)
+
+
+# The form field each refusal is about, for a save made in the background.
+_LIMIT_ERROR_FIELDS = {"amount": "amount", "period": "period", "person": "principal"}
+
+
+def _limit_error(request: Request, code: str) -> RedirectResponse:
+    """A refused limit: the page with its message, or, for a background save,
+    the same message tied to its field (nothing typed is lost)."""
+    from .product_errors import background_save, product_error
+    if not background_save(request):
+        return _limit_redirect(error=code)
+    message = _LIMIT_ERRORS.get(code, _LIMIT_ERRORS["amount"])
+    field = _LIMIT_ERROR_FIELDS.get(code)
+    raise product_error(422, f"spending_limit_{code}", message,
+                        field_errors={field: message} if field else None)
 
 
 @router.post("/spending-limits/workspace")
@@ -1009,11 +1738,12 @@ def spending_limits_workspace(request: Request, choice: str = Form("none"),
     actor = auth.caller_principal(request) or "local"
     try:
         if choice == "none":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_workspace_limit(actor=actor)
             return _limit_redirect("workspace_cleared")
         spending_limits.set_workspace_limit(amount, period, actor=actor)
     except spending_limits.SpendingLimitError as exc:
-        return _limit_redirect(error=exc.code)
+        return _limit_error(request, exc.code)
     return _limit_redirect("workspace")
 
 
@@ -1026,11 +1756,12 @@ def spending_limits_default(request: Request, choice: str = Form("none"),
     actor = auth.caller_principal(request) or "local"
     try:
         if choice == "none":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_default_limit(actor=actor)
             return _limit_redirect("default_cleared")
         spending_limits.set_default_limit(amount, period, actor=actor)
     except spending_limits.SpendingLimitError as exc:
-        return _limit_redirect(error=exc.code)
+        return _limit_error(request, exc.code)
     return _limit_redirect("default")
 
 
@@ -1044,9 +1775,10 @@ def spending_limits_person(request: Request, principal: str = Form(""),
     actor = auth.caller_principal(request) or "local"
     try:
         if action == "remove":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_user_limit(principal, actor=actor)
             return _limit_redirect("person_cleared")
         spending_limits.set_user_limit(principal, amount, period, actor=actor)
     except spending_limits.SpendingLimitError as exc:
-        return _limit_redirect(error=exc.code)
+        return _limit_error(request, exc.code)
     return _limit_redirect("person")

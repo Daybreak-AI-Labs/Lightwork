@@ -17,14 +17,11 @@ from __future__ import annotations
 import os
 import socket
 
-LOCAL_PROVIDERS = frozenset({
-    "ollama", "llamacpp", "llama_cpp", "vllm", "tgi", "lmstudio", "local",
-})
+from .providers import _canonical
+
+LOCAL_PROVIDERS = frozenset({"ollama", "vllm", "tgi"})
 # Default local ports for a best-effort reachability probe.
-_LOCAL_PORTS = {
-    "ollama": 11434, "vllm": 8000, "tgi": 8080, "lmstudio": 1234,
-    "llamacpp": 8080, "llama_cpp": 8080, "local": 8000,
-}
+_LOCAL_PORTS = {"ollama": 11434, "vllm": 8000, "tgi": 8080}
 
 
 def _env_true(name: str) -> bool:
@@ -47,7 +44,7 @@ def _provider_of(spec: str) -> str:
 
 def is_local(spec: str) -> bool:
     """True iff ``spec``'s provider is a local inference backend."""
-    return _provider_of(spec) in LOCAL_PROVIDERS
+    return _canonical(_provider_of(spec)) in LOCAL_PROVIDERS
 
 
 def reorder(specs: list[str], *, available_fn=None) -> list[str]:
@@ -60,7 +57,7 @@ def reorder(specs: list[str], *, available_fn=None) -> list[str]:
     af = available_fn or probe
     local_ok, rest = [], []
     for s in specs:
-        (local_ok if (is_local(s) and af(_provider_of(s))) else rest).append(s)
+        (local_ok if (is_local(s) and af(_canonical(_provider_of(s)))) else rest).append(s)
     return local_ok + rest
 
 
@@ -83,7 +80,7 @@ def local_model_for_role(role: str) -> str | None:
 
 def probe(provider: str, *, timeout: float = 0.3) -> bool:
     """Best-effort TCP probe of a local provider's default port."""
-    port = _LOCAL_PORTS.get(provider)
+    port = _LOCAL_PORTS.get(_canonical(provider))
     if not port:
         return False
     try:
@@ -102,7 +99,7 @@ def pick_local(role: str, *, probe_fn=None) -> str | None:
     if not spec:
         return None
     pf = probe_fn or probe
-    return spec if pf(_provider_of(spec)) else None
+    return spec if pf(_canonical(_provider_of(spec))) else None
 
 
 __all__ = [

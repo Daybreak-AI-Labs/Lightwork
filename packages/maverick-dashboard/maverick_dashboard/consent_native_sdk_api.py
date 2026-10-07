@@ -116,9 +116,13 @@ def _private(response: Response) -> None:
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
 
 
-def _preflight(request: Request, deps: NativeConsentSDKAPIDependencies, operation: str) -> None:
+async def _preflight(
+    request: Request, deps: NativeConsentSDKAPIDependencies, operation: str
+) -> None:
     try:
-        if deps.gate() is not True:
+        # The gate reads the application directory from disk for every
+        # anonymous request, so it runs on a worker thread, not the event loop.
+        if await run_in_threadpool(deps.gate) is not True:
             raise HTTPException(status_code=404, detail="not found")
     except HTTPException:
         raise
@@ -202,7 +206,7 @@ def create_consent_native_sdk_router(dependencies: NativeConsentSDKAPIDependenci
         request: Request,
         response: Response,
     ) -> dict[str, Any]:
-        _preflight(request, deps, "enroll")
+        await _preflight(request, deps, "enroll")
         body = await _bounded_model(request, NativeEnrollmentIn)
         if not isinstance(body, NativeEnrollmentIn):
             raise HTTPException(status_code=422, detail="native enrollment is invalid")
@@ -240,7 +244,7 @@ def create_consent_native_sdk_router(dependencies: NativeConsentSDKAPIDependenci
         request: Request,
         response: Response,
     ) -> dict[str, Any]:
-        _preflight(request, deps, "dispatch")
+        await _preflight(request, deps, "dispatch")
         body = await _bounded_model(request, NativeEnvelopeIn)
         if not isinstance(body, NativeEnvelopeIn):
             raise HTTPException(status_code=422, detail="native envelope is invalid")
@@ -282,7 +286,7 @@ def create_consent_native_sdk_router(dependencies: NativeConsentSDKAPIDependenci
         request: Request,
         response: Response,
     ) -> dict[str, Any]:
-        _preflight(request, deps, "refresh")
+        await _preflight(request, deps, "refresh")
         body = await _bounded_model(request, NativeAuthorityRefreshIn)
         if not isinstance(body, NativeAuthorityRefreshIn):
             raise HTTPException(status_code=422, detail="native refresh is invalid")

@@ -3,7 +3,7 @@
   var root = document.getElementById("workspace-recovery");
   if (!root) return;
   var get = function (id) { return document.getElementById("wrec-" + id); };
-  var state = null, review = null, busy = false, installationPoints = [], accessDenied = false;
+  var state = null, review = null, busy = false, installationPoints = [], nativeReview = null, accessDenied = false;
   var comparison = null, comparisonContext = null, comparisonGeneration = 0;
   var drillEvidence = null, drillContext = null, drillGeneration = 0;
   var custodyEvidence = null, custodyContext = null, custodyGeneration = 0;
@@ -13,6 +13,16 @@
   var identityTransition = null;
   var accessMessage = "Your recovery access is unavailable. Sign in with an authorized account and reload this page before continuing.";
   function say(text) { get("status").textContent = text; }
+  function clearApprovalCode() {
+    get("installation-code").value = "";
+    get("installation-code-copy-status").textContent = "";
+  }
+  function currentNativeReview() {
+    return !!nativeReview && /^[0-9a-f]{32}$/.test(nativeReview.id)
+      && typeof nativeReview.expires_at === "number" && Number.isFinite(nativeReview.expires_at)
+      && nativeReview.expires_at * 1000 > Date.now() && !!nativeReview.release
+      && typeof nativeReview.release.version === "string" && nativeReview.release.version.length > 0 && nativeReview.release.version.length <= 64;
+  }
   function controls() {
     var ready = !busy && !accessDenied && !!state;
     var hasKey = ready && !!state.key_id;
@@ -47,8 +57,9 @@
     get("encryption-download").disabled = !hasKey || !state.encryption_custody || !state.encryption_custody.local_export_available || !get("encryption-confirm").checked;
     get("prepare").disabled = !selected || !state.live_restore_available;
     get("restore").disabled = !ready || !review || !get("confirm").checked;
-    get("installation-authorize").disabled = !ready || !state.live_restore_available || !get("installation-confirm").checked;
-    get("installation-rollback").disabled = get("installation-authorize").disabled || !get("installation-point").value;
+    var installationReady = ready && state.live_restore_available && get("installation-confirm").checked;
+    get("installation-authorize").disabled = !installationReady || !currentNativeReview();
+    get("installation-rollback").disabled = !installationReady || !get("installation-point").value;
     get("installation-transition-file").disabled = !ready || !state.live_restore_available;
     get("installation-transition-review").disabled = !ready || !state.live_restore_available || !get("installation-transition-file").files.length;
     get("installation-transition-confirm").disabled = !ready || !identityTransition;
@@ -71,10 +82,40 @@
     channelEvent("controls");
   }
   function clearReview() { review = null; get("review").hidden = true; get("review-text").textContent = ""; get("confirm").checked = false; }
+  function clearExcludedKeys() {
+    get("excluded-keys").hidden = true;
+    get("excluded-keys-status").textContent = "";
+    get("excluded-keys-list").replaceChildren();
+  }
+  function keyListMessage(keys) {
+    return !Array.isArray(keys) ? "This older copy did not record which key files were left out. Check your separately saved keys before relying on it."
+      : keys.length ? "Key files left out of this copy:"
+        : "No separate on-disk key files were recorded as left out when this copy was made. Keys held by an outside service are not included in this check.";
+  }
+  function renderExcludedKeys(row) {
+    get("excluded-keys").hidden = false;
+    get("excluded-keys-status").textContent = keyListMessage(row.withheld_key_files);
+    list("excluded-keys-list", Array.isArray(row.withheld_key_files) ? row.withheld_key_files : []);
+  }
+  function renderInstallationKeys(points) {
+    points = points.filter(function (row) { return row.snapshot_saved === true; });
+    get("installation-key-custody").hidden = !points.length;
+    var target = get("installation-key-custody-list"); target.replaceChildren();
+    points.forEach(function (row) {
+      var entry = document.createElement("li"), title = document.createElement("p");
+      title.textContent = "Saved update copy " + row.id.slice(0, 8) + ": " + keyListMessage(row.withheld_key_files); entry.appendChild(title);
+      if (Array.isArray(row.withheld_key_files) && row.withheld_key_files.length) {
+        var keys = document.createElement("ul");
+        row.withheld_key_files.forEach(function (name) { var item = document.createElement("li"); item.textContent = name; keys.appendChild(item); });
+        entry.appendChild(keys);
+      }
+      target.appendChild(entry);
+    });
+  }
   function clearConfirmations() {
     clearReview();
     clearIdentityTransition();
-    root.querySelectorAll('input[type="checkbox"]').forEach(function (input) { input.checked = false; });
+    root.querySelectorAll('input[type="checkbox"]:not(#wrec-installation-handoff)').forEach(function (input) { input.checked = false; });
   }
   function clearIdentityTransition() { identityTransition = null; get("installation-transition-details").textContent = ""; get("installation-transition-confirm").checked = false; }
   function clearComparison() {
@@ -107,10 +148,11 @@
   }
   function clearPrivateState() {
     channelDrafts.clear();
-    accessDenied = true; state = null; installationPoints = []; clearConfirmations(); clearEvidence(); clearReconciliation();
+    accessDenied = true; state = null; installationPoints = []; nativeReview = null; clearConfirmations(); clearEvidence(); clearReconciliation();
+    clearExcludedKeys(); renderInstallationKeys([]);
     root.querySelectorAll("input, textarea").forEach(function (input) { if (input.type !== "checkbox") input.value = ""; });
     root.querySelectorAll("select, ul").forEach(function (element) { element.replaceChildren(); });
-    ["identity", "last-restore", "key-status", "encryption-status", "result", "bootstrap-status", "installation-result", "installation-retention-status"].forEach(function (id) { get(id).textContent = ""; });
+    ["identity", "last-restore", "key-status", "encryption-status", "result", "bootstrap-status", "installation-result", "installation-retention-status", "installation-native-review"].forEach(function (id) { get(id).textContent = ""; });
     controls();
     say(accessMessage); get("status").setAttribute("tabindex", "-1"); get("status").focus();
     channelEvent("denied");
@@ -136,7 +178,7 @@
       throw new Error(accessMessage);
     }
     if (!response.ok) {
-      clearConfirmations(); clearEvidence();
+      clearConfirmations(); clearEvidence(); clearExcludedKeys();
       var error = await response.json().catch(function () { return {}; });
       throw new Error(plainDetail(error.detail, response));
     }
@@ -156,7 +198,7 @@
     if (typeof detail === "string" && detail.length <= 400 && /^[A-Z]/.test(detail)
       && !/[_{}<>\[\]]|HTTP|Traceback|Error:/.test(detail)) return detail;
     if (window.mvErrorText) return window.mvErrorText(response, "complete this recovery step");
-    return "Recovery could not complete this step.";
+    return "Recovery could not complete this step. Try again.";
   }
   function list(id, items) {
     get(id).replaceChildren();
@@ -173,7 +215,7 @@
       restore_pending: "A restore onto this new installation was interrupted. Recover it here before attempting another restore.",
       reconciliation_required: "Restored files are held while you review queued and possibly external work below.",
       completed: "The most recent new-install recovery and restored-work review completed.",
-      unavailable: bootstrap.detail || "New-installation recovery status is unavailable. Remain in recovery mode.",
+      unavailable: bootstrap.detail || "New-installation recovery status is unavailable. Remain in recovery mode and refresh the page in a minute.",
     };
     get("bootstrap-status").textContent = messages[bootstrap.state] || "New-installation recovery is still protected. Refresh before continuing.";
   }
@@ -393,7 +435,7 @@
       return;
     }
     heading.textContent = descriptor.title + " · " + descriptor.source_label + " · " + (index + 1);
-    explanation.textContent = descriptor.source_label + " · Restored " + new Date(descriptor.restored_at).toLocaleString();
+    explanation.textContent = descriptor.source_label + " · Restored " + (window.LightworkI18n ? window.LightworkI18n.formatDate(descriptor.restored_at) : new Date(descriptor.restored_at).toLocaleString());
     if (descriptor.status === "recorded" && item.state === "resolved") {
       var done = document.createElement("p"); done.textContent = "Review recorded. No old action was repeated."; entry.append(done); return;
     }
@@ -443,13 +485,28 @@
     function edited() {
       confirmation.checked = false;
       fields.forEach(function (record) { if (!record.fixed) draft.values[record.input.name] = record.input.value; record.error.hidden = true; record.input.removeAttribute("aria-invalid"); });
+      if (selectedCheckpoint) showSelectedCheckpoint();
       controls();
     }
     var zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "your device's time zone";
     var checked = field("checked_at", "When did you check the service?", "datetime-local", "Your local time (" + zone + "). " + (finishing ? "The original saved observation time is retained." : "Check within the last 15 minutes."));
     var reference = field("evidence_reference", "Evidence reference", "text", "Use a ticket, receipt, or service record that supports your findings. At least 8 characters.");
     if (finishing) { checked.value = localTime(recorded.checked_at); reference.value = recorded.evidence_reference; }
-    var execution, delivery, chunkFields = [], position, resume;
+    var execution, delivery, chunkFields = [], position, resume, selectedCheckpoint, manual;
+    function showSelectedCheckpoint() {
+      var retained = draft.sourceCheckpoint;
+      if (retained && (retained.position !== position.value || retained.checked_at !== checked.value || retained.evidence_reference !== reference.value)) {
+        delete draft.sourceCheckpoint; retained = null;
+      }
+      if (retained) {
+        var date = window.LightworkI18n ? window.LightworkI18n.formatDate(retained.source_at) : new Date(retained.source_at).toLocaleString();
+        selectedCheckpoint.textContent = retained.empty_source ? "Selected checkpoint: the source was confirmed empty at " + date + ". No earlier messages will be collected."
+          : "Selected checkpoint: collect only after " + date + ". Collection will skip through this checkpoint. Unknown delivery outcomes remain unknown.";
+      } else if (position.value) {
+        selectedCheckpoint.textContent = "A manual source position is entered. Review its complete details below before confirming.";
+        manual.open = true;
+      } else selectedCheckpoint.textContent = "No source checkpoint selected. Look up the configured source and choose where collection resumes.";
+    }
     if (descriptor.kind === "message") {
       execution = field("execution", "Did the requested action happen?", null, "Use the service's action history, not an assumption based on delivery.", descriptor.execution_choices);
       delivery = field("delivery", "Was the message delivered?", null, "Check the service's delivery record.", descriptor.delivery_choices);
@@ -473,6 +530,50 @@
         "Copy the complete number from the source. " + (descriptor.minimum_position != null ? "It must be at least " + descriptor.minimum_position + "." : "Do not use the older saved position."));
       position.inputMode = "numeric"; position.maxLength = isMessage ? 4096 : 40;
       if (finishing) position.value = recorded.position;
+      if (!finishing) {
+        manual = document.createElement("details"); var manualTitle = document.createElement("summary");
+        manualTitle.textContent = "Manual source position and evidence (advanced)"; manual.append(manualTitle, position.parentNode, reference.parentNode); form.append(manual);
+        selectedCheckpoint = document.createElement("p"); selectedCheckpoint.className = "wrec-field-help"; selectedCheckpoint.setAttribute("role", "status");
+        form.insertBefore(selectedCheckpoint, manual); showSelectedCheckpoint();
+        var lookupPanel = document.createElement("div"), lookupButton = document.createElement("button"), olderButton = document.createElement("button"), choices = document.createElement("select"), lookupStatus = document.createElement("p"), lookupLabel = document.createElement("label");
+        lookupButton.type = "button"; lookupButton.textContent = "Look up source checkpoints";
+        olderButton.type = "button"; olderButton.textContent = "Show older checkpoints"; olderButton.hidden = true;
+        choices.id = form.id + "-source-checkpoint"; lookupLabel.htmlFor = choices.id; lookupLabel.textContent = "Choose where collection resumes";
+        choices.hidden = true; lookupStatus.setAttribute("role", "status"); lookupStatus.setAttribute("aria-live", "polite");
+        lookupPanel.append(lookupButton, olderButton, lookupLabel, choices, lookupStatus); form.insertBefore(lookupPanel, manual);
+        var sourcePage = null;
+        async function lookupSource(before) {
+          if (busy || accessDenied) return;
+          var binding = state.context;
+          confirmation.checked = false; sourcePage = null; choices.replaceChildren(); choices.hidden = true; olderButton.hidden = true;
+          lookupStatus.textContent = "Reading checkpoint dates from this configured source. No message will be sent or replayed.";
+          await action(async function () {
+            var result = await request("operations/channel-source-lookup", { item_id: item.id, expected_review_token: descriptor.review_token, before: before });
+            if (!state || state.context !== binding || accessDenied || !channelDrafts.has(key)) return;
+            if (result.available !== true) { lookupStatus.textContent = result.notice || "The source is unavailable. Keep this item unresolved; no position was guessed."; return; }
+            if (result.review_token !== descriptor.review_token || !Array.isArray(result.candidates) || result.candidates.length > 50 || !Number.isFinite(Date.parse(result.observed_at))) throw new Error("The source lookup changed. Refresh and review again.");
+            sourcePage = result;
+            var prompt = document.createElement("option"); prompt.value = ""; prompt.textContent = "Select a dated checkpoint after reviewing its evidence"; choices.append(prompt);
+            result.candidates.forEach(function (candidate, candidateIndex) {
+              if (!/^[0-9]{1,40}$/.test(candidate.position) || !Number.isFinite(Date.parse(candidate.source_at)) || !/^[a-f0-9]{64}$/.test(candidate.evidence_digest || "") || typeof candidate.evidence_reference !== "string") throw new Error("The source evidence is incomplete. Keep this review unresolved.");
+              var option = document.createElement("option"); option.value = String(candidateIndex); option.textContent = (candidate.empty_source ? "Source confirmed empty at " : "Collect only after ") + (window.LightworkI18n ? window.LightworkI18n.formatDate(candidate.source_at) : new Date(candidate.source_at).toLocaleString()) + " · Checkpoint " + (candidateIndex + 1); choices.append(option);
+            });
+            choices.hidden = !result.candidates.length; olderButton.hidden = !result.next_before;
+            lookupStatus.textContent = result.candidates.length ? result.notice : "No selectable current checkpoint was returned. Keep this item unresolved or review the original service; no checkpoint was guessed.";
+          });
+        }
+        lookupButton.addEventListener("click", function () { return lookupSource(null); });
+        olderButton.addEventListener("click", function () { if (sourcePage && sourcePage.next_before) return lookupSource(sourcePage.next_before); });
+        choices.addEventListener("change", function () {
+          if (busy || !sourcePage || choices.value === "") return;
+          var selected = sourcePage.candidates[Number(choices.value)];
+          if (!selected) return;
+          position.value = selected.position; checked.value = localTime(sourcePage.observed_at); reference.value = selected.evidence_reference;
+          draft.sourceCheckpoint = { position: position.value, checked_at: checked.value, evidence_reference: reference.value, source_at: selected.source_at, empty_source: selected.empty_source === true };
+          edited();
+          lookupStatus.textContent = "The selected checkpoint stays visible while browsing other dates. Review it and explicitly confirm below. Delivery receipts and unknown outcomes remain unchanged.";
+        });
+      }
     } else if (descriptor.kind === "poll_time") {
       resume = field("resume_time", "Start checking for new posts from", "datetime-local", "Your local time (" + zone + "). Choose a time at or after restoration, verified against the service.");
       if (finishing) resume.value = localTime(recorded.resume_time);
@@ -523,7 +624,7 @@
         if (!resultAnswers.resume_time) invalid("resume_time", "Choose the date and time to start checking for new posts.");
         else if (Date.parse(resultAnswers.resume_time) < Date.parse(descriptor.restored_at) || (observed && Date.parse(resultAnswers.resume_time) > Date.parse(observed) + 60000)) invalid("resume_time", "Choose a time after restoration and no later than the time you checked the service.");
       }
-      if (errors.length) { if (showErrors) { form.hidden = false; draft.open = true; fieldByName.get(errors[0]).input.focus(); } return null; }
+      if (errors.length) { if (showErrors) { form.hidden = false; draft.open = true; if (["position", "evidence_reference"].includes(errors[0]) && manual) manual.open = true; fieldByName.get(errors[0]).input.focus(); } return null; }
       return resultAnswers;
     }
     async function refreshStatus() {
@@ -661,12 +762,18 @@
   }
   async function load(selected) {
     channelCurrent = false;
-    clearEvidence();
+    clearEvidence(); clearExcludedKeys(); renderInstallationKeys([]);
+    nativeReview = null;
+    get("installation-native-review").textContent = "";
+    get("installation-confirm").checked = false;
+    clearApprovalCode();
+    clearIdentityTransition();
     installationPoints = [];
+    get("installation-point").replaceChildren();
     get("installation-retire-confirm").checked = false;
     get("installation-retire-point").replaceChildren();
     var result = await request("status");
-    if (state && result.context !== state.context) { channelDrafts.clear(); clearReconciliation(); clearReview(); clearIdentityTransition(); get("installation-transition-file").value = ""; get("installation-code").value = ""; get("installation-confirm").checked = false; }
+    if (state && result.context !== state.context) { channelDrafts.clear(); clearReconciliation(); clearReview(); clearIdentityTransition(); get("installation-transition-file").value = ""; clearApprovalCode(); get("installation-confirm").checked = false; }
     state = result;
     renderBootstrapStatus();
     get("identity").textContent = "Workspace: " + result.tenant + " · Lightwork " + result.application_version;
@@ -680,16 +787,20 @@
     list("coverage", result.coverage); list("excluded", result.excluded); list("blockers", result.restore_blockers);
     get("snapshot").replaceChildren();
     var empty = document.createElement("option"); empty.value = ""; empty.textContent = "Choose a snapshot"; get("snapshot").appendChild(empty);
-    result.snapshots.forEach(function (row, index) { var option = document.createElement("option"); option.value = row.id; var when = row.created_at ? new Date(row.created_at * 1000).toLocaleString() : "Snapshot " + (index + 1); option.textContent = when + " · " + (row.bytes / 1048576).toFixed(2) + " MB · " + row.id.slice(0, 8); get("snapshot").appendChild(option); });
+    result.snapshots.forEach(function (row, index) { var option = document.createElement("option"); option.value = row.id; var when = row.created_at ? (window.LightworkI18n ? window.LightworkI18n.formatDate(row.created_at) : new Date(row.created_at * 1000).toLocaleString()) : "Snapshot " + (index + 1); option.textContent = when + " · " + (row.bytes / 1048576).toFixed(2) + " MB · " + row.id.slice(0, 8); get("snapshot").appendChild(option); });
     if (selected) get("snapshot").value = selected;
     try {
       var installation = await request("installation");
+      nativeReview = installation.native_review || null;
+      if (!currentNativeReview()) nativeReview = null;
+      get("installation-native-review").textContent = nativeReview ? "Native release: " + nativeReview.release.version + ". Review expires " + (window.LightworkI18n ? window.LightworkI18n.formatDate(nativeReview.expires_at) : new Date(nativeReview.expires_at * 1000).toLocaleString()) + "." : "For a protected update, first select Check for updates in the native app, then refresh this page.";
       get("installation-point").replaceChildren();
       var choose = document.createElement("option"); choose.value = ""; choose.textContent = "Choose a completed upgrade"; get("installation-point").appendChild(choose);
       (installation.recovery_points || []).filter(function (item) { return item.status === "upgraded"; }).forEach(function (item) {
         var option = document.createElement("option"); option.value = item.id; option.textContent = item.new_version + " → " + item.old_version + " · " + item.id.slice(0, 8); get("installation-point").appendChild(option);
       });
       installationPoints = installation.recovery_points || [];
+      renderInstallationKeys(installationPoints);
       var option = document.createElement("option"); option.value = ""; option.textContent = "Choose a point to retire"; get("installation-retire-point").appendChild(option);
       var phase = { authorized: "Unused authorization", prepared: "Update prepared", applying: "Update in progress", incomplete: "Recovery unfinished", upgraded: "Completed upgrade", rolled_back: "Completed rollback", retired: "Retirement cleanup pending" };
       list("installation-retention-list", installationPoints.map(function (item) {
@@ -698,7 +809,7 @@
         return label + (item.retirement_blocker ? ": " + item.retirement_blocker : item.cleanup_pending ? ": Continue the already reviewed retirement cleanup." : ": Eligible for reviewed retirement.");
       }));
       get("installation-retention-status").textContent = installationPoints.length + " of " + (installation.point_limit || 20) + " local installation slots used. " + (installationPoints.length ? "Retirement frees a slot after file cleanup succeeds." : "No installation recovery points are saved.");
-      list("installation-retirement-history", (installation.retirement_history || []).map(function (item) { return item.id.slice(0, 8) + " · retired " + new Date(item.retired_at * 1000).toLocaleString(); }));
+      list("installation-retirement-history", (installation.retirement_history || []).map(function (item) { return item.id.slice(0, 8) + " · retired " + (window.LightworkI18n ? window.LightworkI18n.formatDate(item.retired_at) : new Date(item.retired_at * 1000).toLocaleString()); }));
     } catch (error) { clearConfirmations(); clearEvidence(); if (accessDenied) throw error; get("installation-result").textContent = error.message; }
     if (result.bootstrap) {
       try { renderReconciliation(await request("reconciliation")); }
@@ -749,7 +860,7 @@
   }
   function renderComparison() {
     var row = comparison;
-    get("comparison-summary").textContent = "Captured " + new Date(row.compared_at * 1000).toLocaleString() + ": " + row.total_changes
+    get("comparison-summary").textContent = "Captured " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.compared_at) : new Date(row.compared_at * 1000).toLocaleString()) + ": " + row.total_changes
       + (row.total_changes === 1 ? " file difference, including " : " file differences, including ") + row.protected_changes
       + (row.protected_changes === 1 ? " protected difference requiring administrator review." : " protected differences requiring administrator review.");
     get("comparison-status").textContent = row.total_changes ? "Showing differences " + (row.offset + 1) + "–" + (row.offset + row.items.length)
@@ -836,8 +947,8 @@
     }
     verifyDrillReport(row, selected);
     drillEvidence = row; drillContext = context;
-    get("drill-report-summary").textContent = "Test completed " + new Date(row.completed_at * 1000).toLocaleString() + ": " + row.file_count + " files restored and checked in " + row.elapsed_seconds
-      + " seconds. Snapshot created " + new Date(row.snapshot_created_at * 1000).toLocaleString() + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
+    get("drill-report-summary").textContent = "Test completed " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.completed_at) : new Date(row.completed_at * 1000).toLocaleString()) + ": " + row.file_count + " files restored and checked in " + row.elapsed_seconds
+      + " seconds. Snapshot created " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.snapshot_created_at) : new Date(row.snapshot_created_at * 1000).toLocaleString()) + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
     get("drill-report-build").textContent = row.current_build_matches ? "The tested application build matches this app. This historical test does not prove the current workspace is ready for recovery."
       : "This test used a different application build (Lightwork " + row.application_version + "). Keep it as historical evidence; it does not prove readiness for this app.";
     get("drill-report-identity").textContent = "Snapshot: " + row.snapshot + ". Archive fingerprint: " + row.archive_sha256 + ". Test report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
@@ -891,8 +1002,8 @@
     var outcomes = { verified_supported_formats: "Recognized supported formats verified", incomplete: "Test incomplete", failed: "Verification failed", no_encrypted_records: "No encrypted records tested" };
     get("custody-status").textContent = outcomes[row.outcome] + ". Review the exact coverage below; no live restore has been authorized.";
     var duration = row.elapsed_seconds < 0.1 ? "less than 0.1" : row.elapsed_seconds.toLocaleString(undefined, { maximumFractionDigits: 1 });
-    get("custody-summary").textContent = "Completed " + new Date(row.completed_at * 1000).toLocaleString() + " in " + duration + " seconds using your uploaded key copy in a fresh temporary process. Snapshot created "
-      + new Date(row.snapshot_created_at * 1000).toLocaleString() + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
+    get("custody-summary").textContent = "Completed " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.completed_at) : new Date(row.completed_at * 1000).toLocaleString()) + " in " + duration + " seconds using your uploaded key copy in a fresh temporary process. Snapshot created "
+      + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.snapshot_created_at) : new Date(row.snapshot_created_at * 1000).toLocaleString()) + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
     get("custody-build").textContent = row.current_build_matches ? "The tested application build matches this app. This saved result does not prove current recovery readiness."
       : "This historical test used a different application build (Lightwork " + row.application_version + "). It does not prove readiness for this app.";
     var formats = { "raw-v1": "Encrypted files (v1)", "raw-v2": "Encrypted files (rotated-key v2)", "raw-tenant-local": "Encrypted files (local tenant key)",
@@ -992,36 +1103,44 @@
   on("key-download", async function () { await request("key/download", { confirm: true }, "Lightwork-recovery-key.txt"); say("Recovery key download started."); });
   on("encryption-download", async function () { if (!get("encryption-confirm").checked) return; await request("encryption-keys/download", { confirm: true, confirm_shared_keys: true }, "Lightwork-local-encryption-keys.zip"); get("encryption-confirm").checked = false; say("Local encryption key download started. Store these sensitive shared keys separately from snapshots."); });
   on("key-import", async function () { var key = get("key-input").value.trim(); if (!key) throw new Error("Enter your existing recovery key."); await request("key", { confirm: true, key: key }, "Lightwork-recovery-key.txt"); get("key-input").value = ""; await load(); say("Recovery key imported."); });
-  on("create", async function () { clearReview(); say("Creating and verifying a snapshot…"); var row = await request("snapshots", { confirm: true }); await load(row.id); say("Snapshot created and verified. Export a copy outside this computer."); });
-  on("import", async function () { clearReview(); var file = get("file").files[0]; if (!file) throw new Error("Select a snapshot archive."); if (file.size > state.max_archive_bytes) throw new Error("This archive exceeds the in-app size limit."); say("Importing and verifying the archive…"); var row = await request("import", file); get("file").value = ""; await load(row.id); say("Snapshot imported and verified."); });
-  on("inspect", async function () { say("Checking the signature and every archived file…"); var row = await request(path("inspect"), {}); get("result").textContent = "Signature and all " + row.file_count + " files verified" + (row.created_at ? " · Made " + new Date(row.created_at * 1000).toLocaleString() : "") + " · Lightwork " + row.application_version + " · " + row.compatibility; say("Snapshot verification finished."); });
+  on("create", async function () { clearReview(); clearExcludedKeys(); say("Creating and verifying a snapshot…"); var row = await request("snapshots", { confirm: true }); await load(row.id); renderExcludedKeys(row); say("Snapshot created and verified. Export a copy outside this computer."); });
+  on("import", async function () { clearReview(); clearExcludedKeys(); var file = get("file").files[0]; if (!file) throw new Error("Select a snapshot archive."); if (file.size > state.max_archive_bytes) throw new Error("This archive exceeds the in-app size limit."); say("Importing and verifying the archive…"); var row = await request("import", file); get("file").value = ""; await load(row.id); renderExcludedKeys(row); say("Snapshot imported and verified."); });
+  on("inspect", async function () { clearExcludedKeys(); say("Checking the signature and every archived file…"); var row = await request(path("inspect"), {}); renderExcludedKeys(row); get("result").textContent = "Signature and all " + row.file_count + " files verified" + (row.created_at ? " · Made " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.created_at) : new Date(row.created_at * 1000).toLocaleString()) : "") + " · Lightwork " + row.application_version + " · " + row.compatibility; say("Snapshot verification finished."); });
   on("download", async function () { await request(path("download"), {}, "Lightwork-snapshot-" + get("snapshot").value + ".tgz"); say("Verified snapshot download started. Store it securely."); });
   on("drill", async function () { clearDrillReport(); say("Restoring into a temporary workspace and checking the result…"); var row = await request(path("drill"), { confirm: true }); get("result").textContent = row.file_count + " files restored and checked in " + row.elapsed_seconds + " seconds. Your live workspace was not changed. External stores were not tested."; say("Local restore test passed. View the last restore test to review and download its saved evidence."); });
   on("retire", async function () { if (!get("retire-confirm").checked) return; var row = await request(path("inspect"), {}); await request(path("retire"), { confirm: true, sha256: row.sha256 }); get("retire-confirm").checked = false; clearReview(); await load(); say("The selected local snapshot was retired."); });
   on("prepare", async function () { clearReview(); say("Verifying the selected snapshot and preparing its recovery point…"); var row = await request(path("prepare"), { confirm: true }); if (typeof row.review !== "string" || row.target !== state.target || ["ordinary", "virgin_bootstrap"].indexOf(row.restore_mode) === -1) throw new Error("The restore review does not match this workspace. Refresh and try again."); review = row; var virgin = row.restore_mode === "virgin_bootstrap"; get("review-text").textContent = "Restore " + row.file_count + " files to workspace " + row.tenant + " on Lightwork " + row.application_version + ". " + (virgin ? "The signed empty installation is the recovery point, and restored work will remain held for reconciliation." : "A verified safety snapshot is saved first.") + " This review expires in five minutes."; get("confirm-text").textContent = virgin ? "I reviewed the empty target and snapshot, and authorize restoring it with all queued and uncertain work held." : "I reviewed the workspace and snapshot, and understand that newer local work will be replaced."; get("review").hidden = false; say("Review the restore details. No files have been restored yet."); });
   on("restore", async function () { if (!review || !get("confirm").checked) return; var selected = review, snapshot = get("snapshot").value; clearReview(); say("Restoring the reviewed snapshot and checking the result…"); var result = await request("restore", { review: selected.review, target: selected.target, confirm: true }); if (result.restored !== true || result.post_restore_verified !== true || ["completed", "reconciliation_required"].indexOf(result.state) === -1) throw new Error("Restore confirmation was incomplete. Remain in recovery mode and review the safety snapshot."); state.live_restore_available = false; await load(snapshot); say(result.state === "reconciliation_required" ? "Workspace files were restored and checked. Review every held item below before normal use." : "Workspace restored and checked. Return to the desktop menu when you are ready to restart normal work."); });
-  get("snapshot").addEventListener("change", function () { clearReview(); clearEvidence(); get("retire-confirm").checked = false; get("result").textContent = ""; controls(); });
+  get("snapshot").addEventListener("change", function () { clearReview(); clearEvidence(); clearExcludedKeys(); get("retire-confirm").checked = false; get("result").textContent = ""; controls(); });
   get("confirm").addEventListener("change", controls);
   get("retire-confirm").addEventListener("change", controls);
   get("encryption-confirm").addEventListener("change", controls);
   async function authorizeInstallation(rollback) {
     if (!get("installation-confirm").checked) return;
-    get("installation-code").value = "";
-    var body = { confirm: true, confirm_all_workspaces: true };
+    clearApprovalCode();
+    var body = { confirm: true, confirm_all_workspaces: true, native_handoff: get("installation-handoff").checked };
+    if (!rollback) {
+      if (!currentNativeReview()) throw new Error("Check for updates in the native app and refresh this page to review the exact release.");
+      body.review_id = nativeReview.id;
+    }
     if (rollback) { if (!get("installation-point").value) return; body.rollback_id = get("installation-point").value; }
     else if (get("installation-transition-file").files.length) {
       if (!identityTransition || !get("installation-transition-confirm").checked || identityTransition.context !== state.context) return;
       body.identity_transition = identityTransition.envelope; body.transition_sha256 = identityTransition.sha256; body.confirm_identity_transition = true;
     }
     var result = await request("installation/authorize", body);
+    if (result.native_handoff === true) {
+      get("installation-result").textContent = "Protected approval ready until " + (window.LightworkI18n ? window.LightworkI18n.formatDate(result.expires_at) : new Date(result.expires_at * 1000).toLocaleString()) + ". In Install & updates, select Load protected approval, review its administrator, action and scope, then confirm. Nothing has been installed.";
+    } else {
     if (typeof result.authorization !== "string" || !/^[0-9a-f]{32}:[0-9a-f]{64}$/.test(result.authorization)) throw new Error("The maintenance authorization was incomplete. Review again.");
     get("installation-code").value = result.authorization;
     get("installation-result").textContent = "Authorization ready for 15 minutes. Continue in the desktop app's Install & updates controls and confirm the exact " + (rollback ? "rollback" : "update") + ".";
+    }
     get("installation-confirm").checked = false;
     clearIdentityTransition(); get("installation-transition-file").value = "";
   }
   on("installation-transition-review", async function () {
-    clearIdentityTransition(); get("installation-code").value = "";
+    clearIdentityTransition(); clearApprovalCode();
     var file = get("installation-transition-file").files[0], binding = state.context;
     if (!file || file.size > 65536) throw new Error("Choose the signed review file (no larger than 64 KB).");
     var envelope = await file.text();
@@ -1030,31 +1149,52 @@
     identityTransition = { envelope: envelope, sha256: result.sha256, context: binding };
     get("installation-transition-details").textContent = "Verified signatures for " + result.from_version + " → " + result.to_version +
       "\nPublisher: " + result.from_publisher + " → " + result.to_publisher + "\nUpdate key fingerprints: " + result.from_key_sha256 + " → " + result.to_key_sha256 +
-      "\nNew admissions end: " + new Date(result.expires_at * 1000).toISOString() + ". Rollback is limited to the exact retained pair and compatible unchanged protected state. Windows verifies each installer's publisher trust before execution.";
+      "\nNew admissions end: " + (window.LightworkI18n ? window.LightworkI18n.formatDate(result.expires_at) : new Date(result.expires_at * 1000).toISOString()) + ". Rollback is limited to the exact retained pair and compatible unchanged protected state. Windows verifies each installer's publisher trust before execution.";
   });
-  get("installation-transition-file").addEventListener("change", function () { clearIdentityTransition(); get("installation-code").value = ""; controls(); });
+  get("installation-transition-file").addEventListener("change", function () { clearIdentityTransition(); clearApprovalCode(); controls(); });
   get("installation-transition-confirm").addEventListener("change", controls);
   on("installation-authorize", function () { return authorizeInstallation(false); });
   on("installation-rollback", function () { return authorizeInstallation(true); });
   get("installation-confirm").addEventListener("change", controls);
-  get("installation-point").addEventListener("change", function () { get("installation-code").value = ""; controls(); });
+  get("installation-point").addEventListener("change", function () { clearApprovalCode(); get("installation-confirm").checked = false; controls(); });
   get("installation-retire-point").addEventListener("change", function () { get("installation-retire-confirm").checked = false; controls(); });
   get("installation-retire-confirm").addEventListener("change", controls);
   on("installation-retire", async function () {
     var selected = installationPoints.find(function (item) { return item.id === get("installation-retire-point").value; });
     if (!selected || !selected.can_retire || !get("installation-retire-confirm").checked) return;
     get("installation-retire-confirm").checked = false;
-    get("installation-code").value = "";
+    clearApprovalCode();
     await request("installation/" + encodeURIComponent(selected.id) + "/retire", { confirm: true, sha256: selected.record_sha256 });
     await load();
     say("The selected installation point was retired. A signed retirement receipt has been kept.");
   });
   action(async function () { await load(); say("Review coverage and keep a separate recovery key copy before relying on snapshots."); });
-  // Copy the private approval code for the desktop app's Install & updates.
+  // Recovery mode has its own shell, so the ordinary clipboard/toast helpers
+  // are not present. Keep the result beside the button where it is visible.
   var copyCode = document.getElementById("wrec-installation-code-copy");
-  if (copyCode) copyCode.addEventListener("click", function () {
-    var code = get("installation-code").value.trim();
-    if (!code) { window.mvToast("There is no approval code yet. Review an update above first.", {error: true}); return; }
-    window.mvCopy(code);
+  if (copyCode) copyCode.addEventListener("click", async function () {
+    var field = get("installation-code");
+    var status = get("installation-code-copy-status");
+    var code = field.value.trim();
+    if (!code) { status.textContent = "There is no approval code yet. Review an update above first."; return; }
+    var copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(code); copied = true; } catch (error) { /* try local copy below */ }
+    }
+    if (!copied) {
+      var area;
+      try {
+        area = document.createElement("textarea");
+        area.value = code; area.style.position = "fixed"; area.style.opacity = "0";
+        document.body.appendChild(area); area.select();
+        copied = !!(document.execCommand && document.execCommand("copy"));
+      } catch (error) { copied = false; }
+      finally { if (area) area.remove(); }
+    }
+    if (copied) { status.textContent = "Approval code copied."; copyCode.focus(); }
+    else {
+      field.focus(); field.select();
+      status.textContent = "Could not copy automatically. The code is selected above; copy it yourself.";
+    }
   });
 })();

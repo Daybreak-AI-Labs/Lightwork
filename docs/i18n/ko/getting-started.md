@@ -2,53 +2,13 @@
 
 # 시작하기
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## 설치
 
-Python 3.10–3.12와 검토한 커밋의 전체 SHA를 사용하세요. 자체 패키지 8개는 아직 완전한 묶음으로 PyPI에 게시되지 않았으므로, 매니페스트 설치 프로그램을 통해 저장소 소스를 함께 설치하세요. 대시보드, 마법사, 채널, MCP 서버, 지식 및 학습 패키지가 포함됩니다. `release-runtime`은 OpenAI 호환 클라이언트를, `evidence-analysis`는 PDF 및 스프레드시트 파서를 제공합니다.
+고객 설치에는 운영체제에 맞는 서명된 파일을 [파일이 첨부된 GitHub 릴리스](https://github.com/Daybreak-AI-Labs/Lightwork/releases)에서 받으세요. 해당 릴리스의 체크섬과 서명을 확인한 뒤 `dashboard` 명령으로 실행하세요. [배포 안내](../../DISTRIBUTION.md)에 파일과 확인 절차가 나와 있습니다. 해당 플랫폼의 파일이 없다면 고객용 패키지를 요청하세요.
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-Windows PowerShell에서는 먼저 커밋 자리표시자를 바꾸세요.
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-실행 파일 경로를 명시하므로 PowerShell 활성화 정책을 변경할 필요가 없습니다. 마법사에서 공급자와 샌드박스를 설정하세요. 소스 설치는 외부 계정, API 크레딧, 컨테이너 엔진이나 Kubernetes 클러스터를 만들지 않습니다. 고객 업무에 통합 기능을 사용하기 전에 허가된 실제 작업으로 확인하세요.
-
-같은 환경의 Python으로 패키지 묶음을 확인하세요.
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-Windows에서는 해당 실행 파일 이름 대신 `.\.venv\Scripts\python.exe`와 `.\.venv\Scripts\lightwork.exe`를 사용하세요.
-
-인증이 필요한 데스크톱 소스 설치에는 검토한 커밋의 `deploy/desktop/install.sh` 또는 `deploy/desktop/install.ps1`을 사용하고 `MAVERICK_REF`에 소문자로 된 전체 SHA를 설정하세요. 이 방식은 저장소 접근 권한과 플랫폼 사전 요구 사항이 필요한 소스 설치이며, 독립적으로 실행되는 서명된 제품 설치 프로그램이 아닙니다. 스크립트는 변경 가능한 참조를 거부하고 자체 패키지를 공개 인덱스에서 대신 받지 않습니다. `MAVERICK_*` 변수는 `LIGHTWORK_*`로도 표기할 수 있습니다.
+고객 설치를 위해 전체 저장소를 복제하지 마세요. 내부 연구, 감사, 특허 문서도 포함됩니다. 여덟 패키지는 아직 PyPI에 일괄 게시되지 않았습니다. 이미 저장소 접근 승인을 받은 유지보수 담당자는 [개발용 설치 절차](../../internal/source-install.md)를 사용할 수 있습니다.
 
 ## 첫 실행
 
@@ -168,10 +128,20 @@ maverick onboard
 ## 음성 입력(내장, 오프라인)
 
 대시보드의 마이크 버튼과 `transcribe_audio` 도구는 공급자 키 없이
-동작합니다. 로컬 Whisper 엔진은 대시보드 패키지에 포함되어 있고, 체크섬
-검증된 모델은 대시보드 첫 시작 시 자동으로 내려받습니다(이그레스 잠금
-배포이거나 `[voice] auto_fetch_model = false`이면 건너뜀). 자세한 내용은
-CLI로 확인합니다:
+동작합니다. 로컬 Whisper 엔진은 대시보드 패키지에 포함되어 있으며,
+앱을 열어도 기본적으로 모델 파일을 다운로드하지 않습니다.
+**Settings → Models**의 음성 받아쓰기 섹션에서 전역 관리자는 설정된 모델의 출처와 크기(기본 모델은
+약 148 MB)를 확인한 뒤 모델을 검사하거나 다운로드할 수 있습니다.
+페이지를 새로고침해도 진행 상황은 유지되고, 취소하면 완료되지 않은 다운로드가
+삭제되며, 실패한 경우 같은 화면에서 다시 시도할 수 있습니다. 기존 파일은
+정확한 크기와 체크섬 검사를 통과해야 검증된 것으로 표시됩니다. 모델 검증은
+음성 엔진이 로드되었거나 마이크가 작동한다는 보장은 아닙니다.
+
+설치 프로그램은 시작 시 다운로드를 허용할지 명시적으로 묻습니다. 저장된
+`[voice] auto_fetch_model = true` 또는 `MAVERICK_VOICE_AUTO_FETCH=1`은
+계속 시작 시 다운로드를 활성화합니다. 리디렉션을 포함해 네트워크 정책은
+항상 적용됩니다. 관리형 사용자 지정 모델 경로와 선택한 클라우드 음성 백엔드의
+설정은 유지되며, 이 화면에서 자동으로 바꾸지 않습니다. CLI도 사용할 수 있습니다:
 
 ```bash
 maverick voice setup    # 체크섬 검증된 모델 다운로드(약 148 MB)
@@ -186,13 +156,10 @@ maverick voice transcribe clip.wav   # 파이프라인 동작 테스트
 
 ## 모델 또는 공급자 변경
 
-마법사는 언제든지 다시 실행할 수 있습니다.
-
-```bash
-maverick init
-```
-
-또는 `~/.maverick/config.toml`을 직접 편집하세요. `[models]` 섹션은 각 에이전트 역할을 `provider:model-id` 문자열에 매핑합니다. 스키마는 [`configuration.md`](../../configuration.md)를 참고하세요.
+설치 후 **Settings → Provider keys** 또는 **Settings → Models**에서 선택을 변경하세요.
+배포에서 관리하는 값은 화면에 표시됩니다. 그런 값을 변경하려면 설치 관리자가
+원본 설정을 바꿔야 새 값이 적용됩니다. 기본 설정에 관한 내용은
+[`configuration.md`](../../configuration.md)를 참고하세요.
 
 ## 데이터가 저장되는 위치
 
@@ -206,7 +173,9 @@ maverick init
 | `~/.maverick/learned-skills/` | 학습 루프가 증류한 스킬 |
 | `~/.maverick/dreams/` | 통합된 통찰, 리허설 큐, 학습 스냅샷 |
 
-모든 데이터는 로컬에 있습니다. 선택한 클라우드 LLM으로 보내는 프롬프트 외에는 아무것도 업로드되지 않습니다.
+Lightwork는 위 파일을 사용 중인 배포 환경에 저장합니다. 클라우드 AI 공급자나
+연결된 서비스를 활성화하면 이를 통해 전송되는 작업 내용이 배포 환경 밖으로
+나갈 수 있습니다. 사용하기 전에 각 공급자, 커넥터 및 외부 전송 정책을 확인하세요.
 
 실행을 몇 번 쌓고 나면, 학습 영역은 네 가지 명령으로 요약됩니다. `maverick dream`(경험
 통합), `maverick hindsight`(학습이 도움이 되었는가, 아니면 퇴보했는가?),

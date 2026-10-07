@@ -91,7 +91,8 @@ async def test_exception_and_cancel_close_every_started_episode(
         monkeypatch.setattr("maverick.orchestrator.start_mcp_clients", fail)
     with pytest.raises(error):
         await run_goal(ctx.llm, ctx.world, ctx.budget, ctx.goal_id, sandbox=ctx.sandbox)
-    assert ctx.world.get_goal(ctx.goal_id).status == ("cancelled" if cancel else "blocked")
+    # An unexpected error marks the goal failed (2182ba8e); a cancel stays cancelled.
+    assert ctx.world.get_goal(ctx.goal_id).status == ("cancelled" if cancel else "failed")
     episode, = ctx.world.list_episodes(goal_id=ctx.goal_id)
     assert episode.ended_at is not None
     assert episode.outcome == ("interrupted" if cancel else "failure")
@@ -145,6 +146,39 @@ async def test_paid_finalize_is_included_in_episode_and_quota(run_state, monkeyp
     assert episode.input_tokens == 170
     assert episode.output_tokens == 60
     assert UsageLedger().usage("user:local")["in_tokens"] == 170
+
+
+@pytest.mark.asyncio
+async def test_private_goal_skips_opted_in_shared_skill_distillation(run_state, monkeypatch):
+    from maverick import audit
+
+    ctx = run_state
+    ctx.goal_id = ctx.world.create_goal("private payroll plan", owner="user:alice")
+    monkeypatch.setenv("MAVERICK_AUTO_DISTILL", "1")
+    monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: None)
+
+    async def answer(self):
+        return AgentResult(role=self.role, name=self.name, final="assessment ready")
+
+    def forbidden_distill(*args, **kwargs):
+        pytest.fail("private goal must not reach the tenant-wide distiller")
+
+    skipped = []
+    original_audit = audit.audit_event
+
+    def capture_audit(kind, **payload):
+        if kind == audit.EventKind.SKILL_DISTILL_SKIPPED:
+            skipped.append(payload)
+        return original_audit(kind, **payload)
+
+    monkeypatch.setattr(Agent, "run", answer)
+    monkeypatch.setattr("maverick.orchestrator.distill", forbidden_distill)
+    monkeypatch.setattr(audit, "audit_event", capture_audit)
+    result = await run_goal(ctx.llm, ctx.world, ctx.budget, ctx.goal_id, sandbox=ctx.sandbox)
+    assert "skill distill" not in result
+    assert ctx.world.get_goal(ctx.goal_id).status == "done"
+    assert skipped == [{"agent": "skill_distillation", "goal_id": ctx.goal_id,
+                        "reason": "private_source"}]
 
 
 @pytest.mark.asyncio

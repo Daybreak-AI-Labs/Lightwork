@@ -108,7 +108,8 @@ _MAX_LEARNED_TEXT = {
     "name": 512,
     "source": 2048,
 }
-_LEARNED_FIELDS = frozenset({"ts", "need", "kind", "name", "source", "outcome"})
+_LEARNED_FIELDS = frozenset({"ts", "need", "kind", "name", "source", "outcome",
+                              "content_version", "owner", "goal_id"})
 _MAX_LEARNED_LEDGER_BYTES = 16 * 1024 * 1024
 
 
@@ -145,6 +146,51 @@ def settings() -> dict:
         }
 
 
+def skill_acquisition_readiness() -> dict:
+    """Current prerequisites for automatic signed catalog-skill preparation.
+
+    No catalog request, publisher key disclosure or provider call is needed.
+    Being configured means Lightwork can check a match, not that a suitable
+    signed catalog entry exists. The final installer still verifies it.
+    """
+    from . import config
+    from .audit import signing
+    from .learning_guard import Halted
+
+    config.load_config()
+    notice = ("Automatic skill preparation accepts only signatures from publishers you trust. "
+              "A matching, correctly signed skill must still be available and pass the installation checks. "
+              "This check adds nothing and does not contact an AI service or the catalog.")
+    result = {"ready": False, "trusted_publishers": 0, "notice": notice}
+
+    def blocked(status, message, setting=None):
+        return {**result, "status": status, "message": message,
+                "remedy": {"href": "/settings/all?id=" + setting,
+                           "label": "Review trusted skill publishers" if setting == "skills.trusted_pubkeys" else "Review skill preparation settings"}
+                if setting else {"href": "/help", "label": "Open Help"}}
+
+    if config.config_source_errors(include_tenant=True):
+        return blocked("Settings need attention", "Current learning settings could not be checked. Ask your administrator to review them.")
+    cfg = settings()
+    if not enabled():
+        return blocked("Automatic learning is off", "Automatic catalog-skill preparation is off. Existing skills are kept.", "self_learning.enable")
+    if not cfg["preflight"]:
+        return blocked("Skill preparation is off", "New tasks are not checked for catalog skills before they start.", "self_learning.preflight")
+    trusted = config.get_skills()["trusted_pubkeys"]
+    result["trusted_publishers"] = sum(bool(re.fullmatch(r"[a-fA-F0-9]{64}", key)) for key in set(trusted))
+    if not result["trusted_publishers"]:
+        return blocked("Choose trusted skill publishers", "Automatic skill preparation cannot install a catalog skill until you choose a trusted publisher. Upload the publisher's public key in Trusted skill publishers.", "skills.trusted_pubkeys")
+    if not signing._have_crypto():
+        return blocked("Signature checking is unavailable", "This installation cannot verify publisher signatures. Ask your administrator to repair signature checking before automatic skill preparation can run.")
+    try:
+        check_learning_halt("self_learning", "skill_readiness")
+    except Halted:
+        return blocked("Learning is stopped", "Automatic skill preparation is paused by the current learning stop. Existing skills are kept.")
+    return {**result, "ready": True, "status": "Ready to check signed matches",
+            "message": "Lightwork can check for matching skills signed by your trusted publishers. Availability and the final signature are checked when a skill is added.",
+            "remedy": {"href": "/settings/all?id=skills.trusted_pubkeys", "label": "Review trusted skill publishers"}}
+
+
 # --------------------------------------------------------------------------
 # learned-capability ledger
 # --------------------------------------------------------------------------
@@ -156,6 +202,9 @@ class Learned:
     name: str
     source: str = ""
     outcome: str = "acquired"   # acquired | failed
+    content_version: int = 0
+    owner: str | None = None
+    goal_id: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -235,6 +284,9 @@ def _record_impl(
     )
     if entry is None:
         return False
+    from .learning_content import allowed, lineage
+    content = lineage()
+    entry = replace(entry, **content)
     with _lock:
         try:
             ensure_private_directory(path.parent)
@@ -246,6 +298,8 @@ def _record_impl(
                 previous = atomic_read_text(path) if path.exists() else ""
                 if previous and not previous.endswith("\n"):
                     previous += "\n"
+                if not allowed(content):
+                    return False
                 if before_write is not None:
                     before_write()
                 atomic_write_text(
@@ -294,8 +348,9 @@ def _record_committed(
     )
 
 
-def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
-    """Most-recent-first list of learned capabilities."""
+def history(*, limit: int = 50, path: Path | None = None, owner: str | None = None) -> list[Learned]:
+    """Current-owner learned capabilities, filtered before limiting results."""
+    from .learning_content import allowed
     path = path if path is not None else learned_path()
     if not path.exists():
         return []
@@ -325,8 +380,9 @@ def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
                     name=d.get("name"), source=d.get("source"),
                     outcome=d.get("outcome"),
                 )
-                if entry is not None:
-                    out.append((append_index, entry))
+                if entry is not None and allowed(d, owner=owner):
+                    out.append((append_index, replace(entry, content_version=1,
+                        owner=d["owner"], goal_id=d["goal_id"])))
             except (json.JSONDecodeError, TypeError, ValueError):
                 continue
     except (OSError, RuntimeError):
@@ -1405,8 +1461,12 @@ def _generated_tool_proxy(
     from .tools import Tool
 
     name = str(metadata["name"])
+    from .learning_content import source_allowed_now
+    target = generated_tools_dir() / f"{name}.py"
 
     def _run(args: dict[str, Any]) -> str:
+        if not source_allowed_now(target, digest):
+            return "ERROR: generated tool source content is unavailable"
         if not _generated_consent_granted(
             tenant=tenant, name=name, digest=digest,
         ):
@@ -1415,9 +1475,12 @@ def _generated_tool_proxy(
                 "tenant/name/digest consent is missing or revoked"
             )
         try:
-            return _execute_generated_tool(
+            result = _execute_generated_tool(
                 source=source, metadata=metadata, args=args, sandbox=sandbox,
             )
+            if not source_allowed_now(target, digest):
+                return "ERROR: generated tool source content is unavailable"
+            return result
         except Exception as e:
             return (
                 f"ERROR: generated tool {name!r} sandbox execution failed: "
@@ -1443,8 +1506,9 @@ def _read_generated_source(path: Path) -> str:
     return source
 
 
-def generated_tool_names() -> set[str]:
-    """Discover consented generated-tool names without importing/executing source."""
+def generated_tool_names(*, owner: str | None = None) -> set[str]:
+    """Discover authorized consented names without importing/executing source."""
+    from .learning_content import source_allowed_now
     from .paths import current_tenant_id
 
     directory = generated_tools_dir()
@@ -1468,7 +1532,7 @@ def generated_tool_names() -> set[str]:
             if not ok:
                 continue
             digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-            if _generated_consent_granted(
+            if source_allowed_now(path, digest, owner=owner) and _generated_consent_granted(
                 tenant=tenant, name=path.stem, digest=digest,
             ):
                 names.add(path.stem)
@@ -1477,7 +1541,12 @@ def generated_tool_names() -> set[str]:
     return names
 
 
-def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]:
+def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None = None,
+                          expected_digest: str | None = None, metadata_stop: bool = False,
+                          allow_absent: bool = False, before_delete: Callable[[], None] | None = None,
+                          effect_guard: Callable[[], None] | None = None,
+                          owned_absence_guard: Callable[[], None] | None = None,
+                          after_revoke: Callable[[], None] | None = None) -> dict[str, Any]:
     """Revoke and remove one persisted generated tool, fail-closed.
 
     Deletion is an authority lifecycle transition, not merely ``Path.unlink``:
@@ -1504,22 +1573,42 @@ def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]
     target = generated_tools_dir() / f"{name}.py"
     with cross_process_lock(target, strict=True):
         if not target.is_file():
-            raise FileNotFoundError(target)
-        source = _read_generated_source(target)
-        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            if not allow_absent or not metadata_stop or expected_digest is None:
+                raise FileNotFoundError(target)
+            digest = expected_digest
+        else:
+            source = _read_generated_source(target)
+            digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        if expected_digest is not None and digest != expected_digest:
+            raise GeneratedToolRemovalError("The reviewed generated source changed; review it again")
+        from .learning_content import source_allowed_now
+        if metadata_stop:
+            from .generated_tool_removal import require_owned
+            try:
+                require_owned(target, digest, owner)
+            except FileNotFoundError:
+                if not allow_absent or target.exists() or owned_absence_guard is None:
+                    raise
+                owned_absence_guard()
+        elif not source_allowed_now(target, digest, owner=owner):
+            raise PermissionError("Generated source content is unavailable")
         scope = _generated_consent_scope(tenant, name, digest)
+
+        if before_delete is not None:
+            before_delete()
+        if effect_guard is not None:
+            effect_guard()
 
         consent_revoked = revoke(
             "register-generated-tool",
             scope=scope,
             strict=True,
             write_tombstone=True,
+            effect_guard=effect_guard,
+            all_matching_bindings=True,
         )
-        if _generated_consent_granted(
-            tenant=tenant,
-            name=name,
-            digest=digest,
-        ):
+        from .generated_tool_removal import runtime_permission
+        if runtime_permission(tenant, name, digest):
             raise GeneratedToolRemovalError(
                 "generated-tool authority remained active after revocation"
             )
@@ -1528,7 +1617,7 @@ def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]
             EventKind.LEARNING_UPDATE,
             agent="self_learning",
             operation="generated_tool_authority_revoked",
-            name=name,
+            name_sha256=hashlib.sha256(name.encode("utf-8")).hexdigest(),
             tenant=tenant,
             source_sha256=digest,
             consent_revoked=consent_revoked,
@@ -1538,11 +1627,19 @@ def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]
             raise GeneratedToolRemovalError(
                 "generated-tool revocation could not be recorded in the audit log"
             )
+        if after_revoke is not None:
+            after_revoke()
 
         # Revocation and its audit evidence are durable before this point. If
         # unlink now fails, the source remains present but cannot execute; the
         # caller can safely retry removal without resurrecting authority.
-        target.unlink()
+        if effect_guard is not None:
+            effect_guard()
+        target.unlink(missing_ok=allow_absent)
+        from .learning_content import metadata_path
+        if effect_guard is not None:
+            effect_guard()
+        metadata_path(target).unlink(missing_ok=True)
 
     return {
         "name": name,
@@ -1567,13 +1664,14 @@ def write_generated_tool(
     ``require_approval`` remains for API compatibility but can no longer bypass
     this security boundary: generated code always requires digest-bound consent.
     """
+    from .learning_content import lineage, publish
     from .paths import current_tenant_id
     from .safety.consent import (
         consume_operation_consent,
         grant_persistent,
         require_operation_consent,
     )
-
+    content_lineage = lineage()
     check_learning_halt("self_learning", "generated_tool_start")
     if not _NAME_RE.match(name):
         raise ValueError(
@@ -1694,6 +1792,7 @@ def write_generated_tool(
             check_learning_halt("self_learning", "generated_tool_persistence")
             atomic_write_text(target, source, mode=0o600)
             try:
+                publish(target, source, content_lineage)
                 # A later process must distinguish these approved bytes from an
                 # AST-safe file swapped in after registration.
                 check_learning_halt(
@@ -1736,6 +1835,7 @@ def load_generated_tools(*, sandbox: Any = None) -> list[Any]:
     skipped without taking down registry assembly. Only consulted when
     self-learning is enabled (see base_registry).
     """
+    from .learning_content import source_allowed_now
     from .paths import current_tenant_id
     from .tools import Tool
 
@@ -1767,6 +1867,8 @@ def load_generated_tools(*, sandbox: Any = None) -> list[Any]:
             if not ok:
                 raise ValueError(f"rejected by Shield: {reason}")
             digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            if not source_allowed_now(p, digest):
+                continue
             if not _generated_consent_granted(
                 tenant=tenant, name=p.stem, digest=digest,
             ):
@@ -1945,6 +2047,13 @@ async def preflight(
     """
     check_learning_halt("self_learning", "preflight_start")
     acquired: list[str] = []
+    readiness = skill_acquisition_readiness()
+    if not readiness["ready"]:
+        message = readiness["message"] + " No catalog skill was added. Review skill preparation on the Learning page."
+        log.info("Automatic skill preparation unavailable: %s", readiness["status"])
+        if blackboard is not None:
+            blackboard.post("orchestrator", "observation", message)
+        return acquired
     try:
         from .safety.secret_detector import redact
         safe_goal, _ = redact(str(goal_text or "")[:8_000])
@@ -2005,7 +2114,7 @@ __all__ = [
     "provider_egress_enabled",
     "write_generated_tool", "delete_generated_tool", "load_generated_tools",
     "GeneratedToolRemovalError", "audit_generated_source",
-    "preflight",
+    "preflight", "skill_acquisition_readiness",
     "validate_spec_url", "probe_openapi_spec", "discover_openapi_spec",
     "LEARNED_PATH", "GENERATED_TOOLS_DIR",  # noqa: F822 - dynamic __getattr__ API
     "TOOL_AUTHOR_SYSTEM",

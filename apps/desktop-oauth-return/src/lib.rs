@@ -437,6 +437,14 @@ fn validate_authorization(url: &str, state: &str, ticket: &Ticket) -> Result<(),
                 "state",
             ],
         ),
+        "microsoft" => (
+            url.strip_prefix("https://login.microsoftonline.com/common/oauth2/v2.0/authorize?")
+                .ok_or("This provider sign-in address is not supported.")?,
+            &[
+                "client_id", "code_challenge", "code_challenge_method", "nonce",
+                "redirect_uri", "response_type", "scope", "state",
+            ],
+        ),
         _ => return Err(REFUSED),
     };
     let fields = query(raw_query)?;
@@ -465,6 +473,7 @@ fn validate_authorization(url: &str, state: &str, ticket: &Ticket) -> Result<(),
                 fields.get("audience").map(String::as_str) != Some("api.atlassian.com")
                     || fields.get("prompt").map(String::as_str) != Some("consent")
             }
+            "microsoft" => fields.get("nonce").is_none_or(|value| !token(value, 40, 64)),
             _ => true,
         }
     {

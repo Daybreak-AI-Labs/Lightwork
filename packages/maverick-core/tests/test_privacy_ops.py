@@ -226,6 +226,101 @@ class TestDsar:
         listed = privacy_ops.list_dsars()
         assert [x["status"] for x in listed if x["id"] == r["id"]] == ["fulfilled"]
 
+    def test_close_removes_export_only_after_durable_close(self, monkeypatch):
+        opened = privacy_ops.open_dsar("jordan@example.com", "access", channel="email")
+        fulfilled = privacy_ops.fulfill_dsar(opened["id"])
+        path = Path(fulfilled["fulfillment"]["export_path"])
+        assert path.is_file()  # Available to deliver before close.
+        original_unlink = Path.unlink
+        observed = []
+
+        def unlink_after_commit(target, *args, **kwargs):
+            if target == path:
+                observed.append(privacy_ops._DSAR.load(opened["id"])["status"])
+            return original_unlink(target, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", unlink_after_commit)
+            closed = privacy_ops.close_dsar(opened["id"], closed_by="privacy-lead")
+
+        assert observed == ["closed"]
+        assert closed["status"] == "closed"
+        assert closed["export_cleanup"]["status"] == "removed"
+        assert not path.exists()
+        revision = closed["revision"]
+        repeated = privacy_ops.close_dsar(opened["id"])
+        assert repeated["export_cleanup"]["status"] == "removed"
+        assert repeated["revision"] == revision
+
+    def test_failed_export_cleanup_is_visible_and_retryable(self, monkeypatch):
+        opened = privacy_ops.open_dsar("jordan@example.com", "portability", channel="email")
+        fulfilled = privacy_ops.fulfill_dsar(opened["id"])
+        path = Path(fulfilled["fulfillment"]["export_path"])
+        original_unlink = Path.unlink
+
+        def refuse_once(target, *args, **kwargs):
+            if target == path:
+                raise PermissionError("simulated file lock")
+            return original_unlink(target, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", refuse_once)
+            first = privacy_ops.close_dsar(opened["id"])
+
+        assert first["status"] == "closed" and path.is_file()
+        assert first["export_cleanup"]["status"] == "failed"
+        assert "could not be safely removed" in first["export_cleanup"]["message"]
+        assert privacy_ops.get_dsar(opened["id"])["export_cleanup"]["status"] == "failed"
+        retried = privacy_ops.close_dsar(opened["id"])
+        assert retried["status"] == "closed"
+        assert retried["export_cleanup"]["status"] == "removed"
+        assert not path.exists()
+
+    def test_close_refuses_tampered_export_path_and_artifact(self, tmp_path):
+        opened = privacy_ops.open_dsar("jordan@example.com", "access", channel="email")
+        fulfilled = privacy_ops.fulfill_dsar(opened["id"])
+        path = Path(fulfilled["fulfillment"]["export_path"])
+        unrelated = tmp_path / "unrelated.json"
+        unrelated.write_text("leave me alone", encoding="utf-8")
+
+        def plant_other_path(record):
+            record["fulfillment"] = {**record["fulfillment"], "export_path": str(unrelated)}
+
+        privacy_ops._DSAR.update(opened["id"], plant_other_path)
+        refused = privacy_ops.close_dsar(opened["id"])
+        assert refused["export_cleanup"]["status"] == "failed"
+        assert path.is_file() and unrelated.read_text(encoding="utf-8") == "leave me alone"
+
+        def restore_path(record):
+            record["fulfillment"] = {**record["fulfillment"], "export_path": str(path)}
+
+        privacy_ops._DSAR.update(opened["id"], restore_path)
+        path.write_text("{}", encoding="utf-8")
+        refused_artifact = privacy_ops.close_dsar(opened["id"])
+        assert refused_artifact["export_cleanup"]["status"] == "failed"
+        assert path.is_file() and path.read_text(encoding="utf-8") == "{}"
+
+    def test_close_removes_bound_orphan_from_interrupted_fulfillment(self):
+        from maverick.file_lock import ensure_private_directory
+        from maverick.paths import data_dir
+
+        opened = privacy_ops.open_dsar("jordan@example.com", "access", channel="email")
+        out_dir = ensure_private_directory(data_dir("dsar_requests") / "exports")
+        path = out_dir / f"{opened['id']}-export.json"
+        intent = privacy_ops._dsar_export_intent(opened)
+        bundle = {
+            "subject": {"user_id": opened["subject_id"], "channel": "email"},
+            "tenant": None, "counts": {"facts": 1},
+        }
+        privacy_ops._write_dsar_export_artifact(path, intent, bundle)
+        assert privacy_ops.get_dsar(opened["id"])["status"] == "open"
+
+        closed = privacy_ops.close_dsar(opened["id"])
+
+        assert closed["status"] == "closed"
+        assert closed["export_cleanup"]["status"] == "removed"
+        assert not path.exists()
+
     def test_erasure_fulfillment_is_structured_not_shell_text(self):
         subject = "jordan@example.com & calc.exe | whoami > owned.txt"
         channel = "email & echo %COMSPEC% ^ !PATH!"
@@ -346,6 +441,7 @@ class TestDsar:
 
         def crash_after_artifact(
             cls, path, record, previous, *, bump_revision=True,
+            effect_guard=None,
         ):
             if path.stem == opened["id"] and record.get("status") == "fulfilled":
                 raise OSError("simulated crash before record commit")
@@ -354,6 +450,7 @@ class TestDsar:
                 record,
                 previous,
                 bump_revision=bump_revision,
+                effect_guard=effect_guard,
             )
 
         with monkeypatch.context() as crash:
@@ -606,11 +703,14 @@ def test_audit_outbox_is_at_least_once_with_stable_event_id(monkeypatch):
     )
     original_write = privacy_ops._RecordStore._write_path
 
-    def crash_before_clear(cls, path, record, previous, *, bump_revision=True):
+    def crash_before_clear(
+        cls, path, record, previous, *, bump_revision=True, effect_guard=None,
+    ):
         if not bump_revision:
             raise OSError("simulated crash after signed append")
         return original_write(
             path, record, previous, bump_revision=bump_revision,
+            effect_guard=effect_guard,
         )
 
     with monkeypatch.context() as crash:
@@ -1127,8 +1227,14 @@ class TestIncidentRegister:
         r = privacy_ops.open_incident(
             "Misdirected owner statement batch", severity="high",
             categories="contact details, account balances",
-            affected_estimate="~120 owners", reported_by="ops")
+            affected_estimate="~120 owners", affected_people=120,
+            reported_by="ops")
         assert r["status"] == "open"
+        assert r["affected_people"] == 120
+        updated = privacy_ops.set_incident_affected_people(
+            r["id"], None, updated_by="ops")
+        assert updated["affected_people"] is None
+        assert updated["affected_estimate"] == "~120 owners"
         listed = privacy_ops.list_incidents()[0]
         assert 70 <= listed["hours_left"] <= 72
         assert listed["clock_breached"] is False
@@ -1136,6 +1242,26 @@ class TestIncidentRegister:
             privacy_ops.open_incident("x", severity="catastrophic")
         with pytest.raises(ValueError):
             privacy_ops.open_incident("   ")
+        with pytest.raises(ValueError, match="affected_people"):
+            privacy_ops.open_incident("x", affected_people=-1)
+
+    def test_the_clock_runs_from_when_the_organisation_became_aware(self):
+        now = time.time()
+        aware = now - 30 * 3600
+        r = privacy_ops.open_incident("Laptop with a customer list stolen",
+                                      aware_at=aware, reported_by="dpo")
+        assert r["aware_at"] == aware
+        assert r["notify_deadline_at"] == pytest.approx(aware + 72 * 3600)
+        assert r["created_at"] >= now
+        listed = privacy_ops.list_incidents()[0]
+        assert 40 <= listed["hours_left"] <= 42
+        with pytest.raises(ValueError, match="future"):
+            privacy_ops.open_incident("Not yet", aware_at=now + 3600)
+        with pytest.raises(ValueError, match="aware"):
+            privacy_ops.open_incident("Garbage", aware_at=float("nan"))
+        default = privacy_ops.open_incident("Found today")
+        assert default["aware_at"] == pytest.approx(default["created_at"])
+        assert default["notify_deadline_at"] == pytest.approx(default["aware_at"] + 72 * 3600)
 
     def test_notification_decision_documents_both_ways(self):
         r = privacy_ops.open_incident("Lost badge with cached emails")
@@ -1506,3 +1632,246 @@ class TestPdfExtraction(TestPdfExtraction):  # noqa: F811
         assert record["status"] == "pending_review"
         assert record["review_required"] is True
         assert record["document_evidence"]["review_required"] is True
+
+
+class TestDsarClocks:
+    """Regime-aware deadlines, verification and extensions on the tracker."""
+
+    def test_jurisdiction_sets_regime_clock_and_acknowledgement(self):
+        r = privacy_ops.open_dsar(
+            "casey@example.com", "access", jurisdiction="us_ca_ccpa",
+            source="public_form", status="unverified",
+            requester={"name": "Casey", "relationship": "customer",
+                       "message": "x" * 5000, "authorised_agent": False},
+        )
+        assert r["status"] == "unverified"
+        assert r["verification"] == {"status": "unverified"}
+        assert r["due_basis"] == "statutory"
+        assert r["due_at"] == pytest.approx(r["received_at"] + 45 * 86400)
+        assert r["acknowledge_by"] is not None
+        assert r["extended_until"] is None and r["extension_reason"] == ""
+        assert r["source"] == "public_form"
+        assert len(r["requester"]["message"]) == 4000
+        listed = privacy_ops.list_dsars()[0]
+        assert listed["effective_due_at"] == r["due_at"]
+        assert listed["overdue"] is False and listed["due_soon"] is False
+
+    def test_legacy_open_keeps_fallback_clock(self):
+        r = privacy_ops.open_dsar("jordan@example.com", "erasure")
+        assert r["jurisdiction"] == "" and r["due_basis"] == "fallback_30_days"
+        assert r["verification"] == {"status": "not_required"}
+        assert r["source"] == "dashboard"
+
+    def test_verify_moves_unverified_to_open(self):
+        r = privacy_ops.open_dsar(
+            "casey@example.com", "correction", jurisdiction="eu_gdpr",
+            source="public_form", status="unverified",
+        )
+        with pytest.raises(ValueError):
+            privacy_ops.verify_dsar(r["id"], method="magic", reference="x")
+        done = privacy_ops.verify_dsar(
+            r["id"], method="email_challenge", reference="link opened",
+            verified_by="public-rights-form",
+        )
+        assert done["status"] == "open"
+        assert done["verification"]["method"] == "email_challenge"
+        assert done["verification"]["verified_at"] > 0
+        assert privacy_ops.verify_dsar("DSAR-nope", method="other", reference="x") is None
+
+    def test_extension_is_validated_against_the_regime(self):
+        r = privacy_ops.open_dsar("casey@example.com", "access", jurisdiction="us_va")
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(r["id"], reason="", days=10)
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(r["id"], reason="complex", days=46)
+        ext = privacy_ops.extend_dsar(r["id"], reason="complex request", days=30)
+        assert ext["extended_until"] == pytest.approx(r["due_at"] + 30 * 86400)
+        assert ext["extension_reason"] == "complex request"
+        assert privacy_ops.list_dsars()[0]["effective_due_at"] == ext["extended_until"]
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(r["id"], reason="again", days=5)
+        no_ext = privacy_ops.open_dsar("b@example.com", "access", jurisdiction="br_lgpd")
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(no_ext["id"], reason="late", days=5)
+
+    def test_acknowledge_and_clock_states(self):
+        r = privacy_ops.open_dsar("casey@example.com", "access", jurisdiction="us_ca_ccpa")
+        later = r["received_at"] + 20 * 86400
+        clock = privacy_ops.dsar_clock(r, now=later)
+        assert clock["acknowledge_overdue"] is True
+        acked = privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        assert acked["acknowledged_at"] > 0
+        assert privacy_ops.dsar_clock(acked, now=later)["acknowledge_overdue"] is False
+        near = privacy_ops.dsar_clock(acked, now=r["due_at"] - 3 * 86400)
+        assert near["due_soon"] is True and near["overdue"] is False
+        past = privacy_ops.dsar_clock(acked, now=r["due_at"] + 86400)
+        assert past["overdue"] is True
+
+    def test_verify_acknowledge_and_extend_tell_webhook_subscribers(self, monkeypatch):
+        from maverick import webhook_events
+
+        sent: list[tuple[str, str, str]] = []
+        monkeypatch.setattr(
+            webhook_events, "emit",
+            lambda event, **kw: sent.append((event, kw["record_type"], kw["record_id"])) or 1,
+        )
+        r = privacy_ops.open_dsar(
+            "casey@example.com", "access", jurisdiction="us_ca_ccpa",
+            source="public_form", status="unverified",
+        )
+        privacy_ops.verify_dsar(r["id"], method="email_challenge", reference="link opened")
+        privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        privacy_ops.extend_dsar(r["id"], reason="complex request", days=30)
+        # A repeat that changes nothing sends nothing.
+        privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        assert [e for e, _rt, _rid in sent] == [
+            "dsar.opened", "dsar.verified", "dsar.acknowledged", "dsar.extended",
+        ]
+        assert all(rt == "dsar" and rid == r["id"] for _e, rt, rid in sent)
+        assert {"dsar.verified", "dsar.acknowledged", "dsar.extended"} <= webhook_events.EVENT_TYPES
+
+    def test_manual_kinds_need_a_recorded_answer(self):
+        # A button click no longer marks a manual right answered: the action,
+        # answer date and proof must be recorded when closing.
+        r = privacy_ops.open_dsar("casey@example.com", "opt_out", jurisdiction="us_ca_ccpa")
+        with pytest.raises(ValueError, match="Record what was changed or stopped"):
+            privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")
+        assert privacy_ops.get_dsar(r["id"])["status"] == "open"
+        today = _day(time.time())
+        with pytest.raises(ValueError, match="what was changed or stopped"):
+            privacy_ops.close_dsar(r["id"], closed_by="ops", outcome={
+                "kind": "answered", "answered_on": today, "reference": "Opt-out ticket 7"})
+        done = privacy_ops.close_dsar(r["id"], closed_by="ops", outcome={
+            "kind": "answered", "answered_on": today, "reference": "Opt-out ticket 7",
+            "note": "Stopped sale and sharing in the CRM and ad platforms"})
+        assert done["status"] == "closed"
+        assert done["outcome"]["kind"] == "answered" and done["outcome"]["reference"] == "Opt-out ticket 7"
+
+
+def _day(ts: float) -> str:
+    import datetime as _dt
+
+    return _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+class TestDsarOutcomes:
+    """A request counts as answered only when an answer is on record; a
+    deletion also needs the erasure result or the lawful reason for keeping
+    the data. Closing without either is reported as exactly that."""
+
+    def _report(self):
+        return privacy_ops.program_report(assessment_types={"none"})["dsar"]
+
+    def test_close_without_an_answer_is_not_answered_on_time(self):
+        r = privacy_ops.open_dsar("jordan@example.com", "erasure", jurisdiction="eu_gdpr")
+        privacy_ops.close_dsar(r["id"], closed_by="dpo")
+        dsar = self._report()
+        assert dsar["handled"] == 1
+        assert dsar["answered"] == 0
+        assert dsar["handled_on_time"] == 0
+        assert dsar["closed_without_response"] == 1
+
+    def test_recorded_answers_count_and_open_work_stays_open(self):
+        today = _day(time.time())
+        erased = privacy_ops.open_dsar("a@example.com", "erasure", jurisdiction="eu_gdpr")
+        privacy_ops.close_dsar(erased["id"], closed_by="dpo", outcome={
+            "kind": "answered", "answered_on": today, "erasure": "erased",
+            "reference": "CRM ticket 4521"})
+        refused = privacy_ops.open_dsar("b@example.com", "access", jurisdiction="eu_gdpr")
+        privacy_ops.close_dsar(refused["id"], closed_by="dpo", outcome={
+            "kind": "refused", "answered_on": today, "lawful_basis": "Manifestly unfounded",
+            "reference": "Letter 12"})
+        manual = privacy_ops.open_dsar("c@example.com", "opt_out", jurisdiction="us_ca_ccpa")
+        privacy_ops.close_dsar(manual["id"], closed_by="ops", outcome={
+            "kind": "answered", "answered_on": today, "reference": "Opt-out ticket 9",
+            "note": "Stopped sale and sharing in the CRM and ad platforms"})
+        withdrawn = privacy_ops.open_dsar("d@example.com", "access")
+        privacy_ops.close_dsar(withdrawn["id"], closed_by="dpo",
+                               outcome={"kind": "withdrawn", "note": "Requester withdrew by phone"})
+        waiting = privacy_ops.open_dsar("e@example.com", "erasure")
+        privacy_ops.fulfill_dsar(waiting["id"], fulfilled_by="ops")  # awaiting erasure
+        privacy_ops.open_dsar("f@example.com", "access", source="public_form", status="unverified")
+        dsar = self._report()
+        assert dsar["open"] == 2               # waiting for deletion + unverified
+        assert dsar["handled"] == 4            # closed or answered only
+        assert dsar["answered"] == 3
+        assert dsar["handled_on_time"] == 3
+        assert dsar["answered_late"] == 0
+        assert dsar["withdrawn"] == 1
+        assert dsar["closed_without_response"] == 0
+        stored = privacy_ops.get_dsar(erased["id"])["outcome"]
+        assert stored["kind"] == "answered" and stored["erasure"] == "erased"
+        assert stored["recorded_by"] == "dpo" and stored["answered_on"] == today
+
+    def test_outcome_needs_the_facts_that_make_it_true(self):
+        today = _day(time.time())
+        r = privacy_ops.open_dsar("g@example.com", "erasure", jurisdiction="eu_gdpr")
+        bad = (
+            {"kind": "maybe"},
+            {"kind": "answered", "reference": "x", "erasure": "erased"},  # no date
+            {"kind": "answered", "answered_on": "2999-01-01", "reference": "x", "erasure": "erased"},
+            {"kind": "answered", "answered_on": "2001-01-01", "reference": "x", "erasure": "erased"},
+            {"kind": "answered", "answered_on": today, "reference": "x"},  # erasure result missing
+            {"kind": "answered", "answered_on": today, "reference": "x", "erasure": "not_erased"},
+            {"kind": "answered", "answered_on": today, "erasure": "erased"},  # no proof reference
+            {"kind": "refused", "answered_on": today, "reference": "x"},  # no lawful basis
+        )
+        for outcome in bad:
+            with pytest.raises(ValueError):
+                privacy_ops.close_dsar(r["id"], closed_by="dpo", outcome=outcome)
+        assert privacy_ops.get_dsar(r["id"])["status"] == "open"
+        kept = privacy_ops.close_dsar(r["id"], closed_by="dpo", outcome={
+            "kind": "answered", "answered_on": today, "reference": "x",
+            "erasure": "not_erased", "lawful_basis": "Tax records kept for 6 years"})
+        assert kept["status"] == "closed"
+        assert kept["outcome"]["lawful_basis"] == "Tax records kept for 6 years"
+
+    def test_a_request_marked_answered_stays_answered_when_closed(self):
+        r = privacy_ops.open_dsar("k@example.com", "opt_out", jurisdiction="us_ca_ccpa")
+        with pytest.raises(ValueError):
+            privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")  # no click-through answer
+        privacy_ops.close_dsar(r["id"], closed_by="ops", outcome={
+            "kind": "answered", "answered_on": _day(time.time()), "reference": "Opt-out ticket 11",
+            "note": "Stopped sale and sharing in the CRM and ad platforms"})
+        dsar = self._report()
+        assert dsar["answered"] == 1 and dsar["closed_without_response"] == 0
+        # A deletion handed over for erasure is not an answer by itself.
+        d = privacy_ops.open_dsar("l@example.com", "erasure")
+        privacy_ops.fulfill_dsar(d["id"], fulfilled_by="ops")
+        privacy_ops.close_dsar(d["id"], closed_by="ops")
+        assert self._report()["closed_without_response"] == 1
+
+    def test_a_closed_request_can_have_its_answer_recorded_once(self):
+        today = _day(time.time())
+        r = privacy_ops.open_dsar("h@example.com", "access", jurisdiction="eu_gdpr")
+        privacy_ops.close_dsar(r["id"], closed_by="dpo")
+        assert self._report()["closed_without_response"] == 1
+        fixed = privacy_ops.close_dsar(r["id"], closed_by="dpo", outcome={
+            "kind": "answered", "answered_on": today, "reference": "Sent from the privacy inbox"})
+        assert fixed["outcome"]["kind"] == "answered"
+        assert self._report()["handled_on_time"] == 1
+        with pytest.raises(privacy_ops.RecordConflict):
+            privacy_ops.close_dsar(r["id"], closed_by="dpo", outcome={
+                "kind": "refused", "answered_on": today, "reference": "x", "lawful_basis": "y"})
+        assert privacy_ops.get_dsar(r["id"])["outcome"]["kind"] == "answered"  # never rewritten
+
+    def test_on_time_uses_the_extended_deadline(self, monkeypatch):
+        import time as _t
+
+        real = _t.time
+        start = real()
+        r = privacy_ops.open_dsar("i@example.com", "access", jurisdiction="eu_gdpr",
+                                  received_at=start)
+        privacy_ops.extend_dsar(r["id"], reason="Many systems to search", days=30)
+        late = privacy_ops.open_dsar("j@example.com", "access", jurisdiction="eu_gdpr",
+                                     received_at=start)
+        monkeypatch.setattr(_t, "time", lambda: start + 70 * 86400)
+        answered_on = _day(start + 40 * 86400)  # after 30 days, inside the extension
+        privacy_ops.close_dsar(r["id"], closed_by="dpo", outcome={
+            "kind": "answered", "answered_on": answered_on, "reference": "x"})
+        privacy_ops.close_dsar(late["id"], closed_by="dpo", outcome={
+            "kind": "answered", "answered_on": answered_on, "reference": "x"})
+        dsar = self._report()
+        assert dsar["answered"] == 2
+        assert dsar["handled_on_time"] == 1
+        assert dsar["answered_late"] == 1

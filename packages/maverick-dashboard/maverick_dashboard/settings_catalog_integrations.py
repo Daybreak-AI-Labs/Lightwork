@@ -113,6 +113,8 @@ _ROUTE_FILES = (("image", "Picture"), ("audio", "Sound recording"), ("video", "V
 
 
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
+    from maverick.image_edit_models import CHOICES, MAX_MODEL_LENGTH, MODEL_PATTERN
+
     plan_cells = (
         C("features", "What the plan includes", "picks", choices=_plan_features(),
           max_items=128),
@@ -122,6 +124,15 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           minimum=0, maximum=10000, integer=True, unit="tasks", default=0),
     )
     return (
+        *(S("image_edit", field, label,
+            "Copy the model name from its Replicate page, with a version if you want to "
+            "keep using that version. Leave empty to keep the built-in choice. A choice "
+            "set on the server takes priority. Hosted image edits use your connected "
+            "Replicate account and may cost money; saving this choice makes no image.",
+            "text", "AI models", "", "maverick.image_edit_models", subgroup="Images",
+            env=(env,), pattern=MODEL_PATTERN, max_length=MAX_MODEL_LENGTH,
+            aliases="image picture edit inpaint variation upscale replicate")
+          for field, env, label in CHOICES),
         # ------------------------------------------------ plans and billing
         S("billing", "enforce_plan_caps", "Hold workspaces to their plan's daily limit",
           "A workspace without a daily spending limit of its own uses the daily limit of its "
@@ -360,6 +371,70 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "used instead.",
           "secret", "Integrations", "", "maverick.notifications", pattern=r"[A-Za-z0-9]{30}",
           max_length=30, env=("PUSHOVER_APP_TOKEN",), aliases="pushover phone alerts"),
+        S("notifications.email", "host", "Mail server for alerts",
+          "The outgoing mail server for alerts and daily summaries, such as smtp.example.com. "
+          "Leave empty to send them through the email account under Email for agents.",
+          "text", "Integrations", "", "maverick.notifications", subgroup="Email alerts",
+          pattern=_HOST, max_length=253),
+        S("notifications.email", "port", "Mail server port",
+          "Usually 587 for STARTTLS or 465 for SSL.",
+          "number", "Integrations", 587, "maverick.notifications", subgroup="Email alerts",
+          minimum=1, maximum=65535, integer=True),
+        S("notifications.email", "user", "Mail sign-in name",
+          "The account name the mail server expects. Leave empty when the server needs none.",
+          "text", "Integrations", "", "maverick.notifications", subgroup="Email alerts",
+          pattern=_ACCOUNT, max_length=254),
+        S("notifications.email", "password", "Mail password",
+          "The password or app password for that account. It is stored sealed and never shown "
+          "again. A password set on the server is used instead.",
+          "secret", "Integrations", "", "maverick.notifications", subgroup="Email alerts",
+          max_length=500, env=("MAVERICK_SMTP_PASSWORD",)),
+        S("notifications.email", "from_address", "Send alerts as",
+          "The address alerts and summaries come from.",
+          "text", "Integrations", "", "maverick.notifications", subgroup="Email alerts",
+          pattern=r"(" + _EMAIL + r")?", max_length=254),
+        S("notifications.email", "tls", "Connection security",
+          "How the mail server connection is protected.",
+          "select", "Integrations", "starttls", "maverick.notifications", subgroup="Email alerts",
+          choices=(("starttls", "STARTTLS (usual on port 587)"), ("ssl", "SSL (usual on port 465)"),
+                   ("none", "None (only inside a trusted network)")),
+          weaker="none", order=("ssl", "starttls", "none"),
+          warning="Mail, including alert contents, would travel unprotected."),
+        S("notifications.email", "to", "Send finished-task alerts to",
+          "The address that receives finished-task alerts when Email is the alert service.",
+          "text", "Integrations", "", "maverick.notifications", subgroup="Email alerts",
+          pattern=r"(" + _EMAIL + r")?", max_length=254),
+        S("channels.slack", "signing_secret", "Slack signing secret",
+          "From your Slack app's Basic Information page. Needed when buttons and slash commands "
+          "reach this server over the web instead of Socket Mode. Stored sealed.",
+          "secret", "Chat channels", "", "maverick_dashboard.me_api", subgroup="Slack",
+          max_length=200, env=("SLACK_SIGNING_SECRET",)),
+        S("channels.slack", "approvals_channel", "Post new approval requests in",
+          "The Slack channel id (starts with C) where new requests appear as cards with Approve "
+          "and Reject buttons. Leave empty to post none.",
+          "text", "Chat channels", "", "maverick.channel_approvals", subgroup="Slack",
+          pattern=r"([A-Z0-9]{5,24})?", max_length=24, env=("SLACK_APPROVALS_CHANNEL",)),
+        S("my_work", "digest_enable", "Send a daily summary",
+          "Send each person a summary of what is waiting for them, once a day at their own "
+          "hour, through their linked chat apps and email.",
+          "toggle", "Integrations", False, "maverick.config", subgroup="Daily summary",
+          env=("MAVERICK_DAILY_DIGEST",)),
+        S("my_work", "digest_hour", "Usual summary hour",
+          "The local hour the summary goes out unless a person picks their own on My work.",
+          "number", "Integrations", 8, "maverick.config", subgroup="Daily summary",
+          minimum=0, maximum=23, integer=True, unit="o'clock"),
+        S("my_work", "digest_poll_seconds", "Check for due summaries every",
+          "How often Lightwork looks for people whose summary is due.",
+          "number", "Integrations", 300, "maverick.config", subgroup="Daily summary",
+          minimum=30, maximum=3600, integer=True, unit="seconds", restart=True),
+        S("my_work", "send_when_empty", "Send empty summaries",
+          "Send the summary even when nothing is waiting, unless a person chooses otherwise.",
+          "toggle", "Integrations", False, "maverick.config", subgroup="Daily summary"),
+        S("my_work", "monthly_spend_limit_dollars", "Monthly spending limit per person",
+          "The figure each person's spending this month is compared with on My work and in "
+          "the summary. Zero shows no limit.",
+          "number", "Integrations", 0, "maverick.config", subgroup="Daily summary",
+          minimum=0, maximum=1000000, unit="dollars"),
         S("alerts", "enabled", "Alert me about problems with Lightwork itself",
           "Send an urgent alert with the service chosen above when, for example, the "
           "emergency stop trips, a spending limit runs out or the activity record breaks.",
@@ -423,9 +498,9 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           aliases="tax signed updates public key publisher"),
 
         # --------------------------------------------------------- chat apps
-        S("channels.routing", "rules", "Send chat messages to a specialist",
+        S("channels.routing", "rules", "Send chat messages to an agent or specialist",
           "Rules are checked in order for every message that arrives through a chat app; "
-          "the first one that matches decides which specialist handles it. Messages that "
+          "the first one that matches decides which agent or specialist handles it. Messages that "
           "match no rule go to the general assistant, as they do with no rules at all.",
           "rules", "Chat channels", [], "maverick.channel_autorouting",
           subgroup="Message routing",
@@ -441,15 +516,23 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           ),
           item_label="Rule", add_label="Add a rule",
           empty_text="Every chat message goes to the general assistant.", weaker="change",
-          warning="Matching chat messages will be handled by the chosen specialist, with that "
-                  "specialist's tools and permissions.",
-          aliases="routing rules specialist department triage"),
+          warning="Matching chat messages will be handled by the chosen agent or specialist, "
+                  "with its tools and permissions.",
+          aliases="routing rules agent specialist department triage"),
         S("channels", "rich_render", "Show formulas and diagrams as a page",
           "When a reply contains formulas or diagrams, also send a page that shows them "
           "properly. The page is saved on this server.",
           "toggle", "Chat channels", False, "maverick_channels.rich_render",
           subgroup="Every chat app", restart=True, env=("MAVERICK_CHANNELS_RICH_RENDER",),
           aliases="math mermaid render"),
+        S("channels", "max_intake_records", "Saved chat message capacity",
+          "The number of saved message receipts each workspace can hold across all chat apps. "
+          "Lightwork clears delivered messages after their retention window; messages needing "
+          "review stay saved. Raise this before capacity is full.",
+          "number", "Chat channels", 20000, "maverick_channels.delivery",
+          subgroup="Every chat app", minimum=1000, maximum=100000, integer=True,
+          unit="messages", restart=True, weaker="higher",
+          warning="A higher limit retains more message receipts on this server."),
 
         # ---------------------------------------------------- vendor onboarding
         S("vendor_onboarding", "safe_read_attempts", "Tries for each vendor document read",

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}App Tracking Checks · Lightwork{% endblock %}
+{% block title %}App tracking checks · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 <div class="governance-workbench" id="consent-application-scanner-shell"
      data-api-base="{{ api_base }}" data-copilot-page="/consent/application-scans"
      data-can-admin="{{ 'true' if application_scanner_can_admin else 'false' }}"
      data-can-audit="{{ 'true' if application_scanner_can_audit else 'false' }}">
-  {{ hero('Consent review', 'App Tracking Checks',
+  {{ hero('Consent review', 'App tracking checks',
           lede='Check your mobile and TV apps for the permissions, personal data and tracking tools they declare. A second person reviews each result before you rely on it.') }}
   {% include "_consent_nav.html" %}
   {% if not application_scanner_enabled %}
@@ -65,7 +65,7 @@
                    accept=".xml,.json,.plist,.xcprivacy,application/xml,application/json,application/x-plist,text/plain"
                    aria-describedby="cas-files-help">
           </label>
-          <p class="muted cw-wide" id="cas-files-help">Choose the settings files your developer can send you: AndroidManifest.xml for Android or Fire TV, Info.plist and PrivacyInfo.xcprivacy for iPhone and Apple TV, the manifest file for Roku, config.xml for Samsung TV, or the appinfo file for LG TV. Up to 64 files, each under 1 MB. The app itself (the file people download) cannot be read.</p>
+          <p class="muted cw-wide" id="cas-files-help">Choose the settings files your developer can send you. Use AndroidManifest.xml for Android or Fire TV, and Info.plist and PrivacyInfo.xcprivacy for iPhone and Apple TV. Use the manifest file for Roku, config.xml for Samsung TV, or the appinfo file for LG TV. Up to 64 files, each under 1 MB. The app itself (the file people download) cannot be read.</p>
           <div class="cw-actions">
             <button class="btn btn--primary" type="submit">Check files</button>
             <button class="btn btn--ghost" type="button" data-cas-close="cas-scan-form">Cancel</button>
@@ -133,7 +133,7 @@
 
   <details class="panel">
     <summary>About this page’s safeguards</summary>
-    <p class="muted">Only the settings files you upload are read, and they are not kept after the check. The results list what the files declare; they do not prove how the app behaves on a device, and tracking tools are only suggestions until a person reviews them. Viewers can see results, administrators make changes and auditors check the records.</p>
+    <p class="muted">Only the settings files you upload are read, and they are not kept after the check. The results list what the files declare. They do not prove how the app behaves on a device, and tracking tools are only suggestions until a person reviews them. Viewers can see results, administrators make changes and auditors check the records.</p>
   </details>
   <noscript><p class="panel">Turn on JavaScript to use this page.</p></noscript>
 </div>

@@ -8,7 +8,6 @@ logic out of the template makes empty/error states deterministic and testable.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
 from typing import Any
 
 _CRITICAL_GAPS = frozenset(
@@ -90,13 +89,9 @@ def display_timestamp(value: object) -> str:
     if isinstance(value, bool):
         return ""
     if isinstance(value, (int, float)):
-        try:
-            return datetime.fromtimestamp(
-                float(value),
-                timezone.utc,
-            ).strftime("%Y-%m-%d %H:%M:%S UTC")
-        except (OSError, OverflowError, ValueError):
-            return ""
+        from .plain_labels import datetime_text
+
+        return datetime_text(value)
     text = str(value or "").strip()
     return text
 

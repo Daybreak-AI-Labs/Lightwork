@@ -688,6 +688,7 @@ def serve(
     # Fail closed: a client-bound deployment must not serve unbound.
     from ..client import require_client_binding
     require_client_binding()
+    runtime_uses_saved_arguments = max_workers is None and bearer_token is None
     bearer_token = _resolve_bearer_token(bearer_token)
     grpc = _require_grpc()
     pb2, pb2_grpc = _load_stubs()
@@ -709,6 +710,18 @@ def serve(
     from ..grpc_tls import bind_port
     secure = bind_port(server, address, "grpc")
     server.start()
+    from ..runtime_configuration import start as start_runtime_receipt
+    # The blocking watcher stops the heartbeat as soon as the native server
+    # terminates, including callers using the returned server.stop() handle.
+    if runtime_uses_saved_arguments and callable(getattr(server, "wait_for_termination", None)):
+        runtime_receipt = start_runtime_receipt("grpc")
+        if runtime_receipt is not None:
+            def stopped():
+                try:
+                    server.wait_for_termination()
+                finally:
+                    runtime_receipt.close()
+            threading.Thread(target=stopped, name="grpc-configuration-receipt", daemon=True).start()
     log.info("Lightwork gRPC API listening on %s (%s)", address,
              "TLS" if secure else "plaintext")
     return server

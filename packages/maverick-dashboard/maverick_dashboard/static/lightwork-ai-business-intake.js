@@ -10,7 +10,7 @@
   function put(object,path,value){const parts=path.split('.');if(parts.length===1)object[path]=value;else{if(!Object.hasOwn(object,parts[0]))object[parts[0]]={};object[parts[0]][parts[1]]=value;}}
   const statusLabel=value=>({draft:'Draft',submitting:'Submitting',pending_review:'Awaiting review'}[value]||(window.mvHuman?window.mvHuman(value):String(value)));
   function readFile(file){if(typeof file.text==='function')return file.text();return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(new Error('That file could not be read. Nothing was imported.'));reader.readAsText(file);});}
-  function say(message){el('status').textContent=message;}
+  function say(message){window.mvStatus(el('status'),message);}
   function lock(){expired=true;current=null;contract=null;controls.clear();references.clear();savedAnswers='{}';el('fields').replaceChildren();el('drafts').replaceChildren();el('missing').replaceChildren();for(const id of ['current','progress','validation','list-status'])el(id).textContent='';el('import').value='';update();}
   function update(){const unavailable=busy||expired||!contract;root.setAttribute('aria-busy',String(busy));root.querySelectorAll('button,input,select,textarea').forEach(item=>item.disabled=unavailable);
     el('refresh').disabled=busy||expired;el('refresh').textContent=contract?'Refresh workspace drafts':'Retry loading intake questions';
@@ -21,23 +21,24 @@
     el('open').disabled=unavailable||!el('drafts').value;el('more').hidden=!hasMore;el('save').textContent=current?'Save draft answers':'Start draft';
   }
   async function api(path,method='GET',body){const response=await fetch(base+path,{method,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json',...(contract?{'X-Lightwork-Intake-Context':contract.context}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
-    if([401,403].includes(response.status)){lock();throw new Error('Your sign-in or access changed. Sign in again and reload AI business intake.');}
-    const friendly=action=>window.mvErrorText?window.mvErrorText(response,action):'Could not '+action+'. Please try again.';
+    // A refusal's body is never read: release it so the request ends instead of staying open.
+    if([401,403].includes(response.status)){response.body?.cancel().catch(()=>{});lock();throw new Error('Your sign-in or access changed. Sign in again and reload AI business intake.');}
+    const friendly=action=>window.mvErrorText?window.mvErrorText(response,action):'Could not '+action+'. Try again.';
     if(response.status>=500)throw new Error('The intake service is unavailable. Your answers are kept; try again.');
     const raw=await response.text();if(new TextEncoder().encode(raw).length>2*1024*1024)throw new Error('The intake response is too large. Narrow the draft search.');
-    let data;try{data=JSON.parse(raw);}catch(_){throw new Error('The intake response could not be read. Your unsaved answers are still here.');}
+    let data;try{data=JSON.parse(raw);}catch(_){throw new Error('The intake response could not be read. Your unsaved answers are still here. Refresh the page and try again.');}
     if(!response.ok){const detail=typeof data.detail==='string'?data.detail:'';
       if(response.status===409&&/account or workspace changed/i.test(detail)){lock();throw new Error('The account or workspace changed. Reload AI business intake.');}
       else if(response.status===409)conflicted=true;
       const error=new Error(response.status===409?'Someone else changed this intake since you opened it.':friendly('complete the intake request'));error.status=response.status;throw error;}
-    if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('The intake service returned an invalid result.');
+    if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('The intake reply could not be read. Refresh the page and try again.');
     if(contract&&data.context!==contract.context){lock();throw new Error('The account or workspace changed. Reload AI business intake.');}
     return data;
   }
   async function run(work){if(busy||expired)return;busy=true;update();try{await work();}catch(error){say(error.message+(conflicted&&!expired?' Your unsaved answers are kept. Open the saved intake to review its current version before continuing.':''));el('status').focus();}finally{busy=false;update();}}
   const choiceLabel=value=>({none:'No data',public:'Public information',internal:'Internal',confidential_business:'Confidential business information',personal:'Personal data',sensitive_personal:'Sensitive personal data',both:'Internal and external',assistive:'Assists a person',recommending:'Recommends decisions',automated:'Makes automated decisions',not_applicable:'Not applicable',unknown:'Not yet known'}[value]||value.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()));
   function build(answers={}){controls.clear();el('fields').replaceChildren();const groups=new Map();
-    for(const field of contract.fields){let group=groups.get(field.group);if(!group){group=node(field.group==='Advanced'?'details':'fieldset');group.append(node(field.group==='Advanced'?'summary':'legend',field.group));if(field.group==='Specialist review signals')group.append(node('p','These are screening questions, not legal advice or a legal determination. Select what may apply, or leave unanswered for help from a specialist. Choose “None of these signals” only after reviewing every choice.'));el('fields').append(group);groups.set(field.group,group);}
+    for(const field of contract.fields){let group=groups.get(field.group);if(!group){group=node(field.group==='Advanced'?'details':'fieldset');group.append(node(field.group==='Advanced'?'summary':'legend',field.group));if(field.group==='Expert review signals')group.append(node('p','These are screening questions, not legal advice or a legal determination. Select what may apply, or leave unanswered for help from a compliance expert. Choose “None of these signals” only after reviewing every choice.'));el('fields').append(group);groups.set(field.group,group);}
       const wrap=node('div');wrap.className='abi-field';wrap.dataset.field=field.path;const value=at(answers,field.path),id='abi-field-'+field.path.replace(/\./g,'-');let read,input;
       if(field.kind==='multiple'){const box=node('fieldset');box.append(node('legend',field.label+(field.required?' (needed before submission)':'')));const options=[...field.choices];if(field.path.startsWith('regulatory_context.'))options.push('');
         for(const option of options){const label=node('label');label.className='abi-choice';const check=node('input');check.type='checkbox';check.value=option;check.checked=Array.isArray(value)&&(option===''?value.length===0:value.includes(option));label.append(check,node('span',option===''?'None of these signals':choiceLabel(option)));box.append(label);
@@ -72,8 +73,8 @@
     el('progress').textContent=row.progress.missing_fields.length?row.progress.missing_fields.length+' answers still needed before submission.':'All required answers are saved. Independent review is still required.';
     el('import').value='';update();
   }
-  async function list(more=false){const result=await api('/drafts?'+new URLSearchParams({limit:'100',offset:String(more?offset:0),q:el('search').value.trim()}));if(!Array.isArray(result.intakes)||!Number.isSafeInteger(result.count)||typeof result.has_more!=='boolean')throw new Error('The draft list could not be read.');
-    if(!more){el('drafts').replaceChildren(new Option('Choose a saved intake',''));offset=0;}for(const row of result.intakes){if(!/^ABI-[a-f0-9]{24}$/.test(row.id))throw new Error('The draft list contains an invalid reference.');el('drafts').append(new Option((row.use_case_name||'Untitled intake')+' · '+statusLabel(row.status),row.id));}offset+=result.intakes.length;hasMore=result.has_more;el('list-status').textContent=result.count?'Showing '+offset+' of '+result.count+' matching workspace intakes.':'No matching workspace intakes. Start a new draft above.';update();}
+  async function list(more=false){const result=await api('/drafts?'+new URLSearchParams({limit:'100',offset:String(more?offset:0),q:el('search').value.trim()}));if(!Array.isArray(result.intakes)||!Number.isSafeInteger(result.count)||typeof result.has_more!=='boolean')throw new Error('The draft list could not be read. Refresh the page and try again.');
+    if(!more){el('drafts').replaceChildren(new Option('Choose a saved intake',''));offset=0;}for(const row of result.intakes){if(!/^ABI-[a-f0-9]{24}$/.test(row.id))throw new Error('The saved intake list has an entry that could not be read. Refresh the page and try again.');el('drafts').append(new Option((row.use_case_name||'Untitled intake')+' · '+statusLabel(row.status),row.id));}offset+=result.intakes.length;hasMore=result.has_more;el('list-status').textContent=result.count?'Showing '+offset+' of '+result.count+' matching workspace intakes.':'No matching workspace intakes. Start a new draft above.';update();}
   el('answers').addEventListener('input',()=>{el('validation').textContent='';update();});el('answers').addEventListener('change',update);el('drafts').addEventListener('change',update);
   el('new').addEventListener('click',()=>run(async()=>{if(!await confirmReplace())return;current=null;conflicted=false;references.clear();build();savedAnswers='{}';el('current').textContent='New intake';el('progress').textContent='Start a draft with what you know, then return to finish it.';el('missing').replaceChildren();say('New intake ready. Nothing has been saved or submitted.');}));
   el('refresh').addEventListener('click',()=>run(()=>contract?list():initialize()));el('find').addEventListener('submit',event=>{event.preventDefault();run(()=>list());});el('more').addEventListener('click',()=>run(()=>list(true)));

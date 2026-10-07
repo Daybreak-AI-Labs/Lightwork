@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Governance Assistants · Lightwork{% endblock %}
+{% block title %}Governance assistants · Lightwork{% endblock %}
 {% block content %}
 <style>
   .ga-shell { display:grid; gap:var(--space-5); }
@@ -11,9 +11,9 @@
   .ga-cards .panel h3 { margin:0; }
   .ga-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; }
   .ga-form { display:grid; gap:var(--space-3); max-width:44rem; }
-  .ga-form label { display:grid; gap:.35rem; font-weight:600; }
+  .ga-form label { display:grid; gap:.35rem; font-weight: var(--font-semibold); }
   .ga-choices { border:1px solid var(--hairline); border-radius:var(--radius-md,8px); padding:var(--space-3); display:flex; flex-wrap:wrap; gap:var(--space-2) var(--space-4); }
-  .ga-choices label { display:flex; gap:.4rem; align-items:center; font-weight:400; }
+  .ga-choices label { display:flex; gap:.4rem; align-items:center; font-weight: var(--font-normal); }
   .ga-table { overflow:auto; }
   .ga-output { white-space:pre-wrap; word-break:break-word; max-height:22rem; overflow:auto; }
 </style>
@@ -32,7 +32,7 @@
      data-can-audit="{{ 'true' if governance_can_audit else 'false' }}">
   <details>
     <summary>About this page's safeguards</summary>
-    <p class="muted">Assistants only read records Lightwork already holds; this page never accepts pasted evidence, workspace choices, credentials or destinations. Every result waits for a person to review it. Carrying out an action is off unless a policy allows it, needs two different people to approve, and is recorded so it can be checked later.</p>
+    <p class="muted">Assistants only read records Lightwork already holds; this page never accepts pasted evidence, workspace choices, credentials or destinations. Every result waits for a person to review it. Carrying out an action is off unless a policy allows it. It needs two different people to approve, and is recorded so it can be checked later.</p>
   </details>
 
   <section aria-label="Assistants">
@@ -83,7 +83,7 @@
       <select class="select" id="ga-runs-filter"><option value="">All assistants</option><option value="breach_response">Breach response</option><option value="privacy_risk_assessment">Privacy risk</option><option value="program_copilot">Program copilot</option><option value="knowledgebase_governance">Knowledgebase governance</option><option value="third_party_risk">Third-party risk</option></select>
     </div>
     <div class="ga-table"><table><caption class="sr-only">Reviews prepared by governance assistants</caption>
-      <thead><tr><th scope="col">Assistant</th><th scope="col">Prepared</th><th scope="col">Status</th><th scope="col">Findings</th><th scope="col">Started</th><th scope="col">Actions</th></tr></thead>
+      <thead><tr><th scope="col">Assistant</th><th scope="col">Prepared</th><th scope="col">Status</th><th scope="col">Findings</th><th scope="col">Last updated</th><th scope="col">Actions</th></tr></thead>
       <tbody id="ga-runs"><tr><td colspan="6">Loading…</td></tr></tbody></table></div>
   </section>
 

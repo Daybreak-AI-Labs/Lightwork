@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block title %}{{ project.name or 'project' }} · Lightwork{% endblock %}
 {% block content %}
-  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/projects">← Projects</a></p>
+{% from "_back_link.html" import back_link with context %}
+  <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/projects', 'Projects') }}</p>
   <h1 class="page-title">{{ project.name or 'Untitled project' }}</h1>
   {% if project.description %}<p class="page-subtitle">{{ project.description }}</p>{% endif %}
   <p><a class="btn btn--ghost" href="/project-reviews#project={{ project.id }}">Ask a colleague to review a result</a> <a class="btn btn--ghost" href="/settings">Turn on team reviews in Settings</a></p>
 
+  {% if nav_mode == 'areas' %}
+  {% if project_plan_available %}{% from "_view_tabs.html" import view_tabs %}{{ view_tabs('Project views', [('tasks', 'Tasks', '/projects/' ~ project.id), ('plan', 'Plan', '/projects/' ~ project.id ~ '?tab=plan')], 'tasks') }}{% endif %}
+  {% else %}
+  <p><a class="btn btn--ghost" href="/project-workspaces/{{ project.id }}">Open project workspace</a></p>
+  {% endif %}
   <div class="panel">
     <p class="muted" style="margin: 0;">
       {% if project.domain %}Department: {{ project.domain|humanize }} · {% endif %}

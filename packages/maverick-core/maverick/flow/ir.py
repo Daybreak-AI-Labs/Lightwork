@@ -300,7 +300,10 @@ class FlowNode:
     y: float = 0.0
     # Optional pure scalar specialization; original agent remains the fallback.
     learned_operator: dict[str, Any] | None = None
+    # A reviewed rule-only release must stop on uncertainty instead of invoking AI.
+    learned_fallback: bool = True
     recipe_step: int | None = None  # requires the parent flow's complete recipe
+    concurrency: int = 0          # foreach: simultaneous items; 0 keeps the shared pool
 
     def to_dict(self) -> dict:
         d: dict[str, Any] = {"id": self.id, "kind": self.kind}
@@ -316,12 +319,16 @@ class FlowNode:
             d["recipe_step"] = self.recipe_step
         if self.learned_operator is not None:
             d["learned_operator"] = copy.deepcopy(self.learned_operator)
+        if self.learned_fallback is not True:
+            d["learned_fallback"] = self.learned_fallback
         for key in ("seconds", "retries", "retry_backoff", "timeout", "limit"):
             value = getattr(self, key)
             if value:
                 d[key] = value
         if self.concurrent:
             d["concurrent"] = True
+        if self.concurrency:
+            d["concurrency"] = self.concurrency
         if self.cases:
             d["cases"] = self.cases
         if self.choices:
@@ -345,6 +352,9 @@ class FlowNode:
     @staticmethod
     def from_dict(d: dict) -> FlowNode:
         body = d.get("body")
+        concurrency = d.get("concurrency", 0)
+        if type(concurrency) is not int or not 0 <= concurrency <= 8:
+            raise ValueError("Choose Shared workflow limit or between 1 and 8 items at once.")
         # Legacy-shape migration, done HERE so every consumer (runner, sweep,
         # designer, drafter) sees one field: old approvals encoded their expiry
         # in `timeout` before `expires_after` existed.
@@ -356,12 +366,14 @@ class FlowNode:
             next=d.get("next"), tool=str(d.get("tool", "")),
             params=dict(d.get("params") or {}), brief=str(d.get("brief", "")),
             learned_operator=copy.deepcopy(d.get("learned_operator")),
+            learned_fallback=d.get("learned_fallback", True),
             recipe_step=d.get("recipe_step"),
             condition=str(d.get("condition", "")),
             if_true=d.get("if_true"), if_false=d.get("if_false"),
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
             limit=int(d.get("limit", 0) or 0),
             concurrent=bool(d.get("concurrent", False)),
+            concurrency=concurrency,
             cases=[dict(c) for c in (d.get("cases") or []) if isinstance(c, dict)],
             choices=[str(c) for c in (d.get("choices") or [])],
             assignee=str(d.get("assignee", "")),
@@ -412,6 +424,7 @@ class Flow:
     learned_recipe: dict | None = None  # reviewed action dataflow; exact generated graph
     recipe_lineage: dict | None = None  # admitted signed evidence; never caller run data
     recipe_teaching: dict | None = None  # explicit native human teaching, not general guard bypass
+    notify_on: str = "all"           # all opted-in events, or problems only
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -424,6 +437,7 @@ class Flow:
         return {
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "revision": self.revision, "notify": self.notify,
+            "notify_on": self.notify_on,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
             "schedule": self.schedule, "timezone": self.timezone, "owner": self.owner,
             "max_concurrent": self.max_concurrent, "inputs": self.inputs,
@@ -438,6 +452,9 @@ class Flow:
 
     @staticmethod
     def from_dict(d: dict) -> Flow:
+        notify_on = d.get("notify_on", "all")
+        if not isinstance(notify_on, str) or notify_on not in {"all", "problems"}:
+            raise ValueError("Choose alerts for all updates or problems only.")
         nodes = [FlowNode.from_dict(n) for n in (d.get("nodes") or [])]
         return Flow(
             id=str(d.get("id", "")), name=str(d.get("name", "")),
@@ -446,6 +463,7 @@ class Flow:
             version=int(d.get("version", 1) or 1),
             revision=str(d.get("revision", "") or ""),
             notify=bool(d.get("notify", False)),
+            notify_on=notify_on,
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
             max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
             schedule=str(d.get("schedule", "")), timezone=str(d.get("timezone", "")),
@@ -457,9 +475,53 @@ class Flow:
             recipe_teaching=copy.deepcopy(d.get("recipe_teaching")),
         )
 
+    def unreachable_node_ids(self) -> list[str]:
+        """Steps that no run can reach from this flow's first step."""
+        reached: set[str] = set()
+        pending = [self.start]
+        while pending:
+            node_id = pending.pop()
+            if node_id in reached or node_id not in self.nodes:
+                continue
+            reached.add(node_id)
+            node = self.nodes[node_id]
+            if node.kind == NODE_BRANCH:
+                targets = [node.if_true or node.next, node.if_false or node.next]
+            elif node.kind == NODE_SWITCH:
+                targets = [node.next] + [
+                    case.get("to") or node.next
+                    for case in node.cases if isinstance(case, dict)
+                ]
+            else:
+                targets = [node.next]
+            if node.kind in (_WORK_KINDS | {NODE_SCOPE}):
+                targets.append(node.on_error)
+            if node.kind == NODE_APPROVAL:
+                targets.append(node.on_expire)
+            pending.extend(target for target in targets
+                           if isinstance(target, str) and target)
+        return sorted(self.nodes.keys() - reached)
+
+    def reachability_errors(self) -> list[str]:
+        """Publication blockers, including disconnected nested flow steps."""
+        errors = [
+            f"step {self.nodes[node_id].label or node_id!r} can never run; connect it from the first step"
+            for node_id in self.unreachable_node_ids()
+        ]
+        for node in self.nodes.values():
+            if node.body is not None:
+                errors.extend(f"{node.label or node.id}: {error}"
+                              for error in node.body.reachability_errors())
+            for branch in node.branches:
+                errors.extend(f"{node.label or node.id}: {error}"
+                              for error in branch.reachability_errors())
+        return errors
+
     def validate(self, *, _inherited_approval: bool = False) -> list[str]:
         """Structural problems (empty list = valid). Not an execution check."""
         errs: list[str] = []
+        if not isinstance(self.notify_on, str) or self.notify_on not in {"all", "problems"}:
+            errs.append("Choose alerts for all updates or problems only.")
         if self.recipe_lineage is not None and self.learned_recipe is None:
             errs.append("recipe lineage requires its complete parent recipe")
         if self.recipe_teaching is not None and self.learned_recipe is None:
@@ -492,6 +554,8 @@ class Flow:
             seen_ids.add(n.id)
             if n.kind not in NODE_KINDS:
                 errs.append(f"node {n.id!r}: unknown kind {n.kind!r}")
+            if type(n.concurrency) is not int or not 0 <= n.concurrency <= 8:
+                errs.append(f"node {n.id!r}: choose Shared workflow limit or between 1 and 8 items at once")
             errs.extend(self._validate_retry_policy(n))
             errs.extend(self._validate_routing(n))
             errs.extend(self._validate_retry_budget(n))
@@ -515,6 +579,10 @@ class Flow:
 
     def _validate_retry_policy(self, n: FlowNode) -> list[str]:
         errs = []
+        if type(n.learned_fallback) is not bool:
+            errs.append(f"node {n.id!r}: learned fallback must be a boolean")
+        elif not n.learned_fallback and (n.kind != NODE_AGENT or n.learned_operator is None):
+            errs.append(f"node {n.id!r}: rule-only work requires a learned operator")
         retries = max(0, n.retries)
         backoff = max(0.0, n.retry_backoff)
         if retries > MAX_FLOW_NODE_RETRIES:
@@ -823,12 +891,11 @@ def ensure_high_risk_approvals(flow: Flow) -> Flow:
 
 
 def _pause_node_errors(flow: Flow) -> list[str]:
-    """Errors for ``approval``/``delay`` nodes anywhere inside a NESTED sub-flow
+    """Errors for pausing nodes anywhere inside a NESTED sub-flow
     (a foreach body, a parallel branch, and recursively their own nested bodies).
     Human-in-the-loop lives only at the top flow: a nested context can't pause, so
-    a nested ``approval`` rejects the WHOLE run and a nested ``delay`` silently
-    does nothing. Flagging it at validation turns a runtime footgun into a clear
-    save-time error."""
+    a nested approval or event wait rejects the run and a nested delay is skipped.
+    Flagging it at validation turns a runtime footgun into a clear save-time error."""
     errs: list[str] = []
     for n in flow.nodes.values():
         if n.kind == NODE_APPROVAL:
@@ -837,6 +904,9 @@ def _pause_node_errors(flow: Flow) -> list[str]:
         if n.kind == NODE_DELAY:
             errs.append(f"delay node {n.id!r} can't wait inside a loop/branch "
                         "(nested delays are skipped); move it to the top flow")
+        if n.kind == NODE_WAIT:
+            errs.append(f"Wait for another app step {n.label or n.id!r} cannot wait "
+                        "inside a loop or parallel path; move it to the main flow")
         if n.kind in (NODE_FOREACH, NODE_WHILE, NODE_SCOPE) and n.body is not None:
             errs.extend(_pause_node_errors(n.body))
         if n.kind == NODE_PARALLEL:

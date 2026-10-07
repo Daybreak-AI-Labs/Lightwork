@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime, timezone
 
 _UPPER_WORDS = {"gpt": "GPT", "ai": "AI", "llm": "AI model", "vl": "VL", "api": "API",
                 "sms": "SMS", "ros": "ROS", "ui": "UI", "pro": "Pro"}
@@ -112,9 +113,29 @@ CAPABILITY_LABELS = {
 }
 
 FEATURE_LABELS = {
+    "employee_companions": "Employee companions",
     "workflow_readiness": "Workflow catalog",
     "project_reviews": "Project reviews",
+    "deliverable_bundles": "Selected deliverable bundles",
+    "project_workspaces": "Project workspaces",
+    "task_handoffs": "Accepted task handoffs",
+    "human_conversation_handoffs": "Human help in Chat",
     "outcome_measurement": "Outcome measurement",
+    "commitment_viability": "Keep promises in view",
+    "work_restructuring": "Share preparation safely",
+    "portable_competence": "Share and qualify local rule structures",
+    "private_task_computation": "Private task calculations",
+    "semantic_rule_reuse": "Reuse complete rule-behavior evidence",
+    "procedure_interactions": "Check local rules together",
+    "operational_competence_acquisition": "Plan teaching questions",
+    "request_program": "Prepare an answer for this request",
+    "commitment_economic_alternatives": "Compare additional-work economics",
+    "workflow_step_checks": "Try one workflow step",
+    "applicability_regions": "Checked answer regions",
+    "governed_rule_evolution": "Rewrite and check local rules",
+    "recovery_visibility": "Understand a missing reply",
+    "commitment_capability_learning": "Qualify additional work",
+    "shared_decision_evidence": "Shared decision reviews",
     "guided_onboarding": "Guided first steps",
     "action_center": "Action center",
     "draft_recovery": "Recover unsaved drafts",
@@ -125,7 +146,7 @@ FEATURE_LABELS = {
     "skills": "Skills library",
     "world_model": "Shared memory across tasks",
     "streaming": "Show replies as they are written",
-    "pack_editing": "Edit specialist teams",
+    "pack_editing": "Edit agents and specialists",
     "role_editing": "Edit agent roles",
     "scheduling": "Scheduled workflows",
     "triggers": "Start workflows from other apps",
@@ -135,9 +156,27 @@ FEATURE_LABELS = {
 FEATURE_HELP = {
     "workflow_readiness": "Show the ready-made workflows you can run and what each still needs before you rely on it.",
     "project_reviews": "Share finished task results with the reviewers you choose.",
+    "deliverable_bundles": "Share selected files and result versions with a named colleague for review and offline use.",
+    "project_workspaces": "Plan outcomes, milestones and current source context with explicitly chosen colleagues.",
+    "task_handoffs": "Offer a named colleague an unstarted continuation with selected evidence and a spending ceiling; acceptance closes the original conversation to new execution.",
     "outcome_measurement": "Compare how long work took before and after Lightwork, using your own numbers.",
+    "commitment_viability": "See whether reported capacity and stock can cover two accepted orders, and what needs a decision before an option closes.",
+    "work_restructuring": "Check exact shared preparation across permitted original local cases, with separate complete results and deadlines.",
+    "portable_competence": "Release only reviewed anonymous local rule structures. Qualify them against a target workflow and its own permitted cases before any local use.",
+    "private_task_computation": "Check a bounded rule using a permitted task attachment and release only a separately approved fixed answer. Original data stays private.",
+    "procedure_interactions": "Compare two owned local rules in both orders and check all supported starting values before any combined use.",
+    "operational_competence_acquisition": "Plan questions from a rule's complete supported alternatives and current permitted effort reports. Teaching and publication remain separate reviews.",
+    "request_program": "Check bounded arrangements of your existing taught rules against permitted original cases for one request. Nothing is published automatically.",
+    "commitment_economic_alternatives": "Compare reported offer prices and full incremental costs with currently protected commitments. Results remain conditional on your stated facts.",
+    "workflow_step_checks": "Check one owned taught step against ordinary entered values without running the whole workflow or any connected action.",
+    "applicability_regions": "Check both local rule versions across every supported starting situation. Only current separately permitted expected answers can choose a version; unclear situations remain for review.",
+    "governed_rule_evolution": "Build alternative local rules and a complete checking order from one owned published rule. Independently review every change before publication, and retain the exact previous release for restoration.",
+    "recovery_visibility": "Practice with fictional sign-offs to see when identical visible status hides different original outcomes. No live approval or connected service is used.",
+    "semantic_rule_reuse": "Check every supported input for a local Yes/No or bounded whole-number rule before reusing prior evidence across a rewrite. All checks count toward the reviewed work allowance.",
+    "commitment_capability_learning": "Compare additional work, possible resource additions and reported trial outcomes while protecting accepted commitments.",
+    "shared_decision_evidence": "Find information that can resolve several entered choices, with current sharing permission and a shared question limit.",
     "guided_onboarding": "Offer a step-by-step path to your first finished piece of work.",
-    "action_center": "Collect approvals, sign-offs and reviews waiting for you in one list.",
+    "action_center": "Collect approvals and reviews waiting for you in one list.",
     "draft_recovery": "Keep a private, encrypted copy of unfinished work so it survives a closed tab.",
     "support_center": "Let administrators prepare a support report to send to the Lightwork team. Nothing is sent automatically.",
     "record_search": "Find vendors, evidence, assessments, tasks and reports by name.",
@@ -148,7 +187,7 @@ FEATURE_HELP = {
 
 # The core agent roles, as a title and one line on what each does.
 AGENT_ROLES = {
-    "orchestrator": ("Planner", "Breaks a task into steps and hands each step to the right specialist."),
+    "orchestrator": ("Planner", "Breaks a task into steps and hands each step to the right agent or specialist."),
     "researcher": ("Researcher", "Finds and reads sources, and gathers the facts a task needs."),
     "coder": ("Coder", "Writes and changes code."),
     "coding": ("Coding assistant", "Helps with smaller coding steps inside a larger task."),
@@ -178,10 +217,14 @@ def agent_role_help(role: object) -> str:
 # Chat-app setup fields: (label, help, advanced). Advanced fields sit in a
 # collapsed "Advanced settings" section with sensible defaults.
 CHANNEL_FIELDS = {
+    ("email", "email_auth"): ("How email signs in", "Microsoft accounts use protected account sign-in. Other mail services can keep their password setup.", False),
+    ("email", "oauth_account"): ("Connected Microsoft mailbox", "Connect your mailbox on Connections, then choose it here. A reconnected account must be chosen and saved again.", False),
     ("telegram", "bot_token"): ("Bot token", "From BotFather in Telegram after you create a bot.", False),
     ("discord", "bot_token"): ("Bot token", "From the Discord Developer Portal, under your app's Bot page.", False),
     ("slack", "app_token"): ("App token (starts with xapp-)", "From your Slack app's Basic Information page, under App-Level Tokens.", False),
     ("slack", "bot_token"): ("Bot token (starts with xoxb-)", "From your Slack app's OAuth & Permissions page.", False),
+    ("slack", "signing_secret"): ("Signing secret", "From your Slack app's Basic Information page. Needed only when buttons and slash commands reach this server over the web (Interactivity URL) rather than Socket Mode.", True),
+    ("slack", "approvals_channel"): ("Approvals channel", "The Slack channel id (starts with C) where new approval cards with Approve and Reject buttons are posted. Leave empty to post none.", True),
     ("whatsapp_cloud", "access_token"): ("Access token", "From Meta for Developers, WhatsApp > API Setup.", False),
     ("whatsapp_cloud", "phone_number_id"): ("Phone number ID", "Shown next to your WhatsApp business number on the same API Setup page.", False),
     ("whatsapp_cloud", "verify_token"): ("Verification word", "Any word you choose. Enter the same word in Meta's webhook settings.", False),
@@ -192,6 +235,7 @@ CHANNEL_FIELDS = {
     ("sms", "from_number"): ("Sending phone number", "Your Twilio number, with country code, like +15551234567.", False),
     ("sms", "port"): ("Listening port", "Only change this if your IT team asks you to.", True),
     ("email", "imap_host"): ("Incoming mail server", "For example imap.gmail.com. Choosing your email provider above fills this in.", False),
+    ("email", "trusted_authserv_id"): ("Server that checks incoming mail", "Ask your mail administrator for the server name on its sender-check result. The server must remove sender-supplied results before mail reaches this inbox. Incoming email cannot start work until this is set and the sender check passes.", False),
     ("email", "imap_user"): ("Incoming mail username", "Usually the full email address.", False),
     ("email", "imap_password"): ("Incoming mail password", "Many providers need an app password rather than your normal password.", False),
     ("email", "smtp_host"): ("Outgoing mail server", "For example smtp.gmail.com.", False),
@@ -200,6 +244,10 @@ CHANNEL_FIELDS = {
     ("email", "smtp_port"): ("Outgoing mail port", "Usually 465. Some providers, such as Outlook, use 587.", True),
     ("mattermost", "url"): ("Server address", "The web address people use to open Mattermost, such as https://chat.example.com.", False),
     ("mattermost", "bot_token"): ("Bot access token", "From Mattermost's System Console, under Integrations > Bot Accounts, after you create a bot.", False),
+    ("teams", "app_id"): ("App ID", "The Microsoft App ID of your Azure Bot, shown on the bot's Configuration page in the Azure portal.", False),
+    ("teams", "app_password"): ("Client secret", "From the app registration in Microsoft Entra, under Certificates & secrets. Paste the secret value, not its id.", False),
+    ("teams", "tenant_id"): ("Tenant ID", "Your Microsoft Entra tenant id (Directory ID). Leave blank only for a multi-tenant app registration.", False),
+    ("teams", "port"): ("Listening port", "Only change this if your IT team asks you to. Your public HTTPS address must forward /webhook/teams to it.", True),
 }
 
 CHANNEL_HELP_LINKS = {
@@ -209,6 +257,7 @@ CHANNEL_HELP_LINKS = {
     "whatsapp_cloud": "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
     "sms": "https://console.twilio.com",
     "mattermost": "https://developers.mattermost.com/integrate/reference/bot-accounts/",
+    "teams": "https://learn.microsoft.com/azure/bot-service/bot-service-quickstart-registration",
 }
 
 
@@ -260,15 +309,59 @@ def unique_slug(name: object, taken, *, fallback: str = "item", max_len: int = 4
     return f"{base}-{n}"
 
 
-def money(value: object) -> str:
-    """Dollars to two places; tiny non-zero amounts read as "under $0.01"."""
+def day_text(day) -> str:
+    """A calendar day the way browsers write it on English pages: "4 Oct 2026",
+    "30 Sept 2026" (en-GB spells September "Sept")."""
+    month = day.strftime("%b")
+    return f"{day.day} {'Sept' if month == 'Sep' else month} {day.year}"
+
+
+def datetime_text(value: object, *, seconds: bool = False, date_only: bool = False) -> str:
+    """Epoch seconds as the shared server-side text: "4 Oct 2026, 14:01 UTC".
+
+    The |datetime filter wraps this text in a <time> the browser rewrites in the
+    viewer's zone; plain strings (option labels, chat replies, printed reports)
+    use it directly. ``seconds`` adds ":05" where two moments a minute apart must
+    stay distinct; ``date_only`` gives "4 Oct 2026". "" when unreadable.
+    """
+    if isinstance(value, bool):
+        return ""
+    try:
+        when = datetime.fromtimestamp(float(value), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    if date_only:
+        return day_text(when)
+    return f"{day_text(when)}, {when.strftime('%H:%M:%S' if seconds else '%H:%M')} UTC"
+
+
+def money(value: object, decimals: int = 2, currency: str = "USD") -> str:
+    """Money the way every page shows it (``mvMoney`` in lightwork-ui.js too):
+    "$1,234.56" or "-$5.00", tiny non-zero amounts as "under $0.01".
+
+    ``decimals=4`` is only for a labelled per-unit price ("$0.0030 per 1K
+    tokens"). Another currency shows its code ("EUR 75.00").
+    """
     try:
         amount = float(value or 0)
     except (TypeError, ValueError):
-        return "$0.00"
-    if 0 < abs(amount) < 0.005:
-        return "under $0.01"
-    return f"${amount:,.2f}"
+        amount = 0.0
+    smallest = 10.0 ** -decimals
+    if 0 < abs(amount) < smallest / 2:
+        return "under " + money(smallest, decimals, currency)
+    number = f"{abs(amount):,.{decimals}f}"
+    sign = "-" if amount < 0 else ""
+    code = str(currency or "USD").upper()
+    return f"{sign}${number}" if code == "USD" else f"{sign}{code} {number}"
+
+
+def percent(value: object) -> str:
+    """A percentage with at most one decimal: 0 -> "0%", 37.46 -> "37.5%"."""
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    return f"{amount:,.1f}".removesuffix(".0") + "%"
 
 
 def size(num_bytes: object) -> str:
@@ -309,6 +402,7 @@ def register(env) -> None:
     env.filters.setdefault("capability_label", capability_label)
     env.filters.setdefault("feature_label", feature_label)
     env.filters.setdefault("money", money)
+    env.filters.setdefault("percent", percent)
     env.filters.setdefault("agent_role", agent_role_title)
     env.filters.setdefault("agent_role_help", agent_role_help)
     env.filters.setdefault("effort_label", lambda v: EFFORT_LABELS.get(str(v or ""), str(v or "").capitalize()))

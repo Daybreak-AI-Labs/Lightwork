@@ -2160,7 +2160,7 @@ def record_completion(
 
 
 def _role_requirement_rows() -> list[dict[str, Any]]:
-    rows = _ROLE_REQUIREMENTS.list(limit=_ROLE_MAX_LIST)
+    rows = _bounded_rows(_ROLE_REQUIREMENTS, _ROLE_MAX_LIST, "Role requirements")
     rows.sort(key=lambda row: str(row.get("role") or ""))
     return rows
 
@@ -2172,11 +2172,11 @@ def literacy_gaps(*, now: float | None = None) -> dict[str, Any]:
     current = time.time() if now is None else _role_timestamp(now, "now")
     requirements = {row["role"]: row for row in _role_requirement_rows()}
     completions: dict[tuple[str, str], dict[str, Any]] = {}
-    for row in _ROLE_COMPLETIONS.list(limit=_ROLE_MAX_LIST * 4):
+    for row in _bounded_rows(_ROLE_COMPLETIONS, _ROLE_MAX_LIST * 4, "Training completions"):
         completions[(str(row.get("person")), str(row.get("training")))] = row
     persons: list[dict[str, Any]] = []
     counts = {"current": 0, "expired": 0, "missing": 0}
-    assignments = _ROLE_ASSIGNMENTS.list(limit=_ROLE_MAX_LIST * 4)
+    assignments = _bounded_rows(_ROLE_ASSIGNMENTS, _ROLE_MAX_LIST * 4, "Role assignments")
     assignments.sort(key=lambda row: str(row.get("person") or ""))
     for assignment in assignments:
         person = str(assignment.get("person") or "")
@@ -2302,13 +2302,8 @@ def literacy_plane_status(*, now: float | None = None) -> dict[str, Any]:
         canonical_requirements = []
     role_gaps = literacy_gaps(now=observed_at)
     role_requirements = _role_requirement_rows()
-    role_assignments = _ROLE_ASSIGNMENTS.list(limit=_ROLE_MAX_LIST * 4 + 1)
-    role_completions = _ROLE_COMPLETIONS.list(limit=_ROLE_MAX_LIST * 4 + 1)
-    role_limit = _ROLE_MAX_LIST * 4
-    if len(role_assignments) > role_limit or len(role_completions) > role_limit:
-        raise AILiteracyStateError(
-            "AI literacy compatibility plane exceeds the bounded status limit"
-        )
+    role_assignments = _bounded_rows(_ROLE_ASSIGNMENTS, _ROLE_MAX_LIST * 4, "Role assignments")
+    role_completions = _bounded_rows(_ROLE_COMPLETIONS, _ROLE_MAX_LIST * 4, "Training completions")
     canonical_summary = dict(canonical_export.get("summary") or {})
     canonical_present = bool(
         canonical_requirements or int(canonical_summary.get("subjects") or 0)

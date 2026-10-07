@@ -26,10 +26,12 @@ The title can also contain ``{{ vars }}``.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -78,6 +80,7 @@ class Template:
     verified: bool = False
     owner: str = ""
     generation: int = 0
+    parameter_schema: dict = field(default_factory=dict)
 
     @classmethod
     def parse(cls, text: str, name: str, path: Path | None = None) -> Template:
@@ -119,6 +122,9 @@ class Template:
         if generation < 0:
             raise ValueError(f"template {name!r}: [generation] cannot be negative")
 
+        from .template_parameters import normalize_schema
+
+        names = meta.get("params", []) if isinstance(meta.get("params"), list) else []
         return cls(
             name=name,
             title=str(meta.get("title", name)),
@@ -131,6 +137,7 @@ class Template:
             pubkey=meta.get("pubkey") if isinstance(meta.get("pubkey"), str) else None,
             owner=meta.get("owner") if isinstance(meta.get("owner"), str) else "",
             generation=generation,
+            parameter_schema=normalize_schema(meta.get("parameter_schema"), names),
         )
 
     def render(self, **params: str) -> tuple[str, str]:
@@ -138,15 +145,14 @@ class Template:
 
         Missing required params raise ValueError.
         """
-        missing = [p for p in self.params if p not in params]
-        if missing:
-            raise ValueError(
-                f"template {self.name!r} missing required params: {missing}"
-            )
-        return (
-            _substitute(self.title, params),
-            _substitute(self.body, params),
-        )
+        from .connections import current_principal
+        return self.render_for(current_principal(), **params)
+
+    def render_for(self, actor, **params: str) -> tuple[str, str]:
+        from .template_connections import parameters
+        resolved, _ = parameters(self, actor, params)
+        return _substitute(self.title, resolved), _substitute(self.body, resolved)
+
 
 
 def _parse_frontmatter(front: str) -> dict:
@@ -237,6 +243,30 @@ def load_template(name: str) -> Template:
     )
 
 
+def can_read_template(template: Template, principal: str | None) -> bool:
+    """Content permission is exact ownership or verifiable publication.
+
+    Unknown user-installed ownership is retained for migration, never inferred
+    from an administrator role or from the absence of owner frontmatter.
+    """
+    if template.owner and template.owner == (principal or "local"):
+        return True
+    if template.path is None:
+        return False
+    try:
+        path = template.path.resolve()
+        if not template.owner and any(path.parent == directory.resolve() for directory in _BUNDLED_CANDIDATES):
+            return True
+        if path.parent != user_templates_dir().resolve():
+            return False
+        receipt = json.loads((path.parent / (template.name + ".publication.json")).read_text(encoding="utf-8"))
+        return (receipt.get("schema") == "lightwork.catalog-template-publication.v1"
+                and receipt.get("name") == template.name
+                and receipt.get("sha256") == hashlib.sha256(path.read_bytes()).hexdigest())
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def _optional_template_budget(value: float | None) -> float | None:
     if value is None:
         return None
@@ -247,6 +277,30 @@ def _optional_template_budget(value: float | None) -> float | None:
     if isinstance(value, bool) or not math.isfinite(amount) or amount < 0:
         raise ValueError("template budgets must be finite non-negative numbers")
     return amount
+
+
+def _template_parameters(params, title, body):
+    clean_params: list[str] = []
+    for p in (str(p).strip() for p in (params or [])):
+        if re.match(r"^[A-Za-z_]\w*$", p) and p not in clean_params:
+            clean_params.append(p)
+    # Reconcile declared params with the {{placeholders}} the title/body actually
+    # use: an undeclared placeholder would render as a literal "{{x}}" in the
+    # goal, and the scheduler/trigger UI (which prompts from tpl.params) would
+    # never ask the operator to fill it. Fold any used-but-undeclared placeholder
+    # into params so every slot is fillable.
+    for m in _VAR.finditer(f"{title}\n{body}"):
+        placeholder = m.group(1)
+        if placeholder not in clean_params:
+            clean_params.append(placeholder)
+    return clean_params
+
+
+def _template_owner(value):
+    owner = str(value or "local").strip()
+    if not owner or len(owner) > 256 or any(ord(char) < 32 or ord(char) == 127 for char in owner):
+        raise ValueError("template owner must be a bounded printable principal")
+    return owner
 
 
 def save_user_template(
@@ -261,6 +315,8 @@ def save_user_template(
     owner: str | None = None,
     expected_generation: int | None = None,
     admin_override: bool = False,
+    parameter_schema: dict | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> Template:
     """Persist a user-authored (or AI-drafted) workflow as a user template.
 
@@ -276,13 +332,7 @@ def save_user_template(
     False.
     """
     _validate_template_name(name)
-    owner = str(owner or "local").strip()
-    if (
-        not owner
-        or len(owner) > 256
-        or any(ord(char) < 32 or ord(char) == 127 for char in owner)
-    ):
-        raise ValueError("template owner must be a bounded printable principal")
+    owner = _template_owner(owner)
     if expected_generation is not None:
         try:
             expected_generation = int(expected_generation)
@@ -294,19 +344,10 @@ def save_user_template(
     body = (body or "").strip()
     if not body:
         raise ValueError("template body must not be empty")
-    clean_params: list[str] = []
-    for p in (str(p).strip() for p in (params or [])):
-        if re.match(r"^[A-Za-z_]\w*$", p) and p not in clean_params:
-            clean_params.append(p)
-    # Reconcile declared params with the {{placeholders}} the title/body actually
-    # use: an undeclared placeholder would render as a literal "{{x}}" in the
-    # goal, and the scheduler/trigger UI (which prompts from tpl.params) would
-    # never ask the operator to fill it. Fold any used-but-undeclared placeholder
-    # into params so every slot is fillable.
-    for m in _VAR.finditer(f"{title}\n{body}"):
-        placeholder = m.group(1)
-        if placeholder not in clean_params:
-            clean_params.append(placeholder)
+    clean_params = _template_parameters(params, title, body)
+    from .template_parameters import normalize_schema
+
+    schema = normalize_schema(parameter_schema, clean_params)
     bd = _optional_template_budget(budget_dollars)
     bw = _optional_template_budget(budget_wall_seconds)
 
@@ -325,13 +366,13 @@ def save_user_template(
         if dest.exists() and not overwrite:
             raise FileExistsError(f"template {name!r} already exists")
         generation = 1
+        previous_content = None
         if dest.exists():
             from .file_lock import atomic_read_text, ensure_private_file
 
             ensure_private_file(dest)
-            existing = Template.parse(
-                atomic_read_text(dest, encoding="utf-8"), name, path=dest,
-            )
+            previous_content = atomic_read_text(dest, encoding="utf-8")
+            existing = Template.parse(previous_content, name, path=dest)
             if not admin_override:
                 if existing.owner and existing.owner != owner:
                     raise PermissionError(
@@ -364,11 +405,20 @@ def save_user_template(
             front.append(f"budget_dollars: {bd}")
         if bw is not None:
             front.append(f"budget_wall_seconds: {bw}")
+        if schema:
+            front.append("parameter_schema: " + json.dumps(schema, ensure_ascii=True, separators=(",", ":")))
         if clean_params:
             front.append("params:")
             front.extend(f"  - {p}" for p in clean_params)
         content = "---\n" + "\n".join(front) + "\n---\n" + body + "\n"
-        atomic_write_text(dest, content)
+        from .workflow_versions import before_save
+
+        if effect_guard is None:
+            before_save(name, content, previous_content)
+            atomic_write_text(dest, content)
+        else:
+            before_save(name, content, previous_content, effect_guard=effect_guard)
+            atomic_write_text(dest, content, effect_guard=effect_guard)
     return Template.parse(content, name, path=dest)
 
 
@@ -438,6 +488,7 @@ def _canonical_template_signed_bytes(template: Template) -> bytes:
             "title": template.title,
             "body": template.body,
             "params": list(template.params),
+            **({"parameter_schema": template.parameter_schema} if template.parameter_schema else {}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -525,6 +576,15 @@ def install_template_from_catalog(
     ensure_private_directory(target_dir)
     target = target_dir / f"{name}.md"
     with cross_process_lock(target, strict=True):
+        if target.exists():
+            # Installing catalog content may not silently replace a privately
+            # authored workflow or an unknown legacy record with the same slug.
+            existing = Template.parse(target.read_text(encoding="utf-8"), name, path=target)
+            if existing.owner or not can_read_template(existing, "user:catalog-publication-check"):
+                raise ValueError("A private or unverified template already uses this name. Review it in the workflow builder before installing.")
         atomic_write_text(target, content)
+        atomic_write_text(target_dir / (name + ".publication.json"), json.dumps({
+            "schema": "lightwork.catalog-template-publication.v1", "name": name,
+            "sha256": hashlib.sha256(target.read_bytes()).hexdigest()}))
     template.path = target
     return template

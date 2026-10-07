@@ -46,11 +46,45 @@ def _cutoff_for_days(days: int, *, now: float | None = None) -> float:
 
 
 def purge_audit_files(
+    *, days: int, audit_dir: Path | None = None, dry_run: bool = False,
+    now: float | None = None, review_binding: dict | None = None,
+) -> dict:
+    if review_binding is None:
+        return _purge_audit_files(days=days, audit_dir=audit_dir, dry_run=dry_run, now=now)
+    from contextlib import ExitStack
+
+    from ..file_lock import cross_process_lock
+    from ..paths import data_dir
+    from ..retention_review_bindings import RetentionReviewChanged, file_seal
+
+    directory = audit_dir if audit_dir is not None else data_dir("audit")
+    if dry_run:
+        review_binding["files"] = {}
+        return _purge_audit_files(days=days, audit_dir=directory, dry_run=True, now=now, _binding=review_binding)
+    expected = review_binding.get("files")
+    if not isinstance(expected, dict) or len(expected) > 256:
+        raise RetentionReviewChanged("The saved activity review is unavailable. Preview again.")
+    paths = []
+    for name in sorted(expected):
+        if Path(name).name != name or not name.endswith(".ndjson"):
+            raise RetentionReviewChanged("The saved activity review is invalid. Preview again.")
+        paths.append(directory / name)
+    with ExitStack() as locks:
+        for path in paths:
+            locks.enter_context(cross_process_lock(path, strict=True))
+        for path in paths:
+            if not path.exists() or file_seal(path) != expected[path.name]:
+                raise RetentionReviewChanged("An activity file changed after preview. No activity files were deleted; preview again.")
+        return _purge_audit_files(days=days, audit_dir=directory, now=now, _paths=paths, _locks_held=True)
+
+
+def _purge_audit_files(
     *,
     days: int,
     audit_dir: Path | None = None,
     dry_run: bool = False,
     now: float | None = None,
+    _paths: list[Path] | None = None, _locks_held: bool = False, _binding: dict | None = None,
 ) -> dict:
     """Remove ``YYYY-MM-DD.ndjson`` files older than ``days``.
 
@@ -73,7 +107,9 @@ def purge_audit_files(
     removed: list[str] = []
     purged: list[dict] = []
     kept = 0
-    for path in sorted(audit_dir.glob("*.ndjson")):
+    skipped: list[str] = []
+    marker_failed = False
+    for path in _paths if _paths is not None else sorted(audit_dir.glob("*.ndjson")):
         try:
             day = datetime.strptime(path.stem, "%Y-%m-%d").date()
         except ValueError:
@@ -91,16 +127,30 @@ def purge_audit_files(
                 purged.append(
                     {"day": path.stem, "tip_hash": tip, "row_count": count}
                 )
+                if _binding is not None:
+                    from ..retention_review_bindings import (
+                        MAX_BYTES,
+                        RetentionReviewChanged,
+                        file_seal,
+                    )
+
+                    if len(_binding["files"]) >= 256:
+                        raise RetentionReviewChanged("Too many activity files for one safe review. Choose a longer retention period and preview again.")
+                    _binding["files"][path.name] = file_seal(path)
+                    if sum(row["bytes"] for row in _binding["files"].values()) > MAX_BYTES:
+                        raise RetentionReviewChanged("The eligible activity files are too large for one safe review. Choose a longer retention period and preview again.")
                 continue
 
             # Capture and unlink under the exact sidecar lock used by append,
             # GDPR rewrite, and checkpoint publication. Without this, a writer
             # can append between the captured tip and unlink, making the signed
             # purge marker attest to bytes other than those actually destroyed.
+            from contextlib import nullcontext
+
             from ..file_lock import cross_process_lock
 
             try:
-                with cross_process_lock(path, strict=True):
+                with nullcontext() if _locks_held else cross_process_lock(path, strict=True):
                     if not path.exists():
                         continue
                     tip, count = _tip_and_count(path)
@@ -110,9 +160,12 @@ def purge_audit_files(
                 # with writers or prove which bytes it is deleting.
                 log.warning("retention: cannot safely purge %s: %s", path, e)
                 kept += 1
+                skipped.append(path.name)
                 continue
 
             removed.append(path.name)
+            if not tip:
+                marker_failed = True  # Destroyed bytes cannot be attested without their signed tip.
             purged.append(
                 {"day": path.stem, "tip_hash": tip, "row_count": count}
             )
@@ -134,11 +187,14 @@ def purge_audit_files(
         # failure-policy: fail_soft_with_audit
         except Exception as e:  # pragma: no cover - must not undo the purge
             log.warning("retention: could not record anchor purge marker: %s", e)
+            marker_failed = True
     log.info(
         "retention: audit purge cutoff=%s removed=%d kept=%d dry_run=%s",
         cutoff_day, len(removed), kept, dry_run,
     )
-    return {"removed": removed, "kept": kept, "cutoff_day": str(cutoff_day)}
+    return {"removed": removed, "kept": kept, "cutoff_day": str(cutoff_day),
+            "skipped": skipped, "status": "partial" if skipped or marker_failed else "completed",
+            "purge_marker": "failed" if marker_failed else "recorded" if purged and not dry_run else "not_needed"}
 
 
 def _tip_and_count(path: Path) -> tuple[str, int]:
@@ -248,18 +304,21 @@ def purge_world_episodes(
     db_path: Path | None = None,
     dry_run: bool = False,
     now: float | None = None,
+    review_binding: dict | None = None,
 ) -> dict:
     """Delete ``episodes`` rows ended before ``days`` ago."""
     if days is None or int(days) <= 0:
         return {"deleted": 0, "reason": "disabled"}
     cutoff_ts = _cutoff_for_days(days, now=now)
+    if review_binding is not None and db_path is not None:
+        raise RetentionScopeError("Reviewed retention requires the configured native store.")
     if db_path is not None:
         deleted = _purge_table_by_time(
             db_path, "episodes", "ended_at", cutoff_ts, dry_run=dry_run,
         )
     else:
         deleted = _purge_canonical_world(
-            "purge_episodes_before", cutoff_ts, dry_run=dry_run,
+            "purge_episodes_before", cutoff_ts, dry_run=dry_run, review_binding=review_binding,
         )
     log.info("retention: episodes deleted=%d dry_run=%s", deleted, dry_run)
     return {"deleted": deleted, "cutoff_ts": cutoff_ts}
@@ -271,18 +330,21 @@ def purge_world_events(
     db_path: Path | None = None,
     dry_run: bool = False,
     now: float | None = None,
+    review_binding: dict | None = None,
 ) -> dict:
     """Delete ``goal_events`` rows older than ``days``."""
     if days is None or int(days) <= 0:
         return {"deleted": 0, "reason": "disabled"}
     cutoff_ts = _cutoff_for_days(days, now=now)
+    if review_binding is not None and db_path is not None:
+        raise RetentionScopeError("Reviewed retention requires the configured native store.")
     if db_path is not None:
         deleted = _purge_table_by_time(
             db_path, "goal_events", "ts", cutoff_ts, dry_run=dry_run,
         )
     else:
         deleted = _purge_canonical_world(
-            "purge_goal_events_before", cutoff_ts, dry_run=dry_run,
+            "purge_goal_events_before", cutoff_ts, dry_run=dry_run, review_binding=review_binding,
         )
     log.info("retention: goal_events deleted=%d dry_run=%s", deleted, dry_run)
     return {"deleted": deleted, "cutoff_ts": cutoff_ts}
@@ -294,25 +356,28 @@ def purge_world_messages(
     db_path: Path | None = None,
     dry_run: bool = False,
     now: float | None = None,
+    review_binding: dict | None = None,
 ) -> dict:
     """Delete ``messages`` rows older than ``days``."""
     if days is None or int(days) <= 0:
         return {"deleted": 0, "reason": "disabled"}
     cutoff_ts = _cutoff_for_days(days, now=now)
+    if review_binding is not None and db_path is not None:
+        raise RetentionScopeError("Reviewed retention requires the configured native store.")
     if db_path is not None:
         deleted = _purge_table_by_time(
             db_path, "messages", "ts", cutoff_ts, dry_run=dry_run,
         )
     else:
         deleted = _purge_canonical_world(
-            "purge_messages_before", cutoff_ts, dry_run=dry_run,
+            "purge_messages_before", cutoff_ts, dry_run=dry_run, review_binding=review_binding,
         )
     log.info("retention: messages deleted=%d dry_run=%s", deleted, dry_run)
     return {"deleted": deleted, "cutoff_ts": cutoff_ts}
 
 
 def _purge_canonical_world(
-    method_name: str, cutoff_ts: float, *, dry_run: bool,
+    method_name: str, cutoff_ts: float, *, dry_run: bool, review_binding: dict | None = None,
 ) -> int:
     """Run a portable retention primitive on the configured world backend.
 
@@ -333,6 +398,10 @@ def _purge_canonical_world(
     # Do not create an empty SQLite database merely because a scheduled
     # retention job ran before the world was initialized.
     if not is_postgres_configured() and not default_db_path().exists():
+        if review_binding is not None:
+            from ..retention_review_bindings import check, seal
+
+            check(review_binding, seal([]), dry_run=dry_run)
         return 0
     world = open_world()
     try:
@@ -341,7 +410,7 @@ def _purge_canonical_world(
             raise RetentionScopeError(
                 f"configured world backend lacks retention primitive {method_name}"
             )
-        return int(method(float(cutoff_ts), dry_run=dry_run) or 0)
+        return int(method(float(cutoff_ts), dry_run=dry_run, **({"review_binding": review_binding} if review_binding is not None else {})) or 0)
     finally:
         close_world_if_owned(world)
 
@@ -352,13 +421,14 @@ def purge_usage_ledger(
     ledger_path: Path | None = None,
     dry_run: bool = False,
     now: float | None = None,
+    review_binding: dict | None = None,
 ) -> dict:
     """Prune usage-ledger ``(principal, day)`` buckets older than ``days``."""
     if days is None or int(days) <= 0:
         return {"removed_buckets": 0, "reason": "disabled"}
     from ..quotas import UsageLedger
     ledger = UsageLedger(ledger_path) if ledger_path is not None else UsageLedger()
-    result = ledger.prune(int(days), now=now, dry_run=dry_run)
+    result = ledger.prune(int(days), now=now, dry_run=dry_run, **({"review_binding": review_binding} if review_binding is not None else {}))
     log.info("retention: usage ledger removed_buckets=%d dry_run=%s",
              result.get("removed_buckets", 0), dry_run)
     return result
@@ -430,6 +500,20 @@ def enforce(
     db_path: Path | None = None,
     now: float | None = None,
     _fleet_child: bool = False,
+    _review_binding: dict | None = None,
+) -> dict:
+    from ..authority_effects import authority_effect_fence
+
+    # Hold changes and app-owned authority changes share this fence. Recheck
+    # preservation under it and retain it through each destructive operation.
+    with authority_effect_fence():
+        return _enforce(config=config, dry_run=dry_run, audit_dir=audit_dir,
+                        db_path=db_path, now=now, _fleet_child=_fleet_child, _review_binding=_review_binding)
+
+
+def _enforce(
+    *, config: dict | None, dry_run: bool, audit_dir: Path | None,
+    db_path: Path | None, now: float | None, _fleet_child: bool, _review_binding: dict | None = None,
 ) -> dict:
     """Apply every configured retention rule. Returns a per-rule report.
 
@@ -472,32 +556,44 @@ def enforce(
                     "tenants": reports,
                 }
 
+    if _review_binding is not None and (not _fleet_child or sum(bool(cfg.get(key)) for key in ("audit_days", "episodes_days", "events_days", "messages_days", "usage_days")) != 1):
+        raise RetentionScopeError("A reviewed retention step requires one scoped native store.")
+
+    binding = {"review_binding": _review_binding} if _review_binding is not None else {}
     audit_days = cfg.get("audit_days")
     episodes_days = cfg.get("episodes_days")
     events_days = cfg.get("events_days")
     messages_days = cfg.get("messages_days")
     usage_days = cfg.get("usage_days")
 
-    report: dict = {"dry_run": dry_run}
+    from .preservation import preservation_snapshot
+
+    try:
+        preservation = preservation_snapshot()
+    except Exception as exc:  # failure-policy: fail_closed -- unverified holds prohibit deletion
+        raise RetentionScopeError("Preservation holds could not be verified; no records were deleted.") from exc
+    if preservation["blocked"] and not dry_run:
+        raise RetentionScopeError("Recorded preservation holds block broad deletion in this workspace.")
+    report: dict = {"dry_run": dry_run, "preservation": preservation}
     if audit_days:
         report["audit"] = purge_audit_files(
-            days=audit_days, audit_dir=audit_dir, dry_run=dry_run, now=now,
+            days=audit_days, audit_dir=audit_dir, dry_run=dry_run, now=now, **binding,
         )
     if episodes_days:
         report["episodes"] = purge_world_episodes(
-            days=episodes_days, db_path=db_path, dry_run=dry_run, now=now,
+            days=episodes_days, db_path=db_path, dry_run=dry_run, now=now, **binding,
         )
     if events_days:
         report["goal_events"] = purge_world_events(
-            days=events_days, db_path=db_path, dry_run=dry_run, now=now,
+            days=events_days, db_path=db_path, dry_run=dry_run, now=now, **binding,
         )
     if messages_days:
         report["messages"] = purge_world_messages(
-            days=messages_days, db_path=db_path, dry_run=dry_run, now=now,
+            days=messages_days, db_path=db_path, dry_run=dry_run, now=now, **binding,
         )
     if usage_days:
         report["usage_ledger"] = purge_usage_ledger(
-            days=usage_days, dry_run=dry_run, now=now,
+            days=usage_days, dry_run=dry_run, now=now, **binding,
         )
 
     if not dry_run:

@@ -414,7 +414,7 @@ def report_clock(record: dict[str, Any], *, now: float | None = None) -> dict[st
     current = time.time() if now is None else _timestamp(now, "now")
     due = float(record.get("report_due_at") or 0.0)
     status = str(record.get("status") or "")
-    running = status in ("declared", "initial_reported")
+    running = status == "declared"
     return {
         "status": status,
         "report_due_at": due,
@@ -440,8 +440,11 @@ def list_declarations(
         raise ValueError(
             "status must be one of: " + ", ".join(sorted(_TRANSITIONS))
         )
+    records = _STORE.list(limit=_MAX_RECORDS + 1)
+    if len(records) > _MAX_RECORDS:
+        raise ValueError("serious-incident inventory exceeds its supported capacity")
     rows = []
-    for record in _STORE.list(limit=_MAX_RECORDS):
+    for record in records:
         if wanted is not None and record.get("status") != wanted:
             continue
         rows.append({**record, "clock": report_clock(record, now=now)})

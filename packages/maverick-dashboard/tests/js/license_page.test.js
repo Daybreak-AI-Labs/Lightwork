@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const script = fs.readFileSync(path.join(folder, 'static/lightwork-license.js'), 'utf8');
 
@@ -46,6 +47,7 @@ function fixture(route, {installed = false, confirm = true} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + MARKUP.replace('INSTALLED', String(installed)) + '</body>',
     {url: 'https://lightwork.example/settings/license', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [], copies = [], downloads = [];
+  shell(window);
   window.fetch = async (url, options = {}) => {
     const call = {url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body};
     calls.push(call);

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
+const {shell} = require('./_shell');
 const base = path.join(__dirname, '../../maverick_dashboard');
 const source = fs.readFileSync(path.join(base, 'static/lightwork-support.js'), 'utf8');
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -15,6 +16,7 @@ const page = `<section id="support-center" data-context="ctx"><button id="suppor
 function harness(fetchImpl) {
   const dom = new JSDOM(page, { runScripts: 'outside-only' });
   dom.window.fetch = fetchImpl;
+  shell(dom.window);
   dom.window.eval(source);
   return dom;
 }

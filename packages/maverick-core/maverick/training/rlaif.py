@@ -809,8 +809,9 @@ def main(argv: list[str] | None = None) -> int:
                 pairs, rows_by_id, rm_model, disagree_penalty=args.disagree_penalty)
             print(
                 f"reward-model cross-check: {rep['agreement_rate']:.0%} agreement "
-                f"with the verifier ({rep['agree']}/{rep['pairs']} pairs); "
-                "disagreements downweighted",
+                f"with the verifier ({rep['agree']}/{rep['scored']} scored comparisons); "
+                f"{rep['abstained']} comparisons abstained unchanged; "
+                f"{rep['disagree']} disagreements downweighted",
                 file=sys.stderr,
             )
     return train(

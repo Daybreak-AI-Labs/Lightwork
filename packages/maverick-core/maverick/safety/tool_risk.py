@@ -26,6 +26,8 @@ behaviour is unchanged unless a ceiling is configured.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import fnmatch
 import logging
 
@@ -35,7 +37,8 @@ log = logging.getLogger(__name__)
 RISK_LEVELS = ("low", "medium", "high")
 
 # Built-in risk classification. Anything not listed (and not matched by a
-# configured override) defaults to ``medium``. High-risk tools can mutate
+# configured override) defaults to ``high`` until it is deliberately rated.
+# High-risk tools can mutate
 # the host, run arbitrary code, or drive a real machine/browser; low-risk
 # tools are read-only or pure lookups.
 _DEFAULT_RISK: dict[str, str] = {
@@ -43,8 +46,7 @@ _DEFAULT_RISK: dict[str, str] = {
     # high: arbitrary code / host mutation / full control
     "shell": "high",
     # The session kernel executes model-written Python. It is exactly as
-    # consequential as `shell` and must never fall through to the medium
-    # default that an unclassified name would get.
+    # consequential as `shell` and needs an intentional high classification.
     "repl_exec": "high",
     "computer": "high",
     "browser": "high",
@@ -69,6 +71,17 @@ _DEFAULT_RISK: dict[str, str] = {
     # no allow-list concept. Had no entry at all, so it fell to "medium".
     "webrtc": "high",
     "websocket": "high",
+    # Native tools with paid/external data dispatch, credential exchange,
+    # device control, shared-store mutation or executable document processing.
+    "image_edit": "high", "huggingface": "high", "translate": "high",
+    "newsapi": "high", "reddit": "high", "wolfram": "high",
+    "bitbucket": "high", "view_image": "high", "speak": "high",
+    "transcribe_audio": "high", "oidc": "high", "oauth_helper": "high",
+    "embedded_device": "high", "ffmpeg": "high", "pandoc": "high",
+    "imagemagick": "high", "office_convert": "high", "ocr": "high",
+    "latex": "high", "cache_admin": "high",
+    # Bounded native goal-local memory/link records, without an external effect.
+    "kv_memory": "medium", "remember_outcome_key": "medium",
     # high: mutate external state / money / send messages / drive infra or a
     # device / recursively spawn. These used to fall through to the "medium"
     # default, so a max_risk="medium" channel ceiling failed to drop them.
@@ -281,6 +294,7 @@ _DEFAULT_RISK: dict[str, str] = {
 }
 
 _DEFAULT_RISK_LEVEL = "medium"
+_UNCLASSIFIED_RISK_LEVEL = "high"
 
 
 # The long-tail enterprise connectors (built by ``enterprise_connectors.py`` via
@@ -340,6 +354,29 @@ def _read_connector_risks() -> dict[str, str]:
     return _READ_CONNECTOR_RISKS
 
 
+# Operator-provisioned read adapters the audited pack catalog names as
+# deployment prerequisites (``domain_prose_lint.ABSTRACT_ADAPTERS``, a ratchet).
+# They are deliberately rated, not unknown: each is a read seat a medium-ceiling
+# pack declares, so it keeps the medium rating it had before unrated names were
+# raised to the high refusal floor. Medium, never low: these seats can return
+# confidential records. An exact ``[security.tool_risk]`` override still wins,
+# so an operator whose adapter can do more rates it higher.
+_ABSTRACT_ADAPTER_RISK_LEVEL = "medium"
+_ABSTRACT_ADAPTERS: frozenset[str] | None = None
+
+
+def _abstract_adapter_names() -> frozenset[str]:
+    global _ABSTRACT_ADAPTERS
+    if _ABSTRACT_ADAPTERS is not None:
+        return _ABSTRACT_ADAPTERS
+    try:
+        from ..domain_prose_lint import ABSTRACT_ADAPTERS
+    except Exception:
+        return frozenset()  # not importable yet -- fail closed, retry next call
+    _ABSTRACT_ADAPTERS = frozenset(ABSTRACT_ADAPTERS)
+    return _ABSTRACT_ADAPTERS
+
+
 def risk_rank(level: str) -> int:
     """Rank of a risk level (0=low). Unknown levels rank as medium."""
     try:
@@ -366,6 +403,61 @@ def _load_overrides() -> dict[str, str]:
     return out
 
 
+#: Overrides pinned for the duration of one registry build (see
+#: :func:`pinned_overrides`). ``None`` outside such a block.
+_PINNED_OVERRIDES: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "maverick_tool_risk_pinned_overrides", default=None,
+)
+
+
+@contextlib.contextmanager
+def pinned_overrides():
+    """Read ``[security.tool_risk]`` once for everything inside the block.
+
+    Building a base registry registers thousands of tools, and each
+    ``register`` runs the ACL's ``tool_risk`` check, which re-read the whole
+    config every time (measured: 2,937 ``load_config`` calls per ``Agent()``).
+    The config cannot meaningfully change mid-build, so pin one snapshot for
+    the block; outside it every call reads the live config as before. Nested
+    blocks reuse the outer snapshot.
+    """
+    if _PINNED_OVERRIDES.get() is not None:
+        yield
+        return
+    token = _PINNED_OVERRIDES.set(_load_overrides())
+    try:
+        yield
+    finally:
+        _PINNED_OVERRIDES.reset(token)
+
+
+@contextlib.contextmanager
+def reviewed_ratings(ratings: dict[str, str]):
+    """Apply operator-reviewed ratings for otherwise *unrated* names in the block.
+
+    An external agent's tool names are its own, so its enrollment carries the
+    operator's rating for each. Those ratings only fill the unrated high
+    floor; a name Lightwork (or ``[security.tool_risk]``) already classifies
+    keeps that classification, so an enrollment can never down-rate it.
+    """
+    base = _current_overrides(None)
+
+    extra = {name: level for name, level in (ratings or {}).items()
+             if level in RISK_LEVELS and tool_risk_is_unrated(name, base)}
+    token = _PINNED_OVERRIDES.set({**extra, **base})
+    try:
+        yield
+    finally:
+        _PINNED_OVERRIDES.reset(token)
+
+
+def _current_overrides(overrides: dict[str, str] | None) -> dict[str, str]:
+    if overrides is not None:
+        return overrides
+    pinned = _PINNED_OVERRIDES.get()
+    return pinned if pinned is not None else _load_overrides()
+
+
 def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
     """Risk level for a tool: config override (exact then glob), then the
     built-in default.
@@ -376,9 +468,10 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
     from ``enterprise_connectors.py``), which is write-capable by construction.
     A config override is checked first, so either can be relaxed deliberately,
     e.g. ``[security.tool_risk]`` ``"mcp_*" = "medium"`` or ``okta = "medium"``.
-    Any other unclassified tool falls back to ``medium``.
+    Any other unclassified tool falls back to ``high``. That refusal floor is
+    not an intentional classification; ``tool_risk_is_classified`` stays false.
     """
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     if name in overrides:
         return overrides[name]  # exact override wins, even lowering a built-in
     builtin = _DEFAULT_RISK.get(name)
@@ -398,26 +491,27 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
         return builtin
     # Unclassified. An MCP tool is externally-defined arbitrary code reached
     # through a third-party server, and an enterprise connector is write-capable
-    # by construction -> both fail safe to high. Anything else -> medium.
+    # by construction -> both fail safe to high. Other unknown names likewise
+    # cannot enter a low/medium risk ceiling merely because they were unrated.
     if name.startswith("mcp_"):
         return "high"
     if name in _read_connector_names():
         return _read_connector_risks().get(name, "high")
     if name in _enterprise_connector_names():
         return "high"
+    if name in _abstract_adapter_names():
+        return _ABSTRACT_ADAPTER_RISK_LEVEL
     # A namespaced action (``salesforce.write``, ``servicenow.read``) inherits
     # its namespace's classification when it has none of its own -- UPWARD
-    # ONLY, so a suffix can raise the floor but never launder a high-risk
-    # connector down to the medium default. Without this, ``salesforce`` is
-    # high while ``salesforce.write`` -- the governed action that actually
-    # posts to the system of record -- landed on medium and slipped under a
-    # max_risk="medium" ceiling.
+    # ONLY, so a suffix never launders a high-risk connector into a lower
+    # inherited rating. Unknown suffixes otherwise retain the high refusal
+    # floor; they are not thereby marked intentionally classified.
     namespace = name.split(".", 1)[0]
     if namespace and namespace != name:
         inherited = tool_risk(namespace, overrides)
         if risk_rank(inherited) > risk_rank(_DEFAULT_RISK_LEVEL):
             return inherited
-    return _DEFAULT_RISK_LEVEL
+    return _UNCLASSIFIED_RISK_LEVEL
 
 
 def tool_risk_is_classified(
@@ -425,14 +519,14 @@ def tool_risk_is_classified(
 ) -> bool:
     """Whether ``name`` has an intentional risk classification.
 
-    ``tool_risk`` retains its compatibility fallback of ``medium`` for unknown
-    names, but reliability and workflow governance must distinguish that
+    ``tool_risk`` conservatively refuses unknown names under low/medium
+    ceilings, but reliability and workflow governance must distinguish that
     fallback from an explicitly reviewed medium-risk tool. Otherwise a newly
     installed mutating plugin silently gains automatic retries and bypasses
     high-risk approval gates merely because its name is absent from the table.
     """
     name = str(name or "")
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     if name in overrides or name in _DEFAULT_RISK:
         return True
     if any(
@@ -444,7 +538,23 @@ def tool_risk_is_classified(
         name.startswith("mcp_")
         or name in _read_connector_names()
         or name in _enterprise_connector_names()
+        or name in _abstract_adapter_names()
     )
+
+
+def tool_risk_is_unrated(
+    name: str, overrides: dict[str, str] | None = None,
+) -> bool:
+    """Whether ``name`` only carries the unrated high refusal floor.
+
+    A namespaced name (``salesforce.write``) inherits its namespace's rating
+    upward, so a classified namespace makes the name rated too.
+    """
+    name = str(name or "")
+    overrides = _current_overrides(overrides)
+    namespace = name.split(".", 1)[0]
+    return not (tool_risk_is_classified(name, overrides)
+                or (namespace != name and tool_risk_is_classified(namespace, overrides)))
 
 
 def tools_exceeding(
@@ -456,7 +566,7 @@ def tools_exceeding(
     if not max_risk:
         return set()
     ceiling = risk_rank(max_risk)
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     return {
         n for n in tool_names
         if risk_rank(tool_risk(n, overrides)) > ceiling
@@ -470,11 +580,11 @@ def risk_map(tool_names, overrides: dict[str, str] | None = None) -> dict[str, s
     re-reads config every call (it is uncached), so a UI listing ~1000 tools
     would re-parse config ~1000 times. This reads the overrides a single time
     and reuses them."""
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     return {n: tool_risk(n, overrides) for n in tool_names}
 
 
 __all__ = [
     "RISK_LEVELS", "risk_rank", "tool_risk", "tool_risk_is_classified",
-    "tools_exceeding", "risk_map",
+    "tools_exceeding", "risk_map", "pinned_overrides",
 ]

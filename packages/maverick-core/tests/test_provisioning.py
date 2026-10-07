@@ -180,3 +180,85 @@ def test_init_from_file_bad_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "out.toml"))
     r = CliRunner().invoke(main, ["init", "--from-file", str(bad)])
     assert r.exit_code != 0 and "invalid TOML" in r.output
+
+
+@pytest.mark.parametrize("body", [
+    '[budgets]\nx = 1\n',
+    '[budget]\nmax_dollarss = 50\n',
+    '[budget]\nmax_dollars = "unlimited"\n',
+])
+def test_init_from_file_rejects_unusable_settings_without_replacing_old(
+    monkeypatch, tmp_path, body,
+):
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    src = tmp_path / "new.toml"
+    src.write_text(body, encoding="utf-8")
+    dst = tmp_path / "installed" / "config.toml"
+    dst.parent.mkdir()
+    old = b'[budget]\nmax_dollars = 20\n'
+    dst.write_bytes(old)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(dst))
+
+    result = CliRunner().invoke(main, ["init", "--from-file", str(src)])
+
+    assert result.exit_code != 0
+    assert "no changes were made" in result.output
+    assert dst.read_bytes() == old
+    assert not list(dst.parent.glob("config.toml.bak-*"))
+
+
+def test_init_from_file_preserves_private_backup_before_replacing(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    src = tmp_path / "new.toml"
+    src.write_bytes(b'[budget]\nmax_dollars = 50\n')
+    dst = tmp_path / "installed" / "config.toml"
+    dst.parent.mkdir()
+    old = b'[budget]\nmax_dollars = 20\n'
+    dst.write_bytes(old)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(dst))
+
+    result = CliRunner().invoke(main, ["init", "--from-file", str(src)])
+
+    assert result.exit_code == 0, result.output
+    assert dst.read_bytes() == src.read_bytes()
+    backups = list(dst.parent.glob("config.toml.bak-*"))
+    assert len(backups) == 1 and backups[0].read_bytes() == old
+    assert private_path_is_restricted(backups[0], 0o600)
+    assert str(backups[0]) in result.output
+
+
+@pytest.mark.parametrize("fail_when", ["backup", "replace"])
+def test_init_from_file_write_failure_leaves_previous_settings(
+    monkeypatch, tmp_path, fail_when,
+):
+    import maverick.file_lock as file_lock
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    src = tmp_path / "new.toml"
+    src.write_bytes(b'[budget]\nmax_dollars = 50\n')
+    dst = tmp_path / "installed" / "config.toml"
+    dst.parent.mkdir()
+    old = b'[budget]\nmax_dollars = 20\n'
+    dst.write_bytes(old)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(dst))
+    original_write = file_lock.atomic_write_bytes
+
+    def interrupted_write(path, data, *, mode):
+        if (path == dst) == (fail_when == "replace"):
+            raise OSError("simulated write failure")
+        return original_write(path, data, mode=mode)
+
+    monkeypatch.setattr(file_lock, "atomic_write_bytes", interrupted_write)
+    result = CliRunner().invoke(main, ["init", "--from-file", str(src)])
+
+    assert result.exit_code != 0 and "previous file remains" in result.output
+    assert dst.read_bytes() == old
+    backups = list(dst.parent.glob("config.toml.bak-*"))
+    assert len(backups) == (fail_when == "replace")
+    if backups:
+        assert backups[0].read_bytes() == old

@@ -106,18 +106,21 @@ vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
 
 ## 3. A guided tour
 
-The 90-second path:
+Obtain the signed binary for your platform from an
+[asset-bearing release](https://github.com/Daybreak-AI-Labs/Lightwork/releases),
+verify its checksum and exact-tag signature, and run its `dashboard` command.
+Finish owner and provider setup in the application before starting work. See
+[Getting started](getting-started.md) for the customer route and the separate
+[engineering source-install procedure](internal/source-install.md) if you
+already have approved repository access. A full clone carries internal research,
+audit and patent documents.
 
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-pip install -e ./packages/maverick-core -e ./apps/installer-cli
-maverick init          # wizard: four questions, safe defaults (--fast skips)
-maverick start "Research the three best static site generators for a docs \
-site, compare them in a table, and scaffold the winner" --max-dollars 2.0
-```
+The dashboard is the customer entry point for starting and supervising work.
+The commands below are maintainer-facing CLI equivalents; their presence does
+not establish that every customer operation has an accepted in-product journey.
+See the [coverage register](post-install-operation-coverage.md) for that status.
 
-Watch it work from a second terminal:
+For maintainers, watch work from a second terminal:
 
 ```bash
 maverick monitor       # live Rich plan-tree TUI of the swarm

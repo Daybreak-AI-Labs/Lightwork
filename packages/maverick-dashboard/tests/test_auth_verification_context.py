@@ -57,6 +57,11 @@ def test_blocked_verification_does_not_block_actual_asgi_probe_and_preserves_chi
         loop_thread = threading.get_ident()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver",
                                      headers={"Origin": "http://testserver"}) as client:
+            # A served dashboard has built its routes during startup warm-up
+            # (app._warm_goal_runtime); FastAPI builds included routes lazily
+            # on first match, which this in-process client would otherwise pay
+            # inside the timed probe. Warm them the same way first.
+            assert (await client.get("/livez")).status_code == 200
             request = asyncio.create_task(client.get("/api/v1/facts", headers={"Authorization": "Bearer synthetic"}))
             try:
                 assert await asyncio.to_thread(entered.wait, 1)

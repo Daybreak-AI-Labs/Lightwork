@@ -6,13 +6,63 @@ results, stream live progress, manage facts and skills, view spend.
 
 ## Auth
 
-By default, no auth -- the server binds to `127.0.0.1` only.
+By default, no bearer is required on the same computer because the server
+binds to `127.0.0.1` only. For a local script that changes anything, send an
+`Origin` header matching the dashboard address, such as
+`Origin: http://127.0.0.1:8765`. A write without that header receives a 403;
+the check prevents a page opened in your browser from changing Lightwork in
+the background. Read-only local requests do not need this header.
+
+For a long-running integration, create an API key in **Account › API keys** in
+the product and send it as a Bearer header. The key is the recommended route
+for a script that cannot supply an exact local Origin. Use the product's
+local-owner enrollment first if this is a new single-user installation.
 
 For VPS / remote deployments, set `MAVERICK_DASHBOARD_TOKEN` and
 bind to `0.0.0.0` behind Caddy (TLS). Every API request then needs
 an `Authorization: Bearer <token>` header. (The legacy `?token=` query
 parameter was removed: it leaked the bearer via Referer, proxy logs and
 browser history.)
+
+### API keys (recommended for scripts and integrations)
+
+Every signed-in person can create their own keys on **Account › API keys**
+(`/account/api-keys`); administrators see every key there and can create
+**service accounts** -- named identities for programs that hold keys and a
+role but cannot sign in. A key is sent exactly like the token:
+
+    Authorization: Bearer lwk_...
+
+- **Shown once.** The secret appears only in the response that creates or
+  rotates it; the server stores its SHA-256, never the secret.
+- **Scopes.** A key does only what its scopes allow, mapped onto the RBAC
+  permissions routes already check: `tasks:read` (view), `tasks:write` and
+  `approvals:decide` (operate), `audit:read` (audit), `settings:write` and
+  `admin` (admin). The two operate scopes currently grant the same broad
+  operator permission. `settings:write` grants administrator-gated controls;
+  `admin` also grants operator and audit controls. A key can never do more
+  than its owner's *current* role:
+  scopes outside the role are refused at creation, and a demoted owner's
+  keys shrink with them. A read-only key calling a write route gets a
+  `403` that says the key lacks a scope.
+- **Expiry.** Every key has an expiry date (default 90 days, at most 365 by
+  default; both are settings). An expired key gets a plain `401`. The keys
+  page warns about keys that stop within seven days.
+- **Rotation.** *Rotate* mints a replacement with the same name and scopes;
+  the old secret keeps working for a grace period (24 hours by default) and
+  then stops. *Revoke* stops a key at once. Disabling a service account
+  revokes all of its keys.
+- **Workspace binding.** A key may be bound to one workspace; it then acts
+  only inside it.
+- Endpoints: `GET/POST /api/v1/api-keys`, `POST /api/v1/api-keys/{id}/rotate`,
+  `POST /api/v1/api-keys/{id}/revoke`, `GET/POST /api/v1/service-accounts`,
+  `POST /api/v1/service-accounts/{name}/disable`. Every change is audited.
+  API-key bearers can list keys allowed by their role, but cannot create,
+  rotate, revoke or disable credentials. Sign in to manage them in the product.
+
+The static `MAVERICK_DASHBOARD_TOKEN` keeps working as **break-glass**
+access: it has no scopes and no person behind it, its use is recorded in
+the activity record, and Settings shows a warning while it is set.
 
 Exempt from auth (so external tooling and probes work without creds):
 `/healthz`, `/livez`, `/readyz`, `/openapi.json`, `/docs`, `/redoc`, and the
@@ -39,9 +89,16 @@ goals beyond a cap queue (not rejected) up to `MAVERICK_GOAL_ACQUIRE_TIMEOUT`.
 The per-user lane also prevents an attacker / runaway client from draining
 your Anthropic budget by firing 100 POSTs in 30 seconds.
 
-Individual goal budget caps are also bounded server-side:
-`max_dollars` clamped to [0, 100], `max_wall_seconds` to [1, 86400],
-`max_depth` to [1, 5]. Pydantic validates before the goal starts.
+REST goal starts always have finite limits, including on an older installation
+whose general task limits were switched off. Omitted values use the current
+configured task limit, or $2 and 30 minutes when none exists. A supplied value
+is clamped to the operator's lower ceiling and the REST safety ceiling of $100
+and 24 hours. The accepted `POST /goals` response includes `limits` with the
+exact dollar, time and depth caps passed to the runner. A request with an
+`Idempotency-Key` can recover those caps from the submission receipt.
+This REST rule does not change the operator's limits for CLI or internal tasks.
+`max_depth` is validated in [1, 5]. Spend and time values must be finite and
+non-negative; invalid values receive a 422 response before the goal starts.
 
 ## Endpoints
 
@@ -49,11 +106,12 @@ Individual goal budget caps are also bounded server-side:
 
 | Method | Path | Description |
 |---|---|---|
-| `POST`   | `/api/v1/goals` | Create + start a goal (BackgroundTask). Honors `max_dollars`, `max_wall_seconds`, `max_depth` from body. |
+| `POST`   | `/api/v1/goals` | Create + start a goal (BackgroundTask). Returns effective `limits` after configured and REST ceilings. |
 | `GET`    | `/api/v1/goals` | List goals (filter `status=`, paginate `limit=` + `offset=`). |
 | `GET`    | `/api/v1/goals/{id}` | One goal. |
 | `GET`    | `/api/v1/goals/{id}/events` | **Short-poll** live progress (returns events with `id > since`). |
 | `POST`   | `/api/v1/goals/{id}/answer` | Resolve a queued question. Body: `{"question_id": int, "answer": str}`. |
+| `GET`    | `/api/v1/goals/{id}/cost-breakdown` | What the goal has spent so far (`total_dollars`), split by outcome. |
 
 Note on polling: the events endpoint is **short-poll** (returns
 immediately with whatever's available since `?since=<last_id>`). The
@@ -61,12 +119,54 @@ client drives the poll cadence (suggest 2-3s). For push-based streaming use
 Server-Sent Events at `GET /api/v1/goals/{id}/events/stream` (supports
 `Last-Event-ID`) or the WebSocket at `/ws/v1/runs/{id}/events`.
 
+These customer activity transports project readable progress rather than raw
+internal prompts, model scratch text or tool-result envelopes. Durable IDs,
+timestamps and useful findings are preserved; the original event records remain
+in the stored run evidence. An action activity describes a request, not a receipt
+of a completed external effect. A stopped task's event response returns its plain
+`stop.message` as `result`; diagnostic stop text belongs to the technical record.
+
+A goal with status `blocked` is not running, but it is not always finished:
+
+- `needs_input: true` -- the task asked a question and is waiting for a
+  person. `open_question_ids` lists the questions to answer with
+  `POST /api/v1/goals/{id}/answer`. `GET /api/v1/goals/{id}/events` reports
+  `reason_code: "awaiting_input"` and `terminal: false` while this holds, so a client that stops at `terminal`
+  keeps watching until the task is answered and continues. Stop polling on
+  `terminal`, not on `status == "blocked"`.
+- `needs_input: false` -- the task stopped for another reason (a failed or
+  refused run, a spending or quota limit, a halt, a hold nobody approved).
+  `terminal` is `true`; `reason_code` gives a stable machine-readable cause
+  and `stop` gives the plain-language message, next step, and optional link.
+
+`reason_code` is also on `GET /api/v1/goals/{id}`. It is `null` for work that
+has not stopped. Examples include `provider_authentication`,
+`provider_rate_limit`, `provider_unavailable`, `spending_limit`, and
+`policy_blocked`; clients should handle an unrecognized code as a stopped
+task and display the accompanying `stop` guidance.
+
+`needs_input` is read from the open questions alone. A task that asked a
+question, was continued without an answer and then stopped for another reason
+still has that question open, so it keeps reporting `needs_input: true` (and
+`terminal: false` on the events endpoint) until the question is answered; read
+`result` to see why it last stopped.
+
+Only the short-poll endpoint holds `terminal` open for a task that waits for an
+answer. The Server-Sent Events stream, the WebSocket and the older
+`/api/goal/{id}/events` poller end at `blocked` -- a stream cannot be kept
+open for as long as a person takes to answer -- so a client that sees one of
+them end with status `blocked` should read `needs_input` from
+`GET /api/v1/goals/{id}`, and reopen the stream once the question is answered.
+
+Every goal also carries `created_at` and `updated_at` (seconds since the
+epoch; `updated_at` moves on each status change).
+
 ### Facts
 
 | Method | Path | Description |
 |---|---|---|
-| `GET`  | `/api/v1/facts` | All facts as `{key: value}`. |
-| `POST` | `/api/v1/facts` | Upsert. Body: `{"key": str, "value": str}`. |
+| `GET`  | `/api/v1/facts` | Shared business facts as `{key: value}`; private task/personal namespaces are excluded. |
+| `POST` | `/api/v1/facts` | Create with expected revision `0`; replace with the revision and account/workspace context from `GET /facts/record?key=...`. Stale changes return 409. |
 
 ### Skills
 
@@ -82,55 +182,71 @@ Server-Sent Events at `GET /api/v1/goals/{id}/events/stream` (supports
 |---|---|---|
 | `GET` | `/api/v1/spend` | Total spend + per-episode breakdown. |
 
-## Example: start a goal
+## Example: start a goal and recover its receipt
+
+Persist one random request key **before** sending, scoped to the current dashboard,
+account and workspace. Keep the original input and key through a timeout or reload;
+do not generate a new key to retry uncertain work. The maintained
+[REST lifecycle example](clients/examples/rest_lifecycle.py) sends at most one POST
+and switches to receipt GET on uncertainty.
+
+The following example is for a local installation without a Bearer key. On a
+remote installation, use a personal or service-account API key instead.
 
 ```bash
-curl -X POST http://127.0.0.1:8765/api/v1/goals \
+# REQUEST_KEY must be your previously persisted key for this logical request.
+curl --fail-with-body --max-time 15 -X POST http://127.0.0.1:8765/api/v1/goals \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" \
-  -d '{
-    "title": "Compare pgvector and Qdrant",
-    "description": "Side by side, write to report.md",
-    "max_dollars": 2.0,
-    "max_wall_seconds": 1800
-  }'
+  -H "Origin: http://127.0.0.1:8765" \
+  -H "Idempotency-Key: $REQUEST_KEY" \
+  -d '{"title":"Compare pgvector and Qdrant","description":"Write to report.md",
+       "max_dollars":2.0,"max_wall_seconds":1800}'
 ```
 
-Response::
-
-```json
-{
-  "id": 42,
-  "status": "pending",
-  "title": "Compare pgvector and Qdrant",
-  "description": "Side by side, write to report.md",
-  "result": null
-}
-```
-
-## Example: poll for events
+A goal ID acknowledges admission, **not execution**. Inspect `limits` in the
+response to see the exact accepted cap, then inspect the current task state.
+If the request times out, loses its reply, or has an uncertain server error, use
+only this read with the same key, account and workspace:
 
 ```bash
-since=0
-while true; do
-  resp=$(curl -s "http://127.0.0.1:8765/api/v1/goals/42/events?since=$since" \
-    -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN")
-  echo "$resp" | jq '.events[]'
-  since=$(echo "$resp" | jq '.next_id')
-  status=$(echo "$resp" | jq -r '.status')
-  [ "$status" = "done" ] || [ "$status" = "blocked" ] && {
-    # Final pass to flush tail events committed after status flipped.
-    sleep 1
-    curl -s "http://127.0.0.1:8765/api/v1/goals/42/events?since=$since" \
-      -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" | jq '.events[]'
-    break
-  }
-  sleep 2
-done
+curl --fail-with-body --max-time 15 \
+  'http://127.0.0.1:8765/api/v1/goal-submissions/receipt?kind=api' \
+  -H "Idempotency-Key: $REQUEST_KEY" -H 'Cache-Control: no-cache'
 ```
 
-The final-pass after terminal status flushes any events the agent
-committed between the last poll and goal completion.
+The receipt distinguishes `state` (`accepted` or `not_dispatched`),
+`submission_state`, the goal, accepted `limits` (when dispatch intent exists),
+and `execution_confirmed: false`. Admission/dispatch
+is not proof of a completed provider or external action. A 409 means that the same
+key's reviewed input or effective execution limits differ; review the existing
+request. A missing/unavailable receipt leaves the start unresolved: keep the
+original key and input, restore the same account and workspace, and check again.
+A 401/403 requires restoring authorized access. Do not submit another POST until
+the original outcome is reconciled.
+
+## Example: poll every event page through terminal acknowledgement
+
+```python
+import requests
+from rest_lifecycle import poll_events
+
+result = poll_events(
+    requests.Session(), "http://127.0.0.1:8765",
+    {"Authorization": "Bearer " + token}, goal_id=42,
+    emit=lambda event: print(event), since=last_persisted_cursor,
+    deadline_seconds=1800, cancelled=lambda: user_cancelled,
+)
+# Persist result["since"]. terminal=False means supervision ended, not that work stopped.
+```
+
+Copy [rest_lifecycle.py](clients/examples/rest_lifecycle.py) alongside this script.
+It drains `has_more` pages immediately, advances only after displaying each event,
+ignores repeated IDs, and stops only on the server's `terminal: true` with no
+remaining backlog. It handles every terminal status, including failed/cancelled,
+without assuming contiguous event IDs. Authentication/permission errors stop with
+a remedy. Other errors stop without inventing a cursor; resume from the last
+accepted cursor after reviewing the error. A bounded polling deadline or local
+cancel stops supervision and does not cancel the server task.
 
 ## Example: answer a queued question
 
@@ -145,9 +261,13 @@ Returns 204 No Content on success, 404 if no matching open question.
 
 ## Example: use a template
 
+Persist a separate request key for this template submission using the same recovery contract above.
+
 ```bash
-curl -X POST http://127.0.0.1:8765/api/v1/goals \
+curl --fail-with-body --max-time 15 -X POST http://127.0.0.1:8765/api/v1/goals \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" \
+  -H "Idempotency-Key: $REQUEST_KEY" \
   -d '{
     "template": "trip-plan",
     "title": "",
@@ -159,13 +279,23 @@ Template-rendered title overrides the empty one supplied in `title`.
 
 ## Error responses
 
-All errors use the FastAPI default `{"detail": "..."}` shape with
-HTTP status codes:
+API errors use a `detail` field. It can be a message string, a structured
+business error, or a list of field-validation objects with `loc`, `msg` and
+`type`. Do not assume it is always a string or parse its English wording to
+decide whether an uncertain operation should be repeated. Some responses
+also include recovery information such as `reauthenticate`; browser page
+navigation can instead receive an actionable HTML page or sign-in redirect.
+Use the HTTP status and the operation's documented Original/recovery control:
 
 - `400` malformed input (missing API key, invalid template params)
 - `401` missing / wrong bearer token
+- `403` current access refused or the feature is disabled
 - `404` no such goal / question / skill
-- `422` Pydantic validation (e.g., `max_dollars` out of range)
+- `409` current state changed, or the reviewed operation cannot proceed
+- `422` Pydantic validation (e.g., a negative or non-finite spending limit)
+- `429` request limit reached
+- `503` required service or configuration unavailable; this does not establish
+  that an earlier uncertain external effect did not happen
 - `500` internal error (server bug -- file an issue with `maverick doctor` output)
 
 ## Mobile / external app integrations
@@ -177,6 +307,7 @@ Designed for non-channel frontends:
 - Cron jobs -> a 6am goal to summarize overnight email + slack
 - GitHub Actions -> kick off a Lightwork goal on PR open
 
-Always set explicit `max_dollars` and `max_wall_seconds` from external
-callers -- defaults are conservative ($2, 30min) but every API has
-edge cases.
+External callers can send explicit `max_dollars` and `max_wall_seconds` when
+their own policy requires a tighter cap. An omitted value uses the configured
+task limit or the REST default of $2 and 30 minutes. Larger requests never
+exceed $100 or 24 hours, and a lower operator ceiling still wins.

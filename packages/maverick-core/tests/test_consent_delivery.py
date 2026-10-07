@@ -329,7 +329,7 @@ def test_delivery_refuses_process_wide_private_fetch_override(
         tmp_path / "delivery.db",
         config_gate=lambda: True,
     )
-    with pytest.raises(ConsentDeliveryConfigError, match="private-fetch override"):
+    with pytest.raises(ConsentDeliveryConfigError, match="private-network browsing"):
         store.enroll_destination(
             "tenant-a",
             destination_id="destination-a",
@@ -337,6 +337,58 @@ def test_delivery_refuses_process_wide_private_fetch_override(
             signing_key_id="key-1",
             idempotency_key="enroll-1",
         )
+    with pytest.raises(ConsentDeliveryNotFound):
+        store.destination("tenant-a", "destination-a")
+
+
+def test_delivery_refuses_private_network_browsing_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("[tools]\nfetch_allow_private = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(config_file))
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    config.reset_config_cache()
+
+    store = ConsentDeliveryStore(tmp_path / "delivery.db", config_gate=lambda: True)
+    with pytest.raises(ConsentDeliveryConfigError, match="private-network browsing"):
+        store.enroll_destination(
+            "tenant-a",
+            destination_id="destination-a",
+            origin="https://8.8.8.8",
+            signing_key_id="key-1",
+            idempotency_key="enroll-1",
+        )
+    with pytest.raises(ConsentDeliveryNotFound):
+        store.destination("tenant-a", "destination-a")
+
+
+def test_delivery_enrollment_obeys_enterprise_outbound_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import maverick.enterprise as enterprise
+    import maverick.tools._ssrf as ssrf
+
+    observed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        enterprise, "enterprise_egress_denial",
+        lambda url, *, tool: observed.append((url, tool)) or "blocked",
+    )
+    monkeypatch.setattr(
+        ssrf, "resolve_pinned_ip", lambda _host, **_kwargs: "8.8.8.8"
+    )
+    store = ConsentDeliveryStore(tmp_path / "delivery.db", config_gate=lambda: True)
+    with pytest.raises(ConsentDeliveryConfigError, match="approved outbound hosts"):
+        store.enroll_destination(
+            "tenant-a",
+            destination_id="destination-a",
+            origin="https://8.8.8.8",
+            signing_key_id="key-1",
+            idempotency_key="enroll-1",
+        )
+    assert observed == [("https://8.8.8.8", "consent_delivery")]
     with pytest.raises(ConsentDeliveryNotFound):
         store.destination("tenant-a", "destination-a")
 
@@ -1099,6 +1151,7 @@ def test_default_transport_uses_safe_client_without_network(
     assert response.status_code == 204
     assert response.retry_after_seconds == 3
     assert observed["safe_client_url"] == request.url
+    assert observed["safe_client_kwargs"]["require_public"] is True
     assert observed["method"] == "POST"
     assert "follow_redirects" not in observed
 
@@ -1152,12 +1205,71 @@ def test_default_transport_rechecks_private_fetch_override_before_network(
         "safe_client",
         lambda *_args, **_kwargs: pytest.fail("network boundary must not open"),
     )
-    with pytest.raises(ConsentDeliveryTransportError, match="private-fetch override"):
+    with pytest.raises(ConsentDeliveryTransportError, match="private-network browsing"):
         HTTPSConsentDeliveryTransport().post(
             request,
             timeout_seconds=5,
             max_response_bytes=128,
         )
+
+
+def test_default_transport_rechecks_private_network_browsing_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "delivery.db")
+    _enroll(store)
+    _enqueue(store)
+    request = store.build_signed_request(
+        store.claim("tenant-a", worker_id="worker-1")[0], HMACSigner()
+    )
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("[tools]\nfetch_allow_private = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(config_file))
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    config.reset_config_cache()
+
+    import maverick.tools._ssrf as ssrf
+
+    monkeypatch.setattr(
+        ssrf,
+        "safe_client",
+        lambda *_args, **_kwargs: pytest.fail("network boundary must not open"),
+    )
+    with pytest.raises(ConsentDeliveryTransportError, match="private-network browsing"):
+        HTTPSConsentDeliveryTransport().post(
+            request, timeout_seconds=5, max_response_bytes=128
+        )
+
+
+def test_default_transport_rechecks_enterprise_outbound_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "delivery.db")
+    _enroll(store)
+    _enqueue(store)
+    request = store.build_signed_request(
+        store.claim("tenant-a", worker_id="worker-1")[0], HMACSigner()
+    )
+    import maverick.enterprise as enterprise
+    import maverick.tools._ssrf as ssrf
+
+    observed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        enterprise, "enterprise_egress_denial",
+        lambda url, *, tool: observed.append((url, tool)) or "blocked",
+    )
+    monkeypatch.setattr(
+        ssrf,
+        "safe_client",
+        lambda *_args, **_kwargs: pytest.fail("network boundary must not open"),
+    )
+    with pytest.raises(ConsentDeliveryTransportError, match="approved outbound hosts"):
+        HTTPSConsentDeliveryTransport().post(
+            request, timeout_seconds=5, max_response_bytes=128
+        )
+    assert observed == [(request.url, "consent_delivery")]
 
 
 def test_list_destinations_is_tenant_scoped_and_bounded(tmp_path: Path) -> None:

@@ -201,8 +201,8 @@ def test_lineage_service_callbacks_recheck_current_authority_after_context_creat
     from maverick_dashboard import api_flow_recipe_lineage as routes
     from maverick_dashboard import rbac, workspace_tenants
 
-    sources, value = package(enabled)
     registry.create_tenant(TENANT)
+    sources, value = package(enabled)
     rbac.set_tenant_role(TENANT, OWNER, "operator")
     workspace_tenants.set_selection(OWNER, TENANT)
     request = SimpleNamespace(state=SimpleNamespace(
@@ -260,3 +260,63 @@ def test_lineage_http_reads_and_imports_are_tenant_scoped(enabled):
     response = enabled.client.post(BASE, json={"package": value})
     assert response.status_code == 403 and PRIVATE_REF not in response.text
     assert len(enabled.calls) == 4
+
+
+def test_signed_source_explanation_publication_and_withdrawal(enabled):
+    from maverick_dashboard import product_operations as operations
+    from maverick_dashboard import product_operations_workflow_explanation as copilot
+
+    # The dashboard app already mounts the explanation and Copilot operation
+    # routes; mounting them again would leave duplicates for every later test.
+    sources, value = package(enabled)
+    admitted = enabled.client.post(BASE, json={"package": value}).json()
+    draft = enabled.client.post(BASE + "/" + admitted["id"] + "/draft",
+                                json={"flow_id": "explained", "name": "Review invoice creation"}).json()
+    saved = enabled.client.post("/api/v1/flows", json={"flow": draft})
+    assert saved.status_code == 201, saved.text
+    path = "/api/v1/flows/explained/explanation"
+    initial = enabled.client.get(path)
+    assert initial.status_code == 200, initial.text
+    report = initial.json()["explanation"]
+    assert report["learning"]["status"] == "Allowed at this check"
+    assert len(report["learning"]["examples"]) == 2
+    assert report["publication"]["status"] == "Not published"
+    assert report["action_approval"]["status"] == "Approval required before each learned action"
+    assert all(example["permission"] == "Allowed for learning" for example in report["learning"]["examples"])
+    assert "package_sha256" not in initial.text and "definition_digest" not in initial.text
+    assert PRIVATE_REF not in initial.text and RATIONALE not in initial.text
+    assert enabled.client.get(path, headers={"Authorization": "Bearer bob"}).status_code == 404
+    enabled.monkeypatch.setattr(operations, "_gate", lambda _request: None)
+    enabled.monkeypatch.setattr(operations, "_context", lambda _request: "c" * 64)
+    enabled.monkeypatch.setattr(operations, "enabled_families", lambda: {"learning"})
+    enabled.monkeypatch.setattr(operations, "adapters", lambda: {item.id: item for item in copilot.entries()})
+    selection = {"kind": "flow", "id": "explained"}
+    catalog = enabled.client.post("/api/v1/copilot/product-operations/catalog",
+                                  json={"page": "/flows/designer/explained", "selection": selection}).json()
+    operation = catalog["operations"][0]
+    explained = enabled.client.post("/api/v1/copilot/product-operations/prepare", json={
+        "page": "/flows/designer/explained", "selection": selection, "operation": operation["id"],
+        "context": catalog["context"], "revision": operation["revision"], "arguments": {}})
+    assert explained.status_code == 200, explained.text
+    assert explained.json()["read_only"] is True
+    assert explained.json()["details"]["learning"] == report["learning"]
+    assert "token" not in explained.json()
+    published = enabled.client.post("/api/v1/flows/explained/publish",
+                                  json={"version": saved.json()["version"], "revision": saved.json()["revision"]})
+    assert published.status_code == 200, published.text
+    assert enabled.client.get(path).json()["explanation"]["publication"]["status"] == "Published"
+
+    _source, source_run, _bundle = sources[0]
+    current = enabled.client.get(_base(source_run)).json()
+    withdrawn = enabled.client.post(_base(source_run) + "/withdraw", json={
+        "expected_revision": current["revision"], "expected_episode_sha256": current["episode_sha256"],
+        "expected_review_sha256": current["review_sha256"], "withdraw": True, "rationale": "Stop future reuse."})
+    assert withdrawn.status_code == 200, withdrawn.text
+    after = enabled.client.get(path)
+    assert after.status_code == 200, after.text
+    assert after.json()["explanation"]["learning"]["status"] == "Not confirmed"
+    assert after.json()["explanation"]["learning"]["examples"] == []
+    assert "withheld" in after.json()["explanation"]["learning"]["message"]
+    with tenant_scope(tenant=TENANT):
+        assert store.load_flow("explained") is not None
+    assert len(enabled.calls) == 4, "reading an explanation never repeats a connected action"

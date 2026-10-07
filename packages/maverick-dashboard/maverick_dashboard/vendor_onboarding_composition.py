@@ -75,9 +75,9 @@ def _role_authority(role: str) -> str:
     })
 
 
-def _workspace_authority(request: Request, actor: str, tenant: str) -> str:
+def _workspace_authority(request: Request, actor: str, tenant: str, *, source: str | None = None) -> str:
     """Bind navigation state so any later workspace switch invalidates work."""
-    source = str(getattr(getattr(request, "state", None), "workspace_tenant_source", "") or "operator_floor")
+    source = source or str(getattr(getattr(request, "state", None), "workspace_tenant_source", "") or "operator_floor")
     generation = 0
     if source == "principal_selection":
         from . import workspace_tenants
@@ -166,12 +166,45 @@ def bind_request(request: Request) -> WorkflowBinding:
     ctx = _context(request)
     enrolled = settings()
 
-    def authorize(candidate: ServiceContext, _operation: str, _resource: str) -> bool:
+    def authorize(candidate: ServiceContext, operation: str, _resource: str) -> bool:
         # Re-resolve current enrollment and RBAC at every sensitive boundary.
         # The service separately revalidates connection generations and sources.
         with tenant_scope(tenant=ctx.tenant):
             current = _context(request)
-        return candidate.binding() == current.binding() and (not candidate.human or current.human)
+            if candidate.binding() == current.binding():
+                return not candidate.human or current.human
+            if (operation not in {"action.execute", "action.approve"}
+                    or candidate.actor == current.actor
+                    or any(getattr(candidate, field) != getattr(current, field) for field in (
+                        "tenant", "resource_owner", "credential_authority", "credential_ref",
+                        "document_credential_ref", "budget_authority", "authority_schema",
+                    ))):
+                return False
+            from . import rbac, workspace_tenants
+            from .auth import role_for_principal
+            from .scim_groups import active_for_principal
+
+            role = role_for_principal(candidate.actor)
+            if ("operate" not in rbac.permissions_for(role)
+                    or candidate.authorization_role != role
+                    or candidate.authorization_policy != _role_authority(role)
+                    or active_for_principal(candidate.actor) is False):
+                return False
+            # A bound second principal has their own role and workspace history.
+            # The current request's navigation binding belongs to another actor.
+            try:
+                selected = (
+                    workspace_tenants.principal_can_select(candidate.actor, candidate.tenant)
+                    and candidate.workspace_authority == _workspace_authority(
+                        request, candidate.actor, candidate.tenant, source="principal_selection",
+                    )
+                )
+            except HTTPException:
+                selected = False
+            floor = candidate.workspace_authority == _workspace_authority(
+                request, candidate.actor, candidate.tenant, source="operator_floor",
+            )
+            return selected or floor
 
     return WorkflowBinding(VendorOnboardingService(
         documents=GoogleDriveEvidence(

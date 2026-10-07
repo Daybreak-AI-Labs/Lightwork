@@ -164,7 +164,8 @@ def sandbox_run(
 
     Through a sandbox, the argv is shell-quoted with ``shlex.join`` and handed
     to ``exec()`` (which runs ``sh -c``); ``stdin`` is fed via a base64 pipe so
-    arbitrary text reaches the process without shell-quoting hazards. When no
+    arbitrary text reaches the process without shell-quoting hazards. Windows
+    LocalBackend runs the argv directly with a bounded stdin pipe. When no
     sandbox is wired in, falls back to a scrubbed-env ``subprocess.run`` of the
     raw argv list (no shell interpolation -- the chokepoint guard forbids that
     outside the sandbox backends), passing ``stdin`` directly.
@@ -175,6 +176,15 @@ def sandbox_run(
         from ..sandbox.sdk import execution_callable
 
         execute = execution_callable(sandbox)
+        if os.name == "nt":
+            from ..sandbox.local import LocalBackend
+
+            if type(sandbox) is LocalBackend:
+                # cmd.exe has no printf/base64 -d pipeline and an 8191-char
+                # command limit. Direct argv avoids shell interpolation; the
+                # bounded stdin pipe keeps notebook contents off the command line.
+                res = execute(argv, timeout=timeout, stdin=stdin)
+                return res.exit_code, res.stdout, res.stderr
         import shlex
         cmd = shlex.join(argv)
         if stdin is not None:
@@ -336,6 +346,16 @@ class ToolRegistry:
         self._core_names: set[str] = set()
         self._core: set[str] = set()
         self._activated: set[str] = set()
+        self._activation_order: list[str] = []
+        # The last model-facing catalog ceiling. Overflow is discoverable by
+        # find_tools, rather than disappearing when a provider truncates it.
+        self._catalog_limit: int | None = None
+        # Names never exposed NOR discoverable (a pack's deny_tools, or
+        # anything the agent's capability would refuse anyway). run() can
+        # still resolve them -- the capability / ACL check at call time is
+        # the authority; this only keeps them out of the catalog and out of
+        # find_tools' search space.
+        self._hidden: set[str] = set()
         # Listeners receive safe progress before screening, never raw chunks.
         # The agent explicitly releases screened/redacted content at delivery.
         self._chunk_listener = None
@@ -438,10 +458,15 @@ class ToolRegistry:
     # hits. activation only governs what the model SEES -- run() executes
     # any registered tool regardless.
 
-    def enable_deferred(self, core: set[str]) -> None:
-        """Expose only ``core`` (∩ registered) + find_tools to the model."""
+    def enable_deferred(self, core: set[str], *, hidden: set[str] | None = None) -> None:
+        """Expose only ``core`` (∩ registered) + find_tools to the model.
+
+        ``hidden`` names are neither exposed nor discoverable via find_tools
+        (they stay registered, so execution semantics are unchanged).
+        """
         self._deferred = True
-        self._core_names = set(core)
+        self._hidden = set(hidden or ())
+        self._core_names = set(core) - self._hidden
         self._core = {n for n in self._core_names if n in self._tools}
         self._anthropic_cache = None
 
@@ -453,11 +478,19 @@ class ToolRegistry:
 
     def activate(self, names: list[str]) -> list[str]:
         """Reveal deferred tools to the model. Returns the names that
-        resolved to a registered tool (unknown names are ignored)."""
-        resolved = [n for n in names if n in self._tools and self._acl_allows(n) and self._mcp_binding_current(n)]
+        can actually be shown next turn (unknown names are ignored)."""
+        resolved = [n for n in names if n in self._tools and n not in self._hidden
+                    and self._acl_allows(n) and self._mcp_binding_current(n)]
         if resolved:
             self._activated.update(resolved)
+            for name in resolved:
+                if name in self._activation_order:
+                    self._activation_order.remove(name)
+                self._activation_order.append(name)
             self._anthropic_cache = None
+        if self._catalog_limit is not None:
+            visible = self._limited_names(self._catalog_limit)
+            return [n for n in resolved if n in visible]
         return resolved
 
     def exposed(self) -> list[Tool]:
@@ -468,21 +501,58 @@ class ToolRegistry:
         """
         if not self._deferred:
             return [t for n, t in self._tools.items() if self._acl_allows(n) and self._mcp_binding_current(n)]
-        names = self._exposed_names()
+        names = self._exposed_names() - self._hidden
         return [t for n, t in self._tools.items() if n in names and self._acl_allows(n) and self._mcp_binding_current(n)]
 
     def deferred_tools(self) -> list[Tool]:
         """Registered tools not currently exposed -- find_tools' search space."""
-        names = self._exposed_names()
+        if self._catalog_limit is not None:
+            names = self._limited_names(self._catalog_limit) | self._hidden
+        elif self._deferred:
+            names = self._exposed_names() | self._hidden
+        else:
+            names = {t.name for t in self.exposed()} | self._hidden
         return [t for n, t in self._tools.items() if n not in names and self._acl_allows(n) and self._mcp_binding_current(n)]
 
-    def to_anthropic(self) -> list[dict[str, Any]]:
+    def _limited_names(self, limit: int) -> set[str]:
+        """Prefer discovery, recently requested tools and the working core."""
+        offered = self.exposed()
+        if len(offered) <= limit:
+            return {t.name for t in offered}
+        available = {t.name for t in offered}
+        # Registration order puts orchestration after hundreds of base tools.
+        # A model with a tool ceiling must retain discovery and coordination;
+        # recently discovered tools then displace the ordinary catalog tail.
+        priority = (
+            [self.META_TOOL]
+            + list(reversed(self._activation_order))
+            + ["ask_user", "spawn_subagent", "spawn_swarm", "spawn_specialist",
+               "list_specialists", "send_to_agent", "recv_from_agent",
+               "delegate_to_agent", "knowledge_search"]
+            + sorted(CORE_TOOL_NAMES)
+            + [t.name for t in offered]
+        )
+        selected: set[str] = set()
+        for name in priority:
+            if name in available:
+                selected.add(name)
+                if len(selected) == limit:
+                    break
+        return selected
+
+    def to_anthropic(self, *, max_tools: int | None = None) -> list[dict[str, Any]]:
+        if max_tools is not None and (type(max_tools) is not int or max_tools < 1):
+            raise ValueError("max_tools must be a positive integer")
+        self._catalog_limit = max_tools
         visible = tuple(n for n in self._mcp_bindings if self._mcp_binding_current(n))
         if visible != self._mcp_visibility:
             self._mcp_visibility = visible
             self._anthropic_cache = None
         if self._anthropic_cache is None:
             self._anthropic_cache = [t.to_anthropic() for t in self.exposed()]
+        if max_tools is not None and len(self._anthropic_cache) > max_tools:
+            names = self._limited_names(max_tools)
+            return [t for t in self._anthropic_cache if t["name"] in names]
         return self._anthropic_cache
 
     def cache_namespace(self) -> str:
@@ -683,7 +753,57 @@ CORE_TOOL_NAMES = frozenset({
     "spend_report", "notify", "compute",
     # multi-agent
     "spawn_subagent", "spawn_swarm",
+    # kernel tools Agent._build_tools registers on top of base_registry
+    # (bus, specialists, governed knowledge, self-learning) -- listed here so
+    # they stay visible under [tools] exposure = "core".
+    "send_to_agent", "recv_from_agent", "delegate_to_agent",
+    "spawn_specialist", "list_specialists", "knowledge_search",
+    "learn_capability", "code_exec",
+    # the read-only data basics 1,700+ specialist packs allow
+    "sql_query_read", "spreadsheet_read",
+    # the discovery meta-tool itself
+    "find_tools",
 })
+
+# Role-specific additions to CORE_TOOL_NAMES under [tools] exposure = "core".
+# Kept small: everything else stays discoverable through find_tools. A role
+# without an entry (worker, writer, summarizer, verifier, a pack's name...)
+# gets exactly CORE_TOOL_NAMES.
+ROLE_TOOL_OVERLAYS: dict[str, frozenset[str]] = {
+    "orchestrator": frozenset({"task_graph", "spend_report"}),
+    "coder": frozenset({
+        "git_advanced", "test_impact", "test_gen", "semantic_code_search",
+        "lsp_bridge", "cross_repo_deps",
+    }),
+    "researcher": frozenset({
+        "arxiv", "wikipedia", "semantic_scholar", "hackernews",
+        "citation_verifier", "web_archive", "spreadsheet",
+    }),
+    "analyst": frozenset({"pandas_query", "spreadsheet", "sql_query", "format_money", "currency"}),
+    "writer": frozenset({"outline_writer", "plain_language", "pandoc", "latex"}),
+}
+ROLE_TOOL_OVERLAYS["coding"] = ROLE_TOOL_OVERLAYS["coder"]
+ROLE_TOOL_OVERLAYS["reviewer"] = ROLE_TOOL_OVERLAYS["coder"]
+ROLE_TOOL_OVERLAYS["revisor"] = ROLE_TOOL_OVERLAYS["coder"]
+# Not every role needs the code-editing tools; the kernel core keeps
+# read_file/write_file/shell for all, and these ride only with code roles.
+_CODE_EDIT_TOOLS = frozenset({"apply_patch", "ast_edit", "preview_diff", "repo_map", "dep_graph"})
+_NON_CODE_ROLES = frozenset({"worker", "researcher", "writer", "analyst", "summarizer",
+                             "verifier", "translator", "vision", "skill_distiller"})
+
+
+def core_tool_names(role: str, *, extra=()) -> frozenset[str]:
+    """The tool names shown up front for ``role`` under exposure = "core".
+
+    ``extra`` is the operator's ``[tools] core_extra`` pin list. Names that
+    are not registered are harmless (enable_deferred intersects).
+    """
+    role = str(role or "").strip().lower()
+    names = set(CORE_TOOL_NAMES) | ROLE_TOOL_OVERLAYS.get(role, frozenset())
+    if role in _NON_CODE_ROLES:
+        names -= _CODE_EDIT_TOOLS
+    names.update(str(t).strip() for t in (extra or ()) if str(t).strip())
+    return frozenset(names)
 
 # Credentialed SaaS/cloud tools that may use ambient host credentials (PR
 # #124): they only register when the operator opts in via
@@ -717,6 +837,15 @@ AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES = AMBIENT_CRED_TOOL_NAMES | frozenset({
 
 
 def _ambient_credential_denial(name: str, principal: str | None) -> str | None:
+    from ..template_connections import SelectionUnavailable, active, selected
+    if active() and name in AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES:
+        if name == "gdrive":
+            try:
+                selected("gdrive", principal)
+                return None
+            except SelectionUnavailable:
+                pass
+        return "REFUSED: this connector cannot use the task's exact selected account. No ambient account was substituted."
     if not principal or name not in AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES:
         return None
     from ..enterprise import enterprise_enabled
@@ -731,19 +860,26 @@ def _ambient_credential_denial(name: str, principal: str | None) -> str | None:
     )
 
 
-def _deferred_loading_enabled() -> bool:
-    """Whether deferred tool loading is on (default off -- unchanged behavior).
+def enterprise_unavailable_tool_names() -> frozenset[str]:
+    """Connector tools a signed-in person cannot run while Enterprise mode is on.
 
-    Enable with ``MAVERICK_DEFERRED_TOOLS=1`` or ``[tools] deferred_loading =
-    true`` in ``~/.maverick/config.toml``.
+    The same rule :func:`_ambient_credential_denial` applies at call time, stated
+    ahead of time so the Tools page can tell an administrator before rollout
+    rather than the person's task being refused. Empty when Enterprise mode is
+    off. Callers intersect it with the tools actually registered.
     """
-    if _env_true("MAVERICK_DEFERRED_TOOLS"):
-        return True
+    from ..enterprise import enterprise_enabled
+
+    return AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES if enterprise_enabled() else frozenset()
+
+
+def _deferred_loading_enabled() -> bool:
+    """Use the same explicit policy as agents, retaining the standalone default."""
     try:
-        from ..config import load_config
-        return bool(load_config().get("tools", {}).get("deferred_loading", False))
+        from ..config import get_deferred_tools
+        return get_deferred_tools(default=False)
     except Exception:  # pragma: no cover -- config never blocks the registry
-        return False
+        return True  # a failed policy read must not widen the visible catalog
 
 
 def base_registry(
@@ -761,6 +897,7 @@ def base_registry(
     budget: Any = None,
     _include_generated_tools: bool = True,
     _skip_tool_acl: bool = False,
+    _include_plugins: bool = True,
 ) -> ToolRegistry:
     """Build the base tool set (no spawn tools).
 
@@ -1485,9 +1622,10 @@ def base_registry(
     # share the most-abused namespace, mcp_*) are covered; plugins
     # register below and pick up their own limits via a second pass.
     _apply_rate_limits(reg)
-    _apply_python_plugins(reg)
-    _apply_ts_plugins(reg)
-    _apply_grpc_plugins(reg)
+    if _include_plugins:
+        _apply_python_plugins(reg)
+        _apply_ts_plugins(reg)
+        _apply_grpc_plugins(reg)
     if _include_generated_tools:
         _apply_generated_tools(reg, sandbox)
     # Second rate-limit pass to cover plugin-registered tools. Earlier
@@ -1503,36 +1641,46 @@ def base_registry(
     # never set this private flag; the default remains fail-closed ACL
     # enforcement and the permissions snapshot applies the same resolver to
     # the introspection registry immediately after capturing catalog names.
-    _apply_tool_acl_unless_skipped(
-        reg,
-        skip=_skip_tool_acl,
-        channel=channel,
-        user_id=user_id,
-    )
-    if not _skip_tool_acl:
-        _apply_containment(reg)
-        _apply_network_posture(reg)
-    _apply_deferred_loading(reg)
-
-    # Route every compatible external connector write through the durable,
-    # fresh-human governed transaction boundary. Done last so it wraps the
-    # final tool objects; assembly fails closed if the boundary cannot load.
     from ..governed_tools import apply_governed_connectors
+    from ..safety.tool_risk import pinned_overrides
 
-    apply_governed_connectors(reg, goal_id=goal_id)
+    # Everything below registers tools past the ACL, whose risk check read the
+    # config once per tool (thousands of times per agent). Pin the
+    # [security.tool_risk] snapshot for the rest of the build.
+    with pinned_overrides():
+        _apply_tool_acl_unless_skipped(
+            reg,
+            skip=_skip_tool_acl,
+            channel=channel,
+            user_id=user_id,
+        )
+        if not _skip_tool_acl:
+            _apply_containment(reg)
+            _apply_network_posture(reg)
+        _apply_deferred_loading(reg)
+
+        # Route every compatible external connector write through the durable,
+        # fresh-human governed transaction boundary. Done last so it wraps the
+        # final tool objects; assembly fails closed if the boundary cannot load.
+        apply_governed_connectors(reg, goal_id=goal_id)
 
     return reg
 
 
-def base_tool_names() -> set[str] | None:
+def base_tool_names(*, configured_optional: bool = False, include_plugins: bool = True) -> set[str] | None:
     """Best-effort set of the built-in tool names, for callers that need to
     diff a pack's declared tools against what actually exists (the agent
     factory's capability-provisioning step).
 
-    Builds the base registry against an in-memory world and a local sandbox --
-    no provider keys, no network, no optional high-impact tools. Returns the
-    registered names, or ``None`` if assembly fails (a caller then skips
-    tool-existence checks rather than guessing). Never raises.
+    Builds the base registry against an in-memory world and a local sandbox.
+    Legacy add-on assembly may run configured factories or contact add-on hosts;
+    this helper does not invoke an action tool. The default omits optional high-impact tools;
+    ``configured_optional=True`` includes only those enabled in this
+    deployment, so a roster can show honest workflow-action availability.
+    Returns the registered names, or ``None`` if assembly fails (a caller
+    then skips tool-existence checks rather than guessing). Never raises.
+    ``include_plugins=False`` omits Python/TS/gRPC add-on loading and generated
+    tool probing; callers can read consented generated names separately.
     """
     world = None
     try:
@@ -1540,11 +1688,23 @@ def base_tool_names() -> set[str] | None:
         from ..world_model import open_world
 
         world = open_world(None)
+        if configured_optional:
+            from ..config import get_capabilities
+
+            caps = get_capabilities()
+        else:
+            caps = {}
         reg = base_registry(
             world,
             LocalBackend(),
-            _include_generated_tools=False,
+            enable_computer_use=bool(caps.get("computer_use", False)),
+            enable_browser=bool(caps.get("browser", False)),
+            enable_web_search=bool(caps.get("web_search", False)),
+            enable_mobile_tools=bool(caps.get("mobile_tools", False)),
+            enable_ros=bool(caps.get("ros", False)),
+            _include_generated_tools=configured_optional and include_plugins,
             _skip_tool_acl=True,
+            _include_plugins=include_plugins,
         )
         return {t.name for t in reg.all()}
     except Exception as e:  # pragma: no cover -- best-effort introspection
@@ -1584,8 +1744,10 @@ def _register_optional_tools(
     if enable_browser:
         from .aria_navigate import aria_navigate
         from .browser import browser
-        reg.register(browser())
-        reg.register(aria_navigate())
+        # Sync Playwright objects must be created, used, and closed on one
+        # worker for this customer goal; generic tool threads can rotate.
+        reg.register(browser(managed=True))
+        reg.register(aria_navigate(managed=True))
 
 
 def _apply_tool_acl(reg: ToolRegistry, *, channel: str | None, user_id: str | None) -> None:

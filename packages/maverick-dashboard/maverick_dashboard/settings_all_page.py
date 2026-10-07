@@ -15,8 +15,11 @@ enforces it independently of the page.
 from __future__ import annotations
 
 import contextvars
+import copy
 import dataclasses
+import hashlib
 import itertools
+import json
 import os
 import threading
 import time
@@ -24,11 +27,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import auth, settings_access_guard, settings_tests
+from . import auth, settings_access_guard, settings_tests, step_up
 from . import settings_catalog as catalog
 
 router = APIRouter()
@@ -36,6 +39,9 @@ router = APIRouter()
 PAGE_PATH = "/settings/all"
 ROWS_PATH = PAGE_PATH + "/rows"
 API_PATH = "/api/v1/settings/catalog"
+# The shipped cloud-agent authority is process-local and deliberately refuses
+# production enablement. Do not offer controls that cannot make the page work.
+_UNAVAILABLE_SETTING_SECTIONS = frozenset({"ai_cloud_agent_governance"})
 
 SOURCE_TEXT = {
     "deployment": "Set by your server's deployment settings",
@@ -68,6 +74,7 @@ def _sources() -> dict[str, Any]:
     from . import settings_store
 
     config.reset_config_cache()
+    config._load_wizard_env()
     try:
         base = config._load_config_file(config.config_path())
     except Exception:  # an unreadable base file shows as "not set by installer"
@@ -79,11 +86,41 @@ def _sources() -> dict[str, Any]:
             operator = config._load_config_file(Path(overlay_env).expanduser())
         except Exception:
             operator = {}
+    tenant: dict = {}
+    tenant_path = config.tenant_config_path()
+    if tenant_path:
+        try:
+            tenant = config._load_config_file(tenant_path)
+        except Exception:
+            tenant = {}
     return {
         "base": base if isinstance(base, dict) else {},
         "here": settings_store.load_overlay(),
         "operator": operator if isinstance(operator, dict) else {},
+        "tenant": tenant if isinstance(tenant, dict) else {},
     }
+
+
+def _revision(layers: dict[str, Any] | None = None) -> str:
+    """Opaque review binding, including deployment overrides and environment."""
+    from maverick import config
+
+    from . import settings_store
+
+    sources = _sources() if layers is None else layers
+    names = {name for setting in catalog.SETTINGS for name in setting.env}
+    names.update(name for provider in settings_store.PROVIDERS for name in provider.get("env", ()))
+    names.update(config.PROVIDER_KEY_ENV_VARS)
+    names.update(config.PROVIDER_BASE_URL_ENV_VARS)
+    names.update(f"{name.upper()}_{row[2].upper()}" for name, row in catalog.CHANNEL_ALLOWLISTS.items())
+    names.update(name for name in os.environ if name.startswith("MAVERICK_"))
+    # Variable references may be chosen by the installer rather than named in
+    # the catalog. Bind their values without ever sending those values out.
+    from maverick.config import _ENV_PATTERN
+    names.update(_ENV_PATTERN.findall(json.dumps(sources, default=str)))
+    environment = {name: os.environ.get(name, "") for name in names}
+    return hashlib.sha256(json.dumps([sources, environment], sort_keys=True,
+                                     default=str).encode()).hexdigest()
 
 
 def _env_locked(setting: catalog.Setting) -> bool:
@@ -110,8 +147,11 @@ def _layer_value(setting: catalog.Setting, layer: object) -> tuple[bool, object]
 
 def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
     """Tables merge like the kernel's config loader: later layers add rows."""
+    from maverick.config_resets import apply_to_base, is_reset
+    masked = is_reset(layers["here"], setting)
+    layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
     merged: dict[str, object] = {}
-    source = "default"
+    source = "here" if masked else "default"
     for name, label in (("base", "installer"), ("here", "here")):
         present, value = _layer_value(setting, layers[name])
         if present and isinstance(value, dict):
@@ -121,11 +161,47 @@ def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str
     if present:
         merged.update(value if isinstance(value, dict) else {})
         return {"source": "deployment", "locked": True, "value": merged, "known": True}
-    return {"source": source, "locked": False, "value": merged, "known": True}
+    return {"source": "here" if masked else source, "locked": False, "value": merged, "known": True}
 
 
 def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
     """Effective value, where it comes from, and whether this page may change it."""
+    if setting.id == "capabilities.deferred_tools":
+        return _resolve_deferred_tools(layers)
+    provider = _resolve_provider_field(setting, layers)
+    if provider is not None:
+        return provider
+    if setting.section == "features":
+        return _resolve_feature(setting, layers)
+    if setting.section.startswith("channels."):
+        name = setting.section.removeprefix("channels.")
+        access = catalog.CHANNEL_ALLOWLISTS.get(name)
+        if access and setting.key == access[2]:
+            # The adapters use a server list only when NO configured list is
+            # present. An explicit [] must remain authoritative and deny all.
+            from maverick.config_resets import apply_to_base
+            from maverick_channels.base import normalize_allowlist
+
+            layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
+            paths = [setting.path]
+            if name == "teams":
+                paths.append((*setting.path[:-1], "allowed_user_ids"))
+            for path in paths:
+                for layer, source in (("tenant", "deployment"), ("operator", "deployment"),
+                                      ("here", "here"), ("base", "installer")):
+                    present, value = catalog.lookup(layers[layer], path)
+                    if present and value is not None:
+                        if not isinstance(value, (list, tuple, set)):
+                            return {"source": source, "locked": True, "value": None, "known": False}
+                        return {"source": source, "locked": source == "deployment",
+                                "value": sorted(normalize_allowlist(value, "")), "known": True}
+            environment = f"{name.upper()}_{setting.key.upper()}"
+            people = sorted(normalize_allowlist(None, environment))
+            if people:
+                return {"source": "deployment", "locked": False,
+                        "source_text": "Set when this Lightwork process starts · save here to replace it",
+                        "value": people, "known": True}
+            return {"source": "default", "locked": False, "value": [], "known": True}
     if _env_locked(setting):
         return {"source": "deployment", "locked": True, "value": None, "known": False}
     if setting.control == "table":
@@ -136,11 +212,103 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
     present, value = catalog.lookup(layers["here"], setting.path)
     if present:
         return {"source": "here", "locked": False, "value": value, "known": True}
+    from maverick.config_resets import is_reset
+    if is_reset(layers["here"], setting):
+        return {"source": "here", "locked": False, "value": _default_in(setting, layers), "known": True}
     present, value = catalog.lookup(layers["base"], setting.path)
     if present:
         return {"source": "installer", "locked": False, "value": value, "known": True}
     return {"source": "default", "locked": False, "value": _default_in(setting, layers),
             "known": True}
+
+
+def _resolve_deferred_tools(layers: dict[str, Any]) -> dict[str, Any]:
+    """Show the same explicit/current/legacy choice as the native registry."""
+    from maverick.config import env_flag
+    from maverick.config_resets import apply_to_base
+
+    environment = env_flag("MAVERICK_DEFERRED_TOOLS")
+    if environment is not None:
+        return {"source": "deployment", "locked": True, "value": environment, "known": True}
+    if os.environ.get("MAVERICK_DEFERRED_TOOLS", "").strip():
+        return {"source": "deployment", "locked": True, "value": None, "known": False}
+    layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
+    for path in (("capabilities", "deferred_tools"), ("tools", "deferred_loading")):
+        for name in ("tenant", "operator", "here", "base"):
+            present, value = catalog.lookup(layers[name], path)
+            if not present:
+                continue
+            legacy = path[0] == "tools"
+            source = {"tenant": "deployment", "operator": "deployment",
+                      "here": "here", "base": "installer"}[name]
+            state = {"source": source, "locked": not legacy and source == "deployment",
+                     "value": value if type(value) is bool else True, "known": True}
+            if type(value) is not bool:
+                state["source_text"] = "The earlier choice is invalid; the short list stays on."
+            elif legacy:
+                state["source_text"] = "Earlier saved choice · save here to replace it"
+            return state
+    return {"source": "default", "locked": False, "value": True, "known": True}
+
+
+def _resolve_feature(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
+    """Use the switch's real native layers; installation trust is global only."""
+    if any(name in os.environ for name in setting.env):
+        return {"source": "deployment", "locked": True, "value": None, "known": False}
+    names = ("operator", "here", "base") if setting.key == "signing_identity_transition" else (
+        "tenant", "operator", "here", "base")
+    for name in names:
+        present, value = _layer_value(setting, layers[name])
+        if present:
+            source = {"tenant": "deployment", "operator": "deployment",
+                      "here": "here", "base": "installer"}[name]
+            return {"source": source, "locked": name in {"tenant", "operator"},
+                    "value": value, "known": type(value) is bool}
+    return {"source": "default", "locked": False, "value": setting.default, "known": True}
+
+
+def _resolve_provider_field(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any] | None:
+    """Match provider runtime precedence; a server fallback can be replaced here."""
+    if (not setting.section.startswith("providers.")
+            or setting.key not in {"api_key", "base_url"}):
+        return None
+    from maverick import config
+    from maverick.config_resets import apply_to_base
+
+    from .settings_store import provider_address_display
+
+    def public_value(value):
+        return bool(value) if setting.secret else provider_address_display(value)[0]
+
+    name = setting.section.removeprefix("providers.")
+    env_map = (config.PROVIDER_KEY_ENV_MAP if setting.key == "api_key"
+               else config.PROVIDER_BASE_URL_ENV_MAP)
+    value: object = None
+    source = "default"
+    base = apply_to_base(layers["base"], layers["here"])
+    for layer, label in (("base", "installer"), ("here", "here"),
+                         ("operator", "deployment"), ("tenant", "deployment")):
+        present, candidate = catalog.lookup(base if layer == "base" else layers.get(layer, {}),
+                                            setting.path)
+        if present:
+            value, source = candidate, label
+    if not isinstance(value, str) or not value.strip():
+        value, source = None, "default"
+        for env_name in env_map.get(name, ()):
+            candidate = os.environ.get(env_name, "").strip()
+            if candidate:
+                value, source = candidate, "deployment"
+                break
+        if source == "deployment":
+            # Unlike most deployment settings, provider environment variables
+            # are a fallback: a dashboard value takes precedence at runtime.
+            return {"source": source, "locked": False,
+                    "source_text": "Set when Lightwork starts · save here to replace it",
+                    "value": public_value(value), "known": True}
+    if value is None:
+        return {"source": "default", "locked": False, "value": _default_of(setting), "known": True}
+    return {"source": source, "locked": source == "deployment",
+            "value": public_value(value), "known": True}
 
 
 def _has_partial_default(setting: catalog.Setting) -> bool:
@@ -254,17 +422,20 @@ def _build_source_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 -
                     out.append((model, f"{model} ({PROVIDER_LABELS.get(provider, provider)})"))
         return out
     if source == "local_models":
-        from maverick.llm import catalog_specs
-        from maverick.provider_local_first import LOCAL_PROVIDERS, is_local
+        from maverick.llm import PROVIDER_LABELS, catalog_specs
+        from maverick.provider_local_first import is_local
+        from maverick.providers import _canonical
 
         from .model_pickers import config_catalog
 
         out = [("", "None chosen")]
         specs = [spec for spec, _label in catalog_specs()] + config_catalog()
         for spec in dict.fromkeys(specs):
-            if is_local(spec) and spec.split(":", 1)[0] in LOCAL_PROVIDERS:
+            if is_local(spec):
                 provider, _, model = spec.partition(":")
-                out.append((spec, f"{model} ({identity_format.humanize(provider)})"))
+                provider = _canonical(provider)
+                label = PROVIDER_LABELS.get(provider) or {"tgi": "Hugging Face (local)", "vllm": "vLLM (local)"}[provider]
+                out.append((spec, f"{model} ({label})"))
         return out
     if source == "tools":
         return [*TOOL_FAMILIES,
@@ -329,6 +500,10 @@ def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one bra
         from maverick.suite_grants import known_suites
 
         return sorted(((s, department_title(s)) for s in known_suites()), key=lambda c: c[1])
+    if source == "local_linux_images":
+        from maverick.sandbox.local_images import inventory
+        images, _notice = inventory()
+        return [("", "No practice environment selected"), *((image.id, image.label) for image in images)]
     if source == "roles":
         from . import rbac
 
@@ -393,6 +568,8 @@ def _capability_role_choices() -> list[tuple[str, str]]:
 
 
 def _workspace_choices() -> list[tuple[str, str]]:
+    from .workspace_display import duplicate_workspace_ids
+
     try:
         from maverick.tenant.registry import list_tenants
 
@@ -404,7 +581,12 @@ def _workspace_choices() -> list[tuple[str, str]]:
         tid = str(getattr(tenant, "id", "") or "")
         if tid:
             out.append((tid, str(getattr(tenant, "display_name", "") or "") or tid))
-    return sorted(out, key=lambda c: c[1].lower())
+    duplicates = duplicate_workspace_ids(out)
+    return sorted(
+        [(tid, f"{label} (Reference: {tid})" if tid in duplicates else label)
+         for tid, label in out],
+        key=lambda choice: choice[1].lower(),
+    )
 
 
 def _model_role_choices() -> list[tuple[str, str]]:
@@ -423,6 +605,7 @@ def _structured_sources() -> dict[str, Any]:
 
 _ACCESS_SOURCES = {
     "themes": _theme_choices,
+    "preference_themes": lambda: [("system", "Follow system"), *_theme_choices()],
     "capability_roles": _capability_role_choices,
     "workspaces": _workspace_choices,
     "model_roles": _model_role_choices,
@@ -433,7 +616,7 @@ _ACCESS_SOURCES = {
 }
 # Lists too long (or too slow: the voices ask the speech service) to put in
 # the page: loaded when the person searches them.
-_LAZY_SOURCES = frozenset({"tools", "tools_any", "chat_users", "tts_voices"})
+_LAZY_SOURCES = frozenset({"tools", "tools_any", "chat_users", "tts_voices", "local_linux_images"})
 _TOOL_SOURCES = frozenset({"tools", "tools_any"})
 
 
@@ -454,15 +637,40 @@ def _resolved(
 
     if setting.choices_from in _LAZY_SOURCES and not full:
         choices = list(TOOL_FAMILIES) if setting.choices_from == "tools" else []
+        if setting.choices_from == "local_linux_images":
+            choices = [("", "No practice environment selected")]
     else:
-        choices = list(_source_choices(setting.choices_from))
+        if setting.choices_from == "local_linux_images":
+            from maverick.sandbox.local_images import LocalImageUnavailable
+            try:
+                choices = list(_source_choices(setting.choices_from))
+            except LocalImageUnavailable:
+                # Preserve the exact draft; coerce performs the fresh selected
+                # image check and returns a plain refusal before any write.
+                choices = [("", "No practice environment selected")]
+        else:
+            choices = list(_source_choices(setting.choices_from))
     known = {v for v, _ in choices}
     extra = current if isinstance(current, (list, dict)) else [current]
     if setting.control == "rules":
         extra = []
     for value in extra:
         if value not in (None, "") and str(value) not in known:
-            choices.append((str(value), identity_format.humanize(value)))
+            if setting.choices_from == "local_linux_images":
+                from maverick.sandbox.local_images import (
+                    LocalImageUnavailable,
+                    cached_label,
+                    selected,
+                )
+                label = cached_label(value)
+                if full:
+                    try:
+                        label = selected(str(value)).label
+                    except LocalImageUnavailable:
+                        label = "Previously selected practice environment · unavailable"
+                choices.append((str(value), label))
+            else:
+                choices.append((str(value), identity_format.humanize(value)))
             known.add(str(value))
     if setting.control == "table":
         choices = [c for c in choices if c[0] not in setting.fixed_keys]
@@ -530,7 +738,7 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         "warning": setting.warning,
         "warning_lead": catalog.warning_lead(setting) if setting.warning else "",
         "source": state["source"],
-        "source_text": SOURCE_TEXT[state["source"]],
+        "source_text": state.get("source_text", SOURCE_TEXT[state["source"]]),
         "locked": state["locked"],
         "default_text": catalog.display_value(setting, _default_of(setting)),
         "max_length": setting.max_length,
@@ -569,6 +777,8 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
             {"value": key, "fingerprint": catalog.key_fingerprint(key)}
             for key in (value if isinstance(value, list) else [])
         ]
+    if setting.control == "select" and setting.choices_from in _LAZY_SOURCES:
+        row["choices_url"] = f"{API_PATH}/choices/{setting.id}"
     if setting.control == "picks":
         labels = dict(setting.choices)
         row["picks"] = [{"value": str(v), "label": labels.get(str(v), str(v))}
@@ -587,6 +797,8 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         row["segment_at"] = catalog.workspace_address_parts(value)[1] if state["known"] else -1
     if setting.preview:
         row["preview_url"] = f"{API_PATH}/preview/{setting.id}"
+        # The approval-threshold preview also covers the default (empty) choice.
+        row["preview_any"] = setting.preview == "approval_checks"
     if setting.control == "table":
         if setting.choices_from == "tools":
             row["choices"] = []  # long list: the page loads it when needed
@@ -715,7 +927,7 @@ def _working_values(layers: dict[str, Any]) -> dict[str, object]:
 
 def _search_text(setting: catalog.Setting) -> str:
     """What a search matches (the page filters its loaded rows on the same words)."""
-    return " ".join((setting.label, setting.help, setting.aliases, setting.group,
+    return " ".join((setting.id, setting.id.replace(".", " "), setting.label, setting.help, setting.aliases, setting.group,
                      setting.subgroup)).lower()
 
 
@@ -734,6 +946,7 @@ def catalog_state(
     the settings matching every search word, or only those changed here."""
     layers = _sources()
     groups = []
+    revision = _revision(layers)
     filtered = bool(group or words or changed)
     order = itertools.count()
     token = _CHOICE_MEMO.set({})
@@ -755,10 +968,11 @@ def catalog_state(
             for index, setting in settings:
                 rows.append(_row(setting, layers))
                 rows[-1]["order"] = index
+                rows[-1]["revision"] = revision
             groups.append(_group_state(name, rows, parts))
     finally:
         _CHOICE_MEMO.reset(token)
-    return {"groups": groups}
+    return {"groups": groups, "revision": revision}
 
 
 def _parts(settings: list[catalog.Setting]) -> dict[str, int]:
@@ -809,7 +1023,8 @@ def _in_page_order(group: str) -> list[catalog.Setting]:
     Rows come from several group modules, so one part's rows can be split by
     another module's; the page shows rows without a part first, then each part
     in the order it first appears, never one heading twice."""
-    settings = [s for s in catalog.SETTINGS if s.group == group]
+    settings = [s for s in catalog.SETTINGS if s.group == group
+                and s.section not in _UNAVAILABLE_SETTING_SECTIONS]
     first: dict[str, int] = {}
     for setting in settings:
         first.setdefault(setting.subgroup, len(first))
@@ -896,6 +1111,12 @@ def all_settings_page(
         for g in groups:
             g["settings"] = loaded.get(g["slug"], [])
             g["loaded"] = g["slug"] == group and not words and not changed
+    from maverick.oidc import login_enabled
+
+    from .saml import _session_secret, saml_enabled
+    from .settings_catalog_requests import authority
+    from .voice_receiver_api import setup as voice_setup
+
     return _app().templates.TemplateResponse(request, "settings_all.html", {
         "groups": groups,
         "modules": _module_rows(),
@@ -906,6 +1127,10 @@ def all_settings_page(
         "only_changed": changed,
         "focus_id": focus.id if focus is not None else "",
         "served": bool(words or changed),
+        "oidc_login_active": login_enabled(),
+        "saml_login_active": saml_enabled() and bool(_session_secret()),
+        "settings_request_context": authority(request),
+        "voice_setup": voice_setup(request),
     })
 
 
@@ -936,16 +1161,19 @@ class SettingChange(BaseModel):
     id: str = Field(min_length=3, max_length=120)
     value: Any = None
     reset: bool = False
+    inherit: bool = False
 
 
 class CatalogUpdate(BaseModel):
+    expected_revision: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     changes: list[SettingChange] = Field(min_length=1, max_length=len(catalog.SETTINGS))
     confirm: bool = False
+    reviewed_token: str | None = Field(default=None, max_length=1048576)
 
 
 @router.get(API_PATH + "/choices/{setting_id}")
 async def catalog_choices(
-    request: Request, setting_id: str, column: str = "",
+    request: Request, setting_id: str, column: str = "", refresh: bool = False,
 ) -> JSONResponse:
     """The options of one setting (or one column of its rows) whose list is
     too long to put in the page."""
@@ -958,6 +1186,15 @@ async def catalog_choices(
         return JSONResponse({"detail": "That setting has no list of options.",
                              "message": "That setting has no list of options."},
                             status_code=404)
+    notice = ""
+    if setting.choices_from == "local_linux_images":
+        from maverick.sandbox.local_images import LocalImageUnavailable, inventory
+        try:
+            images, notice = await run_in_threadpool(inventory, refresh=refresh)
+        except LocalImageUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        choices = (("", "No practice environment selected"), *((image.id, image.label) for image in images))
+        return JSONResponse({"choices": [{"value": v, "label": label} for v, label in choices], "notice": notice}, headers={"Cache-Control": "no-store"})
     resolved = await run_in_threadpool(_resolved, setting)
     choices = (next(c for c in resolved.columns if c.key == column).choices
                if column else resolved.choices)
@@ -982,12 +1219,46 @@ async def catalog_list(
         return JSONResponse({"detail": message, "message": message}, status_code=404,
                             headers={"Cache-Control": "no-store"})
     state = await run_in_threadpool(catalog_state, group, _words(q), changed=changed)
-    return JSONResponse(state, headers={"Cache-Control": "no-store"})
+    from .draft_api import context_for
+
+    auth.require_global_permission(request, "admin")
+    state["context"] = context_for(request)
+    return _conditional_json(request, state)
+
+
+def _conditional_json(request: Request, state: dict[str, Any]) -> Response:
+    """The state as JSON with a content ETag; ``304 Not Modified`` when the
+    client's ``If-None-Match`` still matches.
+
+    The whole catalog is ~1.5 MB. ``private, no-cache`` lets the browser
+    keep its copy but revalidate every time, so a repeat load of the page
+    moves no bytes when nothing changed. The server still computes the state
+    (its inputs include per-setting choice providers, so a cheaper
+    fingerprint would risk serving stale rows).
+    """
+    body = json.dumps(state, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Cookie, Authorization"}
+    if _etag_matches(request.headers.get("if-none-match", ""), etag):
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
+
+
+def _etag_matches(header: str, etag: str) -> bool:
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+    tags = {t.strip().removeprefix("W/") for t in header.split(",")}
+    return etag in tags
 
 
 def _audit_value(setting: catalog.Setting, value: object) -> object:
     if setting.secret:
         return "set" if value else "not set"
+    if setting.control == "number" and not catalog.valid_number(setting, value):
+        encoded = json.dumps([type(value).__name__, value], sort_keys=True, default=repr).encode("utf-8")
+        return {"state": "invalid previous number", "fingerprint": hashlib.sha256(encoded).hexdigest()}
     if setting.control == "keys" and isinstance(value, list):
         return [catalog.key_fingerprint(k) for k in value]
     if setting.control == "document":
@@ -1048,6 +1319,11 @@ def _sealed_rows(setting: catalog.Setting, rows: object) -> object:
              for k, v in row.items()} for row in rows]
 
 
+def _require_valid_number(setting: catalog.Setting, value: object) -> None:
+    if setting.control == "number" and not catalog.valid_number(setting, value):
+        raise _Refused(400, f"{setting.label}: choose a valid number or its product default before continuing.")
+
+
 def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # noqa: C901
     """Validate a request against the catalog; nothing is written here."""
     layers = _sources()
@@ -1060,6 +1336,11 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         setting = catalog.BY_ID.get(item.id)
         if setting is None:
             raise _Refused(400, "That setting is not available here.")
+        if setting.section in _UNAVAILABLE_SETTING_SECTIONS:
+            raise _Refused(
+                409,
+                "Cloud agent oversight is still in development and cannot be turned on in this installation. Open its page to ask Daybreak about availability.",
+            )
         if item.id in seen:
             raise _Refused(400, "Each setting can be changed once per save.")
         seen.add(item.id)
@@ -1071,9 +1352,34 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 "so it can't be changed here.",
             )
         old = state["value"]
+        from maverick.config_resets import METADATA, is_reset, reset_spec
+        marker = (METADATA, setting.id)
+        was_reset = is_reset(layers["here"], setting)
+        if item.reset and item.inherit:
+            raise _Refused(400, "Choose either product default or inherited value.")
+        if item.inherit and setting.control != "table":
+            if not catalog.lookup(layers["here"], setting.path)[0] and not was_reset:
+                continue
+            if was_reset:
+                writes[marker] = None
+            inherited = {**layers, "here": {}}
+            new = _resolve(setting, inherited)["value"]
+            if setting.id == "plugins.workbench_image":
+                try:
+                    new = catalog.coerce(_resolved(setting, new), new)
+                except catalog.SettingError as exc:
+                    raise _Refused(400, str(exc)) from exc
+            _require_valid_number(setting, new)
+            writes[setting.path] = None
+            prospective[setting.id] = new
+            changes.append({"setting": setting, "old": old, "new": new})
+            if catalog.weakens(setting, old, new):
+                weakening.append({"id": setting.id, "label": setting.label,
+                                  "warning": setting.warning})
+            continue
         if setting.control == "table":
             new, table_writes = _plan_table(setting, item, old, layers)
-            if old == new and not (item.reset and table_writes):
+            if old == new and not ((item.reset or item.inherit) and table_writes):
                 continue
             writes.update(table_writes)
             prospective[setting.id] = new
@@ -1085,13 +1391,30 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         if item.reset:
             default = _default_of(setting)
             base_present, base_value = catalog.lookup(layers["base"], setting.path)
-            if _has_partial_default(setting):
+            if (setting.section.startswith("providers.") and setting.key in {"api_key", "base_url"}
+                    and base_present and base_value != default):
+                # Empty provider fields are omitted by the overlay writer. A
+                # reset marker is required to mask a nonempty installer value.
+                writes[marker] = reset_spec(setting)
+                writes[setting.path] = None
+                new = default
+            elif (setting.section.startswith("channels.")
+                    and (access := catalog.CHANNEL_ALLOWLISTS.get(setting.section.removeprefix("channels.")))
+                    and setting.key == access[2]):
+                # Product-default access is nobody, including where a server
+                # environment would otherwise supply a fallback list.
+                writes[setting.path] = []
+                new = []
+            elif default is None and base_present:
+                writes[marker] = reset_spec(setting)
+                writes[setting.path] = None
+                new = None
+            elif _has_partial_default(setting):
                 # Removing the value could let an older default apply: write
                 # the default itself.
                 writes[setting.path] = default
                 new = default
-            elif (not setting.secret and base_present and default is not None
-                    and base_value != default):
+            elif (base_present and default is not None and base_value != default):
                 # The installer chose something else: write the default so the
                 # setting really returns to it.
                 writes[setting.path] = default
@@ -1100,6 +1423,8 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 writes[setting.path] = None  # drop the value set here
                 new = base_value if base_present else default
         else:
+            if was_reset:
+                writes[marker] = None
             try:
                 new = catalog.coerce(_resolved(setting, old), item.value)
                 if setting.control == "document":
@@ -1115,8 +1440,33 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 new = base_value if base_present else _default_of(setting)
             else:
                 writes[setting.path] = _sealed_rows(setting, new)
+        if (item.reset and setting.section.startswith("providers.")
+                and setting.key in {"api_key", "base_url"}):
+            # A cleared provider value can reveal a server fallback. Compare
+            # and review the value that will actually take effect after save.
+            planned_here = copy.deepcopy(layers["here"])
+            if marker in writes:
+                metadata = planned_here.setdefault(METADATA, {})
+                if writes[marker] is None:
+                    metadata.pop(setting.id, None)
+                else:
+                    metadata[setting.id] = writes[marker]
+            node = planned_here
+            for part in setting.path[:-1]:
+                node = node.setdefault(part, {})
+            if writes.get(setting.path) is None:
+                node.pop(setting.path[-1], None)
+            else:
+                node[setting.path[-1]] = writes[setting.path]
+            new = _resolve(setting, {**layers, "here": planned_here})["value"]
+        if item.reset and setting.id == "plugins.workbench_image":
+            try:
+                new = catalog.coerce(_resolved(setting, new), new)
+            except catalog.SettingError as exc:
+                raise _Refused(400, str(exc)) from exc
+        _require_valid_number(setting, new)
         unchanged = old == new and (not item.reset or state["source"] != "here")
-        if unchanged and (item.reset or not setting.secret):
+        if unchanged and marker not in writes and (item.reset or not setting.secret):
             writes.pop(setting.path, None)
             continue
         prospective[setting.id] = new
@@ -1151,9 +1501,21 @@ def _plan_table(
     base_rows = dict(base_rows) if isinstance(base_rows, dict) else {}
     _present, here_rows = _layer_value(setting, layers["here"])
     here_rows = dict(here_rows) if isinstance(here_rows, dict) else {}
-    if item.reset:
+    from maverick.config_resets import METADATA, is_reset, reset_spec
+    marker = (METADATA, setting.id)
+    was_reset = is_reset(layers["here"], setting)
+    metadata_writes = {}
+    if item.inherit:
+        if was_reset:
+            metadata_writes[marker] = None
         wanted = dict(base_rows)
+    elif item.reset:
+        wanted = dict(_default_of(setting))
+        metadata_writes[marker] = reset_spec(setting)
+        base_rows = {}
     else:
+        if was_reset:
+            base_rows = {}
         try:
             wanted = catalog.coerce(_resolved(setting, before), item.value)
         except catalog.SettingError as exc:
@@ -1173,7 +1535,14 @@ def _plan_table(
                 for name, spec in wanted.items()
             }
         wanted = _keep_named_secrets(setting, before, wanted)
-    writes: dict[tuple[str, ...], object] = {}
+        if setting.id == "dashboard.themes":
+            from .themes import contrast_issues
+
+            for name, palette in wanted.items():
+                issues = contrast_issues(palette)
+                if issues:
+                    raise _Refused(400, f"Theme {name}: " + " ".join(issues))
+    writes: dict[tuple[str, ...], object] = dict(metadata_writes)
     if setting.key_kind == "entries":
         for name in here_rows:
             if name not in wanted or wanted[name] == base_rows.get(name):
@@ -1231,7 +1600,7 @@ def _sealed_named(setting: catalog.Setting, rows: dict) -> dict:
 
 
 def _record(changes: list[dict], actor: str, confirmed: bool,
-            asked: frozenset[str] = frozenset()) -> None:
+            asked: frozenset[str] = frozenset(), before_revision: str = "", after_revision: str = "") -> None:
     from maverick.audit import EventKind, audit_event
 
     for change in changes:
@@ -1243,6 +1612,7 @@ def _record(changes: list[dict], actor: str, confirmed: bool,
             actor=actor,
             section=setting.section,
             key=setting.key,
+            before_revision=before_revision, after_revision=after_revision,
             old=_audit_value(setting, change["old"]),
             new=_audit_value(setting, change["new"]),
             confirmed=bool(confirmed and (setting.id in asked or catalog.weakens(
@@ -1270,120 +1640,120 @@ def _saved_state(before: dict[str, Any] | None, asked: set[str]) -> dict[str, An
     old = {r["id"]: r for g in before["groups"] for r in g["settings"]}
     groups = []
     for group in after["groups"]:
-        rows = [r for r in group["settings"] if r["id"] in asked or old.get(r["id"]) != r]
+        rows = [r for r in group["settings"] if r["id"] in asked or
+                {k: v for k, v in old.get(r["id"], {}).items() if k != "revision"} !=
+                {k: v for k, v in r.items() if k != "revision"}]
         if rows:
             parts = {r["subgroup"] for r in rows}
             groups.append({**group, "settings": rows,
                            "subgroups": [s for s in group["subgroups"] if s["name"] in parts]})
-    return {"groups": groups}
+    return {"groups": groups, "revision": after["revision"]}
 
 
 @router.post(API_PATH)
-async def catalog_update(
-    request: Request, body: CatalogUpdate, full: bool = False,
-) -> JSONResponse:
+async def catalog_update(request: Request, body: CatalogUpdate, full: bool = False) -> JSONResponse:
+    """Validate, commit and record one reviewed revision under the writer lock."""
+    def save() -> JSONResponse:
+        from . import settings_store
+
+        if body.reviewed_token:
+            if not body.confirm:
+                raise HTTPException(422, "Confirm the complete reviewed changes before saving.")
+            from .settings_catalog_requests import apply
+            value, status = apply(request, body.reviewed_token, full=full)
+            return JSONResponse(value, status_code=status, headers={"Cache-Control": "private, no-store"})
+        with settings_store._locked(strict=True):
+            return _catalog_update_locked(request, body, full)
+
+    return await run_in_threadpool(save)
+
+
+def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=False, *, effect_guard=None) -> JSONResponse:
     """Save or reset settings. The reply carries the rows the save touched
     (``?full=1``: every row, as ``GET`` lists them)."""
     _app()._require_same_origin(request)
-    auth.require_global_permission(request, "admin")
+    auth.require_global_permission(request, 'admin')
+    if effect_guard is not None:
+        effect_guard()
     from maverick.audit import AuditRefused
 
     from . import settings_governance_level, settings_store
-
+    current = _revision()
+    if body.expected_revision != current:
+        state = catalog_state()
+        asked = {item.id for item in body.changes}
+        conflicts = [{"id": row["id"], "label": row["label"],
+                      "current": row["value_text"], "source": row["source_text"]}
+                     for group in state["groups"] for row in group["settings"]
+                     if row["id"] in asked]
+        return JSONResponse({"message": "Settings changed since you reviewed them. Your draft is kept.",
+                             "conflicts": conflicts, "revision": current}, status_code=409,
+                            headers={"Cache-Control": "no-store"})
     try:
-        # Choosing a governance level also applies the settings it stands for.
-        body, learning = await run_in_threadpool(
-            settings_governance_level.expand, body, SettingChange)
-        writes, changes, weakening, _layers = await run_in_threadpool(_plan, body)
+        body, learning = settings_governance_level.expand(body, SettingChange)
+        writes, changes, weakening, _layers = _plan(body)
     except settings_governance_level.Unavailable as exc:
-        return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=409,
-                            headers={"Cache-Control": "no-store"})
+        return JSONResponse({'detail': str(exc), 'message': str(exc)}, status_code=409, headers={'Cache-Control': 'no-store'})
     except _Refused as exc:
-        # ``message`` is written for people (the page shows it as is).
-        return JSONResponse({"detail": exc.message, "message": exc.message},
-                            status_code=exc.status, headers={"Cache-Control": "no-store"})
+        return JSONResponse({'detail': exc.message, 'message': exc.message}, status_code=exc.status, headers={'Cache-Control': 'no-store'})
+    if any(c["setting"].section == "features"
+           or c["setting"].id in settings_access_guard.SIGN_IN_IDS
+           or c["setting"].id.startswith(settings_access_guard.SIGN_IN_PREFIXES)
+           or c["setting"].id.startswith(settings_access_guard.KEY_PREFIXES)
+           for c in changes):
+        step_up.require_recent_mfa(request, "change_auth_settings")
     try:
-        access = await run_in_threadpool(_guard, request, writes, changes, _layers) \
-            if changes else []
+        access = _guard(request, writes, changes, _layers) if changes else []
     except settings_access_guard.Refused as exc:
-        return JSONResponse({"detail": exc.message, "message": exc.message, "lockout": True},
-                            status_code=409, headers={"Cache-Control": "no-store"})
+        return JSONResponse({'detail': exc.message, 'message': exc.message, 'lockout': True}, status_code=409, headers={'Cache-Control': 'no-store'})
     weakening = weakening + access + settings_governance_level.confirm_items(learning)
-    if weakening and not body.confirm:
-        return JSONResponse(
-            {"detail": "confirmation required", "confirm": weakening},
-            status_code=409,
-            headers={"Cache-Control": "no-store"},
-        )
+    if weakening and (not body.confirm):
+        return JSONResponse({'detail': 'confirmation required', 'confirm': weakening}, status_code=409, headers={'Cache-Control': 'no-store'})
     asked = {item.id for item in body.changes}
-    before = None if full else await run_in_threadpool(catalog_state)
+    before = None if full else catalog_state()
     if not writes:
+        if effect_guard is not None:
+            effect_guard()
         if learning:
-            await run_in_threadpool(settings_governance_level.turn_on, learning,
-                                    auth.caller_principal(request) or "local administrator")
-        state = await run_in_threadpool(_saved_state, before, asked)
-        return JSONResponse({"changed": [], "restart": False, **state},
-                            headers={"Cache-Control": "no-store"})
-    actor = auth.caller_principal(request) or "local administrator"
-    # [safety] quorum_required: a protected change waits for other
-    # administrators' approval (settings_quorum); unset, this is a no-op.
+            settings_governance_level.turn_on(learning, auth.caller_principal(request) or 'local administrator')
+        state = _saved_state(before, asked)
+        return JSONResponse({'changed': [], 'restart': False, **state}, headers={'Cache-Control': 'no-store'})
+    actor = auth.caller_principal(request) or 'local administrator'
     from . import settings_quorum
-
-    hold, approved = await run_in_threadpool(settings_quorum.review, changes, actor,
-                                             _audit_value)
+    if effect_guard is not None:
+        effect_guard()
+    hold, approved = settings_quorum.review(changes, actor, _audit_value)
     if hold is not None:
-        state = await run_in_threadpool(_saved_state, before, asked)
-        return JSONResponse({"changed": [], "restart": False, "quorum": hold,
-                             "message": hold["message"], **state},
-                            status_code=202, headers={"Cache-Control": "no-store"})
-    payload = {path: (settings_store.REMOVE if value is None else value)
-               for path, value in writes.items()}
+        state = _saved_state(before, asked)
+        return JSONResponse({'changed': [], 'restart': False, 'quorum': hold, 'message': hold['message'], **state}, status_code=202, headers={'Cache-Control': 'no-store'})
+    payload = {path: settings_store.REMOVE if value is None else value for path, value in writes.items()}
     try:
-        previous = await run_in_threadpool(settings_store.set_catalog_values, payload)
+        previous = settings_store.set_catalog_values(payload, before_effect=effect_guard)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="That setting is not available here.") from exc
+        raise HTTPException(status_code=400, detail='That setting is not available here.') from exc
     except (OSError, TypeError, settings_store.SecuritySuiteConfigUnavailable) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Settings could not be saved right now. Nothing was changed.",
-        ) from exc
+        raise HTTPException(status_code=503, detail='Settings could not be saved right now. Nothing was changed.') from exc
     try:
-        await run_in_threadpool(_record, changes, actor, body.confirm,
-                                frozenset(item["id"] for item in access))
+        _record(changes, actor, body.confirm, frozenset(item['id'] for item in access), current, _revision())
     except AuditRefused as exc:
-        # The activity record refused the change: put the previous values back
-        # so nothing changes without a record of it.
         try:
-            await run_in_threadpool(settings_store.set_catalog_values, previous)
+            settings_store.set_catalog_values(previous)
         except Exception as rollback_exc:
-            raise HTTPException(
-                status_code=500,
-                detail="The change could not be recorded and could not be undone.",
-            ) from rollback_exc
-        raise HTTPException(
-            status_code=503,
-            detail="The change could not be recorded, so it was undone.",
-        ) from exc
-    await run_in_threadpool(settings_quorum.settle, approved)
+            raise HTTPException(status_code=500, detail='The change could not be recorded and could not be undone.') from rollback_exc
+        raise HTTPException(status_code=503, detail='The change could not be recorded, so it was undone.') from exc
+    settings_quorum.settle(approved)
     if learning:
         try:
-            await run_in_threadpool(settings_governance_level.turn_on, learning, actor)
+            settings_governance_level.turn_on(learning, actor)
         except (RuntimeError, OSError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="The settings were saved, but the learning systems for this level "
-                       "could not be turned on. Turn them on from the Learning page.",
-            ) from exc
-    state = await run_in_threadpool(_saved_state, before, asked)
-    return JSONResponse(
-        {
-            "changed": [c["setting"].id for c in changes],
-            "restart": any(c["setting"].restart for c in changes),
-            **state,
-        },
-        headers={"Cache-Control": "no-store"},
-    )
+            raise HTTPException(status_code=503, detail='The settings were saved, but the learning systems for this level could not be turned on. Turn them on from the Learning page.') from exc
+    if any(path[0] in {"dreaming", "data_engine", "self_harness", "flows", "automation_events"}
+           for path in writes):
+        from .automation_queue import refresh_runtime
 
+        refresh_runtime(request)
+    state = _saved_state(before, asked)
+    return JSONResponse({'changed': [c['setting'].id for c in changes], 'restart': any(c['setting'].restart for c in changes), **state}, headers={'Cache-Control': 'no-store'})
 
 # ---------------------------------------------------------------- checks
 class SettingCheck(BaseModel):
@@ -1493,6 +1863,24 @@ async def catalog_preview(request: Request, setting_id: str, value: str = "") ->
 
     headers = {"Cache-Control": "no-store"}
     setting = catalog.BY_ID.get(setting_id)
+    if setting is not None and setting.preview == "retention":
+        # A shorter keep period: what the next clean-up would delete (a dry run).
+        from maverick import policy_preview
+        try:
+            shown = await run_in_threadpool(policy_preview.retention, setting.key, value)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=422,
+                                headers=headers)
+        return JSONResponse(shown, headers=headers)
+    if setting is not None and setting.preview == "approval_checks":
+        # The approval threshold: what the recorded checks would have needed (report only).
+        from . import approval_threshold_preview
+        try:
+            shown = await run_in_threadpool(approval_threshold_preview.preview, value)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=422,
+                                headers=headers)
+        return JSONResponse(shown, headers=headers)
     if setting is None or setting.preview != "governance_level":
         message = "This setting has nothing to preview."
         return JSONResponse({"detail": message, "message": message}, status_code=404,

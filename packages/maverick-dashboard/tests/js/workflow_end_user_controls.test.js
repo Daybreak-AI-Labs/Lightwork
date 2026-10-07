@@ -6,21 +6,28 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const templates = path.resolve(__dirname, "../../maverick_dashboard/templates");
+const readTemplate = name => fs.readFileSync(path.join(templates, name), "utf8").replace(/\r\n/g, "\n");
+const FDCore = require(path.join(templates, "flow_designer_core.js"));
 
 async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx") {
   const details = { open: false }, title = { value: existing.title || "" };
+  const references = {value:"[]"};
   const description = { value: existing.description || "", closest: () => details };
   const notice = { hidden: true }, storage = new Map([["lightwork:template-draft:v1", JSON.stringify(draft)]]);
   let submits = 0;
-  const form = { querySelector: selector => selector.startsWith("input") ? title : description, submit() { submits++; } };
+  const form = { querySelector: selector => selector.includes("connection_references") ? references : selector.includes('name="title"') ? title : description, submit() { submits++; } };
   for (const input of [title, description]) { input.listeners = {}; input.addEventListener = (type, callback) => { input.listeners[type] = callback; }; input.removeEventListener = type => { delete input.listeners[type]; }; }
-  const context = { Date, fetch: async () => typeof serverContext === "function" ? serverContext(title, description) : ({ ok: true, json: async () => ({ context: serverContext }) }),
+  const context = { window: {}, Date, fetch: async () => typeof serverContext === "function" ? serverContext(title, description) : ({ ok: true, json: async () => ({ context: serverContext }) }),
     sessionStorage: { getItem: key => storage.get(key), removeItem: key => storage.delete(key) },
     document: { querySelector: () => form, getElementById: () => notice } };
-  const source = fs.readFileSync(path.join(templates, "chat.html"), "utf8");
+  const source = readTemplate("chat.html");
+  // Only the page's copy helpers; the composer's own resize/Enter wiring that
+  // follows them is not part of the template handoff.
+  const helpers = source.indexOf("  function chatCopy(");
+  vm.runInNewContext(source.slice(helpers, source.indexOf("  (function () {", helpers)), context);
   const start = source.indexOf("  (async function receiveTemplateDraft()");
   await vm.runInNewContext(source.slice(start, source.indexOf("  })();", start) + 7), context);
-  return { title, description, details, notice, storage, submits };
+  return { title, description, references, details, notice, storage, submits };
 }
 
 test("prepared template becomes a visible ordinary Chat draft once, without submitting", async () => {
@@ -86,8 +93,10 @@ function scheduleFixture(value = "") {
     "fd-sched-days": { hidden: true }, "fd-sched-dom-row": { hidden: true }, "fd-sched-minute-row": { hidden: true },
     "fd-sched-time-row": { hidden: true }, "fd-sched-tz-row": { hidden: true },
   };
-  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days } };
-  const source = fs.readFileSync(path.join(templates, "flow_designer.js"), "utf8");
+  // A changed timetable is one undoable edit (the designer's pushHistory).
+  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days }, edits: 0 };
+  context.pushHistory = () => { context.edits += 1; };
+  const source = readTemplate("flow_designer.js");
   vm.runInNewContext(source.slice(source.indexOf("  // ---- schedule picker"),
     source.indexOf("  function fillTimeZones(")), context);
   return { fields, context, custom, days };
@@ -97,8 +106,10 @@ function authoringFixture(kind, handoff, fetchImpl = async () => ({ ok: true, js
   const brief = { value: "" }, listeners = new Map(), messages = [], calls = [];
   const storage = new Map([["lightwork.authoring-handoff", typeof handoff === "string" ? handoff : JSON.stringify(handoff)]]);
   let drafts = 0;
+  const loadedFlows = [];
   const context = {
     Date, brief, rootFlow: { id: "", name: "", nodes: [] }, dirty: false,
+    FDCore, fromApiFlow(value) { loadedFlows.push(value); context.rootFlow = value; },
     templateWorkspaceStarted: false, playbookWorkspaceStarted: false, fileInput: { files: [] },
     draftIsDirty: () => context.dirty,
     draft() { drafts++; },
@@ -114,13 +125,39 @@ function authoringFixture(kind, handoff, fetchImpl = async () => ({ ok: true, js
     },
   };
   for (const field of ["elName", "elTitle", "elSteps", "pbName", "pbDesc", "pbPersona"]) context[field] = { value: "" };
-  const source = fs.readFileSync(path.join(templates, kind === "flow" ? "flow_designer.js" : "workflow_builder.html"), "utf8");
+  const source = readTemplate(kind === "flow" ? "flow_designer.js" : "workflow_builder.html");
   const begin = source.indexOf("async function receiveAuthoringHandoff(");
   const end = source.indexOf(kind === "flow" ? "  buildExamples();" : "    renderExamples();", begin);
   assert.ok(begin >= 0 && end > begin);
   vm.runInNewContext(source.slice(begin, end), context);
-  return { context, brief, listeners, messages, calls, storage, draftCalls: () => drafts };
+  return { context, brief, listeners, messages, calls, storage, loadedFlows, draftCalls: () => drafts };
 }
+
+test("Ekko hands an approval-first, unsaved workflow into the designer for review", async () => {
+  const flow = { id: "ekko-draft-abc", name: "Recurring report", start: "human-review", version: 0,
+    revision: "", nodes: [
+      { id: "human-review", kind: "approval", prompt: "Review before work", next: "observed-1" },
+      { id: "observed-1", kind: "agent", brief: "Draft the report" },
+    ] };
+  const ui = authoringFixture("flow", { kind: "flow", brief: "Review this work", context: "ctx",
+    created_at: Date.now(), flow });
+  await ui.context.receiveAuthoringHandoff(false);
+  assert.equal(ui.loadedFlows.length, 1);
+  assert.equal(ui.loadedFlows[0].start, "human-review");
+  assert.equal(ui.brief.value, "Review this work");
+  assert.equal(ui.draftCalls(), 0);
+  assert.match(ui.messages.at(-1).message, /Review.*save/);
+});
+
+test("Ekko handoff keeps the canvas empty when the suggested review gate is missing", async () => {
+  const ui = authoringFixture("flow", { kind: "flow", brief: "Review this work", context: "ctx",
+    created_at: Date.now(), flow: { id: "proposal", name: "Proposal", start: "work",
+      nodes: [{ id: "work", kind: "agent", brief: "Work before review" }] } });
+  await ui.context.receiveAuthoringHandoff(false);
+  assert.equal(ui.loadedFlows.length, 0);
+  assert.equal(ui.brief.value, "");
+  assert.equal(ui.messages.at(-1).error, true);
+});
 
 for (const kind of ["agent", "flow"]) {
   const handoff = () => ({ kind, brief: "Draft a review workflow", created_at: Date.now(), context: "ctx" });
@@ -219,6 +256,9 @@ test("plain schedule choices produce the matching timetable and read back the sa
     ui.context.syncScheduleControls();
     assert.equal(ui.fields["fd-sched-freq"].value, freq);
   }
+  assert.equal(ui.context.edits, cases.length, "each changed timetable is one undo step");
+  ui.context.chooseSchedule();
+  assert.equal(ui.context.edits, cases.length, "choosing the same timetable adds no undo step");
   ui.fields["fd-sched-freq"].value = "weekly";
   ui.days.find(d => d.value === "5").checked = true;
   ui.fields["fd-sched-time"].value = "17:45";
@@ -242,10 +282,12 @@ test("readable permission chips retain exact identifiers and remove only the sel
   const allow = new Element(), deny = new Element();
   allow.value = "web_search, send_email"; deny.value = "delete_file";
   const allowed = new Element(), blocked = new Element(), browse = new Element();
-  const context = { pbAllow: allow, pbDeny: deny, Event,
+  const context = { pbAllow: allow, pbDeny: deny, Event, window: {},
     document: { createElement: () => new Element(), querySelector: () => browse,
       getElementById: id => id === "pb-allow-summary" ? allowed : blocked } };
-  const source = fs.readFileSync(path.join(templates, "workflow_builder.html"), "utf8");
+  const source = readTemplate("workflow_builder.html");
+  vm.runInNewContext(source.slice(source.indexOf("    function productText("),
+    source.indexOf("    function setStatus(")), context);
   const splitStart = source.indexOf("    function splitList(");
   const splitEnd = source.indexOf("\n    }", splitStart) + 6;
   vm.runInNewContext(source.slice(splitStart, splitEnd), context);
@@ -278,10 +320,12 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
     constructor(callback) { this.callback = callback; }
     observe(target) { observers.set(target, this.callback); }
   }
-  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8");
+  const source = readTemplate("chat_goal.html");
   const start = source.indexOf("    (function () {", source.indexOf('// "Show work" strip'));
   const end = source.indexOf("    })();", start) + "    })();".length;
-  vm.runInNewContext(source.slice(start, end), { MutationObserver, document: { getElementById: id => fields[id] } });
+  const context = { MutationObserver, window: {}, document: { getElementById: id => fields[id] } };
+  vm.runInNewContext(source.slice(source.indexOf('    function cgText('), source.indexOf('    // Plain-language failure text')), context);
+  vm.runInNewContext(source.slice(start, end), context);
   observers.get(events)();
   assert.equal(now.textContent.includes("internal_connector"), false);
   assert.equal(events.children[0].textContent, raw, "the complete work log remains available");
@@ -296,7 +340,7 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
 });
 
 test("a refused chat follow-up shows the server's plain sentence and never raw validation text", () => {
-  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8");
+  const source = readTemplate("chat_goal.html");
   const start = source.indexOf("      function submissionError(");
   const end = source.indexOf("\n      }\n", source.indexOf("function replyFailureText(", start)) + "\n      }\n".length;
   assert.ok(start > 0 && end > start, "the follow-up failure helpers are present");
@@ -310,4 +354,11 @@ test("a refused chat follow-up shows the server's plain sentence and never raw v
   assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "Please review this message." }] }), "Please review this message.");
   assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "field_required" }] }), "Could not send your message. Generic 422.");
   assert.equal(context.replyFailureText({ status: 500 }, {}), "Could not send your message. Generic 500.");
+});
+
+
+test("prepared account references remain separate from the editable brief",async()=>{
+ const refs=[{name:"chosen",owner:"user:owner",tenant:"one",connector:"slack_api",revision:"fixed"}];
+ const ui=await receiveTemplateFixture({title:"Review",description:"Brief",connection_references:refs,created_at:Date.now(),context:"ctx"});
+ assert.deepEqual(JSON.parse(ui.references.value),refs);assert.equal(ui.description.value,"Brief");assert.equal(ui.submits,0);
 });

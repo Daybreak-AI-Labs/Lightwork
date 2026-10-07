@@ -5,7 +5,7 @@ const markup=fs.readFileSync(path.join(folder,"templates/project_reviews.html"),
 const source=fs.readFileSync(path.join(folder,"static/lightwork-project-reviews.js"),"utf8");
 const snapshot={goal_id:7,title:"Captured <img src=x>",result:"Sensitive <img src=x onerror=alert(1)> result",suite:"finance"};
 const packet={id:"PRP-one",revision:1,source_version:"a".repeat(64),snapshot,owner:"user:owner",reviewer:"user:reviewer",project_name:"Project",status:"pending",due_at:2000000000,note:"Review this.",history:[{actor:"user:owner",action:"sent",at:1000,note:"Review this."}],stale:false,can_respond:true};
-async function fixture({principal="user:owner",intercept=()=>undefined,fragment=""}={}){
+async function fixture({principal="user:owner",intercept=()=>undefined,fragment="",setup=()=>{}}={}){
   const dom=new JSDOM(markup,{url:"https://lightwork.example/project-reviews"+fragment,runScripts:"outside-only"}),{window}=dom,calls=[];
   window.document.getElementById("pr-root").dataset.context="context-one";window.TextEncoder=TextEncoder;window.mvConfirm=async()=>true;
   window.fetch=async(url,options={})=>{const call={url:new URL(url,window.location),...options};calls.push(call);const injected=await intercept(call);if(injected instanceof Response)return injected;let data=injected;
@@ -21,7 +21,7 @@ async function fixture({principal="user:owner",intercept=()=>undefined,fragment=
   async function click(id){el(id).click();await settle();}
   function change(id,value){el(id).value=value;el(id).dispatchEvent(new window.Event("input",{bubbles:true}));el(id).dispatchEvent(new window.Event("change",{bubbles:true}));}
   function submit(id){el(id).dispatchEvent(new window.Event("submit",{cancelable:true,bubbles:true}));}
-  window.eval(source);await settle();return{window,calls,el,settle,click,change,submit};
+  setup(window);window.eval(source);await settle();return{window,calls,el,settle,click,change,submit};
 }
 async function preview(ui){ui.change("project","1");await ui.settle();ui.change("goal","7");await ui.click("preview");ui.change("reviewer","user:reviewer");ui.change("due","2027-01-01T12:00");ui.change("note","Review the explicit limitations.");}
 test("sharing needs a current preview and explicit confirmation, and keeps the exact captured version",async t=>{
@@ -29,7 +29,7 @@ test("sharing needs a current preview and explicit confirmation, and keeps the e
   await preview(ui);assert.equal(ui.el("preview-text").querySelector("img"),null);assert.match(ui.el("preview-text").textContent,/Sensitive/);
   ui.window.mvConfirm=async()=>false;ui.submit("send");await ui.settle();assert.equal(ui.calls.some(row=>row.method==="POST"),false);
   ui.window.mvConfirm=async()=>true;ui.submit("send");await ui.settle();const write=ui.calls.find(row=>row.method==="POST"),body=JSON.parse(write.body);
-  assert.equal(body.source_version,packet.source_version);assert.equal(body.expected_team_revision,2);assert.equal(body.goal_id,7);assert.equal(write.headers["X-Lightwork-Review-Context"],"context-one");assert.match(ui.el("status").textContent,/No task was run or signed off/);
+  assert.equal(body.source_version,packet.source_version);assert.equal(body.expected_team_revision,2);assert.equal(body.goal_id,7);assert.equal(write.headers["X-Lightwork-Review-Context"],"context-one");assert.match(ui.el("status").textContent,/No task was started or approved/);
 });
 test("an uncertain send preserves input and exact retry identity while refusing duplicate clicks",async t=>{
   let release,writes=0;const blocked=new Promise(done=>release=done);
@@ -89,4 +89,38 @@ test("sharing asks through the shared dialog and refuses when it is missing; peo
   const ui=await fixture();t.after(()=>ui.window.close());delete ui.window.mvConfirm;await preview(ui);
   assert.match(ui.el("reviewer").textContent,/reviewer/);assert.equal(/user:/.test(ui.el("reviewer").textContent),false);
   ui.submit("send");await ui.settle();assert.equal(ui.calls.some(row=>row.method==="POST"),false);
+});
+
+const installLocale=require('./helpers/recovery_review_i18n');
+const fr=text=>({text,lang:'fr'});
+const reviewCatalog={
+  'Choose your project':fr('Choisissez votre projet'),
+  'Pending':fr('En attente'),
+  'Review list is up to date. Only reviews you can open are shown.':fr('La liste des révisions est à jour.'),
+  'Share exactly the captured result shown above with {name}?':fr('Partager le résultat capturé avec {name} ?'),
+  'Share for review':fr('Partager pour révision'),
+  'Reviewer: {name}':fr('Réviseur : {name}'),
+  'Cancel':fr('Annuler'),
+};
+test('project review keeps stored text opaque when it equals a translated control',async t=>{
+  const captured={...snapshot,title:'Choose your project',result:'Choose your project <img src=x> مرحبا'};
+  const ui=await fixture({setup:w=>installLocale(w,{catalog:reviewCatalog}),intercept:call=>call.url.pathname.includes('/packets/')?{...packet,snapshot:captured,note:'Choose your project'}:undefined});t.after(()=>ui.window.close());
+  assert.equal(ui.el('project').firstElementChild.textContent,'Choisissez votre projet');assert.equal(ui.el('project').firstElementChild.lang,'fr');
+  ui.el('inbox').querySelector('button').click();await ui.settle();
+  assert.equal(ui.el('packet-title').textContent,'Choose your project');assert.equal(ui.el('packet-title').lang,'und');assert.equal(ui.el('packet-note').lang,'und');
+  assert.equal(ui.el('result').textContent,captured.result);assert.equal(ui.el('result').querySelector('img'),null);
+  assert.match(ui.el('packet-summary').textContent,/En attente/);assert.equal(ui.el('packet-summary').querySelector('bdi').lang,'und');
+  ui.window.LightworkI18n.translate();assert.equal(ui.el('packet-note').textContent,'Choose your project');assert.equal(ui.el('result').textContent,captured.result);
+});
+test('translated sharing confirmation isolates exact recipient and cancellation causes no write',async t=>{
+  const recipient='user:<img src=x> مرحبا';
+  const ui=await fixture({setup:w=>installLocale(w,{catalog:reviewCatalog}),intercept:call=>call.url.pathname.endsWith('/projects/1')?{team:{revision:2,members:[recipient]},eligible_members:[recipient],goals:[{id:7,title:'Result',status:'done'}]}:undefined});t.after(()=>ui.window.close());
+  await preview(ui);ui.change('reviewer',recipient);ui.submit('send');await ui.settle();
+  const doc=ui.window.document,msg=doc.getElementById('mv-confirm-msg');assert.equal(doc.getElementById('mv-confirm').open,true);assert.equal(msg.lang,'fr');assert.match(msg.textContent,/Partager/);assert.equal(msg.querySelector('bdi').textContent,'<img src=x> مرحبا');assert.equal(msg.querySelector('bdi').lang,'und');assert.equal(msg.querySelector('img'),null);
+  doc.getElementById('mv-confirm-cancel').click();await ui.settle();assert.equal(ui.calls.some(call=>call.method==='POST'),false);assert.equal(ui.el('note').value,'Review the explicit limitations.');
+});
+test('an unknown review network error stays opaque and refresh restores the translated status',async t=>{
+  let broken=false;const ui=await fixture({setup:w=>installLocale(w,{catalog:reviewCatalog}),intercept:()=>{if(broken)throw new Error('Choose your project');}});t.after(()=>ui.window.close());
+  broken=true;await ui.click('refresh');assert.equal(ui.el('status').textContent,'Choose your project');assert.equal(ui.el('status').lang,'und');
+  broken=false;await ui.click('refresh');assert.equal(ui.el('status').textContent,'La liste des révisions est à jour.');assert.equal(ui.el('status').lang,'fr');assert.equal(ui.el('status').hasAttribute('data-user-content'),false);
 });

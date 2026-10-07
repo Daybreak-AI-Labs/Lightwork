@@ -50,7 +50,7 @@
   var result = document.getElementById("cag-result");
   var output = document.getElementById("cag-output");
 
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) { node.className = cls; }
     if (text !== undefined && text !== null) { node.textContent = String(text); }
@@ -63,19 +63,20 @@
   }
   function when(ts) {
     if (typeof window.mvWhen === "function") { return window.mvWhen(ts); }
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function badge(pair) {
-    var span = el("span", pair[0], "badge " + pair[1]);
+    var span = el("span", "badge " + pair[1], pair[0]);
     return span;
   }
-  function plainError(status, action) {
+  function plainError(status, action, headers) {
     if (typeof window.mvErrorText === "function") {
-      return window.mvErrorText({ status: status }, action);
+      // Headers carry the turned-off reason, so "off" is never read as "no permission".
+      return window.mvErrorText({ status: status, headers: headers }, action);
     }
     if (status === 403) { return "Could not " + action + ". You do not have permission to do this."; }
     if (status === 409) { return "Could not " + action + ". This changed since you opened it. Refresh the page and try again."; }
-    return "Could not " + action + ". Something went wrong. Please try again.";
+    return "Could not " + action + ". Something went wrong. Try again.";
   }
   var CONFLICTS = {
     cloud_agent_dispatch_requires_reconciliation:
@@ -107,7 +108,7 @@
     }
     if (!response.ok) {
       var detail = body && typeof body.detail === "string" ? body.detail : "";
-      var error = new Error(CONFLICTS[detail] || plainError(response.status, action));
+      var error = new Error(CONFLICTS[detail] || plainError(response.status, action, response.headers));
       error.status = response.status;
       error.technical = detail;
       throw error;
@@ -116,12 +117,14 @@
   }
 
   function say(message, technical) {
-    result.textContent = message;
+    // Like its error sentences, the page also runs without the shell's helpers.
+    if (typeof window.mvStatus === "function") window.mvStatus(result, message);
+    else result.textContent = message;
     output.textContent = technical === undefined ? "" :
       (typeof technical === "string" ? technical : JSON.stringify(technical, null, 2));
   }
   function failed(error) {
-    say(error && error.message ? error.message : "Something went wrong. Please try again.",
+    say(error && error.message ? error.message : "Something went wrong. Try again.",
       error && error.technical ? error.technical : undefined);
   }
 
@@ -151,13 +154,13 @@
   function emptyRow(tbody, columns, text) {
     tbody.textContent = "";
     var tr = el("tr");
-    var td = el("td", text);
+    var td = el("td", null, text);
     td.colSpan = columns;
     tr.appendChild(td);
     tbody.appendChild(tr);
   }
   function button(label, handler, cls) {
-    var b = el("button", label, cls || "btn");
+    var b = el("button", cls || "btn", label);
     b.type = "button";
     b.addEventListener("click", function () {
       if (b.disabled) { return; }
@@ -175,7 +178,7 @@
     var bindings = Array.isArray(status.provider_bindings) ? status.provider_bindings : [];
     bindings.forEach(function (binding) {
       var name = PROVIDERS[binding.provider] || human(binding.provider);
-      list.appendChild(el("li", name + ": " + (binding.active ? "connected" :
+      list.appendChild(el("li", null, name + ": " + (binding.active ? "connected" :
         binding.bound ? "connection paused" : "not connected yet")));
     });
     state.frameworkEnabled = status.databricks_framework_enabled === true;
@@ -221,19 +224,19 @@
     tbody.textContent = "";
     state.agents.forEach(function (agent) {
       var tr = el("tr");
-      var th = el("th", agent.label);
+      var th = el("th", null, agent.label);
       th.scope = "row";
       tr.appendChild(th);
       var status = el("td");
       status.appendChild(badge(LIFECYCLE[agent.lifecycle_state] || [human(agent.lifecycle_state), "idle"]));
-      if (agent.drifted) { status.appendChild(el("div", "Changed since last review", "muted")); }
+      if (agent.drifted) { status.appendChild(el("div", "muted", "Changed since last review")); }
       tr.appendChild(status);
-      tr.appendChild(el("td", (agent.tool_refs || []).length + " tools · " +
+      tr.appendChild(el("td", null, (agent.tool_refs || []).length + " tools · " +
         (agent.model_refs || []).length + " models · " +
         (agent.data_source_refs || []).length + " data sources"));
-      tr.appendChild(el("td", when(agent.last_seen_at)));
+      tr.appendChild(el("td", null, when(agent.last_seen_at)));
       var actions = el("td");
-      var wrap = el("div", null, "cag-actions");
+      var wrap = el("div", "cag-actions", null);
       if (can.operate) {
         var check = button("Check against a policy", function () { return openCheck(agent); });
         check.setAttribute("aria-label", "Check " + agent.label + " against a policy");
@@ -256,7 +259,7 @@
   }
 
   function option(select, value, label) {
-    var o = el("option", label);
+    var o = el("option", null, label);
     o.value = value;
     select.appendChild(o);
   }
@@ -334,23 +337,23 @@
     state.intents.forEach(function (intent) { prepared[intent.evaluation_ref] = true; });
     state.evaluations.forEach(function (evaluation) {
       var tr = el("tr");
-      var th = el("th", agentLabel(evaluation.agent_ref));
+      var th = el("th", null, agentLabel(evaluation.agent_ref));
       th.scope = "row";
       tr.appendChild(th);
-      tr.appendChild(el("td", (ACTIONS[evaluation.requested_action] || human(evaluation.requested_action)) +
+      tr.appendChild(el("td", null, (ACTIONS[evaluation.requested_action] || human(evaluation.requested_action)) +
         " · " + targetLabel(agentByRef(evaluation.agent_ref), evaluation.target_ref)));
       var decision = el("td");
       decision.appendChild(badge(DECISIONS[evaluation.decision] || [human(evaluation.decision), "idle"]));
       if (Array.isArray(evaluation.reason_codes) && evaluation.reason_codes.length) {
-        decision.appendChild(el("div", evaluation.reason_codes.map(human).join(", "), "muted"));
+        decision.appendChild(el("div", "muted", evaluation.reason_codes.map(human).join(", ")));
       }
       tr.appendChild(decision);
-      tr.appendChild(el("td", when(evaluation.evaluated_at)));
+      tr.appendChild(el("td", null, when(evaluation.evaluated_at)));
       var actions = el("td");
       if (can.admin && evaluation.decision === "allow_intent" && !prepared[evaluation.evaluation_ref]) {
         actions.appendChild(button("Prepare change", function () { return prepareChange(evaluation); }));
       } else if (prepared[evaluation.evaluation_ref]) {
-        actions.appendChild(el("span", "Change prepared", "muted"));
+        actions.appendChild(el("span", "muted", "Change prepared"));
       }
       tr.appendChild(actions);
       tbody.appendChild(tr);
@@ -381,17 +384,17 @@
     tbody.textContent = "";
     state.intents.forEach(function (intent) {
       var tr = el("tr");
-      var th = el("th", agentLabel(intent.agent_ref));
+      var th = el("th", null, agentLabel(intent.agent_ref));
       th.scope = "row";
       tr.appendChild(th);
-      tr.appendChild(el("td", (ACTIONS[intent.action] || human(intent.action)) + " · " +
+      tr.appendChild(el("td", null, (ACTIONS[intent.action] || human(intent.action)) + " · " +
         targetLabel(agentByRef(intent.agent_ref), intent.target_ref)));
       var status = el("td");
       status.appendChild(badge(STATUSES[intent.status] || [human(intent.status), "idle"]));
       tr.appendChild(status);
-      tr.appendChild(el("td", String(intent.attempts || 0)));
+      tr.appendChild(el("td", null, String(intent.attempts || 0)));
       var actions = el("td");
-      var wrap = el("div", null, "cag-actions");
+      var wrap = el("div", "cag-actions", null);
       if (can.admin && (intent.status === "prepared" || intent.status === "retryable")) {
         wrap.appendChild(button("Send to provider", function () { return dispatchChange(intent); }, "btn btn--primary"));
       }
@@ -486,23 +489,23 @@
     var tbody = document.getElementById("cag-reviews");
     var reviews = body.reviews || [];
     if (!reviews.length) {
-      emptyRow(tbody, 4, "No Databricks mapping reviews yet.");
+      emptyRow(tbody, 4, "No Databricks mapping reviews yet. Reviews appear here after a mapping is checked.");
       return;
     }
     tbody.textContent = "";
     reviews.forEach(function (review) {
       var tr = el("tr");
-      var th = el("th", review.pack_version);
+      var th = el("th", null, review.pack_version);
       th.scope = "row";
       tr.appendChild(th);
-      tr.appendChild(el("td", (review.decision === "approved" ? "Approved" : "Rejected") + " · " + when(review.reviewed_at)));
+      tr.appendChild(el("td", null, (review.decision === "approved" ? "Approved" : "Rejected") + " · " + when(review.reviewed_at)));
       var attestation = attested[review.review_ref];
-      tr.appendChild(el("td", attestation ? "Approved " + when(attestation.attested_at) : "Waiting"));
+      tr.appendChild(el("td", null, attestation ? "Approved " + when(attestation.attested_at) : "Waiting"));
       var actions = el("td");
-      var wrap = el("div", null, "cag-actions");
+      var wrap = el("div", "cag-actions", null);
       if (can.admin && review.decision === "approved" && !attestation) {
         if (review.reviewed_by_you) {
-          wrap.appendChild(el("span", "Someone else must give the second approval", "muted"));
+          wrap.appendChild(el("span", "muted", "Someone else must give the second approval"));
         } else {
           wrap.appendChild(button("Give second approval", function () { return openAttest(review); }));
         }

@@ -84,3 +84,22 @@ SDK. It does not authenticate a real Codex account, call a model, validate live
 customer plugins, or qualify a deliberately detached POSIX process. Windows
 Job Object descendant cleanup is exercised on Windows; platform-specific tests
 must also run on supported POSIX hosts.
+
+
+## Local gRPC plugin execution
+
+The gRPC host follows the same no-replay rule: a transport failure, deadline,
+server error or cancellation never repeats the Call. Unknown outcomes carry an
+internal immutable attempt receipt, so outer tool retries cannot replay them.
+A later independent invocation can rebuild a connection after owned cleanup.
+The optional local server uses the shared process-tree owner with bounded pipe
+queues; output is capped at 2 MiB per operation and RPC messages at 1 MiB. One
+call deadline includes lock wait and startup. Cancellation cancels the local RPC,
+closes its channel and joins an owned server's cleanup; it does not prove that
+an independently managed endpoint rolled back an effect. Such an outcome stays
+unknown and requires reconciliation. Malformed timeout values are rejected.
+
+With the plugin workbench enabled, exact local bundled server source is pinned
+before startup and across task/workflow resumes. Its container qualification uses
+the actual Describe/Call contract, current configuration and immutable image;
+connection-only targets cannot claim version-specific readiness.

@@ -14,27 +14,31 @@
     -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     padding: var(--space-3) var(--space-4); }
   .g-row__id{ font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--text-sm); flex: 0 0 auto; min-width: 0; }
-  .g-filters{ display: flex; gap: var(--space-2); flex-wrap: wrap; margin: 0 0 var(--space-3); }
   .g-row__main{ flex: 1 1 12rem; min-width: 0; }
   .g-row__title{ font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g-row__desc{ color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .g-row__actions{ display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 0 1 auto; min-width: 0; margin-inline-start: auto; opacity: 0.72; }
+  /* Quiet but readable: muted text at full strength (an opacity of 0.72 on
+     top of --muted measured 3.97:1 in the dark theme). */
+  .g-row__actions{ display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 0 1 auto; min-width: 0; margin-inline-start: auto; }
   .g-row__actions a{ font-size: var(--text-sm); color: var(--muted); }
   .g-row__actions a:hover{ color: var(--brand-hi); }
-  .g-row:hover .g-row__actions{ opacity: 1; }
   @media(max-width:540px){
     .g-row__main{flex-basis:100%;order:2}
   }
-  .g-empty{ text-align: center; color: var(--muted); padding: var(--space-6) var(--space-4);
-    border: 1px dashed var(--glass-border, var(--border)); border-radius: var(--radius-lg);
-    background: var(--glass-soft, var(--surface-1)); }
 </style>
 
   {% from "_hero.html" import hero, state %}
+  {% from "_empty_state.html" import empty_state %}
   {% set running = goals | selectattr('status', 'equalto', 'running') | list | length %}
+  {% set goals_actions %}
+    <a class="btn btn--primary" href="/chat">New task</a>
+    <a class="btn" href="/goal-builder">Step-by-step form</a>
+    <a class="btn btn--ghost" href="/graph-editor">Visual task map</a>
+  {% endset %}
   {% call hero('Your AI workforce', 'Tasks',
-               subtitle='Every task on record',
-               lede='Find your work, read its result, and open a task to review or continue it.') %}
+               subtitle='Your currently readable tasks',
+               lede='Find your work, read its result, and open a task to review or continue it.',
+               actions=goals_actions if can_create_goal else '') %}
     {{ state('Current state',
              goals | length ~ ' recent task' ~ ('' if goals | length == 1 else 's'),
              badge=(running ~ ' running') if running else ('Ready' if goals else 'None yet'),
@@ -44,29 +48,25 @@
   {% endcall %}
 
   <div class="g-bar">
-    {% if can_create_goal %}
-    <a class="btn btn--primary" href="/chat">New task</a>
-    <a class="btn" href="/goal-builder">Step-by-step form</a>
-    <a class="btn btn--ghost" href="/graph-editor">Visual task map</a>
-    {% endif %}
-    {% if goals %}
+    {% if work_details_available %}<a class="btn btn--ghost" href="/work-details">Business fields and stages</a>{% endif %}
     <input id="run-search-q" type="search" placeholder="Search tasks…"
-           aria-label="Search tasks by title or description" autocomplete="off"
-           class="input g-bar__search">
-    {% endif %}
+           aria-label="Search tasks by title, request or saved result" autocomplete="off" maxlength="256"
+           class="input g-bar__search" data-context="{{ task_search_context }}">
   </div>
 
+  {% if task_views_available %}{% include "_task_saved_views.html" %}{% endif %}
   {% include "_upcoming_tasks.html" %}
 
-  {% if goals %}
-  <div class="g-filters" role="group" aria-label="Show tasks">
-    <button type="button" class="btn btn--primary" data-g-filter="">All</button>
-    <button type="button" class="btn" data-g-filter="running active pending">Running</button>
-    <button type="button" class="btn" data-g-filter="blocked awaiting_approval">Waiting for you</button>
-    <button type="button" class="btn" data-g-filter="failed">Failed</button>
-    <button type="button" class="btn" data-g-filter="done">Done</button>
-  </div>
-  <div class="g-list" id="run-list">
+  {% from "_tabs.html" import panel_tabs %}
+  {# The filter in the address (?status=failed) is selected from the first
+     paint; the page script then shows only its rows. #}
+  {% set g_status = (request.query_params.get('status') or '') if request is defined else '' %}
+  {% set g_filter = g_status if g_status in ('running', 'waiting', 'failed', 'done') else 'all' %}
+  {{ panel_tabs('Show tasks', [('all', 'All', ''), ('running', 'Running', 'running active pending'),
+                               ('waiting', 'Waiting for you', 'blocked awaiting_approval'),
+                               ('failed', 'Failed', 'failed'), ('done', 'Done', 'done')], g_filter,
+                id='g-filter', data='g-filter', controls='run-list') }}
+  <div class="g-list" id="run-list" role="tabpanel" aria-labelledby="g-filter-tab-{{ g_filter }}">
     {% for g in goals %}
     <div class="g-row" id="{{ g.id }}" data-status="{{ g.status }}">
       <span class="g-row__id">{{ (g.created_at | datetime) if g.created_at else '' }}</span>
@@ -76,26 +76,37 @@
         <div class="g-row__title"><a href="/chat/goal/{{ g.id }}">{{ g.title }}</a></div>
         {% if g.description %}<div class="g-row__desc" title="{{ g.description }}">{{ (g.description or '')[:160] }}</div>{% endif %}
       </span>
+      {# Each link names its task for screen readers ("Result: <title>"); the
+         visible word comes first, so voice control still matches it. #}
       <span class="g-row__actions">
-        <a href="/goals/{{ g.id }}/plan">Plan</a>
-        <a href="/goals/{{ g.id }}/trajectory">Step by step</a>
-        {% if g.status in ('failed', 'blocked') %}<a href="/goals/{{ g.id }}/errors">Problems</a>{% endif %}
+        <a href="/chat/goal/{{ g.id }}">Result<span class="sr-only">: {{ g.title }}</span></a>
+        <a href="/goals/{{ g.id }}/trajectory">Steps<span class="sr-only">: {{ g.title }}</span></a>
+        <a href="/goals/{{ g.id }}/plan">Plan<span class="sr-only">: {{ g.title }}</span></a>
+        {% if g.status in ('failed', 'blocked') %}<a href="/goals/{{ g.id }}/errors">Problems<span class="sr-only">: {{ g.title }}</span></a>{% endif %}
       </span>
     </div>
     {% endfor %}
+    {% if not goals %}
+      {{ empty_state('No recent tasks to show',
+                     'Search your readable work, or continue to older tasks when available.') }}
+    {% endif %}
   </div>
   <p id="run-search-status" role="status" aria-live="polite"></p>
   <button id="run-search-retry" type="button" class="btn" hidden>Retry search</button>
-  {% else %}
-    <div class="g-empty">
-      <p style="font-weight: var(--font-semibold); margin: 0 0 var(--space-2);">No tasks yet</p>
-      {% if can_create_goal %}
-      <p style="margin: 0;">Start your first piece of work from <a href="/chat">Chat</a> — describe what you need in plain English.</p>
-      <a class="btn btn--primary" href="/chat" style="margin-top: var(--space-3);">Start a task</a>
-      {% else %}
-      <p style="margin: 0;">Tasks you can view will appear here when work is created.</p>
-      {% endif %}
-    </div>
+  <button id="run-search-older" type="button" class="btn" aria-controls="run-list" hidden>Search older work</button>
+  <button id="run-more" type="button" class="btn" data-next-offset="{{ next_offset }}"
+          data-page-size="{{ page_size }}" data-continuation="{{ task_search_continuation }}"
+          aria-controls="run-list" {% if not has_more %}hidden{% endif %}>Show more tasks</button>
+
+  {# ?owner=me&include=background (My background work's address in the
+     job-named navigation): schedules, workflow runs and connections too. #}
+  {% if goals_background %}
+  <section id="my-work" class="panel" data-context="{{ work_context }}" data-row-heading="h3" aria-labelledby="my-work-title" style="max-width:72rem">
+    <h2 id="my-work-title">My background work</h2>
+    <p class="muted">Your tasks, schedules, workflow runs and connections. Open a row for its current controls and evidence.</p>
+    {% with my_work_level=3 %}{% include "_my_work_body.html" %}{% endwith %}
+  </section>
+  {% include "_my_work_assets.html" %}
   {% endif %}
 
   <script>
@@ -104,19 +115,27 @@
     var listEl = document.getElementById('run-list');
     if (!input || !listEl) return;
     var original = listEl.innerHTML;
-    var timer = null, generation = 0, controller = null, expired = false;
+    var timer = null, generation = 0, controller = null, expired = false, loading = false;
+    var context = input.dataset.context, nextSearch = '', failedSearch = null, matches = [];
     var status = document.getElementById('run-search-status'), retry = document.getElementById('run-search-retry');
+    var older = document.getElementById('run-search-older'), more = document.getElementById('run-more');
+    var nextList = more.dataset.continuation || '';
     function esc(s) {
       return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
         return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
       });
     }
-    function render(goals) {
+    function render(goals, complete) {
       if (!goals.length) {
-        listEl.innerHTML = '<div class="g-empty" style="padding:var(--space-5);">No matching tasks.</div>';
+        if (window.mvEmpty) {
+          listEl.replaceChildren(mvEmpty(complete ? 'No matching tasks' : 'No matches in this part',
+            complete ? 'No currently readable tasks matched. Try other words, or clear the search.' : 'Search older work to keep looking. Older tasks have not all been checked yet.'));
+        } else listEl.textContent = complete ? 'No matching tasks.' : 'No matches in this part. Search older work to continue.';
         return;
       }
-      listEl.innerHTML = goals.map(function (g) {
+      listEl.innerHTML = goals.map(rowHtml).join('');
+    }
+    function rowHtml(g) {
         var d = (g.description || '').slice(0, 160);
         var when = g.created_at && window.mvWhen ? mvWhen(g.created_at) : '';
         var label = window.mvHuman ? mvHuman(g.status) : String(g.status).replace(/_/g, ' ');
@@ -128,43 +147,92 @@
           '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + gid + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +
-          '<a href="/goals/' + gid + '/plan">Plan</a>' +
-          '<a href="/goals/' + gid + '/trajectory">Step by step</a>' +
-          (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems</a>' : '') + '</span></div>';
-      }).join('');
+          '<a href="/chat/goal/' + gid + '">Result<span class="sr-only">: ' + esc(g.title) + '</span></a>' +
+          '<a href="/goals/' + gid + '/trajectory">Steps<span class="sr-only">: ' + esc(g.title) + '</span></a>' +
+          '<a href="/goals/' + gid + '/plan">Plan<span class="sr-only">: ' + esc(g.title) + '</span></a>' +
+          (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems<span class="sr-only">: ' + esc(g.title) + '</span></a>' : '') + '</span></div>';
     }
-    function search(immediate) {
+    function clearPrivate(message) {
+      expired = true; ++generation; clearTimeout(timer); if (controller) controller.abort();
+      original = ''; matches = []; nextList = ''; nextSearch = ''; failedSearch = null;
+      listEl.replaceChildren(); input.value = ''; input.disabled = true;
+      older.hidden = true; more.hidden = true; retry.hidden = true;
+      listEl.removeAttribute('aria-busy'); status.textContent = message;
+      selection();
+    }
+    async function read(path, signal) {
+      var response = await fetch(path, {headers:{'Accept':'application/json', 'X-Lightwork-Task-Search-Context':context},
+        cache:'no-store', signal:signal});
+      if (response.redirected || response.status === 401 || response.status === 403) {
+        clearPrivate('Your sign-in or access changed. Sign in again, then reload Tasks.'); throw new Error('access');
+      }
+      if (!response.ok) { var error = new Error('request'); error.status = response.status; throw error; }
+      var reader = response.body && response.body.getReader(), size = 0, chunks = [];
+      if (!reader) throw new Error('reply');
+      try {
+        for (;;) { var part = await reader.read(); if (part.done) break; size += part.value.length;
+          if (size > 2097152) { await reader.cancel(); throw new Error('reply'); } chunks.push(part.value); }
+      } finally { reader.releaseLock(); }
+      var bytes = new Uint8Array(size), offset = 0;
+      chunks.forEach(function (part) { bytes.set(part, offset); offset += part.length; });
+      return JSON.parse(new TextDecoder().decode(bytes));
+    }
+    function valid(page) {
+      if (!page || page.context !== context) {
+        clearPrivate('Your account, workspace or access changed. Reload Tasks to read private results.'); throw new Error('access');
+      }
+      if (!Array.isArray(page.items) || page.items.length > 100 || typeof page.complete !== 'boolean' ||
+          typeof page.continuation !== 'string' || page.continuation.length > 1536 || page.complete !== !page.continuation)
+        throw new Error('reply');
+    }
+    function run(q, cursor, append, attempt) {
+      controller = new AbortController(); var current = controller, deadline = setTimeout(function () { current.abort(); }, 15000);
+      loading = true; older.disabled = true; more.disabled = true; retry.hidden = true;
+      listEl.setAttribute('aria-busy', 'true');
+      status.textContent = q ? 'Searching this part… Previous results remain below.' : 'Loading older tasks…';
+      read('/api/v1/goals/search-page?' + new URLSearchParams({q:q, cursor:cursor, limit:q ? '100' : '50'}), current.signal)
+        .then(function (page) {
+          if (attempt !== generation || expired) return;
+          valid(page); failedSearch = null;
+          if (q) {
+            matches = append ? matches.concat(page.items) : page.items;
+            nextSearch = page.continuation; render(matches, page.complete); older.hidden = !nextSearch;
+            status.textContent = matches.length + (matches.length === 1 ? ' matching task found in checked parts. ' : ' matching tasks found in checked parts. ') +
+              (page.complete ? 'Reached the end of the retained task list. Later changes need a fresh search.' : 'Older work remains unchecked. Search older work to continue.');
+          } else {
+            if (!append) listEl.replaceChildren();
+            if (page.items.length) { listEl.querySelectorAll('.empty-state').forEach(function (node) { node.remove(); });
+              listEl.insertAdjacentHTML('beforeend', page.items.map(rowHtml).join('')); }
+            original = listEl.innerHTML; nextList = page.continuation; more.hidden = !nextList;
+            status.textContent = page.complete ? 'Reached the end of your readable task list.' : 'More older work is available.';
+          }
+          applyFilter(); selection();
+        })
+        .catch(async function (error) {
+          if (attempt !== generation || expired) return;
+          if (error.status === 409) { await verifyScope(); if (attempt !== generation || expired) return; }
+          failedSearch = {q:q, cursor:error.status === 409 ? '' : cursor, append:error.status === 409 ? false : append}; retry.hidden = false;
+          retry.textContent = error.status === 409 ? 'Search newest work' : 'Retry search';
+          status.textContent = error.status === 409 ? 'The older search or current access changed. Your words are kept; search from the newest work again.' :
+            'This part could not be read. Previous results and your words are kept. Retry reads it again without changing any task.';
+        })
+        .finally(function () {
+          clearTimeout(deadline);
+          if (attempt === generation) { loading = false; older.disabled = false; more.disabled = false; listEl.removeAttribute('aria-busy'); }
+        });
+    }
+    more.addEventListener('click', function () { if (!loading && nextList && !input.value.trim()) run('', nextList, true, ++generation); });
+    older.addEventListener('click', function () { if (!loading && nextSearch) run(input.value.trim(), nextSearch, true, ++generation); });
+    function search(immediate, startCursor) {
       if (expired) return;
       var q = input.value.trim();
       clearTimeout(timer); var attempt = ++generation;
       if (controller) controller.abort();
-      retry.hidden = true; listEl.setAttribute('aria-busy', 'false');
-      if (!q) { listEl.innerHTML = original; status.textContent = ''; return; }
+      loading = false; nextSearch = ''; matches = []; retry.hidden = true; older.hidden = true;
+      more.hidden = !!q || !nextList; listEl.setAttribute('aria-busy', 'false');
+      if (!q) { listEl.innerHTML = original; applyFilter(); status.textContent = ''; return; }
       timer = setTimeout(function () {
-        controller = new AbortController(); listEl.setAttribute('aria-busy', 'true');
-        status.textContent = 'Searching… Previous results remain below until the search completes.';
-        fetch('/api/v1/goals/search?q=' + encodeURIComponent(q) + '&limit=100',
-              {headers: {'Accept': 'application/json'}, cache: 'no-store', signal: controller.signal})
-          .then(function (r) {
-            if (attempt !== generation) return null;
-            if (r.status === 401 || r.status === 403) {
-              expired = true; original = ''; listEl.replaceChildren(); input.disabled = true;
-              throw new Error('Your sign-in or access changed. Sign in again, then reload your tasks.');
-            }
-            if (!r.ok) throw new Error('Search could not be loaded. Previous results remain below. Retry when the service is available.');
-            return r.json();
-          })
-          .then(function (rows) {
-            if (attempt !== generation || rows === null) return;
-            if (!Array.isArray(rows)) throw new Error('The search response could not be read. Previous results remain below.');
-            render(rows); applyFilter(); status.textContent = rows.length ? rows.length + (rows.length === 1 ? ' matching task.' : ' matching tasks.') : 'No matching tasks.';
-          })
-          .catch(function (error) {
-            if (attempt !== generation || error.name === 'AbortError') return;
-            status.textContent = expired ? error.message : 'Search could not be completed. Previous results remain below. Your search is kept; try again.';
-            retry.hidden = expired;
-          })
-          .finally(function () { if (attempt === generation) listEl.setAttribute('aria-busy', 'false'); });
+        run(q, startCursor || '', false, attempt);
       }, immediate ? 0 : 200);
     }
     input.addEventListener('input', function () { search(false); });
@@ -179,12 +247,56 @@
     filterBtns.forEach(function (b) {
       b.addEventListener('click', function () {
         active = b.getAttribute('data-g-filter') || '';
-        filterBtns.forEach(function (x) { x.classList.toggle('btn--primary', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
         applyFilter();
+        writeAddress();
       });
     });
-    retry.addEventListener('click', function () { search(true); });
+    var savedStatuses = {'':'', running:'running active pending', waiting:'blocked awaiting_approval', failed:'failed', done:'done'};
+    window.LightworkTaskFilters = {current:function () {
+      return {q:input.value.trim(), status:Object.keys(savedStatuses).find(function (key) { return savedStatuses[key] === active; }) || ''};
+    }};
+    // The address follows the chosen filter and search, so a copied link or a
+    // refresh shows the same tasks. replaceState keeps Back for leaving the page.
+    var addressTimer = null;
+    function writeAddress() {
+      var params = new URLSearchParams(window.location.search), current = window.LightworkTaskFilters.current();
+      params.delete('search_after');
+      ['status', 'q'].forEach(function (key) { if (current[key]) params.set(key, current[key]); else params.delete(key); });
+      var query = params.toString();
+      window.history.replaceState(window.history.state, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+    }
+    input.addEventListener('input', function () { clearTimeout(addressTimer); addressTimer = setTimeout(writeAddress, 400); });
+    function selection() {
+      var selected = {kind:'task_filter', filters:window.LightworkTaskFilters.current()};
+      if (nextSearch) selected.task_search = {query:input.value.trim(), continuation:nextSearch};
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:selected}}));
+    }
+    input.addEventListener('input',selection);
+    filterBtns.forEach(function (button) { button.addEventListener('click',selection); });
+    var initial=new URLSearchParams(window.location.search), initialStatus=initial.get('status') || '';
+    if (Object.prototype.hasOwnProperty.call(savedStatuses,initialStatus)) {
+      filterBtns.forEach(function (button) { if (button.getAttribute('data-g-filter') === savedStatuses[initialStatus]) button.click(); });
+    }
+    if (initial.has('q')) { input.value=initial.get('q').slice(0,256); search(true, initial.get('search_after') || ''); }
+    selection();
+    retry.addEventListener('click', function () {
+      if (expired || loading) return;
+      if (failedSearch) run(failedSearch.q, failedSearch.cursor, failedSearch.append, ++generation);
+      else search(true);
+    });
+    async function verifyScope() {
+      if (expired) return;
+      var checking = new AbortController(), deadline = setTimeout(function () { checking.abort(); }, 10000);
+      try {
+        var value = await read('/api/v1/goals/search-context', checking.signal);
+        if (!expired && value.context !== context) clearPrivate('Your account, workspace or access changed. Reload Tasks to read private results.');
+      } catch (_error) { /* An offline read preserves entered words; all result reads still check current authority. */ }
+      finally { clearTimeout(deadline); }
+    }
+    document.addEventListener('lightwork:copilot-context-changed', verifyScope);
+    window.addEventListener('lightwork:context-changed', function () { clearPrivate('Your account or workspace changed. Reload Tasks.'); });
     window.addEventListener('pagehide', function () { ++generation; clearTimeout(timer); if (controller) controller.abort(); });
   })();
   </script>
+{% if task_views_available %}<script src="/static/lightwork-task-views.js" defer></script>{% endif %}
 {% endblock %}

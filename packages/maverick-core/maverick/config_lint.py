@@ -41,10 +41,22 @@ from urllib.parse import urlparse
 # Only sections with a small, stable, documented key set get an explicit set;
 # those are the ones where an unknown key is a useful signal.
 KNOWN_SCHEMA: dict[str, set[str] | None] = {
+    "instruction_capture": {"enable"},
+    "approval_challenges": {"enable"},
+    "image_edit": {"inpaint_model", "variation_model", "upscale_model"},
     # --- fixed-key sections (unknown keys are flagged) ---
     "deployment": {"type", "allow_multiple_control_planes"},
+    "personalization": {"locked_fields", "defaults"},
+    "copilot": {"operation_families"},
+    "settings": {"runtime_status"},
+    "mobile_offline": {"enabled", "max_age_seconds", "max_bytes"},
+    "workflows": {"versioning", "typed_inputs"},
+    "_dashboard_resets": None,  # Internal global-overlay reset metadata; removed before runtime config.
     "budget": {
         "task_limits_enabled",
+        "guidance",
+        "warnings",
+        "warning_thresholds",
         "strict_pricing",
         "max_dollars",
         "max_wall_seconds",
@@ -215,6 +227,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "token",
         "theme",
         "density",
+        "glass",
+        "navigation",
+        "navigation_personal",
         "allow_extension",
         "compress",
         "themes",
@@ -224,7 +239,14 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "group_suites",
         "active_tenant",
     },
-    "analytics": {"mcp_client_language", "task_questions"},
+    "analytics": {"mcp_client_language", "task_questions", "usability_survey", "usage_measures",
+                  "web_vitals", "web_vitals_sample_rate"},
+    # Agent Factory: JD hiring (maverick.jd_hiring) and the publish gate
+    # (maverick.agent_publish_policy).
+    "agent_factory": {"jd_hiring", "require_passing_tests"},
+    "practice": {"enable", "daily_spend_cap"},
+    "collaboration": {"comments", "suggestions", "ai_suggestions"},
+    "first_outcome": {"department", "sample_workspace_created"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
     # fall back to defaults.
@@ -513,6 +535,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "ott_ctv_rights",
         "drop_management",
         "notice_governance",
+        "public_rights_form",
     },
     "tech_risk_compliance": {
         "enable",
@@ -603,6 +626,7 @@ _NUMERIC_KEYS: dict[str, set[str]] = {
     "sandbox": {"timeout", "pids_limit", "memory_mb", "cpus", "run_as_user"},
     "commerce": {"max_session_spend", "max_line_quantity", "max_cart_lines"},
     "durable": {"keep_last"},
+    "analytics": {"web_vitals_sample_rate"},
     "ekko": {
         "retention_days",
         "enrollment_days",
@@ -680,6 +704,7 @@ _INTEGER_KEYS: dict[str, set[str]] = {
 # Keys that, when present, must be a bool. Section -> key. Plus the universal
 # ``enabled``/``enable`` toggle, handled separately for every known section.
 _BOOL_KEYS: dict[str, set[str]] = {
+    "first_outcome": {"sample_workspace_created"},
     "safety": {"scan_input", "scan_tool_calls", "scan_output", "compartments"},
     "features": {"skills", "world_model", "streaming"},
     "capabilities": {
@@ -702,7 +727,10 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "cross_run_pool",
         "warm",
     },
-    "analytics": {"mcp_client_language", "task_questions"},
+    "analytics": {"mcp_client_language", "task_questions", "usability_survey", "usage_measures", "web_vitals"},
+    "agent_factory": {"jd_hiring", "require_passing_tests"},
+    "practice": {"enable"},
+    "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "self_learning": {
         "preflight",
         "create_tools",
@@ -901,7 +929,12 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
         "retry_base_seconds",
         "retry_max_seconds",
         "destinations",
+        "worker",
     },
+    # Automatic delivery for separately reviewed subscriptions; read by the
+    # dashboard (consent_delivery_managed_api.worker_enabled), which refuses
+    # any other key.
+    ("consent_preferences", "delivery", "worker"): {"enable"},
     ("consent_preferences", "delivery", "destinations"): {
         "enable",
         "enabled_providers",
@@ -1124,6 +1157,15 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
     ("privacy_automation", "regulatory_intelligence"): {
         "enable",
     },
+    ("privacy_automation", "public_rights_form"): {
+        "enable",
+        "verification_ttl_hours",
+        "status_ttl_days",
+        "requests_per_ip_per_hour",
+        "requests_per_email_per_day",
+        "internal_target_days",
+        "max_message_chars",
+    },
     ("privacy_automation", "rights_orchestration"): {
         "enable",
         "source_adapters",
@@ -1338,6 +1380,7 @@ _NESTED_BOOL_KEYS: dict[tuple[str, ...], set[str]] = {
     },
     ("consent_preferences", "identity"): {"enable"},
     ("consent_preferences", "delivery"): {"enable"},
+    ("consent_preferences", "delivery", "worker"): {"enable"},
     ("consent_preferences", "delivery", "destinations"): {"enable"},
     ("consent_preferences", "analytics"): {"enable"},
     ("consent_preferences", "experiments"): {"enable"},
@@ -4762,6 +4805,22 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
     return findings
 
 
+def _lint_image_edit_models(cfg: dict) -> list[Finding]:
+    from .image_edit_models import validate_model
+
+    table = cfg.get("image_edit", {})
+    if not isinstance(table, dict):
+        return [Finding("image_edit", None, "error", "Image model settings must be a table.")]
+    findings: list[Finding] = []
+    for key in KNOWN_SCHEMA["image_edit"]:
+        if key in table:
+            try:
+                validate_model(table[key])
+            except ValueError as exc:
+                findings.append(Finding("image_edit", key, "error", str(exc)))
+    return findings
+
+
 def lint_config(cfg: dict) -> list[Finding]:
     """Validate a loaded config dict and return findings (possibly empty).
 
@@ -4955,6 +5014,7 @@ def lint_config(cfg: dict) -> list[Finding]:
                 )
             )
 
+    findings.extend(_lint_image_edit_models(cfg))
     findings.extend(_lint_governance_nested_tables(cfg))
     findings.extend(_lint_inline_secrets(cfg))
     findings.extend(_lint_group_mappings(cfg))

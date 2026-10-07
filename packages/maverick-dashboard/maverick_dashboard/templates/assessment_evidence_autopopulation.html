@@ -1,21 +1,21 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Suggested Assessment Answers · Lightwork{% endblock %}
+{% block title %}Suggested assessment answers · Lightwork{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="{{ style_path }}">
 {% endblock %}
 {% block content %}
-{% if not proposal_module_enabled %}
-{{ module_gate('assessment_evidence_autopopulation', 'Suggested assessment answers',
-               detail='Turn this on to have Lightwork suggest questionnaire answers from evidence your team has already approved. AI evidence analysis must be on too.',
-               can_activate=proposal_can_admin) }}
-{% endif %}
 <div class="aep-shell" id="assessment-evidence-shell"
       data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
       data-module-enabled="{{ 'true' if proposal_module_enabled else 'false' }}"
       data-can-operate="{{ 'true' if proposal_can_operate else 'false' }}">
   {{ hero('Assessments', 'Suggested assessment answers', lede='Use evidence your team has already approved to suggest answers for an open questionnaire. Someone reviews the suggestions, then chooses which ones to add.') }}
+  {% if not proposal_module_enabled %}
+  {{ module_gate('assessment_evidence_autopopulation', 'Suggested assessment answers',
+                 detail='Turn this on to have Lightwork suggest questionnaire answers from evidence your team has already approved. AI evidence analysis must be on too.',
+                 can_activate=proposal_can_admin) }}
+  {% endif %}
 {% if proposal_workspace_missing %}
   <section class="panel" aria-labelledby="aep-workspace-title">
     <h2 id="aep-workspace-title">Choose a workspace first</h2>

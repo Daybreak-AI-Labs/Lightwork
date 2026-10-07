@@ -32,6 +32,7 @@ import time
 import unicodedata
 import uuid
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, Decimal
 
@@ -292,7 +293,8 @@ def _risk_calibration_boundary(
     evaluator_id: str | None,
 ) -> tuple[str | None, Callable[[], bool] | None]:
     """Preflight calibration and build the final post-eval receipt check."""
-    if not _fresh_calibration_receipt(settings):
+    if not _fresh_calibration_receipt(
+            settings, general_evaluator_id=evaluator_id if scoring else None):
         return ("risk-limited promotion requires a fresh adequate calibration "
                 "receipt", None)
     if not bool(settings.get("risk_limited")) or not scoring:
@@ -324,6 +326,7 @@ def run_self_harness_pass(  # noqa: C901 - fail-closed orchestration boundary
     holdout_authorize=None,
     eval_for_context=None,
     calibration_evaluator_id: str | None = None,
+    effect_scope=None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -466,7 +469,7 @@ def run_self_harness_pass(  # noqa: C901 - fail-closed orchestration boundary
             holdout_rotations=holdout_rotations, canary=bool(canary),
             holdout_authorize=holdout_authorize,
             eval_for_context=eval_for_context,
-            promotion_authorize=final_promotion_authorize)
+            promotion_authorize=final_promotion_authorize, effect_scope=effect_scope)
         if (sealed_holdout is not None
                 and not sealed_holdout.finalize_remaining()):
             report.skipped.append(
@@ -483,6 +486,7 @@ def run_self_harness_pass(  # noqa: C901 - fail-closed orchestration boundary
 def _fresh_calibration_receipt(
     settings: Mapping[str, object], *, now: float | None = None,
     evaluator_id: str | None = None, evidence_since: float | None = None,
+    general_evaluator_id: str | None = None,
 ) -> bool:
     """Require a structurally valid, recent risk-limited calibration receipt.
 
@@ -531,7 +535,11 @@ def _fresh_calibration_receipt(
                 or not 0.0 <= current - stamp <= max_age):
             return False
         if evaluator_id is None:
-            return True
+            # Initial admission must use the checker that was actually
+            # reviewed, before spending on a new cycle. The separate final
+            # receipt still requires this cycle's exact evidence watermark.
+            return (general_evaluator_id is None or
+                    verdict.get("evaluator_id") == general_evaluator_id)
         bound_id = str(evaluator_id or "").strip()
         if (not bound_id
                 or verdict.get("schema") != "maverick-calibration-receipt-v2"
@@ -582,7 +590,7 @@ def _validation_floors(st: dict) -> dict:
         metamorphic_tolerance=st.get("metamorphic_tolerance", 0.0))
 
 
-def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
+def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, object]]]:
     """Normalize one already-read raw corpus snapshot for evaluation.
 
     Risk-limited cycles hash the raw manifest and evaluate this derived view of
@@ -591,17 +599,23 @@ def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
     """
     if not isinstance(raw, Mapping):
         return {}
-    out: dict[str, list[dict[str, str]]] = {}
+    from .self_harness_eval import case_current
+    out: dict[str, list[dict[str, object]]] = {}
     for key, rows in raw.items():
         if not isinstance(rows, list):
             continue
         cases = []
         for row in rows:
             if isinstance(row, Mapping) and str(row.get("goal") or "").strip():
-                cases.append({
-                    "goal": str(row["goal"]),
-                    "expected": str(row.get("expected") or ""),
-                })
+                if not case_current(row):
+                    continue
+                case = {"goal": str(row["goal"]), "expected": str(row.get("expected") or "")}
+                if "privacy_schema" in row:
+                    case.update({name: row[name] for name in
+                                 ("privacy_schema", "task_source", "authoring_request") if name in row})
+                    if "source_goal_ids" in row:
+                        case["source_goal_ids"] = list(row["source_goal_ids"])
+                cases.append(case)
         if cases:
             out[str(key)] = cases
     return out
@@ -667,13 +681,31 @@ def _effective_eval_family(
     }
 
 
+def _evaluator_llm(model_id, dispatch_guard=None):
+    """Keep reviewed callers' current authority on each physical attempt."""
+    from .llm import LLM
+    client = LLM(model_id)
+    if dispatch_guard is None:
+        return client
+
+    class Guarded:
+        model = client.model
+
+        def complete(self, *args, **kwargs):
+            return client.complete(*args, **kwargs, dispatch_guard=dispatch_guard,
+                                   max_physical_attempts=1, _no_failover=True)
+
+    return Guarded()
+
+
 def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0.3,
                     budget=None, judge_samples: int = 1,
                     judge_unknown: bool = False, system_prefix: str = "",
                     verifier_model: str | None = None,
                     strict_judge: bool = False,
                     calibration_evaluator_id: str | None = None,
-                    corpus_manifest: Mapping[str, object] | None = None):
+                    corpus_manifest: Mapping[str, object] | None = None,
+                    dispatch_guard=None):
     """Build ``(held_in, held_out, score_with, score_without)`` -- the LIVE A/B --
     from a configured eval corpus + the model's own LLM client, so the driver can
     actually PROMOTE rather than only dry-inspect. The candidate ``model_id``
@@ -684,7 +716,7 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
     model, or no usable held-out split. Never raises."""
     try:
         from . import self_harness_eval as ev
-        from .llm import LLM, model_for_role
+        from .llm import model_for_role
         corpus = (
             _normalize_eval_manifest(corpus_manifest)
             if corpus_manifest is not None
@@ -700,8 +732,8 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
         score_with, score_without = ev.corpus_ab_scorers(
             cases,
             run_fn=ev.llm_runner(
-                LLM(model_id), budget=budget, system_prefix=system_prefix),
-            judge_fn=ev.llm_judge(LLM(judge_model), budget=budget,
+                _evaluator_llm(model_id, dispatch_guard), budget=budget, system_prefix=system_prefix),
+            judge_fn=ev.llm_judge(_evaluator_llm(judge_model, dispatch_guard), budget=budget,
                                   samples=judge_samples, strict=strict_judge,
                                   evaluator_id=calibration_evaluator_id),
             judge_unknown=judge_unknown, detailed=True)
@@ -734,7 +766,8 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
                        verifier_model: str | None = None,
                        strict_judge: bool = False,
                        calibration_evaluator_id: str | None = None,
-                       corpus_manifest: Mapping[str, object] | None = None):
+                       corpus_manifest: Mapping[str, object] | None = None,
+                       dispatch_guard=None):
     """Build the ``eval_for_context`` seam from the corpus: a domain-scoped
     signature (``"domain=finance"``) is validated against the corpus's
     ``finance``-keyed cases -- its own department's ground truth -- instead of
@@ -751,7 +784,7 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
     defaults). Never raises."""
     try:
         from . import self_harness_eval as ev
-        from .llm import LLM, model_for_role
+        from .llm import model_for_role
         corpus = (
             _normalize_eval_manifest(corpus_manifest)
             if corpus_manifest is not None
@@ -761,9 +794,9 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
         if not domain_keys:
             return None
         run_fn = ev.llm_runner(
-            LLM(model_id), budget=budget, system_prefix=system_prefix)
+            _evaluator_llm(model_id, dispatch_guard), budget=budget, system_prefix=system_prefix)
         judge_model = verifier_model or model_for_role("verifier")
-        judge_fn = ev.llm_judge(LLM(judge_model), budget=budget,
+        judge_fn = ev.llm_judge(_evaluator_llm(judge_model, dispatch_guard), budget=budget,
                                 samples=judge_samples, strict=strict_judge,
                                 evaluator_id=calibration_evaluator_id)
         cache: dict[str, tuple | None] = {}
@@ -857,6 +890,7 @@ class _SealedHoldoutAuthorizer:
         effective_index: Mapping[str, object], evaluator_epoch: str,
         image: str, evaluation_budget, judge_samples: int,
         metamorphic_enabled: bool,
+        dispatch_guard=None, effect_scope=None,
     ) -> None:
         self.ledger = ledger
         self.policy = policy
@@ -867,6 +901,8 @@ class _SealedHoldoutAuthorizer:
         self.evaluation_budget = evaluation_budget
         self.judge_samples = judge_samples
         self.metamorphic_enabled = metamorphic_enabled
+        self.dispatch_guard = dispatch_guard
+        self.effect_scope = effect_scope
         self.cycle_id = uuid.uuid4().hex
         self.counter = 0
         self.pending: list[_PendingHoldoutEvaluation] = []
@@ -940,6 +976,8 @@ class _SealedHoldoutAuthorizer:
                 files={"main.py": _SELF_HARNESS_EVALUATOR_SOURCE},
             )
             try:
+                if self.dispatch_guard is not None:
+                    self.dispatch_guard()
                 result = IsolatedEvaluator(
                     ledger=self.ledger,
                     policy=self.policy,
@@ -1040,7 +1078,8 @@ class _SealedHoldoutAuthorizer:
             protocol_sha256=protocol.sha256,
             declared_cost=declared_cost,
         )
-        permit = self.ledger.authorize(query, self.policy)
+        with self.effect_scope() if self.effect_scope is not None else nullcontext():
+            permit = self.ledger.authorize(query, self.policy)
         budget = self.evaluation_budget
         self.pending.append(_PendingHoldoutEvaluation(
             query=query,
@@ -1062,6 +1101,14 @@ class _SealedHoldoutAuthorizer:
         return self._finish_pending()
 
 
+def _holdout_resource_limit(budget, name, default):
+    value = getattr(budget, name, None)
+    value = default if value is None else value
+    if type(value) not in {int, float} or not math.isfinite(value) or value < 0:
+        raise ValueError("self-harness holdout resource allowance is invalid")
+    return value
+
+
 def _build_holdout_authorizer(
     settings: Mapping[str, object], *, corpus_path: str,
     model_id: str, evaluation_system: str,
@@ -1070,6 +1117,7 @@ def _build_holdout_authorizer(
     held_out_frac: float = 0.3,
     corpus_manifest: Mapping[str, object] | None = None,
     evaluation_budget=None,
+    dispatch_guard=None, effect_scope=None,
 ):
     """Bind one cycle to an atomic, Docker-completed final-query ledger."""
     from . import self_harness_eval as ev
@@ -1110,15 +1158,10 @@ def _build_holdout_authorizer(
         "ledger_id": ledger_status.ledger_id,
     })
     max_queries = int(settings.get("holdout_max_queries", 2))
-    eval_max_input = int(getattr(evaluation_budget, "max_input_tokens", 10**9))
-    eval_max_output = int(getattr(evaluation_budget, "max_output_tokens", 10**9))
-    eval_max_dollars = str(getattr(
-        evaluation_budget, "max_dollars",
-        settings.get("eval_budget_dollars", 5.0),
-    ))
-    eval_max_compute = math.ceil(float(getattr(
-        evaluation_budget, "max_wall_seconds", 3600.0,
-    )) * 1000)
+    eval_max_input = int(_holdout_resource_limit(evaluation_budget, "max_input_tokens", 10**9))
+    eval_max_output = int(_holdout_resource_limit(evaluation_budget, "max_output_tokens", 10**9))
+    eval_max_dollars = str(_holdout_resource_limit(evaluation_budget, "max_dollars", settings.get("eval_budget_dollars", 5.0)))
+    eval_max_compute = math.ceil(_holdout_resource_limit(evaluation_budget, "max_wall_seconds", 3600.0) * 1000)
     policy = AlphaBudget(
         family_alpha=float(settings.get("holdout_family_alpha", 0.05)),
         query_alpha=float(settings.get("holdout_query_alpha", 0.025)),
@@ -1179,7 +1222,122 @@ def _build_holdout_authorizer(
         evaluation_budget=evaluation_budget,
         judge_samples=int(settings.get("judge_samples", 1)),
         metamorphic_enabled=metamorphic_enabled,
+        dispatch_guard=dispatch_guard, effect_scope=effect_scope,
     )
+
+
+def _lifecycle_review_options(*, strict, dispatch_guard, evaluation_budget, advance):
+    if not strict:
+        return {}
+
+    def current():
+        if evaluation_budget is not None:
+            evaluation_budget.check()
+        if dispatch_guard is not None:
+            dispatch_guard()
+
+    factory = getattr(advance, "lifecycle_guard", None)
+
+    def staged(after, before_meta, after_meta):
+        reviewed = factory(after, before_meta, after_meta)
+
+        def checked():
+            if evaluation_budget is not None:
+                evaluation_budget.check()
+            reviewed()
+
+        return checked
+
+    return {"strict": True, "before_write": current,
+            "write_guard_factory": staged if factory is not None else None,
+            "after_write": advance if callable(advance) else None}
+
+
+def _finish_self_harness_cycle(report, *, model_id, st, retire,
+                               retire_after_days, score_with, score_without,
+                               held_out, held_in, provider_work_item, effect_scope,
+                               dispatch_guard, strict=False, qualification_held=False,
+                               evaluation_budget=None):
+    """Keep separately authorized local maintenance independent of AI eligibility."""
+    from . import self_harness
+    from .learning_guard import check_learning_halt
+    from .provider_cost_cap import work_item_scope
+
+    check_learning_halt("self_harness", "local-maintenance")
+    if dispatch_guard is not None:
+        dispatch_guard()
+    resolved = (report.model_id or model_id) or None
+    # OUTCOME-DRIVEN LIFECYCLE: graduate/demote canaries from the accumulated
+    # recall->outcome counters (safe -- only touches canary-flagged lines), and
+    # optionally re-measure each line's live A/B lift to demote dead weight
+    # (opt-in: a general corpus can under-credit a narrow line).
+    if resolved and self_harness.enabled() and not qualification_held:
+        try:
+            with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                options = _lifecycle_review_options(strict=strict, dispatch_guard=dispatch_guard,
+                    evaluation_budget=evaluation_budget, advance=advance)
+                res = self_harness.review_canaries(resolved, **options)
+                if not strict and (res.get("graduated") or res.get("demoted")) and callable(advance):
+                    advance()
+            report.graduated = list(res.get("graduated", []))
+            report.demoted = list(res.get("demoted", []))
+        except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+            if strict:
+                raise
+            log.debug("self-harness canary review failed", exc_info=True)
+        # Relapse recency guard (opt-in): AFTER the canary review, so a
+        # line re-probated now gets adjudicated on the NEXT cycle's
+        # evidence rather than instantly demoted in the same pass.
+        try:
+            share = float((st or {}).get("relapse_failure_share") or 0.0)
+            if share > 0:
+                with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                    options = _lifecycle_review_options(strict=strict, dispatch_guard=dispatch_guard,
+                        evaluation_budget=evaluation_budget, advance=advance)
+                    report.relapsed = self_harness.review_relapses(
+                        resolved, failure_share=share,
+                        min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)), **options)
+                    if not strict and report.relapsed and callable(advance):
+                        advance()
+        except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+            if strict:
+                raise
+            log.debug("self-harness relapse review failed", exc_info=True)
+        if ((st or {}).get("risk_limited") and (st or {}).get("efficacy_review")):
+            report.skipped.append(
+                "risk-limited efficacy review requires a separately budgeted live set")
+        elif (self_harness.settings().get("efficacy_review")
+                and score_with is not None and score_without is not None):
+            try:
+                cases = list(held_out or []) + list(held_in or [])
+                with work_item_scope(provider_work_item):
+                    report.demoted += self_harness.review_efficacy(
+                        resolved, cases, score_with=score_with,
+                        score_without=score_without, effect_scope=effect_scope)
+            except Exception:  # pragma: no cover
+                log.debug("self-harness efficacy review failed", exc_info=True)
+    if qualification_held:
+        report.qualification_held = True
+        report.frozen, report.gate_enabled = self_harness._governance_readiness()
+        report.skipped.append("Trial-lesson decisions remain held; qualification was not completed")
+    retired = 0
+    if retire and not resolved:
+        report.skipped.append("Local retirement needs a currently selected model")
+    if retire and resolved and self_harness.enabled():
+        days = retire_after_days
+        if days is None:
+            days = self_harness.settings().get("retire_after_days", 0.0)
+        if days and float(days) > 0:
+            with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                retired = self_harness.retire_stale(
+                    older_than_days=float(days), model_id=resolved,
+                    strict=strict, before_write=dispatch_guard,
+                    write_guard_factory=getattr(advance, "retirement_guard", None))
+                if retired and callable(advance):
+                    advance()
+    if dispatch_guard is not None:
+        dispatch_guard()
+    return report, retired
 
 
 def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration boundary
@@ -1187,7 +1345,9 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
     retire: bool = True, retire_after_days: float | None = None,
     held_in=None, held_out=None, score_with=None, score_without=None,
     propose_fn=None, controller=None, evaluation_system: str | None = None,
-    work_item_id: str | None = None,
+    work_item_id: str | None = None, raise_errors: bool = False,
+    evaluation_budget=None, evaluation_corpus_manifest=None,
+    dispatch_guard=None, effect_scope=None,
     **pass_kwargs,
 ):
     """One full DRIVER cycle -- a governed learning pass THEN stale-line
@@ -1211,6 +1371,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         from . import self_harness
         from .llm import require_model_allowed
 
+        if dispatch_guard is not None:
+            dispatch_guard()
         if model_id is not None:
             # A caller-selected candidate model is an explicit policy pin. Keep
             # the original corpus key spelling, but reject it before any
@@ -1222,14 +1384,25 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         # A/B, the domain-scoped quads, and the metamorphic paraphraser
         # together, so the operator's cap bounds the whole cycle, not each
         # evaluator.
-        eval_budget = _eval_budget(st) if st is not None else None
+        eval_budget = (evaluation_budget if evaluation_budget is not None
+                       else _eval_budget(st) if st is not None else None)
         # Resolve evaluator identities once and reuse those exact values for
         # holdout authorization and construction. Re-resolving a role between
         # those steps creates a TOCTOU gap: the ledger can authorize judge A
         # while judge B actually sees the sealed cases.
+        source_cases = []
         bound_verifier_model: str | None = None
         bound_metamorphic_model: str | None = None
         calibration_evaluator_id: str | None = None
+
+        def held_qualification(report):
+            return _finish_self_harness_cycle(
+                report, model_id=model_id, st=st, retire=retire,
+                retire_after_days=retire_after_days, score_with=None,
+                score_without=None, held_out=None, held_in=None,
+                provider_work_item=None, effect_scope=effect_scope,
+                dispatch_guard=dispatch_guard, strict=raise_errors,
+                qualification_held=True, evaluation_budget=eval_budget)
         # AUTO-WIRE the live A/B from config so a scheduled cycle can actually
         # PROMOTE, not just dry-inspect: if the caller injected no scorers and
         # [self_harness] eval_corpus is set, build the model-generates /
@@ -1245,7 +1418,9 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 # One immutable-in-memory snapshot feeds both the holdout
                 # family digest and every evaluator built below. Never reopen
                 # a mutable corpus path after spending authorization for it.
-                corpus_manifest = eval_module._load_raw(str(corpus_path))
+                corpus_manifest = (evaluation_corpus_manifest if evaluation_corpus_manifest is not None
+                                   else eval_module._load_raw(str(corpus_path)))
+                source_cases = [case for rows in _normalize_eval_manifest(corpus_manifest).values() for case in rows]
                 try:
                     bound_verifier_model = str(
                         model_for_role("verifier")
@@ -1270,12 +1445,12 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report = self_harness.SelfHarnessReport(model_id=str(model_id))
                     report.skipped.append(
                         "risk-limited auto-evaluation requires deployed prompt snapshot")
-                    return report, 0
+                    return held_qualification(report)
                 if st.get("risk_limited") and not bound_verifier_model:
                     report = self_harness.SelfHarnessReport(model_id=str(model_id))
                     report.skipped.append(
                         "risk-limited auto-evaluation requires a bound verifier model")
-                    return report, 0
+                    return held_qualification(report)
                 if st.get("risk_limited"):
                     calibration_evaluator_id = eval_module.judge_evaluator_identity(
                         str(bound_verifier_model),
@@ -1292,7 +1467,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report.skipped.append(
                         "risk-limited metamorphic evaluation requires a bound "
                         "paraphraser model")
-                    return report, 0
+                    return held_qualification(report)
                 if (st.get("risk_limited")
                         and pass_kwargs.get("metamorphic_fn") is not None
                         and pass_kwargs.get("holdout_authorize") is None):
@@ -1300,7 +1475,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report.skipped.append(
                         "risk-limited injected metamorphic evaluation requires a "
                         "caller-supplied holdout authorizer bound to that transform")
-                    return report, 0
+                    return held_qualification(report)
                 if st.get("risk_limited") and pass_kwargs.get(
                         "holdout_authorize") is None:
                     try:
@@ -1310,13 +1485,14 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                             verifier_model=bound_verifier_model,
                             metamorphic_model=bound_metamorphic_model,
                             corpus_manifest=corpus_manifest,
-                            evaluation_budget=eval_budget)
+                            evaluation_budget=eval_budget,
+                            dispatch_guard=dispatch_guard, effect_scope=effect_scope)
                     except Exception:
                         report = self_harness.SelfHarnessReport(model_id=str(model_id))
                         report.skipped.append(
                             "risk-limited auto-evaluation requires a valid provisioned "
                             "holdout ledger and remaining query budget")
-                        return report, 0
+                        return held_qualification(report)
                 # With metamorphic validation on, paraphrased (non-corpus)
                 # goals must be JUDGEABLE, not indeterminate -- the LLM judge
                 # doesn't need the expected hint.
@@ -1330,7 +1506,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                                         strict_judge=bool(st.get("risk_limited")),
                                         calibration_evaluator_id=(
                                             calibration_evaluator_id),
-                                        corpus_manifest=corpus_manifest)
+                                        corpus_manifest=corpus_manifest,
+                                        dispatch_guard=dispatch_guard)
                 if built is not None:
                     held_in, held_out, score_with, score_without = built
                 # Scoped evaluation: the corpus's domain keys validate matching
@@ -1347,7 +1524,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                                              strict_judge=bool(st.get("risk_limited")),
                                              calibration_evaluator_id=(
                                                  calibration_evaluator_id),
-                                             corpus_manifest=corpus_manifest)
+                                             corpus_manifest=corpus_manifest,
+                                             dispatch_guard=dispatch_guard)
                     if efc is not None:
                         pass_kwargs["eval_for_context"] = efc
         if (st is not None and st.get("risk_limited")
@@ -1356,7 +1534,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
             report = self_harness.SelfHarnessReport(model_id=str(model_id or ""))
             report.skipped.append(
                 "risk-limited evaluation requires sealed holdout query authorization")
-            return report, 0
+            return held_qualification(report)
         # Metamorphic validation (opt-in, [self_harness] metamorphic): reject a
         # candidate whose lift does not survive PARAPHRASING the held-out cases
         # (overfit to exact wording). Built only when something will actually
@@ -1366,7 +1544,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 and pass_kwargs.get("metamorphic_fn") is None):
             try:
                 from . import self_harness_eval as ev
-                from .llm import LLM, model_for_role
+                from .llm import model_for_role
                 if not bound_metamorphic_model:
                     bound_metamorphic_model = str(
                         model_for_role("summarizer")
@@ -1374,7 +1552,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 if not bound_metamorphic_model:
                     raise ValueError("metamorphic model is unavailable")
                 pass_kwargs["metamorphic_fn"] = ev.llm_paraphraser(
-                    LLM(bound_metamorphic_model), budget=eval_budget)
+                    _evaluator_llm(bound_metamorphic_model, dispatch_guard), budget=eval_budget,
+                    authorize_sources=lambda: ev.require_cases_current(source_cases))
             except Exception:
                 log.debug("self-harness paraphraser construction failed",
                           exc_info=True)
@@ -1384,7 +1563,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     report.skipped.append(
                         "risk-limited metamorphic evaluation could not construct "
                         "the authorized paraphraser")
-                    return report, 0
+                    return held_qualification(report)
         # Keep every physical provider attempt in this cycle discoverable under
         # one exact work item.  Callers may bind an authoritative business work
         # item; scheduled/local cycles receive a fresh opaque operation id.
@@ -1400,58 +1579,22 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 reflexions, model_id=model_id, limit=limit,
                 held_in=held_in, held_out=held_out, score_with=score_with,
                 score_without=score_without, propose_fn=propose_fn,
-                controller=controller, **pass_kwargs)
-        resolved = (report.model_id or model_id) or None
-        # OUTCOME-DRIVEN LIFECYCLE: graduate/demote canaries from the accumulated
-        # recall->outcome counters (safe -- only touches canary-flagged lines), and
-        # optionally re-measure each line's live A/B lift to demote dead weight
-        # (opt-in: a general corpus can under-credit a narrow line).
-        if resolved and self_harness.enabled():
-            try:
-                res = self_harness.review_canaries(resolved)
-                report.graduated = list(res.get("graduated", []))
-                report.demoted = list(res.get("demoted", []))
-            except Exception:  # pragma: no cover -- lifecycle never perturbs a run
-                log.debug("self-harness canary review failed", exc_info=True)
-            # Relapse recency guard (opt-in): AFTER the canary review, so a
-            # line re-probated now gets adjudicated on the NEXT cycle's
-            # evidence rather than instantly demoted in the same pass.
-            try:
-                share = float((st or {}).get("relapse_failure_share") or 0.0)
-                if share > 0:
-                    report.relapsed = self_harness.review_relapses(
-                        resolved, failure_share=share,
-                        min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)))
-            except Exception:  # pragma: no cover -- lifecycle never perturbs a run
-                log.debug("self-harness relapse review failed", exc_info=True)
-            if ((st or {}).get("risk_limited") and (st or {}).get("efficacy_review")):
-                report.skipped.append(
-                    "risk-limited efficacy review requires a separately budgeted live set")
-            elif (self_harness.settings().get("efficacy_review")
-                    and score_with is not None and score_without is not None):
-                try:
-                    cases = list(held_out or []) + list(held_in or [])
-                    with work_item_scope(provider_work_item):
-                        report.demoted += self_harness.review_efficacy(
-                            resolved, cases, score_with=score_with,
-                            score_without=score_without)
-                except Exception:  # pragma: no cover
-                    log.debug("self-harness efficacy review failed", exc_info=True)
-        retired = 0
-        if retire and self_harness.enabled():
-            days = retire_after_days
-            if days is None:
-                days = self_harness.settings().get("retire_after_days", 0.0)
-            if days and float(days) > 0:
-                retired = self_harness.retire_stale(
-                    older_than_days=float(days), model_id=resolved)
-        return report, retired
+                controller=controller, effect_scope=effect_scope, **pass_kwargs)
+        if dispatch_guard is not None:
+            dispatch_guard()
+        return _finish_self_harness_cycle(
+            report, model_id=model_id, st=st, retire=retire,
+            retire_after_days=retire_after_days, score_with=score_with,
+            score_without=score_without, held_out=held_out, held_in=held_in,
+            provider_work_item=provider_work_item, effect_scope=effect_scope,
+            dispatch_guard=dispatch_guard, strict=raise_errors,
+            evaluation_budget=eval_budget)
     except Halted:
         raise
     except Exception as exc:  # pragma: no cover -- maintenance stays best-effort
         from .llm import ModelNotAllowedError
 
-        if isinstance(exc, ModelNotAllowedError):
+        if isinstance(exc, ModelNotAllowedError) or raise_errors:
             raise
         log.debug("self-harness cycle failed", exc_info=True)
         from . import self_harness
@@ -1558,6 +1701,9 @@ def _memo_scorer(fn, *, draws: int = 2, by_line: bool = False,
         return float("nan")
 
     def _scored(line, goals):
+        authorize = getattr(fn, "authorize_sources", None)
+        if authorize is not None:
+            authorize()
         key = ((str(line), tuple(goals)) if by_line else tuple(goals))
         if key in cache:
             cached = cache[key]
@@ -1607,7 +1753,7 @@ def _memo_paraphraser(fn):
     return _para
 
 
-def _transfer_context(st: dict, corpus_path: str):
+def _transfer_context(st: dict, corpus_path: str, *, evaluation_budget=None):
     """The shared per-sweep transfer state: ``(eval_for_target, validate_kwargs)``.
 
     ``eval_for_target`` caches each target's corpus-built quad (so a fleet
@@ -1621,7 +1767,7 @@ def _transfer_context(st: dict, corpus_path: str):
             "snapshots and a separately budgeted holdout authorizer")
     if not _learning_provider_egress_enabled():
         return (lambda _model: None), _validation_floors(st)
-    budget = _eval_budget(st)
+    budget = evaluation_budget if evaluation_budget is not None else _eval_budget(st)
     judge_unknown = bool(st.get("metamorphic"))
     cache: dict[str, tuple | None] = {}
 
@@ -1639,9 +1785,10 @@ def _transfer_context(st: dict, corpus_path: str):
         try:
             from . import self_harness_eval as ev
             from .llm import LLM, model_for_role
+            source_cases = [case for rows in ev.load_eval_corpus(corpus_path).values() for case in rows]
             validate_kwargs["metamorphic_fn"] = _memo_paraphraser(
                 ev.llm_paraphraser(LLM(model_for_role("summarizer")),
-                                   budget=budget))
+                                   budget=budget, authorize_sources=lambda: ev.require_cases_current(source_cases)))
         except Exception:  # pragma: no cover -- no paraphraser = check off
             log.debug("transfer paraphraser construction failed", exc_info=True)
     return eval_for_target, validate_kwargs
@@ -1652,7 +1799,8 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
                               controller=None, force: bool = False,
                               raise_errors: bool = False,
                               work_item_id: str | None = None,
-                              _context=None) -> dict:
+                              _context=None, dispatch_guard=None,
+                              effect_scope=None, promotion_authorize=None) -> dict:
     """Driver entry for a governed cross-model transfer trial: try
     ``source_model``'s graduated lines on ``targets`` (default: the whole
     fleet) against each target's corpus-built A/B, applying the configured
@@ -1689,10 +1837,15 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
             else f"self-harness-transfer:{uuid.uuid4().hex}"
         )
         with work_item_scope(provider_work_item):
+            guarded = {} if dispatch_guard is None and effect_scope is None and promotion_authorize is None else {
+                "dispatch_guard": dispatch_guard, "effect_scope": effect_scope,
+                "promotion_authorize": promotion_authorize, "raise_errors": raise_errors,
+                "max_promotions": int(st.get("max_promotions_per_cycle", 0))}
             return self_harness.run_transfer(
                 str(source_model), list(targets), eval_for_target=eval_for_target,
                 controller=controller, force=force, validate_kwargs=validate_kwargs,
-                holdout_rotations=int(st.get("holdout_rotations", 1) or 1))
+                holdout_rotations=1 if guarded and st.get("risk_limited") else int(st.get("holdout_rotations", 1) or 1),
+                **guarded)
     except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
         if raise_errors:
             raise
@@ -1700,7 +1853,8 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
         return {}
 
 
-def run_self_harness_transfer_sweep(*, controller=None) -> dict:
+def run_self_harness_transfer_sweep(*, controller=None, evaluation_budget=None,
+                                   work_item_id: str | None = None) -> dict:
     """Fleet-wide transfer: every configured role model as source in turn,
     all sources sharing ONE transfer context (evaluator cache, budget pot,
     floors). The tried-memory keeps steady-state spend near zero -- only lines
@@ -1715,13 +1869,14 @@ def run_self_harness_transfer_sweep(*, controller=None) -> dict:
         corpus_path = st.get("eval_corpus")
         if not corpus_path:
             return out
-        context = _transfer_context(st, corpus_path)
+        context = _transfer_context(st, corpus_path, evaluation_budget=evaluation_budget)
         fleet = harness_fleet_models()
         for m in fleet:
             # run_transfer skips the source itself -- no pre-filter needed.
             rep = run_self_harness_transfer(
                 m, targets=fleet,
-                corpus_path=corpus_path, controller=controller, _context=context)
+                corpus_path=corpus_path, controller=controller, _context=context,
+                work_item_id=work_item_id)
             if any(r.get("attempted") for r in rep.values()):
                 out[m] = rep
     except Exception:  # pragma: no cover -- a sweep never perturbs a run
@@ -1756,7 +1911,7 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
             from .llm import model_for_role
             key = model_for_role("orchestrator")
         refl = [r.to_dict() for r in reflexion.list_recent(limit=500)
-                if _scope_matches(r, channel=None, user_id=None)]
+                if _scope_matches(r, channel=None, user_id=None) and r.owner == ""]
         # Isolation parity with the reflexion side: owner-scoped goals stay
         # out of the shared corpus -- one tenant's goal text must never be
         # mined into ground truth other contexts evaluate against.
@@ -1769,7 +1924,7 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
         # The corpus/pending files are plaintext sidecars; goal content can be
         # sealed at rest and is secret-redacted on every other persistence
         # path -- redact here too, before it leaves the world DB.
-        cands = [{"goal": _sanitize_text(c["goal"]),
+        cands = [{**c, "goal": _sanitize_text(c["goal"]),
                   "expected": _sanitize_text(c["expected"])}
                  for c in ev.harvest_corpus_candidates(refl, goals, known=known)]
         # The files hold REDACTED text, so re-check known post-redaction too
@@ -1879,6 +2034,78 @@ def harness_fleet_models() -> list[str]:
     return sorted(models)
 
 
+def nightly_self_harness_enabled() -> bool:
+    """The shared scheduler/CLI gate; invalid policy never starts learning."""
+    from . import self_harness
+
+    settings = self_harness.settings()
+    return bool(self_harness.enabled() and settings.get("auto_run")
+                and settings.get("_config_valid", True))
+
+
+def run_nightly_self_harness(world) -> dict:
+    """Protect standalone and combined nightly mutations with a complete point."""
+    if not nightly_self_harness_enabled():
+        return {}
+    from .dreaming import learning_mutation_scope
+
+    with learning_mutation_scope():
+        return _run_nightly_self_harness(world)
+
+
+def _run_nightly_self_harness(world) -> dict:
+    """Run the configured nightly loop under the same gates as a manual pass.
+
+    Only aggregate counts enter the activity record; customer examples, model
+    instructions and candidate lessons stay in their governed stores. An
+    unrecordable start cannot authorize unattended changes.
+    """
+    if not nightly_self_harness_enabled():
+        return {}
+    from . import self_harness
+    from .audit import EventKind, audit_event
+    from .learning_guard import check_learning_halt
+
+    check_learning_halt("self-harness", "nightly")
+    operation = uuid.uuid4().hex
+
+    def record(phase, **values):
+        if not audit_event(EventKind.LEARNING_UPDATE, agent="self_harness_nightly",
+                           phase=phase, operation=operation, **values):
+            raise RuntimeError("Nightly learning could not be recorded")
+
+    record("started")
+    try:
+        settings = self_harness.settings()
+        budget = _eval_budget(settings)
+        results = run_self_harness_all_models(
+            raise_errors=True, evaluation_budget=budget,
+            work_item_id=f"self-harness-nightly:{operation}")
+        reports = [report for report, _retired in results.values()]
+        summary = {
+            "models_reviewed": len(reports),
+            "patterns_found": sum(report.mined for report in reports),
+            "improvements_adopted": sum(report.promoted for report in reports),
+            "improvements_retired": sum(retired for _report, retired in results.values()),
+            "reviews_held_back": sum(bool(report.skipped or report.frozen
+                                         or not report.gate_enabled) for report in reports),
+        }
+        if settings.get("transfer_auto") and not settings.get("risk_limited"):
+            run_self_harness_transfer_sweep(
+                evaluation_budget=budget, work_item_id=f"self-harness-nightly:{operation}")
+        summary["transfer_held_back"] = bool(settings.get("transfer_auto")
+                                             and settings.get("risk_limited"))
+        summary["examples_prepared"] = run_corpus_harvest(world, raise_errors=True)
+        summary["inspection_only"] = (not bool(settings.get("eval_corpus"))
+                                      or not _learning_provider_egress_enabled()
+                                      or bool(reports) and all(report.qualification_held for report in reports))
+        record("completed", **summary)
+        return summary
+    except Exception:
+        record("stopped")
+        raise
+
+
 def run_self_harness_all_models(*, limit: int = 500, retire: bool = True,
                                 should_stop: Callable[[], bool] | None = None, **cycle_kwargs):
     """Run a self-harness cycle for EVERY distinct configured role model, so
@@ -1907,6 +2134,8 @@ def run_self_harness_all_models(*, limit: int = 500, retire: bool = True,
     except Halted:
         raise
     except Exception:  # pragma: no cover -- a fleet sweep never perturbs a run
+        if cycle_kwargs.get("raise_errors"):
+            raise
         log.debug("self-harness all-models cycle failed", exc_info=True)
     return out
 
@@ -1917,4 +2146,5 @@ __all__ = [
     "run_self_harness_cycle", "run_self_harness_all_models", "harness_fleet_models",
     "run_self_harness_transfer", "run_self_harness_transfer_sweep",
     "run_corpus_harvest",
+    "nightly_self_harness_enabled", "run_nightly_self_harness",
 ]

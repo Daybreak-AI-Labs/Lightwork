@@ -314,10 +314,15 @@ async def _require_agent(request: Request) -> str:
         raise HTTPException(status_code=401,
                             detail="invalid credentials") from e
     agent_hdr = request.headers.get("x-lightwork-agent-id", "")
-    ts = request.headers.get("x-maverick-timestamp", "")
+    from maverick.webhooks import read_signature_headers
+
+    try:
+        hmac_sig, ts = read_signature_headers(request.headers)
+    except ValueError as exc:
+        raise HTTPException(status_code=401,
+                            detail="conflicting webhook authentication headers") from exc
     nonce = request.headers.get("x-lightwork-nonce", "")
     envelope_sig = request.headers.get("x-lightwork-request-signature", "")
-    hmac_sig = request.headers.get("x-maverick-signature", "")
     if agent_hdr and ts and nonce and envelope_sig:
         scheme = "envelope"
         # Starlette caches the body, so the endpoint model still parses it.
@@ -1018,6 +1023,83 @@ def _runtime_authority_fingerprint(
     return hashlib.sha256(encoded).hexdigest()
 
 
+async def _fresh_runtime_gate(payload):
+    from .auth import fresh_configuration
+
+    with fresh_configuration():
+        return await _external_execute_runtime_gate(payload)
+
+
+class _EnforcementObserver:
+    """Bind native physical attempt custody to current authenticated sources."""
+
+    def __init__(self, payload, result, agent_id):
+        from maverick import agent_trust
+        from maverick.paths import current_tenant_id_strict
+
+        self.payload = payload.model_dump_json()
+        self.result = result
+        self.agent_id = agent_id
+        self.tenant = current_tenant_id_strict()
+        self.agent = agent_trust.load_registry_strict().get(agent_id)
+        from maverick import runtime_enforcement_records as records
+
+        self.expected = records.digest([_runtime_authority_fingerprint(payload, result), self.sources()])
+        self.identifier = None
+        if self.agent is None or not self.agent.is_active()[0] or self.tenant is None:
+            raise HTTPException(409, "Current safeguard account authority is unavailable.")
+
+    def sources(self):
+        from maverick import model_risk_assurance as assurance
+
+        asset = self.result.receipt["asset_binding"]["asset_id"]
+        observation, declaration = assurance.get_observation(asset), assurance.get_declaration(asset)
+        if (observation is None or declaration is None or observation.get("_audit_pending")
+                or declaration.get("_audit_pending")
+                or not assurance._DEFAULT._declaration_is_current(declaration, observation)):
+            raise HTTPException(409, "The AI system's current reviewed safeguards are unavailable.")
+        return [observation, declaration]
+
+    def identity(self):
+        from maverick import agent_trust
+        from maverick.paths import current_tenant_id_strict
+
+        from .auth import fresh_configuration
+
+        with fresh_configuration():
+            current = agent_trust.load_registry_strict().get(self.agent_id)
+            if (current != self.agent or current is None or not current.is_active()[0]
+                    or current_tenant_id_strict() != self.tenant):
+                raise HTTPException(409, "The safeguard account or workspace changed.")
+
+    def current(self):
+        from anyio import from_thread
+        from maverick import runtime_enforcement_records as records
+
+        self.identity()
+        payload = ExternalExecuteIn.model_validate_json(self.payload)
+        result = from_thread.run(_fresh_runtime_gate, payload)
+        current = records.digest([_runtime_authority_fingerprint(payload, result), self.sources()])
+        if not hmac.compare_digest(current, self.expected):
+            raise HTTPException(409, "The current safeguard sources changed before admission.")
+        self.identity()
+
+    def __call__(self, phase, status):
+        from maverick import runtime_enforcement_records as records
+
+        actor = "agent:" + self.agent_id
+        if phase == "prepare":
+            self.identifier = records.capture(self.result, actor=actor, request_sha256=self.expected,
+                status=status, effect_guard=self.current)
+        elif phase == "outcome" and self.identifier is not None:
+            records.finish(self.identifier, status=status, actor=actor, effect_guard=self.identity)
+        else:
+            raise ValueError("Unknown native enforcement phase")
+
+    def refuse(self):
+        self("prepare", "refused")
+
+
 def _runtime_revalidation_callback(
     payload: ExternalExecuteIn,
     initial_result: object | None,
@@ -1034,7 +1116,7 @@ def _runtime_revalidation_callback(
         from anyio import from_thread
 
         current_payload = ExternalExecuteIn.model_validate_json(frozen_payload)
-        current = from_thread.run(_external_execute_runtime_gate, current_payload)
+        current = from_thread.run(_fresh_runtime_gate, current_payload)
         if current is not None and getattr(current, "decision", None) != "allow":
             return False
         actual = _runtime_authority_fingerprint(current_payload, current)
@@ -1059,7 +1141,13 @@ async def external_execute(
         "runtime_asset_version_digest",
     })
     runtime_result = await _external_execute_runtime_gate(payload)
+    observer = _EnforcementObserver(payload, runtime_result, agent_id) if runtime_result is not None and not payload.preview else None
     if runtime_result is not None and runtime_result.decision != "allow":
+        try:
+            if observer is not None:
+                await run_in_threadpool(observer.refuse)
+        except Exception as exc:
+            raise HTTPException(503, "Safeguard refusal activity could not be confirmed. No action was sent.") from exc
         return {
             "allowed": False,
             "rule": "runtime_guardrail",
@@ -1072,6 +1160,7 @@ async def external_execute(
             "runtime_guardrail": {
                 "decision": runtime_result.decision,
                 "receipt": runtime_result.receipt,
+                "enforcement_record": observer.identifier if observer is not None else None,
             },
         }
     if runtime_result is not None:
@@ -1083,6 +1172,7 @@ async def external_execute(
         agent_id,
         request_body,
         shield=_shield(),
+        enforcement_observer=observer,
         runtime_revalidator=_runtime_revalidation_callback(
             payload, runtime_result
         ),
@@ -1093,6 +1183,7 @@ async def external_execute(
             "runtime_guardrail": {
                 "decision": runtime_result.decision,
                 "receipt": runtime_result.receipt,
+                "enforcement_record": observer.identifier if observer is not None else None,
             },
         }
     return outcome
@@ -1123,7 +1214,13 @@ async def external_execution_commit(
     from maverick import external_agents as xa
     runtime_payload = ExternalExecuteIn(**payload.model_dump())
     runtime_result = await _external_execute_runtime_gate(runtime_payload)
+    observer = _EnforcementObserver(runtime_payload, runtime_result, agent_id) if runtime_result is not None else None
     if runtime_result is not None and runtime_result.decision != "allow":
+        try:
+            if observer is not None:
+                await run_in_threadpool(observer.refuse)
+        except Exception as exc:
+            raise HTTPException(503, "Safeguard refusal activity could not be confirmed. No action was sent.") from exc
         return {
             "allowed": False,
             "rule": "runtime_guardrail",
@@ -1136,6 +1233,7 @@ async def external_execution_commit(
             "runtime_guardrail": {
                 "decision": runtime_result.decision,
                 "receipt": runtime_result.receipt,
+                "enforcement_record": observer.identifier if observer is not None else None,
             },
         }
     request_body = payload.model_dump(exclude={
@@ -1153,6 +1251,7 @@ async def external_execution_commit(
         execution_id,
         request_body,
         shield=_shield(),
+        enforcement_observer=observer,
         runtime_revalidator=_runtime_revalidation_callback(
             runtime_payload, runtime_result
         ),
@@ -1163,6 +1262,7 @@ async def external_execution_commit(
             "runtime_guardrail": {
                 "decision": runtime_result.decision,
                 "receipt": runtime_result.receipt,
+                "enforcement_record": observer.identifier if observer is not None else None,
             },
         }
     return outcome
@@ -1338,8 +1438,8 @@ _OPENAPI: dict = {
                             "goal_id": {"type": "integer"},
                             "heartbeat_seconds": {
                                 "type": "number",
-                                "description": "Beat at least this often "
-                                               "or the run is reclaimed."},
+                                "description": "Recommended maximum interval between beats. "
+                                               "It leaves margin before stale-run recovery."},
                         }}}}}},
             },
         },

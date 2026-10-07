@@ -193,6 +193,189 @@ async def skill_source_install(body: SkillInstallIn, request: Request) -> dict:
     return {"name": s.name, "triggers": s.triggers, "tools_needed": s.tools_needed}
 
 
+# ---- Skills suggested by completed shared work -----------------------------
+
+
+class LearnedAdmissionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    publish_name: str = Field(default="", max_length=96)
+    confirm: bool = False
+    review_token: str = Field(default="", max_length=100000)
+
+
+class LearnedWithdrawalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirm: bool = False
+    review_token: str = Field(default="", max_length=100000)
+
+
+class LearnedReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: Literal["admit", "withdraw"]
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    publish_name: str = Field(default="", max_length=96)
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+def _learned_admission_allowed() -> tuple[bool, str]:
+    from maverick.config import get_skills
+    from maverick.skill.distillation_local import enabled
+
+    if not enabled():
+        return False, "Learning from completed work is off. Turn it on in Learning settings first."
+    if get_skills()["require_signed"]:
+        return False, "This workspace only accepts signed skills. These suggestions need a trusted signature before they can be added."
+    return True, ""
+
+
+def _learned_candidates() -> dict:
+    from maverick.skill import stats as skill_stats
+    from maverick.skills import (
+        admitted_learned_skills,
+        available_skills,
+        learned_skill_candidates,
+        learned_skill_use_key,
+    )
+    from maverick.swarm import _default_use_skills
+
+    allowed, reason = _learned_admission_allowed()
+    admitted = admitted_learned_skills()
+    recall_enabled = _default_use_skills()
+    runtime = {skill.name: skill for skill in available_skills()
+               if learned_skill_use_key(skill)}
+    use_keys = {name: learned_skill_use_key(skill) for name, skill in runtime.items()}
+    uses = {row["name"]: row["uses"] for row in skill_stats.usage_rows(list(use_keys.values()))}
+    tracking = skill_stats._enabled()
+
+    def saved_row(row) -> dict:
+        ready = row.source_shared and recall_enabled and row.name in runtime
+        status = (
+            "Paused: the source task is no longer shared. Agents cannot use this skill."
+            if not row.source_shared else
+            "Paused: agent skills are turned off. Turn them on in Settings to use this."
+            if not recall_enabled else
+            "Paused: current skill trust settings prevent agents from using this skill."
+            if row.name not in runtime else
+            "Available for matching new tasks."
+        )
+        return {
+            "name": row.name, "fingerprint": row.fingerprint,
+            "candidate_fingerprint": row.candidate_fingerprint,
+            "source_shared": row.source_shared, "recall_ready": ready,
+            "use_tracking": tracking, "uses": uses.get(use_keys.get(row.name, ""), 0),
+            "status": status,
+        }
+
+    return {
+        "can_add": allowed, "blocked": reason,
+        "suggestions": [{
+            "name": row.name, "triggers": row.triggers,
+            "tools": row.tools_needed, "instructions": row.body,
+            "source_tasks": row.source_goal_ids,
+            "fingerprint": row.fingerprint, "ok": row.validation.ok,
+            "problems": [_plain_problem(e) for e in row.validation.errors],
+            "suggestions": [_plain_problem(w) for w in row.validation.warnings],
+        } for row in learned_skill_candidates()],
+        "added": [saved_row(row) for row in admitted],
+    }
+
+
+@router.get("/skills/learned-candidates")
+async def skill_learned_candidates(request: Request) -> dict:
+    require_permission(request, "admin")
+    def current():
+        from .learned_skill_changes import authority
+        context = authority(request)
+        value = _learned_candidates()
+        authority(request, context)
+        return {**value, "context": context}
+    return await run_in_threadpool(current)
+
+
+@router.post("/skills/learned-candidates/{name}/review")
+async def skill_learned_review(request: Request, name: str, body: LearnedReviewIn):
+    from . import learned_skill_changes as changes
+    changes.authority(request, body.context, write=True)
+    return await run_in_threadpool(changes.sealed_review, request, name, body.action, body.fingerprint, body.publish_name)
+
+
+@router.get("/skills/learned-requests")
+async def skill_learned_requests(request: Request):
+    from .learned_skill_changes import recent
+    return await run_in_threadpool(recent, request)
+
+
+@router.get("/skills/learned-requests/{operation}")
+async def skill_learned_original(request: Request, operation: str):
+    from .learned_skill_changes import original
+    return await run_in_threadpool(original, request, operation)
+
+
+def _record_learned_change(request: Request, verb: str, *, name: str,
+                           fingerprint: str, source_tasks: tuple[int, ...],
+                           phase: str) -> None:
+    """Record intent before the file change and completion only afterward."""
+    from maverick.audit import EventKind, audit_event
+
+    try:
+        written = audit_event(
+            EventKind.CONTROL_PLANE_ACTION, agent="dashboard", verb=verb,
+            actor=actor(request), phase=phase,
+            **({"ok": True} if phase == "completed" else {}), name=name,
+            content_sha256=fingerprint, source_goal_ids=list(source_tasks),
+        )
+    except Exception as exc:
+        if phase == "completed":
+            raise HTTPException(503, "The skill changed, but the activity record could not confirm completion. Refresh the current skill list.") from exc
+        raise HTTPException(503, "The activity record is not accepting entries, so the skill was not changed.") from exc
+    if not written:
+        if phase == "completed":
+            raise HTTPException(503, "The skill changed, but the activity record could not confirm completion. Refresh the current skill list.")
+        raise HTTPException(503, "The activity record is unavailable, so the skill was not changed.")
+
+
+def admit_checked_learned_skill(request: Request, name: str, body: LearnedAdmissionIn) -> dict:
+    """One authority path for the Skills page and Copilot."""
+    from . import learned_skill_changes as changes
+    changes.authority(request, write=True)
+    if not body.confirm:
+        raise HTTPException(422, "Read the suggestion and confirm before adding it.")
+    if not body.review_token:
+        raise HTTPException(409, "Review the full current suggestion before adding it. No skill was changed.")
+    review = changes.open_review(request, body.review_token)
+    prepared = review["prepared"]
+    if (prepared["action"] != "admit" or prepared["name"] != name
+            or prepared["fingerprint"] != body.fingerprint or prepared["publish_name"] != (body.publish_name or name)):
+        raise HTTPException(409, "This request differs from the reviewed skill. Prepare a fresh review.")
+    return changes.apply(request, prepared, review["operation"], expires=review["expires"])
+
+
+@router.post("/skills/learned-candidates/{name}/admit", status_code=201)
+async def skill_learned_admit(request: Request, name: str, body: LearnedAdmissionIn) -> dict:
+    return await run_in_threadpool(admit_checked_learned_skill, request, name, body)
+
+
+def withdraw_checked_learned_skill(request: Request, name: str, body: LearnedWithdrawalIn) -> dict:
+    from . import learned_skill_changes as changes
+    changes.authority(request, write=True)
+    if not body.confirm:
+        raise HTTPException(422, "Confirm before removing this saved skill.")
+    if not body.review_token:
+        raise HTTPException(409, "Review the current saved skill before removing it. No skill was changed.")
+    review = changes.open_review(request, body.review_token)
+    prepared = review["prepared"]
+    if prepared["action"] != "withdraw" or prepared["name"] != name or prepared["fingerprint"] != body.fingerprint:
+        raise HTTPException(409, "This request differs from the reviewed removal. Prepare a fresh review.")
+    return changes.apply(request, prepared, review["operation"], expires=review["expires"])
+
+
+@router.post("/skills/learned-candidates/{name}/withdraw")
+async def skill_learned_withdraw(request: Request, name: str, body: LearnedWithdrawalIn) -> dict:
+    return await run_in_threadpool(withdraw_checked_learned_skill, request, name, body)
+
+
 # ---- Skills: track record and tidying up (skills stats / skills evict) ----
 
 _MIN_USES = (3, 5, 10, 20)

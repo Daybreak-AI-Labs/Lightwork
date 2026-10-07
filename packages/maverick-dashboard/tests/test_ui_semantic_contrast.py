@@ -67,3 +67,46 @@ def test_danger_controls_use_the_theme_foreground():
     for selector in (".btn--danger", ".halt-pill.armed"):
         rule = re.search(re.escape(selector) + r"\s*\{([^}]+)\}", css)
         assert rule and "color: var(--danger-fg)" in rule.group(1)
+
+
+def _raised(palette: dict[str, str]) -> tuple[float, ...]:
+    # --surface-2 as drawn without glass (the reduced-transparency fallback):
+    # the darkest a raised card, chip or control gets behind its text.
+    panel, text = _rgb(palette["--panel"]), _rgb(palette["--text"])
+    return tuple(0.86 * p + 0.14 * t for p, t in zip(panel, text, strict=True))
+
+
+@pytest.mark.parametrize("theme", ["dark", "light", "hicontrast"])
+def test_brand_text_reads_on_raised_surfaces(theme):
+    # Approval "Technical details" toggles and template chips put brand text
+    # on --surface-2; the dark theme measured 4.1:1 there before.
+    palette = _palette(theme)
+    ratio = _contrast(_rgb(palette["--brand"]), _raised(palette))
+    assert ratio >= 4.5, f"{theme} brand on a raised surface is {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("theme", ["dark", "light", "hicontrast"])
+def test_warning_badges_read_on_raised_cards(theme):
+    # "Can't be undone" on an approval card: the warn badge (its 18% tint)
+    # over the card's --surface-2; light measured 3.84 to 4.18:1 before.
+    palette = _palette(theme)
+    warn, card = _rgb(palette["--warn"]), _raised(palette)
+    tint = tuple(0.18 * fg + 0.82 * bg for fg, bg in zip(warn, card, strict=True))
+    ratio = _contrast(warn, tint)
+    assert ratio >= 4.5, f"{theme} warn badge on a raised card is {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("theme", ["dark", "light", "solarized", "hicontrast"])
+def test_selected_tabs_read_in_every_theme(theme):
+    # The shared tab strip (Settings sections and other pages): selected text
+    # is --text, unselected --muted, and the selection mark a --brand line.
+    # The old Settings tab put white on the brand fill (1.25:1 in high contrast).
+    palette = _palette(theme)
+    panel = _rgb(palette["--panel"])
+    assert _contrast(_rgb(palette["--text"]), panel) >= 4.5
+    assert _contrast(_rgb(palette["--muted"]), panel) >= 4.5
+    assert _contrast(_rgb(palette["--brand"]), panel) >= 3
+    css = _STYLESHEET.read_text(encoding="utf-8")
+    rule = re.search(r'\.mv-tab\[aria-selected="true"\][^{]*\{([^}]*)\}', css).group(1)
+    assert "color: var(--text)" in rule and "border-bottom-color: var(--brand)" in rule
+    assert "background" not in rule

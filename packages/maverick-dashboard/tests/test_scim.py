@@ -204,28 +204,86 @@ class TestLifecycle:
     ):
         from maverick.tenant import registry
 
+        attempts = []
+
         def fail_create(*_args, **_kwargs):
+            attempts.append(True)
             raise RuntimeError("simulated tenant provisioning failure")
 
         monkeypatch.setattr(registry, "create_tenant", fail_create)
         response = _make_user(client, username="no-tenant@example.com")
         assert response.status_code == 500
+        assert len(attempts) == 1
         listed = client.get("/scim/v2/Users", headers=_auth()).json()
         assert listed["totalResults"] == 0
 
-    def test_partial_tenant_create_is_compensated_before_scim_failure(
+    def test_uncertain_tenant_create_is_not_adopted_or_deleted_after_failure(
         self, client, monkeypatch
     ):
         from maverick.tenant import registry
 
         original_create = registry.create_tenant
+        attempts = []
 
         def fail_after_registry_commit(*args, **kwargs):
+            attempts.append(True)
             original_create(*args, **kwargs)
             raise OSError("simulated workspace materialization failure")
 
         monkeypatch.setattr(registry, "create_tenant", fail_after_registry_commit)
         response = _make_user(client, username="partial-tenant@example.com")
+        assert response.status_code == 500
+        assert len(attempts) == 1
+        # A raised create did not hand back an owned incarnation. It might be
+        # a competing provisioner's record, so SCIM cannot safely delete it.
+        retained = registry.list_tenants()
+        assert len(retained) == 1
+        assert client.get("/scim/v2/Users", headers=_auth()).json()["totalResults"] == 0
+        monkeypatch.setattr(registry, "create_tenant", original_create)
+        with pytest.raises(ValueError):
+            registry.create_tenant(retained[0].id)
+        retry = _make_user(client, username="partial-tenant@example.com")
+        assert retry.status_code == 201
+        assert retry.json()["id"] != retained[0].id
+        assert registry.get_tenant(retry.json()["id"]).display_name == (
+            "Alice Smith (partial-tenant@example.com)"
+        )
+
+    def test_only_name_conflicts_get_a_bounded_numbered_retry(self):
+        from maverick.tenant import registry
+        from maverick_dashboard import scim
+
+        registry.create_tenant("first", display_name="Alice Smith")
+        registry.create_tenant("second", display_name="Alice Smith (alice@example.com)")
+        scim._provision_tenant("third", "Alice Smith", "alice@example.com")
+        assert registry.get_tenant("third").display_name == (
+            "Alice Smith (alice@example.com) #2"
+        )
+
+    def test_create_uuid_race_never_deletes_another_provisioners_tenant(self, monkeypatch):
+        from maverick.tenant import registry
+        from maverick_dashboard import scim
+
+        original = registry.create_tenant
+
+        def competitor_wins(uid, **kwargs):
+            original(uid, display_name="Other provisioner")
+            return original(uid, **kwargs)
+
+        monkeypatch.setattr(registry, "create_tenant", competitor_wins)
+        with pytest.raises(ValueError, match="already exists"):
+            scim._provision_tenant("race", "SCIM candidate")
+        assert registry.get_tenant("race").display_name == "Other provisioner"
+
+    def test_known_provision_is_compensated_if_scim_publication_fails(self, client, monkeypatch):
+        from maverick.tenant import registry
+        from maverick_dashboard import scim
+
+        def failed_save(_users):
+            raise OSError("synthetic storage failure")
+
+        monkeypatch.setattr(scim, "_save", failed_save)
+        response = _make_user(client, username="failed-save@example.com")
         assert response.status_code == 500
         assert registry.list_tenants() == []
         assert client.get("/scim/v2/Users", headers=_auth()).json()["totalResults"] == 0
@@ -286,8 +344,13 @@ class TestLifecycle:
         assert r.status_code == 404
 
     def test_list_and_filter(self, client):
-        _make_user(client, username="a@x.com")
-        _make_user(client, username="b@x.com")
+        first = _make_user(client, username="a@x.com")
+        second = _make_user(client, username="b@x.com")
+        assert first.status_code == second.status_code == 201
+        assert first.json()["displayName"] == second.json()["displayName"] == "Alice Smith"
+        from maverick.tenant import registry
+        assert registry.get_tenant(first.json()["id"]).display_name == "Alice Smith"
+        assert registry.get_tenant(second.json()["id"]).display_name == "Alice Smith (b@x.com)"
         r = client.get("/scim/v2/Users", headers=_auth())
         assert r.json()["totalResults"] == 2
         # userName eq filter (the IdP existence probe).
@@ -295,6 +358,19 @@ class TestLifecycle:
         body = r2.json()
         assert body["totalResults"] == 1
         assert body["Resources"][0]["userName"] == "a@x.com"
+
+    def test_long_scim_name_keeps_resource_and_bounded_workspace_label(self, client):
+        from maverick.tenant import registry
+
+        long_name = "Alexandra " * 29 + "Alexandra"
+        created = _make_user(client, username="long@example.com", displayName=long_name)
+        assert created.status_code == 201
+        assert created.json()["displayName"] == long_name
+        uid = created.json()["id"]
+        label = registry.get_tenant(uid).display_name
+        assert len(label) <= 200
+        assert label.startswith("Alexandra") and label.endswith("…")
+        assert uid not in label
 
     def test_unsupported_filter_400(self, client):
         r = client.get('/scim/v2/Users?filter=displayName co "z"', headers=_auth())

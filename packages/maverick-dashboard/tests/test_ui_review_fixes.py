@@ -27,18 +27,23 @@ def test_popout_decision_bridges_to_the_approval_row():
     html = client.get("/approvals").text
     # The pop-out announces its decision...
     assert "mv-assessment-decided" in html
-    # ...and the queue page listens and clicks the matching row's own
+    # ...and the queue page listens and clicks the matching card's own
     # (audited) approve/deny path.
-    assert "tr.dataset.assessment" in html
+    assert "item.dataset.assessment" in html
     assert "addEventListener('mv-assessment-decided'" in html
 
 
 def test_audit_page_has_instant_filter():
     from maverick.audit import record
-    record("TOOL_CALL", agent="pia-analyst", goal_id=1, tool="email")
+    record("TOOL_CALL", agent="pia-analyst", goal_id=1, tool="email",
+           note="Private quarterly forecast for the board")
     html = client.get("/audit").text
     assert 'id="aud-q"' in html and 'id="aud-kind"' in html and 'id="aud-person"' in html
-    assert 'id="audit-table"' in html and "Pia analyst" in html
+    assert 'id="audit-table"' in html and "Tool call" in html
+    # The acting agent or specialist is an identifier the log filters by
+    # (ADM-5), but free-form tool payloads stay private content.
+    assert 'id="aud-agent"' in html and ">Pia analyst</option>" in html
+    assert "Private quarterly forecast" not in html
 
 
 def test_settings_capabilities_carry_descriptions():

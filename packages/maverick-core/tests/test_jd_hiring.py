@@ -50,6 +50,9 @@ def test_match_returns_ranked_relevant_packs():
     # Explanability: matched terms are real JD words.
     assert any("invoices" in m.matched_terms or "vendor" in m.matched_terms
                for m in matches[:3])
+    assert not {"specialist", "match", "process", "prepare"} & {
+        term for match in matches for term in match.matched_terms
+    }
 
 
 def test_match_domain_specificity():
@@ -66,7 +69,8 @@ def test_match_includes_custom_tenant_packs(tmp_path, monkeypatch):
         'compartment = "acme_llama_groomer"\n'
         'description = "Grooms llamas and maintains llama grooming schedules"\n'
         'persona = "You are the llama grooming specialist."\n'
-        'allow_tools = ["read_file"]\n',
+        'allow_tools = ["read_file"]\n'
+        'max_risk = "low"\n',
         encoding="utf-8",
     )
     domains = available_domains()
@@ -108,6 +112,43 @@ def test_draft_derives_workflow_from_jd_bullets():
 def test_draft_without_bullets_falls_back_to_default_workflow():
     prof = draft_from_jd("Generalist", "A role with no bullet structure at all.")
     assert prof.workflow, "default workflow must be present"
+
+
+def test_unusable_ai_draft_uses_bullets_and_reports_the_source():
+    class UnusableLLM:
+        def complete(self, **_kwargs):
+            return type("Reply", (), {"text": "Here is my draft in prose, not JSON."})()
+
+    prof, source = draft_from_jd(
+        "Accounts Payable Specialist", FINANCE_JD, llm=UnusableLLM(),
+        return_source=True,
+    )
+    assert source == "bullet_points"
+    assert prof.description == "Accounts Payable Specialist"
+    assert "Process vendor invoices" in [s.name for s in prof.workflow][0]
+    assert "configured work steps" in prof.persona
+
+
+def test_ai_draft_keeps_role_title_as_the_short_display_name():
+    class UsefulLLM:
+        def complete(self, **_kwargs):
+            return type("Reply", (), {"text": json.dumps({
+                "description": "A paragraph that should never replace the role title " * 8,
+                "persona": "You review accounts payable records against source documents.",
+                "workflow": [
+                    {"name": "Check invoices", "instruction": "Compare invoices with purchase orders."},
+                    {"name": "Reconcile records", "instruction": "Identify and flag discrepancies."},
+                    {"name": "Hand off payment run", "instruction": "Prepare an approval-ready report.", "gate": "review"},
+                ],
+            })})()
+
+    prof, source = draft_from_jd(
+        "Accounts Payable Specialist", FINANCE_JD, llm=UsefulLLM(),
+        return_source=True,
+    )
+    assert source == "ai"
+    assert prof.description == "Accounts Payable Specialist"
+    assert prof.workflow[0].name == "Check invoices"
 
 
 @pytest.mark.parametrize("field", ["role_title", "jd_text", "industry"])

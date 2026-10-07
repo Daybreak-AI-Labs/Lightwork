@@ -4,6 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {webcrypto}=require("node:crypto");
 const {JSDOM}=require("jsdom");
+const {shell: loadShell} = require('./_shell');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<30;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -32,6 +33,7 @@ async function page(options={}){
     if(options.conflict&&method!=="GET")return reply(409,{detail:{code:"authority_stale",message:"stale publication binding"}});
     return reply(201,{});
   };
+  loadShell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-global-opt-out.js"));
   await flush();
@@ -119,5 +121,42 @@ test("declining the question leaves a switched-on set-up unchanged",async()=>{
     ui.d.getElementById("goo-config-form").dispatchEvent(new ui.w.Event("submit",{bubbles:true,cancelable:true}));await flush();
     assert.equal(ui.confirms.length,1);assert.equal(ui.posts().length,0);
     assert.equal(ui.d.getElementById("goo-config-panel").hidden,false);
+  }finally{ui.dom.window.close();}
+});
+
+// ---- no loader keeps saying "Loading" ---------------------------------------
+async function statusPage(status,moduleEnabled="true"){
+  const html=expandLoops(read("templates/consent_global_opt_out.html")).replace(/\{%[\s\S]*?%\}/g,"").replace(/\{\{[\s\S]*?\}\}/g,"");
+  const dom=new JSDOM(html,{url:"https://lightwork.test/consent/global-opt-out",runScripts:"outside-only"});
+  const w=dom.window,d=w.document,calls=[];
+  Object.defineProperty(w,"crypto",{value:webcrypto});w.TextEncoder=TextEncoder;
+  const shell=d.getElementById("global-opt-out-shell");
+  shell.setAttribute("data-api-base","/api/v1/consent/global-opt-out");shell.setAttribute("data-can-admin","true");shell.setAttribute("data-can-audit","true");
+  shell.setAttribute("data-module-enabled",moduleEnabled);
+  d.getElementById("goo-table").innerHTML='<p class="muted">Loading…</p>';
+  w.mvErrorText=(failure,action)=>"Could not "+action+". Try again later.";
+  w.fetch=async url=>{calls.push(url);return status();};
+  loadShell(w);
+  w.eval(read("static/lightwork-consent-workbench.js"));
+  w.eval(read("static/lightwork-consent-global-opt-out.js"));
+  await flush();
+  return {dom,d,calls,table:()=>d.getElementById("goo-table").textContent};
+}
+
+test("a failed availability check replaces the opt-out list's Loading with what happened",async()=>{
+  const ui=await statusPage(()=>reply(503,{detail:"unavailable"}));
+  try{assert.equal(ui.table(),"Could not load opt-out set-ups. Try again later.");}finally{ui.dom.window.close();}
+});
+
+test("opt-out that is on but not ready says when set-ups will appear",async()=>{
+  const ui=await statusPage(()=>reply(200,{enabled:true,readiness:{ready:false}}));
+  try{assert.equal(ui.table(),"Opt-out set-ups appear here once your banner is published and a website or app key exists.");}finally{ui.dom.window.close();}
+});
+
+test("a turned-off opt-out module starts no checks and shows no red sentence under its gate",async()=>{
+  const ui=await statusPage(()=>{throw new Error("no request expected");},"false");
+  try{
+    assert.deepEqual(ui.calls,[]);
+    assert.equal(ui.d.getElementById("goo-runtime-status").textContent,"");
   }finally{ui.dom.window.close();}
 });

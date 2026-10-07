@@ -84,6 +84,14 @@ class VendorManagementConfigError(VendorManagementError):
     """The feature is not enabled or configured safely."""
 
 
+class QuestionnaireResponsesUnavailable(VendorManagementError):
+    """A questionnaire's stored replies could not be checked."""
+
+
+class QuestionnaireLinkUnavailable(VendorManagementError):
+    """An existing public link could not be safely retired."""
+
+
 def get_vendor_management_config() -> dict[str, Any]:
     from .config import load_global_config
 
@@ -131,6 +139,30 @@ def _text(value: object, label: str, limit: int) -> str:
     return text
 
 
+def _public_vendor(record: dict[str, Any]) -> dict[str, Any]:
+    """Project a vendor without bearer links, including its link history.
+
+    The exact form address is returned only by the create/replace operation.
+    Subsequent reads and unrelated writes carry a stable, non-authorizing
+    request id so a person can select a link to replace without learning it.
+    """
+    projected = dict(record)
+    questionnaires = []
+    for row in record.get("questionnaires") or []:
+        if not isinstance(row, dict):
+            raise RecordLookupUnavailable("vendor questionnaire entry is invalid")
+        token = row.get("token")
+        if not isinstance(token, str) or not token:
+            raise RecordLookupUnavailable("vendor questionnaire token is invalid")
+        visible = {key: value for key, value in row.items()
+                   if key not in {"token", "previous_links"}}
+        visible["request_id"] = lookup_digest(token)
+        visible["previous_count"] = len(row.get("previous_links") or [])
+        questionnaires.append(visible)
+    projected["questionnaires"] = questionnaires
+    return projected
+
+
 def _vendor_id(name: str) -> str:
     return f"VMR-{_sha256(name.strip().lower())[:24]}"
 
@@ -158,7 +190,7 @@ def register_vendor(
         "category": _text(category, "category", 128),
         "criticality": criticality,
         "owner": _text(owner, "owner", 256),
-        "status": "active",
+        "status": "under_review",
         "links": [],
         "questionnaires": [],
         "monitoring_notes": [],
@@ -180,6 +212,9 @@ def set_vendor_status(
     *,
     actor: str,
     expected_revision: int,
+    effect_guard=None,
+    assessment_id: str | None = None,
+    assessment_revision: int | None = None,
 ) -> dict[str, Any]:
     _require_enabled()
     if status not in STATUSES:
@@ -189,16 +224,45 @@ def set_vendor_status(
     def mutate(value: dict[str, Any]) -> None:
         value["status"] = status
 
-    saved = _VENDORS.update(
-        _text(vendor_id, "vendor_id", 64),
-        mutate,
-        expected_revision=int(expected_revision),
-        action="set_vendor_status",
-        actor=operator,
-    )
+    identifier = _text(vendor_id, "vendor_id", 64)
+    current = _VENDORS.get(identifier)
+    if current is None:
+        raise KeyError(f"vendor is not registered: {vendor_id}")
+    from contextlib import nullcontext
+
+    from .third_party_lifecycle import ThirdPartyLifecycleError
+    scope = nullcontext(None)
+    if status == "active" and current.get("status") != "active":
+        from .paths import current_tenant_id_strict, data_dir
+        from .third_party_lifecycle import ThirdPartyLifecycleError, ThirdPartyLifecycleStore
+        tenant = current_tenant_id_strict()
+        if not tenant:
+            raise VendorManagementError("Select the vendor's workspace before activating it.")
+        try:
+            lifecycle = ThirdPartyLifecycleStore(data_dir("third_party_management", "third-party-lifecycle.sqlite3", tenant=tenant))
+            scope = lifecycle.activation_scope(tenant, identifier)
+        except ThirdPartyLifecycleError as exc:
+            raise VendorManagementError("Turn on Third-party lifecycle and complete this vendor's assessment before activation.") from exc
+    try:
+        with scope as evaluation:
+            def checked_mutate(value):
+                if effect_guard is not None:
+                    effect_guard()
+                if status == "active" and value.get("status") != "active" and evaluation is None:
+                    raise VendorManagementError("The vendor status changed. Review its latest assessment before activation.")
+                mutate(value)
+                if evaluation is not None:
+                    if ((assessment_id is not None and evaluation["assessment_id"] != assessment_id)
+                            or (assessment_revision is not None and evaluation["revision"] != assessment_revision)):
+                        raise VendorManagementError("This vendor's evaluated assessment changed. Review activation again.")
+                    value["activation_assessment"] = evaluation
+            saved = _VENDORS.update(identifier, checked_mutate, expected_revision=int(expected_revision),
+                action="set_vendor_status", actor=operator)
+    except ThirdPartyLifecycleError as exc:
+        raise VendorManagementError(str(exc)) from exc
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def link_vendor_record(
@@ -238,7 +302,7 @@ def link_vendor_record(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def request_questionnaire(
@@ -307,7 +371,73 @@ def request_questionnaire(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return {**dict(saved), "form_path": f"/form/{token}"}
+    return {**_public_vendor(saved), "form_path": f"/form/{token}"}
+
+
+def replace_questionnaire_link(
+    vendor_id: str,
+    request_id: str,
+    *,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """Replace one full or compromised form link without losing earlier replies.
+
+    The request ID is the digest of the current token, never the token itself.
+    Closing the old form happens inside the governed record's CAS mutation.
+    Its closure marker is durable and checked by append under the form lock, so
+    an in-flight submission cannot land *after* closure. A failed record write
+    can leave the old link closed; retrying this action repairs that safe state.
+    """
+    _require_enabled()
+    from . import form_store
+
+    if not isinstance(request_id, str) or len(request_id) != 64 or any(
+        char not in "0123456789abcdef" for char in request_id
+    ):
+        raise ValueError("questionnaire selection is invalid")
+    operator = _text(actor, "actor", 256)
+    token = secrets.token_urlsafe(24)
+
+    def mutate(value: dict[str, Any]) -> None:
+        rows = list(value.get("questionnaires") or [])
+        matches = [row for row in rows if isinstance(row, dict) and hmac.compare_digest(
+            lookup_digest(str(row.get("token") or "")), request_id,
+        )]
+        if len(matches) != 1:
+            raise KeyError("questionnaire link is no longer active")
+        current = matches[0]
+        old_token = str(current.get("token") or "")
+        previous = current.get("previous_links") or []
+        if not isinstance(previous, list) or any(
+            not isinstance(entry, dict) or not form_store.valid_token(entry.get("token"))
+            for entry in previous
+        ):
+            raise QuestionnaireLinkUnavailable("questionnaire history is unavailable")
+        try:
+            form_store.close_token(old_token)
+        except (OSError, form_store.FormStoreUnavailable, ValueError) as exc:
+            raise QuestionnaireLinkUnavailable("questionnaire link could not be replaced") from exc
+        now = time.time()
+        previous.append({
+            "token": old_token,
+            "requested_by": current.get("requested_by"),
+            "requested_at": current.get("requested_at"),
+            "replaced_by": operator,
+            "replaced_at": now,
+        })
+        current.update(token=token, status="sent", requested_by=operator,
+                       requested_at=now, previous_links=previous)
+        value["questionnaires"] = rows
+
+    saved = _VENDORS.update(
+        _text(vendor_id, "vendor_id", 64), mutate,
+        expected_revision=int(expected_revision),
+        action="replace_questionnaire_link", actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"vendor is not registered: {vendor_id}")
+    return {**_public_vendor(saved), "form_path": f"/form/{token}"}
 
 
 def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
@@ -327,17 +457,50 @@ def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
             # Cursor "0" = everything; "" would be a baseline-only call
             # that returns no rows at all.
             submissions, _cursor = form_store.since(token, "0")
-        except Exception:
-            submissions = []
+        except Exception as exc:
+            raise QuestionnaireResponsesUnavailable(
+                "questionnaire replies could not be checked"
+            ) from exc
         kind = str(row.get("assessment_type") or "")
+        previous_links = []
+        saved_history = row.get("previous_links") or []
+        if not isinstance(saved_history, list) or any(
+            not isinstance(previous, dict) or not form_store.valid_token(previous.get("token"))
+            for previous in saved_history
+        ):
+            raise QuestionnaireResponsesUnavailable("questionnaire history is unavailable")
+        for previous in saved_history:
+            previous_token = str(previous.get("token") or "")
+            try:
+                old_submissions, _cursor = form_store.since(previous_token, "0")
+            except Exception as exc:
+                raise QuestionnaireResponsesUnavailable(
+                    "questionnaire replies could not be checked"
+                ) from exc
+            previous_links.append({
+                "request_id": lookup_digest(previous_token),
+                "status": "replaced",
+                "requested_at": previous.get("requested_at"),
+                "requested_by": previous.get("requested_by"),
+                "replaced_at": previous.get("replaced_at"),
+                "replaced_by": previous.get("replaced_by"),
+                "reply_count": len(old_submissions),
+                "submissions": old_submissions[-10:],
+                "score": _score_submission(kind, old_submissions[-1]) if old_submissions else None,
+            })
         out.append(
             {
+                "request_id": lookup_digest(token),
                 "assessment_type": kind,
-                "status": "answered" if submissions else row.get("status"),
+                "questions": [{"id": question.id, "text": question.text}
+                              for question in _template_questions(kind)],
+                "status": "replaced" if form_store.is_closed(token) else
+                          "answered" if submissions else row.get("status"),
                 "requested_at": row.get("requested_at"),
                 "requested_by": row.get("requested_by"),
-                "form_path": f"/form/{token}",
-                "submissions": submissions[:10],
+                "reply_count": len(submissions),
+                "submissions": submissions[-10:],
+                "previous_links": previous_links,
                 # Latest submission scored against the template's risk
                 # answers -- the questionnaire's inherent-risk read-back.
                 "score": (
@@ -384,7 +547,7 @@ def record_monitoring_note(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def record_vendor_contract(
@@ -441,7 +604,7 @@ def record_vendor_contract(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def contract_renewals(
@@ -564,6 +727,8 @@ def questionnaire_for_token(token: str) -> dict[str, Any] | None:
         raise RecordLookupUnavailable("vendor questionnaire association is ambiguous")
     kind = str(matches[0].get("assessment_type") or "")
     from . import form_store
+    if form_store.is_closed(needle):
+        return None
     questions = _template_questions(kind)
     if len(questions) > int(getattr(form_store, "_MAX_FIELDS", 50)) - 1:
         raise RecordLookupUnavailable("vendor questionnaire exceeds the current submission field bound")
@@ -599,7 +764,7 @@ def prepare_questionnaire_index(*, batches: int = 1, rebuild: bool = False):
 def get_vendor(vendor_id: str) -> dict[str, Any] | None:
     _require_enabled()
     record = _VENDORS.get(_text(vendor_id, "vendor_id", 64))
-    return None if record is None else dict(record)
+    return None if record is None else _public_vendor(record)
 
 
 def list_vendors(*, status: str | None = None) -> list[dict[str, Any]]:
@@ -609,7 +774,7 @@ def list_vendors(*, status: str | None = None) -> list[dict[str, Any]]:
     rows = _VENDORS.list(limit=_SCAN_LIMIT)
     rows.sort(key=lambda row: str(row.get("name") or "").lower())
     return [
-        dict(row) for row in rows
+        _public_vendor(row) for row in rows
         if status is None or row.get("status") == status
     ]
 

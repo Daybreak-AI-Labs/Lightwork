@@ -11,15 +11,15 @@ that can be described semantically ("click the Login button"), and
 computer for tasks where the UI isn't a normal DOM (desktop apps,
 canvas-based interfaces, anti-bot challenges).
 
-Persistent browser context across actions: the tool keeps a single
-chromium instance alive in a module-level handle. Closed at the end
-of the goal via ``close_browser()``.
+Browser context persists across actions in one goal. Separate goals, users,
+and workspaces never share a page or cookies; goal cleanup closes the context.
 
 Session persistence: cookies + localStorage are saved to disk only when
 ``MAVERICK_BROWSER_STATE`` explicitly points at a per-task profile file.
 When enabled, the state file is mode 0600, checkpointed after navigation,
 on the ``save_session`` action, and at interpreter exit, then reloaded
-when the next context starts. Disable with ``MAVERICK_BROWSER_NO_PERSIST=1``.
+when the next standalone context starts. Goal-scoped contexts never use the
+shared file. Disable with ``MAVERICK_BROWSER_NO_PERSIST=1``.
 
 Safety:
   - All navigations are allow-listed by default to ``http(s)://`` URLs.
@@ -28,8 +28,10 @@ Safety:
 """
 from __future__ import annotations
 
+import asyncio
 import atexit
 import base64
+import contextvars
 import copy
 import json
 import logging
@@ -37,6 +39,8 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
@@ -98,10 +102,22 @@ _DEFAULT_STATE_PATH = data_dir("browser", "state.json")
 
 
 def _persist_enabled() -> bool:
-    """Persistence is opt-in via an explicit per-task state file."""
+    """Only standalone use may load an explicitly configured state file.
+
+    An environment-wide path cannot safely identify a user's goal or workspace.
+    Goal sessions start fresh; browser_auth_vault is the explicit credential
+    path for customer work.
+    """
+    from ..connections import current_principal
+    from ..logging_config import current_goal_id
+    from ..paths import current_tenant_id_strict
+
     return (
         os.environ.get("MAVERICK_BROWSER_NO_PERSIST") != "1"
         and bool(os.environ.get("MAVERICK_BROWSER_STATE"))
+        and current_goal_id() is None
+        and current_principal() is None
+        and current_tenant_id_strict() is None
     )
 
 
@@ -176,6 +192,9 @@ class _BrowserSession:
 
     def __init__(self):
         self._lock = threading.Lock()
+        # Freeze this at creation: atexit/goal cleanup runs after the caller's
+        # context may have been reset and must not turn persistence back on.
+        self._allow_persist = _persist_enabled()
         self._playwright = None
         self._browser = None
         self._context = None
@@ -275,7 +294,7 @@ class _BrowserSession:
                 "Chrome/126.0.0.0 Safari/537.36"
             ),
             viewport={"width": 1280, "height": 800},
-            storage_state=_restore_state_arg(),
+            storage_state=_restore_state_arg() if self._allow_persist else None,
         )
         # Network-level backstop: every OTHER guard in this module only
         # re-checks page.url after an action completes, so a page's own
@@ -570,7 +589,7 @@ class _BrowserSession:
     def save_state(self) -> bool:
         """Persist cookies + localStorage to disk. Returns True if written."""
         with self._lock:
-            if self._context is None or not _persist_enabled():
+            if self._context is None or not self._allow_persist:
                 return False
             p = _state_path()
             try:
@@ -612,33 +631,96 @@ class _BrowserSession:
             self._page = self._context = self._browser = self._playwright = None
 
 
-_session: _BrowserSession | None = None
+_BrowserScope = tuple[str | None, str | None, int | None]
+_sessions: dict[_BrowserScope, _BrowserSession] = {}
+_workers: dict[_BrowserScope, ThreadPoolExecutor] = {}
+_closing: set[_BrowserScope] = set()
 _session_lock = threading.Lock()
 
 
+def _session_scope() -> _BrowserScope:
+    from ..connections import current_principal
+    from ..logging_config import current_goal_id
+    from ..paths import current_tenant_id_strict
+
+    return current_tenant_id_strict(), current_principal(), current_goal_id()
+
+
 def _get_session() -> _BrowserSession:
-    global _session
+    scope = _session_scope()
     with _session_lock:
-        if _session is None:
-            _session = _BrowserSession()
-        return _session
+        if scope in _closing:
+            raise RuntimeError("browser session is closing")
+        if scope not in _sessions:
+            _sessions[scope] = _BrowserSession()
+        return _sessions[scope]
+
+
+def _close_scope(scope: _BrowserScope) -> None:
+    with _session_lock:
+        session = _sessions.pop(scope, None)
+    try:
+        if session is not None:
+            try:
+                session.save_state()
+            finally:
+                session.close()
+    finally:
+        from .aria_navigate import _clear_scope
+
+        _clear_scope(scope)
 
 
 def close_browser() -> None:
-    """Tear down the persistent browser session. Idempotent."""
-    global _session
+    """Tear down only the caller's browser session. Idempotent."""
+    _close_scope(_session_scope())
+
+
+async def run_on_browser_worker(fn: Callable[[dict[str, Any]], str], args: dict[str, Any]) -> str:
+    """Keep sync Playwright and its page on one thread for this customer goal."""
+    scope = _session_scope()
     with _session_lock:
-        if _session is not None:
-            _session.save_state()
-            _session.close()
-            _session = None
+        if scope in _closing:
+            return "ERROR: browser session is closing; no action was sent"
+        worker = _workers.get(scope)
+        if worker is None:
+            worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lightwork-browser")
+            _workers[scope] = worker
+    context = contextvars.copy_context()
+    return await asyncio.get_running_loop().run_in_executor(worker, context.run, fn, args)
+
+
+async def close_goal_browsers(goal_id: int) -> None:
+    """Close each principal's browser on its Playwright worker at goal end."""
+    tenant = _session_scope()[0]
+    with _session_lock:
+        scopes = [scope for scope in _sessions.keys() | _workers.keys()
+                  if scope[0] == tenant and scope[2] == goal_id]
+        _closing.update(scopes)
+    try:
+        for scope in scopes:
+            with _session_lock:
+                worker = _workers.get(scope)
+            if worker is None:
+                _close_scope(scope)
+            else:
+                await asyncio.get_running_loop().run_in_executor(worker, _close_scope, scope)
+                with _session_lock:
+                    _workers.pop(scope, None)
+                worker.shutdown(wait=False)
+    finally:
+        with _session_lock:
+            _closing.difference_update(scopes)
 
 
 def _save_on_exit() -> None:
-    s = _session
-    if s is not None:
+    with _session_lock:
+        sessions = tuple(_sessions.values())
+        _sessions.clear()
+    for session in sessions:
         try:
-            s.save_state()
+            session.save_state()
+            session.close()
         except Exception:
             pass
 
@@ -1303,8 +1385,11 @@ def _run_browser_action(args: dict[str, Any]) -> str:
     return dispatch()
 
 
-def browser() -> Tool:
+def browser(*, managed: bool = False) -> Tool:
     """Factory: builds the browser tool."""
+    async def managed_action(args: dict[str, Any]) -> str:
+        return await run_on_browser_worker(_run_browser_action, args)
+
     return Tool(
         name="browser",
         description=(
@@ -1318,5 +1403,5 @@ def browser() -> Tool:
             "use the 'computer' tool for non-DOM UIs."
         ),
         input_schema=_BROWSER_INPUT_SCHEMA,
-        fn=_run_browser_action,
+        fn=managed_action if managed else _run_browser_action,
     )

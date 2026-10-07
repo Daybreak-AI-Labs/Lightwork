@@ -41,25 +41,39 @@ def create_ai_cloud_agent_governance_workbench_router(
             None,
         )
         probe = selected if callable(selected) else enabled_probe
+        runtime_factory = getattr(
+            request.app.state,
+            "ai_cloud_agent_governance_runtime_factory",
+            None,
+        )
         available = False
-        configuration_available = tenant != "" and callable(probe)
-        if configuration_available:
+        # Why the page cannot be used, so the copy can say the true thing:
+        # "workspace" (none selected), "not_connected" (nothing on this
+        # installation supplies the service) or "unreachable" (it failed).
+        unavailable_reason = ""
+        if not callable(probe) or not callable(runtime_factory):
+            unavailable_reason = "not_connected"
+        elif tenant == "":
+            unavailable_reason = "workspace"
+        else:
             try:
                 result = probe(tenant)
                 if type(result) is bool:
                     available = result
                 else:
-                    configuration_available = False
+                    unavailable_reason = "unreachable"
             except (KeyboardInterrupt, SystemExit):
                 raise
             except Exception:
-                configuration_available = False
+                unavailable_reason = "unreachable"
+        configuration_available = unavailable_reason == ""
         response = templates.TemplateResponse(
             request,
             "ai_cloud_agent_governance.html",
             {
                 "ai_cloud_agent_governance_enabled": available,
                 "ai_cloud_agent_governance_configuration_available": (configuration_available),
+                "cag_unavailable_reason": unavailable_reason,
                 # Only hides buttons a role cannot use; the API still enforces each.
                 "cag_can_operate": has_permission(request, "operate"),
                 "cag_can_admin": has_permission(request, "admin"),

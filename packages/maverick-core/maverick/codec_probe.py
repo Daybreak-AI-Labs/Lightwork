@@ -30,6 +30,7 @@ Anthropic counting API live alongside; tests use a trivial stub.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -137,37 +138,100 @@ def tiktoken_counter(encoding: str = "cl100k_base") -> Counter:
     """A free, local BPE token counter (OpenAI's tiktoken). Not Anthropic's exact
     vocabulary, but a faithful proxy for the question that matters here -- whether
     rare sentinel codes tokenize worse than the common English they replace
-    (true of every BPE tokenizer trained on natural text). Needs ``pip install
-    tiktoken``."""
+    (true of every BPE tokenizer trained on natural text). The default
+    vocabulary and tokenizer dependency ship with Lightwork and
+    requires neither a cache download nor a post-installation package change."""
+    if encoding == "cl100k_base":
+        from .local_token_counter import counter
+
+        return counter()
     import tiktoken
 
     enc = tiktoken.get_encoding(encoding)
     return lambda text: len(enc.encode(text))
 
 
-def anthropic_counter(model: str) -> Counter:
-    """The exact Anthropic token count, via the messages counting API. Needs an
-    API key and network -- use this on the Mac mini for the authoritative number;
-    use ``tiktoken_counter`` for a free offline proxy."""
-    from anthropic import Anthropic
+def anthropic_counting_available(model: str) -> bool:
+    """Read direct-connection eligibility without constructing SDK clients."""
+    from urllib.parse import urlsplit
 
-    # Metering is intentionally one request per count operation. The caller
-    # can rerun a measurement; an SDK retry would create unrecorded API work.
-    client = Anthropic(max_retries=0)
+    from . import config
+    from .llm import LLM, _parse_spec, require_model_allowed
+
+    provider, _ = _parse_spec(model)
+    if provider != "anthropic" or config.config_source_errors(include_tenant=True):
+        return False
+    require_model_allowed(model)
+    connection = LLM(model=model)._provider_client_config(provider)
+    location = urlsplit(connection.base_url or "https://api.anthropic.com")
+    return bool((connection.api_key or connection.environment_dict().get("ANTHROPIC_AUTH_TOKEN"))
+                and location.scheme == "https" and location.hostname == "api.anthropic.com"
+                and location.port in (None, 443) and location.path in ("", "/"))
+
+
+def anthropic_counter(model: str, *, official_only: bool = False,
+                      before_count: Callable[[], None] | None = None) -> Counter:
+    """Use the configured Anthropic counting connection, not ambient SDK defaults.
+
+    Counts are provider estimates, not a receipt for generated-message billing.
+    A connection or workspace change refuses the remaining measurement. The
+    optional dashboard guard also checks current learning and account authority.
+    """
+    from urllib.parse import urlsplit
+
+    from . import config
+    from .llm import LLM, MODEL_OPUS, MODEL_OPUS_FAST, _parse_spec, require_model_allowed
+
+    provider, model_id = _parse_spec(model)
+    if provider != "anthropic":
+        raise ValueError("Provider counting requires an Anthropic model. Use the local estimate instead.")
+    require_model_allowed(model)
+    if config.config_source_errors(include_tenant=True):
+        raise RuntimeError("The current AI connection settings could not be read. No messages were sent.")
+    llm = LLM(model=model)
+    adapter, original_route = llm._dispatch_client(provider)
+    if official_only:
+        location = urlsplit(str(adapter.client.base_url))
+        if (location.scheme != "https" or location.hostname != "api.anthropic.com"
+                or location.port not in (None, 443) or location.path not in ("", "/")):
+            raise ValueError("This connection uses a gateway. Use the local estimate; its counting service is not qualified.")
+    if model_id == MODEL_OPUS_FAST:
+        model_id = MODEL_OPUS
+    counts: OrderedDict[str, int] = OrderedDict()
 
     def _count(text: str) -> int:
-        resp = client.messages.count_tokens(
-            model=model, messages=[{"role": "user", "content": text or " "}])
-        return int(resp.input_tokens)
+        if before_count is not None:
+            before_count()
+        require_model_allowed(model)
+        if config.config_source_errors(include_tenant=True):
+            raise RuntimeError("The current AI connection settings could not be read. No further messages were sent.")
+        current, route = llm._dispatch_client(provider)
+        if route != original_route:
+            raise RuntimeError("The AI connection or workspace changed. No further messages were sent; review a new measurement.")
+        if text in counts:
+            counts.move_to_end(text)
+            return counts[text]
+        response = current.client.messages.count_tokens(
+            model=model_id, messages=[{"role": "user", "content": text or " "}])
+        value = response.input_tokens
+        if type(value) is not int or value < 0:
+            raise ValueError("The provider did not return a valid token count.")
+        if len(text) <= 16000:
+            counts[text] = value
+            if len(counts) > 256:
+                counts.popitem(last=False)
+        return value
 
     return _count
 
 
-def resolve_counter(*, encoding: str = "cl100k_base", model: str | None = None) -> Counter:
+def resolve_counter(*, encoding: str = "cl100k_base", model: str | None = None,
+                    official_only: bool = False,
+                    before_count: Callable[[], None] | None = None) -> Counter:
     """Pick a token counter: the Anthropic API when a ``model`` is given (exact),
     else the local tiktoken proxy. Raises a helpful error if neither is available."""
     if model:
-        return anthropic_counter(model)
+        return anthropic_counter(model, official_only=official_only, before_count=before_count)
     try:
         return tiktoken_counter(encoding)
     except Exception as exc:  # pragma: no cover -- environment-dependent
@@ -179,5 +243,5 @@ def resolve_counter(*, encoding: str = "cl100k_base", model: str | None = None) 
 
 __all__ = [
     "TokenDelta", "Counter", "measure", "codebook_token_cost",
-    "tiktoken_counter", "anthropic_counter", "resolve_counter",
+    "tiktoken_counter", "anthropic_counter", "anthropic_counting_available", "resolve_counter",
 ]

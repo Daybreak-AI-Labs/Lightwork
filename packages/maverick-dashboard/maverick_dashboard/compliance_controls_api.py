@@ -350,13 +350,13 @@ class RetentionIn(BaseModel):
 
 
 def _current_retention() -> dict[str, int | None]:
-    from maverick.config import load_config
+    from maverick.config import load_global_config
 
-    section = (load_config() or {}).get("retention") or {}
+    section = (load_global_config() or {}).get("retention") or {}
     out: dict[str, int | None] = {}
     for key, _label in RETENTION_FIELDS:
         value = section.get(key) if isinstance(section, dict) else None
-        out[key] = value if isinstance(value, int) and not isinstance(value, bool) else None
+        out[key] = value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
     return out
 
 
@@ -376,26 +376,37 @@ async def retention_settings(request: Request) -> dict:
 @router.post("/retention")
 async def save_retention(request: Request, body: RetentionIn) -> dict:
     require_global_permission(request, "admin")
+    from .retention_maintenance import authorize
+
+    authorize(request, request.headers.get("X-Lightwork-Retention-Context"))
     updates = {
-        ("retention", key): value
-        for key, value in body.model_dump().items()
-        if value is not None
+        ("retention", key): 0 if value is None else value
+        for key, value in body.model_dump(exclude_unset=True).items()
     }
     if not updates:
         raise HTTPException(status_code=422, detail="Choose at least one period.")
     await _save_recorded(request, updates)
-    return {"saved": True, "message": "Retention periods saved."}
+    effective = await run_in_threadpool(_current_retention)
+    if any(effective[key] != (value or None) for (_, key), value in updates.items()):
+        raise HTTPException(409, {
+            "message": "The saved preference is overridden by installation policy. Effective periods have not changed; ask your installation administrator.",
+            "effective": effective,
+        })
+    return {"saved": True, "effective": effective, "message": "Retention periods saved. Keep until I choose disables automatic pruning for that record type."}
 
 
 def _summarize_retention(report: dict) -> dict:
     if report.get("status") == "disabled":
         return {"applied": False, "removed": 0, "message": "No retention periods are set yet. Choose them first."}
     removed = 0
+    unresolved = []
 
     def walk(value: Any) -> None:
         nonlocal removed
         if isinstance(value, dict):
             for k, v in value.items():
+                if (k in {"error", "failed", "skipped", "unknown"} and v) or (k == "status" and v in {"partial", "unknown", "failed", "running"}):
+                    unresolved.append(k)
                 counted = str(k).startswith(("deleted", "removed"))
                 if counted and isinstance(v, int) and not isinstance(v, bool):
                     removed += v
@@ -409,40 +420,83 @@ def _summarize_retention(report: dict) -> dict:
 
     walk(report)
     return {
-        "applied": True,
+        "applied": not unresolved,
         "removed": removed,
+        "unresolved": bool(unresolved),
         "message": (
-            f"Retention applied. {removed} old record(s) were removed."
+            f"Retention needs attention. {removed} removals are confirmed; some records were skipped or have an unknown outcome. Review the per-store receipt before retrying."
+            if unresolved else f"Retention applied. {removed} old record(s) were removed."
             if removed
             else "Retention applied. Nothing was old enough to remove."
         ),
     }
 
 
-@router.post("/retention/apply")
-async def apply_retention(request: Request) -> dict:
-    """Run the retention rules now (every workspace; global admin)."""
+class RetentionApplyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    confirm_no_holds: bool = False
+    retry: bool = False
+    context: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+
+
+def _retention_response(value):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(value, headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/retention/preview")
+async def preview_retention(request: Request) -> dict:
     require_global_permission(request, "admin")
-    from maverick.audit import AuditRefused, audit_event
-    from maverick.audit.retention import enforce
+    from . import retention_maintenance
 
-    from .auth import caller_principal
+    operation = request.headers.get("X-Lightwork-Retention-Operation")
+    if operation is not None and not re.fullmatch(r"[a-f0-9]{32}", operation):
+        raise HTTPException(422, "The preview reference is invalid. Reopen retention.")
+    value = await run_in_threadpool(retention_maintenance.preview, request,
+                                   request.headers.get("X-Lightwork-Retention-Context"), operation_id=operation)
+    return _retention_response(value)
 
-    # Recorded before anything is removed: a refused record removes nothing.
+
+@router.get("/retention/reviews")
+async def retention_reviews(request: Request):
+    from . import retention_maintenance
+
+    return _retention_response(await run_in_threadpool(retention_maintenance.history, request))
+
+
+@router.get("/retention/runs/{run_id}")
+async def retention_receipt(request: Request, run_id: str) -> dict:
+    require_global_permission(request, "admin")
+    from . import retention_maintenance
+
+    return _retention_response(await run_in_threadpool(retention_maintenance.read, request, run_id))
+
+
+@router.post("/retention/apply")
+async def apply_retention(request: Request, body: RetentionApplyIn) -> dict:
+    """Apply a reviewed, frozen cutoff in its actual workspace scope."""
+    require_global_permission(request, "admin")
+    from maverick.audit import AuditRefused
+
+    from . import retention_maintenance
+
+    if body.retry:
+        raise HTTPException(409, "Read the original result. A new deletion needs a fresh preview and separate confirmation.")
     try:
-        await run_in_threadpool(
-            lambda: audit_event("retention_applied", agent="dashboard", _global=True,
-                                actor=caller_principal(request) or "local administrator",
-                                source="compliance"))
+        receipt = await run_in_threadpool(
+            retention_maintenance.apply, request, body.review_id,
+            confirm_holds=body.confirm_no_holds, expected_context=body.context,
+            expected_revision=body.expected_revision, operation_id=body.operation_id,
+        )
     except AuditRefused as exc:
-        raise HTTPException(
-            status_code=503, detail="This could not be recorded, so nothing was removed."
-        ) from exc
-    try:
-        report = await run_in_threadpool(enforce)
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Retention could not be applied.") from exc
-    return _summarize_retention(report if isinstance(report, dict) else {})
+        raise HTTPException(503, "The deletion approval could not be recorded; no new store was started.") from exc
+    return _retention_response({"applied": receipt["status"] == "completed", "removed": receipt["removed"],
+                               "unresolved": receipt["unresolved"], "message": receipt["message"], "receipt": receipt})
 
 
 # ---- People: export / erase ---------------------------------------------
@@ -522,6 +576,10 @@ async def export_person(request: Request, person: PersonIn) -> Response:
     """Download everything held about one person (right of access)."""
     require_permission(request, "admin")
     channel, user = _validated(person)
+    from .content_access import require_employee_content
+    resource_id = json.dumps([channel, user], separators=(",", ":"))
+    require_employee_content(request, "channel:" + resource_id,
+                             resource_kind="subject_data", resource_id=resource_id)
     from maverick.audit import AuditRefused, audit_event
     from maverick.dsar import export_subject_data
 
@@ -705,8 +763,11 @@ async def download_soc2(request: Request) -> Response:
     require_permission(request, "admin")
     from maverick.soc2 import collect_soc2_evidence
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "soc2")
     evidence = await run_in_threadpool(collect_soc2_evidence)
-    return _attachment(evidence, "lightwork-soc2-snapshot.json")
+    return report_downloads.finish(request, "soc2", context, _attachment(evidence, "lightwork-soc2-snapshot.json"))
 
 
 @router.get("/downloads/ai-bom")
@@ -714,11 +775,14 @@ async def download_ai_bom(request: Request) -> Response:
     require_permission(request, "admin")
     from maverick import ai_bom
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "ai_inventory")
     try:
         document = await run_in_threadpool(ai_bom.export_ai_bom)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail="The AI inventory is not available.") from exc
-    return _attachment(document, "lightwork-ai-inventory.cdx.json")
+    return report_downloads.finish(request, "ai_inventory", context, _attachment(document, "lightwork-ai-inventory.cdx.json"))
 
 
 def _assessment_id(value: str) -> str:
@@ -732,13 +796,16 @@ async def download_oscal(request: Request, assessment: str) -> Response:
     require_permission(request, "operate")
     from maverick import assessment_exports
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "oscal")
     try:
         document = await run_in_threadpool(
             assessment_exports.render_oscal_assessment_results, _assessment_id(assessment)
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="That assessment no longer exists.") from exc
-    return _attachment(document, "lightwork-assessment-results.oscal.json")
+    return report_downloads.finish(request, "oscal", context, _attachment(document, "lightwork-assessment-results.oscal.json"))
 
 
 @router.get("/downloads/soa")
@@ -746,13 +813,16 @@ async def download_soa(request: Request, assessment: str) -> Response:
     require_permission(request, "operate")
     from maverick import assessment_exports
 
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "soa")
     try:
         soa = await run_in_threadpool(
             assessment_exports.render_statement_of_applicability, _assessment_id(assessment)
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="That assessment no longer exists.") from exc
-    return Response(
+    response = Response(
         content=assessment_exports.soa_markdown(soa),
         media_type="text/markdown",
         headers={
@@ -760,6 +830,7 @@ async def download_soa(request: Request, assessment: str) -> Response:
             "Cache-Control": "no-store",
         },
     )
+    return report_downloads.finish(request, "soa", context, response)
 
 
 @router.get("/assessments")

@@ -18,24 +18,29 @@ Ops (each patch is a dict with an ``op`` key):
   one node field (anything but ``id``).
 - ``{"op": "set_flow_field", "field": "name", "value": ...}`` -- set a
   flow-level field (``name``/``start``/``notify``/``max_seconds``/
-  ``max_dollars``/``schedule``).
+  ``max_dollars``/``schedule``/``timezone``/``max_concurrent``/``inputs``).
 - ``{"op": "rewire", "id": "<id>", "field": "next", "to": "<id>|null"}`` --
-  repoint one routing edge (``next``/``if_true``/``if_false``/``on_error``).
+  repoint one routing edge (``next``/``if_true``/``if_false``/``on_error``/
+  ``on_expire``).
 """
 from __future__ import annotations
 
 from typing import Any
 
+from .draft import _sanitize_inputs
 from .ir import Flow, FlowNode, partition_draft_validation_errors
 
 PATCH_OPS = frozenset({"add_node", "remove_node", "set_field", "set_flow_field", "rewire"})
 
 _ROUTE_FIELDS = frozenset({"next", "if_true", "if_false", "on_error", "on_expire"})
-_FLOW_FIELDS = frozenset({"name", "start", "notify", "max_seconds", "max_dollars", "schedule"})
+_FLOW_FIELDS = frozenset({
+    "name", "start", "notify", "notify_on", "max_seconds", "max_dollars", "schedule",
+    "timezone", "max_concurrent", "inputs",
+})
 _NODE_FIELDS = frozenset({
     "kind", "next", "tool", "params", "brief", "condition", "if_true", "if_false",
-    "cases", "items", "var", "body", "limit", "concurrent", "branches", "prompt",
-    "choices", "seconds", "flow_ref", "retries", "on_error", "timeout", "output",
+    "cases", "items", "var", "body", "limit", "concurrent", "concurrency", "branches", "prompt",
+    "choices", "seconds", "flow_ref", "retries", "retry_backoff", "on_error", "timeout", "output",
     "label", "x", "y",
     # rich human-task fields (approval) -- documented in FLOW_SCHEMA_BLOCK, so
     # the copilot must be able to set them, else "make it expire / escalate /
@@ -87,6 +92,10 @@ def _remove_node(flow: Flow, p: dict) -> None:
         n.if_true = _heal(n.if_true, nid, successor)
         n.if_false = _heal(n.if_false, nid, successor)
         n.on_error = _heal(n.on_error, nid, successor)
+        n.on_expire = _heal(n.on_expire, nid, successor)
+        for case in n.cases:
+            if case.get("to") == nid:
+                case["to"] = successor
     if flow.start == nid:
         flow.start = successor or (next(iter(flow.nodes)) if flow.nodes else "")
 
@@ -112,8 +121,30 @@ def _set_field(flow: Flow, p: dict) -> None:
 def _set_flow_field(flow: Flow, p: dict) -> None:
     field = str(p.get("field") or "")
     _require(field in _FLOW_FIELDS, f"set_flow_field: field {field!r} is not editable")
+    value = p.get("value")
+    if field == "inputs":
+        _require(isinstance(value, list) and len(value) <= 32,
+                 "set_flow_field: inputs must be a list of at most 32 questions")
+        clean = _sanitize_inputs(value)
+        _require(len(clean) == len(value),
+                 "set_flow_field: each question needs a unique name and supported answer type")
+        value = clean
+    elif field == "max_concurrent":
+        _require(type(value) is int and 0 <= value <= 32,
+                 "set_flow_field: simultaneous runs must be between 0 and 32")
+    elif field == "timezone":
+        _require(isinstance(value, str) and len(value) <= 80,
+                 "set_flow_field: time zone must be a valid location name")
+        value = value.strip()
+        if value:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+            try:
+                ZoneInfo(value)
+            except (ValueError, ZoneInfoNotFoundError) as e:
+                raise PatchError("set_flow_field: unknown time zone") from e
     d = flow.to_dict()
-    d[field] = p.get("value")
+    d[field] = value
     try:
         updated = Flow.from_dict(d)
     except (TypeError, ValueError, KeyError) as e:
@@ -153,6 +184,8 @@ def describe_patch(p: dict) -> str:
     if op == "remove_node":
         return f"remove node {p.get('id', '?')}"
     if op == "set_field":
+        if p.get("field") == "concurrency":
+            return f"set items at once for {p.get('id', '?')} to {p.get('value') or 'Shared workflow limit'}"
         return f"set {p.get('id', '?')}.{p.get('field', '?')}"
     if op == "set_flow_field":
         return f"set flow.{p.get('field', '?')}"

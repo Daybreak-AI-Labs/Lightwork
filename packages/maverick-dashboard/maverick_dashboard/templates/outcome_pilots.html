@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Workflow pilots · Lightwork{% endblock %}
 {% block content %}
-<h1>Workflow pilots</h1>
-<p>Compare the same cases with and without AI. Plan the cases and acceptance criteria before work starts,
-  then record observed effort, corrections, cost evidence, and the current reviewed outcome.</p>
+{% from "_hero.html" import hero %}
+{{ hero('Your AI workforce', 'Workflow pilots',
+        lede='Compare the same cases with and without AI. Plan the cases and acceptance criteria before work starts,
+              then record observed effort, corrections, cost evidence, and the current reviewed outcome.',
+        compact=true) }}
 <p>These are your recorded observations. Provider invoice accuracy, customer acceptance of the pilot itself,
   and isolation from model training require separate evidence. <a href="/savings">View savings estimates</a>.</p>
 <style>
@@ -37,8 +39,15 @@
   .ov-entry-form .input { box-sizing:border-box;width:100%;max-width:100%; }
   .ov-entry-form fieldset { border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3); }
 </style>
-<div id="outcome-pilots" data-context="{{ pilot_context }}">
+<div id="outcome-pilots" data-context="{{ pilot_context }}" data-enabled="{{ 'true' if pilot_enabled else 'false' }}">
   <p id="op-status" role="status" aria-live="polite"></p>
+  <section class="panel" id="op-original-controls" aria-labelledby="op-original-heading">
+    <h2 id="op-original-heading">Check an original pilot request</h2>
+    <p>A lost reply can leave a saved or partly saved change. Read its original outcome before another save. This never repeats the request.</p>
+    <button type="button" class="btn" id="op-original-check">Check original outcome</button>
+    <div id="op-original-result" role="status" aria-live="polite"></div>
+  </section>
+  <section class="panel" id="op-guided-review" aria-live="polite"></section>
   <section class="panel" aria-labelledby="op-accounting-title">
     <h2 id="op-accounting-title">Outcome and cost accounting</h2>
     <p>Technical verification, human acceptance, and complete cost are reported separately. Failed, cancelled, and unresolved work remains in the denominator.</p>
@@ -83,7 +92,7 @@
         </div>
         <label>Evidence details<textarea class="input" name="evidence_note" required maxlength="4000" rows="3"></textarea></label>
         <label>Correction explanation<textarea class="input" name="correction_reason" maxlength="2000" rows="2" placeholder="Required when replacing the current baseline"></textarea></label>
-        <button type="submit" class="btn primary">Save baseline evidence</button>
+        <button type="submit" class="btn btn--primary">Save baseline evidence</button>
       </form>
     </details>
 
@@ -126,7 +135,7 @@
           </div>
         </fieldset>
         <label><input type="checkbox" name="complete_coverage"> Mark complete only after every cost family above is Included or Confirmed zero.</label>
-        <button type="submit" class="btn primary">Save delivered cost</button>
+        <button type="submit" class="btn btn--primary">Save delivered cost</button>
       </form>
     </details>
 
@@ -145,7 +154,7 @@
         </div>
         <label>Evidence details<textarea class="input" name="note" required maxlength="4000" rows="3"></textarea></label>
         <label>Correction explanation<textarea class="input" name="correction_reason" maxlength="2000" rows="2" placeholder="Required when replacing the same source entry"></textarea></label>
-        <button type="submit" class="btn primary">Save commercial evidence</button>
+        <button type="submit" class="btn btn--primary">Save commercial evidence</button>
       </form>
     </details>
   </section>
@@ -171,7 +180,7 @@
       <form id="op-prepare">
         <div class="op-grid">
           <label>Task name<input name="title" class="input" required maxlength="200"></label>
-          <label>Specialist with a reviewed deliverable<select name="domain" id="op-specialist" class="input" required><option value="">Choose a specialist</option></select></label>
+          <label>Agent or specialist with a reviewed result<select name="domain" id="op-specialist" class="input" required><option value="">Choose an agent or specialist</option></select></label>
           <label>Task instructions<textarea name="description" class="input" required maxlength="4000" rows="3"></textarea></label>
         </div>
         <button type="submit" class="btn">Save prepared task</button>
@@ -191,18 +200,27 @@
         </select></label>
         <label>Prior-exposure checks and remaining limitations<textarea class="input" name="prior_exposure_statement" id="op-prior-exposure" maxlength="2000" rows="3"></textarea></label>
       </div>
+      <div class="op-accounting-assurance">
+        <h3>Optional improvement release</h3>
+        <p>Connect this plan to a governed candidate before work starts. Lightwork checks the currently deployed baseline and freezes both release commitments with the selected cases. Use protected evaluation tasks and record prior-exposure checks. The task history does not yet verify which release served each case, so the resulting comparison remains exploratory.</p>
+        <label for="op-candidate">Candidate release</label>
+        <select id="op-candidate" name="candidate_id" class="input" disabled><option value="">No candidate release — workflow pilot</option></select>
+        <button type="button" class="btn" id="op-candidate-refresh">Check release readiness</button>
+        <p id="op-candidate-status" role="status" aria-live="polite">Open this plan to check whether release comparisons are available. A normal workflow pilot does not need a release connection.</p>
+      </div>
       <p>The exclusion mode requires a named account and task cases only. It prevents automatic local capture, donation and learning replay for the fixed evaluation group. It does not undo prior learning, control provider training or cover manually copied/relabelled data. State what was checked; do not assume new task IDs prove new content.</p>
       <div id="op-planned-cases"></div>
       <button type="button" class="btn" id="op-add-case">Add a case</button>
-      <button type="submit" class="btn primary">Save and freeze plan</button>
+      <button type="submit" class="btn btn--primary">Save and freeze plan</button>
     </form>
   </details>
   <details class="panel" id="op-review-panel"><summary>Independently review a pilot’s local learning policy</summary>
-    <p>An administrator who did not create the pilot checks that its test plan was fixed in advance and that its test tasks were kept out of automatic learning. The decision covers this installation only. It does not certify how the AI provider trains its models.</p>
+    <p>An administrator who did not create the pilot checks two things. Its test plan was fixed in advance, and its test tasks were kept out of automatic learning. The decision covers this installation only. It does not certify how the AI provider trains its models.</p>
     <label for="op-review-reference">Pilot to review</label>
     <select class="select" id="op-review-reference" aria-describedby="op-review-note"><option value="">Open this section to load pilots…</option></select>
     <p class="muted" id="op-review-note" role="status"></p>
     <button type="button" class="btn" id="op-review-load">Open review evidence</button>
+    <p>Review authority does not grant access to private employee tasks. Before opening a review with employee-owned sources, use <a href="/content-access">Content access</a> to request a purpose-bound, independently approved read for each source task. Expired or revoked access must be reviewed again.</p>
     <div id="op-independent-report"></div>
   </details>
 </div>

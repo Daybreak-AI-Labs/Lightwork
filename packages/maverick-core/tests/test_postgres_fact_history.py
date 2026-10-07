@@ -122,3 +122,45 @@ def test_gdpr_history_export_and_purge(temporal_world):
     assert k in removed
     assert w.fact_history_matching(tok) == {}
     assert w.fact_history(k) == []
+
+
+def test_revision_conflict_and_delete_recreate_parity(temporal_world):
+    from maverick.fact_revision import FactConflict
+
+    w = temporal_world
+    key = w._kp + "revision"
+    first = w.upsert_fact(key, "one", expected_revision=0)
+    second = w.upsert_fact(key, "two", expected_revision=first)
+    assert second > first
+    assert w.fact_record(key)["revision"] == second
+    history = w.fact_history(key)
+    with pytest.raises(FactConflict):
+        w.upsert_fact(key, "stale", expected_revision=first)
+    with pytest.raises(FactConflict):
+        w.delete_fact(key, expected_revision=first)
+    assert w.fact_history(key) == history
+    w.delete_fact(key, expected_revision=second)
+    third = w.upsert_fact(key, "three", expected_revision=0)
+    assert third > second
+    with pytest.raises(FactConflict):
+        w.delete_fact(key, expected_revision=second)
+
+
+def test_revision_and_browsing_are_exact_tenant_scoped(temporal_world):
+    from maverick.fact_revision import FactConflict
+    from maverick.paths import tenant_scope
+
+    w = temporal_world
+    key = w._kp + "tenant-revision"
+    with tenant_scope(tenant="revision-a"):
+        a_revision = w.upsert_fact(key, "a", expected_revision=0)
+    with tenant_scope(tenant="revision-b"):
+        assert w.fact_record(key) is None
+        b_revision = w.upsert_fact(key, "b", expected_revision=0)
+        with pytest.raises(FactConflict):
+            w.upsert_fact(key, "wrong", expected_revision=a_revision)
+        assert w.fact_record(key)["value"] == "b"
+    with tenant_scope(tenant="revision-a"):
+        with pytest.raises(FactConflict):
+            w.delete_fact(key, expected_revision=b_revision)
+        assert w.fact_record(key)["value"] == "a"

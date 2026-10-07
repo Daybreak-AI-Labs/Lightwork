@@ -34,6 +34,10 @@ def test_lang_resolution_param_cookie_header():
     assert i18n.resolve_lang(_Req(q="ja")) == "ja"
     assert i18n.resolve_lang(_Req(c="de")) == "de"
     assert i18n.resolve_lang(_Req(h="zh-CN,zh;q=0.9")) == "zh"
+    assert i18n.resolve_lang(_Req(h="ar-SA,ar;q=0.9")) == "en"
+    assert i18n.resolve_lang(_Req(h="ar-SA,fr-CA;q=0.9")) == "fr"
+    assert i18n.resolve_lang(_Req(q="ar", h="fr-CA")) == "ar"
+    assert i18n.resolve_lang(_Req(c="ar", h="fr-CA")) == "ar"
     assert i18n.resolve_lang(_Req()) == "en"
     assert i18n.resolve_lang(_Req(q="xx", h="pt-BR")) == "en"
 
@@ -50,22 +54,56 @@ def test_lang_param_translates_chrome_and_sets_cookie():
     assert '<html lang="fr"' not in r.text
     assert 'lang="fr">Aller au contenu</a>' in r.text
     assert 'lang="fr">Police</span>' in r.text
-    assert 'lang="fr">auto-hébergé</span>' in r.text
+    # The footer is the product name only; no untranslated chrome is left in it.
+    assert '<span class="muted">Lightwork by Daybreak Labs</span>' in r.text
     assert "mvk_lang=fr" in r.headers.get("set-cookie", "")
     r2 = client.get("/overview", params={"lang": "ja"})
     assert '<html lang="en" dir="ltr">' in r2.text
     assert 'lang="ja">コンテンツへスキップ</a>' in r2.text
-    # English selection: no per-element lang attributes at all.
+    # English selection: chrome and explicit journey regions declare English.
     r3 = client.get("/overview", params={"lang": "en"})
     assert '<html lang="en" dir="ltr">' in r3.text
-    assert 'lang="en">' not in r3.text
+    assert 'lang="en" dir="ltr" data-product-copy>Interface language</span>' in r3.text
 
 
-def test_rtl_selection_keeps_direction_but_declares_the_english_body():
+def test_rtl_selection_declares_the_english_body_left_to_right():
+    """UX-198: ``dir`` describes the body like ``lang`` does. An English body
+    must not be mirrored because a few chrome strings were translated."""
     r = client.get("/overview", params={"lang": "ar"})
     assert r.status_code == 200
-    assert '<html lang="en" dir="rtl">' in r.text
+    assert '<html lang="en" dir="ltr">' in r.text
     assert 'lang="ar">تخطي إلى المحتوى</a>' in r.text
+
+
+def test_arabic_browser_gets_a_left_to_right_english_page_on_both_shells():
+    """UX-198: Accept-Language alone must not flip the English UI right-to-left
+    on the product shell (``/overview``) or the chat shell (``/chat``)."""
+    fresh = TestClient(app)
+    for path in ("/overview", "/chat"):
+        r = fresh.get(path, headers={"Accept-Language": "ar-SA,ar;q=0.9"})
+        assert r.status_code == 200, path
+        assert '<html lang="en" dir="ltr">' in r.text, path
+        assert 'lang="ar">تخطي إلى المحتوى</a>' not in r.text, path
+        assert 'lang="en" dir="ltr" data-product-copy' in r.text, path
+
+
+def test_arabic_browser_keeps_public_owner_sign_in_left_to_right(monkeypatch):
+    from maverick_dashboard import local_owner
+
+    monkeypatch.setattr(local_owner, "_local", lambda *args, **kwargs: None)
+    monkeypatch.setattr(local_owner, "claimed", lambda: False)
+    monkeypatch.setattr(local_owner, "available", lambda request: True)
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 53210),
+                    follow_redirects=False) as fresh:
+        response = fresh.get("/auth/local-owner", headers={"Accept-Language": "ar-SA,ar;q=0.9"})
+    assert response.status_code == 200
+    assert '<html lang="en" dir="ltr">' in response.text
+    assert "Set up the owner of this installation" in response.text
+
+
+def test_auto_detected_languages_have_complete_catalogs():
+    assert frozenset({"en", "fr", "de", "ja", "zh"}) == i18n.AUTO_LANGS
+    assert all(entry.get(lang) for lang in i18n.AUTO_LANGS for entry in i18n.MESSAGES.values())
 
 
 def test_content_lang_declares_only_translated_bodies():

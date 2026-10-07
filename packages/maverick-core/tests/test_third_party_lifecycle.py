@@ -157,6 +157,50 @@ def create_approved_template(
     assert approved.state == "approved"
 
 
+def evaluated_owner_review_assessment(
+    store: ThirdPartyLifecycleStore,
+    principal: Principal,
+    vendor_ref: str,
+    tenant: str = "tenant-a",
+) -> None:
+    """Give ``vendor_ref`` the complete, evaluated assessment activation needs."""
+    create_approved_template(store, principal, tenant)
+    assessment_id = f"assessment-{vendor_ref}"
+    principal.value = "creator"
+    store.create_assessment(
+        tenant,
+        assessment_id,
+        vendor_ref=vendor_ref,
+        template_id="assessment.standard",
+        template_version=1,
+        owner_ref="owner",
+        respondent_assignments={
+            "security_control": "respondent-security",
+            "privacy_scope": "respondent-privacy",
+        },
+        retention_seconds=DAY,
+        idempotency_key=f"{assessment_id}-create",
+    )
+    principal.value = "respondent-security"
+    first = store.record_response(
+        tenant, assessment_id, "security_control", value=True,
+        evidence_sha256=DIGEST_A, evidence_refs=["evidence.security"],
+        expected_revision=1, idempotency_key=f"{assessment_id}-security",
+    )
+    principal.value = "respondent-privacy"
+    second = store.record_response(
+        tenant, assessment_id, "privacy_scope", value="low",
+        evidence_sha256=DIGEST_B, evidence_refs=["evidence.privacy"],
+        expected_revision=first.revision, idempotency_key=f"{assessment_id}-privacy",
+    )
+    principal.value = "owner"
+    result = store.evaluate_assessment(
+        tenant, assessment_id, expected_revision=second.revision,
+        idempotency_key=f"{assessment_id}-evaluate",
+    )
+    assert result.route == "owner_review"
+
+
 def dependencies() -> list[dict[str, str]]:
     return [
         {
@@ -696,6 +740,9 @@ def test_lifecycle_transitions_are_cas_safe_under_concurrency(
     authority: tuple[ThirdPartyLifecycleStore, Clock, Principal],
 ) -> None:
     store, _, principal = authority
+    # Without an evaluated assessment "active" would always conflict and the
+    # race would be decided by the activation gate, not the revision CAS.
+    evaluated_owner_review_assessment(store, principal, "vendor")
     principal.value = "owner"
     store.create_lifecycle(
         "tenant-a",
@@ -730,6 +777,8 @@ def test_offboarding_four_eyes_legal_hold_no_silent_completion_and_recovery(
     authority: tuple[ThirdPartyLifecycleStore, Clock, Principal],
 ) -> None:
     store, clock, principal = authority
+    # Activation requires the vendor's complete, evaluated assessment.
+    evaluated_owner_review_assessment(store, principal, "vendor-1")
     principal.value = "owner"
     lifecycle = store.create_lifecycle(
         "tenant-a",

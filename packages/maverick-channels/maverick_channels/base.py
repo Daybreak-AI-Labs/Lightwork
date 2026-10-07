@@ -222,10 +222,21 @@ class IncomingMessage:
     channel: str = ""
     raw: object = None
     sender_id: str | None = None
+    # First-party provider identifiers retained in the sealed durable intake.
+    # These fields alone are never proof; the delivery receipt must also match
+    # the currently authenticated app account at execution time.
+    provider_tenant_id: str | None = None
+    provider_sender_id: str | None = None
     # Platform message id of THIS inbound message, when the platform has one
     # (Slack ts, Telegram message_id, ...). Lets the reply thread onto it via
     # Channel.send_threaded; None on platforms without addressable messages.
     message_id: str | None = None
+    # Stable platform thread/topic anchor when it differs from the recipient.
+    # Kept in the durable intake so a recovered answer cannot jump threads.
+    conversation_ref: str | None = None
+    # A room thread reply without a bot mention may answer an open question,
+    # but must never create an unrelated goal when none is pending.
+    question_reply_only: bool = False
 
     @property
     def principal_id(self) -> str:

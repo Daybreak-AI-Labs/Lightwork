@@ -1,10 +1,14 @@
 {% macro asset_options(placeholder='Choose an AI system') %}<option value="">{{ placeholder }}</option>{% for a in model_risk_assets %}<option value="{{ a.asset_id }}" data-revision="{{ a.revision }}" data-digest="{{ a.version_digest }}" data-version="{{ (a.metadata or {}).get('version') or ('Recorded version ' ~ a.revision) }}">{{ a.display_name or 'Unnamed AI system' }}</option>{% endfor %}{% endmacro %}
 {% macro version_select(label, kind, empty='Latest version') %}<label>{{ label }}<select class="select" name="version" data-version-options="{{ kind }}"><option value="">{{ empty }}</option></select></label>{% endmacro %}
-<style>
+<style nonce="{{ csp_style_nonce }}">
   .assurance-form fieldset { border:1px solid var(--border); border-radius:var(--radius-md, 8px); padding:var(--space-3); margin:0; min-width:0; }
-  .assurance-form legend { font-weight:600; padding:0 var(--space-1); }
+  .assurance-form legend { font-weight: var(--font-semibold); padding:0 var(--space-1); }
   .assurance-checks { display:flex; flex-wrap:wrap; gap:var(--space-2) var(--space-4); }
   .assurance-checks label { display:inline-flex; gap:var(--space-1); align-items:center; }
+  #policy-exception-controls { display:grid; gap:var(--space-2); }
+  #policy-exception-controls label { display:flex; flex-direction:row; gap:var(--space-2); align-items:flex-start; overflow-wrap:anywhere; }
+  .policy-exception-dialog { box-sizing:border-box; width:min(40rem,calc(100vw - 2rem)); max-height:calc(100vh - 2rem); overflow:auto; overflow-wrap:anywhere; }
+  .policy-exception-dialog button { margin:var(--space-2); white-space:normal; }
 </style>
 <section class="panel" id="governance-operations-panel"
          data-governance-admin="{{ 'true' if gateway_admin else 'false' }}">
@@ -252,6 +256,7 @@
         <thead><tr><th scope="col">Rules</th><th scope="col">Status</th><th scope="col">Version in use</th><th scope="col">Actions</th></tr></thead>
         <tbody id="ai-policy-management-policies"><tr><td colspan="4">Loading rules…</td></tr></tbody>
       </table></div>
+      {% if suggestions_enabled is defined and suggestions_enabled() %}{% from "_policy_suggestions.html" import policy_suggestions, policy_suggestions_script %}{{ policy_suggestions() }}{{ policy_suggestions_script() }}{% endif %}
       <div class="assurance-table"><table>
         <caption>Exceptions to the rules</caption>
         <thead><tr><th scope="col">Exception</th><th scope="col">Rules</th><th scope="col">Status</th><th scope="col">Ends</th><th scope="col">Actions</th></tr></thead>
@@ -311,26 +316,30 @@
           <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Turn on this version</button><span id="ai-policy-activate-status" role="status" aria-live="polite"></span></div>
         </form>
         <form id="ai-policy-exception-request" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="policy">Choose rules in the table above.</p>
-          <label>Short name for the exception<input class="input" name="exception_key" required maxlength="128" placeholder="for example: holiday support pilot"></label>
+          <label>Exception name<input class="input" name="exception_key" required maxlength="65" placeholder="For example: Holiday support pilot"></label>
+          <label>AI-use rules<select class="select" id="policy-exception-policy" required><option value="">Loading rules currently in use…</option></select></label>
           <input type="hidden" name="policy_id" data-pick="policy" data-pick-required>
           <input type="hidden" name="policy_version" data-pick="policy" data-pick-required>
           <label>Ends on<input class="input" name="expires_at" type="datetime-local" required></label>
           <div class="assurance-form__wide" data-structured="exception-scope"></div>
           <label class="assurance-form__wide">Reason<textarea class="textarea" name="reason" required maxlength="2000" rows="3"></textarea></label>
-          <label class="assurance-form__wide">Other safeguards in place (short names, separated by commas)<input class="input" name="compensating_control_ids" required maxlength="4096" placeholder="manual review, traffic cap"></label>
-          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Request the exception</button><span id="ai-policy-exception-request-status" role="status" aria-live="polite"></span></div>
+          <fieldset class="assurance-form__wide"><legend>Other safeguards to rely on</legend><p class="assurance-muted">Choose recorded safeguards by name. Their recorded status and owner are shown; selecting one does not establish that it is in place.</p><div id="policy-exception-controls">Loading safeguards…</div><a href="/security">Manage safeguards in Security</a></fieldset>
+          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Review exception request</button><span id="ai-policy-exception-request-status" role="status" aria-live="polite"></span></div>
         </form>
         <form id="ai-policy-exception-approve" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="exception">Choose an exception in the table above.</p>
           <input type="hidden" name="exception_key" data-pick="exception" data-pick-required>
           <input type="hidden" name="expected_revision" data-pick="exception" data-pick-required>
-          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Approve</button><span id="ai-policy-exception-approve-status" role="status" aria-live="polite"></span></div>
+          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Review approval</button><span id="ai-policy-exception-approve-status" role="status" aria-live="polite"></span></div>
         </form>
         <form id="ai-policy-exception-close" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="exception">Choose an exception in the table above.</p>
           <input type="hidden" name="exception_key" data-pick="exception" data-pick-required>
           <input type="hidden" name="expected_revision" data-pick="exception" data-pick-required>
           <label class="assurance-form__wide">Closure reason<textarea class="textarea" name="reason" required maxlength="1000" rows="2"></textarea></label>
-          <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Close exception</button><span id="ai-policy-exception-close-status" role="status" aria-live="polite"></span></div>
+          <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Review closure</button><span id="ai-policy-exception-close-status" role="status" aria-live="polite"></span></div>
         </form>
+        <div class="assurance-actions"><button class="btn btn--ghost" id="policy-exception-refresh" type="button">Refresh exception choices</button><button class="btn btn--ghost" id="policy-exception-original" type="button" hidden>Read original exception result</button><button class="btn btn--ghost" id="policy-exception-new" type="button" hidden>Start a different action</button></div>
+        <p id="policy-exception-status" class="assurance-muted" role="status" aria-live="polite"></p>
+        <div id="policy-exception-result" class="assurance-table" role="region" aria-label="Original exception result"></div>
         <form id="ai-policy-evaluate" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="evaluation">Optional: choose a saved check above to replace it.</p>
           <label>Short name for this check<input class="input" data-pick-fill="evaluation" name="evaluation_key" required maxlength="128" placeholder="for example: support assistant review"></label>
           <input type="hidden" name="expected_revision" data-pick="evaluation" value="0">
@@ -558,14 +567,12 @@
     <h3 id="ai-conformity-title">EU AI Act launch readiness</h3>
       <p>Collect what the EU AI Act asks for before a system goes to market.</p>
       <details class="assurance-muted"><summary>What this does and doesn't prove</summary><p>You record the evidence the EU AI Act asks for before a
-      launch, and a second person approves it. This is an internal checklist: it
-      does not decide what the law says, sign a declaration, add a CE mark or
+      launch, and a second person approves it. This is an internal checklist. It does not decide what the law says, sign a declaration, add a CE mark or
       show that a regulator accepted anything.</p>
       <details><summary>Technical details</summary><p>Manage human-declared FRIA, Annex IV,
       Article 43, post-market, draft-declaration, and CE-readiness evidence
       against the official consolidated Regulation. This internal workflow
-      does not classify a system as law, perform conformity assessment, sign
-      a declaration, create or affix a CE mark, certify, or record regulator
+      does not classify a system as law, perform conformity assessment or sign a declaration. It does not create or affix a CE mark, certify, or record regulator
       or notified-body acceptance.</p></details></details>
     <form id="ai-conformity-list" class="assurance-form">
       <input type="hidden" name="limit" value="100">
@@ -734,8 +741,7 @@
       comparison or that the comparison kept everyone anonymous.</p>
       <details><summary>Technical details</summary><p>Prepare and inspect voluntary, aggregate-only
       benchmark contributions backed by exact evidence. An operator may pin
-      versioned Ed25519 report trust roots and an HTTPS coordinator, but every
-      transmission remains a separate human action with literal consent and an
+      versioned Ed25519 report trust roots and an HTTPS coordinator. Every transmission remains a separate human action with literal consent and an
       idempotency key. Pseudonymous export, transport, and signatures do not
       establish cohort inclusion, anonymity, representative methodology, or
       independently verified differential privacy.</p></details></details>
@@ -828,10 +834,7 @@
       for you, and the list does not prove every AI tool was found. Web traffic,
       people, prompts and answers are never accepted.</p>
       <details><summary>Technical details</summary><p>Register, approve, bind, and revoke sensor
-      identities, and admit privacy-safe normalized observations. This is a
-      control plane only: it deploys no live browser, network, OAuth, SaaS,
-      identity-directory, or data-catalog sensors and makes no completeness
-      claim about enterprise AI discovery. Raw traffic, people, prompts, and
+      identities, and admit privacy-safe normalized observations. This is a control plane only. It deploys no live browser, network, OAuth, SaaS, identity-directory, or data-catalog sensors. It makes no completeness claim about enterprise AI discovery. Raw traffic, people, prompts, and
       model outputs are not accepted.</p></details></details>
     <form id="ai-discovery-sensor-list" class="assurance-form">
       <input type="hidden" name="limit" value="100">
@@ -1005,7 +1008,7 @@
       <p class="assurance-muted">Only an administrator who is signed in can use the agent identity controls.</p>
       {% endif %}
     </details>
-    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session.</p>
+    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session. Choose a connected service and select Read now.</p>
     <details open>
       <summary>Identities</summary>
       <div class="assurance-table"><table>
@@ -1153,7 +1156,8 @@
       {% if gateway_admin %}
       <div class="assurance-form">
         <p class="assurance-form__wide assurance-muted">Sending changes the other system. It sends the record and destination chosen in the preview form, using the connection an administrator set up.</p>
-        <div class="assurance-form__wide assurance-actions"><button id="grc-outbound-sync" class="btn" type="button">Send now</button><span id="grc-outbound-sync-status" role="status" aria-live="polite"></span></div>
+        <label class="assurance-form__wide"><input id="grc-outbound-confirm" type="checkbox" disabled> I reviewed the complete current record and destination below.</label>
+        <div class="assurance-form__wide assurance-actions"><button id="grc-outbound-sync" class="btn" type="button" disabled>Send reviewed record</button><span id="grc-outbound-sync-status" role="status" aria-live="polite"></span></div>
       </div>
       {% endif %}
       <form id="grc-outbound-state" data-autoview="event" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="event">Choose an event in the table below.</p>
@@ -1164,16 +1168,18 @@
       </form>
     </div>
     <div id="grc-outbound-result" class="assurance-table" role="region" aria-label="Details" hidden></div>
+    <div class="assurance-actions"><button id="grc-outbound-original" class="btn btn--ghost" type="button" hidden>Check original delivery result</button><span id="grc-outbound-original-status" role="status" aria-live="polite"></span></div>
     <div class="assurance-table"><table>
-      <caption>Recent sends, failures and conflicts</caption>
+      <caption>Recent delivery problems</caption>
       <thead><tr><th scope="col">What happened</th><th scope="col">Sent to</th><th scope="col">Record</th><th scope="col">Why</th><th scope="col">Actions</th></tr></thead>
-      <tbody id="grc-outbound-events"><tr><td colspan="5">Loading recent sends…</td></tr></tbody>
+      <tbody id="grc-outbound-events"><tr><td colspan="5">Loading delivery problem records…</td></tr></tbody>
     </table></div>
     <p id="grc-outbound-events-status" class="assurance-muted" role="status" aria-live="polite"></p>
   </section>
 </section>
 
 <script src="/static/lightwork-assurance-forms.js"></script>
+<script src="/static/lightwork-policy-exceptions.js"></script>
 <script>
 (() => {
   "use strict";
@@ -1185,7 +1191,8 @@
   const byId = id => document.getElementById(id);
   const setStatus = (id, message) => {
     const target = byId(id);
-    if (target) target.textContent = String(message || "").slice(0, 320);
+    if (target && window.mvStatus) window.mvStatus(target, String(message || "").slice(0, 320));
+    else if (target) target.textContent = String(message || "").slice(0, 320);
   };
   const asText = value => value === null || value === undefined || value === "" ? "—" : String(value);
   const splitTokens = value => String(value || "").split(",").map(item => item.trim()).filter(Boolean);
@@ -1239,25 +1246,19 @@
   };
   // One plain sentence per failure: never a status code or server wording.
   const safeDetail = async (response, fallback) => {
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status}, fallback);
+    // Headers carry the turned-off reason, so "off" is never read as "no permission".
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status, headers: response.headers}, fallback);
     if (response.status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (response.status === 404) return "That item no longer exists. Refresh the page to see the latest.";
     if (response.status === 409) return "This was changed since you opened it. Choose it again in the table and retry.";
     if (response.status === 400 || response.status === 422) return "Some of the details need fixing. Check them and try again.";
     if (response.status === 503) return "This feature is not available right now. It may need to be turned on or set up first.";
-    return `Could not ${fallback}. Please try again.`;
+    return `Could not ${fallback}. Try again.`;
   };
-  const request = async (path, options = {}, action = "finish that") => {
-    let response;
-    try {
-      response = await fetch(prefix + path, {credentials: "same-origin", ...options});
-    } catch (_error) {
-      throw new Error("Could not reach the server — check your connection and try again.");
-    }
-    if (!response.ok) throw new Error(await safeDetail(response, action));
-    if (response.status === 204) return null;
-    return response.json();
-  };
+  // One JSON request through the shell's mvFetchJSON: one plain sentence per
+  // failure, never a status code or server wording.
+  const request = (path, options = {}, action = "finish that") => window.mvFetchJSON(prefix + path,
+    {...options, messages: {offline: "Could not reach the server — check your connection and try again."}}, action);
   const sendJson = (path, method, body, action) => request(path, {
     method,
     headers: {"Content-Type": "application/json"},
@@ -1267,6 +1268,108 @@
   // under "Technical details" for auditors.
   const HIDDEN_KEYS = /sha256|digest|hmac|signature|schema|payload|tenant|principal|idempotency|revision|endpoint|uuid|(^|_)(ref|refs|id|ids|key|url)$/;
   const words = value => (typeof window.mvHuman === "function" ? window.mvHuman(value) : String(value).replace(/[_-]+/g, " "));
+  // Plain names for the record fields people see; anything not listed is
+  // spelled out from its key, with codes and kinds read as plain nouns.
+  const FIELD_LABELS = {
+    adapter: "Connector", adapter_reported_standard: "Standard the connector reported",
+    adapter_reported_trust_chain_state: "Signature chain the connector reported",
+    adapter_reported_validation_state: "Check result the connector reported", adapter_version: "Connector version",
+    age_seconds: "Age (seconds)", analysis_scope_code: "What was analysed",
+    annex_iii_point: "EU AI Act high-risk area (Annex III)",
+    annex_iii_point_2_national: "National critical infrastructure (Annex III point 2)",
+    annex_iv: "Technical documentation (Annex IV)", anonymity_claim: "Stated as anonymous",
+    anonymity_verified: "Anonymity checked", applicability_determination: "Does the rule apply",
+    approval_receipt: "Approval record", approval_scope: "What the approval covers", asserted: "Stated",
+    asserted_at: "Stated on", asserted_by: "Stated by", asserted_high_risk: "Stated as high risk",
+    asserted_union_market: "Stated as sold in the EU", assertion_codes: "Statements",
+    assertion_count: "Number of statements", assertions: "Statements", asset_binding: "Linked AI system",
+    asset_binding_current: "Linked AI system is current",
+    asset_binding_resolver_attached: "AI system lookup available", assumption_bindings: "Linked assumptions",
+    attestation: "Confirmation", attestation_accepted: "Confirmation accepted", attested_at: "Confirmed on",
+    attested_by: "Confirmed by", authoritative_for_compliance: "Counts as the compliance record",
+    authoritative_plane: "Where the official record is kept", backlink_base: "Link back to Lightwork",
+    binding: "Link", binding_current: "Link is current", body: "Content", body_bytes: "Content size (bytes)",
+    breakdown_truncated: "Breakdown shortened", canonical: "Standard form",
+    cas_enforced: "Protected against overlapping changes", case_projection: "Case summary",
+    ce_marking_artifact: "CE marking document", certification_claim: "Stated certification",
+    citations_truncated: "Citations shortened", claim_generator: "Tool that made the record", code: "Code",
+    cohort: "Comparison group", cohort_code: "Comparison group",
+    cohort_inclusion_verified: "Comparison group membership checked",
+    complete_inventory_claimed: "Stated as a complete list", compliance_determination: "Compliance conclusion",
+    conceptual_soundness: "Is the design sound", configured_sinks: "Where records are sent",
+    conformity_determination: "Conformity conclusion", context_binding: "Linked context",
+    context_floor: "Lowest risk level for this context", context_floor_change: "Change to the lowest risk level",
+    context_floors: "Lowest risk levels by context", correction_delta: "Size of the correction",
+    counterfactual: "What-if example", counterfactual_projection: "What-if summary",
+    counterfactuals: "What-if examples", coverage_determination: "Coverage conclusion",
+    crash_recovery_idempotent: "Safe to repeat after a crash", credentials_retained: "Sign-in details kept",
+    current_model_risk_binding: "Current model risk record", decision_receipt: "Decision record",
+    decision_seam_available: "Decision step available", declaration_artifact: "Declaration document",
+    delta: "Change", denominator: "Out of", deployment_binding: "Linked deployment", determination: "Conclusion",
+    differential_privacy_claim: "Stated privacy protection (differential privacy)",
+    differential_privacy_parameters_complete: "Privacy protection settings complete",
+    differential_privacy_verified: "Privacy protection checked", dispatch_unconfirmed: "Sending not confirmed",
+    dispatching: "Sending", durable_request_queue: "Requests kept until sent",
+    economic_operator_role: "Your role under the EU AI Act", epsilon: "Privacy protection strength (epsilon)",
+    eu_risk_tier: "EU AI Act risk level", evidence_binding_count: "Linked evidence items",
+    evidence_bindings: "Linked evidence", expires_in_seconds: "Expires in (seconds)", floor: "Lowest level",
+    four_eyes: "Second person required", four_eyes_approved: "Approved by a second person",
+    four_eyes_verified: "Second-person approval checked", fraction: "Share",
+    fria: "Fundamental rights impact assessment (FRIA)", governance_posture: "Overall governance status",
+    headers: "Request details", idempotent: "Safe to repeat", idempotent_replay: "Repeat of an earlier request",
+    idempotent_resume: "Resumed safely", immediate_trigger: "Needs reporting now",
+    immediate_trigger_ready: "Ready for immediate reporting", independent_audit_claim: "Stated independent audit",
+    ingested_at: "Received on", insurability_determination: "Insurability conclusion",
+    insurer_acceptance_claim: "Stated insurer acceptance", internal_control_annex_vi: "Internal checks (Annex VI)",
+    interpretation_state: "How sure the reading is", jurisdiction_scope_codes: "Jurisdictions covered",
+    k_anonymity_min: "Smallest group size shared", k_threshold_structurally_satisfied: "Group size rule met",
+    kind: "Type", legal_determination_state: "Legal conclusion status", lookback_days: "Days looked back",
+    lot_batch_number: "Batch number", magnitude: "Size", manifest: "Contents list",
+    manifest_citation: "Contents list reference", mapping_registry_retained: "Mapping list kept",
+    mapping_retention_seconds: "Mapping kept for (seconds)",
+    materialisation_measures: "Steps taken to reduce the risk", materiality: "Importance",
+    max_bytes_billed: "Most data billed (bytes)", max_request_bytes: "Largest request (bytes)",
+    max_response_bytes: "Largest reply (bytes)", media_bytes_persisted: "Media file stored",
+    missing_grace_runs: "Missed checks allowed", mixed_planes: "Records from more than one place",
+    model_modality_code: "Kind of model", model_tier: "Model level", next_cursor: "More results available",
+    noise_mechanism: "Privacy noise method", normalized: "Standardised",
+    notified_body_acceptance: "Accepted by the notified body",
+    notified_body_annex_vii: "Notified body review (Annex VII)", numerator: "Count",
+    observation_bindings: "Linked observations", offset: "Starting point", operation_claim: "Stated action",
+    operator: "Operator", operator_role: "Operator role", packet_issuance: "Report issued", page_cap: "Most pages",
+    params: "Request details", poll_seconds: "Check every (seconds)", posture: "Status",
+    premium_reduction_claim: "Stated premium reduction", projection: "Summary",
+    projection_version: "Summary version", provider_policy_mutated: "Provider settings changed",
+    provider_policy_writes: "Provider setting changes", provider_write_performed: "Change made at the provider",
+    provider_write_state: "Provider change status", provider_writes: "Changes at the provider",
+    provider_writes_possible: "Can change provider settings", public_key_hex: "Public key", rank: "Rank",
+    raw_content_persisted: "Original content stored", raw_identity_retained: "Original identity kept",
+    receipt: "Record", receipt_count: "Number of records", receipt_ids_truncated: "Record list shortened",
+    receipts: "Records", record_cap: "Most records", reference_cohort: "Comparison group", registry: "Register",
+    regulator_filing_claim: "Stated regulator filing", requirement_binding: "Linked requirement",
+    resource_arn: "Cloud resource", response_field_params: "Fields asked for",
+    revalidation_required: "Needs checking again", risk_tier: "Risk level",
+    runtime_available: "Running checks available", runtime_content: "Content checked while running", scope: "Scope",
+    scope_kind: "Type of scope", scope_summary: "Scope summary", secrets_retained: "Secrets kept",  // pragma: allowlist secret
+    sensor_binding: "Linked sensor", sink: "Destination", slot: "Place", snapshot_fresh: "Copy is up to date",
+    snapshot_total: "Total in the copy", snapshots: "Saved copies", soundness_summary: "Design review summary",
+    stale: "Out of date", stale_observation_count: "Out-of-date observations",
+    stale_reasons: "Why it is out of date", staleness: "How out of date", strict_manifest: "Exact contents list",
+    submission_receipt: "Filing record", superseded_at: "Replaced on", supersession: "Replacement",
+    sysparm_display_value: "ServiceNow display values", sysparm_limit: "ServiceNow record limit",
+    sysparm_query: "ServiceNow search", system_operator_type: "Who operates the system",
+    template_binding: "Linked template", threshold_determination: "Threshold conclusion",
+    timeout_seconds: "Time limit (seconds)", truncated: "Shortened", unblended_cost: "Cost before discounts",
+    uri: "Address", validation_scope: "What was checked", validity_seconds: "Valid for (seconds)",
+    verifier_instructions: "How to check it"
+  };
+  const fieldLabel = key => {
+    if (Object.prototype.hasOwnProperty.call(FIELD_LABELS, key)) return FIELD_LABELS[key];
+    let plain = key.replace(/_kind$/, "_type").replace(/_seconds$/, "_(seconds)");
+    if (/_codes$/.test(plain)) plain = plain.replace(/_codes$/, "").replace(/([^s])$/, "$1s");
+    else plain = plain.replace(/_code$/, "");
+    return words(plain);
+  };
   const readableValue = (key, value) => {
     if (value === true) return "Yes";
     if (value === false) return "No";
@@ -1291,7 +1394,7 @@
     const dl = document.createElement("dl");
     Object.entries(value).forEach(([key, item]) => {
       if (HIDDEN_KEYS.test(key) || item === null || item === undefined || item === "") return;
-      const dt = document.createElement("dt"); dt.textContent = words(key);
+      const dt = document.createElement("dt"); dt.textContent = fieldLabel(key);
       const dd = document.createElement("dd");
       if (item && typeof item === "object") { if (depth < 2) dd.appendChild(readable(item, depth + 1)); else dd.textContent = "(see technical details)"; }
       else dd.textContent = readableValue(key, item);
@@ -1414,7 +1517,7 @@
     const seconds = Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) return "—";
     if (typeof window.mvWhen === "function") return window.mvWhen(seconds);
-    return new Date(seconds * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(seconds) : new Date(seconds * 1000).toLocaleString());
   };
   // Fingerprints are computed here from a chosen file or typed text.
   const hex = buffer => Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -1467,7 +1570,7 @@
       await fillFingerprints(form);
       return await action();
     }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally {
       delete form.dataset.inFlight;
       if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
@@ -1497,8 +1600,8 @@
       });
       setStatus("ai-literacy-load-status", `${rows.length} training requirement(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 4, "Training requirements could not be loaded. No coverage conclusion is shown.");
-      setStatus("ai-literacy-load-status", plainMessage(error, "Training records are not available right now."));
+      clear(target); emptyRow(target, 4, "Training requirements could not be loaded. No coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-literacy-load-status", plainMessage(error, "Training records are not available right now. Try again in a minute."));
     }
   };
   const literacyPerson = byId("ai-literacy-person-query");
@@ -1589,8 +1692,8 @@
       if (!rows.length) emptyRow(target, 5, "No serious incidents are being tracked. Use “Start tracking an incident” below when one happens. This does not show that none occurred.");
       setStatus("article-73-load-status", `${rows.length} incident(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Incidents could not be loaded. No deadline conclusion is shown.");
-      setStatus("article-73-load-status", plainMessage(error, "Incident is not available right now."));
+      clear(target); emptyRow(target, 5, "Incidents could not be loaded. No deadline conclusion is shown. Refresh the page and try again.");
+      setStatus("article-73-load-status", plainMessage(error, "Incident is not available right now. Try again in a minute."));
     }
   };
   const incidentDetail = byId("article-73-detail-query");
@@ -1691,8 +1794,8 @@
         : "No cost sources are turned on yet. An administrator can connect AWS, Azure, Google Cloud or OpenAI in Settings.");
     } catch (error) {
       const target = byId("ai-cost-collector-result");
-      if (target) target.textContent = "Cost sources could not be loaded. No conclusion about which providers are covered is shown.";
-      setStatus("ai-cost-collector-status", plainMessage(error, "Cost collection is not available right now."));
+      if (target) target.textContent = "Cost sources could not be loaded. No conclusion about which providers are covered is shown. Refresh the page and try again.";
+      setStatus("ai-cost-collector-status", plainMessage(error, "Cost collection is not available right now. Try again in a minute."));
     }
   };
   if (costCollectorForm) costCollectorForm.addEventListener("submit", event => {
@@ -1720,8 +1823,8 @@
       const result = await request(path, {}, "load the cost report"); showProjection("ai-cost-roi-result", result);
       setStatus("ai-cost-roi-status", "Report shown. Measured costs and estimates are labelled separately.");
     } catch (error) {
-      const target = byId("ai-cost-roi-result"); if (target) target.textContent = "The cost report could not be loaded. No financial conclusion is shown.";
-      setStatus("ai-cost-roi-status", plainMessage(error, "Cost reports are not available right now."));
+      const target = byId("ai-cost-roi-result"); if (target) target.textContent = "The cost report could not be loaded. No financial conclusion is shown. Refresh the page and try again.";
+      setStatus("ai-cost-roi-status", plainMessage(error, "Cost reports are not available right now. Try again in a minute."));
     }
   };
   if (costForm) costForm.addEventListener("submit", event => {
@@ -1758,6 +1861,7 @@
     if (exceptionScope && inUse) {
       exceptionScope.child("statement_ids").setOptions((inUse.statements || []).map(statement => [statement.statement_id, String(statement.text || statement.statement_id).slice(0, 140)]));
     }
+    if (window.LightworkPolicyExceptions) window.LightworkPolicyExceptions.choosePolicy(item.policy_id);
     if (announce && policyVersionStatements && latest) {
       policyVersionStatements.load(latest.statements || []);
       const form = byId("ai-policy-version");
@@ -1795,11 +1899,11 @@
       if (!policies.length) emptyRow(policyTarget, 4, "No AI use rules yet. An administrator can create them under “Create and manage rules”.");
       clear(exceptionTarget);
       exceptions.forEach(item => tableRow(exceptionTarget, [
-        words(item.exception_key),
+        window.LightworkPolicyExceptions.name(item),
         `${policiesById.has(item.policy_id) ? policyTitle(policiesById.get(item.policy_id)) : words(item.policy_id)}, version ${asText(item.policy_version)}`,
         words(item.status),
         displayTime(item.expires_at)
-      ], {kind: "exception", key: item.exception_key, label: words(item.exception_key),
+      ], {kind: "exception", key: item.exception_key, label: window.LightworkPolicyExceptions.name(item),
           fields: {exception_key: item.exception_key, expected_revision: item.revision, record_kind: "exceptions", record_key: item.exception_key}}));
       if (!exceptions.length) emptyRow(exceptionTarget, 5, "No exceptions have been requested.");
       clear(evaluationTarget);
@@ -1817,10 +1921,10 @@
       );
     } catch (error) {
       clear(policyTarget); clear(exceptionTarget); clear(evaluationTarget);
-      emptyRow(policyTarget, 4, "Rules could not be loaded. No policy-coverage conclusion is shown.");
-      emptyRow(exceptionTarget, 5, "Exceptions could not be loaded. No authorization conclusion is shown.");
-      emptyRow(evaluationTarget, 5, "Saved checks could not be loaded. No validation conclusion is shown.");
-      setStatus("ai-policy-management-load-status", plainMessage(error, "AI use rules are not available right now."));
+      emptyRow(policyTarget, 4, "Rules could not be loaded. No policy-coverage conclusion is shown. Refresh the page and try again.");
+      emptyRow(exceptionTarget, 5, "Exceptions could not be loaded. Refresh the page and try again. No authorization conclusion is shown.");
+      emptyRow(evaluationTarget, 5, "Saved checks could not be loaded. No validation conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-policy-management-load-status", plainMessage(error, "AI use rules are not available right now. Try again in a minute."));
     }
   };
   const policyRecordQuery = byId("ai-policy-record-query");
@@ -1914,52 +2018,11 @@
       delete policyActivate.dataset.confirmationPending;
     }
   });
-  const policyExceptionRequest = byId("ai-policy-exception-request");
-  if (policyExceptionRequest) policyExceptionRequest.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(policyExceptionRequest, "ai-policy-exception-request-status", "Requesting the exception…", async () => {
-      const fields = formBody(policyExceptionRequest);
-      const scope = await collectSlot("exception-scope");
-      const result = await sendJson("/ai-policy-management/exceptions", "POST", {
-        exception_key: shortName(fields.get("exception_key")),
-        policy_id: fields.get("policy_id"),
-        policy_version: Number(fields.get("policy_version")),
-        scope,
-        reason: fields.get("reason"),
-        compensating_control_ids: splitTokens(fields.get("compensating_control_ids")).map(item => shortName(item)),
-        expires_at: unixTime(fields.get("expires_at"))
-      });
-      showProjection("ai-policy-record-result", result);
-      setStatus("ai-policy-exception-request-status", "Exception requested. It has no effect until a different person approves it.");
-      await loadPolicyManagement();
-    });
-  });
-  const policyExceptionApprove = byId("ai-policy-exception-approve");
-  if (policyExceptionApprove) policyExceptionApprove.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(policyExceptionApprove, "ai-policy-exception-approve-status", "Recording your approval…", async () => {
-      const fields = formBody(policyExceptionApprove); const key = String(fields.get("exception_key") || "").trim();
-      const result = await sendJson(`/ai-policy-management/exceptions/${encodeURIComponent(key)}/approve`, "POST", {
-        expected_revision: Number(fields.get("expected_revision"))
-      });
-      showProjection("ai-policy-record-result", result);
-      setStatus("ai-policy-exception-approve-status", "Approved. The exception still only covers what it lists, until its end date.");
-      await loadPolicyManagement();
-    });
-  });
-  const policyExceptionClose = byId("ai-policy-exception-close");
-  if (policyExceptionClose) policyExceptionClose.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(policyExceptionClose, "ai-policy-exception-close-status", "Closing the exception…", async () => {
-      const fields = formBody(policyExceptionClose); const key = String(fields.get("exception_key") || "").trim();
-      const result = await sendJson(`/ai-policy-management/exceptions/${encodeURIComponent(key)}/close`, "POST", {
-        expected_revision: Number(fields.get("expected_revision")),
-        reason: fields.get("reason")
-      });
-      showProjection("ai-policy-record-result", result);
-      setStatus("ai-policy-exception-close-status", "Exception closed. Check affected uses again before relying on an older result.");
-      await loadPolicyManagement();
-    });
+  if (window.LightworkPolicyExceptions && exceptionScope) window.LightworkPolicyExceptions.mount({
+    scope: exceptionScope,
+    collectScope: () => collectSlot("exception-scope"),
+    write: (path, body) => sendJson(path, "POST", body),
+    reload: loadPolicyManagement
   });
   const policyEvaluate = byId("ai-policy-evaluate");
   if (policyEvaluate) policyEvaluate.addEventListener("submit", event => {
@@ -2020,13 +2083,13 @@
         displayTime(item.expires_at)
       ], {kind: "signal", key: item.signal_id || item.id, label: words(item.signal_code || item.category),
           fields: {signal_id: item.signal_id || item.id, expected_revision: item.revision}}));
-      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet.");
+      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet. Signals appear here as monitoring reports on it.");
       document.querySelectorAll("select[data-signal-options]").forEach(select => {
         select.replaceChildren(new Option("Choose the newer signal", ""));
         signals.forEach(item => select.appendChild(new Option(`${words(item.signal_code || item.category)} (${displayTime(item.observed_at)})`, item.signal_id || item.id)));
       });
     } else {
-      emptyRow(target, 6, "Signals could not be loaded. No monitoring-coverage conclusion is shown.");
+      emptyRow(target, 6, "Signals could not be loaded. No monitoring-coverage conclusion is shown. Refresh the page and try again.");
     }
     if (scoreResult.status === "fulfilled") {
       const revision = findRevision(scoreResult.value);
@@ -2035,7 +2098,7 @@
     const failures = [scoreResult, signalResult].filter(item => item.status === "rejected");
     if (failures.length) {
       const first = failures[0];
-      setStatus("dynamic-risk-asset-status", plainMessage(first.reason, "Some risk details could not be loaded."));
+      setStatus("dynamic-risk-asset-status", plainMessage(first.reason, "Some risk details could not be loaded. Refresh the page and try again."));
     } else {
       setStatus("dynamic-risk-asset-status", "Score and signals shown. This was not a live check of the system.");
     }
@@ -2188,8 +2251,8 @@
       setStatus("ai-explainability-list-status", `${rows.length} explanation(s) shown.`);
     } catch (error) {
       clear(target);
-      emptyRow(target, 5, "Explanations could not be loaded. No explainability-coverage conclusion is shown.");
-      setStatus("ai-explainability-list-status", plainMessage(error, "Explanations are not available right now."));
+      emptyRow(target, 5, "Explanations could not be loaded. No explainability-coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-explainability-list-status", plainMessage(error, "Explanations are not available right now. Try again in a minute."));
     }
   };
   const explanationList = byId("ai-explainability-list");
@@ -2286,8 +2349,8 @@
       setStatus("ai-insurability-list-status", `${rows.length} profile(s) shown.`);
     } catch (error) {
       clear(target);
-      emptyRow(target, 6, "Insurer profiles could not be loaded. No insurer-readiness conclusion is shown.");
-      setStatus("ai-insurability-list-status", plainMessage(error, "Insurer profiles are not available right now."));
+      emptyRow(target, 6, "Insurer profiles could not be loaded. No insurer-readiness conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-insurability-list-status", plainMessage(error, "Insurer profiles are not available right now. Try again in a minute."));
     }
   };
   const insurabilityList = byId("ai-insurability-list");
@@ -2319,7 +2382,7 @@
       downloadRecord(result, "lightwork-insurer-profile.json");
       setStatus("ai-insurability-detail-status", "Download ready. It was approved by a second person. It does not mean an insurer accepted it.");
     } catch (error) {
-      setStatus("ai-insurability-detail-status", plainMessage(error, "The profile could not be downloaded."));
+      setStatus("ai-insurability-detail-status", plainMessage(error, "The profile could not be downloaded. Try again."));
     } finally {
       insurabilityExport.disabled = false; insurabilityExport.removeAttribute("aria-busy");
     }
@@ -2431,7 +2494,7 @@
         conformityEvidenceBox.appendChild(label);
       });
     } catch (error) {
-      conformityEvidenceBox.replaceChildren(note(plainMessage(error, "The case evidence could not be loaded.")));
+      conformityEvidenceBox.replaceChildren(note(plainMessage(error, "The case evidence could not be loaded. Refresh the page and try again.")));
     }
   };
   const loadConformityCases = async (limit = 100) => {
@@ -2452,8 +2515,8 @@
       if (!rows.length) emptyRow(target, 5, "No readiness cases yet. Use “Start and fill in a readiness case” below to begin.");
       setStatus("ai-conformity-list-status", `${rows.length} readiness case(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Readiness cases could not be loaded. No legal or certification conclusion is shown.");
-      setStatus("ai-conformity-list-status", plainMessage(error, "Launch readiness is not available right now."));
+      clear(target); emptyRow(target, 5, "Readiness cases could not be loaded. No legal or certification conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-conformity-list-status", plainMessage(error, "Launch readiness is not available right now. Try again in a minute."));
     }
   };
   const conformityList = byId("ai-conformity-list");
@@ -2482,7 +2545,7 @@
       downloadRecord(result, "lightwork-launch-readiness.json");
       setStatus("ai-conformity-detail-status", "Package downloaded. It is not a signed declaration, a CE mark or proof that anyone outside accepted it.");
     } catch (error) {
-      setStatus("ai-conformity-detail-status", plainMessage(error, "The package could not be downloaded."));
+      setStatus("ai-conformity-detail-status", plainMessage(error, "The package could not be downloaded. Try again."));
     } finally {
       conformityExport.disabled = false; conformityExport.removeAttribute("aria-busy");
     }
@@ -2630,8 +2693,8 @@
       if (!rows.length) emptyRow(target, 6, "No packages of this kind yet. Use “Prepare a package” below to start one.");
       setStatus("ai-regulated-package-list-status", `${rows.length} package(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 6, "Packages could not be loaded. No compliance or acceptance conclusion is shown.");
-      setStatus("ai-regulated-package-list-status", plainMessage(error, "Evidence packages are not available right now."));
+      clear(target); emptyRow(target, 6, "Packages could not be loaded. No compliance or acceptance conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-regulated-package-list-status", plainMessage(error, "Evidence packages are not available right now. Try again in a minute."));
     }
   };
   const regulatedList = byId("ai-regulated-package-list");
@@ -2656,7 +2719,7 @@
       const result = await request(`${regulatedPackageBase(String(fields.get("plane")))}/${encodeURIComponent(packageId)}/export${query}`, {}, "download the package");
       showProjection("ai-regulated-package-result", result); downloadRecord(result, "lightwork-evidence-package.json");
       setStatus("ai-regulated-package-detail-status", "Package downloaded. It is not a decision, a model approval, a filing or proof that a regulator accepted it.");
-    } catch (error) { setStatus("ai-regulated-package-detail-status", plainMessage(error, "The package could not be downloaded.")); }
+    } catch (error) { setStatus("ai-regulated-package-detail-status", plainMessage(error, "The package could not be downloaded. Try again.")); }
     finally { regulatedExport.disabled = false; regulatedExport.removeAttribute("aria-busy"); }
   });
   const regulatedPrepare = regulatedPrepareForm;
@@ -2713,8 +2776,8 @@
       if (!rows.length) emptyRow(target, 5, "No figures prepared yet. Use “Prepare figures to share” below if you want to take part.");
       setStatus("ai-benchmark-list-status", `${rows.length} set(s) of figures shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Shared figures could not be loaded. No network, cohort, or coverage conclusion is shown.");
-      setStatus("ai-benchmark-list-status", plainMessage(error, "Comparisons are not available right now."));
+      clear(target); emptyRow(target, 5, "Shared figures could not be loaded. No network, cohort, or coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-benchmark-list-status", plainMessage(error, "Comparisons are not available right now. Try again in a minute."));
     }
   };
   const benchmarkList = byId("ai-benchmark-list");
@@ -2744,7 +2807,7 @@
       downloadRecord(result, "lightwork-shared-figures.json");
       setStatus("ai-benchmark-detail-status", "Figures downloaded. This does not prove they were sent, kept anonymous or included in a comparison.");
     } catch (error) {
-      setStatus("ai-benchmark-detail-status", plainMessage(error, "The figures could not be downloaded."));
+      setStatus("ai-benchmark-detail-status", plainMessage(error, "The figures could not be downloaded. Try again."));
     } finally {
       benchmarkExport.disabled = false; benchmarkExport.removeAttribute("aria-busy");
     }
@@ -2837,8 +2900,8 @@
       if (!rows.length) emptyRow(target, 5, "No comparison reports received yet. When the comparison service sends you one, add its file below.");
       setStatus("ai-benchmark-report-list-status", `${rows.length} comparison report(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Comparison reports could not be loaded. No cohort or privacy conclusion is shown.");
-      setStatus("ai-benchmark-report-list-status", plainMessage(error, "Comparison reports are not available right now."));
+      clear(target); emptyRow(target, 5, "Comparison reports could not be loaded. No cohort or privacy conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-benchmark-report-list-status", plainMessage(error, "Comparison reports are not available right now. Try again in a minute."));
     }
   };
   const benchmarkReportList = byId("ai-benchmark-report-list");
@@ -2883,8 +2946,8 @@
       if (!rows.length) emptyRow(target, 5, "No sensors yet. Use “Add or change a sensor” below to add one.");
       setStatus("ai-discovery-sensor-list-status", `${rows.length} sensor(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Sensors could not be loaded. No live-sensor or completeness conclusion is shown.");
-      setStatus("ai-discovery-sensor-list-status", plainMessage(error, "Discovery sensors are not available right now."));
+      clear(target); emptyRow(target, 5, "Sensors could not be loaded. No live-sensor or completeness conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-discovery-sensor-list-status", plainMessage(error, "Discovery sensors are not available right now. Try again in a minute."));
     }
   };
   const discoverySensorList = byId("ai-discovery-sensor-list");
@@ -2980,11 +3043,11 @@
         displayTime(item.observed_at), item.current === true ? "Yes" : "No"
       ], {kind: "observation", key: item.observation_id, label: words(item.normalized?.ai_product_code || "observation"),
           fields: {observation_id: item.observation_id}}));
-      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. No discovery-completeness conclusion is shown.");
+      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. Observations appear here after a discovery run. No discovery-completeness conclusion is shown.");
       setStatus("ai-discovery-observation-list-status", `${rows.length} observation(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Observations could not be loaded. No live collection or completeness conclusion is shown.");
-      setStatus("ai-discovery-observation-list-status", plainMessage(error, "Observations are not available right now."));
+      clear(target); emptyRow(target, 5, "Observations could not be loaded. No live collection or completeness conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-discovery-observation-list-status", plainMessage(error, "Observations are not available right now. Try again in a minute."));
     }
   };
   const discoveryObservationList = byId("ai-discovery-observation-list");
@@ -3131,8 +3194,8 @@
         ? `${configured.size} of ${supported.length} service(s) connected for reading.`
         : "No services are connected yet. An administrator can connect Microsoft Entra, Okta or Microsoft Purview in Settings.");
     } catch (error) {
-      clear(target); emptyRow(target, 4, "Connections could not be checked. No provider-configuration conclusion is shown.");
-      setStatus("ai-identity-governance-status-message", plainMessage(error, "Connections are not available right now."));
+      clear(target); emptyRow(target, 4, "Connections could not be checked. No provider-configuration conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-identity-governance-status-message", plainMessage(error, "Connections are not available right now. Try again in a minute."));
     }
   };
   const identityGovernanceStatus = byId("ai-identity-governance-status");
@@ -3164,7 +3227,7 @@
           : "Scheduled reading is off. Nothing is read automatically."
       );
     } catch (error) {
-      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "Scheduled reading is not available right now."));
+      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "Scheduled reading is not available right now. Try again in a minute."));
     }
   };
   const identityGovernanceScheduler = byId("ai-identity-governance-scheduler");
@@ -3183,7 +3246,7 @@
       const failures = Array.isArray(result.failures) ? result.failures.length : 0;
       setStatus("ai-identity-governance-scheduler-status", `${Number(result.provider_count) || 0} scheduled reading(s) run; ${failures} could not finish. Nothing was changed in the services.`);
     } catch (error) {
-      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "The scheduled reading could not run."));
+      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "The scheduled reading could not run. Try again in a minute."));
     } finally {
       identityGovernanceSchedulerRun.disabled = false;
       identityGovernanceSchedulerRun.removeAttribute("aria-busy");
@@ -3199,7 +3262,7 @@
       const result = await request("/identity-governance/controls/status", {}, "check the controls");
       showProjection("ai-identity-control-result", result);
       const ready = result.runtime_attached === true;
-      const writes = result.provider_writes === true ? "Data label changes can be applied." : "Data label changes cannot be applied right now.";
+      const writes = result.provider_writes === true ? "Data label changes can be applied." : "Data label changes cannot be applied right now. Try again in a minute.";
       setStatus("ai-identity-control-status-message", ready
         ? `The controls are ready. ${writes}`
         : "The controls are not set up for this workspace yet. Ask whoever runs Lightwork to turn them on.");
@@ -3280,12 +3343,12 @@
       renderIdentityChoices();
       setStatus("ai-identity-choices-status", result.available === true
         ? `${identityChoices.federation_bindings.length} agent identit${identityChoices.federation_bindings.length === 1 ? "y" : "ies"} and ${identityChoices.purview_intents.length} prepared change(s) available.`
-        : "No agent identities are enrolled for this workspace yet. Whoever runs Lightwork enrolls them on the server.");
+        : "No agent identities are enrolled for this workspace yet. Ask whoever runs Lightwork to enroll them on the server.");
     } catch (error) {
       purviewLabels.loaded = true;
       renderPurviewLabels();
       renderIdentityChoices();
-      setStatus("ai-identity-choices-status", plainMessage(error, "Agent identities could not be loaded."));
+      setStatus("ai-identity-choices-status", plainMessage(error, "Agent identities could not be loaded. Refresh the page and try again."));
     }
   };
   const identityWorkbench = byId("ai-identity-control-workbench");
@@ -3294,7 +3357,7 @@
     if (!button) return;
     button.disabled = true; button.setAttribute("aria-busy", "true"); setStatus(statusId, message);
     try { return await action(); }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally { button.disabled = false; button.removeAttribute("aria-busy"); }
   };
   const identityFederationInput = form => {
@@ -3329,7 +3392,7 @@
       showProjection("ai-identity-control-result", result);
       const kept = result.mapping_registry_retained === true
         ? "This result was saved, so you can prepare data label changes with it."
-        : "This result could not be saved, so it cannot be used for data label changes.";
+        : "This result could not be saved, so it cannot be used for data label changes. Try again.";
       setStatus("ai-identity-control-evaluate-status", `Shown. ${kept} A permission Lightwork does not recognise grants nothing.`);
     });
   });
@@ -3441,7 +3504,7 @@
       const ready = value => (value === "available" || value === "supported" ? "ready" : "not set up");
       setStatus("ai-media-provenance-capabilities-status", `Checking tool: ${ready(result.verification?.status)}. Signing tool: ${ready(result.signing?.status)}. An administrator connects these tools in Settings.`);
     } catch (error) {
-      setStatus("ai-media-provenance-capabilities-status", plainMessage(error, "Media checks are not available right now."));
+      setStatus("ai-media-provenance-capabilities-status", plainMessage(error, "Media checks are not available right now. Try again in a minute."));
     }
   };
   const mediaProvenanceCapabilities = byId("ai-media-provenance-capabilities");
@@ -3464,8 +3527,8 @@
       if (!rows.length) emptyRow(target, 5, "No media records yet. Use “Check a media file” below to add one. No provenance-coverage conclusion is shown.");
       setStatus("ai-media-provenance-list-status", `${rows.length} media record(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Media records could not be loaded. No provenance-coverage conclusion is shown.");
-      setStatus("ai-media-provenance-list-status", plainMessage(error, "Media records are not available right now."));
+      clear(target); emptyRow(target, 5, "Media records could not be loaded. No provenance-coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-media-provenance-list-status", plainMessage(error, "Media records are not available right now. Try again in a minute."));
     }
   };
   const mediaProvenanceList = byId("ai-media-provenance-list");
@@ -3495,7 +3558,7 @@
       downloadRecord(result, "lightwork-ai-media-provenance.json");
       setStatus("ai-media-provenance-detail-status", "Record downloaded. It does not contain the media file and is not a certification.");
     } catch (error) {
-      setStatus("ai-media-provenance-detail-status", plainMessage(error, "The record could not be downloaded."));
+      setStatus("ai-media-provenance-detail-status", plainMessage(error, "The record could not be downloaded. Try again."));
     } finally {
       mediaProvenanceExport.disabled = false; mediaProvenanceExport.removeAttribute("aria-busy");
     }
@@ -3637,66 +3700,120 @@
   {% endif %}
 
   const grcPreview = byId("grc-outbound-preview");
-  // Records to send are chosen from findings, accepted risks and incidents
-  // already on this page; the server supplies each one's exact details.
-  let grcSources = [];
+  const grcSync = byId("grc-outbound-sync"), grcConfirm = byId("grc-outbound-confirm");
+  const grcOriginalButton = byId("grc-outbound-original");
+  let grcSources = [], grcReview = null, grcBusy = false, grcOriginal = null, grcOriginalChecked = false;
+  try { grcOriginal = JSON.parse(sessionStorage.getItem("lightwork-grc-original") || "null"); } catch (_) {}
+  if (grcOriginalButton) grcOriginalButton.hidden = !grcOriginal;
+  const clearGrcReview = () => {
+    grcReview = null;
+    if (grcConfirm) { grcConfirm.checked = false; grcConfirm.disabled = true; }
+    if (grcSync) grcSync.disabled = true;
+    const result = byId("grc-outbound-result"); if (result) { clear(result); result.hidden = true; }
+  };
+  const showGrcReview = value => {
+    const holder = byId("grc-outbound-result"); clear(holder); holder.hidden = false;
+    const title = document.createElement("h4"); title.textContent = "Review the complete record to send";
+    const dl = document.createElement("dl");
+    (value.details || []).forEach(row => {
+      const dt = document.createElement("dt"); dt.textContent = row.label;
+      const dd = document.createElement("dd"); dd.textContent = row.value; dd.style.whiteSpace = "pre-wrap"; dd.style.overflowWrap = "anywhere";
+      dl.append(dt, dd);
+    });
+    const technical = document.createElement("details"), summary = document.createElement("summary"), pre = document.createElement("pre");
+    summary.textContent = "Exact record version, fingerprint and outbound details"; pre.tabIndex = 0;
+    pre.textContent = JSON.stringify(value.technical, null, 2); technical.append(summary, pre);
+    holder.append(title, dl, technical);
+  };
+  const showGrcResult = value => {
+    const holder = byId("grc-outbound-result"); clear(holder); holder.hidden = false;
+    const message = document.createElement("p"); message.textContent = value.message;
+    const state = value.state || {}, receipt = state.receipt || {};
+    holder.append(message, readable({delivery_status: value.status === "delivered" ? "Confirmed by the destination" : "Destination confirmation missing",
+      confirmed_at: receipt.delivered_at || null, send_attempts: state.attempts || null}));
+    const technical = document.createElement("details"), summary = document.createElement("summary"), pre = document.createElement("pre");
+    summary.textContent = "Exact original delivery record"; pre.tabIndex = 0; pre.textContent = JSON.stringify(value, null, 2);
+    technical.append(summary, pre); holder.append(technical);
+  };
   const loadGrcSources = async () => {
     if (!grcPreview) return;
+    clearGrcReview();
     const select = grcPreview.elements.source_choice;
     const kind = String(grcPreview.elements.source_kind.value || "finding");
     select.replaceChildren(new Option("Loading records…", ""));
     try {
       const result = await request(`/pickers/grc-sources?source_kind=${encodeURIComponent(kind)}`, {}, "load the records");
+      if (String(grcPreview.elements.source_kind.value) !== kind) return;
       grcSources = Array.isArray(result.sources) ? result.sources : [];
       select.replaceChildren(new Option(grcSources.length ? "Choose a record" : "No records of this kind yet", ""));
       grcSources.forEach((row, index) => select.appendChild(new Option(
-        `${ASSET_NAMES[row.asset_id] || "AI system"}: ${asText(row.label).slice(0, 120)} (${words(row.source?.severity)})`, String(index))));
+        `${ASSET_NAMES[row.asset_id] || "AI system"}: ${asText(row.label)} (${words(row.severity)})`, String(index))));
     } catch (error) {
-      grcSources = [];
-      select.replaceChildren(new Option("Records could not be loaded", ""));
-      setStatus("grc-outbound-preview-status", plainMessage(error, "Records could not be loaded."));
+      grcSources = []; select.replaceChildren(new Option("Records could not be loaded", ""));
+      setStatus("grc-outbound-preview-status", plainMessage(error, "Records could not be loaded. Refresh the page and try again."));
     }
   };
-  if (grcPreview) grcPreview.elements.source_kind.addEventListener("change", () => { void loadGrcSources(); });
+  if (grcPreview) {
+    grcPreview.elements.source_kind.addEventListener("change", () => { void loadGrcSources(); });
+    grcPreview.elements.source_choice.addEventListener("change", clearGrcReview);
+    grcPreview.elements.target.addEventListener("change", clearGrcReview);
+  }
   const chosenGrcSource = () => {
     const index = String(grcPreview.elements.source_choice.value || "");
     const row = index === "" ? null : grcSources[Number(index)];
     if (!row || !row.source) throw new Error("Choose a record to send first.");
-    return {...row.source};
+    return {source_kind: row.source.source_kind, source_id: row.source.source_id};
   };
   if (grcPreview) grcPreview.addEventListener("submit", event => {
     event.preventDefault();
-    withButton(grcPreview, "grc-outbound-preview-status", "Preparing the preview…", async () => {
-      const fields = formBody(grcPreview); const source = chosenGrcSource();
-      const result = await sendJson(`/grc-outbound/${encodeURIComponent(String(fields.get("target")))}/preview`, "POST", source, "preview the send");
-      showProjection("grc-outbound-result", result); setStatus("grc-outbound-preview-status", "Preview ready. Nothing was sent.");
+    withButton(grcPreview, "grc-outbound-preview-status", "Preparing the exact record review…", async () => {
+      clearGrcReview();
+      const source = chosenGrcSource(), target = String(grcPreview.elements.target.value);
+      const result = await sendJson(`/grc-outbound/${encodeURIComponent(target)}/preview`, "POST", source, "review the send");
+      if (JSON.stringify(chosenGrcSource()) !== JSON.stringify(source) || String(grcPreview.elements.target.value) !== target) return;
+      grcReview = {target, token: result.review_token}; showGrcReview(result);
+      if (grcConfirm) grcConfirm.disabled = false;
+      setStatus("grc-outbound-preview-status", result.message);
     });
   });
-  {% if gateway_admin %}
-  const grcSync = byId("grc-outbound-sync");
+  if (grcConfirm) grcConfirm.addEventListener("change", () => { grcSync.disabled = grcBusy || !grcReview || !grcConfirm.checked; });
   if (grcSync && grcPreview) grcSync.addEventListener("click", async () => {
-    if (grcSync.disabled) return;
-    let source;
-    try { source = chosenGrcSource(); } catch (error) { setStatus("grc-outbound-sync-status", plainMessage(error, "Choose a record to send first.")); return; }
-    const fields = formBody(grcPreview);
-    const destination = String(fields.get("target")) === "archer" ? "Archer" : "ServiceNow";
-    if (!(await mvConfirm(`Send this record to ${destination} now? This changes records in ${destination}.`, {okText: "Send"}))) return;
-    grcSync.disabled = true; grcSync.setAttribute("aria-busy", "true");
-    setStatus("grc-outbound-sync-status", `Sending to ${destination}…`);
+    if (grcBusy || !grcReview || !grcConfirm.checked) return;
+    if (grcOriginal && !grcOriginalChecked) {
+      setStatus("grc-outbound-sync-status", "Check the earlier original delivery result before deciding on another send. This prevents an uncertain result from being mistaken for a failed send."); return;
+    }
+    const original = {...grcReview}, destination = original.target === "archer" ? "Archer" : "ServiceNow";
+    if (!(await mvConfirm(`Send the complete reviewed record to ${destination}? This may create or update its record. An earlier uncertain effect may already exist; this exact source uses the native original request reference.`, {okText: "Send reviewed record"}))) return;
+    if (!grcReview || grcReview.token !== original.token) return;
+    grcBusy = true; grcSync.disabled = true; grcConfirm.disabled = true; grcSync.setAttribute("aria-busy", "true");
+    grcOriginal = original; grcOriginalChecked = false;
+    try { sessionStorage.setItem("lightwork-grc-original", JSON.stringify(original)); } catch (_) {}
+    if (grcOriginalButton) grcOriginalButton.hidden = false;
+    setStatus("grc-outbound-sync-status", `Sending the reviewed record to ${destination}…`);
     try {
-      const result = await sendJson(`/grc-outbound/${encodeURIComponent(String(fields.get("target")))}/sync`, "POST", source, "send the record");
-      showProjection("grc-outbound-result", result);
-      setStatus("grc-outbound-sync-status", result.status === "delivered"
-        ? `Delivered. ${destination} confirmed it received the record.`
-        : `Send attempted. It counts as delivered only once ${destination} confirms it received the record.`);
+      const result = await sendJson(`/grc-outbound/${encodeURIComponent(original.target)}/sync`, "POST", {review_token: original.token, confirmed: true}, "send the reviewed record");
+      showGrcResult(result); setStatus("grc-outbound-sync-status", result.message);
+      setStatus("grc-outbound-preview-status", "The reviewed request was submitted. Its original result is shown below.");
+      grcOriginalChecked = result.status === "delivered";
       await loadGrcEvents();
     } catch (error) {
-      setStatus("grc-outbound-sync-status", plainMessage(error, "The record could not be sent."));
+      setStatus("grc-outbound-sync-status", plainMessage(error, "The original delivery is unconfirmed. Check its saved result; nothing will be sent again automatically."));
+      setStatus("grc-outbound-preview-status", "The reviewed request was attempted. Check its original result before deciding whether another send is needed.");
     } finally {
-      grcSync.disabled = false; grcSync.removeAttribute("aria-busy");
+      grcBusy = false; grcReview = null; grcConfirm.checked = false; grcSync.removeAttribute("aria-busy");
     }
   });
-  {% endif %}
+  if (grcOriginalButton) grcOriginalButton.addEventListener("click", async () => {
+    if (!grcOriginal || grcBusy) return;
+    grcOriginalButton.disabled = true;
+    try {
+      const result = await sendJson(`/grc-outbound/${encodeURIComponent(grcOriginal.target)}/original`, "POST", {review_token: grcOriginal.token}, "read the exact original result");
+      grcOriginalChecked = true; showGrcResult(result);
+      setStatus("grc-outbound-original-status", result.message);
+    } catch (error) {
+      setStatus("grc-outbound-original-status", plainMessage(error, "The original result cannot be read from this account or workspace. Return to the original account and check the destination. Reading sends nothing."));
+    } finally { grcOriginalButton.disabled = false; }
+  });
   const grcState = byId("grc-outbound-state");
   if (grcState) grcState.addEventListener("submit", event => {
     event.preventDefault();
@@ -3713,11 +3830,11 @@
       rows.forEach(item => tableRow(target, [words(item.event_kind), item.target === "archer" ? "Archer" : "ServiceNow", words(item.source?.kind), words(item.reason)],
         {kind: "event", key: item.id, label: `${words(item.event_kind)} (${words(item.source?.kind)})`,
          fields: {target: item.target, source_kind: item.source?.kind, source_id: item.source?.id}}));
-      if (!rows.length) emptyRow(target, 5, "Nothing has been sent yet. Choose a record above and select Preview. This does not show whether ServiceNow or Archer is connected.");
-      setStatus("grc-outbound-events-status", `${rows.length} recent send(s) shown.`);
+      if (!rows.length) emptyRow(target, 5, "No recent delivery failures or conflicts were recorded. Read the original delivery result to check a send. This list does not prove a connection is available.");
+      setStatus("grc-outbound-events-status", `${rows.length} recent delivery problem(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Recent sends could not be loaded. No delivery conclusion is shown.");
-      setStatus("grc-outbound-events-status", plainMessage(error, "Sending to ServiceNow or Archer is not available right now."));
+      clear(target); emptyRow(target, 5, "Recent sends could not be loaded. No delivery conclusion is shown. Refresh the page and try again.");
+      setStatus("grc-outbound-events-status", plainMessage(error, "Sending to ServiceNow or Archer is not available right now. Try again in a minute."));
     }
   };
 
@@ -3763,6 +3880,9 @@
       loadAllButton.removeAttribute("aria-busy");
     }
   });
+  // Sections load once the shell's helpers (lightwork-ui.js, after the page
+  // content) are ready.
+  const watchPanels = () => {
   if ("IntersectionObserver" in window) {
     panelObserver = new IntersectionObserver(entries => {
       entries.forEach(entry => {
@@ -3780,5 +3900,7 @@
   } else {
     void Promise.all(panelLoaders.map(loadPanel));
   }
+  };
+  if (window.mvFetchJSON) watchPanels(); else document.addEventListener("DOMContentLoaded", watchPanels);
 })();
 </script>

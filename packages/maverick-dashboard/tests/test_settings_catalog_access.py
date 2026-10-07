@@ -22,7 +22,7 @@ from maverick_dashboard import settings_catalog_access as access
 from maverick_dashboard import settings_tests
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -63,6 +63,10 @@ def audit_rows(monkeypatch):
     rows: list[dict] = []
 
     def capture(kind, **payload):
+        # The settings-change rows only: using the server token (as_token)
+        # also writes one rate-limited break-glass row per process.
+        if getattr(kind, "value", kind) == "break_glass_token_used":
+            return True
         rows.append({"kind": kind, **payload})
         return True
 
@@ -87,7 +91,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False, http=client):
-    return http.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(http, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -107,6 +111,8 @@ def _file(tmp_path, name="server.pem", mode=0o600):
 
 
 _TEXT = {
+    "plugins.workbench_image": "sha256:" + "a" * 64,
+    "connections.self_connect_profiles": "google-drive,google-cloud-storage",
     "auth.oidc.issuer": "https://login.example.com/realm",
     "auth.oidc.client_id": "lightwork-dashboard",
     "auth.oidc.audience": "lightwork-dashboard",
@@ -122,6 +128,7 @@ _TEXT = {
     "auth.saml.default_relay_state": "/goals",
     "auth.proxy.header": "X-Auth-User",
     "dashboard.public_url": "https://lightwork.example.com",
+    "dashboard.api_key_prefix": "acme_",  # pragma: allowlist secret - a sample prefix
     "kms.key_id": "arn:aws:kms:us-east-1:123:key/abc",
     "kms.region": "eu-west-1",
     "kms.address": "https://vault.example.com",
@@ -147,13 +154,20 @@ _LIST = {
     "a2a.tools": ["web_search"],
     "a2a.deny_tools": ["shell"],
     "residency.allowed_regions": ["EU"],
+    "auth.mfa.amr_values": ["mfa", "corp-push"],
+    "auth.mfa.acr_values": ["urn:example:mfa"],
+    "auth.mfa.saml_authn_contexts": ["urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"],
+    # The saving request comes from loopback: the list must contain it.
+    "auth.ip_allowlist.cidrs": ["127.0.0.1/32", "10.0.0.0/8"],
+    "auth.ip_allowlist.workspace_cidrs": ["127.0.0.1/32", "10.0.0.0/8"],
 }
 _SECRETS = {
     "queue.redis_dsn": "rediss://:pw@queue.example.com:6380/0",  # pragma: allowlist secret
     "world_model.dsn": "postgres://lw:pw@db.example.com:5432/lightwork",  # pragma: allowlist secret
 }
 _THEME = {"bg": "#101020", "panel": "#181830", "text": "#e0e0f0", "accent": "#7aa2f7"}
-_NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200}
+_NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200,
+            "governed_records.pool_min_size": 2}  # minimum + 1 is its default
 # Rows whose kernel reader refuses them alone: saved together with these.
 _WITH = {
     "dashboard.require_auth": [{"id": "dashboard.invites", "value": True}],
@@ -186,6 +200,8 @@ def _sample(setting, tmp_path):  # noqa: C901 - one branch per control
             folder.mkdir(parents=True, exist_ok=True)
             return str(folder)
         return str(_file(tmp_path, setting.id.replace(".", "-") + ".pem"))
+    if setting.id == "plugins.workbench_image":
+        return _IMAGE_ID
     choices = [v for v, _ in page._resolved(setting).choices]
     if control == "select":
         return next(v for v in choices if v != setting.default)
@@ -226,6 +242,23 @@ def _lookup(tree, setting):
     return catalog.lookup(tree, setting.path)
 
 
+_IMAGE_ID = "sha256:" + "ab" * 32
+
+
+@pytest.fixture()
+def local_image(monkeypatch):
+    """Stand in for one installed practice environment at the engine boundary."""
+    from maverick.sandbox import local_images
+
+    def selected(identity):
+        if identity != _IMAGE_ID:
+            raise local_images.LocalImageUnavailable("The selected practice environment is missing.")
+        return local_images.LocalImage(_IMAGE_ID, "Plugin practice")
+    monkeypatch.setattr(local_images, "selected", selected)
+    monkeypatch.setattr(local_images, "inventory", lambda *, refresh=False: (
+        (local_images.LocalImage(_IMAGE_ID, "Plugin practice"),), "One installed environment."))
+
+
 @pytest.fixture()
 def workspaces(monkeypatch):
     monkeypatch.setitem(page._ACCESS_SOURCES, "workspaces", lambda: [("acme", "Acme")])
@@ -236,7 +269,7 @@ def workspaces(monkeypatch):
 # ------------------------------------------------------------ round trip
 @pytest.mark.parametrize("setting", EDITABLE, ids=lambda s: s.id)
 def test_every_access_row_saves_reads_back_and_resets(setting, tmp_path, monkeypatch, as_token,
-                                                      workspaces, audit_rows):
+                                                      workspaces, local_image, audit_rows):
     monkeypatch.setattr(guard, "_prerequisites", lambda changed, values: None)
     monkeypatch.setattr(settings_tests, "check_kms",
                         lambda values: settings_tests.Outcome(True, "ok"))
@@ -258,7 +291,12 @@ def test_every_access_row_saves_reads_back_and_resets(setting, tmp_path, monkeyp
         assert audit_rows[-1]["key"] == setting.key
     r = _save([{"id": setting.id, "reset": True}], confirm=True)
     assert r.status_code == 200, r.text
-    assert _row(setting.id)["source"] in {"default", "installer"}
+    row = _row(setting.id)
+    if row["source"] == "here":
+        from maverick.config_resets import is_reset
+        assert is_reset(page._sources()["here"], setting), "Only an explicit product-default mask may remain local after reset"
+    else:
+        assert row["source"] in {"default", "installer"}
 
 
 def _invalid(setting, tmp_path):  # noqa: C901 - one branch per control
@@ -296,34 +334,51 @@ def test_every_access_row_refuses_invalid_values(setting, tmp_path, as_token, wo
 
 
 # ----------------------------------------------------------------- paths
-def test_paths_must_be_full_existing_readable_and_inside_allowed_places(tmp_path, as_token,
-                                                                        audit_rows):
+def test_paths_must_be_full_existing_readable_and_inside_allowed_places(
+    tmp_path, tmp_path_factory, monkeypatch, as_token, audit_rows,
+):
     key = "auth.saml.sp_key_file"
+    outside = tmp_path_factory.mktemp("outside-settings-root") / "status.txt"
+    outside.write_text("Synthetic outside-root file", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
     cases = {
         "relative/key.pem": "full location",
         str(tmp_path / "nope.pem"): "nothing was found",
         str(tmp_path): "is a folder",
-        "/proc/self/status": "only uses locations",
+        str(outside): "only uses locations",
     }
     for value, words in cases.items():
         r = _save([{"id": key, "value": value}], confirm=True)
         assert r.status_code == 400, value
         assert words in r.json()["message"], (value, r.json()["message"])
-    world_readable = _file(tmp_path, "open.key", mode=0o644)
-    r = _save([{"id": key, "value": str(world_readable)}], confirm=True)
-    assert r.status_code == 400 and "anyone on the server can read" in r.json()["message"]
-    folder = _save([{"id": "workspace.snapshot_dir", "value": str(world_readable)}], confirm=True)
+    ordinary_file = _file(tmp_path, "ordinary.pem")
+    folder = _save([{"id": "workspace.snapshot_dir", "value": str(ordinary_file)}], confirm=True)
     assert folder.status_code == 400 and "Choose a folder" in folder.json()["message"]
     private = _file(tmp_path, "ok.key", mode=0o600)
     assert _save([{"id": key, "value": str(private)}], confirm=True).status_code == 200
     assert _loaded()["auth"]["saml"]["sp_key_file"] == str(private)
 
 
-def test_a_link_cannot_lead_outside_the_allowed_places(tmp_path, monkeypatch, as_token,
-                                                       audit_rows):
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits; Windows native ACL qualification is separate")
+def test_private_key_path_rejects_world_readable_posix_mode(tmp_path, as_token, audit_rows):
+    world_readable = _file(tmp_path, "open.key", mode=0o644)
+    response = _save([{"id": "auth.saml.sp_key_file", "value": str(world_readable)}], confirm=True)
+    assert response.status_code == 400 and "anyone on the server can read" in response.json()["message"]
+
+
+def test_a_link_cannot_lead_outside_the_allowed_places(
+    tmp_path, tmp_path_factory, monkeypatch, as_token, audit_rows,
+):
     link = tmp_path / "certs" / "sneaky.pem"
     link.parent.mkdir(parents=True, exist_ok=True)
-    link.symlink_to("/etc/hostname" if os.path.exists("/etc/hostname") else "/etc/passwd")
+    outside = tmp_path_factory.mktemp("outside-settings-link") / "key.pem"
+    outside.write_text("Synthetic outside-root file", encoding="utf-8")
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("This Windows account cannot create symbolic links")
+        raise
     monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
     r = _save([{"id": "license.license_file", "value": str(link)}], confirm=True)
     assert r.status_code == 400 and "only uses locations" in r.json()["message"]
@@ -419,6 +474,40 @@ def test_the_sign_in_provider_check(monkeypatch):
     assert not settings_tests.check_oidc({}).ok
 
 
+def test_browser_sign_in_check_rejects_missing_or_wrong_return_address(monkeypatch):
+    monkeypatch.setattr(settings_tests, "fetch", _oidc_fetch())
+    values = {
+        "auth.oidc.issuer": "https://login.example.com/realm",
+        "auth.oidc.client_id": "lightwork",
+        "auth.oidc.client_secret": "client-secret",  # pragma: allowlist secret
+        "auth.oidc.audience": "lightwork",
+        "auth.oidc.session_secret": _SECRET,
+        "auth.oidc.redirect_uri": "https://lightwork.example.com/auth/callback",
+    }
+    assert settings_tests.check_oidc_login(values).ok
+    assert not settings_tests.check_oidc_login({**values, "auth.oidc.client_secret": ""}).ok
+    assert not settings_tests.check_oidc_login({**values, "auth.oidc.redirect_uri": "https://lightwork.example.com/wrong"}).ok
+
+
+def test_single_sign_on_check_requires_real_metadata_and_callback(monkeypatch):
+    metadata = (
+        b'<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata">'
+        b'<IDPSSODescriptor><SingleSignOnService Location="https://idp.example.com/login"/>'
+        b'</IDPSSODescriptor></EntityDescriptor>'
+    )
+    monkeypatch.setattr(settings_tests, "fetch", lambda _url: (200, metadata))
+    values = {
+        "auth.saml.idp_metadata_url": "https://idp.example.com/metadata",
+        "auth.saml.sp_entity_id": "https://lightwork.example.com/saml/metadata",
+        "auth.saml.acs_url": "https://lightwork.example.com/saml/acs",
+        "auth.oidc.session_secret": _SECRET,
+    }
+    assert settings_tests.check_saml(values).ok
+    assert not settings_tests.check_saml_login({**values, "auth.saml.acs_url": "https://lightwork.example.com/wrong"}).ok
+    monkeypatch.setattr(settings_tests, "fetch", lambda _url: (200, b'<EntityDescriptor/>'))
+    assert not settings_tests.check_saml(values).ok
+
+
 def test_the_key_service_check_opens_the_keys_already_in_use(tmp_path, monkeypatch):
     pytest.importorskip("cryptography")
     from maverick.tenant import kms as tenant_kms
@@ -500,6 +589,9 @@ def test_key_service_changes_are_checked_then_confirmed(monkeypatch, as_token, a
 def test_turning_on_company_sign_in_needs_a_passing_test(monkeypatch, audit_rows):
     base = [{"id": "auth.oidc.issuer", "value": _TEXT["auth.oidc.issuer"]},
             {"id": "auth.oidc.client_id", "value": "lightwork"},
+            {"id": "auth.oidc.client_secret", "value": "client-secret"},
+            {"id": "auth.oidc.audience", "value": "lightwork"},
+            {"id": "auth.oidc.redirect_uri", "value": _TEXT["auth.oidc.redirect_uri"]},
             {"id": "auth.oidc.session_secret", "value": _SECRET}]
     fail = settings_tests.Outcome(False, "Lightwork could not reach this address. Check it "
                                          "and try again.")
@@ -512,16 +604,14 @@ def test_turning_on_company_sign_in_needs_a_passing_test(monkeypatch, audit_rows
     monkeypatch.setattr(settings_tests, "check_oidc",
                         lambda values: settings_tests.Outcome(True, "ok"))
     r = _save([*base, {"id": "auth.oidc.enabled", "value": True}], confirm=True)
-    assert r.status_code == 409 and "nobody would be an administrator" in r.json()["message"]
+    assert r.status_code == 409 and "no person has completed a sign-in" in r.json()["message"]
 
     with_admin = [*base, {"id": "dashboard.admins", "value": ["user:ada@example.com"]},
                   {"id": "auth.oidc.enabled", "value": True}]
-    r = _save(with_admin)
-    assert r.status_code == 409
-    confirm = [item for item in r.json()["confirm"] if item.get("kind") == "access"]
-    assert confirm and "sign in again with your company sign-in" in confirm[0]["warning"]
-    assert _save(with_admin, confirm=True).status_code == 200
-    assert _loaded()["auth"]["oidc"]["enabled"] is True
+    r = _save(with_admin, confirm=True)
+    assert r.status_code == 409 and r.json()["lockout"] is True
+    assert "no person has completed a sign-in" in r.json()["message"]
+    assert "auth" not in _loaded() and audit_rows == []
 
 
 def test_half_set_up_single_sign_on_is_refused(audit_rows):
@@ -600,19 +690,42 @@ def test_turning_off_the_way_you_signed_in_is_refused(audit_rows):
     assert _loaded()["dashboard"]["invites"] is True
 
 
-def test_the_owner_is_told_before_company_sign_in_details_pause_the_passphrase(monkeypatch,
+def test_disabled_company_sign_in_details_keep_the_owner_passphrase_available(monkeypatch,
                                                                               audit_rows):
     _base_config('[dashboard]\ninvites = true\nadmins = ["user:ada@example.com"]\n')
     monkeypatch.setattr(guard, "_is_owner", lambda principal: principal == "user:ada@example.com")
     ada = _invite_client("ada@example.com")
     change = [{"id": "auth.oidc.client_id", "value": "lightwork"}]
     r = _save(change, http=ada)
-    assert r.status_code == 409
-    [item] = [i for i in r.json()["confirm"] if i.get("kind") == "access"]
-    assert "passphrase is paused" in item["warning"]
-    assert _save(change, confirm=True, http=ada).status_code == 200
+    assert r.status_code == 200
+    from maverick_dashboard import local_owner
+
+    local_owner._policy()
     assert _save([{"id": "auth.oidc.redirect_uri", "value": _TEXT["auth.oidc.redirect_uri"]}],
-                 http=ada).status_code == 200  # already paused: nothing new to say
+                 http=ada).status_code == 200
+
+
+def test_partial_saml_save_cannot_strand_local_owner_after_sign_out(audit_rows):
+    password = "a long local owner fixture phrase"  # pragma: allowlist secret
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 53210),
+                    headers={"Origin": "http://127.0.0.1:8765"},
+                    follow_redirects=False) as owner:
+        response = owner.post("/auth/local-owner", data={
+            "email": "owner@example.com", "password": password, "confirm": "yes"})
+        assert response.status_code == 303, response.text
+        # Disabled OIDC details can be staged without closing owner recovery.
+        assert _save([{"id": "auth.oidc.client_id", "value": "lightwork"}],
+                     http=owner).status_code == 200
+        refused = _save([{"id": "auth.saml.acs_url",
+                          "value": _TEXT["auth.saml.acs_url"]}], confirm=True, http=owner)
+        assert refused.status_code == 409 and refused.json()["lockout"] is True
+        assert "saml" not in _loaded().get("auth", {})
+        owner.cookies.clear()
+        assert owner.get("/auth/local-login").status_code == 200
+        response = owner.post("/auth/local-login", data={
+            "email": "owner@example.com", "password": password})
+        assert response.status_code == 303, response.text
+        assert owner.get(API).status_code == 200
 
 
 def _request(host="10.0.0.5", headers=None):
@@ -636,10 +749,34 @@ def test_a_proxy_session_survives_only_while_its_proxy_stays_trusted():
 def test_invitation_sessions_end_when_company_sign_in_takes_over():
     before = guard.access_for({"dashboard": {"invites": True}})
     after = guard.access_for({"dashboard": {"invites": True}, "auth": {"oidc": {
-        "enabled": True, "client_id": "x", "session_secret": _SECRET,
+        "enabled": True, "client_id": "x", "client_secret": "client-secret",
+        "redirect_uri": "https://lightwork.example.com/auth/callback",
+        "audience": "x", "session_secret": _SECRET,
         "issuer": "https://login.example.com"}}})
     assert guard._route_survives("invite", _request(), before, before)
     assert not guard._route_survives("invite", _request(), before, after)
+
+
+def test_provider_changes_do_not_count_existing_session_or_bearer_as_recovery():
+    original = {"enabled": True, "issuer": "https://login.example.com",
+                "client_id": "lightwork", "client_secret": "client-secret",
+                "redirect_uri": "https://lightwork.example.com/auth/callback",
+                "audience": "lightwork", "jwks_uri": "https://login.example.com/keys",
+                "algorithms": ["RS256"], "session_secret": _SECRET}
+    before = guard.access_for({"auth": {"oidc": original}})
+    assert guard._route_survives("session", _request(), before, before)
+    assert guard._route_survives("bearer", _request(), before, before)
+    for key, changed_value in (
+        ("issuer", "https://other.example.com"),
+        ("client_secret", "different-secret"),
+        ("redirect_uri", "https://other.example.com/auth/callback"),
+        ("audience", "other-audience"),
+        ("jwks_uri", "https://other.example.com/keys"),
+        ("algorithms", ["ES256"]),
+    ):
+        after = guard.access_for({"auth": {"oidc": {**original, key: changed_value}}})
+        assert not guard._route_survives("session", _request(), before, after), key
+        assert not guard._route_survives("bearer", _request(), before, after), key
 
 
 def test_turning_everything_off_on_this_computer_opens_it_again(monkeypatch):
@@ -877,10 +1014,10 @@ def test_the_server_access_token_can_be_set_here_and_is_checked(monkeypatch, aud
     assert client.get(API, headers=bearer).status_code == 200
     assert _row_with(bearer, "dashboard.token")["is_set"] is True
     # Removing it with only the token to get back in would lock you out.
-    r = client.post(API, json={"changes": [{"id": "dashboard.token", "reset": True}],
+    r = save_catalog(client, API, json={"changes": [{"id": "dashboard.token", "reset": True}],
                                "confirm": True}, headers=bearer)
     assert r.status_code == 409 and "no other working way back in" in r.json()["message"]
-    r = client.post(API, json={"changes": [{"id": "dashboard.token", "value": "short"}],
+    r = save_catalog(client, API, json={"changes": [{"id": "dashboard.token", "value": "short"}],
                                "confirm": True}, headers=bearer)
     assert r.status_code == 400 and r.json()["message"].startswith("Server access token")
     # The environment still wins.
@@ -939,7 +1076,9 @@ def test_colour_themes_are_made_on_the_page_and_offered_to_everyone(as_token, au
     theme = dict(_THEME, name="midnight", warn="#FFAA00", danger="")
     r = _save([{"id": "dashboard.themes", "value": [theme]}], confirm=True)
     assert r.status_code == 200, r.text
-    assert themes.custom_themes() == {"midnight": dict(_THEME, warn="#ffaa00")}
+    assert themes.custom_themes() == {"midnight": dict(
+        _THEME, warn="#ffaa00", danger="#e0e0f0", muted="#e0e0f0", border="#e0e0f0",
+    )}
     assert "body.theme-midnight" in themes.theme_css(themes.custom_themes())
     assert "midnight" in [c["value"] for c in _row("dashboard.theme")["choices"]]
     assert _save([{"id": "dashboard.theme", "value": "midnight"}]).status_code == 200

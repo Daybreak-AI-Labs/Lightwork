@@ -1,8 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Video walkthroughs · Lightwork{% endblock %}
+{% block title %}{{ 'Video · Task replay' if tab_host else 'Video walkthroughs' }} · Lightwork{% endblock %}
 {% block content %}
 {% from "_hero.html" import hero, state %}
-{% call hero('Proof of work', 'Video Walkthroughs',
+{% if tab_host %}
+{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+<div {{ panel_attrs(tab_host.selected) }}>
+<h2>Video walkthroughs</h2>
+<p class="muted">Turn any finished task into a video with captions. Watch exactly what was done, step by step, and
+  share it with your team. Videos are made and kept on your own Lightwork server. Nothing is uploaded anywhere else.
+  {{ items | length }} video{{ '' if items | length == 1 else 's' }}.</p>
+{% else %}
+{% call hero('Proof of work', 'Video walkthroughs',
              subtitle='Watch what was done',
              lede='Turn any finished task into a video with captions. Watch
                    exactly what was done, step by step, and share it with
@@ -13,8 +21,9 @@
            copy='Videos are made and kept on your own Lightwork server.
                  Nothing is uploaded anywhere else.') }}
 {% endcall %}
+{% endif %}
 <div class="panel">
-  <h2 class="wt-flush">Make a Video</h2>
+  <h2 class="wt-flush">Make a video</h2>
   {% if runs %}
   <form id="wt-export" class="wt-form">
     <label class="wt-field" for="wt-goal-id"><span>Finished task</span>
@@ -69,13 +78,14 @@
   </div>
 {% endif %}
 
+{% if tab_host %}</div>{% endif %}
 <style>
   .wt-flush { margin-top: 0; }
   .wt-small { font-size: var(--text-sm); }
   .wt-form { display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap; }
   .wt-field { display: grid; gap: var(--space-1); flex: 0 1 28rem; }
   .wt-title { margin: 0 0 var(--space-3); }
-  .wt-video { width: 100%; max-width: 720px; background: #000; border-radius: 6px; }
+  .wt-video { width: 100%; max-width: 720px; background: #000; border-radius: var(--radius-sm); }
   .wt-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 </style>
 <script>

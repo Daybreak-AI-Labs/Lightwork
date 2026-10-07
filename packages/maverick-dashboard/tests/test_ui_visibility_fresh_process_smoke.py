@@ -48,6 +48,40 @@ DOCUMENTED_STATUS_GATES: dict[str, set[int]] = {
     # refused by design.
     "/research": {403},
     "/knowledge-access": {403},
+    # These opt-in personal surfaces require a named account; the smoke's
+    # local installation credential intentionally cannot impersonate one.
+    "/companion": {403},
+    "/companion/admin": {403},
+    "/deliverable-bundles": {403},
+    "/preferences": {403},
+    "/task-handoffs": {403},
+    "/today": {403},
+    "/my-data": {403},
+    "/content-access": {403},
+    "/notifications": {403},
+    "/access-requests": {403},
+    "/devices": {403},
+    # Human conversation handoff binds every view to the named person who
+    # takes or shares the conversation (human_conversation_handoffs.authority).
+    "/human-conversations": {403},
+    # Employee activation is also switched off by default.
+    "/get-started/employee": {403},
+    # Owned-rule and learning-review pages show only the signed-in person's
+    # own work, so the auth-off smoke gets their sign-in page.
+    "/learning/recheck-rules": {403},
+    "/learning/distinctions": {403},
+    "/learning/rules-together": {403},
+    "/learning/request-program": {403},
+    "/learning/applicability": {403},
+    "/learning/recovery-visibility": {403},
+    "/learning/portable-rules": {403},
+    "/learning/work-restructuring": {403},
+    "/learning/approval-challenges": {403},
+    "/learning/instructions": {403},
+    "/learning/rule-evolution": {401},
+    "/learning/acquisition": {401},
+    # Task mapping is switched off by default.
+    "/compliance/scope-actions/mapping": {403},
 }
 
 created = client.post(

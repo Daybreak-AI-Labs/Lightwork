@@ -9,43 +9,46 @@
     <p class="muted" id="lpo-plan" role="status" aria-live="polite">Loading…</p>
 
     <h3 id="lpo-clash-h">Check lessons for clashes by meaning</h3>
-    <p class="muted">The list above catches clashes by wording. This asks the answer checker to compare each pair of
-      lessons by meaning, which catches reworded clashes. It uses a little of the spending limit; you can stop it.</p>
+    <p class="muted">The wording check above uses no AI calls. Here, review the currently shareable lessons and spending
+      settings before asking the answer checker to look for possible conflicts by meaning. Its judgments may be wrong
+      or unavailable. This changes no instructions.</p>
     <div class="lpo-row">
       <label for="lpo-clash-model">Model</label>
       <select id="lpo-clash-model" class="select"><option value="">Every model</option></select>
-      <button type="button" class="btn btn--ghost" id="lpo-clash-run">Check by meaning</button>
+      <button type="button" class="btn btn--ghost" id="lpo-clash-run">Review meaning check</button>
+    </div>
+    <div id="lpo-clash-review" style="overflow-wrap:anywhere"></div>
+    <div class="lpo-row">
+      <label for="lpo-clash-original">Original check</label>
+      <select id="lpo-clash-original" class="select"><option value="">Choose your original check</option></select>
+      <button type="button" class="btn btn--ghost" id="lpo-clash-recover" disabled>Read original result</button>
+      <button type="button" class="btn btn--ghost" id="lpo-clash-refresh">Refresh original checks</button>
     </div>
     <p class="muted" id="lpo-clash-status" role="status" aria-live="polite"></p>
-    <div id="lpo-clash-out"></div>
+    <div id="lpo-clash-out" style="overflow-wrap:anywhere"></div>
 
-    <h3 id="lpo-transfer-h">Try proven lessons on other models</h3>
-    <p class="muted">Lessons that proved themselves for one model are tested on another. Any that pass start on trial,
-      and real results decide whether they stay.</p>
-    <div class="lpo-row">
-      <label for="lpo-transfer-source">From</label>
-      <select id="lpo-transfer-source" class="select"></select>
-      <label for="lpo-transfer-target">To</label>
-      <select id="lpo-transfer-target" class="select"><option value="">Every other model</option></select>
-      <label><input type="checkbox" id="lpo-transfer-retry"> Try again even for lessons already tried</label>
-      <button type="button" class="btn btn--ghost" id="lpo-transfer-run">Try the lessons</button>
-    </div>
-    <p class="muted" id="lpo-transfer-status" role="status" aria-live="polite"></p>
-    <div id="lpo-transfer-out"></div>
+    {% include "_learning_transfers.html" %}
 
     <h3 id="lpo-cases-h">Test cases</h3>
-    <p class="muted">Test cases are the tasks Lightwork uses to check that a new lesson really helps.</p>
+    <p class="muted">Test questions help compare how Lightwork responds before and after a proposed change.</p>
+    {% include "_learning_test_cases.html" %}
+    {% include "_learning_pending_cases.html" %}
     <div class="lpo-row">
-      <label for="lpo-harvest-mode">New test cases from past work</label>
+      <label for="lpo-harvest-mode">Find examples in legacy shared work</label>
       <select id="lpo-harvest-mode" class="select">
         <option value="propose" selected>Suggest them for review first</option>
         <option value="auto">Add them straight away</option>
       </select>
-      <button type="button" class="btn btn--ghost" id="lpo-harvest">Find new test cases</button>
+      <button type="button" class="btn btn--ghost" id="lpo-harvest">Find shared-work examples</button>
     </div>
+    <p class="muted">This automatic search only considers legacy work with no named owner. To teach from your own work, choose <a href="#learning-task-examples">Use one of my completed tasks</a> above and review its complete source and learning use.</p>
     <div class="lpo-row">
       <button type="button" class="btn btn--ghost" id="lpo-export">Download the test cases</button>
     </div>
+    <section id="learning-case-import" aria-labelledby="lpo-import-title" style="overflow-wrap:anywhere">
+    <h3 id="lpo-import-title">Review a learning-question file</h3>
+    <p class="muted" id="lpo-import-notice">Review the complete file and current questions before importing. Importing uses no AI. Future checks can send shared questions to configured AI providers.</p>
+    <p class="muted">For a whole saved collection, <a href="/learning#learning-review">open Learning review and restoration</a> and check the saved point’s actual coverage. A large file is never shortened to fit this review.</p>
     <div class="lpo-row">
       <label for="lpo-import-file">Add test cases from a file</label>
       <input type="file" id="lpo-import-file" class="input" accept=".json,application/json">
@@ -54,20 +57,27 @@
         <option value="merge" selected>Add new ones, keep the rest</option>
         <option value="replace">Replace all test cases with the file</option>
       </select>
-      <button type="button" class="btn btn--ghost" id="lpo-import-check">Show what would change</button>
+      <button type="button" class="btn btn--ghost" id="lpo-import-check" disabled>Review import</button>
     </div>
     <p class="muted" id="lpo-cases-status" role="status" aria-live="polite"></p>
-    <div id="lpo-cases-out"></div>
+    <p class="muted" id="lpo-import-status" role="status" aria-live="polite"></p>
+    <div id="lpo-cases-out" style="overflow-wrap:anywhere"></div>
+    <div class="lpo-row">
+      <label for="lpo-import-original">Original import</label>
+      <select id="lpo-import-original" class="select"><option value="">Choose your original import</option></select>
+      <button type="button" class="btn btn--ghost" id="lpo-import-recover" disabled>Read original result</button>
+      <button type="button" class="btn btn--ghost" id="lpo-import-refresh">Refresh import controls</button>
+    </div>
+    <div id="lpo-import-result" style="overflow-wrap:anywhere"></div>
+    </section>
 
-    <h3 id="lpo-holdout-h">Hold-out record</h3>
-    <p class="muted">A private record of every use of the questions kept aside for fair testing. It is set up once and
-      never replaced.</p>
-    <div id="lpo-holdout"></div>
-    <p class="muted" id="lpo-holdout-status" role="status" aria-live="polite"></p>
+    {% include '_learning_holdout_setup.html' %}
+    {% include '_learning_calibration.html' %}
   </div>
 </div>
 <style>
   .lpo-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .5rem 0 1rem; }
+  @media (max-width: 560px) { .topbar__controls { column-gap: var(--space-0-5); } }
 </style>
 <script src="/static/lightwork-learned-ops.js" defer></script>
 {% endif %}

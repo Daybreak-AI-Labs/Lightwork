@@ -12,7 +12,7 @@ from maverick.counterfactual_rollout import (
     estimate_effect_via_rollout,
     transitions_from_trajectories,
 )
-from maverick.self_improvement import Candidate, SelfImprovementController
+from maverick.si_producers import propose_with_effect
 from maverick.trajectory_store import TrajectoryStep
 
 
@@ -59,17 +59,12 @@ def test_learning_path_stratified_to_gate():
     # True within-domain effect is +0.3; the naive (confounded) number is larger.
     assert abs(est.effect - 0.3) < 1e-9
     assert est.naive_effect > 0.4
-    assert est.trustworthy and est.ci_low > 0.0
+    assert not est.trustworthy and est.ci_low > 0.0
 
-    # The estimate flows into the promotion ladder's gate (built exactly as
-    # propose_with_effect does) and clears it on the causal lower bound.
-    cand = Candidate(
-        rung="prompt", summary="adopt tool X", baseline_score=0.0,
-        candidate_score=est.effect, samples=est.n_used, effect_ci_low=est.ci_low,
-        capability_widens=False, rollback="snap",
-    )
-    verdict = SelfImprovementController(frozen_fn=lambda: False).evaluate(cand)
-    assert verdict.promote, verdict.blocking_reason
+    # The logged trajectory comparison may motivate an experiment, but the
+    # promotion adapter must reject it before it reaches the controller.
+    verdict = propose_with_effect("prompt", "adopt tool X", est, rollback="snap")
+    assert not verdict.promote
 
 
 def test_rollout_and_rehearsal_share_one_world_model():

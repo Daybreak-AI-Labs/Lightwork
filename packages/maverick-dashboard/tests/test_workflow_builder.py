@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.navigation import assert_navigation_link
+
 
 def _client():
     # Mutating /api/v1 requests in no-token mode must pass the same-origin CSRF check.
@@ -627,30 +629,62 @@ def test_draft_from_file_form_playbook(monkeypatch, tmp_path):
     assert "ap invoice" in captured["src"].lower()
 
 
+def _specialist_decision(client, name, action, **fields):
+    """Review one complete specialist-draft decision, then confirm it."""
+    context = client.get("/api/v1/specialist-drafts", params={"name": name})
+    assert context.status_code == 200, context.text
+    review = client.post("/api/v1/specialist-drafts/review", json={
+        "name": name, "action": action, "context": context.json()["context"], **fields})
+    if review.status_code != 200:
+        return review
+    return client.post("/api/v1/specialist-drafts/apply",
+                       json={"token": review.json()["token"], "confirmed": True})
+
+
 def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
-    """The playbook form persists through the existing /agents/<name>/override
-    path: a new pack, discoverable, with its gated workflow intact."""
+    """The playbook form persists through the reviewed draft path: a saved
+    draft changes nothing, and publishing it makes a new, discoverable pack
+    with its gated workflow intact. The old direct override write is closed."""
     _isolate(monkeypatch, tmp_path)
-    r = _client().post("/api/v1/agents/ap-bot/override", json={
+    from maverick.domain import available_domains
+
+    client = _client()
+    entered = {
         "description": "AP clerk", "persona": "You are a careful AP clerk.",
-        "allow_tools": ["ocr_read", "send_payment"], "deny_tools": ["shell"],
+        "allow_tools": ["ocr", "global_payments"], "deny_tools": ["shell"],
         "max_risk": "high",
         "workflow": [
-            {"name": "Read", "instruction": "ocr", "tools": ["ocr_read"], "gate": None},
-            {"name": "Pay", "instruction": "pay", "tools": ["send_payment"], "gate": "approval"},
+            {"name": "Read", "instruction": "ocr", "tools": ["ocr"], "gate": None},
+            {"name": "Pay", "instruction": "pay", "tools": ["global_payments"], "gate": "approval"},
         ],
-    })
-    assert r.status_code == 200, r.text
-    from maverick.domain import available_domains
+    }
+    direct = client.post("/api/v1/agents/ap-bot/override", json=entered)
+    assert direct.status_code == 409 and "ap-bot" not in available_domains()
+    # Saving accepts only actions this installation can run.
+    saved = _specialist_decision(client, "ap-bot", "save", entered=entered)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["confirmed"] is True and "ap-bot" not in available_domains()
+    # A new agent has no active definition yet; the editor then names the
+    # draft by its original operation, exactly as Workflow Builder does.
+    draft = saved.json().get("draft") or "SPD-" + saved.json()["operation"]
+    published = _specialist_decision(client, "ap-bot", "publish", selected=draft,
+                                     reason="New agent from the workflow builder")
+    assert published.status_code == 200, published.text
+    assert published.json()["confirmed"] is True
     prof = available_domains()["ap-bot"]
     assert [(s.name, s.gate) for s in prof.workflow] == [("Read", None), ("Pay", "approval")]
-    assert prof.allow_tools == ["ocr_read", "send_payment"]
+    assert prof.allow_tools == ["ocr", "global_payments"]
+    # The draft is linted first, so the risk ceiling admits the action and the
+    # refusal is about availability alone.
+    unknown = _specialist_decision(client, "ap-bot-2", "save", entered={
+        "description": "AP clerk", "allow_tools": ["send_payment"], "max_risk": "high"})
+    assert unknown.status_code == 422 and "not available in this installation" in unknown.text
 
 
 def test_save_playbook_rejects_lint_failure(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    # An empty allowlist grants ALL tools -> lint error -> write refused (422).
-    r = _client().post("/api/v1/agents/loose-bot/override", json={
+    # An empty allowlist grants ALL tools -> lint error -> draft refused (422).
+    r = _specialist_decision(_client(), "loose-bot", "save", entered={
         "description": "x", "allow_tools": [], "max_risk": "low",
         "workflow": [{"name": "go"}],
     })
@@ -816,7 +850,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     r = _client().get("/workflow-builder")
     assert r.status_code == 200
     assert "<title>Workflow builder · Lightwork</title>" in r.text
-    assert '<h1 class="page-title">Workflow builder</h1>' in r.text
+    assert '<h1 class="page-title"><span lang="en" dir="ltr" data-product-copy>Workflow builder</span></h1>' in r.text
     assert 'id="wf-draft-btn"' in r.text
     assert "/api/v1/workflows/draft" in r.text
     # Both forms are offered, and the playbook saves via the agent-override path.
@@ -843,7 +877,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     assert '<summary class="wf__sched-title">' in r.text
     # Reachable from the primary nav (Operate group): the redesigned Flows
     # builder is the sidebar entry; the workflow builder is linked in-page from it.
-    assert '<span class="nav-label">Flows</span>' in r.text
+    assert_navigation_link(r.text, "/workflows", "Workflows")
     # A Chat handoff is verified before filling the ordinary brief for review.
     assert "lightwork.authoring-handoff" in r.text
     assert "/api/v1/templates/draft-context" in r.text
@@ -912,7 +946,7 @@ def test_non_admin_edit_agent_deeplink_withholds_existing_pack(monkeypatch, tmp_
     ).text
     assert "PB_EDIT = null" in html
     assert 'PB_EDIT_DENIED = "invoice-clerk"' in html
-    assert "draft a new unsaved first pass" in html
+    assert "You can still draft an unsaved first pass." in html
 
 
 def test_builder_edit_deeplink_rehydrates_editor(monkeypatch, tmp_path):
@@ -922,7 +956,7 @@ def test_builder_edit_deeplink_rehydrates_editor(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly report\nparams:\n  - topic\n---\nResearch {{topic}}.\n", encoding="utf-8")
+        "---\nowner: local\ntitle: Weekly report\nparams:\n  - topic\n---\nResearch {{topic}}.\n", encoding="utf-8")
     t = _client().get("/workflow-builder?edit=weekly-report").text
     assert "WF_EDIT = null" not in t and "weekly-report" in t
     assert "renderDraft(WF_EDIT)" in t and "Editing" in t
@@ -938,7 +972,7 @@ def test_builder_prefill_deeplink_jumps_to_automate(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
+        "---\nowner: local\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
     r = _client().get("/workflow-builder?template=weekly-report")
     assert r.status_code == 200
     assert "weekly-report" in r.text and "WF_PREFILL = null" not in r.text
@@ -956,3 +990,36 @@ def test_workflow_builder_reads_plainly(monkeypatch, tmp_path):
     for phrase in ("a name (id)", "no gate", "Trigger from a webhook", "POSTing", "Failed: '", "Save failed: '"):
         assert phrase not in t
     assert "Someone must approve" in t and "Start it from another app" in t
+
+
+def test_extract_document_requires_review_and_never_calls_drafter(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr("maverick_dashboard.api._extract_binary_doc_text", lambda raw, name: "Procedure text")
+    monkeypatch.setattr("maverick_dashboard.api._drafter_for", lambda form: pytest.fail("Extraction must not call a paid drafter"))
+    response = _client().post("/api/v1/workflows/extract-source", files={"file": ("procedure.pdf", b"%PDF synthetic", "application/pdf")})
+    assert response.status_code == 200
+    assert response.json() == {"text": "Procedure text", "truncated": False, "review_required": True, "started": False}
+
+
+def test_extract_document_refuses_unsupported_empty_and_oversize(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    for name, body in [("procedure.exe", b"data"), ("empty.txt", b""), ("large.txt", b"x" * 512001)]:
+        response = _client().post("/api/v1/workflows/extract-source", files={"file": (name, body)})
+        assert response.status_code == 422
+
+
+def test_the_two_delete_buttons_say_what_they_delete_in_every_language():
+    from pathlib import Path
+
+    from maverick_dashboard import i18n_journeys
+    page = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "workflow_builder.html").read_text(encoding="utf-8")
+    assert "productText(rm,'Delete');" not in page and "okText: 'Delete'," not in page
+    assert page.count("productText(rm,'Delete schedule');") == 1
+    assert page.count("productText(rm,'Delete start');") == 1
+    # A schedule due within a minute is confirmed and deleted at once; otherwise
+    # both deletes leave the list with an Undo toast (CTL-1).
+    assert "okText: 'Delete schedule'" in page
+    assert page.count("mvUndo(") == 2 and "Other apps can no longer start this workflow." in page
+    for label in ("Delete schedule", "Delete start"):
+        for lang in i18n_journeys.TRANSLATION_LANGS:
+            assert i18n_journeys.entry(label, lang)[1] == lang, (label, lang)

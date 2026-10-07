@@ -6,28 +6,18 @@
   var doc = document;
   function $(id) { return doc.getElementById(id); }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function confirmAction(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, { okText: okText }) : Promise.resolve(false);
   }
-  function say(el, text) { if (el) el.textContent = text; }
-  function jsonHeaders() { return { 'Content-Type': 'application/json', Accept: 'application/json' }; }
+  function say(el, text) { window.mvStatus(el, text); }
   function getJSON(url) {
-    return fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
+    return window.mvFetchJSON(url);
   }
   function post(url, body) {
-    return fetch(url, {
-      method: 'POST', headers: jsonHeaders(), credentials: 'same-origin',
-      body: JSON.stringify(body || {}),
-    }).then(function (r) { if (!r.ok) throw r; return r; });
-  }
-  function human(days) {
-    if (days % 365 === 0) { var y = days / 365; return y + (y === 1 ? ' year' : ' years'); }
-    return days + ' days';
+    // The response itself: some answers are files (an export).
+    return window.mvFetchJSON(url, {method: 'POST', body: body || {}, raw: true});
   }
   function saveBlob(blob, name) {
     var url = URL.createObjectURL(blob);
@@ -144,50 +134,7 @@
     });
   });
 
-  // Retention periods.
-  var retentionForm = $('cmp-retention-form');
-  var retentionResult = $('cmp-retention-result');
-  function loadRetention() {
-    if (!retentionForm) return Promise.resolve();
-    return getJSON('/api/v1/compliance/retention').then(function (body) {
-      (body.fields || []).forEach(function (field) {
-        var sel = $('cmp-ret-' + field.key);
-        if (!sel) return;
-        var choices = (body.choices || []).slice();
-        if (field.days && choices.indexOf(field.days) < 0) choices.push(field.days);
-        choices.sort(function (a, b) { return a - b; });
-        choices.forEach(function (days) {
-          var opt = doc.createElement('option');
-          opt.value = String(days); opt.textContent = human(days);
-          sel.appendChild(opt);
-        });
-        sel.value = field.days ? String(field.days) : '';
-      });
-    }).catch(function (failure) { say(retentionResult, errorText(failure, 'load the retention periods')); });
-  }
-  var saveRet = $('cmp-retention-save');
-  if (saveRet) saveRet.addEventListener('click', function () {
-    var body = {};
-    Array.prototype.forEach.call(retentionForm.querySelectorAll('select'), function (sel) {
-      if (sel.value) body[sel.name] = parseInt(sel.value, 10);
-    });
-    if (!Object.keys(body).length) { say(retentionResult, 'Choose at least one period first.'); return; }
-    post('/api/v1/compliance/retention', body).then(function (r) { return r.json(); }).then(function (res) {
-      say(retentionResult, res.message || 'Saved.');
-    }).catch(function (failure) { say(retentionResult, errorText(failure, 'save the retention periods')); });
-  });
-  var applyRet = $('cmp-retention-apply');
-  if (applyRet) applyRet.addEventListener('click', function () {
-    confirmAction('Delete every record that is older than the periods you chose, in every workspace? This cannot be undone.', 'Delete old records').then(function (ok) {
-      if (!ok) return;
-      applyRet.disabled = true;
-      post('/api/v1/compliance/retention/apply').then(function (r) { return r.json(); }).then(function (res) {
-        say(retentionResult, res.message || 'Done.');
-      }).catch(function (failure) {
-        say(retentionResult, errorText(failure, 'delete old records'));
-      }).then(function () { applyRet.disabled = false; });
-    });
-  });
+  // Reviewed retention is handled by lightwork-retention-maintenance.js.
 
   // Assessment downloads.
   var assessment = $('cmp-assessment');
@@ -216,16 +163,7 @@
       say(assessmentResult, errorText(failure, 'load the assessments'));
     });
   }
-  function download(kind) {
-    if (!assessment || !assessment.value) { say(assessmentResult, 'Choose an assessment first.'); return; }
-    var a = doc.createElement('a');
-    a.href = '/api/v1/compliance/downloads/' + kind + '?assessment=' + encodeURIComponent(assessment.value);
-    a.setAttribute('download', '');
-    doc.body.appendChild(a); a.click(); a.remove();
-    say(assessmentResult, 'Your download has started.');
-  }
-  var oscal = $('cmp-oscal'); if (oscal) oscal.addEventListener('click', function () { download('oscal'); });
-  var soa = $('cmp-soa'); if (soa) soa.addEventListener('click', function () { download('soa'); });
+  // Current-account protected file offers use lightwork-report-downloads.js.
 
   // EU AI Act self-check.
   var aiAct = $('cmp-ai-act');
@@ -275,6 +213,5 @@
   });
 
   loadPeople();
-  loadRetention();
   loadAssessments();
 })();

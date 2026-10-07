@@ -113,6 +113,21 @@ def test_module_level_cache_matches_fresh_index():
         n for n, _ in _ROUTER.rank("draft a press release", k=5)][:3]
 
 
+def test_router_refreshes_when_a_pack_changes_without_a_new_name():
+    from maverick.domain import DomainProfile
+
+    original = {
+        "alpha": DomainProfile(name="alpha", description="invoice reconciliation"),
+        "beta": DomainProfile(name="beta", description="customer support"),
+    }
+    revised = {
+        "alpha": DomainProfile(name="alpha", description="customer support"),
+        "beta": DomainProfile(name="beta", description="invoice reconciliation"),
+    }
+    assert rank_specialists("invoice", domains=original, alpha=0.0)[0][0] == "alpha"
+    assert rank_specialists("invoice", domains=revised, alpha=0.0)[0][0] == "beta"
+
+
 # --- Embedding / hybrid path (validated with an injected fake embedder, since
 #     fastembed is optional and absent in CI's lightweight subset) -----------
 import re as _re  # noqa: E402

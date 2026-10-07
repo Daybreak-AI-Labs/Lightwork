@@ -318,7 +318,7 @@ test('rejects case category mismatches and malformed case timestamps', async t =
     await t.test('invalid case projection', async t => {
       const ui = await fixture(async () => ({ok: true, json: async () => payload({cases: [item]})}));
       t.after(() => ui.dom.window.close());
-      assert.match(ui.host.textContent, /category is invalid|admission time is invalid/i);
+      assert.match(ui.host.textContent, /wrong category for its outcome|admission time must be a date and time/i);
       assert.equal(ui.dom.window.document.getElementById('ov-export').disabled, true);
     });
   }
@@ -438,7 +438,7 @@ test('rejects a malformed pilot page cursor before adding or loading a cohort', 
   const document = ui.dom.window.document;
   assert.deepEqual([...document.getElementById('ov-pilot').options].map(option => option.value), ['']);
   assert.equal(document.getElementById('ov-load-more').hidden, true);
-  assert.match(ui.host.textContent, /pilot page cursor is invalid/i);
+  assert.match(ui.host.textContent, /next page of pilots is not valid/i);
   assert.equal(ui.calls.some(call => call.url.includes('/cohort?')), false);
 });
 
@@ -799,5 +799,5 @@ test('invalid page context prevents every request', async t => {
   const ui = await fixture(async () => assert.fail('fetch should not run'), 'bad\ncontext');
   t.after(() => ui.dom.window.close());
   assert.equal(ui.calls.length, 0);
-  assert.match(ui.host.textContent, /context is invalid/);
+  assert.match(ui.host.textContent, /open for a different account or workspace/);
 });

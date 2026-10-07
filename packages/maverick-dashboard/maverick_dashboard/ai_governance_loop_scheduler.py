@@ -239,6 +239,7 @@ class AIGovernanceLoopScheduler:
         self._cycles = 0
         self._last_cycle: AIGovernanceLoopSchedulerCycle | None = None
         self._last_error_code: str | None = None
+        self._source_cursors: dict[str, str] = {}
 
     def _tenants(self) -> tuple[tuple[str, ...], bool]:
         from maverick.paths import canonical_tenant_id
@@ -298,6 +299,10 @@ class AIGovernanceLoopScheduler:
                         or getattr(worker, "principal_ref", None) != self._worker_principal
                     ):
                         raise AIGovernanceLoopSchedulerError("worker_dependency_invalid")
+                    discovery = getattr(worker, "discover_sources", None)
+                    if callable(discovery):
+                        self._source_cursors[tenant_id] = discovery(limit=settings.batch_size,
+                            after=self._source_cursors.get(tenant_id, ""))
                     result = _batch_result(
                         worker.run_batch(
                             worker_id=self._worker_id,

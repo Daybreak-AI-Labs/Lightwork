@@ -1,11 +1,16 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Policy Links · Lightwork{% endblock %}
+{% block title %}Policy links · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% set ppl_admin = policy_links_can_admin if policy_links_can_admin is defined else true %}
 {% set ppl_audit = policy_links_can_audit if policy_links_can_audit is defined else true %}
+{#- The title sits outside the disabled workbench so the gate can follow it
+    without its Turn on button being disabled with the rest. -#}
+{{ hero('Tech risk and compliance', 'Policy links',
+        lede='Write a policy, have it approved, and publish it at a web address that stays the same when you publish a new version. Earlier versions are kept for your records.') }}
 {% if not policy_publication_links_enabled %}
 {{ module_gate('tech_risk_compliance.policy_publication_links', 'Policy links',
                detail='Publishes your approved policies at a lasting web address. Decide who looks after storage, backups and old versions before turning it on.',
@@ -13,9 +18,7 @@
 {% endif %}
 <fieldset class="governance-workbench feature-gated-workbench" id="ppl-root" data-feature-enabled="{{ 'true' if policy_publication_links_enabled else 'false' }}" data-can-admin="{{ 'true' if ppl_admin else 'false' }}" data-can-audit="{{ 'true' if ppl_audit else 'false' }}"{% if not policy_publication_links_enabled %} disabled aria-disabled="true"{% endif %}>
   <legend class="sr-only">Policy links</legend>
-  {{ hero('Tech risk and compliance', 'Policy Links',
-          lede='Write a policy, have it approved, and publish it at a web address that stays the same when you publish a new version. Earlier versions are kept for your records.') }}
-  <p><a class="btn btn--ghost" href="/compliance">Back to compliance</a></p>
+  <p>{{ back_link('/compliance', 'Compliance') }}</p>
   <p id="ppl-status" class="muted" role="status" aria-live="polite"></p>
 
   <section class="panel" aria-labelledby="ppl-policies-heading">
@@ -93,7 +96,7 @@
         <label data-when="later" hidden>Publish at<input class="input" type="datetime-local" name="scheduled_for"></label>
         <label>Stop showing it on (optional)<input class="input" type="datetime-local" name="expires_at"></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Publish</button>
+          <button class="btn btn--primary" type="submit">Publish policy</button>
           <button class="btn btn--ghost" type="button" data-ppl-close="ppl-publish">Cancel</button>
         </div>
       </fieldset>
@@ -112,7 +115,7 @@
         </label>
         <label>At<input class="input" type="datetime-local" name="scheduled_for" required></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Schedule</button>
+          <button class="btn btn--primary" type="submit">Schedule publishing</button>
           <button class="btn btn--ghost" type="button" data-ppl-close="ppl-schedule">Cancel</button>
         </div>
       </fieldset>
@@ -167,18 +170,13 @@
 (function () {
   "use strict";
   var API = "/api/v1/policy-publication-links";
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path, options) {
-    var opts = Object.assign({cache: "no-store"}, options || {});
-    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("ppl-root")) start();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (CW && document.getElementById("ppl-root")) { if (window.mvFetchJSON) start(); else document.addEventListener("DOMContentLoaded", start); }
 
   function start() {
     var $ = function (id) { return document.getElementById(id); };

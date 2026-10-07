@@ -38,6 +38,20 @@ STYLES = {
 }
 
 
+STYLE_LABELS = {
+    "concise": "Short and direct", "thorough": "Context and tradeoffs",
+    "verbose": "Explains its reasoning", "friendly": "Warm and conversational",
+    "formal": "Formal and professional", "playful": "Playful and lively",
+}
+
+
+def style_choices() -> tuple[tuple[str, str], ...]:
+    """The same supported choices for runtime configuration and product editors."""
+    return (("", "Balanced (default)"), *(
+        (key, STYLE_LABELS.get(key, key.replace("_", " ").capitalize())) for key in STYLES
+    ))
+
+
 def load_persona() -> dict:
     try:
         from .config import load_config
@@ -68,13 +82,13 @@ def render_persona_prompt() -> str:
     concatenate without checking.
     """
     p = load_persona()
-    if not (p["name"] or p["style"] or p["addendum"] or p.get("user_name")):
+    if not (p["name"] or p["style"] or p["addendum"]):
         return ""
     parts: list[str] = []
     if p["name"]:
         parts.append(f"You are {p['name']}.")
-    if p.get("user_name"):
-        parts.append(f"The person you work for likes to be called {p['user_name']}.")
+    # Legacy user_name is migrated explicitly into a principal profile. It is
+    # never injected into anonymous, service, or another person's work.
     style = (p["style"] or "").strip().lower()
     if style and style in STYLES:
         parts.append(STYLES[style])

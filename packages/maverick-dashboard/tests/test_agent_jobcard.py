@@ -57,6 +57,23 @@ def test_jobcard_404_for_unknown_agent():
                       ).status_code == 404
 
 
+def test_jobcard_uses_configured_runtime_override_not_pack_declaration(monkeypatch):
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai_compatible:fake-model")
+    response = client.get(f"/api/v1/agents/{_some_agent()}/jobcard")
+    assert response.status_code == 200
+    assert response.json()["cost_tier"]["model"] == "openai_compatible:fake-model"
+    assert response.json()["cost_tier"]["band"] is None
+    assert response.json()["cost_tier"]["label"] == "Unknown"
+
+
+def test_jobcard_page_names_approval_evidence_and_global_cost_band():
+    page = client.get(f"/agents?name={_some_agent()}")
+    assert page.status_code == 200
+    assert "Approved results" in page.text
+    assert "Cost band for this model across Lightwork" in page.text
+    assert "Value delivered" not in page.text
+
+
 def test_cost_tier_table_and_set_roundtrip():
     listing = client.get("/api/v1/model-cost-tiers").json()
     assert listing["bands"] == ["low", "medium", "high", "very_high"]

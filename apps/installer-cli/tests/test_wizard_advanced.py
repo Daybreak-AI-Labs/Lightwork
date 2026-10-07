@@ -405,6 +405,21 @@ def test_headless_assume_writes_and_is_read(tmp_path, monkeypatch):
     assert autonomy.autonomy_enabled() is False
 
 
+def test_confirm_plan_writes_and_is_read(tmp_path, monkeypatch):
+    """Rule-6 loop (AI-3): the wizard's show-the-plan toggle writes [autonomy]
+    confirm_plan, and the kernel reads it back independently of the gate."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_AUTONOMY_GATE", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {"confirm_plan": True})
+    assert tomllib.loads(cfg)["autonomy"] == {"confirm_plan": True}
+
+    from maverick import autonomy
+    assert autonomy.confirm_plan_enabled() is True
+    assert autonomy.autonomy_enabled() is False
+
+
 def test_governed_actions_writes_and_is_read(tmp_path, monkeypatch):
     """Rule-6 loop: the wizard's governed-actions toggle writes [actions] enable,
     and the kernel's lineage gate reads it back."""
@@ -1210,6 +1225,68 @@ def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_pat
     assert "compress" not in tomllib.loads(on).get("dashboard", {})
 
 
+def test_glass_effects_for_everyone_is_written_only_when_chosen(tmp_path, monkeypatch):
+    # Glass effects are off by default (solid panes respond faster), so only a
+    # deliberate "yes" reaches config.toml -- as the value the dashboard reads.
+    on = _write(tmp_path, monkeypatch, {"dashboard_glass": True})
+    assert tomllib.loads(on)["dashboard"]["glass"] == "on"
+    off = _write(tmp_path, monkeypatch, {"dashboard_glass": False})
+    assert "glass" not in tomllib.loads(off).get("dashboard", {})
+    from maverick_dashboard.app import _VALID_GLASS
+    assert tomllib.loads(on)["dashboard"]["glass"] in _VALID_GLASS
+
+
+def test_the_glass_question_defaults_to_off(monkeypatch):
+    from maverick_installer import wizard
+
+    asked = {}
+
+    def confirm(question, *, default=False):
+        if "glass effects" in question.lower():
+            asked["default"] = default
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_select", lambda *args, default=None, **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, default="", **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *args, default=None, **kwargs: default or [])
+    advanced = wizard.pick_advanced()
+    assert asked == {"default": False}
+    assert advanced["dashboard_glass"] is False
+
+
+def test_navigation_areas_are_written_only_when_chosen(tmp_path, monkeypatch):
+    # The classic sidebar is the default, so only a deliberate "yes" reaches
+    # config.toml -- as the values the dashboard reads.
+    on = _write(tmp_path, monkeypatch, {"dashboard_navigation": "areas", "dashboard_navigation_personal": True})
+    table = tomllib.loads(on)["dashboard"]
+    assert (table["navigation"], table["navigation_personal"]) == ("areas", True)
+    off = _write(tmp_path, monkeypatch, {"dashboard_navigation": "classic", "dashboard_navigation_personal": False})
+    assert {"navigation", "navigation_personal"}.isdisjoint(tomllib.loads(off).get("dashboard", {}))
+    from maverick_dashboard.navigation_api import NAVIGATION_MODES
+    assert table["navigation"] in NAVIGATION_MODES
+
+
+def test_the_navigation_questions_default_to_the_classic_sidebar(monkeypatch):
+    from maverick_installer import wizard
+
+    asked = {}
+
+    def confirm(question, *, default=False):
+        if "sidebar" in question.lower():
+            asked[question.split("?")[0]] = default
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_select", lambda *args, default=None, **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, default="", **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *args, default=None, **kwargs: default or [])
+    advanced = wizard.pick_advanced()
+    assert len(asked) == 2 and not any(asked.values())
+    assert advanced["dashboard_navigation"] == "classic"
+    assert advanced["dashboard_navigation_personal"] is False
+
+
 def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
     # Settings > Models discovers reachable models by default, so only a
     # deliberate "no" reaches config.toml, alongside any per-role picks.
@@ -1247,3 +1324,51 @@ def test_bedrock_auth_mode_is_written_and_iam_needs_no_key(tmp_path, monkeypatch
 
     monkeypatch.setattr(wizard, "_q_select", lambda *a, **k: "api_key - Bedrock bearer token in BEDROCK_API_KEY")
     assert wizard.pick_bedrock_auth() == {"auth_mode": "api_key"}
+
+
+def test_fact_tags_share_one_memory_table(tmp_path, monkeypatch):
+    cfg = tomllib.loads(_write(tmp_path, monkeypatch, {"fact_tags": True, "temporal_memory": True}))
+    assert cfg["memory"] == {"fact_tags": True, "temporal": True}
+
+
+def test_bounded_rebuild_setting_is_written_by_knowledge_wizard():
+    from maverick_installer.wizard import _cfg_knowledge
+    cfg = tomllib.loads("\n".join(_cfg_knowledge({"enable": True, "reindex_jobs": True})))
+    assert cfg["knowledge"]["reindex_jobs"] is True
+
+
+def test_spending_alerts_keep_their_default_unless_changed(tmp_path, monkeypatch):
+    def section(answer, **extra):
+        cfg = _write(tmp_path, monkeypatch, {"spending_alert_at": answer, **extra})
+        return tomllib.loads(cfg).get("spending_limits")
+
+    assert section("50, 75, 100") is None  # the default needs no line
+    assert section("") is None
+    assert section("lots") is None  # unreadable keeps the default, never turns alerts off
+    assert section("90, 80") == {"alert_at": [80, 90]}
+    assert section("none") == {"alert_at": []}
+    # The section the kernel reads: spending_alerts.alert_at() follows it.
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    section("80%, 90", spending_workspace_monthly="200")
+    from maverick import config, spending_alerts
+    config.reset_config_cache()
+    assert spending_alerts.alert_at() == [80, 90]
+    config.reset_config_cache()
+
+
+def test_typical_cost_minimum_keeps_its_default_unless_changed(tmp_path, monkeypatch):
+    def section(answer):
+        cfg = _write(tmp_path, monkeypatch, {"typical_cost_min_runs": answer})
+        return tomllib.loads(cfg).get("spending_limits")
+
+    assert section("10") is None  # the default needs no line
+    assert section("") is None
+    assert section("1") is None  # out of range keeps the default
+    assert section("lots") is None
+    assert section("25") == {"typical_cost_min_runs": 25}
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    section("30")
+    from maverick import config, typical_cost
+    config.reset_config_cache()
+    assert typical_cost.min_runs() == 30
+    config.reset_config_cache()

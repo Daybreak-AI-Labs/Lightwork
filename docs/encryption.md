@@ -124,6 +124,12 @@ Store the copies at least as well-protected as the originals, and not next to th
 data they unlock. Operators who inject `MAVERICK_ENCRYPTION_KEY` already hold the
 key in their secrets manager and need no on-disk backup.
 
+`maverick backup create` (like `maverick client export`) leaves the raw key files out of
+the archive: the at-rest key and keyring and the audit signing keys, those of the data
+root and of every workspace under `tenants/<id>/`. `backup create` lists the files it
+left out when it finishes. The escrow copy above is then the only copy of the encryption
+keys, unless you pass `--include-keys` to bundle them.
+
 **Backend:** both backends seal the same sensitive content columns through the
 shared field-sealing path, so selecting Postgres (`[world_model] backend =
 "postgres"` / `MAVERICK_WORLD_BACKEND`) keeps content encrypted at rest. Postgres

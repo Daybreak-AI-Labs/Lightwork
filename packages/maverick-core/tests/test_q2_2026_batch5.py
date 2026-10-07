@@ -375,6 +375,28 @@ def test_git_advanced_cherry_pick_requires_commit(tmp_path):
     assert "requires commit" in out
 
 
+def test_git_mutation_denial_never_reaches_backend(tmp_path, monkeypatch):
+    from maverick.safety import ConsentDenied
+    from maverick.tools import git_advanced as git_module
+
+    (tmp_path / ".git").mkdir()
+    commands = []
+
+    class _Sandbox:
+        workdir = str(tmp_path)
+
+        def exec(self, cmd, timeout=None):
+            commands.append(cmd)
+
+    def deny(*args, **kwargs):
+        raise ConsentDenied("git_advanced")
+
+    monkeypatch.setattr(git_module, "request_execution_consent", deny)
+    out = git_module.git_advanced(_Sandbox()).fn({"op": "bisect_start"})
+    assert "not approved" in out
+    assert commands == []
+
+
 def test_git_advanced_unknown_op(tmp_path):
     if not _git_available():
         pytest.skip("git not installed")

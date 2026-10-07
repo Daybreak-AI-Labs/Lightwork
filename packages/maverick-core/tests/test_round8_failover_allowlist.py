@@ -41,20 +41,20 @@ def test_model_for_role_accepts_bare_vs_qualified_allowlist(monkeypatch, tmp_pat
     from maverick import llm
     ro = _point_overlay(monkeypatch, tmp_path)
     ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
-    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "claude-sonnet-4-6")
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "claude-sonnet-4-6")
     assert llm.model_for_role("orchestrator") == "claude-sonnet-4-6"
 
 
 def test_model_for_role_fallback_is_cheapest_not_lexicographic(monkeypatch, tmp_path):
     # Regression: when neither the resolved model nor DEFAULT_MODEL is allowed,
     # the fallback must be the CHEAPEST allowed model, not sorted(allow)[0].
-    # Here opus ($25/out) sorts before the far cheaper deepseek flash ($0.28),
+    # Here opus ($25/out) sorts before the far cheaper direct deepseek flash ($0.28),
     # so lexicographic-first would force the most expensive allowed model.
     from maverick import llm
     ro = _point_overlay(monkeypatch, tmp_path)
-    ro.set_allowed_models(["anthropic:claude-opus-4-8", "openrouter:deepseek-v4-flash"])
-    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "openai:gpt-5.5")
-    assert llm.model_for_role("bulk") == "openrouter:deepseek-v4-flash"
+    ro.set_allowed_models(["anthropic:claude-opus-4-8", "deepseek:deepseek-v4-flash"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "openai:gpt-5.5")
+    assert llm.model_for_role("bulk") == "deepseek:deepseek-v4-flash"
 
 
 def test_model_for_role_fallback_prefers_zero_cost_local_models(monkeypatch, tmp_path):
@@ -64,8 +64,8 @@ def test_model_for_role_fallback_prefers_zero_cost_local_models(monkeypatch, tmp
     from maverick import llm
 
     ro = _point_overlay(monkeypatch, tmp_path)
-    ro.set_allowed_models(["ollama:my-local", "openrouter:deepseek-v4-flash"])
-    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "openai:gpt-5.5")
+    ro.set_allowed_models(["ollama:my-local", "deepseek:deepseek-v4-flash"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "openai:gpt-5.5")
 
     assert llm.model_for_role("bulk") == "ollama:my-local"
 
@@ -75,7 +75,7 @@ def test_cheapest_allowed_prefers_subscription_and_self_hosted_prefixes():
     # self-hosted. All should rank as zero-cost ahead of a priced remote model.
     from maverick.llm import _cheapest_allowed
 
-    hosted = "openrouter:deepseek-v4-flash"
+    hosted = "deepseek:deepseek-v4-flash"
     assert _cheapest_allowed(["codex_cli:gpt-5.5", hosted]) == "codex_cli:gpt-5.5"
     assert _cheapest_allowed(["vllm:z-local", hosted]) == "vllm:z-local"
     assert _cheapest_allowed(["tgi:z-local", hosted]) == "tgi:z-local"

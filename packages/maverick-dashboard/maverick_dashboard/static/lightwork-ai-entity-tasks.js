@@ -90,7 +90,7 @@
     }
     if (status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (status === 409) return "This changed since you opened it. Refresh the page and try again.";
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   function positiveInteger(raw, label, maximum) {
@@ -160,7 +160,7 @@
       throw new Error("Choose a type of task.");
     }
     if (["low", "medium", "high", "critical"].indexOf(payload.priority) === -1) {
-      throw new Error("Priority is invalid.");
+      throw new Error("That priority is not one of the choices. Choose a priority from the list.");
     }
     var assignee = String(fields.assignee_ref || "").trim();
     if (assignee) payload.assignee_ref = identifier(assignee, "The person assigned");
@@ -178,7 +178,7 @@
     var status = String(fields.status || "");
     if (status) {
       if (["open", "in_progress", "blocked", "resolved", "dismissed"].indexOf(status) === -1) {
-        throw new Error("Status is invalid.");
+        throw new Error("That status is not one of the choices. Choose a status from the list.");
       }
       payload.status = status;
       changes += 1;
@@ -186,7 +186,7 @@
     var priority = String(fields.priority || "");
     if (priority) {
       if (["low", "medium", "high", "critical"].indexOf(priority) === -1) {
-        throw new Error("Priority is invalid.");
+        throw new Error("That priority is not one of the choices. Choose a priority from the list.");
       }
       payload.priority = priority;
       changes += 1;
@@ -199,7 +199,7 @@
       payload.assignee_ref = null;
       changes += 1;
     } else if (assigneeAction !== "keep") {
-      throw new Error("Assignee update action is invalid.");
+      throw new Error("The assignee change was not recognized. Refresh the page and try again.");
     }
     var collaboratorAction = String(fields.collaborator_action || "keep");
     if (collaboratorAction === "replace") {
@@ -209,7 +209,7 @@
       payload.collaborator_refs = [];
       changes += 1;
     } else if (collaboratorAction !== "keep") {
-      throw new Error("Collaborator update action is invalid.");
+      throw new Error("The collaborator change was not recognized. Refresh the page and try again.");
     }
     var dueAction = String(fields.due_action || "keep");
     if (dueAction === "set") {
@@ -219,7 +219,7 @@
       payload.due_at = null;
       changes += 1;
     } else if (dueAction !== "keep") {
-      throw new Error("Due date update action is invalid.");
+      throw new Error("The due date change was not recognized. Refresh the page and try again.");
     }
     if (changes === 0) throw new Error("Select at least one change to save. Nothing was changed.");
     return payload;
@@ -261,6 +261,9 @@
   var listCount = document.getElementById("aet-list-count");
   var filterForm = document.getElementById("aet-filter-form");
   var createForm = document.getElementById("aet-create-form");
+  var createControls = document.getElementById("aet-create-controls");
+  var inventoryStatus = document.getElementById("aet-inventory-status");
+  var inventoryLink = document.getElementById("aet-inventory-link");
   var updateForm = document.getElementById("aet-update-form");
   var updatePanel = document.getElementById("aet-update-panel");
   var entities = [];
@@ -293,12 +296,12 @@
       typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
   function say(message, failed, details) {
-    operationStatus.textContent = message;
+    window.mvStatus(operationStatus, message, {error: !!failed});
     operationStatus.dataset.state = failed ? "failed" : "ready";
     technical(details);
   }
   function fail(error) {
-    say(error && error.message ? error.message : "Something went wrong. Please try again.", true,
+    say(error && error.message ? error.message : "Something went wrong. Try again.", true,
       error && error.technical ? error.technical : undefined);
   }
   function reference(prefix) {
@@ -345,7 +348,7 @@
   function formattedDate(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "—";
     var date = new Date(value * 1000);
-    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+    return Number.isNaN(date.getTime()) ? "—" : window.mvDateAbsolute ? window.mvDateAbsolute(value) : date.toLocaleDateString();
   }
   function dateInputValue(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "";
@@ -399,9 +402,11 @@
     return Array.prototype.slice.call(box.querySelectorAll('input[name="collaborator"]:checked')).map(function (item) { return item.value; });
   }
   async function loadPickers() {
+    var inventoryLoaded = false;
     try {
-      var inventory = await requestAt("/api/v1/assurance/ai-inventory", {}, 4 * 1024 * 1024);
-      entities = (Array.isArray(inventory.assets) ? inventory.assets : []).filter(function (asset) {
+      var inventory = await requestAt("/api/v1/security/assurance/ai-inventory", {}, 4 * 1024 * 1024);
+      if (!Array.isArray(inventory.assets)) throw invalidResponse();
+      entities = inventory.assets.filter(function (asset) {
         return isRecord(asset) && ID_PATTERN.test(String(asset.asset_id || "")) && asset.status === "present";
       }).map(function (asset) {
         return {
@@ -410,9 +415,17 @@
           label: String(asset.display_name || "Unnamed AI system") + (asset.asset_type ? " (" + human(asset.asset_type) + ")" : "")
         };
       });
+      inventoryLoaded = true;
     } catch (_error) {
       entities = [];
     }
+    createControls.disabled = !can.operate || !inventoryLoaded || !entities.length;
+    inventoryStatus.textContent = !inventoryLoaded
+      ? "Could not load AI systems. Choose Check again above to retry. Existing tasks remain available."
+      : !entities.length
+        ? "No AI systems are ready to choose. Add one in AI inventory first."
+        : entities.length + " AI " + (entities.length === 1 ? "system is" : "systems are") + " available.";
+    inventoryLink.hidden = inventoryLoaded && !!entities.length;
     try {
       var directory = await requestAt("/api/v1/people/assignable", {}, 512 * 1024);
       people = Array.isArray(directory.items) ? directory.items.filter(function (item) {
@@ -432,7 +445,8 @@
     fillCollaborators(document.querySelector('[data-collaborator-picker="create"]'), []);
     if (!entities.length) {
       var createEntity = field(createForm, "entity_id");
-      createEntity.options[0].textContent = "No AI systems in the inventory yet — add them on the AI oversight page";
+      createEntity.options[0].textContent = inventoryLoaded
+        ? "No AI systems in inventory yet" : "AI systems could not be loaded";
     }
   }
 
@@ -494,7 +508,7 @@
     } catch (error) {
       clear(taskList);
       listCount.textContent = "0 tasks";
-      listStatus.textContent = error && error.message ? error.message : "Couldn't load tasks.";
+      listStatus.textContent = error && error.message ? error.message : "Couldn't load tasks. Refresh the page and try again.";
       throw error;
     }
   }
@@ -526,7 +540,7 @@
       list.appendChild(make("li", "", formattedDate(item.updated_at || item.created_at) + " — " + pair[0] +
         ", " + human(item.priority) + " priority, assigned to " + personName(item.assignee_ref)));
     });
-    if (!items.length) list.appendChild(make("li", "", "No history yet."));
+    if (!items.length) list.appendChild(make("li", "", "No history yet. Changes to this task appear here."));
     document.getElementById("aet-history-panel").hidden = false;
     var heading = document.getElementById("aet-history-title");
     if (heading && typeof heading.focus === "function") heading.focus();
@@ -551,17 +565,25 @@
         refreshRetention();
       } else if (payload.enabled !== true) {
         readiness.textContent = "Turned off";
-        readinessDetail.textContent = "AI system tasks are turned off. An administrator can turn them on above.";
+        readinessDetail.textContent = "AI system tasks are turned off. Ask an administrator to turn them on.";
         setMark("Off", "failed");
+        listStatus.textContent = "Tasks appear here once AI system tasks are turned on.";
+        inventoryStatus.textContent = (window.LightworkI18n ? window.LightworkI18n.text("AI systems can be chosen once AI system tasks are turned on.") : "AI systems can be chosen once AI system tasks are turned on.");
       } else {
         readiness.textContent = "Setup not finished";
         readinessDetail.textContent = "AI system tasks are turned on, but setup isn't finished. Ask an administrator to complete it.";
         setMark("Not ready", "failed");
+        listStatus.textContent = "Tasks appear here once an administrator finishes the setup.";
+        inventoryStatus.textContent = (window.LightworkI18n ? window.LightworkI18n.text("AI systems can be chosen once an administrator finishes the setup.") : "AI systems can be chosen once an administrator finishes the setup.");
       }
     } catch (error) {
       readiness.textContent = "Unavailable";
-      readinessDetail.textContent = error && error.message ? error.message : "Couldn't check availability.";
+      readinessDetail.textContent = error && error.message ? error.message : "Couldn't check availability. Refresh the page and try again.";
       setMark("Unavailable", "failed");
+      // The list never started; say so instead of "Loading tasks…".
+      listStatus.textContent = typeof window.mvErrorText === "function"
+        ? window.mvErrorText(error, "load the tasks") : "Couldn't load the tasks. Choose Check again.";
+      inventoryStatus.textContent = (window.LightworkI18n ? window.LightworkI18n.text("AI systems could not be checked. Choose Check again above to retry.") : "AI systems could not be checked. Choose Check again above to retry.");
     }
   }
   async function refreshRetention() {
@@ -575,7 +597,7 @@
       purge.textContent = count ? "Delete expired tasks (" + count + ")" : "Delete expired tasks";
       return count;
     } catch (error) {
-      summary.textContent = error && error.message ? error.message : "Couldn't count expired tasks.";
+      summary.textContent = error && error.message ? error.message : "Couldn't count expired tasks. Refresh the page and try again.";
       return 0;
     }
   }
@@ -674,7 +696,7 @@
   document.getElementById("aet-purge-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     var ok = typeof window.mvConfirm === "function"
-      ? await window.mvConfirm("Permanently delete finished or dismissed tasks whose keep-until date has passed? A record that they were deleted is kept. This can't be undone.", {okText: "Delete"})
+      ? await window.mvConfirm("Permanently delete finished or dismissed tasks whose keep-until date has passed? A record that they were deleted is kept. This can't be undone.", {okText: "Delete expired tasks"})
       : false;
     if (!ok) return;
     try {
@@ -688,5 +710,7 @@
     } catch (error) { fail(error); }
   });
 
-  refreshStatus();
+  // A turned-off module shows its gate instead of this workbench's checks:
+  // nothing is requested, and the page already says when tasks will appear.
+  if (shell.dataset.moduleEnabled !== "false") refreshStatus();
 }());

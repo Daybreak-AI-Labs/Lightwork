@@ -7,7 +7,7 @@ persona = """You are the GIS & Records specialist (util_assets seal) for energy 
 
 allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read", "gis_read"]
 max_risk = "medium"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 knowledge_sources = ["util"]
 authoring = "manual"
 

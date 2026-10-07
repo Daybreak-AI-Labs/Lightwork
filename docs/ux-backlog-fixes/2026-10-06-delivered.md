@@ -1,0 +1,421 @@
+# Product changes delivered on October 6
+
+Chat search integration: a restored or older specialist can be repaired by
+deliberately choosing its current search result. It is no longer excluded just
+because the name matches the unavailable selection. Query changes immediately
+invalidate old responses; shared access refusal clears private choices and
+saved-name data while retaining the unsent message. Actual production browser
+controls and the shared request helper passed with isolated read responses,
+zero native writes and no provider call. Native server/search acceptance is
+separate from this controller check.
+
+Learning question-import follow-through: the ordinary complete file and before/
+after review binds exact bytes, mode, current collection/storage/account and
+deadline. Native current authority and private source checks run at the physical
+writer; stale replacement refuses rather than erasing newer questions. One
+actual lost-reply import recovered through pure Original without replay. Late
+file/preview/dialog results preserve newer choices; current role/source changes
+refuse and clear private views. Typed Copilot opens the same protected form
+without importing. Native file/SQLite and the complete 390-pixel review passed;
+PostgreSQL and live providers were not exercised here. The explicit complete
+review and collection limits refuse unchanged, with the ordinary restoration
+route offered. Incoming task-derived file questions still need their native
+completed-work source review. This repairs operating custody, not measured
+learning quality or a whole-backlog completion claim.
+
+UX650, parallel-choice portion: ordinary 2/4/8 choices reach the saved native
+definition and execution instead of disappearing during serialization. The
+explicit maximum includes the caller; legacy omitted/zero values retain their
+original wire and shared-pool behavior. Actual serialization, three native
+versions, a six-item saved run with maximum two bodies and exact order, and
+invalid-value refusals passed without model/action callbacks. Workflow
+Assistant's native compiler/schema support the same field and reset; live
+language-model acceptance was not used. Global spawned-slot accounting is
+unchanged and is not a new aggregate nested-work limit.
+
+UX649, installer alignment: setup now uses the same canonical zero-to-ten retry
+range as native execution and All settings. Invalid entries ask again instead
+of silently clamping to a different choice. Zero and default five remain
+available. Exact prompt-body qualification passed without configuration writes;
+this does not claim a complete interactive installation.
+
+UX650, item-limit portion: the ordinary default reveals its maximum of 1,000.
+A larger implicit collection now fails before this loop's first body iteration
+instead of silently completing a prefix. Explicit positive limits retain their
+intentional prefix behavior. Native save/load, a retained earlier step, all
+three Unicode items and exactly two explicitly selected items passed; there
+were no model/action callbacks. Earlier effects are not rolled back. The
+parallel-choice portion is qualified separately above.
+
+UX518: Learning's actual threads participate in coordinated dashboard shutdown.
+New admission closes, cooperative safe points/Budget hooks receive stop, and
+joins share one deadline. Noncancellable work retains truthful running custody
+and Original; restart waits for its exit. Native encrypted jobs qualified
+cooperative drain, bounded noncooperative return, degraded supervision, closed
+admission, clean reopen and a held late admission that executes nothing. No
+provider call, forced thread kill or arbitrary-callback deadline is claimed.
+
+UX658, specialist portion: current named published specialists are available in
+encrypted personal Preferences and typed Copilot. Untouched Chat/task forms
+prefill the saved name; explicit handoffs, restored drafts and deliberate blank
+choices win. An unavailable name stays visible without silent substitution.
+Native reviewed source metadata and current authority are checked after
+encryption before the atomic writer. One actual specialist-default save with a
+lost reply recovered through pure Original; another person's read was refused,
+and source change at the writer prevented replacement. Typed Cancel, Unicode
+blank-choice restoration and zero-request changed-dialog refusal passed. The
+fixture also made one harmless unchanged reviewed name save. Together with the
+model/depth repair and existing answer-style controls this covers the original
+preference portions, without publishing a specialist or pinning future work.
+
+Specialist work follow-through: Chat selects a named published specialist;
+Agent Factory opens it separately from unsaved edits, and Copilot reviews its
+complete published definition. Current source/suite/access checks guard native
+admission and dispatch claim after attachment waits. Exact Chat submission and
+draft restoration retain the selected name; explicit task AI choices survive.
+Two admitted fictional tasks reached isolated worker boundaries, same-key
+typed replay admitted no second task, and staging/companion/access withdrawal
+refused stale work. The fresh ordinary handoff passed without another admission.
+No paid execution or full unpublished-profile Try is established; the existing
+orchestrator uses current published settings when work begins.
+
+Learning shorthand follow-through: the reviewed sample and counting method are
+captured before each ordinary confirmation. Changed choices or an account/
+workspace event refuse the request and preserve entered work. Unchanged review
+uses the same captured body. The finite production request builders qualified
+three refusals without admitting work or making a provider call; this is a UI
+continuity repair, not measured shorthand improvement or an original-ID closure.
+
+UX644, connected-service portion: ordinary complete editing and typed Copilot
+retain named configured services through reviewed Save, separate publication
+and exact Original. Real specialist construction binds exact current connected
+services while retaining parent access, denials, risk rules and empty-list
+inheritance. Source withdrawal, corrupt configuration, complete access clearing
+and the final phone layout passed. One fictional local transport write and
+post-lock refusal exercised the native registry. Selection does not connect a
+service; no external delivery or in-flight cancellation is claimed.
+
+UX658, model portion: encrypted personal Preferences and typed Copilot now
+select a current permitted Chat model and supported thinking depth. Untouched
+new composers prefill it; explicit or recovered choices and newer drafts win.
+Native checks after writer waits refuse withdrawn access/model policy. One
+actual lost-reply Save recovered without replay, with separate-user isolation,
+complete reset review, private clearing and the 320-pixel form qualified.
+Only the latest native save per scope can be confirmed by Original. The default
+specialist portion is qualified separately above.
+
+UX644, model portion: the ordinary complete editor and typed Copilot Save now
+retain usable specialist and supporting-part AI choices. Complete review and
+answer-check preparation resolve the entered map; actual specialist spawns and
+supporting agents use private copied maps while explicit task/installation
+choices and current model policy keep priority. The complete renderer preserves
+legitimate custom role names, the overlay safely quotes those keys, and an
+explicit empty map clears inherited choices. The connected-service portion is
+qualified separately above; these witnesses do not establish provider quality.
+
+UX610: Studio lists the first approved installed evidence definition without an
+existing blueprint. Named source, supported result and control choices retain
+their exact computed edition/fingerprint bindings. Complete ordinary review,
+protected Copilot handoff, Keep editing and pure Original preserve drafts.
+Current approved source/control editions and signed authority are checked at
+the actual final native writer boundary. One ordinary lost-reply Save retained
+one version; role/source withdrawal after native BEGIN refused another write.
+Phone layout, refresh and private clearing passed. This is setup qualification,
+not collector execution, provider delivery or publication; existing custom
+adapter declarations retain their distinct contract.
+
+Practice admission follow-through: complete native objective/round/current-model
+review binds the exact account, workspace, settings and deadline. Newer drafts
+and withdrawn signed authority refuse Start. An original reference is retained
+before submission; exact encrypted task readback survives a lost reply, reload,
+expired review and changed settings without another admission. One actual
+disabled-engine task spent nothing and changed no code; it establishes custody
+and recovery, not successful self-improvement or a pinned future model.
+
+F01 observation follow-through: release-specific indexed reads and 200-record
+pages find relevant real terminal runs beyond a newer unrelated prefix. Each
+selected observation comes from the owner-bound canonical checkpoint, with
+flow/release/state/dry-run checks. The existing 1,000-observation ceiling now
+applies to relevant runs; an index preview cannot authorize a saved canary
+verdict. Native publication, real run, assessment and restoration passed with
+1,001 newer unrelated records and zero unrelated result hydration. Local
+rule-only support and failure criteria remain unchanged.
+
+Learning continuity follow-through: native model-planning replies bind the exact
+current choices and account/workspace, and recheck current signed access after
+the read. An older result cannot replace changed choices. Protected Copilot
+opens the complete ordinary code-practice form while preserving a newer
+objective and rounds; opening starts no work. Access withdrawal clears private
+work and locks the controls.
+
+Learning task recovery follow-through: a rejected result renderer, initial or
+polled, settles the waiting control, removes partial output and offers a pure
+read of the exact recorded job. Unsupported replies remain unconfirmed and an
+unavailable worker does not imply completion. One actual free shorthand-learning
+job and unchanged retained custody qualified the no-repeat recovery; an empty
+input result establishes no learning-quality or savings claim.
+
+W1-23: additive migration 50 supplies ordered per-task question indexes on both
+native backends. Actual 49-to-50 upgrade, fresh open and reopen preserved 12,003
+questions and every saved answer/task result. Native query plans use the new
+index; PostgreSQL's parent-task tenant and owner boundary remains unchanged.
+No previous migration checksum, bootstrap SQL or data was rewritten.
+
+Knowledge follow-through: newer entered work survives a delayed add and
+superseded file reads; overlapping submission is blocked. Oversized text files
+refuse with the form's 20,000-character limit instead of losing content. Local
+grid, heading and input sizing fit the complete 320-pixel form without hiding
+controls. One native document save, file-ordering/size checks, preserved drafts,
+desktop layout and current access withdrawal passed without an AI provider.
+Browser file selection permission remains an explicit qualification boundary.
+
+Release-view follow-through: actual role/session withdrawal clears the private
+candidate list and review form and locks controls. An old successful reply cannot
+redraw a cleared account/workspace view; ordinary connection failures preserve
+the draft. Actual signed native page and Copilot reads passed with authentic
+retained fictional records and zero release mutations.
+
+P14/N05 shared-storage follow-through: complete ordinary decision and Copilot
+controls now use the existing guarded PostgreSQL writer for loss reviews. The
+writer receives current authority, deadline and exact before/after checks at its
+supported phases; the pre-mutation check no longer dereferences a change that
+has not happened. Existing local guards, encryption, audit, Originals, finite
+limits and unknown outcomes remain binding. This does not establish customer
+facts, business execution or a new research result.
+
+F04/F05 instruction suggestion follow-through: Learned preserves every field of
+a newer suggestion entered while a previous save is pending. Enter and overlapping
+submissions cannot duplicate that admission; a reply resets only the unchanged
+submitted form. Copilot opens the complete ordinary form and focuses Short title,
+without submitting or applying anything. One real native proposal and approval,
+delayed reply, subsequent list refresh, protected handoff and genuine current
+session refusal passed. Private material clears after access withdrawal. No AI
+call or answer-quality improvement is claimed.
+
+UX665: All settings > AI models > Images and the installer provide repainting,
+variation and enlargement model choices. Existing complete Review, Save,
+Original and protected Copilot controls preserve a newer draft. Actual image
+operations consume the current saved values with unchanged defaults and existing
+deployment precedence; unsafe or unreadable settings refuse before prediction.
+The same bounded portable name validation and exact configuration schema apply
+throughout. Native saved-value consumption, generated configuration, ordinary
+controls and genuine access withdrawal passed without a provider call. A
+responsive DOM check establishes width, not phone visual or live image quality.
+
+UX671: Ekko's ordinary explicit recorder now selects the installed Windows,
+Mac or local Linux X11 backend. Fixed app maps preserve the content-free capture
+boundary. Linux desktop reads are isolated and bounded; Wayland, remote and
+headless desktops refuse. Current consent, enrollment, owner, lease, audit and
+Pause/Stop remain required. Constructor waits recheck current permission and
+the exact enrollment before background admission. Protected Copilot opens the
+same permission controls with entered choices intact. Unknown Start or job
+outcomes stay unconfirmed and are not retried automatically or reported as zero;
+the current native watching state provides recovery controls. Local native
+Windows and platform-library/timeout contracts passed; physical Mac/Linux and
+compiled-installer acceptance remain separately unverified.
+
+UX666: Agent Factory now offers named recent tasks, current stopped/waiting/working
+and finished counts, readable recovery reasons, recorded run costs and a creation
+trend for 7, 30 or 90 days. The newest-50 limit and unavailable costs are explicit;
+completion and approval do not establish accuracy or business value. The compact
+ordinary view and protected Copilot opener preserve specialist editor drafts.
+Actual current-owner/source checks refused changed records and other accounts;
+signed access withdrawal cleared private results and locked the reader at 320
+pixels. No AI or external send was needed to qualify this native reader.
+
+UX696: specialist step controls include the current step name and position,
+preserve intentional focus and announce structural changes. Boundary moves are
+disabled. Add, Move and Remove now invalidate an obsolete complete review and
+activate the existing unsaved-draft Load warning. Initial display and exact
+saved-profile loading produce no false structural edit. An actual ordinary
+Review, Cancel, one Save draft and guarded Load preserved every native field and
+step order without a provider call or publication. This also repairs the concrete
+draft-loss risk found while fixing the original accessibility item.
+
+October 7 continued delivery: UX690 removes the unused encrypted-message search
+indexes through an exact schema-49 upgrade on both supported backends, preserving
+authoritative messages, turns, native search and tenant policies. SQLite reopening
+does not recreate its historical index. Versions 1–48 remain immutable; extra or
+altered destructive SQL refuses. Native SQLite and cached PostgreSQL upgrade,
+history, append, search and isolation checks passed. The [offline upgrade boundary](../operations/message-search-retirement.md)
+is explicit; no physical file-size or custom-SQL compatibility claim is made.
+
+UX685 repeated-work follow-through: Workforce's 54 department decisions use one
+current plan read rather than 54 separate reads, with no retained authority.
+Ordinary tool browsing computes only the visible summaries; current searches
+retain the full permitted domain. English pages avoid an unused full translation
+catalog, and other languages build it once. Actual native policy changes, source
+catalog byte equality, rendered pages and ordinary searches passed. This reduces
+specific page work; it does not claim that UX691 memory use or every cold-page
+latency has been solved.
+
+This maps the current delivery batch to the original `claude/ux-backlog-status` `NOT_DONE.md`, rather than replacing that backlog with a new checklist. Ordinary customer controls and their current boundaries are listed below. The detailed native journeys used isolated local transports, not customer or paid-provider accounts. No hosted CI was used.
+
+| Original item | Working product change | Customer control and boundary |
+| --- | --- | --- |
+| UX-364 | Company sign-ins have a current maximum length; browsers have an optional inactivity limit with explicit activity. Automatic refreshes never extend it. | Settings > All settings and its existing reviewed Copilot controls, plus installer setup. Existing sign-in ceilings still apply. Current own-session checks retain observed expiration, reject later activity, and show the actual effective end time. Both new limits default to the existing behavior. |
+| UX-640 | Chat offers a model and thinking-depth choice for each task without changing workspace defaults. | Chat, queued messages, drafts, retries and the complete Copilot task review retain the exact choice. Native admission checks current readiness and allowed depth; ordinary runner routing uses the choice within existing spending limits. Specialist settings and approved backups still apply. Local routing and real admissions were exercised without a live model completion. |
+| UX-383, evidence approvals | Attention includes current continuous-evidence sources awaiting an independent approval. | Attention and Copilot open the existing full source review with the selected item and filters retained. Another authorized reviewer approves the exact edition; the pending item disappears. This covers evidence-source approvals, not every governance family. |
+| UX-387 | Workflow alerts offer All updates or Problems only, with Off preserved. | Designer and its existing Copilot draft controls save and publish the native choice. Problems only includes failures, spending limits and uncertain outcomes; completed work and approval waits do not send an alert. Existing delivery settings still determine the recipient. |
+| UX-237 | The command-line dashboard launch uses the same bounded native server shutdown as the installed application. | A pending native request was cancelled and its process lease released within the chosen shutdown allowance plus the existing close wait. Physical command-line launch and socket acceptance remain separate. |
+| UX-194 | Action wait settings explain the actual expectation rather than promising to cancel a remote effect. | Designer calls the value Expected wait and states that a started action may still settle. AI calls retain their separate Give up after control. |
+| UX-210 | Reviewed discovery findings can update the observed categories of one named existing dataset. | Data discovery and Copilot provide named report/dataset choices, complete current/proposed review, separate confirmation and original-only recovery. Independent approval, current source, dataset edition, account and workspace are checked at native write boundaries. The update preserves business purpose; a paused source refuses further application. An interrupted saved reply recovered one update without repeating it. Choices show the latest fifty scans and first five hundred datasets. |
+| UX-681, outcome correctness | Correction, opt-out, objection and other manually handled privacy requests no longer become Answered through a bare fulfillment marker. | The request page and Copilot open the complete action/response controls. A recorded answer requires the actual action and affected systems, answer date and proof. Separate confirmation binds the exact current revision and immutable original outcome. Interrupted replies recover the original without another close. This records an operator's statement; it does not itself correct another system or independently prove delivery to the requester. Legacy unproved manual fulfillment retains its unanswered deadline. |
+| UX-160, native safeguard activity | Connected-agent actions retain protected activity before the connector is entered and distinguish a returned result from an accepted or unknown outside effect. | Governance and Copilot read the same current authorized originals without repeating actions. Current independently reviewed system declarations and native policy authority are rechecked before sending. The governance loop reconciles six actual source families using separate retained generations, including expiry and removal. Previews and waiting approvals do not count as execution. Local connector qualification covers refused, returned, uncertain and interrupted outcomes; outside custody and large-inventory latency are not established. |
+| UX-117 | Writeback derives its full review from the saved Lightwork finding, acceptance or incident. Original matching receipts remain readable after later exports. | Governance and Copilot; current source/account checks precede the connector write. Uncertain receipts remain uncertain instead of silently repeating a create. |
+| UX-134 | Manual privacy evidence is explicitly an operator attestation, separate from connector observations. | Privacy request source tasks, saved originals and exports; absence of an active record does not claim destruction of retained copies. |
+| UX-368/369/370 | Complete specialist drafts have a test conversation, saved question sets, separate Save draft and Publish, retained complete versions and reviewed Restore. | Agent Factory, Workflow Builder and Copilot. Tests require a configured model and enforce their reviewed spending limits. Publishing requires current acceptance or a separately recorded reason. |
+| UX-385 | Visual questions support All/Any groups, text, numbers and Yes/No without editing an expression. | Workflow Designer; saving and reloading use the same native execution semantics. Unsupported old expressions are kept until explicitly replaced; incomplete edits block save/run/publish. |
+| UX-044/389 | Connected starts use saved accounts and named SharePoint, Salesforce, ServiceNow and Teams sources. | Automations and Copilot; dated source preview, explicit creation, bounded complete reads, original creation recovery and preserved source position. A preview does not confirm future delivery. |
+| UX-168/373 | Owned task answers can produce encrypted text and rich HTML file replies with the original chat thread. | Slack and Telegram. Uncertain file sends are not automatically repeated. Teams supplies named result availability and a configured private task link; its existing transport cannot upload the files. This path does not convert arbitrary content into PDF/DOCX or attach model-supplied filesystem paths. |
+| UX-075 | Company account presets and a real verified sign-in lead to separately reviewed activation and restricted restoration of the previous local-owner choice. | Settings, People and Copilot. The verified account needs an independent administrator grant; a connection check or callback never grants a role. Recovery is restricted to the original owner on the local installation, with current authority and the original passphrase. Uploaded single-sign-on setup and its native round trip are tracked separately below. |
+| UX-086 | Named SharePoint, OneDrive, Google Drive and Confluence sources have folder/space choices, schedules, bounded incremental preparation, per-file history and retained originals. | Knowledge and Copilot. Actual current content-use permission precedes import. A different authorized person approves the exact imported edition before retrieval; attachment preserves the entire specialist profile in a draft, then uses its existing separate Publish review. Direct files only; public website crawling is outside this path. |
+| UX-078 | The customer reviews a brief and requests an on-duty person in the same Chat conversation; the helper takes over after AI stops, replies in that thread, and the customer separately returns to AI. | Chat, Human conversations and Copilot share the same native controls. Earlier private history, files, connected accounts and human exchanges are not automatically supplied to a model. Current named helper access is rechecked. An unsettled AI run or uncertain stop keeps the conversation held; original reads do not repeat a reply. External contact-centre transfers are outside this path. |
+| UX-398, Teams | Verified private Teams accounts can receive personal alerts and explicitly reviewed fixed test messages, with saved original delivery outcomes. | Notifications, My data and Copilot. Native signed inbound proof binds the exact personal conversation and current channel access. Provider acceptance is separate from the recipient reading a message. Uncertain outcomes never automatically resend; group conversations are excluded. This does not add email delivery. |
+| UX-075, uploaded single sign-on | Provider files can be uploaded, retained securely and staged while owner sign-in remains available. A verified signed sign-in, independent administrator grant and complete activation review precede use. | Settings, People and Copilot. Native signed SHA256 round trips, replay refusal and SHA1 refusal were exercised locally. Standard signed sign-in is included in the installer runtime; encrypted assertions require the installation's supported encryption backend. Recovery is limited to restoring the reviewed previous choice for the original local owner. No provider files or private keys are sent to a model. |
+| UX-402/403 | One registered vendor profile joins its actual lifecycle, assessments, screening, decisions and contracts. Existing Intelligence identities require explicit linking; their existing contract references remain intact. | Privacy and Copilot, with direct links to Lifecycle, Intelligence and Contracts. Both register and lifecycle activation enforce the latest complete evaluated assessment at the native writer. A newer incomplete assessment blocks activation; a questionnaire reply or activation decision does not certify the vendor. |
+| UX-411 | A TypeScript plugin's worker is released after its last tool and active call finish, rather than retained until Lightwork exits. | Background lifecycle improvement; current tools retain their worker while in use, serialized calls and pinned plugin files stay enforced, and cleanup does not repeat a previous effect. An actual local worker was retained through an active call and then reaped after release. |
+| UX-553 | Telegram, Discord, WhatsApp and Mattermost have a separately reviewed fixed test message, a current private-recipient selection and a retained original result. | Channels and Copilot open the same protected controls. Conversation choices come from currently permitted native intake; no arbitrary address is accepted. A provider accepting a message does not prove arrival. Interrupted or unknown sends are read without resending. WhatsApp uses a recent retained private conversation and the service can still refuse its reply window. Native and ordinary phone-width journeys used offline providers. |
+| UX-555 | Stopped Chat work shows its recovery controls before optional planning and code tools. | Chat keeps Resume, questions, approvals, history and the original result available. Only optional planning/code sections hide while the native stopped state is displayed; waiting questions retain them. An ordinary phone-width Stop journey preserved entered planning work and its open disclosure, then showed the real cancelled state without horizontal overflow. |
+| UX-483 | Selected local-database spending reports and channel work use the selected database through creation, dispatch and execution. | Existing maintenance commands and the native channel runtime retain their default behavior when no database is selected. An incompatible remote dispatcher, shared backend or per-person world selection is refused instead of silently using a different database. An actual two-database local journey showed distinct spending figures and left the default database's same-numbered tasks untouched. |
+| UX-066/068, selected task read | Copilot reports the same readable stopped-work reason and next action as ordinary Chat, and distinguishes a real unanswered question. | The current task read has a readable date, retained-run figures, saved output names and a complete task-page link. Answers or output lists too large for the panel have an explicit complete-page handoff. Actual authenticated failed and waiting-question reads used no model call or mutation; the question link opened the real retained question. |
+| UX-503 | Connected AI clients receive a useful invalid-arguments response for malformed prompt requests or resource-unsubscribe addresses, instead of an internal failure. | The existing connection protocol preserves valid/default prompts, subscriptions, repeated unsubscribe and subsequent requests. An actual ten-message native request sequence exercised malformed and valid requests without tool, model or network execution. |
+| UX-396 | The phone companion can review and start a task, or review and decide an owned task approval, using separately granted device permissions. | Dashboard pairing, the phone's Tasks/Approvals screens and Copilot's protected pairing handoff share current native permissions. Full review, current limits, separate confirmation and retained original history precede effects. Interrupted or unknown requests are not automatically repeated. Copied-conversation and other approval types open their complete protected dashboard review. Local React-component journeys reached actual native admission/votes; a separate SDK-backed offline journey reached real background execution and a retained result. Native SQLite and pooled PostgreSQL writer guards were exercised. Android/iOS installation and operating-system behavior were not exercised here. |
+| UX-558 | Planning steps no longer report a finished plan when the native planner produced no usable steps or its review could not be read. | Chat and the existing protected Copilot controls retain attempted work, recorded cost and partial step outputs. The ordinary view gives a readable incomplete/unconfirmed result instead of an empty plan heading or raw parser text. Actual native jobs and phone-width controls exercised missing, unreadable and valid plans with fictional local responses. |
+| UX-488 | Model setup and choices use the connected service's current name and do not ask an Ollama installation for an unnecessary key. | Settings retains the exact approved model choices and native readiness states. An unconfigured service says it needs setup; a saved Ollama address becomes pending verification, without falsely claiming that it is reachable. This is a display correction, with an actual native before/after Settings render and no provider request. |
+| UX-552 | Billing, the workspace heading and invoice/plan choices give a readable name for an unnamed workspace. | Main and unnamed workspaces use business labels; existing named workspaces, exact selected identities and duplicate-name references remain intact. The ordinary native page and selections were inspected without an invoice, payment, Stripe or model call. |
+
+## Continued native customer-path fixes
+
+| Original item | Working product change | Customer control and boundary |
+| --- | --- | --- |
+| UX-224 | Monitoring selects active, due records before its limit and rotates through the eligible list with a retained workspace position. A changed or withdrawn source refuses that monitor while eligible peers continue. | Existing scheduled Intelligence monitoring; native source approval and exact job idempotency remain required. A local 1,001-record journey reached a due monitor behind 1,000 future/revoked records; a separate 101-due-record journey reached the later monitor after restart and preserved original jobs. A refused source left 99 eligible peers queued; integrity failures still surfaced. Scheduling position is not audit evidence or a successful scan. |
+| UX-534 | A changed discovery source or lost job lease is handled for that job, allowing other claimed scans to complete. | Native discovery worker; a lost lease never changes another worker's record. Expected source conflicts remain retryable only while the original lease is held. Corrupt native records still stop with an error. Local retained-source and rival-lease journeys completed the unaffected second scan. |
+| UX-587 | Workflow Assistant explains unreadable replies and spending-limit refusals in ordinary language and gives a useful next step. | Designer and Workflow Copilot keep the entered unsaved draft. A valid subsequent reply changes the editable draft through the existing path; it does not silently save or publish. Actual native local-response and phone-width journeys exercised recovery without a paid provider. |
+| UX-589 | Workflow run results expose the complete permitted text, nested objects and lists, full field names and exact large numbers through ordinary progressive reading. | Run page and its read-only Copilot status/link. Native retained values are read in bounded pages with current owner, retained-version and role checks; secret masking precedes traversal. An assigned approval does not grant complete owner data. Actual retained long values exceeded the former preview limit and their final text and list positions were readable at phone width. |
+| UX-617 | Privacy request countdowns agree with their displayed UTC calendar deadline. An already-passed deadline today is included in overdue aging and the board. | Privacy list, selected request, aging, board and current-state Copilot read. Native exact timestamp checks remain authoritative for overdue status; a collected data package is separate from an answered request. The ordinary request and selected deadline question used the same retained record without a send or mutation. |
+| UX-222 | Independent questionnaire respondents can save and submit their own assigned answers after another respondent submits unrelated answers. | New invitations bind the assessment structure, assigned questions and their transitive conditions. Changed overlapping answers, assignments, templates or assessment structure still refuse submission. Existing invitations retain their original exact revision rule. Submission keeps the native revision check; interrupted completion reads the captured original rather than rebasing or submitting again. Actual public API journeys exercised independent responses, preserved drafts, conflicting changes and lost-response recovery. |
+| UX-345 | Work waiting for an answer emits a distinct waiting update, rather than falsely reporting finished work. | The native event contains task state and question count, without question text. Completing the resumed task separately emits its real finished update. Existing terminal-only subscriptions receive no waiting event. Native question, resume and retained-delivery journeys exercised both states without sending an external message. |
+| UX-695 | After downtime, evidence collection requests one elapsed window and resumes at the next boundary of its original schedule. | Continuous evidence and its existing Collect evidence now control. Repeated cycles at the same time do not duplicate the elapsed window; retries retain their original job and window. The clock is read after the native writer lock is acquired. Actual native and phone-width journeys exercised downtime, retry, writer waiting and withdrawn source/account refusal with a fictional local collector. Source collection limits still apply. |
+| UX-255 | Self-improvement no longer stops permanently after 1,000 lifetime adoption receipts. | The default native ledger retains every earlier receipt and the append-only journal. Explicit caller limits still refuse without deleting history; unresolved work on the same artifact still blocks another adoption. A populated 1,000-receipt legacy ledger was reopened, then adopted, restored and appended without changing the original journal prefix. Full-history replay remains; this fixes the cutoff rather than claiming unlimited scale. |
+| UX-243 | A failing fixed action is no longer automatically replaced by an AI step containing only its short label. | The existing workflow replacement review shows the complete permitted action inputs and answer destination, then requires explicit replacement instructions. Saving creates a draft; publishing remains separate. Automatic measured restoration remains available. Designer and selected-step Copilot open the same protected review, while stale work and missing instructions refuse the change. |
+
+The adjacent discovery controls also repair a reproduced customer failure: queued **Run now** and **Cancel** previously returned a lease error. The ordinary page now reviews the exact queued job and current source, requires separate confirmation, retains the original completed report, and records cancellation so that a worker cannot reclaim it. Interrupted replies recover their original without running again. The populated installed-store migration retains prior jobs, reports and integrity records; unsupported schemas refuse migration. Saved-account access is rechecked independently of administrator-only environment sources. Copilot opens these same protected controls while preserving the source draft; it starts no scan itself.
+
+Adjacent work-update setup uses named event choices and retains the exact saved all-events, family or previous selections until explicitly changed. Empty selection refuses instead of subscribing to everything. Copilot reads bounded subscription/delivery status and opens the same protected form without receiving its addresses, secrets or event bodies. The own-secret badge checks the actual stored secret, including encrypted empty values; installation-list signing is shown separately. Saved choices and full actions remain readable at phone width. Local native signing attempts used offline transports, including unsigned ordinary subscriptions and signed installation-list delivery.
+
+Delivery now reserves one native attempt before transport, preserving the originating workspace across background dispatch. Only final 2xx responses record acceptance. Stale retries cannot reset accepted, active or unconfirmed originals; missing responses remain unconfirmed. A separate complete **Review another attempt** and explicit confirmation create a new linked delivery while retaining the unresolved original unchanged. The saved decision remains in its history, and interrupted replies or repeated confirmations read that same new original without sending again. Current workspace, access, source and deadline are checked at the write and send boundaries. This is protection against accidental repeated sends, not a promise of exactly-once effects in an outside system.
+
+Continuous-evidence Copilot reads bounded current setup, schedule and collection status, then opens the same protected page controls while preserving its current entries. Configuration failures remain unavailable instead of appearing as an empty successful inventory. The separate source-setup control opens a guided provider, saved-account, scope, check and company-control form. It does not save, approve or collect.
+
+External sources now use the existing encrypted Connections and signed workspace definitions. The complete source review captures its named account, exact account revision, current checks and controls, and explicit future account-use permission. Save creates a pending version; another administrator approves it, then Start collecting creates its exact enrollment. Editing pauses the previous collection and cancels its waiting work. Current source, owner capability, workspace, account and deadline are rechecked at write and physical read boundaries. Interrupted saves read the exact retained original, including after account rotation or feature withdrawal, without another save. A native signed lifecycle reached actual stock collection with a fictional local provider; installation-managed sources remain separate, and this is not live customer cloud acceptance.
+
+The original backlog still includes work outside this batch. The 28-item research register also retains its distinct research dispositions; these customer features do not turn a bounded pilot or a rejected experiment into a completed invention, measured business outcome or acquisition valuation.
+
+The source-confirmed default-profile lesson-transfer blocker is repaired through **Learned > Test lessons on another model**. The complete ordinary review chooses one target, supplies its standing instructions and captures current source lessons, questions, expected answers and spending. It reuses native request custody, safety copies, the shared Budget, holdout, learning approval and trial promotion. Interrupted replies and selected-original Copilot controls read the original without another test. Unspecified holdout resource ceilings now receive finite defaults without widening explicit zero or smaller caps; temporary authorization failures remain retryable, and finalization preserves the actual stopped or spending outcome. Synthetic local evaluations establish this execution path, not performance on customer work or the authenticity of a supplied deployment-instructions copy.
+
+Two additional fresh-install learning blockers now have ordinary controls. **Learned > Check how answers are judged** supplies complete source/response/independent-label review, actual configured checker judgments, unchanged reliability floors, current progress/Stop and original-only recovery. Native vote telemetry now calibrates response-correctness confidence against its reported response label; a versioned checker identity prevents incompatible earlier measurements from mixing in. Initial admission checks the reviewed checker, while final promotion still checks its current-cycle watermark. Conservative-profile native votes and a phone-width interrupted-reply/Copilot journey exercised this path with synthetic responses; a one-response result remains insufficient.
+
+**Learning > Improve how new agents are built** replaces mandatory technical paired-comparison files with current named correction/request choices, full input-use and spending review, actual paired unsaved intake generation, exact local tool-capability checks and separately reviewed adoption. Existing native promotion gates remain mandatory; incomplete or supplied scores cannot qualify this new path. Its ordinary controls and typed Copilot share full reviews and exact original custody, including current-source privacy projection in generic task views. The permanent governed adoption decision remains readable after its recent detailed observation is retired. Comparison bodies retain the existing 40-task limit; full live-review custody refuses new work rather than allowing replay. This is bounded missing-tool qualification, not measured business lift or complete validation of every kind of agent guidance.
+
+
+Provider Spending health now reads its complete accounting and counters from one sealed native transaction. It removes the second full-ledger hash from each health read while retaining full historical validation, unknown-charge holds and tamper refusal. A migrated 2,000-receipt native check preserved the same result with one hash instead of two; this does not remove the separate per-call full-history seal check.
+
+Agent-building guidance now has an ordinary, separately reviewed **Restore earlier guidance** action and the same complete Copilot review. It restores only the exact latest owned successful adoption, refuses later artifact changes and retains a permanent original restoration receipt. It calls no AI service and remains usable when new learning is disabled. Byte replacement without a receipt stays unconfirmed; a new explicit review may acknowledge the already-restored exact edition without rewriting guidance or claiming the previous attempt succeeded. Unsupported historical editions refuse rather than approximating their earlier contents.
+
+The AI-use exception journey replaces comma-separated safeguard names with current named recorded choices and complete Request, independent Approve and Close reviews. Keep editing retains the draft; interrupted replies are held for exact original-field/lifecycle readback without another write. Copilot opens those same protected controls. Current status alone cannot prove a fabricated earlier approval, and lost access clears private choices. This batch also repairs a reproduced page-loading failure: the evaluation list requested more rows than the governed store permits, clearing policies and exceptions even in an empty workspace. Bounded integrity-checked iteration preserves the evaluation domain limit without changing policy or exception list semantics.
+
+UX-661: Designer now retains exact ordinary saved schedules, including every minute, supported clock-hour intervals and monthly dates through the 31st. Previously a saved hourly minute 10 became a blank picker, and another schedule edit could silently rebuild minute 0. Custom timetables stay unchanged until explicitly replaced. Clock-hour interval and missing-month-date explanations match the existing scheduler. Ordinary edits and Assistant draft changes retain Undo, draft Save and separate Publish; no execution writer changes.
+
+UX-637 follow-through: a successful workspace creation no longer erases the next draft entered while its reply was pending. Exact newer name, email, plan, role and daily limit stay editable; overlapping Create submissions are refused. An unchanged form resets its amount enabled/required state with No daily limit. Shared refreshes preserve Create drafts and visible one-time invitations until deliberate Refresh, and a new onboarding requires acknowledgement before replacing the previous link. Native saved limits and invitation semantics remain unchanged. A delayed ordinary native response reproduced the earlier loss and qualified retention without a second create.
+
+Adjacent Learning repair: shorthand and token-code status refreshes no longer silently change a supported connected-service counting selection to the free estimate. Genuine unavailability gives an explicit fallback notice and retains the sample amount. Ordinary native local learning exercised before/after selection retention and withdrawal with no provider count call; existing connected-service consent and authority stay unchanged.
+
+UX661 continuation: Automations now exposes the 29th, 30th and 31st through its ordinary monthly choices and the same native timetable validation. Its preview explicitly skips months without that date. An ordinary native creation saved one 31st-at-09:10 schedule with one pending occurrence; an invalid 32nd created no job. This qualifies admission, not future task execution. Copilot's protected **Open the complete schedule form** handoff keeps entered choices and uses current page/workspace/operating authority without starting anything. The form now separately reviews complete work and timing, binds the exact native payload to one immutable queue admission and retains original-result recovery after an interrupted reply and reload. Copilot opens the same original controls; scheduling-off preserves that recovery panel. Newer entered work stays intact while an original is read.
+
+Adjacent scheduling reliability: ordinary job admission now places the complete native definition/version/cursor/job write inside the existing queue transaction. A real SQLite insertion-abort formerly left an orphaned schedule; it now retains the exact pre-admission rows. Removing that failure admits one linked occurrence, and ordinary/empty-payload admissions keep their behavior. No new scheduling writer or execution control is introduced.
+
+Confirmed file-release repair: full-history archive and handoff downloads previously released an unapproved result despite Chat's approval requirement. They now bind current release/signoff, person, workspace, source rights and exact content before/after preparing the copy. Approved content and permitted no-output history remain available. The adjacent sanitized audit-replay share binds that same release version and checks current authority inside the native fence at upload; an interrupted fictional upload remains unknown and is not automatically resent. Native qualification includes actual signed-session role withdrawal and zero writes after refusal. This is the current narrower defect, not the stale UX384 claim that the product provides only a technical export.
+
+UX165: Make imports no longer silently retain only the first comparison in a compound condition. Complete supported alternative groups reach ordinary Review, Save, Original and native execution. Malformed or unsupported comparisons refuse review without saving. Named native input paths and typed literals are supported; external module-output expressions remain explicitly unsupported. Four local native branch cases preserved complete conjunctions, alternatives and unconditional fan-out without contacting Make.
+
+UX079: Microsoft 365 email now has account sign-in, renewable encrypted credentials and named owned mail-account choices in Channels. The same native account supports polling, sending and the separate check, without Microsoft password fallback. Current person, workspace, connection edition and application are bound through consent, saving and physical mail operations; token renewal preserves the selected edition, while reconnection or application replacement requires reselection. The ordinary and Copilot setup preserve unrelated drafts and pending consent. Local signed returns and fictional mail transports qualify execution and access controls, not live tenant consent or delivery; the cached desktop-broker Rust check and offline library build do not qualify a launched packaged broker.
+
+UX384 follow-through: Chat answers and selected historical messages now offer an editable Word download through the same current release policy as their Markdown answer. Changed source or review state refuses generation. The existing native writer supplies ordinary document structure, with no legal branding or forced tracked changes; basic headings, bullets and emphasis are formatted, while code and complex layouts retain readable text. The complete original Markdown remains in the archive. Native package reading qualifies preserved content and control behavior; a local Word-engine render was unavailable, so complete Markdown layout fidelity is not claimed.
+
+Adjacent audit completeness: selecting more than four hundred recorded days no longer silently verifies only the newest files. The existing bounded check refuses the oversized selection and asks for separate smaller ranges. Native 401-day refusal performed no verification; a 400-day selection verified every signed daily file and the ledger. The unchanged ordinary error path preserves the exact instruction. This does not add external checkpoint custody.
+
+Adjacent native improvement authority: a still-prepared candidate cannot retain positive installation authorization after learning is disabled, emergency stop is activated or checker calibration freezes. Current controls are checked after ledger waits and final risk approval; existing exact-before abort and exact-after committed-original contracts stay intact. Native control changes during those waits qualified refusal without a model call or artifact replacement. This is an admission repair, not a measured-quality claim.
+
+F04/F05 customer follow-through: ordinary unattended history discovery intentionally skips actor-owned tasks, so a signed-in customer's work could not enter that path. **Learning questions > Use one of my completed tasks** now provides explicit named selection, complete selected text/recorded-answer review, editable standalone question/expected answer, shared-storage/provider-use disclosure and separate native Save/Original. Copilot opens those same private controls while preserving entered work. Unattended exclusions remain unchanged. Selected private question and request text use existing bound encryption; future checks and ordinary readback retain exact current source/workspace/owner/copied-source/release permission. Corrections and protected exports preserve binding; imports cannot silently make private text an unbound manual case. Source withdrawal excludes future use. The actual native checker consumes the saved case without assuming a completed task is correct; local offline consumption does not establish improved customer accuracy.
+
+Post-install workflow inputs: supported multiline string values no longer lose line breaks in a single-line Run field. Nested notes and fixed-list strings use ordinary textareas; typed number/Yes-No controls and exact schema reconstruction stay intact. A real signed native legacy-recipe admission retained line breaks, tabs, Unicode and spaces without a worker or model call. Unsupported open-ended/composed schemas still refuse instead of requiring a customer to enter JSON.
+
+Chat Word downloads now turn supported Markdown tables into editable cells with repeated bold headers and declared alignment. Exact values, tabs and Unicode remain present; malformed extra cells and fenced examples remain readable literal text. The same native selected-answer release policy and original Markdown retention apply. An actual signed download passed package and Word-document library reading, without a provider request. Word-engine visual rendering remains separate.
+
+F04/F05 question-check follow-through: a partial baseline check could previously classify a question as too easy and retire it after only one available passing judgment. The native result now distinguishes requested, judged and unavailable samples; all requested samples must complete before that description applies. Learned provides complete selected-question, expected-answer, provider-use and spending review, separate Start and original/progress/Stop controls using existing learning-pass custody. Checks remove nothing. Retiring a question uses its separate current review. Private responses are encrypted and projected only under current question/source access; Copilot opens the same protected form without starting a check.
+
+UX-365: Connections now offers the existing keyed reference services through named searchable choices, their shipped addresses and plain key guidance. The existing sealed native connection writer and current account/role checks remain unchanged. Reference addresses stay fixed in new and existing forms; no-key tools keep their defaults. Copilot opens the same controls while preserving entered keys and unrelated account-sign-in drafts. Saving credentials and testing service access remain separate from authorizing a future task.
+
+UX-667: saved Chat code blocks have individual Copy code controls rather than requiring whole-answer copying or manual selection. Current, file and earlier-message sources use native source/release checks before clipboard use. Exact snippet whitespace, tabs and Unicode stay intact; changed or unapproved sources refuse. Earlier messages remain copyable during newer work. Clipboard failure offers a selectable fallback without a false Copied result. Copilot opens and focuses the same controls while keeping the unsent message; it copies or executes nothing itself.
+
+Adjacent historical-message repair: exact selected-answer downloads no longer search only the latest two hundred conversation turns. They use the existing owner/thread/tenant-scoped native reader with an exact turn filter. Actual signed Markdown and Word downloads retained the complete earlier answer after 201 later turns, while another conversation's turn refused. The existing general sharing read and its limit remain unchanged. Snippet copying inherits the same native selected-answer path.
+
+The native question-check journey retained both requested attempts and its one unavailable judgment, reported Partial and removed no question. A lost post-admission reply recovered the original after reload without a second LPR/job. Copilot preserved the selected question, model, newer answer-count choice and pending original. Current administrator withdrawal refused access and cleared private views. The reference-service journey saved an actual sealed FRED account, reached the stock read-only tool with fictional transport and refused another principal's private-account use. No live provider or reference service is qualified by these local journeys.
+
+UX223 vendor-alert follow-through: named recipients are saved through ordinary controls with immutable encrypted identities and withdrawal; complete recipients and message are reviewed before native Send. Lost Save replies recover the original recipient without another write. Current withdrawal during mail sign-in stopped the physical send, while a post-send disconnect remained unconfirmed and was not replayed. Copilot opens this same form with the entered draft intact. The separate no-code compliance execution gap is not completed by recipient setup.
+
+UX235: Consent delivery provides protected ordinary keys, destinations, complete automatic-delivery review, Save/Original and pause. The existing delivery store retains the exact future-event starting point and selected key/destination editions; the supervised dashboard worker rechecks current authority before actual sends. Admission precedes the physical receiver call, and an uncertain entered send is held without automatic replay. Native future-event, rotation, withdrawal, pause and lost-response journeys used an isolated signed receiver. Provider-specific external application completion remains separate from that receipt.
+
+UX383 remaining review families: Attention now projects native pending vendor lifecycle, DROP authority, Trust Center authority and disclosure reviews. Independent approval screens expose full current questions/rules and permitted authority details before approval. Source removal, module disabling and current reviewer demotion refuse or clear private controls. An actual complete questionnaire review and separate native approval, protected Copilot opening, and 320-pixel layout were qualified; fictional Trust bindings do not establish outside enrollment.
+
+UX018 excluded-key follow-through: backups now retain authenticated excluded key file names, and workspace/update recovery shows them through ordinary controls. Older snapshots show that no list was recorded rather than claiming there are no missing keys. Installation metadata refuses oversized writes before replacing a saved record. Actual archive creation/verification and signed installation readback confirmed withheld raw key bytes and included wrapped data; the ordinary controller cleared private names after access refusal. This does not claim separately stored keys or an application update were qualified.
+
+UX223 questionnaire execution follow-through: a supported saved Studio form opens in the ordinary builder, preserving complete questions, choices and supported framework/control conditions. Full Review, Save and Original bind its exact source edition; a different administrator reads the complete saved questionnaire before native Publish. Actual assessment consumed that version. Lost successful Save replies created no extra version, source changes refused, and unsupported meaning was not dropped. Generic collector/report integration remains separate.
+
+UX684: Research now runs supported saved programs and approved text snapshots through the installed isolated container runner, with independent complete review, separate Start, progress, Stop and Original. Actual local execution retained checked output, input bytes, Docker timing and successful cleanup; a lost Start response recovered the same attempt. Unsupported executors, remote data and unverifiable constraints refuse before starting. No image pull, host execution fallback or measured learning advantage is claimed.
+
+UX708: the discovery card describes Lightwork plainly, advertises the actual installed A2A 0.3 contract and current native authentication, and publishes no credential. Native protected readback and explicit anonymous-mode discovery passed without a task. Existing All settings key/address/limit controls replace the stale terminal-only guidance; the enabling switch shows its real restart requirement. This is a discovery repair, not A2A 1.0 conformance.
+
+UX374: supported Vapi and Retell function requests now reach the actual channel/Server/Agent path and return the provider's expected response. Informational transcripts start no task. All settings provides the ordinary setup guide and existing protected controls; Copilot preserves their entered work. Existing original custody survives key rotation and a service restart, while current caller/source withdrawal refuses and unknown execution is not replayed. Two local native goals and the 320-pixel ordinary setup were qualified without a provider call. Enterprise phone-only identity is not treated as company sign-in, and Bland inbound remains unsupported.
+
+UX684 Stop follow-through: progress no longer makes a visible Stop button stale. It reads the current revision for the same manifest/attempt/worker before the native guarded cancellation. An actually started sleeping container was stopped and removed, with cleanup retained and no score invented. A pre-launch refusal now retains actual cleanup too. Current reviewer withdrawal refused private originals and controls under the same signed session.
+
+UX705/UX706: the interactive Goal Map uses group semantics so its existing named task buttons are exposed to assistive technology. The remaining original wide-table wrappers now have ordinary keyboard focus and distinct accessible names, including the dynamically created AI-assurance access table and the embedded code area. Previously repaired code/security tables and plan/history main headings were retained; general screen-reader acceptance is not claimed.
+
+UX680: My notifications now connects ordinary private reserved ntfy.sh destinations to the existing background delivery ledger. Full review registers paused, then separate Test, Enable, time-zone/quiet-hours changes, Pause and Withdraw retain their exact original. Every subscribed device may receive an update; this is not a physical-device identity or proof of receipt. Current private reservation, account, source and authority are checked before posting. Protected credentials stay encrypted, uncertain effects are not replayed, and re-registration keeps earlier duplicate protection. Copilot opens the same complete form while preserving entered work. My data independently reviews and erases exact owned destination editions, with names/credentials removed and content-free retained barriers disclosed separately. Actual signed native, writer/provider-wait withdrawal and ordinary lost-reply journeys used fictional local service responses. Live delivery and phone layout acceptance remain unqualified.
+
+UX683: Executive reports offers named saved-report starting points and recurring fresh PDFs. A complete private review retains all six layout choices and only currently available named source choices; old findings are never reused. Separate Use stages the editor, then separate native Create reads current sources and produces a new PDF. Newer entered work survives awaited reads; changed source or current access refuses reuse. Ordinary and typed Copilot journeys, actual second-PDF creation and a 320-pixel review passed.
+
+The recurring-report form separately reviews the entire saved layout, current selected sources, time zone, timetable and next starts before Create schedule. It uses the existing encrypted automation queue; each occurrence takes fresh native source data and creates its own PDF. An interrupted schedule creation recovers the exact single admission after reload. An interrupted PDF return resolves through pure Original reads without another PDF. Current task-key scopes and owner permissions remain binding without a retained bearer; an actual writer wait followed by withdrawn access produced no report. Stop and scheduling-off Original remain available. A 320-pixel ordinary/Copilot journey qualified current-role refusal clearing private choices and reviews. Qualification uses local native sources and stored results; it does not establish email delivery, arbitrary layout design or customer acceptance.
+
+UX675: Help now opens a contextual tour on Get started, Chat, Tasks, Connections, Automations and Learned. Show me highlights/focuses the actual control and starts no business action. Normal-flow guidance and the shared glass surface preserve drafts; Pause, Continue, Restart and Escape are usable. Progress belongs to this browser/account/workspace/page and never marks setup complete. The existing guided-onboarding setting and current page/action permissions govern availability. Ordinary and typed Copilot journeys retained a connection draft and focused the real service choice at 320 pixels; current signed-session access withdrawal refused. This is six supported guided pages, not every page's customer acceptance.
+
+UX686: written conversation compaction retains one private summarizer per actual Agent run, respects the effective saved interval/limits, reuses its prior digest and adds only newly aged complete material. Cadence counts actual model turns, so tool fan-out does not cause repeated summaries. Guarded dispatch retains current authority and Budget. The existing ledger records positive operational continuation/completion only; waiting, stopped, failed and unconfirmed results stay unscored. This is not answer accuracy or parent-verdict evidence. One real local run completed 44 file actions over 23 responses with two summaries at turns 10/20. Current permission withdrawal prevented a waited dispatch; repeated prefixes made no new call. All settings/typed Copilot preserved a draft and saved/read back the interval at 320 pixels without a provider call.
+
+UX674: the GitHub Action publishes native task ID, status, recorded spending, release state and a sanitized answer path rather than requiring log scraping. Its exclusive private CLI result uses current source/domain/sign-off/identity checks; the isolated helper accepts only the current run's signed closed result and never publishes raw metadata or unfinished logs. Pending sign-off, role loss, changed sources, interrupted/preflight runs and fabricated/stale outputs withhold answers. Existing targets and repeat mode refuse before task creation. Local CLI/helper/native release and Bash/YAML checks passed without a hosted run or provider. Recorded dollars do not establish invoice completeness.
+
+UX731 documentation follow-through: plugin documentation and the host example now name the actual current TypeScript stdio protocol, its supported legacy contract and its distinction from manifest API majors. All settings' existing structured TypeScript program/file/argument controls replace the misleading required file-editing guidance. The already shipped Python loader continues to refuse unsupported declared API majors before import; this batch changes documentation only.
+
+UX736 documentation follow-through: the API guide now describes string, structured-business and field-list error details, current refusal/unavailable statuses and Original recovery for uncertain operations. It no longer promises that every detail is a message string. No new error protocol or wholesale client contract change is claimed.
+
+UX689: routine Postgres World Model opens read the native schema and complete tenant-policy catalog instead of rebuilding policies and blocking ordinary readers. Current FORCE, command, roles and both predicates must match; additional permissive policies refuse. Bootstrap, pending upgrades and authorized repairs retain serialized native DDL and recheck after waits. Failed startup closes its connection. An actual cached Postgres 16 fixture confirmed zero DDL on three fresh current opens, distinct connections, raw-SQL tenant isolation, current non-owner access, fresh bootstrap, a genuine 47-to-48 upgrade, owner repair and newer-schema refusal. No connection cache or production throughput benchmark is claimed.
+
+UX738/UX739: Shield startup and the native health check count the actual bundled rules rather than repeating a historical approximation or an unverified full-SDK count. The current native health projection reports 43 bundled patterns. Public safety and audit guidance now describe the existing strict/required refusal and optional scan-error behavior accurately, including decoder and phishing failures. Detector behavior is unchanged; this corrects installed status and documentation rather than claiming better detection accuracy.
+
+UX677: All settings now provides default-off personal completion-rate and recorded-usage alerts, with a setup choice and the existing protected review/Save/Original/Copilot path. Current owned, accessible native episodes feed the existing Inbox and observer; there is no new delivery ledger or worker. Alert identity remains stable within a UTC day for the same threshold, retaining Seen across polls. Eleven real saved runs, foreign-owner exclusion, three native alerts, source/rule rereads, exact original recovery, current workspace withdrawal and rendered ordinary fields were checked. The observation window is the latest 5,000 runs completed within seven days, with incomplete coverage disclosed. Completion rate is operational, not answer accuracy; recorded spend and text units are not a complete invoice. Native mounted Settings calls and HTML were qualified; no additional browser-click or live-send claim is made.
+
+F03/F06 audit follow-through: Activity log provides independently retained checkpoint copies with a complete named account/history/retention review, a second administrator's approval and separate Send. The native pre-send record survives an uncertain reply; Original reads the exact retained version without another upload. Complete remote version inventory detects local history rollback even when local custody receipts also roll back, and refuses conflicting signed histories or incomplete coverage. Actual signed native and ordinary/Copilot journeys, the real stock AWS SDK contract with isolated responses, current writer-wait withdrawal and 320-pixel layout were checked. A real HTTP401 cleared private DOM content and locked controls while retaining only the Original reference. Fixed Amazon storage, one physical PUT attempt and current account/source/authority guards apply. Packaging includes SDK dependencies/data and an offline release-model check; no complete executable rebuild or live AWS acceptance is claimed. This protects a retained checkpoint prefix within its verified lock period; it does not establish administrator independence, subsequent entry correctness, future availability or every-operation coverage.
+UX682: Business details is now reachable from Tasks and AI assurance. Administrators define up to 20 named fields and 12 business stages per category; users choose actual named tasks or one of nine native security record categories. Text, numbers, dates, yes/no and named choices have complete separate Review and Save. Business stages do not start, stop or approve work. Exact Original survives an interrupted reply and reload; current access and record/definition revisions remain binding. Ordinary controls and protected Copilot preserve multiline Unicode drafts, Cancel changes nothing, and current-role withdrawal clears private material. Removed fields retain saved values within the existing record storage bound rather than silently trimming them. Exact Original results cover the latest 20 saves per record or category setup; older requests remain explicitly unavailable. The setting and installer step use the same enabled-by-default capability. Native task/vendor effects, retained audit retry, 21 later edits, 25 removed-field values and the 320-pixel product journey were qualified locally.
+
+UX688: Cost admission uses the unchanged token-limit calculations without importing the Anthropic SDK. In fresh local processes, a controlled non-Anthropic estimate dropped from 1.876 seconds to 0.013 seconds with the exact same price. UX687's existing immutable connector descriptors and per-registry lazy executors already avoid constructing connectors: the current 3,306-tool registry made zero connector factory calls and retained separate current access state. These local timings are not deployment-wide latency guarantees.
+
+UX734: The documentation site uses the actual product mark, fonts, colours and a plain description of Lightwork's platform. Local fonts replace Google font loading. A strict offline public build with the exact pinned MkDocs, Material and Markdown extension passed with 50 pages and 200 resolving brand references; the public document allowlist is unchanged. No hosted build or deployment was run.
+
+UX740: Outgoing webhooks and relay forwards carry Lightwork Event, Delivery, Timestamp and Signature headers alongside identical legacy values. Current inbound receivers accept either naming convention and matching dual headers; conflicting aliases or repeated signature/timestamp fields refuse before reading a body. Signed body bytes, keys, current freshness and delivery custody are unchanged. Native local signing, actual receivers and one retained accepted test delivery were qualified without a provider call or network send. Protocol guides describe current accepted replies and uncertain-delivery recovery. The connected-start setup link now opens the real signing-key section in Settings and is offered only to a current installation administrator.
+
+UX654 follow-through: All settings and advanced installation now expose the same bounded final-answer budget share and running-spending refresh interval. Native startup uses their saved configuration with explicit environment precedence and finite defaults. Full ordinary Review/Save/Original, revoked access, fresh startup, zero/invalid boundaries and one complete installer configuration were qualified. Both require a service restart; neither establishes invoice completeness. These two fields do not close the whole runtime-settings family.
+
+UX664 follow-through: one ordinary Use a short tool list choice resolves recognized environment, current capability configuration and the legacy tool-loading name consistently. Saving Off replaces legacy On and resets the native catalog even without a capability envelope; permissions and model ceilings remain binding. Exact role core, denied-tool exclusions, a model ceiling, one native Settings save, protected Copilot opening, Original, Cancel and access withdrawal were qualified without models or agent work.
+
+Question-file follow-through: the ordinary Preview and Apply now reject malformed question collections, invalid model/question/answer fields and copied private task provenance through their shared parser. Complete valid review preserves unknown saved fields, Unicode and whitespace; empty reviewed replacement remains valid. Actual signed HTTP qualification refused 16 cases through both endpoints with zero imports, corpus writes, receipts or provider calls. Existing successful-import custody qualification is retained separately.

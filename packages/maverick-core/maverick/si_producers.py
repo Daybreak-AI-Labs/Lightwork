@@ -201,24 +201,23 @@ def propose_tool(name, tracker: ToolOutcomeTracker, baseline_success, *, rollbac
 def propose_with_effect(rung, summary, effect: EffectEstimate, *, rollback,
                         capability_widens=False, approved=False, controller=None,
                         **prov) -> Verdict:
-    """Promote a change on its estimated CAUSAL effect (``maverick.promotion_effect``).
+    """Submit a calibrated effect estimate to the promotion gate.
 
-    Replaces the correlational ``baseline``/``candidate`` evidence with a
-    confounder-adjusted effect: the candidate carries ``effect_ci_low`` so the
-    controller's evidence gate requires the LOWER confidence bound of the causal
-    effect to clear the margin. Every promotion records the effect, its CI, the
-    naive (confounded) number for contrast, and the confounders adjusted for --
-    a regulator-grade "why". Fail-closed: an untrustworthy estimate (too little
-    overlap, or a placebo that leaked a non-zero effect) never reaches the gate.
+    Observational strata are useful diagnostic evidence, but do not clear this
+    gate. A promotion-grade estimate requires prospectively randomized units,
+    overlap, and a significant comparison to shuffled assignments. The
+    provenance records the design and uncertainty for review.
     """
     provenance = {
-        "kind": "causal_effect",
+        "kind": "randomized_effect" if effect.randomized else "observational_comparison",
         "ci": [round(effect.ci_low, 6), round(effect.ci_high, 6)],
         "naive": round(effect.naive_effect, 6),
         "adjusted_for": list(effect.adjusted_for),
         "n": effect.n_used,
         "overlap": round(effect.overlap, 4),
         "placebo": round(effect.placebo_effect, 6),
+        "permutation_p_value": round(effect.permutation_p_value, 6),
+        "randomized": effect.randomized,
         "trustworthy": effect.trustworthy,
         **prov,
     }
@@ -228,11 +227,11 @@ def propose_with_effect(rung, summary, effect: EffectEstimate, *, rollback,
         effect_ci_low=effect.ci_low, capability_widens=capability_widens,
         approved=approved, rollback=rollback, provenance=provenance,
     )
-    if not effect.trustworthy:
+    if not effect.trustworthy or not effect.randomized:
         return Verdict(
             cand.id, rung, False,
             (GateResult("effect_calibration", False,
-                        "effect estimate not trustworthy: low overlap or placebo leak"),),
+                        "effect needs a controlled comparison with sufficient overlap and clear evidence"),),
             "effect estimate not trustworthy",
         )
     return consider(cand, controller=controller)

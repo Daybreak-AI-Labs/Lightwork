@@ -2,53 +2,13 @@
 
 # Erste Schritte
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## Installation
 
-Verwenden Sie Python 3.10–3.12 und den vollständigen SHA eines geprüften Commits. Die acht eigenen Pakete sind noch nicht als vollständiger Satz auf PyPI veröffentlicht; installieren Sie sie gemeinsam aus dem Repository über den Manifest-Installer. Dazu gehören Dashboard, Assistent, Kanäle, MCP-Server sowie Wissens- und Lernpakete. `release-runtime` liefert den OpenAI-kompatiblen Client, `evidence-analysis` die PDF- und Tabellenparser.
+Laden Sie für Kunden die signierte Datei für Ihr Betriebssystem von einer [GitHub-Version mit Dateien](https://github.com/Daybreak-AI-Labs/Lightwork/releases) herunter. Prüfen Sie Prüfsumme und Signatur für genau diese Version, und starten Sie die Datei mit dem Befehl `dashboard`. Die [Distributionsanleitung](../../DISTRIBUTION.md) nennt die Dateien und Prüfschritte. Fehlt die Datei für Ihre Plattform, fragen Sie nach einem Kundenpaket.
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-Unter Windows PowerShell ersetzen Sie zuerst den Commit-Platzhalter:
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-Die vollständigen Programmpfade erfordern keine Änderung der PowerShell-Aktivierungsrichtlinie. Konfigurieren Sie Anbieter und Sandbox im Assistenten. Die Quellinstallation stellt keine externen Konten, API-Guthaben, Container-Engine oder Kubernetes-Cluster bereit. Prüfen Sie einen tatsächlich autorisierten Vorgang, bevor Sie eine Integration für Kunden einsetzen.
-
-Prüfen Sie den Paketsatz mit Python aus derselben Umgebung:
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-Verwenden Sie unter Windows `.\.venv\Scripts\python.exe` und `.\.venv\Scripts\lightwork.exe` für diese Programme.
-
-Für den authentifizierten Desktop-Bootstrap beziehen Sie `deploy/desktop/install.sh` oder `deploy/desktop/install.ps1` aus dem geprüften Commit und setzen `MAVERICK_REF` auf dessen vollständigen SHA in Kleinbuchstaben. Dies bleibt eine Quellinstallation mit Repository-Zugriff und Plattformvoraussetzungen; sie ist kein eigenständiger signierter Produktinstaller. Die Skripte lehnen veränderliche Referenzen ab und verwenden keinen öffentlichen Index als Ersatz für eigene Pakete. Jede Variable `MAVERICK_*` kann auch `LIGHTWORK_*` heißen.
+Klonen Sie nicht das vollständige Repository für eine Kundeninstallation: Es enthält auch interne Forschungs-, Audit- und Patentunterlagen. Die acht eigenen Pakete sind noch nicht vollständig auf PyPI veröffentlicht. Wartungspersonal mit bereits genehmigtem Repository-Zugang nutzt die [Engineering-Anleitung](../../internal/source-install.md).
 
 ## Erster Start
 
@@ -175,10 +135,22 @@ Spezialist von der ersten Ausführung an für seine Aufgabe ausgerüstet ist.
 ## Spracheingabe (eingebaut, offline)
 
 Der Mikrofon-Button im Dashboard und das Tool `transcribe_audio` funktionieren
-ohne Provider-Schlüssel: die lokale Whisper-Engine wird mit dem
-Dashboard-Paket ausgeliefert, und das checksummen-geprüfte Modell wird beim
-ersten Dashboard-Start automatisch geladen (übersprungen bei Egress-Lock oder
-mit `[voice] auto_fetch_model = false`). Die CLI zeigt die Details:
+ohne Provider-Schlüssel: Die lokale Whisper-Engine wird mit dem Dashboard-Paket
+ausgeliefert, beim Öffnen der App werden Modelldateien aber standardmäßig nicht
+heruntergeladen. Unter **Settings → Models** kann ein globaler Administrator
+im Bereich für Sprachdiktat Quelle und Größe des konfigurierten Modells (beim
+Standardmodell etwa 148 MB) prüfen und es kontrollieren oder herunterladen.
+Der Fortschritt bleibt nach einem Neuladen der Seite erhalten; ein Abbruch
+entfernt den unvollständigen Download, und Fehler lassen sich dort erneut
+versuchen. Vorhandene Dateien gelten erst nach Prüfung von genauer Größe und
+Prüfsumme als verifiziert. Das belegt weder, dass die Sprach-Engine geladen
+ist, noch, dass das Mikrofon funktioniert.
+
+Der Installer fragt ausdrücklich, ob Downloads beim Start erlaubt sind. Eine
+gespeicherte Einstellung `[voice] auto_fetch_model = true` oder
+`MAVERICK_VOICE_AUTO_FETCH=1` aktiviert sie weiterhin; die Netzwerkrichtlinie
+gilt auch für Weiterleitungen. Verwaltete Pfade zu eigenen Modellen und ein
+gewähltes Cloud-Sprachbackend bleiben erhalten. Die optionale CLI ist ebenfalls verfügbar:
 
 ```bash
 maverick voice setup    # lädt das checksummen-geprüfte Modell (~148 MB)
@@ -193,13 +165,11 @@ Maschine, wenn OpenAI/Groq-Schlüssel konfiguriert sind.
 
 ## Modelle oder Provider wechseln
 
-Führen Sie den Assistenten jederzeit erneut aus:
-
-```bash
-maverick init
-```
-
-Oder bearbeiten Sie `~/.maverick/config.toml` direkt. Der Abschnitt `[models]` ordnet jeder Agentenrolle eine Zeichenkette der Form `provider:model-id` zu. Das Schema ist in [`configuration.md`](../../configuration.md) beschrieben.
+Öffnen Sie nach der Installation **Settings → Provider keys** oder
+**Settings → Models**, um diese Werte zu ändern. Die Seite kennzeichnet Werte,
+die vom Deployment vorgegeben werden; ein Installationsadministrator muss
+diese Quelle ändern, bevor ein neuer Wert wirksam wird. Die zugrunde liegende
+Konfiguration ist in [`configuration.md`](../../configuration.md) beschrieben.
 
 ## Wo die Daten liegen
 
@@ -213,7 +183,10 @@ Oder bearbeiten Sie `~/.maverick/config.toml` direkt. Der Abschnitt `[models]` o
 | `~/.maverick/learned-skills/` | Von den Lernschleifen destillierte Skills |
 | `~/.maverick/dreams/` | Konsolidierte Erkenntnisse, Probelauf-Warteschlange, Lern-Snapshots |
 
-Alles bleibt lokal. Außer Ihren Prompts an das von Ihnen gewählte Cloud-LLM wird nichts hochgeladen.
+Lightwork speichert die oben genannten Dateien in Ihrem Deployment. Wenn Sie
+Cloud-KI-Provider oder verbundene Dienste aktivieren, kann die an sie
+gesendete Arbeit das Deployment verlassen. Prüfen Sie jeden Provider,
+Connector und jede Egress-Richtlinie vor der Nutzung.
 
 Sobald Sie ein paar Läufe hinter sich haben, besteht die Lernoberfläche aus vier
 Befehlen: `maverick dream` (Erfahrung konsolidieren), `maverick hindsight` (hat

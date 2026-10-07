@@ -2,53 +2,13 @@
 
 # はじめに
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## インストール
 
-Python 3.10〜3.12 と、確認済みコミットの完全な SHA を使用してください。自社製の 8 パッケージは、完全な一式としてはまだ PyPI に公開されていません。マニフェストのインストーラーでリポジトリのソースをまとめてインストールします。ダッシュボード、ウィザード、チャネル、MCP サーバー、知識・学習パッケージが含まれます。`release-runtime` は OpenAI 互換クライアント、`evidence-analysis` は PDF と表計算ファイルのパーサーを追加します。
+お客様向けのインストールでは、使用する OS の署名済みファイルを[配布ファイルが添付された GitHub リリース](https://github.com/Daybreak-AI-Labs/Lightwork/releases)から入手してください。対象リリースのチェックサムと署名を確認し、`dashboard` コマンドで起動します。ファイルと確認手順は[配布ガイド](../../DISTRIBUTION.md)を参照してください。対象 OS のファイルがない場合は、お客様向けパッケージを依頼してください。
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-Windows PowerShell では、先にコミットのプレースホルダーを置き換えてください。
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-実行ファイルのパスを明示するため、PowerShell の有効化ポリシーを変更する必要はありません。ウィザードでプロバイダーとサンドボックスを設定してください。ソースからのインストールでは、外部アカウント、API クレジット、コンテナーエンジン、Kubernetes クラスターは用意されません。顧客業務に使う前に、許可された実際の操作で連携を確認してください。
-
-同じ環境の Python でパッケージ一式を確認します。
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-Windows では、実行ファイル名を `.\.venv\Scripts\python.exe` と `.\.venv\Scripts\lightwork.exe` に置き換えてください。
-
-認証付きのデスクトップ用ソースインストールには、確認済みコミットから `deploy/desktop/install.sh` または `deploy/desktop/install.ps1` を取得し、その小文字の完全な SHA を `MAVERICK_REF` に設定します。これはリポジトリへのアクセスと各プラットフォームの前提条件を必要とするソースインストールであり、単独で動く署名済み製品インストーラーではありません。スクリプトは変更可能な参照を拒否し、自社製パッケージを公開インデックスから代替取得しません。`MAVERICK_*` 変数は `LIGHTWORK_*` とも表記できます。
+お客様へのインストールのためにリポジトリ全体を複製しないでください。内部の研究、監査、特許文書も含まれます。8 つのパッケージはまだ PyPI に一式として公開されていません。承認済みのリポジトリアクセスを持つ保守担当者は[開発用インストール手順](../../internal/source-install.md)を利用できます。
 
 ## 初回実行
 
@@ -160,9 +120,21 @@ maverick onboard
 
 ダッシュボードのマイクボタンと `transcribe_audio` ツールは、プロバイダーの
 API キーなしで動作します。ローカル Whisper エンジンはダッシュボード
-パッケージに同梱され、チェックサム検証済みモデルは初回起動時に自動取得
-されます(エグレスロックされた環境や `[voice] auto_fetch_model = false`
-ではスキップ)。詳細は CLI で確認できます:
+パッケージに同梱されていますが、アプリを開いても既定ではモデルファイルは
+ダウンロードされません。**Settings → Models** の音声入力セクションでは、
+グローバル管理者が設定済みモデルの取得元とサイズ（既定のモデルは約 148 MB）を
+確認し、モデルをチェックまたはダウンロードできます。ページを再読み込みしても
+進捗は保持され、キャンセルすると未完了のダウンロードが削除されます。失敗した
+場合は同じ画面から再試行できます。既存のファイルは、サイズとチェックサムが
+完全に一致するまで検証済みと表示されません。モデルの検証は、音声エンジンの
+読み込みやマイクの動作を保証するものではありません。
+
+インストーラーは起動時のダウンロードを許可するか明示的に尋ねます。保存済みの
+`[voice] auto_fetch_model = true` または `MAVERICK_VOICE_AUTO_FETCH=1` は
+引き続き起動時のダウンロードを有効にします。リダイレクトを含め、ネットワーク
+ポリシーは常に適用されます。管理者が設定したカスタムモデルのパスと選択済みの
+クラウド音声バックエンドは維持され、この設定画面で無断で置き換えられることは
+ありません。CLI も利用できます:
 
 ```bash
 maverick voice setup    # チェックサム検証済みモデルを取得(約148 MB)
@@ -177,13 +149,10 @@ maverick voice transcribe clip.wav   # パイプラインの動作確認
 
 ## モデルやプロバイダーの変更
 
-ウィザードはいつでも再実行できます。
-
-```bash
-maverick init
-```
-
-または、`~/.maverick/config.toml` を直接編集してください。`[models]` セクションは、各エージェントロールを `provider:model-id` 形式の文字列に対応付けます。スキーマの詳細は [`configuration.md`](../../configuration.md) を参照してください。
+インストール後は、**Settings → Provider keys** または **Settings → Models** を開いて
+選択を変更できます。デプロイ側で管理されている値は画面に示されます。その値を
+有効に変更するには、インストール管理者が元の設定を変更する必要があります。
+基になる設定については [`configuration.md`](../../configuration.md) を参照してください。
 
 ## データの保存場所
 
@@ -197,6 +166,9 @@ maverick init
 | `~/.maverick/learned-skills/` | 学習ループによって蒸留されたスキル |
 | `~/.maverick/dreams/` | 統合された知見、リハーサルキュー、学習スナップショット |
 
-すべてのデータはローカルに保存されます。選択したクラウド LLM に送信されるプロンプトを除き、何もアップロードされません。
+Lightwork は上記のファイルを利用中のデプロイ環境に保存します。クラウド AI
+プロバイダーや接続サービスを有効にすると、それらを通じて送信される作業内容が
+その環境の外に出ることがあります。利用前に、各プロバイダー、コネクター、
+外部通信ポリシーを確認してください。
 
 ある程度の実行を重ねたら、学習面は 4 つのコマンドに集約されます。`maverick dream`（経験を統合する）、`maverick hindsight`（学習は役立ったか、それとも後退したか？）、`maverick proof`（成果物、回避できたコスト、ROI）、そして `maverick domains-lint`（2,020 エージェントのスペシャリストカタログを監査する）に加えて、`maverick domains-audit`（ガバナンス態勢: 各エージェントが何にアクセスでき、何を拒否し、何を却下するか）と `maverick domains-eval --check`（振る舞いのゴールデンケース）です。

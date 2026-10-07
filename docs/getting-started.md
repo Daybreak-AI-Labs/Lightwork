@@ -2,65 +2,24 @@
 
 ## Install
 
-Use Python 3.10–3.12 and a reviewed full commit SHA. The first-party distribution
-names are not yet published as a complete public PyPI cohort; install their local
-sources together through the manifest installer. It supplies all eight packages,
-including the dashboard, wizard, channels, MCP server, knowledge and learning
-packages. `release-runtime` supplies the OpenAI-compatible provider client;
-`evidence-analysis` supplies the PDF and spreadsheet parsers.
+Request a [customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package)
+for your operating system. It should include the Lightwork binary, its `.sig`
+and `.pem` files, and a checksum manifest. Verify the checksum and exact-tag
+Sigstore identity before running it, using the instructions supplied with that
+package. A source tag alone is not an installable customer release.
 
-On macOS/Linux:
+Run the verified binary with its `dashboard` command and open the local address
+it prints. The current filenames are `maverick-windows-x86_64.exe` on Windows,
+`maverick-macos-arm64` on Apple Silicon, and `maverick-linux-x86_64` on Linux.
+The dashboard guides owner sign-in and provider setup. A provider account,
+credentials, API credits and any external integration prerequisites still need
+their own authorization and validation.
 
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-On Windows PowerShell (replace the commit placeholder first):
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-The explicit executable paths avoid a PowerShell activation-policy requirement.
-Configure the intended provider and sandbox in the wizard. A source installation
-does not provision third-party accounts, API credits, a container engine or a
-Kubernetes cluster. Follow the selected integration's requirements and verify a
-real authorized operation before relying on it for customer work.
-
-To verify the installed cohort, use the same environment's Python:
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-On Windows, substitute `.\.venv\Scripts\python.exe` and
-`.\.venv\Scripts\lightwork.exe` for those executable names.
-
-For the authenticated desktop source bootstrap, obtain
-`deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from that reviewed
-commit and set `MAVERICK_REF` to its lowercase full SHA. This remains a source
-bootstrap with repository-access and platform prerequisites; it is not a
-self-contained signed product installer. The scripts reject mutable refs and
-have no first-party public-index fallback. Every `MAVERICK_*` variable can also
-be spelled `LIGHTWORK_*`.
+Do not clone the full repository to install for a customer: a clone also copies
+internal research, audit evidence and patent documents. The eight-package
+public PyPI cohort is not yet published. Maintainers who already have approved
+repository access can follow the separate engineering source-install procedure
+in the private repository.
 
 ## First run
 
@@ -97,46 +56,54 @@ maverick doctor
 
 The wizard takes ~2 minutes. It writes `~/.maverick/config.toml` and `~/.maverick/.env`.
 
-New setup leaves ordinary task limits unset unless you choose one. Existing
-numeric settings are preserved; **Settings → Task limits** can disable saved
-task defaults reversibly. Usage remains metered, and organization allowances
-remain independent. See [task limits and spend accounting](task-limits.md).
+New consumer setup suggests a $2 and 30-minute task limit and lets you choose
+another limit or none. **Settings → Task limits** can change that choice later.
+Usage remains metered, and organization allowances remain independent. See
+[task limits and spend accounting](task-limits.md).
 
-Then:
+Start with a task that works even when file changes and program execution are
+off:
 
 ```bash
-maverick start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
+maverick start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
 ```
 
 ## Watch the swarm decompose
 
-Run `maverick monitor` in a second terminal. The orchestrator plans the goal, then spawns specialist sub-agents that work in parallel — here a researcher pins down the API, a coder writes the tool, and a verifier runs it:
+Run `maverick monitor` in a second terminal. The orchestrator plans the goal
+and shows its work. For the first task above, an illustrative monitor view is:
 
 ```
 Goal #1 active  2m elapsed
-Build a CLI that emails me a digest of today's top Hacker News stories
+Draft a one-page support response plan
 
 Plan tree
-  ├─        done  #2 Research the Hacker News Firebase API
-  ├─      active  #3 Write the digest CLI (fetch + format + send)
-  ├─      active  #4 Verify it runs and emails a sample digest
-  ├─     pending  #5 Write a short usage README
+  ├─        done  #2 Identify likely response-time bottlenecks
+  ├─      active  #3 Draft actions that do not require hiring
+  └─     pending  #4 Check assumptions and questions for the owner
 
 Latest episode #7 (running)  $0.0431  in=18,204 out=2,910 tools=11
 
 Recent activity
-  4s ago [researcher] decision: top stories live at /v0/topstories.json, then /v0/item/<id>.json
-  3s ago [coder] tool_call: write_file hn_digest.py (118 lines)
-  1s ago [verifier] tool_call: run "python hn_digest.py --dry-run" -> printed 10 stories
+  4s ago [researcher] decision: separate volume from process delays
+  3s ago [writer] draft: owner-facing plan with assumptions
+  1s ago [verifier] review: mark unsupported savings estimates
 
 Cumulative spend on this DB: $0.21
 ```
+
+To create files or run programs later, start Docker or Podman, open
+**Permissions → Where work runs**, choose its container, then confirm
+**Allow file work**. Lightwork checks that the container is running and shows
+any other policy that still blocks those actions. Run `maverick doctor` to see
+the same limitation from the terminal. After that setup, a code-writing task
+can use the isolated work area.
 
 When done:
 
 ```bash
 maverick status      # what's currently active or blocked
-maverick skills      # what the swarm distilled from this run
+maverick skills      # built-in and installed skills; review new suggestions on Skills
 maverick facts       # what it learned about you
 ```
 
@@ -221,9 +188,10 @@ Provisioning never widens its capability envelope.
 
 The dashboard's mic button and the `transcribe_audio` tool work with no
 provider key: the local Whisper engine ships with the dashboard package, and
-opening the app does not download model files by default. In **Settings > Models >
-Local voice setup**, a global administrator can review the configured model's
-source and size (about 148 MB for the default model), then check or download it.
+opening the app does not download model files by default. In **Settings → Models**,
+under **Voice dictation on this computer**, a global administrator can review
+the configured model's source and size (about 148 MB for the default model),
+then check or download it.
 Progress survives a page reload; cancellation removes the unfinished download,
 and failures can be retried in the same screen. Existing files are not labelled
 verified until their exact size and checksum pass. Model verification does not
@@ -248,13 +216,11 @@ OpenAI/Groq keys are configured.
 
 ## Changing models or providers
 
-Re-run the wizard any time:
-
-```bash
-maverick init
-```
-
-Or edit `~/.maverick/config.toml` directly. The `[models]` section maps each agent role to a `provider:model-id` string. See [`configuration.md`](./configuration.md) for the schema.
+After installation, open **Settings → Provider keys** or **Settings → Models**
+to change these choices. The page identifies values controlled by the
+deployment; an installation administrator must change that source before the
+new value can take effect. See [`configuration.md`](./configuration.md) for the
+underlying settings.
 
 ## Where data lives
 
@@ -263,12 +229,14 @@ Or edit `~/.maverick/config.toml` directly. The `[models]` section maps each age
 | `~/.maverick/config.toml` | Your config (deployment, models, safety, budget) |
 | `~/.maverick/.env` | API keys (chmod 600) |
 | `~/.maverick/world.db` | Persistent world model: goals, facts, episodes |
-| `~/.maverick/skills/` | Auto-distilled SKILL.md files from successful runs |
+| `~/.maverick/skills/` | Skills available to agents, including administrator-approved suggestions |
 | `~/maverick-workspace/` | Default sandbox working directory |
-| `~/.maverick/learned-skills/` | Skills distilled by the learning loops |
+| `~/.maverick/learned-skills/` | Suggestions distilled from completed work; review and add them on Skills before agents use them |
 | `~/.maverick/dreams/` | Consolidated insights, rehearsal queue, learning snapshots |
 
-All local. Nothing is uploaded except your prompts to the cloud LLM you chose.
+Lightwork stores the files listed above in your deployment. If you enable cloud
+AI providers or connected services, the work sent through them can leave that
+deployment. Review each provider, connector, and outbound policy before use.
 
 Once you have a few runs behind you, the learning surface is four commands:
 `maverick dream` (consolidate experience), `maverick hindsight` (did learning

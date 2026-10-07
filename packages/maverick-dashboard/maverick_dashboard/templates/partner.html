@@ -6,15 +6,16 @@
   .pf-tile { border: 1px solid var(--hairline); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
   .pf-tile .v { font-size: var(--text-2xl); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
   .pf-tile .l { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-  .pf-scroll { overflow-x: auto; }
+  /* Positioned, so the visually hidden "Actions" header stays inside the
+     scroll box instead of widening the page to 602 px on a phone. */
+  .pf-scroll { overflow-x: auto; position: relative; }
   .pf-form { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: flex-end; margin-top: var(--space-3); }
-  .pf-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); }
+  .pf-form label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-sm); }
   .pf-url { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); font-size: var(--text-xs); }
 </style>
 
   <h1 class="page-title">Partner fleet</h1>
-  <p class="page-subtitle">Every client setup you run, on one screen — whether it is
-    working, which agent version it runs, its branding, and the value each one has
+  <p class="page-subtitle">Every client setup you run, on one screen. See whether it is working, which agent version it runs, its branding, and the value each one has
     counted, added up. Lightwork checks each client's own health and value pages.</p>
 
   <div class="pf-tiles" id="pf-tiles"></div>
@@ -25,7 +26,7 @@
       <button class="btn btn--primary" id="pf-checkall" type="button" style="margin-inline-start:auto;">Check all now</button>
       <span class="muted" id="pf-msg" role="status" aria-live="polite" style="font-size: var(--text-sm);"></span>
     </div>
-    <div class="pf-scroll"><table id="pf-table" style="margin-top: var(--space-3);">
+    <div class="pf-scroll" tabindex="0" role="region" aria-label="Partner listings"><table id="pf-table" style="margin-top: var(--space-3);">
       <thead><tr><th scope="col">Client</th><th scope="col">Web address</th>
         <th scope="col">Agent</th><th scope="col">Status</th>
         <th scope="col">Response time</th><th scope="col">Value counted</th>
@@ -58,7 +59,7 @@
   function fmt(n) { return (n || 0).toLocaleString(); }
   function problem(r, action) {
     return window.mvErrorText ? window.mvErrorText({ status: r && r.status }, action)
-                              : 'Could not ' + action + '. Please try again.';
+                              : 'Could not ' + action + '. Try again.';
   }
   function offline(action) { return 'Could not ' + action + ' — check your connection and try again.'; }
 
@@ -77,7 +78,7 @@
     tiles.appendChild(tile('working', fmt(f.healthy) + ' / ' + fmt(f.total)));
     tiles.appendChild(tile('cases filed', fmt(f.cases)));
     tiles.appendChild(tile('hours saved', fmt(f.hours)));
-    tiles.appendChild(tile('value counted', '$' + fmt(f.dollars)));
+    tiles.appendChild(tile('value counted', window.mvMoney ? window.mvMoney(f.dollars || 0) : '$' + fmt(f.dollars)));
     if (f.external_agents) {
       tiles.appendChild(tile('outside agents', fmt(f.external_agents) +
         (f.external_attention ? ' · ' + fmt(f.external_attention) + ' need attention' : '')));
@@ -109,7 +110,7 @@
       tr.appendChild(el('td', '',
         c.latency_ms == null ? '—' : c.latency_ms + ' ms'));
       tr.appendChild(el('td', '', c.value
-        ? c.value.cases + ' cases · $' + fmt(c.value.dollars) : '—'));
+        ? c.value.cases + ' cases · ' + (window.mvMoney ? window.mvMoney(c.value.dollars || 0) : '$' + fmt(c.value.dollars)) : '—'));
       tr.appendChild(el('td', '', t.theme || '—'));
       var act = el('td');
       var chk = el('button', 'btn btn--ghost btn--sm', 'Check');
@@ -124,18 +125,16 @@
       rm.type = 'button';
       rm.style.marginInlineStart = '6px';
       rm.setAttribute('aria-label', 'Remove ' + t.name);
-      rm.addEventListener('click', async function () {
-        var ok = window.mvConfirm && await window.mvConfirm(
-          'Remove ' + t.name + ' from your client list? Its saved address and access key are deleted. The client\'s own setup is not touched.',
-          { okText: 'Remove client' });
-        if (!ok) return;
-        rm.disabled = true;
-        fetch('/api/v1/partner/tenants/' + t.id, {method: 'DELETE'})
-          .then(function (r) {
-            $('pf-msg').textContent = r.ok ? 'Removed.' : problem(r, 'remove the client');
-            load();
-          })
-          .catch(function () { rm.disabled = false; $('pf-msg').textContent = offline('remove the client'); });
+      rm.addEventListener('click', function () {
+        // One action with a way back (CTL-1): the client leaves the list at
+        // once; its saved address and access key are deleted when Undo ends.
+        tr.hidden = true;
+        window.mvUndo('{name} removed from your client list. The client’s own setup is not touched.', { values: {name: t.name},
+          action: 'remove the client',
+          run: function (keepalive) { return fetch('/api/v1/partner/tenants/' + t.id, {method: 'DELETE', keepalive: keepalive}); },
+          undo: function () { tr.hidden = false; rm.focus(); },
+          done: function () { $('pf-msg').textContent = 'Removed.'; load(); }
+        });
       });
       act.appendChild(chk);
       act.appendChild(rm);
@@ -145,8 +144,7 @@
   }
 
   function load(check) {
-    fetch('/api/v1/partner/fleet' + (check === true ? '?check=1' : ''))
-      .then(function (r) { if (!r.ok) throw r; return r.json(); })
+    window.mvFetchJSON('/api/v1/partner/fleet' + (check === true ? '?check=1' : ''))
       .then(render)
       .catch(function (r) {
         $('pf-msg').textContent = r && r.status ? problem(r, 'load your clients') : offline('load your clients');
@@ -188,7 +186,8 @@
     }).catch(function () { $('pf-msg').textContent = offline('add the client'); });
   });
 
-  load();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', function () { load(); });
 })();
 </script>
 {% endblock %}

@@ -11,6 +11,7 @@ async function downloadedReport(page){
 }
 
 test('protected pilot enforces child exclusion and independently reviews exact local evidence without claiming prior exposure',async({page,context,browser,request,baseURL},info)=>{
+  test.setTimeout(90000); // Native plan, four independently approved source grants and retained export.
   await localOnly(context,baseURL);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const seeded=await request.post('/__browser_fixture/pilot-learning/setup');expect(seeded.status()).toBe(200);
   const fixture=await seeded.json();expect(fixture.provider_calls).toBe(0);
@@ -51,6 +52,20 @@ test('protected pilot enforces child exclusion and independently reviews exact l
     expect((await request.get(reviewPath)).status()).toBe(403);
     expect((await reviewer.request.get('/api/v1/outcome-pilots/'+pilot.id)).status()).toBe(404);
     expect((await request.get(reviewPath,{headers:{'X-Browser-Principal':'browser-colleague'}})).status()).toBe(403);
+    // Independent review never grants ambient access to employee source tasks.
+    // The content owner approves each exact resource, purpose and expiry.
+    expect((await reviewer.request.get(reviewPath)).status()).toBe(404);
+    const accessGrants=[];
+    for(const goal of fixture.goals){
+      const requested=await reviewer.request.post('/api/v1/content-access',{data:{resource_kind:'goal',resource_id:String(goal),purpose:'action_review',minutes:5}});
+      expect(requested.status(),await requested.text()).toBe(200);const pending=await requested.json();
+      expect((await reviewer.request.post('/api/v1/content-access/'+pending.id+'/decision',{data:{expected_revision:pending.revision,decision:'approve'}})).status()).toBe(403);
+      const approved=await request.post('/api/v1/content-access/'+pending.id+'/decision',{data:{expected_revision:pending.revision,decision:'approve'}});
+      expect(approved.status(),await approved.text()).toBe(200);const grant=await approved.json();
+      expect(grant).toMatchObject({status:'approved',reviewed_by:'user:browser-reviewer',requester:'user:browser-learning-reviewer',resource_kind:'goal',resource_id:String(goal),minutes:5});
+      expect(grant.audit_pending).toBe(false);accessGrants.push(grant);
+    }
+    await info.attach('owner-approved-exact-source-access',{body:JSON.stringify(accessGrants,null,2),contentType:'application/json'});
     await second.getByText('Independently review a pilot’s local learning policy',{exact:true}).click();
     // Reviewers pick the pilot from the protected-pilot review queue that
     // opening this section loads; they no longer type the reference.

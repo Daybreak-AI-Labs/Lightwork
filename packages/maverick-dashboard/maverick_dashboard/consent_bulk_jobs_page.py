@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request
@@ -61,15 +62,19 @@ def create_consent_bulk_jobs_page_router(
         require_permission(request, "view")
         _tenant_selected()
         if any(
-            key not in {"theme", "density", "font", "lang"}
+            key not in {"theme", "density", "font", "lang", "job"}
             for key in request.query_params
         ):
             raise HTTPException(
                 status_code=404,
                 detail="consent bulk-job workbench unavailable",
             )
+        selected = request.query_params.get("job")
+        if selected is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", selected):
+            raise HTTPException(404, "The saved consent job is unavailable.")
         style_nonce = secrets.token_urlsafe(18)
         from .api import module_activation_enabled
+        from .draft_api import context_for
 
         response = templates.TemplateResponse(
             request,
@@ -77,6 +82,7 @@ def create_consent_bulk_jobs_page_router(
             {
                 "api_base": API_BASE,
                 "page_path": PAGE_PATH,
+                "request_context": context_for(request),
                 "csp_style_nonce": style_nonce,
                 "bulk_jobs_can_audit": has_global_permission(request, "audit"),
                 "bulk_jobs_can_admin": has_global_permission(request, "admin"),

@@ -241,18 +241,20 @@ def login_enabled(config: OIDCConfig | None = None) -> bool:
 
     Requires ALL of:
       - :func:`oidc_enabled` (the OIDC master switch),
-      - ``client_id`` (the OAuth client this dashboard is registered as),
+      - ``client_id`` and ``client_secret`` (the OAuth client registered at the provider),
+      - ``redirect_uri`` (the registered return address),
+      - ``audience`` (the ID-token audience Lightwork will verify),
       - ``session_secret`` (the HMAC key for our signed session cookie), and
-      - a way to reach the authorization/token endpoints: either ``issuer``
-        (so they can be discovered) OR both endpoints set explicitly.
+      - ``issuer`` (also required when endpoints are entered explicitly, so
+        the returned ID token can be verified).
     """
     cfg = config if config is not None else load_oidc_config()
     if not cfg.enabled:
         return False
-    if not cfg.client_id or not cfg.session_secret:
+    if not (cfg.client_id and cfg.client_secret and cfg.redirect_uri
+            and cfg.audience and cfg.session_secret):
         return False
-    has_endpoints = bool(cfg.authorization_endpoint and cfg.token_endpoint)
-    return bool(cfg.issuer) or has_endpoints
+    return bool(cfg.issuer)
 
 
 # Discovery cache: issuer -> {"authorization_endpoint": ..., "token_endpoint":

@@ -1606,7 +1606,7 @@ def test_govern_refuses_untrusted_promotion_policy_source(tmp_path, monkeypatch)
     monkeypatch.setattr(
         config,
         "config_source_errors",
-        lambda: {"config.toml": "invalid TOML"},
+        lambda **_kwargs: {"config.toml": "invalid TOML"},
     )
     keydir = _keys(tmp_path)
     approve, verifier, public_keys = _external_approval(keydir)

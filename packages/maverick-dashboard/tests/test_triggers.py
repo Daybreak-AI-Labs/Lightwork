@@ -46,7 +46,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tdir)
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly {{topic}} report\nparams:\n  - topic\n---\n"
+        "---\nowner: local\ntitle: Weekly {{topic}} report\nparams:\n  - topic\n---\n"
         "Research {{topic}} and email the team.\n", encoding="utf-8")
 
 
@@ -350,7 +350,7 @@ def test_webhook_run_uses_immutable_template_revision(monkeypatch, tmp_path, _no
 
     import maverick.templates as tpl
     (tpl.USER_TEMPLATES / "weekly-report.md").write_text(
-        "---\ntitle: Replaced {{topic}} workflow\nparams:\n  - topic\n---\n"
+        "---\nowner: local\ntitle: Replaced {{topic}} workflow\nparams:\n  - topic\n---\n"
         "Run a materially different workflow for {{topic}}.\n",
         encoding="utf-8",
     )
@@ -510,7 +510,7 @@ def test_webhook_run_honors_template_budget(monkeypatch, tmp_path):
     _configured(monkeypatch)
     import maverick.templates as tpl
     (tpl.USER_TEMPLATES / "cheap.md").write_text(
-        "---\ntitle: Cheap\nbudget_dollars: 0.75\nbudget_wall_seconds: 120\n---\n"
+        "---\nowner: local\ntitle: Cheap\nbudget_dollars: 0.75\nbudget_wall_seconds: 120\n---\n"
         "Do a small thing.\n", encoding="utf-8")
     import maverick.runner as runner_mod
     seen = {}
@@ -536,11 +536,11 @@ def test_webhook_run_clamps_template_to_configured_operator_budget(monkeypatch, 
     _configured(monkeypatch)
     import maverick.templates as tpl
     (tpl.USER_TEMPLATES / "huge.md").write_text(
-        "---\ntitle: Huge\nbudget_dollars: 1000\nbudget_wall_seconds: 999999\n---\n"
+        "---\nowner: local\ntitle: Huge\nbudget_dollars: 1000\nbudget_wall_seconds: 999999\n---\n"
         "Do a big thing.\n", encoding="utf-8")
     import maverick.runner as runner_mod
-    monkeypatch.setattr(runner_mod, "configured_max_dollars", lambda: 100.0)
-    monkeypatch.setattr(runner_mod, "configured_max_wall_seconds", lambda: 86400.0)
+    monkeypatch.setattr(runner_mod, "configured_goal_ceiling_dollars", lambda: 100.0)
+    monkeypatch.setattr(runner_mod, "configured_goal_ceiling_wall_seconds", lambda: 86400.0)
     seen = {}
 
     def fake_run(
@@ -615,10 +615,15 @@ def test_create_trigger_cannot_overwrite_another_owner(monkeypatch, tmp_path):
     # A non-admin must not hijack a trigger owned by another tenant by reusing
     # its slug; the existing trigger stays intact.
     _isolate(monkeypatch, tmp_path)
-    from maverick_dashboard import api, triggers_store
+    from maverick import templates
+    from maverick_dashboard import api, auth, triggers_store
+    template = templates.USER_TEMPLATES / "weekly-report.md"
+    template.write_text(template.read_text(encoding="utf-8").replace(
+        "owner: local", "owner: user:alice"), encoding="utf-8")
     triggers_store.set_trigger("shared", "weekly-report", {"topic": "x"}, owner="user:bob")
     monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
     r = _client().post("/api/v1/triggers", json={
         "name": "shared", "template": "weekly-report", "params": {"topic": "y"}})
     assert r.status_code == 409

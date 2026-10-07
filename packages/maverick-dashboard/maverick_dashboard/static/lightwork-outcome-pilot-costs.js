@@ -10,7 +10,7 @@
     if(coverage.review){const details=node('details');details.append(node('summary','Recorded coverage review'));details.append(node('p',coverage.review.note));box.append(details);}
     const form=node('form');form.id='op-cost-coverage-form';form.dataset.draftRecovery='off';
     const label=node('label','How all attempts, failures and rejected cases were accounted for'),note=node('textarea');note.className='input';note.required=true;note.rows=3;note.maxLength=4000;label.append(note);form.append(label);
-    const confirmed=node('label'),checkbox=node('input');checkbox.type='checkbox';checkbox.required=true;confirmed.append(checkbox,node('span',' I reviewed every planned case and confirm that all provider costs for those cases, including failed attempts and rejected results, are represented in the current allocations.'));form.append(confirmed);
+    const confirmed=node('label'),checkbox=node('input');checkbox.type='checkbox';checkbox.required=true;confirmed.append(checkbox,node('span',' I reviewed every planned case. All provider costs for those cases, including failed attempts and rejected results, are in the current allocations.'));form.append(confirmed);
     const button=node('button','Confirm complete provider cost coverage');button.type='submit';button.className='btn';button.disabled=!coverage.can_confirm;form.append(button);box.append(form);panel.append(box);
     form.addEventListener('input',event=>{if(event.target!==checkbox){checkbox.checked=false;delete form.dataset.operation;}});
     form.addEventListener('submit',event=>{event.preventDefault();if(!coverage.can_confirm||!checkbox.checked||!form.reportValidity())return;
@@ -22,10 +22,10 @@
     const panel = node('section'); panel.className = 'panel'; panel.id = 'op-provider-costs';
     panel.append(node('h2', 'Admitted provider costs'));
     const costs = data.provider_costs;
-    if (!costs || !['current','partial'].includes(costs.status)) { panel.append(node('p', costs && costs.reason || 'Provider billing is unavailable.')); host.append(panel); return; }
+    if (!costs || !['current','partial'].includes(costs.status)) { panel.append(node('p', costs && costs.reason || 'Provider billing is unavailable. Refresh the page and try again.')); host.append(panel); return; }
     if(costs.status==='partial')panel.append(node('p','Cost coverage is partial: changed or unavailable allocations are excluded from current totals. Review the flagged sources below.'));
     panel.append(node('p', 'Provider amounts are separate from your reported total workflow, human and rework costs. Allocation to cases is your reviewed attribution; invoice authenticity is not independently verified.'));
-    const setup=node('a','Open AI cost collection and receipt setup');setup.href='/assurance';panel.append(setup);
+    const setup=node('a','Open AI cost collection and receipt setup');setup.href='/security/assurance';panel.append(setup);
     const totals = Object.entries(costs.current_totals_by_currency || {});
     panel.append(node('p', totals.length ? 'Current allocated provider cost: ' + totals.map(([currency,amount]) => currency + ' ' + amount).join(' · ') : 'No current provider cost allocation. Unknown costs are not zero.'));
     coverageReview(panel,data,costs.coverage,request,reload,mutation);

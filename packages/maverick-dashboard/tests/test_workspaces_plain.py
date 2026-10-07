@@ -30,15 +30,40 @@ def client(tmp_path, monkeypatch):
     return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
 
 
-def test_create_workspace_by_name_derives_a_unique_id(client):
+def test_create_workspace_by_name_rejects_indistinguishable_names(client):
     r = client.post("/api/v1/admin/tenants", json={"display_name": "Acme Finance", "plan": "pro"})
     assert r.status_code == 201, r.text
     assert r.json()["id"] == "acme-finance"
-    again = client.post("/api/v1/admin/tenants", json={"display_name": "Acme Finance"})
-    assert again.status_code == 201 and again.json()["id"] == "acme-finance-2"
+    for name in ("Acme Finance", " acme   finance ", "ACME FINANCE"):
+        again = client.post("/api/v1/admin/tenants", json={"display_name": name})
+        assert again.status_code == 409
+        assert "workspace with that name" in again.json()["detail"]
+    assert client.post("/api/v1/admin/tenants", json={"id": "other", "display_name": "Acme Finance"}).status_code == 409
+    assert client.post("/api/v1/admin/tenants", json={"display_name": "Acme Sales"}).json()["id"] == "acme-sales"
     assert client.post("/api/v1/admin/tenants", json={"display_name": "  "}).status_code == 422
     # An explicit id still works for automation.
     assert client.post("/api/v1/admin/tenants", json={"id": "beta", "display_name": "B"}).json()["id"] == "beta"
+
+
+def test_existing_duplicate_names_show_stable_references(client):
+    from maverick.tenant import registry as tr
+    from maverick_dashboard import app as dash_app
+    from maverick_dashboard import settings_all_page
+
+    tr.create_tenant("acme-finance", display_name="Acme Finance")
+    tr.create_tenant("acme-finance-2")
+    # Simulate a roster written before name uniqueness was enforced.
+    tr._mutate("acme-finance-2", display_name="Acme  Finance")
+    tr.create_tenant("other", display_name="Other")
+    for path in ("/tenants", "/tenants/overview", "/workspace/tenant", "/users"):
+        page = client.get(path).text
+        assert page.count("Reference: acme-finance") >= 2, path
+        assert "Reference: other" not in page, path
+    choices = settings_all_page._workspace_choices()
+    invoices = dash_app._invoice_workspaces("", "")
+    for labels in ([label for _, label in choices], [row["name"] for row in invoices]):
+        assert sum("Reference: acme-finance" in label for label in labels) == 2
+        assert "Other" in labels
 
 
 def test_workspace_pages_read_plainly(client):

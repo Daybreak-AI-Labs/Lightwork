@@ -90,14 +90,22 @@ async function pageContext(request) {
   return match[1];
 }
 
+function requestBatch(context, items, url) {
+  const view = url.searchParams.get('view') || 'active';
+  return {context, schema: 'lightwork.knowledge-rights-requests.v1', items,
+    count: items.length, can_review: true, view, archived: view === 'archive',
+    ready_to_archive: view === 'ready', next_cursor: null, complete: true,
+    scanned: items.length, notice: 'Source restrictions and legal holds were checked for this batch.'};
+}
+
 for (const width of [320, 1280]) test(`knowledge access is usable and honest at ${width}px`, async ({page, request}) => {
   await page.setViewportSize({width, height: 940});
   const context = await pageContext(request);
   await page.route('**/api/v1/knowledge-access/**', async route => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith('/requests') && route.request().method() === 'GET') {
-      return route.fulfill({json: {context, schema: 'lightwork.knowledge-rights-requests.v1',
-        items: [record()], count: 1, can_review: true}});
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
+    if (url.pathname.endsWith('/request-batches') && route.request().method() === 'GET') {
+      return route.fulfill({json: requestBatch(context, [record()], url)});
     }
     if (url.pathname.endsWith('/search')) {
       await new Promise(resolve => setTimeout(resolve, 600));
@@ -112,7 +120,8 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
     return route.fulfill({status: 404, json: {detail: 'Synthetic route unavailable'}});
   });
   await page.goto('/knowledge-access');
-  await expect(page.getByRole('heading', {name: 'Find knowledge you can use now'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Knowledge', exact: true, level: 1})).toBeVisible();
+  await expect(page.locator('.ka-lede')).toContainText('Find knowledge you can use now');
   await expect(page.locator('#ka-requests')).toContainText('retire or retrain the model');
   await expect(page.locator('#ka-requests')).toContainText('does not erase its influence from learned weights');
 
@@ -135,6 +144,8 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
   // The result limit is a fixed hidden value now, so it is not a tab stop.
   await expect(page.locator('#ka-limit')).toHaveAttribute('type', 'hidden');
   await page.keyboard.press('Tab');
+  await expect(page.locator('#ka-retry-purposes')).toBeFocused();
+  await page.keyboard.press('Tab');
   await expect(page.locator('#ka-search')).toBeFocused();
 
   const overflow = await page.evaluate(() => ({viewport: document.documentElement.clientWidth,
@@ -151,8 +162,8 @@ test('empty and revoked states remove stale content and explain the next step', 
   let searches = 0;
   await page.route('**/api/v1/knowledge-access/**', route => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith('/requests')) return route.fulfill({json: {context,
-      schema: 'lightwork.knowledge-rights-requests.v1', items: [], count: 0, can_review: true}});
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
+    if (url.pathname.endsWith('/request-batches')) return route.fulfill({json: requestBatch(context, [], url)});
     if (url.pathname.endsWith('/search')) {
       searches += 1;
       return route.fulfill({json: {context, schema: 'lightwork.knowledge-search.v1', query: '',
@@ -188,8 +199,8 @@ test('export verifies the complete authority binding with browser Web Crypto', a
   const context = await pageContext(request);
   await page.route('**/api/v1/knowledge-access/**', route => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith('/requests')) return route.fulfill({json: {context,
-      schema: 'lightwork.knowledge-rights-requests.v1', items: [], count: 0, can_review: true}});
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
+    if (url.pathname.endsWith('/request-batches')) return route.fulfill({json: requestBatch(context, [], url)});
     if (url.pathname.endsWith('/search')) return route.fulfill({json: {context,
       schema: 'lightwork.knowledge-search.v1', tenant: 'browser-workspace',
       actor: 'user:browser-reviewer', actor_authorization_sha256: sha('6'), query: '',
@@ -223,10 +234,10 @@ test('an applying source retirement can be recovered in the app by exact replay'
   let submitted;
   await page.route('**/api/v1/knowledge-access/**', async route => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith('/requests') && route.request().method() === 'GET') {
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
+    if (url.pathname.endsWith('/request-batches') && route.request().method() === 'GET') {
       const current = completed ? approved : applying;
-      return route.fulfill({json: {context, schema: 'lightwork.knowledge-rights-requests.v1',
-        items: [current], count: 1, can_review: true}});
+      return route.fulfill({json: requestBatch(context, [current], url)});
     }
     if (url.pathname.endsWith('/decision')) {
       submitted = route.request().postDataJSON();
@@ -239,6 +250,7 @@ test('an applying source retirement can be recovered in the app by exact replay'
   await page.goto('/knowledge-access');
   await expect(page.locator('#ka-requests')).toContainText('Recovery is waiting');
   await expect(page.locator('#ka-requests')).toContainText('currently approved');
+  await page.locator('#ka-requests details > summary').click();
   await page.locator('#ka-requests textarea').fill(rationale);
   await page.locator('#ka-requests input[type="checkbox"]').check();
   await page.getByRole('button', {name: 'Finish the approved removal'}).click();
@@ -270,14 +282,16 @@ test('authenticated browser uses the real APP10 API for search, detail, and rete
   await form.locator('input[name="confirm"]').check();
   await page.getByRole('button', {name: 'Submit request'}).click();
   await expect(page.locator('#ka-requests')).toContainText('Preserve, then process');
+  await page.locator('#ka-requests details', {hasText: 'Preserve, then process'}).locator('summary').click();
 
   const holdBox = page.locator('.ka-review', {hasText: 'Preservation hold'});
-  await holdBox.getByLabel('Name of the legal matter', {exact: true}).fill('browser-matter-2026');
-  await holdBox.getByLabel('Legal or preservation basis', {exact: true}).fill('Synthetic preservation duty.');
-  await holdBox.getByLabel('Hold expires', {exact: true}).fill('2099-01-01T00:00');
+  await holdBox.getByLabel(/^Name of the legal matter/).fill('browser-matter-2026');
+  await holdBox.getByLabel(/^Legal or preservation basis/).fill('Synthetic preservation duty.');
+  await holdBox.getByLabel(/^Hold expires/).fill('2099-01-01T00:00');
   await holdBox.getByText('I checked the matter, the reason and the end date.').click();
   await holdBox.getByRole('button', {name: 'Place a legal hold on this deletion request'}).click();
   await expect(page.locator('#ka-requests')).toContainText('browser-matter-2026 is active');
+  await page.locator('#ka-requests details', {hasText: 'Preserve, then process'}).locator('summary').click();
 
   const releaseBox = page.locator('.ka-review', {hasText: 'Preservation hold'});
   await releaseBox.getByLabel('Why the hold can be released').fill('Synthetic duty ended.');
@@ -300,4 +314,57 @@ test('authenticated browser uses the real APP10 API for search, detail, and rete
   });
   expect(denied.status()).toBe(409);
   expect(await denied.text()).not.toContain('real APP10 registry');
+});
+
+test('an administrator can archive a finished real request in the page while its source stays blocked', async ({page, request}) => {
+  const setup = await request.post('/__browser_fixture/knowledge-access/setup');
+  expect(setup.status()).toBe(200);
+  const fixture = await setup.json();
+  await page.goto('/knowledge-access');
+  await page.locator('#ka-query').fill('synthetic governed browser policy');
+  await page.getByRole('button', {name: 'Search current sources'}).click();
+  await page.getByRole('button', {name: 'View details for Synthetic governed browser policy'}).click();
+  const form = page.locator('#ka-request-form');
+  await form.locator('select[name="request_type"]').selectOption('exclusion');
+  await form.locator('textarea[name="reason"]').fill('Synthetic archive review.');
+  await form.locator('input[name="confirm"]').check();
+  await page.getByRole('button', {name: 'Submit request'}).click();
+  const card = page.locator('.ka-request', {hasText: 'Synthetic archive review.'});
+  await expect(card).toBeVisible();
+  await card.locator('summary').click();
+  await card.locator('.ka-review textarea').fill('Independent synthetic review confirmed.');
+  await card.locator('.ka-review input[type="checkbox"]').check();
+  await card.getByRole('button', {name: 'Approve and stop using this source'}).click();
+  await expect(card).toContainText('approved');
+  await page.getByRole('button', {name: 'Ready to archive'}).click();
+  await card.locator('summary').click();
+  await expect(card.getByRole('button', {name: 'Move to finished archive'})).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await card.getByRole('button', {name: 'Move to finished archive'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('No finished requests are ready to archive');
+  await page.getByRole('button', {name: 'View finished archive'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('Synthetic archive review.');
+  await expect(page.locator('#ka-requests')).toContainText('Retained in the finished archive');
+  await page.getByRole('button', {name: 'View active requests'}).click();
+  await page.getByRole('button', {name: 'View finished archive'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('Synthetic archive review.');
+  const blocked = await request.post('/api/v1/knowledge-access/detail', {data: {
+    context: fixture.context, reference: fixture.reference, purpose: 'product_research'
+  }});
+  expect(blocked.status()).toBe(409);
+});
+
+test('a colleague can recover their own older archived request in the page', async ({page, request}) => {
+  const prepared = await request.post('/__browser_fixture/knowledge-access/archived-owner');
+  expect(prepared.status()).toBe(200);
+  const {id} = await prepared.json();
+  await page.setExtraHTTPHeaders({'X-Browser-Principal': 'browser-colleague'});
+  await page.goto('/knowledge-access');
+  await expect(page.locator('#knowledge-access')).toHaveAttribute('data-can-review', 'false');
+  await page.locator('#ka-archive-reference').fill(id);
+  await page.getByRole('button', {name: 'Find archived request'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('Synthetic colleague archive receipt.');
+  await expect(page.locator('#ka-requests')).toContainText('Retained in the finished archive');
+  await expect(page.locator('#ka-requests')).toContainText(id);
+  await expect(page.locator('#ka-requests .ka-review')).toHaveCount(0);
 });

@@ -438,7 +438,9 @@ class StockPrivacyRightsSourceAdapter:
         maximum: int | None = None,
     ) -> tuple[int, object]:
         if response.status_code == 404:
-            return 0, {}
+            if self.provider in {"microsoft_graph_users", "google_workspace_users"}:
+                return 0, {}
+            raise ProviderPermanentError("provider_request_rejected")
         if response.status_code in {408, 425, 429} or 500 <= response.status_code < 600:
             raise ProviderRetryableError("provider_temporarily_unavailable")
         if 300 <= response.status_code < 400:
@@ -465,6 +467,13 @@ class StockPrivacyRightsSourceAdapter:
             raise ProviderPermanentError("provider_response_invalid")
         records = payload.get("records" if self.provider == "salesforce_contacts" else "result")
         if not isinstance(records, list) or len(records) > self.limits.max_records:
+            raise ProviderPermanentError("provider_response_invalid")
+        if self.provider == "salesforce_contacts" and not records and (
+            payload.get("done") is not True
+            or isinstance(payload.get("totalSize"), bool)
+            or payload.get("totalSize") != 0
+            or payload.get("nextRecordsUrl") is not None
+        ):
             raise ProviderPermanentError("provider_response_invalid")
         return len(records), payload
 
@@ -561,7 +570,30 @@ class StockPrivacyRightsSourceAdapter:
         if phase == "verify_delete":
             if count != 0:
                 raise ProviderRetryableError("provider_delete_not_observed")
-            raise ProviderRetryableError("provider_erasure_proof_unavailable")
+            # This proves absence from the provider's exact active-record lookup,
+            # not hard purge. Mutation reconciliation applies the stronger rule.
+            evidence_digest = hashlib.sha256(
+                _canonical(
+                    {
+                        "schema": "lightwork.privacy-rights-lookup-absence.v1",
+                        "provider": self.provider,
+                        "operation_id": operation_id,
+                        "lookup_url_sha256": hashlib.sha256(lookup_url.encode()).hexdigest(),
+                        "response_status": lookup.status_code,
+                        "response_body_sha256": hashlib.sha256(lookup.body).hexdigest(),
+                        "record_count": 0,
+                    }
+                )
+            ).hexdigest()
+            return ProviderOutcome(
+                status="not_found",
+                record_count=0,
+                acknowledgement_sha256=evidence_digest,
+                acknowledgement_ref=_safe_ref(self.provider, operation_id, "verified-lookup-absence"),
+                provider_evidence_sha256=evidence_digest,
+                opaque_ref=_safe_ref(self.provider, operation_id, "verified-lookup-evidence"),
+                external_side_effect=False,
+            )
         if count == 0:
             empty_digest = hashlib.sha256(
                 _canonical(

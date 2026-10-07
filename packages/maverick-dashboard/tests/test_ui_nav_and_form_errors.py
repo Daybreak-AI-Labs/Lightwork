@@ -1,6 +1,8 @@
 """UI hardening (nav_and_form_errors): active-nav highlighting + graceful goal-form errors."""
 from __future__ import annotations
 
+from html.parser import HTMLParser
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,6 +20,28 @@ def _prep(monkeypatch, tmp_path):
     dash_app._world_cache.clear()
 
 
+class _ActiveNavigation(HTMLParser):
+    def __init__(self, html):
+        super().__init__()
+        self.href = None
+        self.labels = {}
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "a" and attrs.get("aria-current") == "page":
+            self.href = attrs["href"]
+            self.labels[self.href] = ""
+
+    def handle_data(self, data):
+        if self.href is not None:
+            self.labels[self.href] += data
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self.href = None
+
+
 # ---------- active nav highlighting ----------
 
 @pytest.mark.parametrize("path,label", [
@@ -31,10 +55,9 @@ def _prep(monkeypatch, tmp_path):
 def test_current_page_link_is_marked_active(monkeypatch, tmp_path, path, label):
     _prep(monkeypatch, tmp_path)
     r = _client().get(path)
-    # Active link carries the href + state; the label rides in a .nav-label span
-    # (an icon now precedes it), so assert the two parts rather than one literal.
+    # Preserve exact selected destination and spoken text through localized spans.
     assert f'<a href="{path}" class="active" aria-current="page">' in r.text
-    assert f'<span class="nav-label">{label}</span>' in r.text
+    assert _ActiveNavigation(r.text).labels == {path: label}
 
 
 def test_exactly_one_nav_link_is_active(monkeypatch, tmp_path):
@@ -81,15 +104,47 @@ def test_chat_form_submits_via_fetch(monkeypatch, tmp_path):
 def test_chat_can_handoff_an_unsaved_flow_or_agent_draft(monkeypatch, tmp_path):
     """Authoring choices stay browser-local until the user explicitly saves."""
     _prep(monkeypatch, tmp_path)
-    page = _client().get("/chat").text
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    response = _client().get("/chat")
+    assert response.status_code == 200
+    page = response.text
     assert 'name="authoring_kind"' in page
-    assert '<option value="flow">Draft a workflow</option>' in page
-    assert '<option value="agent">Draft an agent</option>' in page
+    from test_support.element_text import element_texts
+
+    assert element_texts(page, "option", {"value": "flow"}) == ["Draft a workflow"]
+    assert element_texts(page, "option", {"value": "agent"}) == ["Draft an agent"]
 
     ui = _client().get("/static/lightwork-ui.js").text
     assert "lightwork.authoring-handoff" in ui
     assert "sessionStorage.setItem" in ui
     assert "kind === 'flow' ? '/flows/designer' : '/workflow-builder'" in ui
+
+
+def test_chat_workflow_draft_tracks_live_feature_state(monkeypatch, tmp_path):
+    from maverick import flow
+
+    _prep(monkeypatch, tmp_path)
+    monkeypatch.setattr(flow, "enabled", lambda: False)
+    monkeypatch.delenv("MAVERICK_FLOWS", raising=False)
+    client = _client()
+    page = client.get("/chat").text
+    assert '<option value="flow"' not in page
+    assert '<option value="agent"' in page
+    assert 'href="/learning#lrn-flows-on"' in page
+
+    disabled = client.post(
+        "/api/v1/flows/draft",
+        json={"description": "Prepare a customer welcome workflow"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert disabled.status_code == 403
+    assert disabled.headers["x-lightwork-feature-off"] == "workflows"
+    assert disabled.json()["detail"].startswith("Workflows are turned off.")
+
+    monkeypatch.setenv("MAVERICK_FLOWS", "0")
+    managed_page = client.get("/chat").text
+    assert '<option value="flow"' not in managed_page
+    assert 'href="/learning#lrn-flows-on"' not in managed_page
 
 
 def test_collapsed_sidebar_is_removed_from_keyboard_and_accessibility_navigation(

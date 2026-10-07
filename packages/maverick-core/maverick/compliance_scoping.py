@@ -24,7 +24,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -492,6 +492,76 @@ class ScopingQuestion:
     condition: Mapping[str, object] | None
 
 
+def _display_names(value, questionnaire_id, questions, rules):
+    """Optional short customer labels, bound to the immutable closed definition."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping) or len(value) > 4096:
+        raise ComplianceScopingValidationError("questionnaire names must be a bounded object")
+    allowed = {questionnaire_id}
+    for question in questions:
+        allowed.update((question["question_id"], question["question_ref"]))
+        allowed.update(question["options"])
+    for rule in rules:
+        allowed.update((rule["rule_id"], rule["framework_ref"], rule["reason_code"]))
+        allowed.update(rule["control_refs"])
+        allowed.update(rule["overlap_refs"])
+    names = {}
+    for key, name in value.items():
+        if (key not in allowed or not isinstance(name, str) or not name.strip()
+                or name != name.strip() or len(name) > 120
+                or any(ord(char) < 32 or ord(char) == 127 for char in name)):
+            raise ComplianceScopingValidationError("questionnaire names must be short labels for declared items")
+        names[key] = name
+    return names
+
+
+def _studio_source(value):
+    """Retained source provenance; callers still enforce actual source authority."""
+    if value is None:
+        return {}
+    source = _closed_mapping(value, "studio source", frozenset({"studio_id", "form_id", "version",
+        "pointer_sha256", "blueprint_sha256"}))
+    return {"studio_id": _id(source["studio_id"], "studio_id"), "form_id": _id(source["form_id"], "form_id"),
+            "version": _integer(source["version"], "studio version", 1, 2_147_483_647),
+            "pointer_sha256": _digest(source["pointer_sha256"], "studio pointer"),
+            "blueprint_sha256": _digest(source["blueprint_sha256"], "studio blueprint")}
+
+
+def _creation_material(questionnaire_id, questions, rules, expected_latest_version,
+                       actor, display_names=None, expected_latest_integrity=None, studio_source=None):
+    questionnaire = _id(questionnaire_id, "questionnaire_id")
+    expected = _integer(expected_latest_version, "expected_latest_version", 0, 1_000_000)
+    known = {}
+    validated_questions = []
+    for item in _sequence(questions, "questions", minimum=len(SCOPING_DOMAINS), maximum=_MAX_QUESTIONS):
+        question = _validate_question(item, known)
+        if question["question_id"] in known:
+            raise ComplianceScopingValidationError("question_id must be unique")
+        known[str(question["question_id"])] = question
+        validated_questions.append(question)
+    if {str(item["domain"]) for item in validated_questions} != SCOPING_DOMAINS:
+        raise ComplianceScopingValidationError("questionnaire must cover every required scoping domain")
+    validated_rules = [_validate_rule(item, known)
+                       for item in _sequence(rules, "rules", minimum=1, maximum=_MAX_RULES)]
+    if len({item["rule_id"] for item in validated_rules}) != len(validated_rules):
+        raise ComplianceScopingValidationError("rule_id must be unique")
+    names = _display_names(display_names, questionnaire, validated_questions, validated_rules)
+    request = {"action": "create_questionnaire_version", "questionnaire_id": questionnaire,
+               "questions": validated_questions, "rules": validated_rules,
+               "expected_latest_version": expected, "actor_ref": actor}
+    if names:
+        request["display_names"] = names
+    source = _studio_source(studio_source)
+    if source:
+        request["studio_source"] = source
+    if expected_latest_integrity is not None:
+        request["expected_latest_integrity"] = _digest(expected_latest_integrity, "latest questionnaire")
+        if expected == 0:
+            raise ComplianceScopingValidationError("a new questionnaire has no previous revision")
+    return request
+
+
 @dataclass(frozen=True)
 class QuestionnaireVersion:
     tenant_id: str
@@ -507,6 +577,8 @@ class QuestionnaireVersion:
     created_at: float
     reviewed_at: float | None
     integrity_sha256: str
+    display_names: Mapping[str, str] = field(default_factory=dict)
+    studio_source: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -898,6 +970,9 @@ class ComplianceScopingStore:
         publication_digest: str,
     ) -> QuestionnaireVersion:
         return QuestionnaireVersion(
+            studio_source=_studio_source(definition.get("studio_source")),
+            display_names=_display_names(definition.get("display_names"), definition["questionnaire_id"],
+                                         definition["questions"], definition["rules"]),
             tenant_id=definition["tenant_id"],
             questionnaire_id=definition["questionnaire_id"],
             version=definition["version"],
@@ -991,47 +1066,26 @@ class ComplianceScopingStore:
         rules: Sequence[Mapping[str, object]],
         expected_latest_version: int,
         idempotency_key: str,
+        display_names: Mapping[str, str] | None = None,
+        expected_latest_integrity: str | None = None,
+        studio_source: Mapping[str, object] | None = None,
+        effect_guard: Callable[[], object] | None = None,
     ) -> QuestionnaireVersion:
         """Append an immutable questionnaire definition pending independent review."""
 
         tenant = _tenant(tenant_id)
-        questionnaire = _id(questionnaire_id, "questionnaire_id")
-        expected = _integer(
-            expected_latest_version, "expected_latest_version", 0, 1_000_000
-        )
-        known: dict[str, Mapping[str, object]] = {}
-        validated_questions: list[dict[str, object]] = []
-        for item in _sequence(
-            questions, "questions", minimum=len(SCOPING_DOMAINS), maximum=_MAX_QUESTIONS
-        ):
-            question = _validate_question(item, known)
-            if question["question_id"] in known:
-                raise ComplianceScopingValidationError("question_id must be unique")
-            known[str(question["question_id"])] = question
-            validated_questions.append(question)
-        if {str(item["domain"]) for item in validated_questions} != SCOPING_DOMAINS:
-            raise ComplianceScopingValidationError(
-                "questionnaire must cover every required scoping domain"
-            )
-        validated_rules = tuple(
-            _validate_rule(item, known)
-            for item in _sequence(rules, "rules", minimum=1, maximum=_MAX_RULES)
-        )
-        if len({item["rule_id"] for item in validated_rules}) != len(validated_rules):
-            raise ComplianceScopingValidationError("rule_id must be unique")
         actor = self._actor()
+        request = _creation_material(questionnaire_id, questions, rules, expected_latest_version,
+                                     actor, display_names, expected_latest_integrity, studio_source)
+        questionnaire = request["questionnaire_id"]
+        expected = request["expected_latest_version"]
+        validated_questions, validated_rules = request["questions"], request["rules"]
         now = _timestamp(self._clock(), "current time")
         version = expected + 1
-        request = {
-            "action": "create_questionnaire_version",
-            "questionnaire_id": questionnaire,
-            "questions": validated_questions,
-            "rules": list(validated_rules),
-            "expected_latest_version": expected,
-            "actor_ref": actor,
-        }
         with self._connect() as connection:
             self._begin(connection)
+            if effect_guard is not None:
+                effect_guard()
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
@@ -1049,6 +1103,10 @@ class ComplianceScopingStore:
                 raise ComplianceScopingConflict(
                     f"latest questionnaire CAS failed: expected {expected}, found {latest}"
                 )
+            if expected_latest_integrity is not None:
+                current = self._get_questionnaire(connection, tenant, questionnaire, latest)
+                if current.integrity_sha256 != expected_latest_integrity:
+                    raise ComplianceScopingConflict("the reviewed questionnaire changed before saving")
             definition = {
                 "tenant_id": tenant,
                 "questionnaire_id": questionnaire,
@@ -1058,6 +1116,10 @@ class ComplianceScopingStore:
                 "created_by": actor,
                 "created_at": now,
             }
+            if request.get("display_names"):
+                definition["display_names"] = request["display_names"]
+            if request.get("studio_source"):
+                definition["studio_source"] = request["studio_source"]
             definition_digest = self._insert(
                 connection,
                 "scope_questionnaires",
@@ -1096,12 +1158,41 @@ class ComplianceScopingStore:
                 "questionnaire_version_created",
                 f"{questionnaire}:{version}",
                 actor,
-                {"version": version, "question_count": len(validated_questions)},
+                {"version": version, "question_count": len(validated_questions),
+                 **({"studio_source_sha256": _sha256(request["studio_source"])} if request.get("studio_source") else {})},
                 now,
             )
+            if effect_guard is not None:
+                effect_guard()
             return self._questionnaire(
                 definition, publication, definition_digest, publication_digest
             )
+
+    def latest_questionnaire(self, tenant_id: str, questionnaire_id: str) -> QuestionnaireVersion | None:
+        """Read the exact latest source; list pagination is not a source guard."""
+        tenant, questionnaire = _tenant(tenant_id), _id(questionnaire_id, "questionnaire_id")
+        self._actor()
+        with self._connect() as connection:
+            row = connection.execute("SELECT MAX(version) AS latest FROM scope_questionnaires "
+                                     "WHERE tenant_id=? AND questionnaire_id=?", (tenant, questionnaire)).fetchone()
+            return None if row["latest"] is None else self._get_questionnaire(connection, tenant, questionnaire, int(row["latest"]))
+
+    def questionnaire_creation_receipt(self, tenant_id: str, questionnaire_id: str, *,
+                                       questions, rules, expected_latest_version: int,
+                                       idempotency_key: str, display_names=None,
+                                       expected_latest_integrity=None, studio_source=None) -> QuestionnaireVersion | None:
+        """Read only the original actor's atomically accepted operation, never replay it."""
+        tenant = _tenant(tenant_id)
+        request = _creation_material(questionnaire_id, questions, rules, expected_latest_version,
+                                     self._actor(), display_names, expected_latest_integrity, studio_source)
+        with self._connect() as connection:
+            _digest_value, operation = self._operation(connection, tenant, idempotency_key, request)
+            if operation is None:
+                return None
+            expected_id = f"{questionnaire_id}:{expected_latest_version + 1}"
+            if operation["result_kind"] != "questionnaire" or operation["result_id"] != expected_id:
+                raise ComplianceScopingIntegrityError("questionnaire receipt result binding failed")
+            return self._get_questionnaire(connection, tenant, questionnaire_id, expected_latest_version + 1)
 
     def publish_questionnaire(
         self,

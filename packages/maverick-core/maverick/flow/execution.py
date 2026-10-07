@@ -264,7 +264,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             inputs: dict | None = None, record_outcomes: bool = True,
             agent_budget_dollars: float = DEFAULT_AGENT_BUDGET, origin: str = "manual",
             now: Callable[[], float] | None = None,
-            episode_capture: ActionEpisodeCapture | None = None) -> store.FlowRun:
+            episode_capture: ActionEpisodeCapture | None = None,
+            execution_guard: Callable[[], None] | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
     (so a caller can hand it back for polling); ``decision`` is the human verdict
@@ -497,6 +498,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 durations[node_id] = durations.get(node_id, 0.0) + dt
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
+        if execution_guard is not None:
+            execution_guard()
         with trace_lock:
             entry: dict = {"status": status, "outcome": outcome}
             if node.id in durations:
@@ -637,7 +640,9 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             return action_runner(node.tool, params, action_data)
 
     def _run_action(node: FlowNode, params: dict, action_data: dict):
-        with action_capture_scope(episode_capture, node):
+        from ..plugin_execution_pins import flow_scope
+
+        with action_capture_scope(episode_capture, node), flow_scope(rid, owner, definition_revision or flow.revision):
             return _dispatch_action(node, params, action_data)
 
     res = run_flow(
@@ -682,16 +687,14 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         paused_node = flow.node(res.cursor)
         if paused_node is not None:
             from ..approval_cards import build_approval_card, digest
-            from .approvals import current_flow_runtime_authority
+            from .approvals import approval_card_presentation, current_flow_runtime_authority
 
             next_node = flow.node(paused_node.next) if paused_node.next else None
             continuation = next_node.to_dict() if next_node is not None else {
                 "kind": "complete", "id": "end",
             }
-            target_label = (
-                f"{next_node.kind} node {next_node.label or next_node.id}"
-                if next_node is not None
-                else f"complete flow {flow.id}"
+            presentation = approval_card_presentation(
+                flow, paused_node, next_node, res.prompt,
             )
             expiry = (
                 float(res.resume_at)
@@ -711,19 +714,14 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approval_card = build_approval_card(
                 action="flow.resume",
                 summary=res.prompt or f"Resume {flow.name or flow.id}",
-                target_label=target_label,
+                target_label=presentation["target_label"],
                 target={
                     "flow_id": flow.id,
                     "pause_node": paused_node.id,
                     "continuation": continuation,
                 },
                 parameters={"data": persisted_data, "continuation": continuation},
-                parameter_summary=[
-                    f"Flow: {flow.name or flow.id}",
-                    f"Continue after approval node: {paused_node.id}",
-                    f"Current input digest: {digest(persisted_data)}",
-                    f"Next node: {target_label}",
-                ],
+                parameter_summary=presentation["parameter_summary"],
                 actor=owner or "local:operator",
                 workspace=runtime_authority["workspace"],
                 role=runtime_authority["role"],
@@ -759,16 +757,10 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                     ],
                 },
                 expires_at=expiry,
-                known_effects=[
-                    "Resumes only the immutable published flow release recorded on this run.",
-                    "The remaining flow may invoke its reviewed external action nodes once.",
-                ],
-                unresolved_assumptions=[
-                    "Connector credentials and target records must still pass dispatch-time authorization.",
-                    "External systems may apply notifications or automation after a tool action.",
-                ],
-                before="The run remains paused and no continuation node has executed.",
-                after="The pinned continuation may execute once under current worker authority.",
+                known_effects=presentation["known_effects"],
+                unresolved_assumptions=presentation["unresolved_assumptions"],
+                before=presentation["before"],
+                after=presentation["after"],
                 irreversible=bool(next_node is not None and next_node.kind == "action"),
             )
             human = {"choices": list(paused_node.choices),
@@ -955,12 +947,11 @@ def default_action_runner(
 
         def audit_result(
             status: str,
-            result: object,
             *,
             disposition: str,
+            safe_summary: str | None = None,
         ) -> bool:
             from ..audit import EventKind, audit_event
-            from ..tool_authz import _audit_summary
 
             return audit_event(
                 EventKind.TOOL_RESULT,
@@ -973,7 +964,13 @@ def default_action_runner(
                 call_commitment_algorithm=TOOL_CALL_COMMITMENT_ALGORITHM,
                 status=status,
                 disposition=disposition,
-                output_summary=_audit_summary(result),
+                # Connector output can echo request credentials under an
+                # innocent key, defeating pattern-only redaction. Keep the
+                # signed receipt content-free; status/disposition and the
+                # call commitment carry the evidence needed for review.
+                output_summary=safe_summary or (
+                    "Tool completed" if status == "ok" else "Tool failed"
+                ),
             )
 
         try:
@@ -1027,8 +1024,8 @@ def default_action_runner(
                 try:
                     audit_result(
                         "error",
-                        f"ERROR: {type(e).__name__}",
                         disposition=disposition,
+                        safe_summary=f"ERROR: {type(e).__name__}",
                     )
                 except BaseException:
                     # A terminal writer failure must never replace the caller's
@@ -1047,12 +1044,12 @@ def default_action_runner(
                     try:
                         audit_result(
                             "error",
-                            f"ERROR: {type(e).__name__}",
                             disposition=(
                                 "budget_exceeded"
                                 if isinstance(e, BudgetExceeded)
                                 else "halted"
                             ),
+                            safe_summary=f"ERROR: {type(e).__name__}",
                         )
                     except AuditRefused:
                         # Preserve the control-flow stop.  The tool boundary has
@@ -1083,7 +1080,6 @@ def default_action_runner(
             try:
                 result_recorded = audit_result(
                     "ok" if ok else "error",
-                    result,
                     disposition="completed" if ok else "tool_error",
                 )
             except AuditRefused:
@@ -1111,10 +1107,14 @@ def sandbox_runners() -> tuple[AgentRunner, ActionRunner]:
     connector, so a user can safely test a flow with sample input before wiring
     it to a live trigger. Each returns a labeled placeholder + a success outcome."""
     def agent(brief: str, data: dict) -> tuple[Any, float | None]:
-        return (f"[dry-run agent] {str(brief)[:120]}", 1.0)
+        # The rendered brief can contain private sample input. It does not
+        # belong in the saved test run as a mock agent result.
+        return ("[dry-run agent] completed", 1.0)
 
     def action(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
-        return ({"dry_run": True, "tool": tool, "params": params}, 1.0)
+        # Rendered parameters are passed only to a live connector. Echoing
+        # them here copied arbitrary credential values into the run record.
+        return ({"dry_run": True, "tool": tool, "parameters": "withheld"}, 1.0)
     return agent, action
 
 

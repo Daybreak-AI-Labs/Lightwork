@@ -139,7 +139,8 @@ def domains_lint(ci: bool, show_warnings: bool) -> None:
     no knowledge sources, no deny list). Operator packs in the workspace
     domains dir are linted alongside the built-ins.
     """
-    from ..domain import available_domains, lint_profile
+    from ..domain import available_domains, lint_profile, rejected_workspace_domains
+    from ..domain_prose_lint import known_tool_names, lint_profiles
     domains = available_domains()
     n_err = n_warn = 0
     for name in sorted(domains):
@@ -151,6 +152,18 @@ def domains_lint(ci: bool, show_warnings: bool) -> None:
         if show_warnings:
             for w in warnings:
                 click.echo(f"warn   {name}: {w}")
+    for name, errors in sorted(rejected_workspace_domains().items()):
+        n_err += len(errors)
+        for error in errors:
+            click.echo(f"ERROR  {name}: {error}", err=True)
+    # The prose lint (text defects, duplicate personas, unknown tools) is part
+    # of the same gate: a pack that reads wrong is as broken as one that is
+    # envelope-unsafe. Mechanical classes fix with
+    # ``python -m maverick.domain_prose_lint --fix``.
+    prose = lint_profiles(domains, known_tools=known_tool_names())
+    n_err += len(prose)
+    for f in prose:
+        click.echo(f"ERROR  {f}", err=True)
     click.echo(f"{len(domains)} pack(s): {n_err} error(s), {n_warn} warning(s)"
                + ("" if show_warnings else " (use --warnings to list them)"))
     if ci and n_err:
@@ -374,7 +387,10 @@ def insights_import(bundle: str) -> None:
     """
     from ..insight_exchange import import_insights
     from ..orchestrator import _build_shield
-    imported, reason = import_insights(bundle, shield=_build_shield())
+    imported, reason = import_insights(
+        bundle, shield=_build_shield(), operator_ref="local CLI operator",
+        operator_basis="local_process",
+    )
     if reason != "ok":
         raise click.ClickException(reason)
     click.echo(f"Imported {imported} peer insight(s).")

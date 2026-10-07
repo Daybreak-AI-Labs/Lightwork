@@ -1,0 +1,671 @@
+{
+  "source_sha": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+  "scope": "Installation and provenance only; no new test or collection runs.",
+  "binding": {
+    "source_sha": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+    "status": "bound_after_both_installs_verified",
+    "previous_binding_hashes": {
+      "source-binding.json": "acf16b5984d124b17cd11e80d85319e068fa7729e6668d29ea2c30c359a43bad",
+      "test-binding.json": "d4595a6e34c91fcfbfd68d2e16efa68bac1880632e779b69a409bee1288fa584"
+    },
+    "new_binding_hashes": {
+      "source-binding.json": "aea419d8a26a5c6fbf8240e093366cae066f29de2a83955267b86e590197294b",
+      "test-binding.json": "1909008104dc3146c9fec44d26a0539601a4779bfe4879105e844a843fcfc7bb"
+    },
+    "installed_verification": {
+      "310": {
+        "receipt": "audit/compat-interpreters/310/final08-install-03/result.json",
+        "sha256": "96b8b1d3b7061a2f3038c188e03e314d299c176bfe0afada3a831f2af7b99358"
+      },
+      "311": {
+        "receipt": "audit/compat-interpreters/311/final08-install-01/result.json",
+        "sha256": "59a1e2c64d047624b4df306e73ff54ea3911cd7f241be9b4a98c69aa8321a2ea"
+      }
+    },
+    "native_readiness": {
+      "310": {
+        "receipt": "audit/compat-interpreters/310/final08-install-03/native-readiness.json",
+        "sha256": "f9b04cbbf0edb4c9035d384ebd43bd76d7afbe04830d643d06d772acd772e957"
+      },
+      "311": {
+        "receipt": "audit/compat-interpreters/311/final08-install-01/native-readiness.json",
+        "sha256": "0bd2f4f8358aa762937f65216137e21236df3f34891d7d2eeb4b36f63c01dc8a"
+      }
+    },
+    "summaries": {
+      "310": {
+        "distributions": 100,
+        "third_party_distributions": 92,
+        "payload_entries_compared": 4856,
+        "record_entries_hash_verified": 4887,
+        "record_entries_without_hash": 8,
+        "limitations": [
+          "Prior final06 wheel archives are not reopened or rehashed because their original sandbox ownership prevents access. Prior wheel identity and dependency metadata are checked against preserved verified binding, manifest, plan, install-source, and provenance receipts. All final08 wheel bytes, metadata and installed payload remain subject to fresh verification."
+        ]
+      },
+      "311": {
+        "distributions": 96,
+        "third_party_distributions": 88,
+        "payload_entries_compared": 4856,
+        "record_entries_hash_verified": 4887,
+        "record_entries_without_hash": 8,
+        "limitations": [
+          "Prior final06 wheel archives are not reopened or rehashed because their original sandbox ownership prevents access. Prior wheel identity and dependency metadata are checked against preserved verified binding, manifest, plan, install-source, and provenance receipts. All final08 wheel bytes, metadata and installed payload remain subject to fresh verification."
+        ]
+      }
+    },
+    "node_dependency_receipt": "audit/final-node-qualification-final-08-02.json",
+    "node_dependency_receipt_sha256": "4d5e76d81c0a561f9c95465f1d35e7b610c5967ce068e8d9e98669745e7dd95b",
+    "runner_sha256": "9d22d9c8425ad6a988ad7f2a69a1b0e2a6caed30fd49aa3d24f018e6cc4f8054",
+    "runtime_tests_executed": false
+  },
+  "binding_receipt": {
+    "path": "audit/compat-interpreters/final08-binding.json",
+    "sha256": "132cc321ffeffb7992863ad59438ada114a4b936c02a779cde2d756586d957d2"
+  },
+  "preserved_prior_artifacts": {
+    "path": "audit/compat-interpreters/retained-before-final08-01/preservation-manifest.json",
+    "sha256": "7a843e416d0bf901f973fcfc30b489a9084c44a00fb6c5d8931e5daade3d6b76"
+  },
+  "helpers": {
+    "rebind_compat_final08.py": {
+      "path": "rebind_compat_final08.py",
+      "sha256": "976353f3870978c96a037c9791067fa1dcc0c858ff129a6d87f319ea3083c992"
+    },
+    "verify_compat_wheel_payload.py": {
+      "path": "verify_compat_wheel_payload.py",
+      "sha256": "d992420368a20148ba78d10c3122690127d90457c2cd0d4e8b902f1f8ce660c7"
+    },
+    "verify_compat_native_readiness.py": {
+      "path": "verify_compat_native_readiness.py",
+      "sha256": "f53bb19e3cbc31435f7f2517b7238dc77ca9f65ead3a3c4cc017b93775684aca"
+    },
+    "run_compat_qualification.py": {
+      "path": "run_compat_qualification.py",
+      "sha256": "9d22d9c8425ad6a988ad7f2a69a1b0e2a6caed30fd49aa3d24f018e6cc4f8054"
+    },
+    "bind_compat_final08.py": {
+      "path": "bind_compat_final08.py",
+      "sha256": "d43433b39a3c6b58045600fdeaccc4f7cfc000644f3e652fbaf8660614961c5b"
+    }
+  },
+  "interpreters": {
+    "310": {
+      "python_version": [
+        3,
+        10,
+        19
+      ],
+      "label": "final08-install-03",
+      "status": "passed",
+      "result": {
+        "path": "audit/compat-interpreters/310/final08-install-03/result.json",
+        "sha256": "96b8b1d3b7061a2f3038c188e03e314d299c176bfe0afada3a831f2af7b99358"
+      },
+      "native_readiness": {
+        "path": "audit/compat-interpreters/310/final08-install-03/native-readiness.json",
+        "sha256": "f9b04cbbf0edb4c9035d384ebd43bd76d7afbe04830d643d06d772acd772e957"
+      },
+      "payload_receipt": {
+        "path": "audit/compat-interpreters/310/final08-install-03/installed-wheel-payload.json",
+        "sha256": "8af1d5fff44e0b8be658e61efd931f6f2a0e39b2932b36d574529a0f7f1013b2"
+      },
+      "install_source": {
+        "path": "audit/compat-interpreters/310/final08-install-03/install-source.json",
+        "sha256": "3716af2a5069319c23e81bbef53242bb4950d9229ac8857310ef7b101e24af2d"
+      },
+      "distributions": 100,
+      "retained_third_party": 92,
+      "third_party_unchanged": true,
+      "origins": {
+        "maverick": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick\\__init__.py",
+        "maverick_channels": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick_channels\\__init__.py",
+        "maverick_dashboard": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick_dashboard\\__init__.py",
+        "maverick_evolve": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick_evolve\\__init__.py",
+        "maverick_installer": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick_installer\\__init__.py",
+        "maverick_knowledge": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick_knowledge\\__init__.py",
+        "maverick_mcp": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick_mcp\\__init__.py",
+        "maverick_shield": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages\\maverick_shield\\__init__.py"
+      },
+      "sys_path": [
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.10-windows-x86_64-none\\python310.zip",
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.10-windows-x86_64-none\\DLLs",
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.10-windows-x86_64-none\\lib",
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.10-windows-x86_64-none",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat310\\lib\\site-packages"
+      ],
+      "origin_probe_imported_first_party": false,
+      "first_party_wheels": [
+        {
+          "name": "maverick-agent",
+          "version": "0.1.7",
+          "sha256": "448dd9fe9bec5441ed672aebd7c75ebc50962d456cdc79896ed4fb11f0bf0d18",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "77409150a2e8bfc34d6e3eda7a37bbbe2bd40df00f6c9d9b2eff90d41227ad0a",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-channels",
+          "version": "0.1.7",
+          "sha256": "194fc3fa916f375b13f3a821bde14a737bf43d1d913b79790c7184c9d574c825",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "304236a9b522b8ae25c1cfed9d373c6d83b188871189f892a19c1da4237d20c9",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-dashboard",
+          "version": "0.1.7",
+          "sha256": "cd7272dd5dd2046aa73d6412b0cab45cf785d3342fa66952a295d14275bdd79c",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "8009f12dbdb1b39243c721f99938296523bb612ed37163c53c0c06f2e55a4c35",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-evolve",
+          "version": "0.1.7",
+          "sha256": "b8e6ffadac2247343fb6122135729ed896c8741393f3c28b3cb7016792894edd",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "53e7d329b9f2ae60a32797aedf4874089b42e65bab35d86b7c22521a032858f1",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-installer",
+          "version": "0.1.7",
+          "sha256": "a4425ad06fb34013244949fadfa83d5f5c99e7693a4ee920e5e4aa7ab20c2505",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "3bf3678ad6e9ff7564e485d101b84ce1f26ea7874d50dd581373b274b077825f",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-knowledge",
+          "version": "0.1.7",
+          "sha256": "bda4ae23826811ba6b562bd7801dadb166107d629cf5fe93a2363093876bad47",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "0ba7fdbd2c38694780b5c2fc2c5bcdff2ace21982f4f83e629b00dafc5022ecd",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-mcp-server",
+          "version": "0.1.7",
+          "sha256": "611dddf2979a0a7d75a04445367e66a1f60a401b6d525ffd94f95c42be1d6c1b",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "c811a52f1a5ed7cb07eb43e6308fc16f0771f047a136394feb9501b22d623819",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-shield",
+          "version": "0.1.7",
+          "sha256": "f3520925ea3da0478f79af81a23f5aaddbc98c9586869b6a37d4579802d1a177",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "dac4d4f6b8e8bbcde533bbd3a54c2cd6981bf7ec4b5d21f54c552e81fd448595",
+          "prior_archive_reopened": false
+        }
+      ],
+      "commands": [
+        {
+          "label": "source-before-head",
+          "returncode": 0,
+          "elapsed_seconds": 0.047,
+          "timeout_seconds": 60,
+          "log_sha256": "a9578367390040112b73dda1b7b372c8ff62473048e7cec883f52126899da388"
+        },
+        {
+          "label": "source-before-status",
+          "returncode": 0,
+          "elapsed_seconds": 0.094,
+          "timeout_seconds": 60,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "label": "identity-before",
+          "returncode": 0,
+          "elapsed_seconds": 1.281,
+          "timeout_seconds": 60,
+          "log_sha256": "a52d64a04a079c5ed0816a2631d7e545a699f9f216ccfc96532a82b41c96ccfb"
+        },
+        {
+          "label": "pip-list-before",
+          "returncode": 0,
+          "elapsed_seconds": 1.203,
+          "timeout_seconds": 60,
+          "log_sha256": "00583f9960be6495a9f77daa201d242d98939564be1d477a0a18d3fd075d38f0"
+        },
+        {
+          "label": "source-preinstall-head",
+          "returncode": 0,
+          "elapsed_seconds": 0.047,
+          "timeout_seconds": 60,
+          "log_sha256": "a9578367390040112b73dda1b7b372c8ff62473048e7cec883f52126899da388"
+        },
+        {
+          "label": "source-preinstall-status",
+          "returncode": 0,
+          "elapsed_seconds": 0.109,
+          "timeout_seconds": 60,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "label": "install",
+          "returncode": 0,
+          "elapsed_seconds": 8.75,
+          "timeout_seconds": 600,
+          "log_sha256": "ac4cec38d13419ae4decfb0cf4b13168286e5fd4bfe0352af2fdb7cd555275c9"
+        },
+        {
+          "label": "pip-check",
+          "returncode": 0,
+          "elapsed_seconds": 0.89,
+          "timeout_seconds": 60,
+          "log_sha256": "672aec65a45bed50e70229c70934a7eebf0462595c459b83023027645d57cccf"
+        },
+        {
+          "label": "pip-list-after",
+          "returncode": 0,
+          "elapsed_seconds": 0.375,
+          "timeout_seconds": 60,
+          "log_sha256": "00583f9960be6495a9f77daa201d242d98939564be1d477a0a18d3fd075d38f0"
+        },
+        {
+          "label": "identity-after",
+          "returncode": 0,
+          "elapsed_seconds": 0.203,
+          "timeout_seconds": 60,
+          "log_sha256": "a52d64a04a079c5ed0816a2631d7e545a699f9f216ccfc96532a82b41c96ccfb"
+        },
+        {
+          "label": "installed-extras",
+          "returncode": 0,
+          "elapsed_seconds": 0.25,
+          "timeout_seconds": 60,
+          "log_sha256": "10cbaa91e497d185901c1214742327fa892c4627db6e4144d8d7f7d9a7b85d05"
+        },
+        {
+          "label": "constraint-closure",
+          "returncode": 0,
+          "elapsed_seconds": 0.265,
+          "timeout_seconds": 60,
+          "log_sha256": "69c3e960d6ddc69ab61ebbf6d0b404dd14268e767f52f56f763196b8bdb72e7b"
+        },
+        {
+          "label": "wheel-payload",
+          "returncode": 0,
+          "elapsed_seconds": 51.344,
+          "timeout_seconds": 60,
+          "log_sha256": "9da520a75959d4056ae64055ff98ff9d296506866ea275786e65a01859cba0c0"
+        },
+        {
+          "label": "source-after-head",
+          "returncode": 0,
+          "elapsed_seconds": 0.047,
+          "timeout_seconds": 60,
+          "log_sha256": "a9578367390040112b73dda1b7b372c8ff62473048e7cec883f52126899da388"
+        },
+        {
+          "label": "source-after-status",
+          "returncode": 0,
+          "elapsed_seconds": 0.11,
+          "timeout_seconds": 60,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "payload_counts": [
+        {
+          "name": "maverick-agent",
+          "payload_compared": 3861,
+          "record_hash_verified": 3866,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-channels",
+          "payload_compared": 34,
+          "record_hash_verified": 37,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-dashboard",
+          "payload_compared": 891,
+          "record_hash_verified": 895,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-evolve",
+          "payload_compared": 16,
+          "record_hash_verified": 20,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-installer",
+          "payload_compared": 9,
+          "record_hash_verified": 13,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-knowledge",
+          "payload_compared": 15,
+          "record_hash_verified": 18,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-mcp-server",
+          "payload_compared": 13,
+          "record_hash_verified": 18,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-shield",
+          "payload_compared": 17,
+          "record_hash_verified": 20,
+          "record_without_hash": 1
+        }
+      ],
+      "limits": [
+        "No first-party modules, entry points or providers are imported/executed.",
+        "Generated launcher bytes are checked against installed RECORD and declared script names, not byte-compared to a wheel entry which does not contain them.",
+        "Hashless generated pyc and rewritten RECORD are enumerated, not claimed wheel-authenticated.",
+        "This verifies visible distribution origins, ordinary wheel payload and RECORD-listed files; it does not prove import resolution or absence of unlisted stale files.",
+        "Prior final06 wheel archives are not reopened or rehashed because their original sandbox ownership prevents access. Prior wheel identity and dependency metadata are checked against preserved verified binding, manifest, plan, install-source, and provenance receipts. All final08 wheel bytes, metadata and installed payload remain subject to fresh verification."
+      ]
+    },
+    "311": {
+      "python_version": [
+        3,
+        11,
+        14
+      ],
+      "label": "final08-install-01",
+      "status": "passed",
+      "result": {
+        "path": "audit/compat-interpreters/311/final08-install-01/result.json",
+        "sha256": "59a1e2c64d047624b4df306e73ff54ea3911cd7f241be9b4a98c69aa8321a2ea"
+      },
+      "native_readiness": {
+        "path": "audit/compat-interpreters/311/final08-install-01/native-readiness.json",
+        "sha256": "0bd2f4f8358aa762937f65216137e21236df3f34891d7d2eeb4b36f63c01dc8a"
+      },
+      "payload_receipt": {
+        "path": "audit/compat-interpreters/311/final08-install-01/installed-wheel-payload.json",
+        "sha256": "5f02fea87781678af4a63eafa4ae48edd73a59a78e09524388fb2c0c7b99784e"
+      },
+      "install_source": {
+        "path": "audit/compat-interpreters/311/final08-install-01/install-source.json",
+        "sha256": "d9bbd7b4022bc6b7a8bc7d18959f7b82f3069ea4d870d3b522a4be3f5db7106d"
+      },
+      "distributions": 96,
+      "retained_third_party": 88,
+      "third_party_unchanged": true,
+      "origins": {
+        "maverick": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick\\__init__.py",
+        "maverick_channels": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick_channels\\__init__.py",
+        "maverick_dashboard": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick_dashboard\\__init__.py",
+        "maverick_evolve": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick_evolve\\__init__.py",
+        "maverick_installer": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick_installer\\__init__.py",
+        "maverick_knowledge": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick_knowledge\\__init__.py",
+        "maverick_mcp": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick_mcp\\__init__.py",
+        "maverick_shield": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages\\maverick_shield\\__init__.py"
+      },
+      "sys_path": [
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\python311.zip",
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\DLLs",
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\Lib",
+        "C:\\Users\\Cstep\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-compat311\\Lib\\site-packages"
+      ],
+      "origin_probe_imported_first_party": false,
+      "first_party_wheels": [
+        {
+          "name": "maverick-agent",
+          "version": "0.1.7",
+          "sha256": "448dd9fe9bec5441ed672aebd7c75ebc50962d456cdc79896ed4fb11f0bf0d18",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "77409150a2e8bfc34d6e3eda7a37bbbe2bd40df00f6c9d9b2eff90d41227ad0a",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-channels",
+          "version": "0.1.7",
+          "sha256": "194fc3fa916f375b13f3a821bde14a737bf43d1d913b79790c7184c9d574c825",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "304236a9b522b8ae25c1cfed9d373c6d83b188871189f892a19c1da4237d20c9",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-dashboard",
+          "version": "0.1.7",
+          "sha256": "cd7272dd5dd2046aa73d6412b0cab45cf785d3342fa66952a295d14275bdd79c",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "8009f12dbdb1b39243c721f99938296523bb612ed37163c53c0c06f2e55a4c35",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-evolve",
+          "version": "0.1.7",
+          "sha256": "b8e6ffadac2247343fb6122135729ed896c8741393f3c28b3cb7016792894edd",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "53e7d329b9f2ae60a32797aedf4874089b42e65bab35d86b7c22521a032858f1",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-installer",
+          "version": "0.1.7",
+          "sha256": "a4425ad06fb34013244949fadfa83d5f5c99e7693a4ee920e5e4aa7ab20c2505",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "3bf3678ad6e9ff7564e485d101b84ce1f26ea7874d50dd581373b274b077825f",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-knowledge",
+          "version": "0.1.7",
+          "sha256": "bda4ae23826811ba6b562bd7801dadb166107d629cf5fe93a2363093876bad47",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "0ba7fdbd2c38694780b5c2fc2c5bcdff2ace21982f4f83e629b00dafc5022ecd",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-mcp-server",
+          "version": "0.1.7",
+          "sha256": "611dddf2979a0a7d75a04445367e66a1f60a401b6d525ffd94f95c42be1d6c1b",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "c811a52f1a5ed7cb07eb43e6308fc16f0771f047a136394feb9501b22d623819",
+          "prior_archive_reopened": false
+        },
+        {
+          "name": "maverick-shield",
+          "version": "0.1.7",
+          "sha256": "f3520925ea3da0478f79af81a23f5aaddbc98c9586869b6a37d4579802d1a177",
+          "dependency_metadata_unchanged": true,
+          "prior_wheel_sha256": "dac4d4f6b8e8bbcde533bbd3a54c2cd6981bf7ec4b5d21f54c552e81fd448595",
+          "prior_archive_reopened": false
+        }
+      ],
+      "commands": [
+        {
+          "label": "source-before-head",
+          "returncode": 0,
+          "elapsed_seconds": 0.031,
+          "timeout_seconds": 60,
+          "log_sha256": "a9578367390040112b73dda1b7b372c8ff62473048e7cec883f52126899da388"
+        },
+        {
+          "label": "source-before-status",
+          "returncode": 0,
+          "elapsed_seconds": 0.109,
+          "timeout_seconds": 60,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "label": "identity-before",
+          "returncode": 0,
+          "elapsed_seconds": 0.969,
+          "timeout_seconds": 60,
+          "log_sha256": "cc69cfcce8cfe092b3d6decb45ab16ecd1b3c1b77a628c1731fb1a71000c2c9d"
+        },
+        {
+          "label": "pip-list-before",
+          "returncode": 0,
+          "elapsed_seconds": 1.0,
+          "timeout_seconds": 60,
+          "log_sha256": "492efbd0e68729b32febe6c25aa52441c7269577f680849ceb8ae29e801bbd74"
+        },
+        {
+          "label": "source-preinstall-head",
+          "returncode": 0,
+          "elapsed_seconds": 0.047,
+          "timeout_seconds": 60,
+          "log_sha256": "a9578367390040112b73dda1b7b372c8ff62473048e7cec883f52126899da388"
+        },
+        {
+          "label": "source-preinstall-status",
+          "returncode": 0,
+          "elapsed_seconds": 0.109,
+          "timeout_seconds": 60,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "label": "install",
+          "returncode": 0,
+          "elapsed_seconds": 8.172,
+          "timeout_seconds": 600,
+          "log_sha256": "ac4cec38d13419ae4decfb0cf4b13168286e5fd4bfe0352af2fdb7cd555275c9"
+        },
+        {
+          "label": "pip-check",
+          "returncode": 0,
+          "elapsed_seconds": 0.657,
+          "timeout_seconds": 60,
+          "log_sha256": "672aec65a45bed50e70229c70934a7eebf0462595c459b83023027645d57cccf"
+        },
+        {
+          "label": "pip-list-after",
+          "returncode": 0,
+          "elapsed_seconds": 0.344,
+          "timeout_seconds": 60,
+          "log_sha256": "492efbd0e68729b32febe6c25aa52441c7269577f680849ceb8ae29e801bbd74"
+        },
+        {
+          "label": "identity-after",
+          "returncode": 0,
+          "elapsed_seconds": 0.187,
+          "timeout_seconds": 60,
+          "log_sha256": "cc69cfcce8cfe092b3d6decb45ab16ecd1b3c1b77a628c1731fb1a71000c2c9d"
+        },
+        {
+          "label": "installed-extras",
+          "returncode": 0,
+          "elapsed_seconds": 0.25,
+          "timeout_seconds": 60,
+          "log_sha256": "0c33a3b67788e53d07ba3b61b62ec2df9900fe6ac347ebd4605427c75a77c45a"
+        },
+        {
+          "label": "constraint-closure",
+          "returncode": 0,
+          "elapsed_seconds": 0.235,
+          "timeout_seconds": 60,
+          "log_sha256": "98895b20b4f34e654d218659793a70f094fb5f9a9762a65207c3070d1936b46e"
+        },
+        {
+          "label": "wheel-payload",
+          "returncode": 0,
+          "elapsed_seconds": 40.016,
+          "timeout_seconds": 60,
+          "log_sha256": "2dd59a49ef4c73c5b798423d658b1a57240a94efae5f52499064ea6927eeefd9"
+        },
+        {
+          "label": "source-after-head",
+          "returncode": 0,
+          "elapsed_seconds": 0.047,
+          "timeout_seconds": 60,
+          "log_sha256": "a9578367390040112b73dda1b7b372c8ff62473048e7cec883f52126899da388"
+        },
+        {
+          "label": "source-after-status",
+          "returncode": 0,
+          "elapsed_seconds": 0.094,
+          "timeout_seconds": 60,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "payload_counts": [
+        {
+          "name": "maverick-agent",
+          "payload_compared": 3861,
+          "record_hash_verified": 3866,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-channels",
+          "payload_compared": 34,
+          "record_hash_verified": 37,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-dashboard",
+          "payload_compared": 891,
+          "record_hash_verified": 895,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-evolve",
+          "payload_compared": 16,
+          "record_hash_verified": 20,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-installer",
+          "payload_compared": 9,
+          "record_hash_verified": 13,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-knowledge",
+          "payload_compared": 15,
+          "record_hash_verified": 18,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-mcp-server",
+          "payload_compared": 13,
+          "record_hash_verified": 18,
+          "record_without_hash": 1
+        },
+        {
+          "name": "maverick-shield",
+          "payload_compared": 17,
+          "record_hash_verified": 20,
+          "record_without_hash": 1
+        }
+      ],
+      "limits": [
+        "No first-party modules, entry points or providers are imported/executed.",
+        "Generated launcher bytes are checked against installed RECORD and declared script names, not byte-compared to a wheel entry which does not contain them.",
+        "Hashless generated pyc and rewritten RECORD are enumerated, not claimed wheel-authenticated.",
+        "This verifies visible distribution origins, ordinary wheel payload and RECORD-listed files; it does not prove import resolution or absence of unlisted stale files.",
+        "Prior final06 wheel archives are not reopened or rehashed because their original sandbox ownership prevents access. Prior wheel identity and dependency metadata are checked against preserved verified binding, manifest, plan, install-source, and provenance receipts. All final08 wheel bytes, metadata and installed payload remain subject to fresh verification."
+      ]
+    }
+  },
+  "retained_failed_attempts": [
+    {
+      "path": "audit/compat-interpreters/310/final08-install-01/result.json",
+      "sha256": "cf7c193be8ec8b9aa7335c107c83557d09c97706c5ee9d1b89b246d7c5712872",
+      "status": "failed",
+      "mutation_started": false,
+      "error": {
+        "detail": "[Errno 13] Permission denied: 'C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\audit\\\\qualification-final-06-contracts\\\\wheels\\\\maverick_agent-0.1.7-py3-none-any.whl'",
+        "type": "PermissionError"
+      }
+    },
+    {
+      "path": "audit/compat-interpreters/310/final08-install-02/result.json",
+      "sha256": "c8d9863126538b1f515a82608af633ba8432a7a8472f5b5959da46b1e41f979d",
+      "status": "failed",
+      "mutation_started": false,
+      "error": {
+        "detail": "[Errno 13] Permission denied: 'C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\audit\\\\qualification-final-08-contracts\\\\wheels\\\\maverick_agent-0.1.7-py3-none-any.whl'",
+        "type": "PermissionError"
+      }
+    }
+  ],
+  "remaining": "Full final08 collection, ordinary four-worker suites and separate serial-heavy cohorts on Python3.10 and3.11 remain held until root's Python3.12 phases complete."
+}

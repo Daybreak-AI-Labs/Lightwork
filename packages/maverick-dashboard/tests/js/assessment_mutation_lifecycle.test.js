@@ -3,8 +3,9 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 const read = name => fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/templates",name),"utf8").replace(/\r\n/g,"\n");
-const source=read("_assessment_review.html"),queue=read("_approvals_queue.html");
+const source=fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/templates/_assessment_review.html"),"utf8").replace(/\r\n/g,"\n").replace(/<script\b[^>]*><\/script>\s*$/,"")+"<script>"+fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-assessment-review.js"),"utf8")+"</script>",queue=read("_approvals_queue.html");
 const flush=async()=>{for(let i=0;i<12;i++)await new Promise(setImmediate);};
 const record=id=>({id,revision:1,subject:"Subject "+id,type:"pia",status:"pending_review",answers:{},question_text:{},result:{total:0,answered:0},followups:[]});
 async function fixture(action) {
@@ -20,11 +21,12 @@ async function fixture(action) {
     const match=url.match(/\/sessions\/([AB])$/);
     return {ok:true,json:async()=>match?record(match[1]):{timeline:[]}};
   };
+  shell(w);
   w.eval(source.slice(source.indexOf("<script>")+8,source.indexOf("</script>")));
   const start=queue.indexOf("    document.addEventListener('mv-assessment-decided'");
   w.eval(queue.slice(start,queue.indexOf("\n  })();",start)));
   const mutate=queue.indexOf("  (function() {\n    const msg = document.getElementById('approval-msg')");
-  w.eval(queue.slice(mutate,queue.lastIndexOf("</script>")));
+  w.eval(queue.slice(mutate,queue.indexOf("</script>",mutate)));
   await w.mvAssessmentReview.open("A");
   return {dom,w,doc,calls,events,resolve:body=>resolve(body),reject:error=>reject(error)};
 }

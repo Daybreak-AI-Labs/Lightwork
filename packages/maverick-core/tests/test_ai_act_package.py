@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from maverick import ai_act_package as pkg
 
 
@@ -108,3 +109,39 @@ def test_logging_audit_signing_is_probed_not_read_from_config(monkeypatch, tmp_p
 def test_package_is_json_serializable(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     json.dumps(pkg.build_package(), default=str)
+
+
+@pytest.mark.parametrize(
+    ("environment", "saved", "enabled"),
+    [
+        (None, None, True),
+        (None, "", False),
+        ("", "Visible saved message", False),
+        ("  ", None, False),
+        ("Visible environment message", "", True),
+    ],
+)
+def test_transparency_matches_effective_disclosure_and_compliance_report(
+    tmp_path, monkeypatch, environment, saved, enabled,
+):
+    """An explicit opt-out cannot be described as a wired Art. 50 control."""
+    from maverick import compliance, config
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    if environment is None:
+        monkeypatch.delenv("MAVERICK_AI_DISCLOSURE", raising=False)
+    else:
+        monkeypatch.setenv("MAVERICK_AI_DISCLOSURE", environment)
+    saved_config = {} if saved is None else {"compliance": {"disclosure_text": saved}}
+    monkeypatch.setattr(config, "load_config", lambda: saved_config)
+
+    built = pkg.build_package()
+    transparency = built["transparency"]
+    control = next(check for check in compliance.compliance_report()
+                   if check.regulation == "EU AI Act Art. 50")
+    assert transparency["first_turn_disclosure_enabled"] is enabled
+    assert control.status == ("active" if enabled else "action_needed")
+    markdown = pkg.render_markdown(built)
+    assert ("first-turn AI disclosure: enabled" if enabled
+            else "first-turn AI disclosure: disabled by operator") in markdown
+    assert "wired" not in transparency["first_turn_disclosure"]

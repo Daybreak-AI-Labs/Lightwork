@@ -21,7 +21,7 @@ def _ep(eid, domain, tool, outcome):
 
 
 def _corpus():
-    # X is causally harmful (0.2), Y causally beneficial (0.9), in both domains.
+    # X/Y correlate with outcomes; these ordinary rows prove no causal effect.
     steps, eid = [], 0
     for domain in ("fin", "ops"):
         for _ in range(12):
@@ -38,14 +38,13 @@ def test_run_once_turns_every_engine(tmp_path):
     mem = pm.MemoryStore(path=tmp_path / "m.json")
     rep = flywheel.run_once(_corpus(), guardrails=rails, memory=mem)
 
-    assert rep.n_episodes == 48 and rep.acted
-    assert [g.action for g in rep.guardrails] == ["X"]          # guard: harmful X
-    assert [m.action for m in rep.memories] == ["Y"]            # remember: beneficial Y
-    assert rep.hypotheses and rep.hypotheses[0].baseline_action == "X"
-    assert rep.hypotheses[0].candidate_action == "Y"            # discover: swap X -> Y
-    assert rep.predicted_lift > 0.5
-    # registries persisted
-    assert rails.consult("X") is not None and mem.strength_of("Y") > 0
+    assert rep.n_episodes == 48 and not rep.acted
+    assert rep.failure_classes[0].action == "X"
+    assert not rep.failure_classes[0].trustworthy
+    assert not rep.guardrails and not rep.memories and not rep.hypotheses
+    assert rep.predicted_lift == 0
+    # The real writer persists no causal promotion from observational evidence.
+    assert rails.consult("X") is None and mem.strength_of("Y") == 0
 
 
 def test_halt_at_guardrail_persistence_boundary_prevents_learned_write(
@@ -92,8 +91,8 @@ def test_run_once_simulates_when_world_model_supplied(tmp_path):
         _corpus(), guardrails=nk.GuardrailRegistry(path=tmp_path / "g.json"),
         memory=pm.MemoryStore(path=tmp_path / "m.json"),
         world_model=wm, start_states=[START])
-    assert rep.simulations
-    assert rep.simulations[0].sim_lift > 0 and rep.simulations[0].worth_experimenting
+    assert rep.failure_classes and not rep.guardrails
+    assert not rep.simulations  # simulated results cannot repair missing causal evidence
 
 
 def test_grounded_outcome_prefers_reality(tmp_path, monkeypatch):

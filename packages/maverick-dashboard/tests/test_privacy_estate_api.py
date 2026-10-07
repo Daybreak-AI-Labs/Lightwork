@@ -92,6 +92,15 @@ def test_vendor_questionnaire_lifecycle_over_the_api():
               "revision": vendor["revision"]})
     assert sent.status_code == 201, sent.text
     assert sent.json()["form_path"].startswith("/form/")
+    token = sent.json()["form_path"].removeprefix("/form/")
+    assert "token" not in sent.json()["questionnaires"][0]
+
+    # The creation response is the only place the public bearer link is shown.
+    listed = client.get("/api/v1/vendors").json()
+    detail = client.get(f"/api/v1/vendors/{vendor['id']}").json()
+    for projection in (listed, detail):
+        assert token not in str(projection)
+    assert detail["questionnaires"][0]["request_id"]
 
     bad = client.post(
         f"/api/v1/vendors/{vendor['id']}/questionnaires",
@@ -102,19 +111,113 @@ def test_vendor_questionnaire_lifecycle_over_the_api():
     back = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires")
     assert back.status_code == 200
     assert back.json()["questionnaires"][0]["status"] == "sent"
+    assert token not in back.text
+    assert "form_path" not in back.json()["questionnaires"][0]
+
+
+def test_admin_can_replace_vendor_link_without_losing_replies(monkeypatch):
+    import maverick_dashboard.api as api
+    from maverick import form_store
+
+    vendor = client.post("/api/v1/vendors", json={
+        "name": "Link rotation", "category": "hosting",
+        "criticality": "high", "owner": "it",
+    }).json()
+    sent = client.post(
+        f"/api/v1/vendors/{vendor['id']}/questionnaires",
+        json={"assessment_type": "vendor_risk", "revision": vendor["revision"]},
+    ).json()
+    old_path = sent["form_path"]
+    assert client.post(old_path, json={"vr_q1": "yes"}).status_code == 201
+    rows = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires").json()["questionnaires"]
+    request_id = rows[0]["request_id"]
+    url = f"/api/v1/vendors/{vendor['id']}/questionnaires/{request_id}/replace"
+
+    original_permission = api.require_permission
+
+    def operator_only(request, permission):
+        if permission == "admin":
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Administrator access required.")
+        return original_permission(request, permission)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(api, "require_permission", operator_only)
+        assert client.post(url, json={"revision": sent["revision"]}).status_code == 403
+    assert client.get(old_path).status_code == 200
+
+    stale = client.post(url, json={"revision": vendor["revision"]})
+    assert stale.status_code == 409
+    assert client.post(old_path, json={"vr_q1": "no"}).status_code == 201
+
+    replaced = client.post(url, json={"revision": sent["revision"]})
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.headers["cache-control"] == "no-store"
+    new_path = replaced.json()["form_path"]
+    assert new_path != old_path
+    for route in ("/api/v1/vendors", f"/api/v1/vendors/{vendor['id']}",
+                  f"/api/v1/vendors/{vendor['id']}/questionnaires"):
+        projection = client.get(route)
+        assert projection.status_code == 200
+        assert old_path.rsplit("/", 1)[-1] not in projection.text
+        assert new_path.rsplit("/", 1)[-1] not in projection.text
+    assert client.get(old_path).status_code == 404
+    assert client.post(old_path, json={"vr_q1": "no"}).status_code == 404
+    assert client.get(new_path).status_code == 200
+    assert client.post(new_path, json={"vr_q1": "no"}).status_code == 201
+    readback = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires")
+    assert readback.headers["cache-control"] == "no-store"
+    history = readback.json()["questionnaires"][0]
+    assert history["previous_links"][0]["reply_count"] == 2
+    assert history["previous_links"][0]["submissions"][0]["vr_q1"] == "yes"
+    assert history["submissions"][0]["vr_q1"] == "no"
+    assert client.post(url, json={"revision": replaced.json()["revision"]}).status_code == 404
+    assert form_store.is_closed(old_path.rsplit("/", 1)[-1])
+
+
+def test_vendor_questionnaire_read_failure_returns_unavailable(monkeypatch):
+    from maverick import form_store
+
+    vendor = client.post("/api/v1/vendors", json={
+        "name": "Globex", "category": "hosting",
+        "criticality": "medium", "owner": "it",
+    }).json()
+    sent = client.post(
+        f"/api/v1/vendors/{vendor['id']}/questionnaires",
+        json={"assessment_type": "vendor_risk", "revision": vendor["revision"]},
+    ).json()
+
+    def fail_read(_token, _cursor):
+        raise OSError("private storage detail")
+
+    monkeypatch.setattr(form_store, "since", fail_read)
+    response = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires")
+    assert response.status_code == 503
+    assert "couldn't check questionnaire replies" in response.json()["detail"]
+    assert "questionnaires" not in response.json()
+    assert "private storage detail" not in response.text
+    assert sent["form_path"] not in response.text
 
 
 def test_vendor_status_note_and_onetrust_import():
     vendor = client.post("/api/v1/vendors", json={
         "name": "Initech", "category": "billing",
         "criticality": "low", "owner": "finance"}).json()
-    moved = client.post(
-        f"/api/v1/vendors/{vendor['id']}/status",
-        json={"status": "under_review", "revision": vendor["revision"]})
-    assert moved.status_code == 200, moved.text
-    stale = client.post(
+    # A new vendor starts under review; activating it needs a completed
+    # assessment, so a bare status move to active is refused.
+    assert vendor["status"] == "under_review"
+    gated = client.post(
         f"/api/v1/vendors/{vendor['id']}/status",
         json={"status": "active", "revision": vendor["revision"]})
+    assert gated.status_code == 422, gated.text
+    moved = client.post(
+        f"/api/v1/vendors/{vendor['id']}/status",
+        json={"status": "offboarded", "revision": vendor["revision"]})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["status"] == "offboarded"
+    stale = client.post(
+        f"/api/v1/vendors/{vendor['id']}/status",
+        json={"status": "under_review", "revision": vendor["revision"]})
     assert stale.status_code == 409
 
     noted = client.post(
@@ -291,6 +394,7 @@ def test_questionnaire_page_and_submission_without_automation_events():
     # The vendor's link renders the questionnaire -- no account, no auth.
     page = client.get(form_path)
     assert page.status_code == 200
+    assert page.headers["cache-control"] == "no-store"
     assert "Pied Piper" in page.text
     assert "Submit answers" in page.text
     assert 'class="public-shell ' in page.text
@@ -430,13 +534,17 @@ def test_breach_plan_endpoints(tmp_path):
     assert plan.status_code == 200, plan.text
     rows = {row["regime"]: row for row in plan.json()["obligations"]}
     assert rows["eu_gdpr"]["authority_due_at"] is not None
+    unknown = client.post("/api/v1/breach/plan", json={
+        "jurisdictions": ["us_ca"],
+    })
+    assert unknown.json()["obligations"][0]["authority_below_threshold"] is None
     bad = client.post("/api/v1/breach/plan",
                       json={"jurisdictions": ["narnia"]})
     assert bad.status_code == 422
     # Anchored to a real incident's discovery time.
     opened = client.post("/api/v1/privacy/incidents", json={
         "title": "Laptop lost", "severity": "high",
-        "affected_estimate": "about 600 people",
+        "affected_estimate": "1.2k customers", "affected_people": "1200",
     })
     assert opened.status_code == 201, opened.text
     incident = opened.json()
@@ -445,8 +553,65 @@ def test_breach_plan_endpoints(tmp_path):
         + "/notification-plan?jurisdictions=eu_gdpr,us_co")
     assert anchored.status_code == 200, anchored.text
     body = anchored.json()
-    assert body["subjects_affected"] == 600
+    assert body["subjects_affected"] == 1200
     assert body["discovered_at"] == incident["created_at"]
+    revised = client.post(
+        f"/api/v1/privacy/incidents/{incident['id']}/affected-people",
+        json={"affected_people": None},
+    )
+    assert revised.status_code == 200, revised.text
+    assert revised.json()["affected_estimate"] == "1.2k customers"
+    unknown_plan = client.get(
+        f"/api/v1/privacy/incidents/{incident['id']}/notification-plan"
+        "?jurisdictions=us_ca,jp_appi"
+    ).json()
+    assert unknown_plan["subjects_affected"] is None
+    assert all(row["authority_below_threshold"] is None
+               for row in unknown_plan["obligations"])
+    assert all("count not provided" in row["threshold_note"]
+               for row in unknown_plan["obligations"])
+
+
+def test_legacy_incident_counts_are_used_only_when_unambiguous(tmp_path):
+    from maverick import config, privacy_ops
+
+    (tmp_path / "config.toml").write_text(
+        _CONFIG + "\n[breach_notification]\nenable = true\n",
+        encoding="utf-8")
+    config.reset_config_cache()
+    for estimate, expected in (
+        ("1,200", 1200),
+        ("1.2k customers", None),
+        ("1,000-5,000", None),
+        ("~300 (0.5% of base)", None),
+    ):
+        opened = client.post("/api/v1/privacy/incidents", json={
+            "title": "Legacy count", "affected_estimate": estimate,
+        }).json()
+        privacy_ops._INCIDENT.update(
+            opened["id"], lambda row: row.pop("affected_people", None))
+        plan = client.get(
+            f"/api/v1/privacy/incidents/{opened['id']}/notification-plan"
+            "?jurisdictions=us_ca,jp_appi"
+        )
+        assert plan.status_code == 200, plan.text
+        assert plan.json()["subjects_affected"] == expected
+        assert all(row["authority_below_threshold"] is not True
+                   for row in plan.json()["obligations"])
+        if estimate == "1.2k customers":
+            corrected = client.post(
+                f"/api/v1/privacy/incidents/{opened['id']}/affected-people",
+                json={"affected_people": 1200},
+            )
+            assert corrected.status_code == 200, corrected.text
+            assert corrected.json()["affected_estimate"] == estimate
+            updated_plan = client.get(
+                f"/api/v1/privacy/incidents/{opened['id']}/notification-plan"
+                "?jurisdictions=us_ca,jp_appi"
+            ).json()
+            assert updated_plan["subjects_affected"] == 1200
+            assert all(row["authority_below_threshold"] is False
+                       for row in updated_plan["obligations"])
 
 
 def test_dsar_fulfillment_flow_over_the_api(tmp_path):

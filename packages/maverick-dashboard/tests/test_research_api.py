@@ -452,17 +452,17 @@ def test_research_page_asset_and_visible_navigation_are_customer_reachable(clien
     page = customer.get("/research")
     assert page.status_code == 200, page.text
     assert 'id="research-lab"' in page.text
-    assert 'src="/static/lightwork-research.js"' in page.text
-    assert 'src="/static/lightwork-research-workspace.js"' in page.text
-    assert 'src="/static/lightwork-candidate-promotions.js"' in page.text
-    assert 'src="/static/lightwork-research-plain.js"' in page.text
+    assert 'src="/static/lightwork-research.js?v=' in page.text  # served with a cache-busting version
+    assert 'src="/static/lightwork-research-workspace.js?v=' in page.text  # served with a cache-busting version
+    assert 'src="/static/lightwork-candidate-promotions.js?v=' in page.text  # served with a cache-busting version
+    assert 'src="/static/lightwork-research-plain.js?v=' in page.text  # served with a cache-busting version
     from test_support.plain_language import developer_terms, visible_text
     assert developer_terms(page.text) == []
     text = visible_text(page.text)
     for banned in ("SHA-256", "Unix seconds", "bytes", "Dataset ID", "Run ID", "Seed", "Evaluator ID"):
         assert banned not in text, banned
     for label in ("Dataset name", "License or contract document", "What it may be used for",
-                  "Time limit", "Storage limit", "Code project"):
+                  "Time limit", "Storage limit", "Saved program"):
         assert label in text, label
     assert 'type="file" data-fingerprint-for="license_evidence_sha256"' in page.text
     plain = customer.get("/static/lightwork-research-plain.js")
@@ -816,7 +816,15 @@ def test_governed_registry_run_and_export_are_available_without_cli(client, monk
     overview = customer.get(BASE).json()
     assert overview["registry"]["datasets"][0]["state"] == "approved"
     assert overview["governed_runs"][0]["run_id"] == "ui-run-1"
-    assert overview["governed_execution"]["state"] == "unavailable"
+    # The fixture's installation profile turns the packaged executor on, so
+    # the overview reports it; turning the profile off reports it unavailable.
+    assert overview["governed_execution"]["state"] == "configured"
+    profile = os.environ["MAVERICK_HOME"] + "/config.toml"
+    with open(profile, "w", encoding="utf-8") as handle:
+        handle.write("[research_execution]\nenable = false\n")
+    config.reset_config_cache()
+    disabled = customer.get(BASE).json()["governed_execution"]
+    assert disabled["available"] is False and disabled["state"] == "unavailable"
 
     governance["rights"] = False
     blocked = customer.get(BASE).json()

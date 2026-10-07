@@ -313,13 +313,12 @@ def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
     because the real problem is that Lightwork refuses to bill a model with
     no verified price, not that spend or time ran out.
     """
+    del exc, goal_id
     return (
-        "Stopped: this goal used a model with no verified price, so "
-        "Lightwork refused to bill it rather than guess.\n"
-        f"Detail: {_safe_exception_text(exc, fallback='model price unavailable')}\n"
-        "Fix: add a sourced price for this model to the rate card, or set "
-        "[budget] strict_pricing = false to allow a warning-labelled "
-        f"estimate, then resume: maverick resume {goal_id}"
+        "Lightwork paused because the selected AI model has no usable price. "
+        "Open Settings, review Models > Prices, then choose a priced model or "
+        "enter your current contract's spending ceiling. You can retry this "
+        "task after the price is ready."
     )
 
 
@@ -399,6 +398,21 @@ def _review_checkpoint_message(detail: str, goal_id: Any) -> str:
     )
 
 
+def _webhook_public_payload(event: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep technical stop text in the run record, not an outbound callback."""
+    if event != "goal_finished" or payload.get("status") not in {"blocked", "failed"}:
+        return payload
+    from .stop_reasons import stop_payload
+
+    raw = payload.get("result")
+    stop = stop_payload(payload["status"], raw if isinstance(raw, str) else None)
+    if stop is None:  # pragma: no cover -- guarded by terminal status above
+        return payload
+    if stop["kind"] == "other":
+        stop["message"] = "The run stopped before finishing."
+    return {**payload, "result": stop["message"], "stop": stop}
+
+
 def _fire_webhook(event: str, payload: dict[str, Any]) -> None:
     """Emit a run-lifecycle webhook, never raising into the run loop.
 
@@ -410,7 +424,7 @@ def _fire_webhook(event: str, payload: dict[str, Any]) -> None:
         if twin.active():
             return  # a production twin replay is not a run anyone subscribed to
         from .webhooks import fire
-        fire(event, payload)
+        fire(event, _webhook_public_payload(event, payload))
     except Exception as e:  # pragma: no cover -- webhooks never block a run
         log.debug(
             "webhook %s skipped: %s",
@@ -539,7 +553,10 @@ def _maybe_learning_cache_block(goal, shield) -> str | None:
         from .pilot_learning import excluded
         if excluded(goal.id):
             return None
-        entry = learning.shared().get(_learning_cache_task(goal))
+        owner = getattr(goal, "owner", None)
+        if not isinstance(owner, str):
+            return None
+        entry = learning.shared().get(_learning_cache_task(goal), source_owner=owner)
         if not entry:
             return None
         result = str(entry.get("result") or "").strip()
@@ -548,6 +565,9 @@ def _maybe_learning_cache_block(goal, shield) -> str | None:
             if not getattr(verdict, "allowed", True):
                 return None
         if not result:
+            return None
+        from .learning_content import allowed
+        if not allowed(entry, owner=owner) or excluded(goal.id):
             return None
         return (
             "\n## A verified answer to this exact task from an earlier run\n"
@@ -580,7 +600,8 @@ def _maybe_store_learning_cache(goal, summary: str, confidence: float | None) ->
         if excluded(goal.id):
             return
         learning.shared().put(_learning_cache_task(goal), summary,
-                              verified_by=f"verifier:goal-{goal.id}")
+                              verified_by=f"verifier:goal-{goal.id}",
+                              source_goal_id=goal.id, source_owner=getattr(goal, "owner", None))
 
 
 def _maybe_recall_prior_work(world, goal, shield) -> str | None:
@@ -621,6 +642,8 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
             for score, meta in sem:
                 gid = meta.get("goal_id")
                 g = world.get_goal(gid) if gid is not None else None
+                if g is None or g.owner != (goal.owner or ""):
+                    continue
                 rows.append((
                     score, gid,
                     (getattr(g, "title", None) or "") if g else "",
@@ -628,7 +651,7 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
                 ))
         else:
             from .tools.recall import recall_past_goals
-            for score, g in recall_past_goals(query, num_results=k + 2, world=world):
+            for score, g in recall_past_goals(query, num_results=k + 2, world=world, owner=goal.owner or ""):
                 rows.append((score, g.id, g.title or "", g.result or ""))
         lines: list[str] = []
         for score, gid, title, raw_result in rows:
@@ -821,6 +844,7 @@ def _maybe_record_reflexion(
             # mining scopes the resulting guidance so an orchestrator lesson
             # doesn't tax worker prompts of the same model.
             role="orchestrator",
+            owner=getattr(goal, "owner", "") or "", goal_id=goal.id,
         )
 
 
@@ -901,6 +925,8 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
             )
         else:
             facts = world.get_facts()
+        from .fact_revision import is_private_fact_key
+        facts = {key: value for key, value in facts.items() if not is_private_fact_key(key)}
     # Bound the block: facts are a standing brief section on EVERY goal, and
     # the store grows forever (kv_memory, dashboard, MCP all write it). Keep
     # the newest N (get_facts orders newest-first) and cap each value, the
@@ -960,9 +986,11 @@ async def _apply_brief_enrichments(
     # gaps and pre-acquire matching catalog skills before the swarm
     # starts, so the agent's first turn already has them. Provider egress,
     # MCP acquisition and generated tools retain separate authority gates.
+    from .chat_message_actions import answer_only_runtime, require_dispatch_sources
+    require_dispatch_sources()
     with _enrich("self-learning preflight"):
         from . import self_learning
-        if self_learning.enabled() and self_learning.settings()["preflight"]:
+        if not answer_only_runtime() and self_learning.enabled() and self_learning.settings()["preflight"]:
             acquired = await self_learning.preflight(
                 llm, f"{goal.title}\n{goal.description or ''}", budget,
                 blackboard,
@@ -1039,6 +1067,7 @@ async def _apply_brief_enrichments(
                 channel=channel,
                 user_id=user_id,
                 domain=domain,
+                owner=goal.owner or "",
             )
             ctx_block = reflexion.format_context(recalled, shield=shield)
             if ctx_block:
@@ -1056,6 +1085,7 @@ async def _apply_brief_enrichments(
             _dreamed = dreaming.recall_insights(
                 f"{goal.title}\n{goal.description or ''}", domain=domain,
                 channel=channel, user_id=user_id,
+                owner=goal.owner or "",
             )
             _dream_block = dreaming.format_context(_dreamed, shield=shield)
             if _dream_block:
@@ -1065,7 +1095,9 @@ async def _apply_brief_enrichments(
             # learned from; framed as untrusted self-reported data.
             from . import user_notes as _un
             _notes_block = _un.format_context(
-                _un.notes_for(channel, user_id), shield=shield,
+                _un.notes_for(channel, (goal.owner or "").removeprefix("user:" + str(channel) + ":")
+                              if (goal.owner or "").startswith("user:" + str(channel) + ":account:") else user_id,
+                              execution_identity=not (goal.owner or "").startswith("user:" + str(channel) + ":account:")), shield=shield,
             )
             if _notes_block:
                 brief = brief + "\n" + _notes_block
@@ -1442,14 +1474,26 @@ class _RunLifecycle:
         if error is not None:
             cancelled = isinstance(error, asyncio.CancelledError)
             allowance_stop = isinstance(error, BudgetExceeded)
-            self.summary = (
-                _budget_stop_message(self.budget, self.goal_id, error) if allowance_stop
-                else cancellation_message(error) if cancelled else f"internal error: {error}"
-            )
-            self.outcome = "interrupted" if cancelled or allowance_stop else "failure"
-            self.world.set_goal_status(
-                self.goal_id, "cancelled" if cancelled else "blocked", result=self.summary,
-            )
+            if cancelled or allowance_stop:
+                self.summary = (
+                    cancellation_message(error) if cancelled
+                    else _budget_stop_message(self.budget, self.goal_id, error)
+                )
+                self.outcome = "interrupted"
+                self.world.set_goal_status(
+                    self.goal_id, "cancelled" if cancelled else "blocked",
+                    result=self.summary,
+                )
+            else:
+                from .stop_reasons import exception_stop_text, explain_stop
+
+                reason = exception_stop_text(error)
+                self.summary = explain_stop(reason).message
+                self.outcome = "failure"
+                goal = self.world.get_goal(self.goal_id)
+                if goal is None or goal.status != "failed":
+                    self.world.set_goal_status(self.goal_id, "failed", result=reason)
+                    self.world.append_event(self.goal_id, "Lightwork", "error", self.summary)
         else:
             goal = self.world.get_goal(self.goal_id)
             if goal.status == "cancelled":
@@ -1547,6 +1591,21 @@ def _evidence_ready_goal_output(
         context_sha256=context_sha,
     )
     return str(delivery["delivered_text"])
+
+
+def _goal_already_ran(world: Any, goal_id: int) -> bool:
+    """Whether a run of this task is already on record (so it was let through).
+
+    ``resume=True`` only says the caller will pick up saved work if there is
+    any -- the shared runner passes it for every dashboard, API, schedule, flow
+    and queue start, first starts included (UX-014) -- so it cannot stand for
+    "a person already approved this". A recorded run can: the start check comes
+    before the first run is recorded, so a task it held has none. When that
+    cannot be read, the check applies."""
+    try:
+        return bool(world.list_episodes(limit=1, goal_id=goal_id))
+    except Exception:
+        return False
 
 
 async def _goal_risk_gate(goal_id: int, goal: Any, *, resuming: bool) -> tuple[dict, str | None]:
@@ -1757,13 +1816,23 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     # After the trace context is bound: an approval request takes its task and
     # requester from it. A resumed task was already let through once.
     _risk_record, _risk_refusal = await _goal_risk_gate(
-        goal_id, goal, resuming=bool(resume or resume_episode_id is not None))
+        goal_id, goal,
+        resuming=resume_episode_id is not None or (bool(resume) and _goal_already_ran(world, goal_id)))
     if _risk_refusal:
         world.set_goal_status(goal_id, "blocked", result=_risk_refusal)
         log.warning("goal #%s not started: %s", goal_id, _risk_refusal)
         return _risk_refusal
     _lifecycle.started = True
-    world.set_goal_status(goal_id, "active")
+    try:
+        world.set_goal_status(goal_id, "active")
+    except Exception as exc:
+        from .event_admission import EventRegistryUnavailable
+
+        if isinstance(exc, EventRegistryUnavailable):
+            # The registry read failed before the pending goal was claimed.
+            # No execution began; preserve the reservation for a queue retry.
+            _lifecycle.started = False
+        raise
     # Success-path audit: a tamper-evident GOAL_START on the signed chain so the
     # audit trail records the run beginning, not just denials. audit_event
     # swallows write errors; a REFUSAL propagates, because a deployment whose
@@ -1872,6 +1941,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         log.warning("goal #%s blocked by UserPromptSubmit hook", goal_id)
         return "BLOCKED: goal input rejected by a UserPromptSubmit hook"
 
+    from .knowledge_task_context import has_binding, run_analysis
+    if has_binding(goal_id, world):
+        return await run_analysis(world, goal_id, budget, _lifecycle, shield=shield)
+
     _fire_webhook("goal_created", {"goal_id": goal_id, "title": goal.title})
 
     mcp_specs = load_mcp_specs_from_config()
@@ -1933,13 +2006,35 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         domain_profile = None
         if domain:
             try:
-                from .domain import agent_from_profile, enabled_domains
+                from .domain import (
+                    agent_from_profile,
+                    enabled_domains,
+                    rejected_workspace_domains,
+                    suites_for_domain,
+                )
                 # enabled_domains() honors the operator's [suites] toggles, so a
                 # domain whose suite is switched off is treated as unavailable.
                 _profile = enabled_domains().get(domain)
                 if _profile is None:
-                    msg = (f"no such domain: {domain!r} (unknown or its suite is "
-                           "disabled). See `maverick compartments` for available domains.")
+                    if domain in rejected_workspace_domains():
+                        msg = (
+                            f"{domain!r} cannot start because its setup needs review. "
+                            "Ask an administrator to check its permissions and "
+                            "operating limits. No work was started."
+                        )
+                    else:
+                        msg = (f"no such domain: {domain!r} (unknown or its suite is "
+                               "disabled). See `maverick compartments` for available domains.")
+                    world.set_goal_status(goal_id, "blocked", result=msg)
+                    _lifecycle.end_episode(msg, "blocked")
+                    _fire_webhook("goal_finished", {
+                        "goal_id": goal_id, "status": "blocked", "result": msg,
+                    })
+                    return msg
+                if (allowed_suites is not None
+                        and not suites_for_domain(domain, _profile) <= allowed_suites):
+                    msg = ("This specialist is outside your department access. "
+                           "No work was started.")
                     world.set_goal_status(goal_id, "blocked", result=msg)
                     _lifecycle.end_episode(msg, "blocked")
                     _fire_webhook("goal_finished", {
@@ -2040,11 +2135,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             return message
         except Exception as e:
             # Anything else escaping the swarm (LLM auth/network errors, a
-            # sandbox exec failure) used to leave the goal row stuck 'active'
-            # forever -- a ghost in `status` and the dashboard. Mark it failed
-            # and close the episode, then re-raise so the caller can present
-            # the error (the CLI turns it into a one-line message).
+            # sandbox exec failure) must leave a finished state. Keep raw SDK
+            # details in the server log; the saved goal and work log carry a
+            # plain, non-sensitive cause and next step for the customer.
+            from .stop_reasons import exception_stop_text, explain_stop
+
             safe_error = _safe_exception_text(e, fallback="internal run failure")
+            reason = exception_stop_text(e)
             try:
                 _lifecycle.end_episode(f"error: {safe_error}", "failure")
             except Exception:  # pragma: no cover
@@ -2055,8 +2152,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             except Exception:  # pragma: no cover -- telemetry never blocks a run
                 pass
             try:
-                world.set_goal_status(
-                    goal_id, "blocked", result=f"internal error: {safe_error}",
+                world.set_goal_status(goal_id, "failed", result=reason)
+                world.append_event(
+                    goal_id, "Lightwork", "error", explain_stop(reason).message,
                 )
             except Exception:  # pragma: no cover
                 pass
@@ -2075,11 +2173,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         if result.blocked_on_user:
             _lifecycle.end_episode("blocked awaiting user", "interrupted")
             world.set_goal_status(goal_id, "blocked")
-            _fire_webhook("goal_finished", {
-                "goal_id": goal_id, "status": "blocked",
-                "result": "blocked awaiting user",
-            })
             qs = world.open_questions(goal_id)
+            _fire_webhook("goal_waiting", {
+                "goal_id": goal_id, "status": "blocked",
+                "waiting_for": "user_input",
+                "open_question_count": min(len(qs), 10000),
+                "open_question_count_complete": len(qs) <= 10000,
+            })
             # Question-asked signal: a stall on missing input is a learnable
             # pattern — record WHAT was missing so the next similar goal
             # gathers it up front (recalled via reflexion; dreaming
@@ -2495,19 +2595,30 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # skill either. This is the second of the two distillation call
         # sites the freeze needs to reach -- this one is opt-in but still
         # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
-        if auto_distill and _skill_distillation_frozen():
+        if auto_distill and getattr(goal, "owner", None) != "":
+            auto_distill = False
+            skill_note = ""
+            try:
+                from .audit import EventKind, audit_event
+                if not audit_event(EventKind.SKILL_DISTILL_SKIPPED,
+                                   agent="skill_distillation", goal_id=goal_id,
+                                   reason="private_source"):
+                    log.warning("private skill distillation skip audit unavailable")
+            except Exception:  # no learning action to roll back
+                log.warning("private skill distillation skip audit unavailable")
+        elif auto_distill and _skill_distillation_frozen():
             auto_distill = False
             skill_note = "\n\n[skill distill skipped: learning is frozen (verifier calibration inadequate)]"
         elif auto_distill:
             try:
-                skill = distill(goal.title, summary, blackboard, llm, budget=budget)
-                # A None return means the distiller's output failed the skill
-                # validation/shield gate (#396) and was NOT written. Say so:
-                # auto-distill used to go silent here, indistinguishable from
-                # "never ran" (platform-test finding).
+                skill = distill(goal.title, summary, blackboard, llm,
+                                budget=budget, source_world=world)
+                # A None return means no skill was installed (validation,
+                # source scope, HALT, or audit may have refused it). Do not
+                # claim a specific failed gate that the caller cannot know.
                 skill_note = (
                     f"\n\n[distilled skill: {skill.name}]" if skill
-                    else "\n\n[skill distill: output failed validation; no skill written]"
+                    else "\n\n[skill distill: no skill installed]"
                 )
             except BudgetExceeded:
                 skill_note = "\n\n[skill distill skipped: budget]"
@@ -2544,7 +2655,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 trajectories = [
                     {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}
-                    for g in world.list_goals(status="done", limit=10, order="desc")
+                    for g in world.list_goals(status="done", limit=10, order="desc", owner="")
                 ]
                 # v2: gate on evidence + dedup against the learned-skills store
                 # so the loop doesn't accumulate near-duplicate skills each run.
@@ -2623,6 +2734,9 @@ async def _run_goal_accounted(
     )
     lifecycle = _RunLifecycle(world, goal_id, budget)
     error: BaseException | None = None
+    from .goal_heartbeat import start_goal_heartbeat
+
+    stop_heartbeat = start_goal_heartbeat(world, goal_id)
     try:
         return await _run_goal_impl(
             llm=llm,
@@ -2657,8 +2771,21 @@ async def _run_goal_accounted(
         # This boundary starts before setup, closes cancellation as well as
         # ordinary errors, and accounts for paid finalization work.
         try:
+            stop_heartbeat()
+        except Exception:  # pragma: no cover -- defensive cleanup
+            log.warning("Goal heartbeat did not stop cleanly", exc_info=True)
+        try:
             lifecycle.finish(error)
         finally:
+            # Playwright's synchronous objects belong to their browser worker.
+            # Close every principal's goal session there before the goal/tenant
+            # context is reset, including cancelled and failed runs.
+            try:
+                from .tools.browser import close_goal_browsers
+
+                await close_goal_browsers(goal_id)
+            except Exception:
+                log.warning("browser goal cleanup failed", exc_info=True)
             settlement.record()
             try:
                 from .logging_config import reset_goal_context
@@ -2684,6 +2811,14 @@ async def run_goal(
     allowed_suites: frozenset[str] | None = None,
 ) -> str:
     """Hold task execution authority until all finalization work has stopped."""
+    from .goal_mutations import GoalMutationConflict
+    from .human_conversation_handoffs import require_ai_open
+    from .task_handoffs import apply_ceiling, require_open
+    try:
+        require_ai_open(world, goal_id)
+        require_open(world, goal_id)
+    except GoalMutationConflict as exc:
+        return f"BLOCKED: {exc}"
     from .federation_admission import FederationAdmissionRequired, require_execution
     try:
         require_execution(world, goal_id, capability=capability, budget=budget, consume=True)
@@ -2717,17 +2852,31 @@ async def run_goal(
                 except Exception:  # pragma: no cover - status write must not mask the block
                     log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
             return f"BLOCKED: {reason}"
+    from .task_execution_guard import TaskBusy
+    from .task_execution_guard import lease as execution_lease
     from .task_file_recovery import run_scope
+    from .template_connections import SelectionUnavailable, bind_goal
     from .tenant.provider_admission import run_scope as organization_run_scope
     sandbox = sandbox or LocalBackend()
-    with run_scope(world, goal_id, sandbox), organization_run_scope(
-        budget, _execution_principal(user_id=user_id, capability=capability),
-    ):
-        return await _run_goal_accounted(
-            llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
-            channel, user_id, capability, orchestrator_model_override, resume,
-            resume_episode_id, domain, allowed_suites,
-        )
+    try:
+        with execution_lease(world, goal_id):
+            require_ai_open(world, goal_id)
+            require_open(world, goal_id)
+            apply_ceiling(world, goal_id, budget)
+            with bind_goal(world, goal_id, _execution_principal(user_id=user_id, capability=capability)), run_scope(world, goal_id, sandbox), organization_run_scope(
+                budget, _execution_principal(user_id=user_id, capability=capability),
+            ):
+                return await _run_goal_accounted(
+                    llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
+                    channel, user_id, capability, orchestrator_model_override, resume,
+                    resume_episode_id, domain, allowed_suites,
+                )
+    except SelectionUnavailable as exc:
+        if goal is not None and goal.owner == _execution_principal(user_id=user_id, capability=capability):
+            world.set_goal_status(goal_id, "blocked", result=str(exc))
+        return f"BLOCKED: {exc}"
+    except (TaskBusy, GoalMutationConflict) as exc:
+        return f"BLOCKED: {exc}"
 
 
 def run_goal_sync(*args, **kwargs) -> str:

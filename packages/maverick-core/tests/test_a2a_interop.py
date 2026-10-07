@@ -11,7 +11,7 @@ from maverick import a2a
 # Hand-authored third-party fixtures shaped per the A2A spec: a rich card
 # (LangGraph-style optional fields) and a minimal-conformant one.
 _THIRD_PARTY_RICH = {
-    "protocolVersion": "1.0",
+    "protocolVersion": "0.3.0",
     "name": "ResearchMate",
     "description": "A LangGraph research agent.",
     "url": "https://agents.example.com/a2a/v1",
@@ -30,7 +30,7 @@ _THIRD_PARTY_RICH = {
 }
 
 _THIRD_PARTY_MINIMAL = {
-    "protocolVersion": "1.0",
+    "protocolVersion": "0.3.0",
     "name": "TinyAgent",
     "url": "https://tiny.example/a2a",
     "version": "0.1",

@@ -1,6 +1,7 @@
 """Federated insight exchange: signed bundles, fail-closed imports."""
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 
@@ -22,7 +23,7 @@ def _seed_insights(tmp_path) -> str:
     dreaming.append_insights([dreaming.DreamInsight(
         ts=1.0, kind="failure_pattern", domain="finance_sox",
         text="Recurring failure (budget, seen 3x) on goals about ledger totals.",
-        evidence=3,
+        evidence=3, owner="",
     )], path=path)
     return path
 
@@ -58,6 +59,209 @@ def test_roundtrip_between_trusting_peers(tmp_path, keys):
     # Provenance-tagged, shared pool (no foreign department names).
     assert merged[0].text.startswith("(peer ")
     assert merged[0].domain is None
+
+
+def test_import_count_excludes_lessons_immediately_removed_by_capacity(tmp_path, keys):
+    bundle = insight_exchange.export_insights(
+        tmp_path / "bundle.json", path=_seed_insights(tmp_path), now=1000.0,
+    )
+    peer_key = _bundle_data(bundle)["peer_key"]
+    dest = tmp_path / "dest.ndjson"
+    texts = [
+        "The shipping route calculation missed remote warehouse closures.",
+        "The approval reminder skipped a pending contract review.",
+        "The inventory forecast double counted returns from the store.",
+    ]
+    existing = [
+        dreaming.DreamInsight(
+            ts=1001.0 + index, kind="failure_pattern", domain=None,
+            text=text,
+            evidence=2, owner="",
+        )
+        for index, text in enumerate(texts)
+    ]
+    assert dreaming.append_insights(existing, path=dest, max_insights=3) == 3
+    imported, reason = insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, max_insights=3, now=1003.0,
+    )
+    assert (imported, reason) == (0, "ok")
+    assert [row.text for row in dreaming.load_insights(dest)] == [row.text for row in existing]
+
+
+def test_import_halt_before_claim_preserves_the_bundle_for_retry(tmp_path, keys, monkeypatch):
+    from maverick import learning_guard
+
+    bundle = insight_exchange.export_insights(
+        tmp_path / "bundle.json", path=_seed_insights(tmp_path),
+    )
+    peer_key = _bundle_data(bundle)["peer_key"]
+    dest = tmp_path / "dest.ndjson"
+    replay = tmp_path / "replay.sqlite3"
+    original = learning_guard.check_learning_halt
+    monkeypatch.setattr(learning_guard, "check_learning_halt", lambda *_: (_ for _ in ()).throw(
+        learning_guard.Halted("operator stop", "file")))
+    refused = insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    )
+    assert refused[0] == 0 and "halted" in refused[1]
+    assert not dest.exists() and not replay.exists()
+    monkeypatch.setattr(learning_guard, "check_learning_halt", original)
+    assert insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    ) == (1, "ok")
+
+
+@pytest.mark.parametrize("stop_phase", ["import_persistence", "import_publish"])
+def test_import_halt_at_publication_releases_unwritten_claim(
+    tmp_path, keys, monkeypatch, stop_phase,
+):
+    from maverick import learning_guard
+
+    bundle = insight_exchange.export_insights(
+        tmp_path / "bundle.json", path=_seed_insights(tmp_path),
+    )
+    peer_key = _bundle_data(bundle)["peer_key"]
+    dest = tmp_path / "dest.ndjson"
+    replay = tmp_path / "replay.sqlite3"
+    original = learning_guard.check_learning_halt
+    phases = []
+
+    def stop_before_write(_job, phase):
+        phases.append(phase)
+        if phase == stop_phase:
+            raise learning_guard.Halted("operator stop", "file")
+
+    monkeypatch.setattr(learning_guard, "check_learning_halt", stop_before_write)
+    refused = insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    )
+    expected_phases = ["import_start", "import_persistence"]
+    if stop_phase == "import_publish":
+        expected_phases.append("import_publish")
+    assert phases == expected_phases
+    assert refused[0] == 0 and "operator stop" in refused[1]
+    assert not dest.exists()
+    monkeypatch.setattr(learning_guard, "check_learning_halt", original)
+    assert insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    ) == (1, "ok")
+
+
+@pytest.mark.parametrize("refusal", [False, "raise"])
+def test_import_requires_prepublication_audit_and_binds_published_bytes(
+    tmp_path, keys, monkeypatch, refusal,
+):
+    from maverick import audit
+
+    bundle = insight_exchange.export_insights(
+        tmp_path / "bundle.json", path=_seed_insights(tmp_path),
+    )
+    peer_key = _bundle_data(bundle)["peer_key"]
+    dest = tmp_path / "dest.ndjson"
+    replay = tmp_path / "replay.sqlite3"
+    events = []
+
+    def refused_audit(_kind, **payload):
+        events.append(payload)
+        if refusal == "raise":
+            raise audit.AuditRefused("strict chain unavailable")
+        return False
+
+    original = audit.audit_event
+    monkeypatch.setattr(audit, "audit_event", refused_audit)
+    refused = insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    )
+    assert refused == (0, "learning audit is unavailable")
+    assert [event["phase"] for event in events] == ["prepared"]
+    assert not dest.exists()
+
+    def recorded(_kind, **payload):
+        events.append(payload)
+        return True
+
+    monkeypatch.setattr(audit, "audit_event", recorded)
+    assert insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    ) == (1, "ok")
+    assert [event["phase"] for event in events[1:]] == ["prepared", "published"]
+    expected = hashlib.sha256(dest.read_bytes()).hexdigest()
+    assert events[-2]["store_after_sha256"] == expected
+    assert events[-1]["store_after_sha256"] == expected
+    monkeypatch.setattr(audit, "audit_event", original)
+
+
+def test_import_reports_published_state_when_completion_audit_fails(
+    tmp_path, keys, monkeypatch,
+):
+    from maverick import audit
+
+    bundle = insight_exchange.export_insights(
+        tmp_path / "bundle.json", path=_seed_insights(tmp_path),
+    )
+    peer_key = _bundle_data(bundle)["peer_key"]
+    dest = tmp_path / "dest.ndjson"
+    replay = tmp_path / "replay.sqlite3"
+    events = []
+
+    def record_first(_kind, **payload):
+        events.append(payload)
+        return payload["phase"] == "prepared"
+
+    monkeypatch.setattr(audit, "audit_event", record_first)
+    imported, reason = insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    )
+    assert imported == 1 and reason == "import published but completion audit is unavailable"
+    assert len(dreaming.load_insights(dest)) == 1
+    assert [event["phase"] for event in events] == ["prepared", "published"]
+    assert insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    ) == (0, "bundle replay rejected")
+
+
+def test_import_never_claims_success_after_an_uncertain_write(tmp_path, keys, monkeypatch):
+    bundle = insight_exchange.export_insights(
+        tmp_path / "bundle.json", path=_seed_insights(tmp_path),
+    )
+    peer_key = _bundle_data(bundle)["peer_key"]
+    dest = tmp_path / "dest.ndjson"
+    replay = tmp_path / "replay.sqlite3"
+
+    def unavailable_writer(*_args, **_kwargs):
+        raise OSError("disk failure")
+
+    monkeypatch.setattr(dreaming, "_atomic_write_lines", unavailable_writer)
+    imported, reason = insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    )
+    assert imported == 0 and "outcome is uncertain" in reason
+    assert not dest.exists()
+    assert insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, replay_path=replay,
+    ) == (0, "bundle replay rejected")
+
+
+def test_cli_import_surfaces_learning_refusal_instead_of_success(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from maverick import orchestrator
+    from maverick.cli import main
+
+    bundle = tmp_path / "bundle.json"
+    bundle.write_text("{}", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(orchestrator, "_build_shield", lambda: object())
+
+    def stopped(_path, **kwargs):
+        calls.append(kwargs)
+        return 0, "learning halted: operator stop"
+
+    monkeypatch.setattr(insight_exchange, "import_insights", stopped)
+    result = CliRunner().invoke(main, ["insights-import", str(bundle)])
+    assert result.exit_code != 0
+    assert "operator stop" in result.output
+    assert "Imported" not in result.output
+    assert calls[0]["operator_basis"] == "local_process"
 
 
 def test_untrusted_key_is_rejected_outright(tmp_path, keys):
@@ -385,7 +589,7 @@ def test_shield_blocked_peer_insight_is_dropped(tmp_path, keys):
 class TestFleetDonationReplay:
     def _donation(self, tmp_path, name, **kw):
         rec = {
-            "schema_version": 1, "ts": 1.0,
+            "schema_version": 1, "ts": 1.0, "source_ownership": "unowned",
             "task_brief_text": "reconcile the quarterly ledger totals",
             "outcome": "success", "tools_used": ["sql_query"],
             "verifier_critique": "",

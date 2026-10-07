@@ -1,9 +1,9 @@
 """Explicit notification worker for third-party monitoring alerts.
 
 The intelligence authority owns a durable at-least-once outbox while this
-module owns the external side effect. Deployments inject an opaque destination
-resolver and transport; credentials and resolved addresses never enter the
-third-party intelligence store or returned batch evidence.
+module owns the external side effect. Saved addresses use the tenant vault;
+batch evidence contains delivery references and outcomes only. An admitted but
+uncertain send is retained for review and is never automatically replayed.
 """
 
 from __future__ import annotations
@@ -54,6 +54,7 @@ class DeliveryBatchResult:
     dead_lettered: int
     acknowledgement_ambiguous: int
     outcomes: tuple[DeliveryOutcome, ...]
+    cancelled: int = 0
     semantics: str = "at_least_once"
 
 
@@ -67,6 +68,7 @@ class SmtpThirdPartyAlertTransport:
         subject: str,
         body: str,
         idempotency_key: str,
+        before_effect: Callable[[], None] | None = None,
     ) -> None:
         from . import mailer
 
@@ -74,6 +76,7 @@ class SmtpThirdPartyAlertTransport:
             recipient,
             subject,
             f"{body}\n\nLightwork delivery reference: {idempotency_key}\n",
+            before_effect=before_effect,
         )
 
 
@@ -106,18 +109,14 @@ def _safe_error_code(error: Exception) -> str:
 def _message(store: ThirdPartyIntelligenceStore, item: OutboxItem) -> str:
     alert = store.get_monitoring_alert(item.tenant_id, item.alert_id)
     monitor = store.get_monitor(item.tenant_id, alert.monitor_id)
+    vendor = store.get_vendor(item.tenant_id, alert.vendor_id)
     return (
-        "A governed third-party monitoring observation changed and requires "
-        "review.\n\n"
-        f"Vendor reference: {alert.vendor_id}\n"
-        f"Monitor reference: {monitor.monitor_id}\n"
-        f"Alert reference: {alert.alert_id}\n"
-        f"Previous observation SHA-256: {alert.previous_observation_sha256}\n"
-        f"Current observation SHA-256: {alert.observation_sha256}\n"
-        f"Evidence SHA-256: {alert.evidence_sha256}\n\n"
-        "Open the authenticated Third-Party Intelligence workspace to review "
-        "the licensed source citations and decide the response. This alert is "
-        "not a sanctions, legal, compliance, or vendor-approval conclusion."
+        f"An approved risk-data source reported a change for {vendor.display_label}.\n\n"
+        "Open Lightwork → Third-party intelligence → Watching for changes to "
+        "review the source evidence and decide what to do. Sign in to your own workspace.\n\n"
+        "This change needs review. It does not approve the vendor or make a legal "
+        "or compliance decision.\n\n"
+        f"Review reference: {alert.alert_id}\nWatch reference: {monitor.monitor_id}"
     )
 
 
@@ -132,6 +131,9 @@ def deliver_alert_batch(
     lease_seconds: float = 60.0,
     base_backoff_seconds: float = 30.0,
     maximum_backoff_seconds: float = 86_400.0,
+    delivery_ids: tuple[str, ...] | None = None,
+    claim_guard: Callable[[], None] | None = None,
+    effect_guard: Callable[[OutboxItem], None] | None = None,
 ) -> DeliveryBatchResult:
     """Claim and deliver one bounded batch with explicit at-least-once limits."""
 
@@ -149,22 +151,52 @@ def deliver_alert_batch(
         worker_id=worker_id,
         limit=limit,
         lease_seconds=float(lease_seconds),
+        delivery_ids=delivery_ids,
+        effect_guard=claim_guard,
     )
     outcomes: list[DeliveryOutcome] = []
-    acknowledged = retry_pending = dead_lettered = ambiguous = 0
+    acknowledged = retry_pending = dead_lettered = ambiguous = cancelled = 0
     for item in items:
         assert item.lease_token is not None
+        dispatched = False
         try:
             recipient = _recipient(
                 resolve_destination(item.tenant_id, item.destination_ref)
             )
-            transport.send(
-                recipient=recipient,
-                subject="Lightwork third-party risk change",
-                body=_message(store, item),
-                idempotency_key=item.delivery_id,
-            )
+            body = _message(store, item)
+
+            def current_effect(item=item, recipient=recipient):
+                store.assert_delivery_authority(item)
+                if effect_guard:
+                    effect_guard(item)
+                if _recipient(resolve_destination(item.tenant_id, item.destination_ref)) != recipient:
+                    raise DestinationResolutionError("The selected recipient changed before sending.")
+
+            store.mark_outbox_dispatch(item)
+            dispatched = True
+            kwargs = dict(recipient=recipient, subject="Lightwork third-party risk change",
+                          body=body, idempotency_key=item.delivery_id)
+            if isinstance(transport, SmtpThirdPartyAlertTransport):
+                transport.send(**kwargs, before_effect=current_effect)
+            else:
+                from .authority_effects import authority_effect_fence
+
+                with authority_effect_fence():
+                    current_effect()
+                    transport.send(**kwargs)
         except Exception as error:  # noqa: BLE001 - sanitized at transport boundary
+            from .mailer import MailerNotSent
+
+            if dispatched and not isinstance(error, MailerNotSent):
+                # A physical write may have happened. Durable dispatching already
+                # prevents expiry/restart from reclaiming this admitted effect.
+                try:
+                    store.mark_outbox_dispatch(item, ambiguous=True)
+                except Exception:
+                    pass  # The original dispatch receipt must remain retained.
+                ambiguous += 1
+                outcomes.append(DeliveryOutcome(item.delivery_id, "ambiguous", "send_unconfirmed"))
+                continue
             error_code = _safe_error_code(error)
             backoff = min(
                 float(maximum_backoff_seconds),
@@ -179,6 +211,8 @@ def deliver_alert_batch(
             )
             if failed.state == "dead_letter":
                 dead_lettered += 1
+            elif failed.state == "cancelled":
+                cancelled += 1
             else:
                 retry_pending += 1
             outcomes.append(DeliveryOutcome(item.delivery_id, failed.state, error_code))
@@ -191,6 +225,10 @@ def deliver_alert_batch(
                 lease_token=item.lease_token,
             )
         except Exception:  # noqa: BLE001 - send succeeded; outcome is ambiguous
+            try:
+                store.mark_outbox_dispatch(item, ambiguous=True)
+            except Exception:
+                pass  # Never revert the existing dispatch admission to retryable.
             ambiguous += 1
             outcomes.append(
                 DeliveryOutcome(item.delivery_id, "ack_ambiguous", "acknowledgement_error")
@@ -207,6 +245,7 @@ def deliver_alert_batch(
         dead_lettered=dead_lettered,
         acknowledgement_ambiguous=ambiguous,
         outcomes=tuple(outcomes),
+        cancelled=cancelled,
     )
 
 

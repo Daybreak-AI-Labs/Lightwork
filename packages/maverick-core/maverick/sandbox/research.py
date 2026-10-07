@@ -107,7 +107,7 @@ def _local_endpoint(endpoint: str) -> bool:
     )
 
 
-def _capture(args, env, *, timeout, limit, effect_guard=None) -> _Capture:
+def _capture(args, env, *, timeout, limit, effect_guard=None, cancelled=None) -> _Capture:
     """Drain concurrently; retained bytes are bounded before appending."""
     if not math.isfinite(timeout) or timeout <= 0:
         raise ResearchContainerError("process wall budget is exhausted")
@@ -145,7 +145,28 @@ def _capture(args, env, *, timeout, limit, effect_guard=None) -> _Capture:
         thread.start()
     reason = "completed"
     try:
-        process.wait(timeout=timeout)
+        if cancelled is None:
+            process.wait(timeout=timeout)
+        else:
+            deadline = time.monotonic() + timeout
+            while process.poll() is None:
+                try:
+                    cancellation = cancelled()
+                except Exception:
+                    # Failure to determine cancellation authority fails closed.
+                    cancellation = True
+                if cancellation:
+                    reason = "cancelled"
+                    process.kill()
+                    process.wait(timeout=5)
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(args, timeout)
+                try:
+                    process.wait(timeout=min(0.1, remaining))
+                except subprocess.TimeoutExpired:
+                    pass
     except subprocess.TimeoutExpired:
         reason = "timeout"
         process.kill()
@@ -412,7 +433,8 @@ class ResearchContainerRunner:
         return min(15, remaining)
 
     def run(self, files: Mapping[str, bytes], *, budget: Budget,
-            entrypoint: str = "main.py", effect_guard=None) -> ResearchResult:
+            entrypoint: str = "main.py", effect_guard=None, cancelled=None,
+            observation=None) -> ResearchResult:
         if not isinstance(budget, Budget):
             raise TypeError("an explicit Budget is required")
         copied = _inputs(files, entrypoint)
@@ -432,6 +454,7 @@ class ResearchContainerRunner:
             ensure_private_directory(parent)
         root = Path(tempfile.mkdtemp(prefix="lightwork-research-", dir=parent)).resolve()
         cleanup = False
+        execution_verified = False
         try:
             _write_snapshot(root, copied)
             self._control(self._create_args(name, root, entrypoint),
@@ -441,14 +464,24 @@ class ResearchContainerRunner:
                 raise ResearchContainerError("candidate snapshot changed before execution")
             policy.update(schema="lightwork.research-linux-container-policy.v2",
                           entrypoint=entrypoint)
+            if observation is not None:
+                observation({"state": "container_prepared", "container": name,
+                             "image_id": self.image_id, "input_sha256": _input_digest(copied)})
             budget.check()
             started = time.monotonic()
             try:
                 result = _capture([*self._base, "start", "--attach", name], self._env,
                                   timeout=min(timeout, budget.remaining_wall()),
-                                  limit=self.limits.output_bytes, effect_guard=effect_guard)
+                                  limit=self.limits.output_bytes, effect_guard=effect_guard, **({"cancelled": cancelled} if cancelled is not None else {}))
             except (OSError, subprocess.SubprocessError) as exc:
                 raise ResearchContainerError("could not start research container") from exc
+            if observation is not None:
+                state = self._json(["container", "inspect", name], timeout=self._control_time(budget))[0]["State"]
+                started_at = state.get("StartedAt")
+                if not isinstance(started_at, str) or started_at.startswith("0001-"):
+                    raise ResearchContainerError("actual container start could not be verified")
+                policy["execution_started_at"] = started_at
+                policy["execution_finished_at"] = state.get("FinishedAt")
             # Always remove the whole container, including background children.
             cleanup = self._cleanup(name)
             if not cleanup:
@@ -457,6 +490,7 @@ class ResearchContainerRunner:
                 raise ResearchContainerError("read-only candidate snapshot changed")
             policy["elapsed_seconds"] = round(time.monotonic() - started, 6)
             policy_sha256 = _digest(policy)
+            execution_verified = True
             stdout = result.out.decode("utf-8", "replace")
             reason = result.reason if stdout.encode("utf-8") == result.out else "invalid_utf8_output"
             return ResearchResult(name, self.image_id, _input_digest(copied),
@@ -470,6 +504,10 @@ class ResearchContainerRunner:
                 cleanup = self._cleanup(name)
             if cleanup:
                 _delete_snapshot(root, parent=parent)
+                if observation is not None and not execution_verified:
+                    observation({"state": "cleanup_verified", "container": name,
+                                 "image_id": self.image_id, "input_sha256": _input_digest(copied),
+                                 "cleanup_verified": True, "execution_outcome_confirmed": False})
             else:
                 raise ResearchContainerError(
                     f"container cleanup remains unverified: {name}; retained snapshot: {root}"

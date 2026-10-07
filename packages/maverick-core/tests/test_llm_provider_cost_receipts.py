@@ -52,6 +52,8 @@ def dispatcher(tmp_path, monkeypatch):
         lambda now=None, period=None: "2026-09-08",
     )
     monkeypatch.setattr(llm_mod, "_estimate_call_cost", lambda *a, **kw: 2.0)
+    # Receipt mechanics use a synthetic model with no real rate-card entry.
+    monkeypatch.setattr(llm_mod, "_lookup_price_quote", lambda _spec: None)
     monkeypatch.setattr(llm_mod, "_run_preflight", lambda *a, **kw: None)
     monkeypatch.setattr(llm_mod, "_enforce_circuit", lambda *a: None)
     monkeypatch.setattr(llm_mod, "_feed_circuit", lambda *a: None)
@@ -61,6 +63,14 @@ def dispatcher(tmp_path, monkeypatch):
         "maverick.budget._lookup_price",
         lambda _model, **_kw: (1_000_000, 0),
     )
+    # Attempt prices now come from the quote itself; keep its provenance
+    # (an estimate for this synthetic model) and only fix the synthetic rate.
+    from dataclasses import replace as _replace
+
+    from maverick import budget as _budget
+    _real_quote = _budget._lookup_price_quote
+    monkeypatch.setattr(_budget, "_lookup_price_quote", lambda model, **kw: _replace(
+        _real_quote(model, **kw), input_per_mtok=1_000_000, output_per_mtok=0))
     return LLM(model="openai:synthetic-receipt-model"), ledger
 
 

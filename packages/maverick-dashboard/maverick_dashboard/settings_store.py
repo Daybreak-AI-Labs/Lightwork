@@ -25,10 +25,13 @@ from pathlib import Path
 
 from maverick import config
 
+from .settings_catalog import CHANNEL_ALLOWLISTS
+from .settings_feature_metadata import FEATURE_DEFAULTS, FEATURE_INFO
+
 # Serializes the overlay load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit
 # provider keys / toggles).
-_SETTINGS_LOCK = threading.Lock()
+_SETTINGS_LOCK = threading.RLock()
 
 
 class SecuritySuiteRevisionConflict(RuntimeError):
@@ -104,7 +107,11 @@ PROVIDERS: list[dict] = [
     {"name": "deepseek", "label": "DeepSeek", "env": ["DEEPSEEK_API_KEY"], "base_url": False},
     {"name": "xai", "label": "xAI (Grok)", "env": ["XAI_API_KEY", "GROK_API_KEY"], "base_url": False},
     {"name": "ollama", "label": "Ollama (self-hosted)", "env": [], "base_url": True},
-    {"name": "vllm", "label": "vLLM / OpenAI-compatible", "env": ["VLLM_BASE_URL", "OPENAI_COMPATIBLE_BASE_URL"], "base_url": True},
+    {"name": "vllm", "label": "vLLM (self-hosted)", "env": ["VLLM_BASE_URL"], "base_url": True},
+    {"name": "tgi", "label": "Hugging Face TGI (self-hosted)", "env": ["TGI_BASE_URL"], "base_url": True},
+    {"name": "openai_compatible", "label": "OpenAI-compatible server", "env": ["OPENAI_COMPATIBLE_BASE_URL"], "base_url": True},
+    {"name": "azure", "label": "Azure OpenAI", "env": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"], "base_url": True},
+    {"name": "bedrock", "label": "Amazon Bedrock", "env": ["BEDROCK_API_KEY", "AWS_REGION"], "base_url": False},
 ]
 _PROVIDER_NAMES = {p["name"] for p in PROVIDERS}
 
@@ -112,26 +119,6 @@ _PROVIDER_NAMES = {p["name"] for p in PROVIDERS}
 CAPABILITY_DEFAULTS = {
     "computer_use": False, "browser": False, "web_search": False,
     "mobile_tools": False, "ros": False, "code_exec": False,
-}
-FEATURE_DEFAULTS = {
-    "workflow_readiness": True,
-    "project_reviews": False,
-    "outcome_measurement": False,
-    "copilot_operations": False,
-    "guided_onboarding": True,
-    "action_center": True,
-    "draft_recovery": True,
-    "support_center": True,
-    "record_search": True,
-    "workspace_recovery": False,
-    "signing_identity_transition": False,
-    "skills": True,
-    "world_model": True,
-    "streaming": True,
-    "pack_editing": True,
-    "role_editing": True,
-    "scheduling": True,
-    "triggers": True,
 }
 
 # What each toggle actually turns on -- shown next to the checkbox so an
@@ -152,34 +139,6 @@ CAPABILITY_INFO = {
                  "work environment. Allowed actions are checked and recorded "
                  "before shell commands run.",
 }
-FEATURE_INFO = {
-    "copilot_operations": "Let Copilot show the current learning example and open its reviewed stop-use control. You confirm the decision in a protected form. Other product actions are not included; the page's own controls remain available when this is off.",
-    "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
-    "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
-    "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",
-    "outcome_measurement": "Plan a paired workflow pilot, record observed baseline and review effort, and compare current accepted outcomes. Unmeasured costs and unreviewed work remain explicit.",
-    "guided_onboarding": "Offer a guided path to a reviewed deliverable, privacy assessment, or accepted vendor case. Task creation alone never establishes success.",
-    "action_center": "Collect approvals, deliverable sign-offs, assessment reviews, and uncertain external actions in one personal list, with private read and snooze preferences. Overdue items remain visible.",
-    "draft_recovery": "Keep encrypted recovery copies of unfinished editor work, private to each account and workspace. Credentials and attachments are excluded; restoring never runs or publishes work.",
-    "record_search": "Find accessible vendors, evidence, assessments, decisions, tasks, and reports by name or reference. Searches use current metadata and disclose unavailable or partial sources.",
-    "workspace_recovery": "Let global administrators export signed local workspace snapshots, verify and test them, and restore only in isolated local recovery mode. External stores and shared administration are excluded.",
-    "signing_identity_transition": "Permit global administrators to explicitly review a dual-signed, exact-release publisher or update-key transition in isolated recovery mode. This changes installation trust for every local workspace. It never accepts an unrelated signer or bypasses Windows signature checks.",
-    "skills": "Agents can use saved procedures from the Skills library "
-              "while working on a task.",
-    "world_model": "The shared operating record: goals, episodes, approvals, "
-                   "and memory live in one governed store. Turning this off "
-                   "stops information from carrying across tasks.",
-    "streaming": "Show responses as they are written in Chat and task "
-                 "activity. When off, responses appear when complete.",
-    "pack_editing": "Edit and override domain packs from the dashboard. Turn "
-                    "off to make pack editors read-only.",
-    "role_editing": "Edit core agent role prompts, models, and effort from the "
-                    "dashboard. Turn off to lock the role roster.",
-    "scheduling": "Create recurring workflow schedules in Automations. "
-                  "Existing schedules are managed from that page.",
-    "triggers": "Start saved workflows when a connected service sends an "
-                "authenticated event. Requires a configured signing secret.",
-}
 
 # The self-learning loop's subsystems -- ONE source of truth shared by the
 # one-click toggle (set_learning writes each (section, config_key) to the
@@ -199,8 +158,9 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_SELF_LEARNING",
      "how": "[self_learning] enable — or MAVERICK_SELF_LEARNING=0 to opt out"},
     {"key": "distill_local", "section": "self_learning", "config_key": "distill_local",
-     "label": "Turn repeated successes into skills",
-     "description": "Write a reusable skill from work that went well, on this server.",
+     "label": "Suggest skills from repeated successes",
+     "description": "Prepare a reusable skill suggestion on this server. Review and add it "
+                    "from Skills before future tasks use it.",
      "env": "MAVERICK_DISTILL_LOCAL",
      "how": "[self_learning] distill_local — or MAVERICK_DISTILL_LOCAL=0"},
     {"key": "failure_telemetry", "section": "telemetry", "config_key": "failure_modes",
@@ -210,6 +170,7 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_FAILURE_TELEMETRY",
      "how": "[telemetry] failure_modes or MAVERICK_FAILURE_TELEMETRY=0"},
     {"key": "budget_tuning", "section": "budget", "config_key": "self_tuning",
+     "default": False,
      "label": "Suggest task limits from experience",
      "description": "Learn how much each kind of task really needs and suggest a "
                     "spending limit for it. A limit you set always wins.",
@@ -262,9 +223,9 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_TRAJECTORY_CAPTURE",
      "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=0"},
     {"key": "causal_promotion", "section": "self_improvement", "config_key": "causal_promotion",
-     "label": "Check an improvement really caused the gain",
-     "description": "Before a learned change is adopted, check that it caused the "
-                    "improvement.",
+     "label": "Require a controlled comparison before adopting changes",
+     "description": "Ordinary task history suggests candidates. Automatic adoption needs "
+                    "a prospectively controlled comparison with enough evidence.",
      "env": "MAVERICK_CAUSAL_PROMOTION", "needs": "self_improvement",
      "how": "[self_improvement] causal_promotion — or MAVERICK_CAUSAL_PROMOTION=0"},
     {"key": "factory_learning", "section": "self_improvement", "config_key": "factory_learning",
@@ -298,9 +259,10 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_OPERATIONS_SCIENTIST",
      "how": "[operations_scientist] enable — or MAVERICK_OPERATIONS_SCIENTIST=0"},
     {"key": "rehearsal", "section": "rehearsal", "config_key": "enable",
-     "label": "Rehearse risky plans first",
-     "description": "Try a risky plan in a simulation before it runs, and ask a "
-                    "person when the result is uncertain.",
+     "label": "Risky action predictions",
+     "description": "Compare high-impact actions with past work. The Safety setting "
+                    "decides whether predictions only watch or hold actions; Shield, "
+                    "permissions, and required approvals still apply.",
      "env": "MAVERICK_REHEARSAL",
      "how": "[rehearsal] enable — or MAVERICK_REHEARSAL=0"},
     {"key": "credit", "section": "credit", "config_key": "enable",
@@ -344,6 +306,9 @@ CHANNELS: list[dict] = [
     {"name": "slack", "label": "Slack", "fields": [
         {"key": "app_token", "label": "App-level token", "secret": True},
         {"key": "bot_token", "label": "Bot token", "secret": True},
+        {"key": "signing_secret", "label": "Signing secret", "secret": True,
+         "env": "SLACK_SIGNING_SECRET"},
+        {"key": "approvals_channel", "label": "Approvals channel", "secret": False},
     ]},
     {"name": "whatsapp_cloud", "label": "WhatsApp (Cloud API)", "fields": [
         {"key": "access_token", "label": "Access token", "secret": True},
@@ -359,7 +324,10 @@ CHANNELS: list[dict] = [
         {"key": "port", "label": "Webhook port", "secret": False, "type": "int"},
     ]},
     {"name": "email", "label": "Email (IMAP/SMTP)", "fields": [
+        {"key": "email_auth", "label": "Email sign-in", "secret": False},
+        {"key": "oauth_account", "label": "Connected Microsoft mailbox", "secret": False},
         {"key": "imap_host", "label": "IMAP host", "secret": False},
+        {"key": "trusted_authserv_id", "label": "Incoming mail server identity", "secret": False},
         {"key": "imap_user", "label": "IMAP user", "secret": False},
         {"key": "imap_password", "label": "IMAP password", "secret": True},
         {"key": "smtp_host", "label": "SMTP host", "secret": False},
@@ -372,7 +340,27 @@ CHANNELS: list[dict] = [
         {"key": "bot_token", "label": "Bot access token", "secret": True,
          "env": "MATTERMOST_BOT_TOKEN"},
     ]},
+    {"name": "teams", "label": "Microsoft Teams", "fields": [
+        {"key": "app_id", "label": "App ID", "secret": False},
+        {"key": "app_password", "label": "Client secret", "secret": True,
+         "env": "TEAMS_APP_PASSWORD"},
+        {"key": "tenant_id", "label": "Tenant ID", "secret": False},
+        {"key": "port", "label": "Webhook port", "secret": False, "type": "int"},
+    ]},
 ]
+# The main setup form must include the access list each adapter needs to
+# start. Share the same identity formats as the guided All settings editor.
+for _channel_spec in CHANNELS:
+    _access = CHANNEL_ALLOWLISTS.get(_channel_spec["name"])
+    if _access:
+        _, _, _key, _item, _hint, _pattern, _error = _access
+        _channel_spec["fields"].append({
+            "key": _key, "label": "Who can message Lightwork", "type": "list",
+            "help": f"Add each permitted {_item.lower()} on its own line. Example: {_hint}. "
+                    "Saving a blank list stops everyone from messaging Lightwork through this app. "
+                    "Use All settings to restore an inherited list instead.",
+            "env": f"{_channel_spec['name'].upper()}_{_key.upper()}",
+        })
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
 
 
@@ -589,7 +577,7 @@ def _dump_webhooks(lines: list[str], whk: dict) -> None:
 # page, and sign-in mode, Bedrock endpoint/region and Azure deployment/version
 # on the All settings page.
 _PROVIDER_FIELDS = ("api_key", "base_url", "auth_mode", "endpoint", "region",
-                    "deployment", "api_version")
+                    "model_id", "deployment", "api_version")
 
 
 def _dump_providers(lines: list[str], providers: dict) -> None:
@@ -631,7 +619,7 @@ def _dump(data: dict) -> str:
     for section in dict.fromkeys((
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
-                    "security_suite_control", "oauth", "workspace",
+                    "security_suite_control", "oauth", "workspace", "_dashboard_resets",
                     # Portal link keyring (portal_routing_key_api); sealed values.
                     "third_party_portal",
                     # Consent publication signing keyring
@@ -695,7 +683,7 @@ def _dump(data: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _write(data: dict) -> None:
+def _write(data: dict, *, before_effect=None) -> None:
     # Unique temp + os.replace (0600): the fixed ".toml.tmp" collided between two
     # concurrent workers. RMW serialization is in the mutators via _locked().
     from maverick.file_lock import atomic_write_text
@@ -709,7 +697,41 @@ def _write(data: dict) -> None:
         raise SettingsNotStorable(
             "A value could not be saved safely, so the settings were not changed."
         ) from exc
-    atomic_write_text(config.dashboard_overrides_path(), text)
+    from .settings_audit import current_write
+
+    change = current_write()
+    if change is not None:
+        change.prepare(_load_overlay_for_update(), data)
+    if before_effect is not None:
+        before_effect()
+    if before_effect is None:
+        atomic_write_text(config.dashboard_overrides_path(), text)
+    else:
+        atomic_write_text(config.dashboard_overrides_path(), text, effect_guard=before_effect)
+    if change is not None and not change.deferred:
+        change.complete()
+
+
+def _write_provider_with_deferred_audit(data: dict) -> None:
+    """Publish the credential, leaving success unclaimed until verification."""
+    from .settings_audit import current_write
+
+    change = current_write()
+    if change is not None:
+        change.deferred = True
+    try:
+        _write(data)
+    finally:
+        if change is not None:
+            change.deferred = False
+
+
+def _complete_provider_audit() -> None:
+    from .settings_audit import current_write
+
+    change = current_write()
+    if change is not None:
+        change.complete()
 
 
 def set_provider(name: str, api_key: str | None = None, base_url: str | None = None) -> None:
@@ -792,6 +814,8 @@ def _verify_provider_rotation(
     observed: object,
     key_value: str,
     base_value: str,
+    details: dict[str, str] | None = None,
+    remove_key: bool = False,
 ) -> None:
     """Reject a post-commit generation that is not the authorized one."""
     import hashlib
@@ -824,6 +848,133 @@ def _verify_provider_rotation(
         raise ProviderRotationConflict(
             "provider base URL is not the effective endpoint; review the active source"
         )
+    if remove_key and str(observed.get("api_key") or "").strip():
+        raise ProviderRotationConflict("the previous key is still active; review its source")
+    for field, expected in (details or {}).items():
+        if str(observed.get(field) or "").strip() != expected:
+            raise ProviderRotationConflict(
+                f"provider {field.replace('_', ' ')} is controlled by another source"
+            )
+
+
+def _provider_setup_details(name: str, values: dict[str, str] | None) -> dict[str, str]:
+    """Accept only the native Azure/Bedrock fields exposed in the guided form."""
+    allowed = {
+        "azure": {"auth_mode", "deployment", "api_version"},
+        "bedrock": {"auth_mode", "endpoint", "region", "model_id"},
+    }.get(name, set())
+    details = {str(k): str(v).strip() for k, v in (values or {}).items() if str(v).strip()}
+    if set(details) - allowed:
+        raise ValueError("this provider does not accept those connection details")
+    if name == "azure":
+        if details.get("auth_mode") not in (None, "api_key", "entra_id"):
+            raise ValueError("choose Azure key or Microsoft sign-in")
+        if "deployment" in details and not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", details["deployment"]):
+            raise ValueError("enter an Azure deployment name using letters, numbers, dots, dashes or underscores")
+        if "api_version" in details and not re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}(-preview)?", details["api_version"]):
+            raise ValueError("enter an Azure service version as YYYY-MM-DD")
+    if name == "bedrock":
+        if details.get("auth_mode") not in (None, "iam", "api_key"):
+            raise ValueError("choose AWS sign-in or a Bedrock access key")
+        if details.get("endpoint") not in (None, "mantle", "legacy"):
+            raise ValueError("choose the current or older Bedrock service")
+        if "region" in details and not re.fullmatch(r"[a-z]{2}(-gov)?-[a-z]+-[0-9]", details["region"]):
+            raise ValueError("enter an AWS region such as us-east-1")
+        if "model_id" in details and not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,120}", details["model_id"]):
+            raise ValueError("enter the Claude model ID shown in your AWS account")
+    return details
+
+
+def _provider_detail_blocker(name: str, field: str) -> str | None:
+    """A value this page cannot make effective must never be saved as success."""
+    for label, path in (
+        ("operator settings", os.environ.get(config.CONFIG_OVERLAY_ENV, "")),
+        ("workspace settings", config.tenant_config_path()),
+    ):
+        if not path:
+            continue
+        loaded = config._load_config_file(Path(path).expanduser())
+        table = (loaded.get("providers") or {}).get(name) if isinstance(loaded, dict) else None
+        if isinstance(table, dict) and str(table.get(field) or "").strip():
+            return label
+    env_name = {
+        ("azure", "deployment"): "AZURE_OPENAI_DEPLOYMENT",
+        ("azure", "api_version"): "AZURE_OPENAI_API_VERSION",
+        ("bedrock", "region"): "AWS_REGION",
+        ("bedrock", "model_id"): "BEDROCK_MODEL_ID",
+    }.get((name, field))
+    if env_name and os.environ.get(env_name, "").strip():
+        return "server environment"
+    if name == "bedrock" and field == "region" and os.environ.get("AWS_DEFAULT_REGION", "").strip():
+        return "server environment"
+    return None
+
+
+def _checked_provider_setup(
+    name: str, key_value: str, base_value: str, details: dict[str, str] | None,
+) -> tuple[dict[str, str], bool]:
+    values = _provider_setup_details(name, details)
+    if base_value:
+        from .integration_readiness import _valid_self_hosted_address
+
+        if len(base_value) > 320 or not _valid_self_hosted_address(base_value):
+            raise ValueError(
+                "enter a server address starting with http:// or https://, without "
+                "sign-in details, extra parameters or a bookmark; use the key field for access"
+            )
+        if name == "azure" and not base_value.lower().startswith("https://"):
+            raise ValueError("enter the secure Azure resource address, starting with https://")
+    if name in {"azure", "bedrock"} and len(key_value) > 500:
+        raise ValueError("the provider key is too long")
+    if key_value and values.get("auth_mode") in {"entra_id", "iam"}:
+        raise ValueError("a key cannot be combined with server sign-in")
+    if name == "bedrock" and values.get("auth_mode") == "iam" and any(
+        os.environ.get(env_name, "").strip()
+        for env_name in ("BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK")
+    ):
+        raise ValueError("remove the Bedrock access key from the server before choosing AWS sign-in")
+    return values, values.get("auth_mode") in {"entra_id", "iam"}
+
+
+def _confirm_cloud_setup(name: str, observed: dict) -> None:
+    if name == "azure" and config.azure_provider_configuration_missing(observed):
+        raise ProviderRotationConflict(
+            "Azure still needs a resource address, deployment and one sign-in method"
+        )
+    if name == "bedrock":
+        region = (os.environ.get("AWS_REGION", "").strip()
+                  or os.environ.get("AWS_DEFAULT_REGION", "").strip()
+                  or str(observed.get("region") or "").strip())
+        if not region or str(observed.get("auth_mode") or "").strip() not in {"iam", "api_key"}:
+            raise ProviderRotationConflict(
+                "Bedrock still needs an AWS region and a sign-in method"
+            )
+        if observed.get("auth_mode") == "api_key" and not (
+            observed.get("api_key") or os.environ.get("BEDROCK_API_KEY")
+            or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+        ):
+            raise ProviderRotationConflict("enter a Bedrock access key or choose AWS sign-in")
+        if not (str(observed.get("model_id") or "").strip()
+                or os.environ.get("BEDROCK_MODEL_ID", "").strip()):
+            raise ProviderRotationConflict("enter the Claude model ID shown in your AWS account")
+
+
+def _provider_rotation_blockers(
+    name: str, state: dict, key_value: str, base_value: str,
+    details: dict[str, str], remove_key: bool,
+) -> list[str]:
+    blockers: list[str] = []
+    if key_value and not state["dashboard_can_set_api_key"]:
+        blockers.append(f"API key is controlled by {state['api_key_source']}")
+    if base_value and not state["dashboard_can_set_base_url"]:
+        blockers.append(f"base URL is controlled by {state['base_url_source']}")
+    if remove_key and not state["dashboard_can_set_api_key"]:
+        blockers.append("the existing key is controlled outside Settings")
+    for field in details:
+        source = _provider_detail_blocker(name, field)
+        if source:
+            blockers.append(f"{field.replace('_', ' ')} is controlled by {source}")
+    return blockers
 
 
 def _restore_provider_overlay(
@@ -852,6 +1003,7 @@ def rotate_provider(
     *,
     api_key: str | None = None,
     base_url: str | None = None,
+    details: dict[str, str] | None = None,
 ) -> dict:
     """Atomically publish a provider rotation only when it becomes effective.
 
@@ -866,7 +1018,8 @@ def rotate_provider(
         raise ValueError("unknown provider")
     key_value = str(api_key or "").strip()
     base_value = str(base_url or "").strip()
-    if not key_value and not base_value:
+    detail_values, remove_key = _checked_provider_setup(name, key_value, base_value, details)
+    if not key_value and not base_value and not detail_values:
         raise ValueError("enter a provider value to save")
 
     try:
@@ -910,26 +1063,32 @@ def rotate_provider(
                         "provider configuration changed while the rotation was being authorized"
                     )
 
-                blockers = []
-                if key_value and not before["dashboard_can_set_api_key"]:
-                    blockers.append(
-                        f"API key is controlled by {before['api_key_source']}"
-                    )
-                if base_value and not before["dashboard_can_set_base_url"]:
-                    blockers.append(
-                        f"base URL is controlled by {before['base_url_source']}"
-                    )
+                blockers = _provider_rotation_blockers(
+                    name, before, key_value, base_value, detail_values, remove_key,
+                )
                 if blockers:
                     raise ProviderRotationConflict(
                         "; ".join(blockers) + "; rotate that source instead"
                     )
 
+                # A carried-forward address must not turn a key rotation into
+                # a new dashboard override of an installer/server address.
+                # Authorize first: unchanged protected fields remain refused.
+                if ((key_value or detail_values) and base_value == before["base_url"]
+                        and before["base_url_source"] != "dashboard"):
+                    base_value = ""
+
                 data = copy.deepcopy(before_overlay)
                 provider_table = data.setdefault("providers", {}).setdefault(name, {})
                 if key_value:
                     provider_table["api_key"] = key_value
+                elif remove_key:
+                    # Selecting server identity explicitly retires the saved
+                    # dashboard key. A higher-authority key is rejected above.
+                    provider_table.pop("api_key", None)
                 if base_value:
                     provider_table["base_url"] = base_value
+                provider_table.update(detail_values)
 
                 # Recheck immediately before commit. The post-commit check below is
                 # still required because higher-authority files do not share this
@@ -942,7 +1101,7 @@ def rotate_provider(
                 # or directory-sync error is reported. Treat any attempted
                 # write as published so every failure takes the rollback path.
                 mutation_attempted = True
-                _write(data)
+                _write_provider_with_deferred_audit(data)
                 config.reset_config_cache()
 
                 authority_after = _provider_authority_fingerprint(name)
@@ -957,7 +1116,11 @@ def rotate_provider(
                     observed=observed,
                     key_value=key_value,
                     base_value=base_value,
+                    details=detail_values,
+                    remove_key=remove_key,
                 )
+                _confirm_cloud_setup(name, observed)
+                _complete_provider_audit()
                 return observed_state
             except Exception as exc:
                 if mutation_attempted:
@@ -1004,10 +1167,11 @@ def clear_provider(name: str) -> None:
         data = _load_overlay_for_update()
         table = (data.get("providers") or {}).get(name)
         if isinstance(table, dict):
-            # Only the key and address are cleared; a sign-in method chosen on
-            # the All settings page stays.
-            table.pop("api_key", None)
-            table.pop("base_url", None)
+            # Guided cloud setup removes its whole dashboard-owned connection;
+            # other providers retain the All settings sign-in choices.
+            fields = _PROVIDER_FIELDS if name in {"azure", "bedrock"} else ("api_key", "base_url")
+            for field in fields:
+                table.pop(field, None)
             if not table:
                 data["providers"].pop(name, None)
         else:
@@ -1091,6 +1255,17 @@ def assert_effective_copilot_operations(enabled: bool) -> None:
     if config.get_features().get("copilot_operations") is not bool(enabled):
         raise FeatureSettingNotEffective(
             "Copilot actions are controlled by another setting. The requested change is not active."
+        )
+
+
+def assert_effective_employee_companions(enabled: bool) -> None:
+    """Report when a saved opt-in differs from the effective deployment policy."""
+    from maverick import config
+
+    if config.get_features().get("employee_companions") is not bool(enabled):
+        raise FeatureSettingNotEffective(
+            "Employee companions are controlled by another setting. "
+            "The requested change is not active."
         )
 
 
@@ -1286,7 +1461,7 @@ def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
             value = list(dict.fromkeys(value))
         elif kind is int:
             low, high = _RETENTION_DAY_BOUNDS
-            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            if isinstance(value, bool) or not isinstance(value, int) or not (value == 0 or low <= value <= high):
                 raise ValueError("retention days are out of range")
         elif not isinstance(value, str) or not value.strip() or len(value) > 1000:
             raise ValueError("text setting is empty or too long")
@@ -1354,6 +1529,7 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "privacy_automation",
     "privacy_automation.data_discovery",
     "privacy_automation.notice_governance",
+    "privacy_automation.public_rights_form",
     "privacy_automation.regulatory_intelligence",
     "privacy_automation.rights_consumer_delivery",
     "privacy_automation.rights_orchestration",
@@ -1452,7 +1628,7 @@ def _catalog_generic_sections() -> tuple[str, ...]:
 REMOVE = object()
 
 
-def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str, ...], object]:
+def set_catalog_values(changes: dict[tuple[str, ...], object], *, before_effect=None) -> dict[tuple[str, ...], object]:
     """Write All-settings values to the overlay in ONE locked save.
 
     ``changes`` maps a catalog key path (``("safety", "profile")``) to its
@@ -1463,6 +1639,8 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     value of each path (``REMOVE`` when absent) so a caller can undo the save
     if the change cannot be recorded in the audit trail.
     """
+    from maverick.config_resets import METADATA, reset_spec
+
     from .settings_catalog import SETTINGS
 
     by_path = {s.path: s for s in SETTINGS if s.key_kind != "entries"}
@@ -1471,7 +1649,15 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     entries = {s.path: s for s in SETTINGS if s.key_kind == "entries"}
     if not isinstance(changes, dict) or not changes:
         raise ValueError("no settings given")
+    reset_tables = {s.id: s for s in SETTINGS}
     for path in changes:
+        if len(path) == 2 and path[0] == METADATA:
+            table = reset_tables.get(path[1])
+            value = changes[path]
+            if table is None or (value is not None and value is not REMOVE and value != reset_spec(table)):
+                raise ValueError("unknown product-default reset")
+            by_path[path] = table
+            continue
         table = entries.get(tuple(path[:-1]))
         if path in by_path:
             continue
@@ -1502,7 +1688,7 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
             else:
                 node[key] = value
         _prune_empty_tables(data, {path[0] for path in changes})
-        _write(data)
+        _write(data, before_effect=before_effect)
     config.reset_config_cache()
     return previous
 
@@ -1526,6 +1712,9 @@ def _prune_empty_tables(data: dict, tops: set[str]) -> None:
 
 
 SANDBOX_BACKENDS: tuple[str, ...] = ("local", "docker", "podman")
+CONTAINER_FILE_TOOLS: tuple[str, ...] = (
+    "shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit",
+)
 
 
 def set_sandbox_backend(backend: str) -> None:
@@ -1543,6 +1732,57 @@ def set_sandbox_backend(backend: str) -> None:
         data = _load_overlay_for_update()
         data.setdefault("sandbox", {})["backend"] = cleaned
         _write(data)
+
+
+def enable_container_file_work() -> None:
+    """Remove only the first-run file-tool blocks after a container is selected.
+
+    The operator must confirm and probe the live daemon at the API boundary.
+    Here the same cross-process lock as other Settings writes protects the
+    read/modify/write. A higher-precedence deployment or tenant denial remains
+    authoritative and is never silently weakened by a latent dashboard value.
+    """
+    with _locked():
+        if config.config_source_errors():
+            raise SecuritySuiteConfigUnavailable(
+                "Settings cannot be read safely; file work was not changed."
+            )
+        effective = config.load_config()
+        backend = str((effective.get("sandbox") or {}).get("backend") or "local").lower()
+        if backend not in ("docker", "podman"):
+            raise ValueError("Choose a running Docker or Podman container first.")
+        higher_paths = []
+        operator_path = os.environ.get(config.CONFIG_OVERLAY_ENV, "").strip()
+        if operator_path:
+            higher_paths.append(Path(operator_path).expanduser())
+        tenant_path = config.tenant_config_path()
+        if tenant_path is not None:
+            higher_paths.append(tenant_path)
+        for path in higher_paths:
+            layer = config._load_config_file(path)
+            policy = (layer.get("security") or {}).get("denied_tools") or []
+            if any(name in policy for name in CONTAINER_FILE_TOOLS):
+                raise ValueError(
+                    "A deployment or workspace rule still blocks file work. "
+                    "Ask its administrator to review that rule."
+                )
+        denied = (effective.get("security") or {}).get("denied_tools") or []
+        if not isinstance(denied, list) or not all(isinstance(name, str) for name in denied):
+            raise SecuritySuiteConfigUnavailable(
+                "Tool rules cannot be read safely; file work was not changed."
+            )
+        remaining = [name for name in denied if name not in CONTAINER_FILE_TOOLS]
+        if remaining == denied:
+            return
+        data = _load_overlay_for_update()
+        security = data.setdefault("security", {})
+        if not isinstance(security, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "Tool rules cannot be read safely; file work was not changed."
+            )
+        security["denied_tools"] = remaining
+        _write(data)
+        config.reset_config_cache()
 
 
 def set_installable_plugins(names) -> None:
@@ -1626,6 +1866,29 @@ def set_active_tenant(tenant_id: str | None) -> None:
             if not data.get("dashboard"):
                 data.pop("dashboard", None)
         _write(data)
+
+
+def clear_deleted_active_tenant(tenant_id: str) -> bool:
+    """Remove the local operator's selection after its workspace is retired.
+
+    An empty dashboard overlay masks a lower-priority config.toml selection;
+    simply deleting the overlay key would expose that closed workspace again.
+    """
+    from maverick.paths import _tenant_namespace_key
+
+    target = _tenant_namespace_key(tenant_id)
+    with _locked():
+        config.reset_config_cache()
+        selected = active_tenant()
+        if selected is None or _tenant_namespace_key(selected) != target:
+            return False
+        data = _load_overlay_for_update()
+        data.setdefault("dashboard", {})["active_tenant"] = ""
+        _write(data)
+        config.reset_config_cache()
+        if active_tenant() is not None:
+            raise RuntimeError("removed workspace selection is still effective")
+        return True
 
 
 def set_model_cost_tier(model: str, band: str | None) -> None:
@@ -2057,7 +2320,25 @@ def set_value_assumptions(*, hourly_rate: float | None = None,
         _write(data)
 
 
-def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
+def _review_email_channel(ccfg, *, enabled, actor):
+    from maverick import microsoft_mail
+    mode = ccfg.get("email_auth", "password")
+    if mode not in {"password", "microsoft"}:
+        raise ValueError("Choose password sign-in or a connected Microsoft mailbox.")
+    if mode == "microsoft" and enabled:
+        try:
+            ccfg.update(microsoft_mail.bind_account(ccfg.get("oauth_account"), actor=actor))
+        except PermissionError as exc:
+            raise ValueError(str(exc)) from exc
+        problem = microsoft_mail.configuration_problem(ccfg)
+        if problem:
+            raise ValueError(problem)
+    elif mode == "password":
+        for key in ("oauth_account", "oauth_tenant", "oauth_principal"):
+            ccfg.pop(key, None)
+
+
+def set_channel(name: str, enabled: bool, values: dict | None = None, *, before_write=None, actor=None) -> None:
     """Enable/disable a channel and set its credentials in the overlay. A blank
     field value is left unchanged (so toggling enabled never wipes a secret you
     can't see). Writes [channels.<name>] to dashboard-config.toml, which
@@ -2069,12 +2350,34 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
     values = values or {}
     with _locked():
         data = _load_overlay_for_update()
+        if before_write is not None:
+            before_write()
         ccfg = data.setdefault("channels", {}).setdefault(name, {})
         ccfg["enabled"] = bool(enabled)
         for field in spec["fields"]:
             key = field["key"]
             raw = values.get(key)
             val = raw.strip() if isinstance(raw, str) else raw
+            if field.get("type") == "list" and key in values:
+                _access = CHANNEL_ALLOWLISTS[name]
+                pattern, error = _access[5], _access[6]
+                entries = (re.split(r"[,\r\n]+", val) if isinstance(val, str)
+                           else val if isinstance(val, list) else None)
+                if entries is None or len(entries) > 200:
+                    raise ValueError("Add no more than 200 permitted people")
+                people = []
+                for entry in entries:
+                    person = str(entry).strip()
+                    if not person:
+                        continue
+                    if not re.fullmatch(pattern, person):
+                        raise ValueError(f"Enter {error}")
+                    if person not in people:
+                        people.append(person)
+                # An explicit empty list denies everyone. Removing this key
+                # instead would silently restore installer/server access.
+                ccfg[key] = people
+                continue
             if val in (None, ""):
                 continue  # blank -> keep the stored value (don't wipe a hidden secret)
             if field.get("type") == "int":
@@ -2084,9 +2387,21 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
                     raise ValueError(f"{field['label']} must be a number") from exc
             elif field.get("type") == "url":
                 ccfg[key] = _channel_server_address(field["label"], val)
+            elif key == "trusted_authserv_id":
+                from maverick.mail_auth import valid_trusted_mail_server
+
+                if not valid_trusted_mail_server(val):
+                    raise ValueError("Incoming mail server identity must be a server name")
+                ccfg[key] = str(val).lower()
             else:
                 ccfg[key] = str(val)
-        _write(data)
+        def reviewed_write():
+            if before_write is not None:
+                before_write()
+            if name == "email":
+                _review_email_channel(ccfg, enabled=enabled, actor=actor)
+        reviewed_write()
+        _write(data, before_effect=reviewed_write)
 
 
 def _channel_server_address(label: str, value: object) -> str:
@@ -2104,14 +2419,16 @@ def _channel_server_address(label: str, value: object) -> str:
     return text
 
 
-def clear_channel(name: str) -> None:
+def clear_channel(name: str, *, before_write=None) -> None:
     """Remove a channel's overlay table entirely (reverts to config.toml/env)."""
     if name not in _CHANNELS_BY_NAME:
         raise ValueError("unknown channel")
     with _locked():
         data = _load_overlay_for_update()
+        if before_write is not None:
+            before_write()
         (data.get("channels") or {}).pop(name, None)
-        _write(data)
+        _write(data, before_effect=before_write)
 
 
 def _raw_config_providers() -> dict:
@@ -2135,6 +2452,29 @@ def _mask(secret: str) -> str:
     return ("•" * 4 + s[-4:]) if len(s) > 4 else "••••"
 
 
+def provider_address_display(value: object) -> tuple[str, bool]:
+    """A safe display only: never copy embedded URL credentials into a form."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    from .integration_readiness import _valid_self_hosted_address
+
+    text = str(value or "").strip()
+    if not text:
+        return "", False
+    try:
+        address = urlsplit(text)
+        host = address.hostname
+        if address.scheme not in {"http", "https"} or not host:
+            raise ValueError("not a server address")
+        host = f"[{host}]" if ":" in host else host
+        if address.port is not None:
+            host += f":{address.port}"
+        display = urlunsplit((address.scheme, host, address.path, "", ""))
+    except ValueError:
+        return "Address needs attention", True
+    return display, len(text) > 320 or not _valid_self_hosted_address(text)
+
+
 def state() -> dict:
     """Redacted snapshot for the settings page. NEVER returns a raw key."""
     overlay = load_overlay()
@@ -2146,12 +2486,36 @@ def state() -> dict:
         ov = ov_providers.get(name) or {}
         raw = raw_providers.get(name) or {}
         effective = config.provider_configuration_state(name)
+        provider_config = config.get_provider_config(name) or {}
         key = ov.get("api_key") or raw.get("api_key")
+        setup_fields = {
+            "azure": ("auth_mode", "deployment", "api_version"),
+            "bedrock": ("auth_mode", "endpoint", "region", "model_id"),
+        }.get(name, ())
+        setup = {field: str(provider_config.get(field) or "").strip() for field in setup_fields}
+        if name == "azure":
+            setup["auth_mode"] = setup.get("auth_mode") or os.environ.get("AZURE_OPENAI_AUTH", "").strip()
+            setup["deployment"] = (os.environ.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
+                                   or setup.get("deployment", ""))
+        if name == "bedrock":
+            setup["auth_mode"] = setup.get("auth_mode") or os.environ.get("BEDROCK_AUTH_MODE", "").strip()
+            setup["region"] = (os.environ.get("AWS_REGION", "").strip()
+                               or os.environ.get("AWS_DEFAULT_REGION", "").strip()
+                               or setup.get("region", ""))
+            setup["model_id"] = (os.environ.get("BEDROCK_MODEL_ID", "").strip()
+                                 or setup.get("model_id", ""))
+        setup_locked = {field: bool(_provider_detail_blocker(name, field)) for field in setup_fields}
+        via = effective["via"]
+        if not via and ov and setup.get("auth_mode") in {"iam", "entra_id"}:
+            via = "dashboard"
+        address, address_needs_repair = provider_address_display(effective["base_url"])
         providers.append({
             "name": name, "label": p["label"], "base_url_field": p["base_url"],
-            "configured": effective["configured"], "via": effective["via"],
+            "configured": effective["configured"],
+            "via": via,
+            "setup": setup, "setup_locked": setup_locked,
             "key_hint": _mask(key) if (ov.get("api_key") or raw.get("api_key")) else None,
-            "base_url": effective["base_url"],
+            "base_url": address, "base_url_needs_repair": address_needs_repair,
             "env_hint": ", ".join(p["env"]) if p["env"] else "",
             "dashboard_set": effective["dashboard_set"],
             "api_key_source": effective["api_key_source"],
@@ -2184,6 +2548,11 @@ def channels_state() -> list[dict]:
     overlay = load_overlay()
     ov_ch = overlay.get("channels") or {}
     raw_ch = _raw_config_channels()
+    from . import settings_all_page as page
+    from .integration_readiness import require_readable_config
+
+    effective = require_readable_config().get("channels") or {}
+    layers = page._sources()
     out = []
     for spec in CHANNELS:
         name = spec["name"]
@@ -2194,16 +2563,42 @@ def channels_state() -> list[dict]:
             ov_v = ov.get(f["key"])
             raw_v = raw.get(f["key"])
             v = ov_v if ov_v not in (None, "") else raw_v
-            configured = v not in (None, "")
+            configured = v not in (None, "", [])
             # A value set on the server (environment) wins over this page.
             from_server = bool(f.get("env") and os.environ.get(f["env"], "").strip())
+            people_source = ""
+            people_locked = False
+            if f.get("type") == "list":
+                from maverick_channels.base import normalize_allowlist
+
+                from .settings_catalog import BY_ID, lookup
+
+                setting = BY_ID[f"channels.{name}.{f['key']}"]
+                current = (effective.get(name) or {}).get(f["key"])
+                if name == "teams" and f["key"] not in (effective.get(name) or {}):
+                    current = (effective.get(name) or {}).get("allowed_user_ids")
+                if current is not None and not isinstance(current, (list, tuple, set)):
+                    raise ValueError("The permitted-people list could not be read safely.")
+                v = sorted(normalize_allowlist(current, f["env"]))
+                configured = bool(v)
+                from_server = current is None and from_server
+                resolved = page._resolve(setting, layers)
+                people_source = resolved.get("source_text") or page.SOURCE_TEXT[resolved["source"]]
+                people_locked = resolved["locked"] or lookup(layers["tenant"], setting.path)[0]
+                if people_locked:
+                    people_source = "Set by your server's deployment settings"
             fields.append({
                 "key": f["key"], "label": f["label"],
                 "secret": bool(f.get("secret")), "type": f.get("type", "text"),
-                "value": "" if f.get("secret") else (str(v) if configured else ""),
+                "help": f.get("help", ""), "advanced": bool(f.get("advanced")),
+                "value": ("" if f.get("secret") else
+                          "\n".join(str(item) for item in v) if f.get("type") == "list" and isinstance(v, list)
+                          else str(v) if configured else ""),
                 "hint": ("on the server" if from_server else
                          _mask(v) if (configured and f.get("secret")) else ""),
                 "configured": configured or from_server,
+                "people": v if f.get("type") == "list" else [],
+                "people_source": people_source, "people_locked": people_locked,
             })
         out.append({
             "name": name, "label": spec["label"],
@@ -2227,5 +2622,5 @@ __all__ = [
     "set_dgm", "set_ekko", "set_security_suite",
     "set_toggle", "set_toggles", "set_learning", "set_learning_subsystem",
     "set_flow_autonomy", "state", "set_channel", "clear_channel",
-    "channels_state",
+    "channels_state", "CONTAINER_FILE_TOOLS", "enable_container_file_work",
 ]

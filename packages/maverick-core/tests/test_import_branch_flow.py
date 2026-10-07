@@ -4,6 +4,7 @@ Automate (WDL) definition preserves If/Foreach; every path emits a per-step
 fidelity report."""
 from __future__ import annotations
 
+import pytest
 from maverick.automation_import import n8n, power_automate
 from maverick.automation_import.to_flow import to_flow, to_flow_with_report
 from maverick.flow.ir import (
@@ -76,6 +77,167 @@ def test_linear_workflow_still_lowers_linearly():
     _assert_preview_valid(f)
     assert not any(n.kind == NODE_BRANCH for n in f.nodes.values())
     assert f.nodes[f.start].next is not None            # chained
+
+
+def _n8n_fanout(connections):
+    return n8n.translate({
+        "id": "fanout", "name": "Welcome a lead", "active": True,
+        "nodes": [
+            {"name": "Hook", "type": "n8n-nodes-base.webhook", "parameters": {}},
+            {"name": "Prepare", "type": "n8n-nodes-base.noOp", "parameters": {}},
+            {"name": "CRM", "type": "n8n-nodes-base.noOp", "parameters": {}},
+            {"name": "Notify", "type": "n8n-nodes-base.noOp", "parameters": {}},
+            {"name": "Welcome", "type": "n8n-nodes-base.noOp", "parameters": {}},
+        ],
+        "connections": connections,
+    })
+
+
+def _edges(*names):
+    return [{"node": name, "type": "main", "index": 0} for name in names]
+
+
+def test_n8n_fanout_runs_every_connected_path_and_reports_the_approximation(
+    tmp_path, monkeypatch,
+):
+    from maverick.flow import store
+    from maverick.flow.runner import STATUS_COMPLETED, run_flow
+
+    imported = _n8n_fanout({
+        "Hook": {"main": [_edges("Prepare")]},
+        "Prepare": {"main": [_edges("CRM", "Notify", "Welcome")]},
+    })
+    flow, report = to_flow_with_report(imported)
+    _assert_preview_valid(flow)
+    assert not flow.reachability_errors()
+    first = flow.nodes[flow.start]
+    fork = flow.nodes[first.next]
+    assert fork.kind == NODE_PARALLEL
+    assert len(fork.branches) == 3
+    assert {e["step"] for e in report if e["kind"] == NODE_AGENT} == {
+        "Prepare", "CRM", "Notify", "Welcome",
+    }
+    fork_entry = next(e for e in report if e["kind"] == NODE_PARALLEL)
+    assert fork_entry["fidelity"] == "approximated"
+    assert "order" in fork_entry["note"]
+
+    # An imported draft must remain publishable, then execute all three paths.
+    monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: tmp_path.joinpath(*p))
+    saved = store.save_flow(flow)
+    store.publish_flow(saved.id, expected_version=saved.version,
+                       expected_revision=saved.revision)
+    seen = []
+    result = run_flow(
+        flow, agent_fn=lambda node, brief, data: seen.append(node.label) or ("ok", None),
+        action_fn=lambda node, params, data: ({"ok": True}, None),
+        data={},
+    )
+    assert result.status == STATUS_COMPLETED
+    assert sorted(seen) == ["CRM", "Notify", "Prepare", "Welcome"]
+
+
+def test_n8n_trigger_fanout_keeps_each_root_path():
+    imported = _n8n_fanout({
+        "Hook": {"main": [_edges("Prepare", "CRM", "Notify", "Welcome")]},
+    })
+    flow, report = to_flow_with_report(imported)
+    _assert_preview_valid(flow)
+    assert flow.nodes[flow.start].kind == NODE_PARALLEL
+    assert len(flow.nodes[flow.start].branches) == 4
+    assert len([r for r in report if r["kind"] == NODE_AGENT]) == 4
+
+
+def test_n8n_decision_fanout_preserves_each_true_connection_and_false_arm():
+    from maverick.flow.runner import STATUS_COMPLETED, run_flow
+
+    imported = _n8n_fanout({
+        "Hook": {"main": [_edges("Prepare")]},
+        "Prepare": {"main": [_edges("CRM", "Notify"), _edges("Welcome")]},
+    })
+    raw = imported.raw
+    raw["nodes"][1]["type"] = "n8n-nodes-base.if"
+    raw["nodes"][1]["parameters"] = {"conditions": {"conditions": [
+        {"leftValue": "{{amount}}", "operator": {"operation": "gt"},
+         "rightValue": "100"},
+    ]}}
+    flow = to_flow(n8n.translate(raw))
+    _assert_preview_valid(flow)
+    choice = flow.nodes[flow.start]
+    assert choice.kind == NODE_BRANCH
+    assert flow.nodes[choice.if_true].kind == NODE_PARALLEL
+    assert flow.nodes[choice.if_false].label == "Welcome"
+    for amount, expected in [(200, ["CRM", "Notify"]), (50, ["Welcome"])]:
+        seen = []
+        result = run_flow(
+            flow,
+            agent_fn=lambda node, brief, data, seen=seen: seen.append(node.label) or ("ok", None),
+            action_fn=lambda node, params, data: ({"ok": True}, None),
+            data={"amount": amount},
+        )
+        assert result.status == STATUS_COMPLETED
+        assert sorted(seen) == expected
+
+
+def test_n8n_fanout_with_risky_action_uses_a_durable_parent_approval():
+    from maverick.flow.runner import STATUS_COMPLETED, run_flow
+
+    raw = _n8n_fanout({
+        "Hook": {"main": [_edges("Prepare")]},
+        "Prepare": {"main": [_edges("CRM", "Notify", "Welcome")]},
+    }).raw
+    raw["nodes"][3]["type"] = "n8n-nodes-base.slack"
+    raw["nodes"][3]["parameters"] = {"operation": "post", "text": "hello"}
+    flow = to_flow(n8n.translate(raw))
+    _assert_preview_valid(flow)
+    assert not flow.reachability_errors()
+    gate = next(node for node in flow.nodes.values() if node.kind == NODE_APPROVAL)
+    fork = flow.nodes[gate.next]
+    assert fork.kind == NODE_PARALLEL
+    assert all(all(node.kind != NODE_APPROVAL for node in branch.nodes.values())
+               for branch in fork.branches)
+    seen = []
+    result = run_flow(
+        flow,
+        agent_fn=lambda node, brief, data: seen.append(node.label) or ("ok", None),
+        action_fn=lambda node, params, data: seen.append(node.label) or ({"ok": True}, None),
+        approve_fn=lambda node, data: "approved",
+        data={},
+    )
+    assert result.status == STATUS_COMPLETED
+    assert sorted(seen) == ["CRM", "Notify", "Prepare", "Welcome"]
+
+
+def test_n8n_fanout_with_shared_downstream_step_requires_repair():
+    imported = _n8n_fanout({
+        "Hook": {"main": [_edges("Prepare")]},
+        "Prepare": {"main": [_edges("CRM", "Notify")]},
+        "CRM": {"main": [_edges("Welcome")]},
+        "Notify": {"main": [_edges("Welcome")]},
+    })
+    with pytest.raises(ValueError, match="paths rejoin or loop"):
+        to_flow_with_report(imported)
+
+
+def test_n8n_disconnected_step_requires_repair_instead_of_a_false_preserved_report():
+    imported = _n8n_fanout({
+        "Hook": {"main": [_edges("Prepare")]},
+        "Prepare": {"main": [_edges("CRM", "Notify")]},
+    })
+    with pytest.raises(ValueError, match="disconnected steps"):
+        to_flow_with_report(imported)
+
+
+@pytest.mark.parametrize("extra, message", [
+    ({"main": [_edges("CRM")], "error": [_edges("Notify")]}, "non-main output"),
+    ({"main": [_edges("CRM"), _edges("Notify")]}, "unsupported output sockets"),
+])
+def test_n8n_unsupported_sockets_are_refused(extra, message):
+    imported = _n8n_fanout({
+        "Hook": {"main": [_edges("Prepare")]},
+        "Prepare": extra,
+    })
+    with pytest.raises(ValueError, match=message):
+        to_flow_with_report(imported)
 
 
 def test_graphless_import_falls_back_to_linear():

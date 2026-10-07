@@ -10,12 +10,13 @@ from maverick_dashboard import agent_control_plane_page as page
 
 
 def _templates() -> Jinja2Templates:
-    selected = Jinja2Templates(directory=Path(page.__file__).parent / "templates")
-    selected.env.globals.update(
-        theme="dark", font="default", lang="en", density="comfortable",
-        custom_theme_css="", custom_theme_names=[], dir="ltr", nav_groups=[],
-        t=lambda key: key,
+    from maverick_dashboard.app import _theme_context
+
+    selected = Jinja2Templates(
+        directory=Path(page.__file__).parent / "templates",
+        context_processors=[_theme_context],
     )
+    selected.env.globals.update(nav_groups=[])
     return selected
 
 

@@ -124,14 +124,18 @@ def test_postgres_contract_filters_foreign_tenant_before_decrypt(world, monkeypa
 
 
 def test_sidebar_calls_root_summary_query_with_active_selection(world, monkeypatch):
-    from maverick_dashboard import app
+    from maverick_dashboard import app, auth
+    from starlette.requests import Request
 
+    request = Request({"type": "http", "method": "GET", "path": "/chat", "headers": []})
+    monkeypatch.setattr(auth, "_authorization_principal", lambda _request: "alice")
     root = world.create_goal("Root", owner="alice")
     for _ in range(81):
         world.create_goal("Child", parent_id=root, owner="alice")
     monkeypatch.setattr(app, "goal_owner_filter", lambda _request: "alice")
     monkeypatch.setattr(world, "list_goals", lambda **_kwargs: pytest.fail("sidebar loaded complete goals"))
-    assert app._chat_threads(None, world, active_root=root)[0] == {
-        "id": root, "target_id": root, "title": "Root", "status": "pending", "active": True,
+    assert app._chat_threads(request, world, active_root=root)[0] == {
+        "id": root, "target_id": root, "title": "Root", "status": "pending", "state_label": "Queued",
+        "active": True, "pinned": False, "archived": False, "stop_kind": "",
         "updated_at": world.get_goal(root).updated_at,
     }

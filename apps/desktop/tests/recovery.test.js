@@ -5,10 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../ui/recovery.js'), 'utf8');
 
-function harness(invoke, overrides = {}) {
+function harness(invoke, overrides = {}, readiness = async () => ({service: "lightwork-dashboard", state: "ready"})) {
   const nodes = new Map(), destinations = [];
   function get(id) { if (!nodes.has(id)) nodes.set(id, { disabled: false, textContent: '', listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; } }); return nodes.get(id); }
-  vm.runInNewContext(source, { document: { getElementById: get }, window: { __TAURI__: { core: { invoke } }, location: { replace(url) { destinations.push(url); } } }, fetch: async () => ({}), setTimeout, clearTimeout, AbortController, ...overrides });
+  vm.runInNewContext(source, { document: { getElementById: get }, window: { __TAURI__: { core: { invoke: (command, args) => command === "dashboard_readiness" ? readiness() : invoke(command, args) } }, location: { replace(url) { destinations.push(url); } } }, fetch: async () => ({}), setTimeout, clearTimeout, AbortController, ...overrides });
   return { get, destinations };
 }
 
@@ -41,13 +41,13 @@ test('return to work chooses the fixed normal mode', async () => {
 
 test('hung readiness fetches hit the overall deadline, abort, and allow retry', async () => {
   let now = 0, sequence = 0;
-  const timers = new Map(), signals = [];
+  const timers = new Map(), probes = [];
   const h = harness(async () => {}, {
     Date: { now: () => now },
-    fetch: async (_url, options) => { signals.push(options.signal); return new Promise(() => {}); },
+
     setTimeout(fn, ms) { timers.set(++sequence, {fn, at: now + ms}); return sequence; },
     clearTimeout(id) { timers.delete(id); },
-  });
+  }, () => { probes.push(true); return new Promise(() => {}); });
   const request = h.get('enter-recovery').listeners.click();
   for (let step = 0; step < 40; step++) {
     for (let tick = 0; tick < 8; tick++) await Promise.resolve();
@@ -56,8 +56,8 @@ test('hung readiness fetches hit the overall deadline, abort, and allow retry', 
     timers.delete(id); now = timer.at; timer.fn();
   }
   await request;
-  assert.equal(now, 60000); assert.ok(signals.length > 0);
-  assert.ok(signals.every(signal => signal.aborted)); assert.equal(timers.size, 0);
+  assert.equal(now, 60000); assert.ok(probes.length > 0);
+  assert.equal(timers.size, 0);
   assert.equal(h.get('enter-recovery').disabled, false);
   assert.equal(h.get('leave-recovery').disabled, false);
   assert.match(h.get('status').textContent, /switched modes, but your workspace isn't answering yet/);

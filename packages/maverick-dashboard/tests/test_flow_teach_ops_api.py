@@ -68,9 +68,11 @@ def env(tmp_path, monkeypatch):
             return {"episode": EPISODES[run_id]}
 
         def get(self, ctx, flow_id, run_id, detail=False):
-            return {"status": "accepted", "revision": 3, "episode_sha256": "e" * 64}
+            return {"status": "accepted", "revision": 3, "episode_sha256": "e" * 64,
+                    "training_available": False}
 
-    monkeypatch.setattr(teach, "_episode_service", lambda request, flow_id: (Evidence(), object()))
+    monkeypatch.setattr(teach, "_episode_service", lambda request, flow_id, **kwargs: (
+        Evidence(), SimpleNamespace(resource_owner="user:owner")))
     application = FastAPI()
 
     @application.middleware("http")
@@ -103,6 +105,22 @@ def test_overview_lists_ai_steps_actions_and_refuses_others(env):
     assert data["flow"]["version"] == env.flow.version
     assert env.client.get("/api/v1/flows/billing/teach", headers=_as("other")).status_code == 404
     assert env.client.get("/api/v1/flows/billing/teach", headers=_as("viewer")).status_code == 403
+
+
+def test_teaching_refuses_changed_flow_before_learning_but_accepts_current_form(env):
+    context = env.client.get("/api/v1/flows/billing/teach").json()["flow"]["context"]
+    changed_account = env.client.post("/api/v1/flows/billing/teach/rule/learn", json=RULE,
+                                      headers={"X-Lightwork-Teaching-Context": "0" * 64})
+    assert changed_account.status_code == 409 and "account changed" in changed_account.json()["detail"]
+    stale = env.client.post("/api/v1/flows/billing/teach/rule/learn", json=RULE,
+                           headers={"X-Lightwork-Flow-Version": str(env.flow.version + 1),
+                                    "X-Lightwork-Flow-Revision": env.flow.revision})
+    assert stale.status_code == 409 and "after review" in stale.json()["detail"]
+    current = env.client.post("/api/v1/flows/billing/teach/rule/learn", json=RULE,
+                             headers={"X-Lightwork-Flow-Version": str(env.flow.version),
+                                      "X-Lightwork-Flow-Revision": env.flow.revision,
+                                      "X-Lightwork-Teaching-Context": context})
+    assert current.status_code == 200 and current.json()["summary"]["examples"] == 4
 
 
 def test_learn_try_add_examples_attach_and_save_through_the_normal_save(env):
@@ -146,25 +164,19 @@ def test_combined_rules_and_plain_refusals(env):
     assert forged.status_code == 200 and forged.json()["answered"] is False
 
 
-def test_recipe_from_reviewed_runs_learns_refines_and_drafts_a_new_flow(env):
+def test_review_acceptance_alone_cannot_train_or_draft_a_recipe(env):
     learned = env.client.post("/api/v1/flows/billing/teach/recipe/learn",
                               json={"run_ids": ["run-a", "run-b"], "tools": TOOLS, "style": "plain"})
-    assert learned.status_code == 200, learned.text
-    summary = learned.json()["summary"]
-    assert summary["runs"] == 2 and summary["actions"] == TOOLS and env.exported == ["run-a", "run-b"]
-    refined = env.client.post("/api/v1/flows/billing/teach/recipe/refine",
-                              json={"artifact": learned.json()["artifact"], "run_ids": ["run-c"]}).json()
-    assert refined["summary"]["runs"] == 3
-    draft = env.client.post("/api/v1/flows/billing/teach/recipe/draft",
-                            json={"artifact": refined["artifact"], "name": "Invoice customers"}).json()
-    assert draft["saved"] is False and draft["draft"]["id"].startswith("invoice-customers-")
-    with tenant_scope(tenant=TENANT):
-        assert store.load_flow(draft["draft"]["id"]) is None, "drafting saves nothing"
+    assert learned.status_code == 409 and "Signed learning is not ready" in learned.json()["detail"]
+    assert env.exported == []
+    # Old raw artifacts cannot be submitted to the customer refinement/draft
+    # routes after the signed lineage boundary was added.
+    assert env.client.post("/api/v1/flows/billing/teach/recipe/refine",
+                           json={"artifact": {}, "run_ids": ["run-c"]}).status_code == 422
+    assert env.client.post("/api/v1/flows/billing/teach/recipe/draft",
+                           json={"artifact": {}, "name": "Invoice customers"}).status_code == 422
     one = env.client.post("/api/v1/flows/billing/teach/recipe/learn", json={"run_ids": ["run-a"], "tools": TOOLS})
     assert one.status_code == 422
-    narrow = env.client.post("/api/v1/flows/billing/teach/recipe/learn",
-                             json={"run_ids": ["run-a", "run-b"], "tools": ["lookup_customer"]})
-    assert narrow.status_code == 400 and narrow.json()["detail"] == "A chosen run used an action you didn't allow."
 
 
 def test_signed_examples_refuse_forgeries_viewers_and_short_sets(env):
@@ -189,6 +201,98 @@ def test_teach_page_renders_with_controls(env, monkeypatch):
     for needle in ("Teach a step from examples", "tr-learn", "Build a flow from reviewed runs", "sg-learn"):
         assert needle in page.text
     assert env.client.get("/flows/billing/teach", headers=_as("other")).status_code == 404
+
+
+def test_recent_example_inbox_is_owner_scoped_and_links_to_exact_run(env, monkeypatch):
+    monkeypatch.setattr(config, "get_flows", lambda: {"action_episode_capture": True})
+    observed = []
+
+    def recent(*, owner, limit, cursor):
+        observed.append((owner, limit, cursor))
+        if owner != "user:owner":
+            return []
+        return [SimpleNamespace(flow_id="billing", run_id="run-a", created=100.0,
+                                updated=100.0, status="completed")]
+
+    monkeypatch.setattr(store, "list_run_metadata", recent)
+    page = env.client.get("/learning/examples")
+    assert page.status_code == 200 and "lex-list" in page.text
+    result = env.client.get("/api/v1/learning/examples")
+    assert result.status_code == 200, result.text
+    assert result.json()["examples"] == [{
+        "flow_id": "billing", "run_id": "run-a", "flow_name": "Billing", "started": 100.0,
+        "run_status": "completed", "status": "accepted", "training_available": False,
+        "retain_until": None, "audit_status": None,
+    }]
+    assert observed == [("user:owner", 200, None)]
+    assert env.client.get("/api/v1/learning/examples", headers=_as("other")).json()["examples"] == []
+    assert env.client.get("/api/v1/learning/examples", headers=_as("viewer")).status_code == 403
+
+
+def test_example_inbox_pages_older_runs_without_a_hidden_cutoff(env, monkeypatch):
+    monkeypatch.setattr(config, "get_flows", lambda: {"action_episode_capture": True})
+    runs = [SimpleNamespace(flow_id="billing", run_id=f"run-{index}", created=float(1000 - index),
+                            updated=float(1000 - index), status="completed") for index in range(51)]
+
+    def recent(*, owner, limit, cursor):
+        assert owner == "user:owner" and limit == 200
+        return [run for run in runs if cursor is None or (run.updated, run.run_id) < cursor][:limit]
+
+    monkeypatch.setattr(store, "list_run_metadata", recent)
+    first = env.client.get("/api/v1/learning/examples")
+    assert first.status_code == 200 and len(first.json()["examples"]) == 50
+    cursor = first.json()["next_cursor"]
+    assert cursor
+    older = env.client.get("/api/v1/learning/examples", params={"cursor": cursor})
+    assert older.status_code == 200 and len(older.json()["examples"]) == 1
+    assert older.json()["next_cursor"] is None
+    assert env.client.get("/api/v1/learning/examples", params={"cursor": "not!valid"}).status_code == 422
+
+
+def test_example_inbox_does_not_present_storage_failure_as_no_examples(env, monkeypatch):
+    from maverick_dashboard import flow_teach_ops_api as teach
+
+    monkeypatch.setattr(config, "get_flows", lambda: {"action_episode_capture": True})
+    monkeypatch.setattr(store, "list_run_metadata", lambda **_kwargs: [
+        SimpleNamespace(flow_id="billing", run_id="run-a", created=100.0, updated=100.0,
+                        status="completed")])
+
+    class Broken:
+        def get(self, *_args):
+            raise OSError("private store unavailable")
+
+    monkeypatch.setattr(teach, "_episode_service", lambda *_args, **_kwargs: (
+        Broken(), SimpleNamespace(resource_owner="user:owner")))
+    failed = env.client.get("/api/v1/learning/examples")
+    assert failed.status_code == 503
+    assert "could not be checked" in failed.json()["detail"]
+    assert "private store" not in failed.text
+    flow_failed = env.client.get("/api/v1/flows/billing/teach/examples")
+    assert flow_failed.status_code == 503 and "could not be checked" in flow_failed.json()["detail"]
+    assert "private store" not in flow_failed.text
+
+
+def test_copilot_reviewed_source_change_refuses_signed_issuance(monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import api_flow_recipe_lineage as lineage
+    from maverick_dashboard import flow_teach_ops_api as teach
+
+    class Evidence:
+        def get(self, *_args):
+            return {"training_available": True, "revision": 4,
+                    "episode_sha256": "e" * 64, "grant_sha256": "g" * 64}
+
+        def export_signed(self, *_args, **_kwargs):
+            pytest.fail("A changed reviewed source must not reach the signer.")
+
+    context = SimpleNamespace(resource_owner="user:owner")
+    monkeypatch.setattr(teach, "_signed_ready", lambda _flags: True)
+    monkeypatch.setattr(teach, "_episode_service", lambda *_args, **_kwargs: (Evidence(), context))
+    monkeypatch.setattr(lineage, "_service", lambda _request: (None, context))
+    with pytest.raises(HTTPException) as error:
+        teach._gather_signed(None, "billing", ["one"], expected_runs={"one": {
+            "revision": 3, "episode": "e" * 64, "grant": "g" * 64}})
+    assert error.value.status_code == 409 and "after review" in error.value.detail
 
 
 def _key_trust(public_hex, issuer="caller-issuer"):

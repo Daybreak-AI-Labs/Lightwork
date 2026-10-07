@@ -70,7 +70,7 @@ test('explicit consent publication resolves through an enrolled public client, r
   await expect(page.locator('#cpp-preview-result')).toContainText('Synthetic privacy choices');
   await expect(page.locator('#cpp-preview-result')).toContainText('Synthetic analytics');
   expect(publishes).toBe(0);expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(0);
-  await promotion.getByRole('button',{name:'Publish',exact:true}).click();
+  await promotion.getByRole('button',{name:'Publish version',exact:true}).click();
   await expect(page.locator('#mv-confirm-msg')).toContainText('Publish to Browser publish web?');await page.locator('#mv-confirm-ok').click();
   await expect(page.locator('#cpp-status')).toHaveText('Published to Browser publish web.');expect(publishes).toBe(1);
   const published=(await ok(await request.get(API+'/properties/'+property+'/history'))).items[0];expect(published.action).toBe('publish');
@@ -85,22 +85,29 @@ test('explicit consent publication resolves through an enrolled public client, r
   expect(resolved.policy_id).toBe('browser-publish-policy');
   await propertyRow.getByRole('button',{name:'History: Browser publish web'}).click();
   await expect(page.locator('#cpp-history').getByRole('row')).toHaveCount(2);
-  // Someone else publishes after this page loaded: the row's revision is now stale.
+  // Withdrawing opens a complete review of the exact banner first; nothing is withdrawn yet.
+  await propertyRow.getByRole('button',{name:'Withdraw: Browser publish web'}).click();
+  const review=page.locator('#cpp-withdrawal-review');await expect(review).toBeVisible();
+  await expect(review).toContainText('Current banner');await expect(review).toContainText('Published version 1');
+  // Someone else publishes after the review: the reviewed withdrawal is now stale and must be refused.
   await ok(await request.post(API+'/properties/'+property+'/publish',{data:{rule_group_id:'browser-publish-rules',rule_group_version:1,
     expected_property_revision:1,expected_publication_revision:1,idempotency_key:'browser-publish-elsewhere'}}));
-  const rejected=page.waitForResponse(response=>response.url().endsWith('/withdraw'));
-  await propertyRow.getByRole('button',{name:'Withdraw: Browser publish web'}).click();
-  await expect(page.locator('#mv-confirm-msg')).toContainText('Stop showing the banner on Browser publish web?');await page.locator('#mv-confirm-ok').click();
+  const rejected=page.waitForResponse(response=>response.url().endsWith('/withdrawal-requests/apply'));
+  await review.getByRole('button',{name:'Withdraw reviewed banner',exact:true}).click();
   expect((await rejected).status()).toBe(409);
-  await expect(page.locator('#cpp-status')).toContainText('changed since you opened it');
-  await expect(page.locator('#cpp-status')).not.toContainText('revision');
+  await expect(page.locator('#cpp-withdrawal-status')).toContainText('This reviewed change was refused');
+  await expect(page.locator('#cpp-withdrawal-status')).not.toContainText('revision');
   expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(2);
   await page.reload();
-  await page.locator('#cpp-property-table').getByRole('button',{name:'Withdraw: Browser publish web'}).click();await page.locator('#mv-confirm-ok').click();
-  await expect(page.locator('#cpp-status')).toHaveText('The banner no longer shows on Browser publish web.');
+  await page.locator('#cpp-property-table').getByRole('button',{name:'Withdraw: Browser publish web'}).click();
+  const fresh=page.locator('#cpp-withdrawal-review');await expect(fresh).toContainText('Published version 2');
+  const applied=page.waitForResponse(response=>response.url().endsWith('/withdrawal-requests/apply'));
+  await fresh.getByRole('button',{name:'Withdraw reviewed banner',exact:true}).click();
+  expect((await applied).status()).toBe(200);
+  await expect(page.locator('#cpp-withdrawal-status')).toHaveText('Your exact original request withdrew the reviewed banner. Nothing was repeated.');
   expect((await request.get('/api/v1/public/consent/configuration',{headers:publicHeaders})).status()).toBe(409);
   const history=await ok(await request.get(API+'/properties/'+property+'/history'));expect(history.items.map(item=>item.action)).toEqual(['withdraw','publish','publish']);
-  await page.locator('#cpp-status').scrollIntoViewIfNeeded();await info.attach('consent-published-and-withdrawn',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
+  await page.locator('#cpp-withdrawal-status').scrollIntoViewIfNeeded();await info.attach('consent-published-and-withdrawn',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
 });
 
 test('a failed recovery save retries the exact operation and survives a page reload',async({page})=>{
@@ -134,7 +141,7 @@ test('a rejected website address is explained plainly and keeps the other fields
   await form.getByLabel('Name').fill('Browser consumer web');await form.getByLabel('Consent group').fill('Browser consumers');
   await form.locator('[name="web_domains"]').fill('not a valid address!');
   const rejected=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().endsWith('/properties/browser-consumer-web'));
-  await form.getByRole('button',{name:'Save',exact:true}).click();const rejection=await rejected;expect(rejection.status()).toBe(422);
+  await form.getByRole('button',{name:'Save property',exact:true}).click();const rejection=await rejected;expect(rejection.status()).toBe(422);
   // The page generated the request reference it sent; a person never types it.
   const enrollmentKey=rejection.request().postDataJSON().idempotency_key;expect(enrollmentKey).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{7,}$/);
   await expect(page.locator('#cpp-status')).toContainText('Check the website addresses');
@@ -144,23 +151,27 @@ test('a rejected website address is explained plainly and keeps the other fields
   await expect(form.locator('[name="idempotency_key"]')).toHaveValue(enrollmentKey);
   await form.locator('[name="web_domains"]').fill('browser-consumer.example.test');
   await expect(form.locator('[name="idempotency_key"]')).not.toHaveValue(enrollmentKey);
-  await form.getByRole('button',{name:'Save',exact:true}).click();
+  await form.getByRole('button',{name:'Save property',exact:true}).click();
   await expect(page.locator('#cpp-status')).toHaveText('Saved Browser consumer web.');
   await expect(page.locator('#cpp-property-table')).toContainText('browser-consumer.example.test');
   await page.setViewportSize({width:320,height:800});await fits(page);
 });
 
 test('workspace recovery creates a real local snapshot and retains signed temporary restore evidence after reload',async({page},info)=>{
+  test.setTimeout(150000); // Real archive verification and fresh-process restore, including Windows filesystem latency.
   await page.setViewportSize({width:375,height:812});await page.goto('/workspace/recovery');
   await expect(page.locator('#wrec-key-create')).toBeEnabled();
   const key=page.waitForEvent('download');await page.locator('#wrec-key-create').click();
   expect((await key).suggestedFilename()).toBe('Lightwork-recovery-key.txt');
-  await expect(page.locator('#wrec-create')).toBeEnabled();await page.locator('#wrec-create').click();
+  await expect(page.locator('#wrec-create')).toBeEnabled();
+  const created=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/v1/recovery/snapshots'),{timeout:60000});
+  await page.locator('#wrec-create').click();await ok(await created);
   await expect(page.locator('#wrec-status')).toContainText('Snapshot created and verified');
   await page.locator('#wrec-inspect').click();await expect(page.locator('#wrec-result')).toContainText('files verified');
   const archive=page.waitForEvent('download');await page.locator('#wrec-download').click();
   expect((await archive).suggestedFilename()).toMatch(/^Lightwork-snapshot-.+\.tgz$/);
-  await page.locator('#wrec-drill').click();await expect(page.locator('#wrec-status')).toContainText('Local restore test passed');
+  const restored=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/drill'),{timeout:60000});
+  await page.locator('#wrec-drill').click();await ok(await restored);await expect(page.locator('#wrec-status')).toContainText('Local restore test passed');
   await expect(page.locator('#wrec-result')).toContainText('Your live workspace was not changed');
   const snapshot=await page.locator('#wrec-snapshot').inputValue();
   let reportLoads=0;page.on('request',r=>{if(r.url().endsWith('/drill/report'))reportLoads++;});
@@ -271,7 +282,9 @@ test('recovery comparison pages real protected differences, downloads captured e
   if(await page.locator('#wrec-key-create').isEnabled()){
     const key=page.waitForEvent('download');await page.locator('#wrec-key-create').click();await key;
   }
-  await expect(page.locator('#wrec-create')).toBeEnabled();await page.locator('#wrec-create').click();
+  await expect(page.locator('#wrec-create')).toBeEnabled();
+  const created=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/v1/recovery/snapshots'),{timeout:60000});
+  await page.locator('#wrec-create').click();await ok(await created);
   await expect(page.locator('#wrec-status')).toContainText('Snapshot created and verified');
   const snapshot=await page.locator('#wrec-snapshot').inputValue();
   for(let index=0;index<55;index++){
@@ -284,7 +297,10 @@ test('recovery comparison pages real protected differences, downloads captured e
   }
   expect((await request.post('/api/v1/facts',{data:{key:'browser_recovery_comparison',value:'Synthetic database content must not enter the report'}})).status()).toBe(204);
   let restoreRequests=0;page.on('request',req=>{if(/\/recovery\/(restore|.*\/prepare|installation\/authorize)$/.test(new URL(req.url()).pathname))restoreRequests++;});
+  const compared=page.waitForResponse(r=>r.request().method()==='POST'&&/\/api\/v1\/recovery\/snapshots\/[^/]+\/compare$/.test(new URL(r.url()).pathname));
   await page.locator('#wrec-compare').press('Enter');
+  const compareResponse=await compared;await compareResponse.finished();
+  console.log(`recovery comparison initial request: ${Math.round(compareResponse.request().timing().responseEnd)} ms`);
   await expect(page.locator('#wrec-comparison-report')).toBeVisible();
   await expect(page.locator('#wrec-comparison-items > li')).toHaveCount(50);
   await expect(page.locator('#wrec-comparison-next')).toBeEnabled();
@@ -357,7 +373,7 @@ test('pilot preparation freezes four unrun tasks and preserves an observation af
   await costs.locator('input[type="number"]').nth(0).fill('25');await costs.locator('input[type="number"]').nth(1).fill('75');
   await costs.locator('textarea').fill('Synthetic internal attribution only; not provider invoice acceptance.');await costs.locator('input[type="checkbox"]').check();
   const confirmLabel=costs.locator('label:has(input[type="checkbox"])');
-  const checkboxBox=await confirmLabel.locator('input').boundingBox(),captionBox=await confirmLabel.locator('span').boundingBox();
+  const checkboxBox=await confirmLabel.locator('input').boundingBox(),captionBox=await confirmLabel.locator('span:not(.mv-required)').boundingBox();
   expect(checkboxBox.x+checkboxBox.width).toBeLessThanOrEqual(captionBox.x);
   await costs.getByRole('button',{name:'Save reviewed allocation'}).click();
   await expect(page.locator('#op-provider-costs')).toContainText('Current allocated provider cost: USD 10.000000001');

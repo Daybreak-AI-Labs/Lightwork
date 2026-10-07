@@ -202,3 +202,32 @@ def test_the_committed_lock_matches_the_real_dashboard():
     """The checked-in grandfather list must describe the CURRENT dashboard,
     not a stale snapshot -- this is exactly what CI enforces."""
     assert ara.problems() == []
+
+
+def test_flags_zero_await_route_with_synchronous_network_fetch(tmp_path):
+    """A catalog index fetch or urllib/httpx call on the loop stalls every
+    request for the duration of the network round trip (measured: /store
+    took every concurrent /livez from 15 ms to 158 ms)."""
+    _write(tmp_path, "maverick_dashboard/app.py", """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/store")
+async def store_page():
+    return [e.to_dict() for e in load_catalog("skills")]
+
+@app.get("/probe")
+async def probe():
+    with guarded_urlopen("https://example.invalid") as resp:
+        return resp.read()
+
+@app.get("/probe2")
+async def probe2():
+    return urllib.request.urlopen("https://example.invalid").read()
+
+@app.get("/probe3")
+async def probe3():
+    return httpx.Client().get("https://example.invalid").text
+""")
+    names = {f.name for f in ara.scan(tmp_path)}
+    assert names == {"store_page", "probe", "probe2", "probe3"}

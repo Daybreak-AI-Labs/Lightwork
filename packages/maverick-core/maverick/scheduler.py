@@ -214,8 +214,9 @@ def timetable_cron(repeat: str, *, at: str = "09:00", days: list[int] | None = N
 
     Hours and minutes are wall-clock in the schedule's own zone (carried as
     ``__tz__`` beside the cron), so no UTC shifting happens here. ``days`` are
-    cron weekdays (0 = Sunday .. 6 = Saturday); ``day_of_month`` is 1-28 so a
-    monthly run happens every month. Raises :class:`CronError` on bad input.
+    cron weekdays (0 = Sunday .. 6 = Saturday); ``day_of_month`` is 1-31.
+    A monthly date absent from a month is skipped, matching a custom cron.
+    Raises :class:`CronError` on bad input.
     """
     if repeat not in TIMETABLE_REPEATS:
         raise CronError("choose how often the schedule repeats")
@@ -238,8 +239,8 @@ def timetable_cron(repeat: str, *, at: str = "09:00", days: list[int] | None = N
         if not chosen or any(type(d) is not int or not 0 <= d <= 6 for d in chosen):
             raise CronError("choose at least one day of the week")
         return f"{minute} {hour} * * {','.join(str(d) for d in chosen)}"
-    if type(day_of_month) is not int or not 1 <= day_of_month <= 28:
-        raise CronError("day_of_month must be between 1 and 28")
+    if type(day_of_month) is not int or not 1 <= day_of_month <= 31:
+        raise CronError("day_of_month must be between 1 and 31")
     return f"{minute} {hour} {day_of_month} * *"
 
 

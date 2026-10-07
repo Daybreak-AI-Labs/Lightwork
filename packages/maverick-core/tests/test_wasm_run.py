@@ -1,10 +1,19 @@
 """WASM sandbox tool: wasmtime invocation shape + WASI capability grants."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
 from maverick.tools.wasm_run import wasm_run
+
+
+@pytest.fixture(autouse=True)
+def _approved_execution(monkeypatch):
+    import maverick.tools.wasm_run as module
+
+    monkeypatch.setattr(module, "request_execution_consent", lambda *a, **kw: object())
+    monkeypatch.setattr(module, "consume_operation_consent", lambda permit: nullcontext())
 
 
 class RecordingSandbox:
@@ -83,6 +92,19 @@ def test_nonzero_exit_surfaces_stderr(tmp_path, have_wasmtime):
                           stderr="wasm trap: out of bounds")
     out = wasm_run(sandbox=sb).fn({"op": "run", "module": "m.wasm"})
     assert out.startswith("ERROR: wasmtime (134)") and "wasm trap" in out
+
+
+def test_denied_run_never_starts_module(tmp_path, have_wasmtime, monkeypatch):
+    import maverick.tools.wasm_run as module
+    from maverick.safety import ConsentDenied
+
+    def deny(*args, **kwargs):
+        raise ConsentDenied("wasm_run")
+
+    monkeypatch.setattr(module, "request_execution_consent", deny)
+    sb = RecordingSandbox(tmp_path)
+    assert "not approved" in wasm_run(sb).fn({"op": "run", "module": "m.wasm"})
+    assert sb.commands == []
 
 
 def test_requires_module(have_wasmtime):

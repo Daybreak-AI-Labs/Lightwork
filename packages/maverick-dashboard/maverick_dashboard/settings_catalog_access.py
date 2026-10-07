@@ -24,6 +24,13 @@ for each workspace) are in settings_catalog_structured.
 """
 from __future__ import annotations
 
+from maverick.config import (
+    DEFAULT_MFA_AMR_VALUES as _MFA_AMR,
+)
+from maverick.config import (
+    DEFAULT_MFA_SAML_CONTEXTS as _MFA_SAML,
+)
+
 # Plain patterns (full match) for text and list entries.
 _HTTPS = r"https://[^\s\"'<>?#]{1,300}"
 _HTTPS_OR_LOCAL = r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,200})?)"
@@ -72,9 +79,9 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
     return (
         # ------------------------------------------------ company sign-in
         S("auth.oidc", "enabled", "Sign in with your company account",
-          "People sign in with your company's sign-in provider instead of using Lightwork on "
-          "this computer without signing in. Fill in the provider's details below and use "
-          "Test connection before turning this on.",
+          "People use your company's sign-in provider. Save its details, try a real company "
+          "sign-in and separately grant the intended administrator access before reviewing "
+          "activation. A provider connection check alone is insufficient.",
           "toggle", grp, False, "maverick.oidc", subgroup=oidc, test="oidc",
           env=("MAVERICK_OIDC_ENABLED",), weaker=False,
           warning="People will no longer need your company sign-in to use Lightwork.",
@@ -139,6 +146,13 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "text", grp, "", "maverick_dashboard.oidc_login", subgroup=oidc, pattern=_HTTPS,
           max_length=300, env=("MAVERICK_OIDC_END_SESSION_ENDPOINT",), aliases="logout"),
         # --------------------------------------------------- single sign-on
+        S("auth.saml", "enabled", "Allow configured single sign-on",
+          "Use single sign-on only when the provider details and sign-in components are ready. "
+          "Guided setup saves details with this off; verify a real account and review activation separately. "
+          "Older complete configurations without this choice keep their existing behavior.",
+          "toggle", grp, True, "maverick_dashboard.saml", subgroup=saml, weaker=False,
+          warning="People will no longer need this single sign-on provider to use Lightwork.",
+          aliases="saml single sign-on activate stage"),
         S("auth.saml", "idp_metadata_url", "Address of your provider's details",
           "The web address where your single sign-on provider publishes its details for "
           "Lightwork. Use Test connection to check it.",
@@ -147,7 +161,7 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Lightwork will trust sign-ins from a different provider.",
           aliases="saml metadata identity provider"),
         S("auth.saml", "idp_metadata_file", "File with your provider's details",
-          "Instead of an address: a file on the server with your provider's details.",
+          "Guided single sign-on setup stores an uploaded provider file privately. Existing server-file locations remain supported.",
           "path", grp, "", "maverick_dashboard.saml", subgroup=saml, path_kind="file",
           max_length=400, weaker="change",
           warning="Lightwork will trust sign-ins from a different provider.",
@@ -213,6 +227,101 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Any program on this computer will be able to tell Lightwork who is signed "
                   "in.",
           aliases="loopback localhost"),
+    ) + _sign_in_security(S)
+
+
+def _sign_in_security(S) -> tuple:  # noqa: N803 -- the catalog's row type
+    grp, sec = "People & access", "Sign-in security"
+    return (
+        S("auth.mfa", "require", "Require sign-in with a second factor",
+          "A company sign-in counts only when the provider confirms a second factor (an "
+          "authenticator app, a security key or a code). People whose sign-in has none are "
+          "asked to sign in again. Your own sign-in must include one before you can turn "
+          "this on.",
+          "toggle", grp, False, "maverick_dashboard.mfa_policy", subgroup=sec,
+          env=("MAVERICK_MFA_REQUIRE",), weaker=False,
+          warning="People will be able to use Lightwork with a password alone.",
+          aliases="mfa two-factor 2fa authenticator otp"),
+        S("auth.mfa", "step_up_minutes", "Sensitive actions need a sign-in this recent",
+          "While a second factor is required: changing roles, removing a spending limit, "
+          "turning off the emergency stop, rotating keys, changing sign-in settings, "
+          "deleting a workspace or signing others out needs a second factor no older than "
+          "this many minutes. Otherwise the person is asked to sign in again.",
+          "number", grp, 15, "maverick_dashboard.mfa_policy", subgroup=sec,
+          minimum=1, maximum=1440, integer=True, unit="minutes",
+          env=("MAVERICK_MFA_STEP_UP_MINUTES",), weaker="higher",
+          warning="An older sign-in will be enough for sensitive actions.",
+          aliases="step-up reauthenticate fresh"),
+        S("auth.mfa", "amr_values", "Sign-in methods that count as a second factor",
+          "The authentication-method values (the ID token's amr claim) that prove a second "
+          "factor. The standard values are filled in; add your provider's own if it uses "
+          "different ones.",
+          "list", grp, list(_MFA_AMR), "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._-]{1,64}", item_label="Method", item_hint="otp",
+          item_error="a short method name", max_items=40, weaker="grow",
+          warning="More sign-in methods will count as a second factor.",
+          aliases="amr methods"),
+        S("auth.mfa", "acr_values", "Authentication contexts that count as a second factor",
+          "Values of the ID token's acr claim that prove a second factor. They are also "
+          "requested from the provider at sign-in. Leave empty when your provider uses the "
+          "methods above instead.",
+          "list", grp, [], "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._/-]{1,200}", item_label="Context",
+          item_hint="urn:example:mfa", item_error="a context value with no spaces",
+          max_items=20, weaker="grow",
+          warning="More authentication contexts will count as a second factor.",
+          aliases="acr context"),
+        S("auth.mfa", "saml_authn_contexts", "SAML authentication contexts that count as a "
+          "second factor",
+          "The assertion's authentication context values that prove a second factor for "
+          "single sign-on. The common values are filled in.",
+          "list", grp, list(_MFA_SAML), "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._/-]{1,200}", item_label="Context",
+          item_hint="urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
+          item_error="a context value with no spaces", max_items=40, weaker="grow",
+          warning="More SAML authentication contexts will count as a second factor.",
+          aliases="saml authncontext"),
+        S("auth.ip_allowlist", "cidrs", "Network addresses allowed to use Lightwork",
+          "Only these addresses or ranges may reach Lightwork; everyone else sees a plain "
+          "refusal. Empty allows every address. The address you are saving from must be on "
+          "the list. Behind a company proxy, list the proxy under Proxy addresses to trust "
+          "first so the real address is used.",
+          "list", grp, [], "maverick_dashboard.ip_allowlist", subgroup=sec, pattern=_NETWORK,
+          item_label="Address", item_hint="203.0.113.0/24",
+          item_error="a network address or range", max_items=64,
+          env=("MAVERICK_IP_ALLOWLIST",), weaker="widen",
+          warning="More network addresses will be able to reach Lightwork.",
+          aliases="ip allowlist allow list cidr network"),
+        S("auth.ip_allowlist", "workspace_cidrs", "Network addresses allowed for this "
+          "workspace",
+          "After a person chooses a workspace, only these addresses or ranges may use it. "
+          "Empty allows every address. A workspace's own settings file can narrow this for "
+          "its members.",
+          "list", grp, [], "maverick_dashboard.ip_allowlist", subgroup=sec, pattern=_NETWORK,
+          item_label="Address", item_hint="203.0.113.0/24",
+          item_error="a network address or range", max_items=64, weaker="widen",
+          warning="More network addresses will be able to use this workspace.",
+          aliases="workspace ip allowlist"),
+        S("auth.sessions", "retention_days", "Keep ended sessions listed for",
+          "How long a sign-in session stays in the record after it ends, so the Sessions "
+          "page can still show it.",
+          "number", grp, 30, "maverick_dashboard.session_registry", subgroup=sec,
+          minimum=1, maximum=3650, integer=True, unit="days",
+          aliases="sessions retention"),
+        S("auth.sessions", "company_hours", "Maximum company sign-in length",
+          "Shorten company sign-ins to this many hours. Zero keeps the existing sign-in limit. "
+          "A sign-in that already ends sooner still ends sooner. Changes also apply to current sessions.",
+          "number", grp, 0, "maverick_dashboard.session_policy", subgroup=sec,
+          minimum=0, maximum=168, integer=True, unit="hours", weaker="change",
+          warning="The maximum time people can stay signed in may change.",
+          aliases="company session lifetime sso timeout"),
+        S("auth.sessions", "idle_minutes", "Sign out inactive browsers after",
+          "End a browser sign-in after this many minutes without clicks, typing or scrolling. "
+          "Automatic page refreshes do not count. Zero turns this limit off. Current sessions follow the new limit.",
+          "number", grp, 0, "maverick_dashboard.session_policy", subgroup=sec,
+          minimum=0, maximum=1440, integer=True, unit="minutes", weaker="change",
+          warning="The time an inactive browser can stay signed in may change.",
+          aliases="idle session inactivity timeout sign out"),
     )
 
 
@@ -239,8 +348,42 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Programs using the old token will be refused, and anyone holding the new "
                   "one can do everything an administrator can.",
           aliases="bearer token api access remote"),
+        S("dashboard", "api_keys", "Access keys for scripts and integrations",
+          "Let people create their own keys on their account page, and administrators "
+          "create service accounts for programs. A key does only what its scopes allow and "
+          "never more than its owner's role, and it stops on its expiry date.",
+          "toggle", grp, True, "maverick.config", subgroup=access,
+          env=("MAVERICK_DASHBOARD_API_KEYS",), weaker=True,
+          warning="Programs holding a key will be able to act as the key's owner, within "
+                  "the key's scopes.",
+          aliases="api keys access keys tokens scripts integrations service accounts"),
+        S("dashboard", "api_key_default_days", "How long a new key lasts",
+          "The number of days a key works unless the person creating it picks fewer.",
+          "number", grp, 90, "maverick.config", subgroup=access,
+          minimum=1, maximum=3650, integer=True, unit="days", weaker="higher",
+          warning="New keys will keep working for longer before they must be renewed.",
+          aliases="api key expiry default"),
+        S("dashboard", "api_key_max_days", "Longest a key may last",
+          "Nobody can create a key that works for more days than this.",
+          "number", grp, 365, "maverick.config", subgroup=access,
+          minimum=1, maximum=3650, integer=True, unit="days", weaker="higher",
+          warning="People will be able to create keys that keep working for longer.",
+          aliases="api key expiry maximum"),
+        S("dashboard", "api_key_rotation_grace_hours", "Grace period after rotating a key",
+          "How long the old key keeps working after someone rotates it, so a program can "
+          "be switched over without downtime.",
+          "number", grp, 24, "maverick.config", subgroup=access,
+          minimum=0, maximum=720, integer=True, unit="hours", weaker="higher",
+          warning="A rotated key will keep working for longer before it stops.",
+          aliases="api key rotation grace"),
+        S("dashboard", "api_key_prefix", "First characters of every key",
+          "Every key starts with this, so logs and secret scanners can recognise one. Two to "
+          "eight lowercase letters or digits followed by an underscore.",
+          "text", grp, "lwk_", "maverick.config", subgroup=access,
+          pattern=r"[a-z][a-z0-9]{1,7}_", max_length=9,
+          aliases="api key prefix"),
         S("dashboard", "default_role", "Role for people without one",
-          "The role anyone who signs in gets until they are given a role of their own.",
+          "The fallback for accounts without an explicit role or verified group mapping. Existing unassigned accounts also inherit changes. Users offers a reviewed viewer/no-department migration.",
           "select", grp, "operator", "maverick_dashboard.rbac", subgroup=access,
           choices_from="roles", weaker="change",
           warning="Everyone without a role of their own will get this role's permissions.",
@@ -258,6 +401,35 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "before any sign-in method is set up.",
           "toggle", grp, True, "maverick_dashboard.local_owner", subgroup=access,
           env=("MAVERICK_LOCAL_OWNER_SETUP",), aliases="owner setup first"),
+        S("plugins", "workbench", "Plugin qualification workbench",
+          "Enable administrator-only version checks in a restricted local container, and pin used plugin bytes for ongoing tasks. No service credentials or network are available during checks.",
+          "toggle", grp, False, "maverick.plugin_workbench", subgroup=access),
+        S("plugins", "workbench_image", "Local plugin practice environment",
+          "Choose a named Linux environment already installed on this computer, containing the approved plugin and its check tools. Load or refresh the installed choices here. No environment is downloaded, built or started by choosing it; its presence and restricted storage settings are checked again before save. Selecting an environment does not prove plugin readiness.",
+          "select", grp, "", "maverick.plugin_workbench", subgroup=access,
+          choices_from="local_linux_images", none_text="No practice environment selected"),
+        S("workflows", "versioning", "Workflow draft and publication history",
+          "Keep immutable snapshots, check reviewed input samples, and require administrator publication for new scheduled workflows. Existing schedule contents stay pinned.",
+          "toggle", grp, True, "maverick.workflow_versions", subgroup=access),
+        S("workflows", "typed_inputs", "Author typed workflow inputs",
+          "Let workflow authors add dates, choices, defaults, optional inputs and own connected accounts. Account selections need this setting on and are checked again before execution; other saved inputs still validate when it is off.",
+          "toggle", grp, True, "maverick_dashboard.api", subgroup=access),
+        S("connections", "allow_self_connect", "Let employees connect their own approved accounts",
+          "Employees with permission to operate can sign in to administrator-approved account profiles. Accounts stay private; app registration and sharing remain administrator tasks.",
+          "toggle", grp, False, "maverick.connection_oauth", subgroup=access, weaker=True,
+          warning="Employees can authorize their own accounts for the approved profiles."),
+        S("connections", "self_connect_profiles", "Approved employee account profiles",
+          "Comma-separated profiles: google-drive, google-cloud-storage, jira-cloud. Jira includes reviewed write access; approve it only when needed.",
+          "text", grp, "google-drive", "maverick.connection_oauth", subgroup=access, max_length=128,
+          pattern=r"^(google-drive|google-cloud-storage|jira-cloud)(,(google-drive|google-cloud-storage|jira-cloud))*$"),
+        S("dashboard", "extension_form_values", "Allow reviewed browser form values",
+          "Allow a person to explicitly share visible form values after reviewing them. Values remain off by default for each page; password values are never read.",
+          "toggle", grp, False, "maverick_dashboard.api", subgroup=access, weaker=True,
+          warning="Reviewed browser context may include private values entered in forms."),
+        S("dashboard", "extension_page_structure", "Allow reviewed browser page structure",
+          "Allow a person to review and share page headings and interactive controls with the configured AI service.",
+          "toggle", grp, True, "maverick_dashboard.api", subgroup=access, weaker=True,
+          warning="Reviewed browser context may include headings and control labels from private pages."),
         S("dashboard", "allow_extension", "Allow the browser extension",
           "Let Lightwork's browser extension work with this installation. It needs the "
           "server's access token.",
@@ -266,7 +438,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="The browser extension will be able to act in Lightwork.",
           aliases="extension browser add-on"),
         S("dashboard", "public_url", "Lightwork's address for others",
-          "The address people use to reach Lightwork, used in invitation and approval links.",
+          "The address people use to reach Lightwork, used in invitation, approval and answer-sharing links.",
           "text", grp, "", "maverick_dashboard.automation_queue", subgroup=access,
           pattern=_HTTPS_OR_LOCAL, max_length=300, env=("MAVERICK_PUBLIC_URL",),
           aliases="public url link address"),
@@ -287,6 +459,24 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "select", grp, "comfortable", "maverick_dashboard.app", subgroup=access,
           choices=(("comfortable", "Comfortable"), ("compact", "Compact")),
           aliases="density compact"),
+        S("dashboard", "glass", "Glass effects for everyone",
+          "See-through, blurred panels people see until they choose their own in Display "
+          "preferences. Off keeps pages faster to respond, especially on older computers.",
+          "select", grp, "off", "maverick_dashboard.app", subgroup=access,
+          choices=(("off", "Off"), ("on", "On")),
+          aliases="glass blur translucent transparency appearance"),
+        S("dashboard", "navigation", "Sidebar for everyone",
+          "Classic lists pages in the current groups. Job-named areas puts every page in one of "
+          "nine areas, such as Work, Privacy and Settings, with tabs and a breadcrumb on each page. "
+          "Who can open each page does not change. Run the tree test before switching everyone.",
+          "select", grp, "classic", "maverick_dashboard.navigation_api", subgroup=access,
+          choices=(("classic", "Classic"), ("areas", "Job-named areas")),
+          aliases="navigation sidebar menu areas information architecture tree test"),
+        S("dashboard", "navigation_personal", "Let people choose their own sidebar",
+          "People can switch between the classic sidebar and the job-named areas for themselves "
+          "in Your preferences. Who can open each page does not change.",
+          "toggle", grp, False, "maverick_dashboard.navigation_api", subgroup=access,
+          aliases="navigation sidebar personal choice try areas"),
         S("dashboard", "invites", "Invite people by email link",
           "Administrators can invite people with a one-time link, and invited people sign in "
           "with that link instead of a company sign-in.",
@@ -759,6 +949,11 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "How long to wait for a free database connection before giving up.",
           "number", grp, 5, "maverick.governed_records", subgroup=store, minimum=0.1,
           maximum=60, unit="seconds", restart=True),
+        S("governed_records", "pool_min_size", "Connections kept open while idle",
+          "How many pooled connections stay open when nothing is happening, so the first "
+          "request after a quiet spell does not wait to connect. Never more than the pool.",
+          "number", grp, 1, "maverick.governed_records", subgroup=store, minimum=0,
+          maximum=32, integer=True, unit="connections", restart=True),
         S("world_model", "backend", "Where Lightwork's records are kept",
           "Lightwork's main records (tasks, results and memory) live in a file on this server "
           "or in a shared PostgreSQL database for several servers.",
@@ -1131,6 +1326,8 @@ def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row an
 
     rows = list(_sign_in(S) + _people(S) + _security(S) + _other_agents(S) + _server(S)
                 + _plumbing(S) + _journal(S))
+    from .settings_catalog_conversation import entries as conversation_entries
+    rows.extend(conversation_entries(S))
     for index, row in enumerate(rows):
         if row.id == "tenancy.egress":
             rows[index] = dataclasses.replace(row, columns=(

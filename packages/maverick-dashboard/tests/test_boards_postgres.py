@@ -9,6 +9,7 @@ passed`` on the Workforce board, the same with 1 parameter on Overview.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 
 import pytest
@@ -55,7 +56,10 @@ def test_overview_and_plan_pages_render_on_postgres(pg):
     client = TestClient(pg.app, headers={"Origin": "http://testserver"})
     r = client.get("/overview")
     assert r.status_code == 200, r.text[:300]
-    assert "Something went wrong" not in r.text
+    # Error copy also occurs in the shell's inert translation catalog.
+    # Check the rendered page heading, not every embedded JSON string.
+    assert re.search(r"<h1\b[^>]*>Overview</h1>", r.text)
+    assert not re.search(r"<h1\b[^>]*>Something went wrong</h1>", r.text)
     r = client.get(f"/goals/{gid}/plan")
     assert r.status_code == 200, r.text[:300]
     assert title in r.text

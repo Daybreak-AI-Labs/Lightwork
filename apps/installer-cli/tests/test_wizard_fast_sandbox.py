@@ -28,7 +28,7 @@ def _stub_fast(monkeypatch, tmp_path: Path, *, docker: bool):
     # contract itself is covered in test_wizard_fast_smoke.py.
     monkeypatch.setattr(wizard, "smoke_test", lambda: True)
     monkeypatch.setattr(wizard, "_docker_available", lambda: docker)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     return wizard
 
 
@@ -55,6 +55,7 @@ def test_fast_setup_falls_back_to_local_when_docker_down(monkeypatch, tmp_path):
         "write_file",
         "apply_patch",
         "str_replace_editor",
+        "ast_edit",
     }
 
 

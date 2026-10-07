@@ -110,3 +110,50 @@ def test_completed_multiline_dispatches_exactly_one_complete_goal(monkeypatch, t
     assert result.exit_code == 0, result.output
     assert seen == ["first\nsecond"]
     world.close()
+
+
+def test_cli_chat_goal_uses_finite_defaults_before_install(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    world = WorldModel(tmp_path / "world.db")
+    seen = []
+
+    def run(_llm, _world, budget, _gid, **_kwargs):
+        seen.append((budget.max_dollars, budget.max_wall_seconds))
+        return "fixture result"
+
+    monkeypatch.setattr(cli, "open_world", lambda _: world)
+    monkeypatch.setattr(cli, "_require_llm_key", lambda: None)
+    monkeypatch.setattr(cli, "_kernel", lambda: SimpleNamespace(
+        DEFAULT_MODEL="fixture:offline", LLM=lambda **kw: None,
+        build_sandbox=lambda **kw: None, run_goal_sync=run))
+    monkeypatch.setattr(click, "prompt", Mock(side_effect=["hello", "exit"]))
+    result = CliRunner().invoke(cli.main, ["chat"])
+    assert result.exit_code == 0, result.output
+    assert seen == [(2.0, 1800.0)]
+    world.close()
+
+
+def test_cli_start_uses_goal_defaults_and_honors_explicit_limits(monkeypatch, tmp_path):
+    from maverick import operator_preflight, providers
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    seen = []
+
+    def run(_llm, _world, budget, _gid, **_kwargs):
+        seen.append((budget.max_dollars, budget.max_wall_seconds))
+        return "fixture result"
+
+    monkeypatch.setattr(cli, "_require_llm_key", lambda: None)
+    monkeypatch.setattr(cli, "_cli_model", lambda *_args: "fixture:offline")
+    monkeypatch.setattr(cli, "open_world", lambda _: WorldModel(tmp_path / "world.db"))
+    monkeypatch.setattr(cli, "_kernel", lambda: SimpleNamespace(
+        LLM=lambda **kw: None, build_sandbox=lambda **kw: None, run_goal_sync=run))
+    monkeypatch.setattr(operator_preflight, "_model_specs", lambda _: {})
+    monkeypatch.setattr(providers, "missing_sdks", lambda _: [])
+
+    default = CliRunner().invoke(cli.main, ["start", "first"])
+    explicit = CliRunner().invoke(cli.main, [
+        "start", "second", "--max-dollars", "5", "--max-wall-seconds", "3600",
+    ])
+    assert default.exit_code == explicit.exit_code == 0, (default.output, explicit.output)
+    assert seen == [(2.0, 1800.0), (5.0, 3600.0)]

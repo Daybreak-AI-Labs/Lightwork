@@ -13,7 +13,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_integrations as integrations
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.channel_review import channel_review_token
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -44,6 +45,11 @@ _ENV = sorted({name for row in ROWS for name in row.env} | {
 # id -> (value sent by the page, value the kernel then reads)
 VALUES: dict[str, tuple[object, object]] = {
     "billing.enforce_plan_caps": (True, True),
+    "image_edit.inpaint_model": ("stability-ai/stable-diffusion-inpainting:abc123",
+                                 "stability-ai/stable-diffusion-inpainting:abc123"),
+    "image_edit.variation_model": ("lambdal/stable-diffusion-image-variation",
+                                   "lambdal/stable-diffusion-image-variation"),
+    "image_edit.upscale_model": ("nightmareai/real-esrgan", "nightmareai/real-esrgan"),
     "billing.plans": (
         [{"name": "pro", "features": ["core", "channels"], "max_daily_dollars": 50,
           "max_concurrent_goals": 3}],
@@ -86,6 +92,7 @@ VALUES: dict[str, tuple[object, object]] = {
                        "https://tax.example.com/constants.json"),
     "tax.trusted_constants_pubkeys": ([_KEY.upper()], [_KEY]),
     "channels.rich_render": (True, True),
+    "channels.max_intake_records": (50000, 50000),
     "vendor_onboarding.safe_read_attempts": (5, 5),
     "vendor_onboarding.safe_read_backoff_seconds": (1.5, 1.5),
     "voice.stt_backend": ("local", "local"),
@@ -106,6 +113,20 @@ VALUES: dict[str, tuple[object, object]] = {
     "voice.whisper_cpp_model": ("ggml-custom.bin", "ggml-custom.bin"),
     "notifications.user_key": (_PUSHOVER_USER, _PUSHOVER_USER),
     "notifications.app_token": (_PUSHOVER_APP, _PUSHOVER_APP),
+    "notifications.email.host": ("smtp.example.com", "smtp.example.com"),
+    "notifications.email.port": (2525, 2525),
+    "notifications.email.user": ("alerts@example.com", "alerts@example.com"),
+    "notifications.email.password": ("sample-mail-password", "sample-mail-password"),  # pragma: allowlist secret
+    "notifications.email.from_address": ("alerts@example.com", "alerts@example.com"),
+    "notifications.email.tls": ("ssl", "ssl"),
+    "notifications.email.to": ("ops@example.com", "ops@example.com"),
+    "channels.slack.signing_secret": ("sample-slack-signing-secret", "sample-slack-signing-secret"),  # pragma: allowlist secret
+    "channels.slack.approvals_channel": ("C0123ABCD", "C0123ABCD"),
+    "my_work.digest_enable": (True, True),
+    "my_work.digest_hour": (7, 7),
+    "my_work.digest_poll_seconds": (120, 120),
+    "my_work.send_when_empty": (True, True),
+    "my_work.monthly_spend_limit_dollars": (250, 250),
     "channels.routing.rules": ([_RULE], [_RULE]),
     # finance operating profile
     "finance.framework": ("ifrs", "ifrs"),
@@ -120,6 +141,10 @@ VALUES: dict[str, tuple[object, object]] = {
 # id -> a value the server must refuse
 INVALID: dict[str, object] = {
     "billing.enforce_plan_caps": "yes",
+    # A web address, a path or a space is never a model name.
+    "image_edit.inpaint_model": "https://replicate.com/stability-ai/stable-diffusion-inpainting",
+    "image_edit.variation_model": "../models/variation",
+    "image_edit.upscale_model": "nightmareai/real esrgan",
     "billing.plans": [{"name": "gold", "features": [], "max_daily_dollars": 1,
                        "max_concurrent_goals": 1}],
     "billing.stripe.prices.pro": "prod_123",
@@ -157,6 +182,7 @@ INVALID: dict[str, object] = {
     "tax.update_url": "http://tax.example.com",
     "tax.trusted_constants_pubkeys": ["not a key"],
     "channels.rich_render": None,
+    "channels.max_intake_records": 500,
     "vendor_onboarding.safe_read_attempts": 6,
     "vendor_onboarding.safe_read_backoff_seconds": 6,
     "voice.stt_backend": "cloud",
@@ -177,6 +203,20 @@ INVALID: dict[str, object] = {
     "voice.whisper_cpp_model": "ggml-escape.bin",
     "notifications.user_key": "too-short",
     "notifications.app_token": "a" * 31,
+    "notifications.email.host": "not a host!",
+    "notifications.email.port": 0,
+    "notifications.email.user": "has space",
+    "notifications.email.password": "",
+    "notifications.email.from_address": "nope",
+    "notifications.email.tls": "plain",
+    "notifications.email.to": "nope",
+    "channels.slack.signing_secret": "",
+    "channels.slack.approvals_channel": "lowercase",
+    "my_work.digest_enable": "yes",
+    "my_work.digest_hour": 24,
+    "my_work.digest_poll_seconds": 10,
+    "my_work.send_when_empty": "on",
+    "my_work.monthly_spend_limit_dollars": -1,
     "channels.routing.rules": [{**_RULE, "specialist": "no_such_pack"}],
     # finance operating profile (a payment below approve is a hard floor)
     "finance.framework": "local_gaap",
@@ -207,6 +247,7 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "webhooks.max_inflight": (100, 300),
     "webhooks.max_age_seconds": (None, 900),
     "webhooks.body_limit": (None, 4096),
+    "notifications.email.tls": (None, "none"),
     "automation_import.max_steps": (None, 1000),
     "tax.trusted_constants_pubkeys": (None, [_KEY]),
     "voice.stt_backend": (None, "openai"),
@@ -215,6 +256,7 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "voice.whisper_cpp_bin": (None, "whisper-cli"),
     "voice.whisper_cpp_model": (None, "ggml-custom.bin"),
     "channels.routing.rules": (None, [_RULE]),
+    "channels.max_intake_records": (20000, 40000),
     # finance operating profile
     "finance.framework": (None, "ifrs"),
     "finance.materiality": (50000, 100000),
@@ -240,6 +282,16 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
+def _link_for_qualification(path, target, *, required=False):
+    try:
+        path.symlink_to(target)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 1314:
+            raise
+        if required:
+            pytest.skip("Windows symlink qualification requires an executor privilege unavailable here")
+
+
 def _voice_engine_files(tmp_path):
     """Lightwork's programs and speech model folders, with one approved entry
     each, entries that must never be offered (not executable, a link out, an
@@ -255,14 +307,19 @@ def _voice_engine_files(tmp_path):
     programs.mkdir(parents=True)
     (programs / "whisper-cli").write_text("#!/bin/sh\necho ok\n")
     os.chmod(programs / "whisper-cli", 0o755)
-    (programs / "whisper-cpp").write_text("not executable")
-    (programs / "whisper.cpp").symlink_to(outside / "tool")
+    if os.name == "nt":
+        # Windows does not expose POSIX executable bits: this invalid entry is
+        # a directory. POSIX jobs retain the non-executable-file qualification.
+        (programs / "whisper-cpp").mkdir()
+    else:
+        (programs / "whisper-cpp").write_text("not executable")
+    _link_for_qualification(programs / "whisper.cpp", outside / "tool")
     (programs / "ffmpeg").write_text("#!/bin/sh\n")
     os.chmod(programs / "ffmpeg", 0o755)
     models = tmp_path / "home" / "models" / "whisper"
     models.mkdir(parents=True)
     (models / "ggml-custom.bin").write_bytes(b"model")
-    (models / "ggml-escape.bin").symlink_to(outside / "ggml-escape.bin")
+    _link_for_qualification(models / "ggml-escape.bin", outside / "ggml-escape.bin")
     return programs, models, outside
 
 
@@ -288,7 +345,7 @@ def _loaded() -> dict:
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -370,7 +427,8 @@ def test_secrets_are_sealed_never_shown_and_audited_as_set(audit_rows):
                             "github.token", "github.share_token", "billing.stripe.secret_key",
                             "billing.stripe.webhook_secret", "github.app_webhook_secret",
                             "webhooks.gitlab_token", "data_map.graph_token",
-                            "notifications.user_key", "notifications.app_token"}
+                            "notifications.user_key", "notifications.app_token",
+                            "notifications.email.password", "channels.slack.signing_secret"}
     r = _save([{"id": key, "value": value} for key, value in secrets.items()])
     assert r.status_code == 200, r.text
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
@@ -583,7 +641,8 @@ def test_saved_gist_key_shares_task_histories_and_the_environment_wins(monkeypat
         def json(self):
             return {"html_url": "https://gist.github.com/example/1"}
 
-    def post(url, *, json, headers, timeout):
+    def post(url, *, content, headers, timeout):
+        assert __import__("json").loads(content) == {"files": {}}
         sent.append(headers["Authorization"])
         return Reply()
 
@@ -679,7 +738,7 @@ def test_a_chosen_program_runs_and_is_checked_again_before_it_runs(tmp_path, mon
     assert audit_rows[-1]["key"] == "whisper_cpp_bin" and audit_rows[-1]["new"] == "whisper-cli"
     # The file is swapped for a link out of the folder after it was chosen.
     program.unlink()
-    program.symlink_to(tmp_path / "outside" / "tool")
+    _link_for_qualification(program, tmp_path / "outside" / "tool", required=True)
     assert voice_models.checked_program("whisper-cli") is None
     assert voice._find_whisper_cpp() is None
     monkeypatch.setenv("MAVERICK_WHISPER_CPP", str(tmp_path / "outside" / "tool"))
@@ -695,7 +754,7 @@ def test_a_chosen_model_file_loads_and_a_link_out_is_refused(tmp_path, audit_row
     assert voice_models.locate_model() == chosen
     assert all(p.name != "ggml-escape.bin" for p in voice_models.installed_models())
     chosen.unlink()
-    chosen.symlink_to(tmp_path / "outside" / "ggml-escape.bin")
+    _link_for_qualification(chosen, tmp_path / "outside" / "ggml-escape.bin", required=True)
     assert voice_models.checked_model_file("ggml-custom.bin") is None
     assert voice_models.locate_model() is None
 
@@ -708,6 +767,9 @@ def test_saved_pushover_keys_send_alerts_and_the_environment_wins(monkeypatch, a
 
     class Reply:
         status_code = 200
+
+        def json(self):
+            return {"status": 1}
 
     def post(url, data=None, **kwargs):
         sent.append(dict(data or {}))
@@ -734,10 +796,12 @@ def test_mattermost_is_set_up_on_the_channels_page_with_a_sealed_token(monkeypat
     page = client.get("/channels")
     assert page.status_code == 200 and "Mattermost" in page.text
     refused = client.post("/channels/save", follow_redirects=False, data={
+        "review_token": channel_review_token(client),
         "channel": "mattermost", "enabled": "on", "url": "http://chat.example.com",
         "bot_token": token})
     assert refused.status_code == 400
     saved = client.post("/channels/save", follow_redirects=False, data={
+        "review_token": channel_review_token(client),
         "channel": "mattermost", "enabled": "on", "url": "https://chat.example.com/",
         "bot_token": token})
     assert saved.status_code == 303

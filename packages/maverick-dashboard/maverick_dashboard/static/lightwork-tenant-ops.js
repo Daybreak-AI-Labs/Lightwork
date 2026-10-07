@@ -10,65 +10,40 @@
     return node;
   }
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function call(path, method, body) {
-    var init = {method: method || 'GET', credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}};
-    if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
-    var response = await window.fetch(path, init);
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store', body: body});
   }
 
-  // ---- one-step client setup ---------------------------------------------------
-  var onboard = $('tenant-onboard');
-  if (onboard) {
-    var msg = $('tenant-onboard-msg');
-    var roles = onboard.querySelector('[data-onboard-roles]');
+  // ---- one-step client setup (the create form's optional invitation) -----
+  var roles = document.querySelector('[data-onboard-roles]');
+  if (roles) {
+    var msg = $('tenant-add-msg');
     call(BASE + '/roles').then(function (data) {
       roles.textContent = '';
       data.roles.forEach(function (r) {
         var o = el('option', null, r.label); o.value = r.value; if (r.value === 'admin') o.selected = true; roles.appendChild(o);
       });
-      if (!data.invitations_on) msg.textContent = 'Invitations are turned off. Turn them on in Settings before setting up a client here.';
+      if (!data.invitations_on) {
+        var invite = $('tenant-invite');
+        if (invite) {
+          invite.open = false;
+          invite.querySelectorAll('input, select').forEach(function (c) { c.disabled = true; });
+          invite.querySelector('p').appendChild(el('span', null, ' Invitations are turned off, so a workspace cannot invite its administrator yet. Turn them on in Settings.'));
+        }
+      }
     }).catch(function () { /* the built-in Admin choice stays */ });
-    onboard.addEventListener('submit', async function (event) {
-      event.preventDefault();
-      var data = new FormData(onboard);
-      var noLimit = onboard.querySelector('[data-limit-toggle]').checked;
-      var body = {
-        display_name: String(data.get('display_name') || '').trim(),
-        plan: String(data.get('plan') || 'free'),
-        max_daily_dollars: noLimit ? 0 : Number(data.get('max_daily_dollars') || 0),
-        admin_email: String(data.get('admin_email') || '').trim(),
-        role: String(data.get('role') || 'admin')
-      };
-      if (!body.display_name || !body.admin_email) { msg.textContent = 'Enter the workspace name and the administrator\'s email.'; return; }
-      msg.textContent = 'Setting up the workspace…';
-      $('tenant-onboard-out').hidden = true;
-      try {
-        var result = await call(BASE + '/onboard', 'POST', body);
-        msg.textContent = result.summary;
-        $('tenant-onboard-link').value = result.invite_link;
-        $('tenant-onboard-out').hidden = false;
-        onboard.reset();
-      } catch (failure) { msg.textContent = await failText(failure, 'set up the workspace'); }
-    });
-    $('tenant-onboard-copy').addEventListener('click', async function () {
+    var copy = $('tenant-onboard-copy');
+    if (copy) copy.addEventListener('click', async function () {
       var field = $('tenant-onboard-link');
       try { await navigator.clipboard.writeText(field.value); msg.textContent = 'Invitation link copied.'; }
       catch (e) { field.select(); msg.textContent = 'Select the link and copy it.'; }
     });
   }
 
-  // ---- re-protect workspace keys -----------------------------------------------
   var keys = $('tenant-keys');
   if (keys) {
     var keysMsg = $('tenant-keys-msg');
@@ -128,8 +103,16 @@
           await new Promise(function (resolve) { setTimeout(resolve, 1000); });
           job = (await call(BASE + '/jobs/' + encodeURIComponent(job.id))).job;
         }
-        if (job.state === 'done') { render(job.result); keysMsg.textContent = 'Done.'; }
-        else keysMsg.textContent = job.error || 'Still working. Check back in a few minutes.';
+        if (job.state === 'done') {
+          render(job.result);
+          keysMsg.textContent = job.result && job.result.failed ? 'Some workspaces still need attention. Keep the current key and check the list below.' : 'Every workspace now uses the new key.';
+        } else if (job.state === 'running') {
+          keysMsg.textContent = 'Still working. Check back in a few minutes.';
+        } else {
+          keysMsg.textContent = (window.mvPlainDetail && window.mvPlainDetail(job.error)) ||
+            'Re-protecting stopped before every workspace was done. Keep the current key and try again.';
+        }
+        if (job.record_warning) keysMsg.textContent += ' The result could not be added to the activity record. Keep the current key and ask your administrator to reconcile it before continuing.';
       } catch (failure) { keysMsg.textContent = await failText(failure, 're-protect the workspaces'); }
       keys.reset();
     });

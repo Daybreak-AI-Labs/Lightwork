@@ -178,3 +178,21 @@ def test_memory_lessons_search_only_the_governed_assessment_collection(monkeypat
 def test_memory_similar_requires_subject():
     assert client.get("/api/v1/assessment-memory/similar",
                       params={"subject": "  "}).status_code == 422
+
+
+def test_precedent_fragment_is_exact_version_and_current_department_scoped(monkeypatch):
+    from maverick.assessment import AssessmentSession, load_saved, save_session
+    from maverick_dashboard import api
+    session = AssessmentSession(type="pia", subject="Acme CRM")
+    session.record("pia_necessity", "yes", note="Source rationale")
+    save_session(session)
+    record = load_saved(session.id)
+    path = "/api/v1/assessment-memory/fragment/" + session.id + "/pia_necessity"
+    response = client.get(path, params={"revision": record["revision"], "policy_digest": record["template_digest"]})
+    assert response.status_code == 200 and response.json()["note"] == "Source rationale"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert client.get(path, params={"revision": 100}).status_code == 409
+    monkeypatch.setattr(api, "_permitted_memory_assessment_types", lambda request: set())
+    denied = client.get(path)
+    assert denied.status_code == 404 and "Source rationale" not in denied.text
+    assert client.get("/api/v1/assessment-memory/similar", params={"subject":"Acme CRM", "type":"pia"}).status_code == 403

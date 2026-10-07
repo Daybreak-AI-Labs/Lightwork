@@ -1,15 +1,22 @@
 """Use-case guidance backed by current, authorized review records."""
 from __future__ import annotations
 
-from .auth import caller_principal, caller_role, goal_owner_filter, has_permission, suite_allowed
+from .auth import (
+    caller_principal,
+    caller_role,
+    goal_owner_filter,
+    has_global_permission,
+    has_permission,
+    suite_allowed,
+)
 
 PLANS = {
     "deliverable": {"label":"Review a completed AI deliverable", "suite":None,
-        "prepare":"Choose a specialist whose deliverable requires sign-off, and describe a small task with clear acceptance criteria.",
-        "prepare_href":"/agents", "prepare_label":"Choose a specialist",
+        "prepare":"Choose an agent or specialist whose result requires approval, and describe a small task with clear acceptance criteria.",
+        "prepare_href":"/agents", "prepare_label":"Choose an agent or specialist",
         "work":"Run the task, check the output and supporting evidence, and request corrections when needed.",
         "work_href":"/chat", "work_label":"Start the task",
-        "review":"Record an explicit approval on the current completed deliverable. A finished run alone does not complete this path.",
+        "review":"Record an explicit approval on the current completed deliverable. A finished task alone does not complete this path.",
         "review_href":"/deliverables", "review_label":"Review deliverables"},
     "vendor": {"label":"Onboard a vendor with reviewed evidence", "suite":"privacy",
         "prepare":"Save the required Jira connection and enroll its project access. Add a Drive connection when using Drive evidence; uploads do not need Drive.",
@@ -82,8 +89,42 @@ def _reviewed_assessment(request):
     return {"complete":False, "status":"incomplete", "detail":"No current approved assessment assigned to or reviewed by you was found."}
 
 
+def first_outcomes_for(request) -> dict:
+    """The eight department first outcomes this caller may run, plus readiness.
+
+    ``ready`` is the offline readiness of the selected model routes; when it is
+    false the page says so and links to Settings instead of offering a run
+    that would fail quietly. ``selected`` is the department setup recorded.
+    """
+    from maverick import sample_outcomes
+    from maverick.config import get_first_outcome
+    from maverick.domain import enabled_domains, suite_for
+
+    from .first_outcome_api import CONNECT_HREF, NOT_READY_DETAIL, provider_ready
+
+    try:
+        packs = enabled_domains()
+    except Exception:
+        packs = {}
+    rows = []
+    for row in sample_outcomes.departments():
+        if row["pack"] in packs and suite_allowed(request, suite_for(row["pack"])):
+            rows.append(dict(row, files=list(sample_outcomes.get(row["department"]).files)))
+    recorded = get_first_outcome()
+    offered = {row["department"] for row in rows}
+    selected = recorded["department"] if recorded["department"] in offered else (
+        sample_outcomes.DEFAULT_DEPARTMENT if sample_outcomes.DEFAULT_DEPARTMENT in offered else
+        (rows[0]["department"] if rows else None))
+    ready = provider_ready()
+    return {"outcomes": rows, "selected": selected, "ready": ready, "can_operate": has_permission(request, "operate"),
+            # Only an administrator can connect an AI service; others are told who can.
+            "can_connect": has_global_permission(request, "admin"),
+            "connect_href": CONNECT_HREF, "not_ready_detail": NOT_READY_DETAIL if not ready else "",
+            "sample_workspace_created": recorded["sample_workspace_created"], "rule": sample_outcomes.SAMPLE_RULE}
+
+
 def for_request(request, world, selected: str = "deliverable") -> dict:
-    from maverick.domain import suite_for
+    from maverick.domain import suites_for_domain
 
     plans = {key: value for key, value in PLANS.items() if suite_allowed(request, value["suite"])}
     selected = selected if selected in plans else "deliverable"
@@ -91,7 +132,7 @@ def for_request(request, world, selected: str = "deliverable") -> dict:
 
     def admitted(domain):
         try:
-            return suite_allowed(request, suite_for(domain))
+            return all(suite_allowed(request, suite) for suite in suites_for_domain(domain))
         except Exception:
             return False
 

@@ -29,15 +29,18 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import secrets
 import string
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 INVITE_TTL_HOURS = 7 * 24          # default link lifetime
-LOCAL_SESSION_DAYS = 30            # no-IdP session lifetime (re-invite to renew)
+INVITE_EXPIRIES = {"1_hour": 1, "1_day": 24, "7_days": 168, "30_days": 720}
+LOCAL_SESSION_DAYS = 30            # no-IdP session lifetime (then sign in with the passphrase)
 _MAX_PENDING = 500                 # cap the store; an admin never needs more
 
 _INVITES_LOCK = threading.Lock()
@@ -103,6 +106,8 @@ class Invite:
     used_at: float | None = None
     used_by: str | None = None
     tenant: str = ""  # set: the role applies inside this workspace only
+    workspace_admin_invite: bool = False  # recheck the issuing member's authority on acceptance
+    grant_confirmed_at: float | None = None  # written only after the native role save returns
 
     @property
     def pending(self) -> bool:
@@ -160,8 +165,6 @@ def _decode_json(raw: str) -> object:
 
 
 def _validate_record(invite_id: str, rec: object) -> dict:
-    from .rbac import is_known_role
-
     if not invite_id or invite_id != invite_id.strip() or len(invite_id) > 128:
         raise InviteStoreError("invite store corrupt: invalid invite id")
     if not isinstance(rec, dict) or rec.get("id") != invite_id:
@@ -177,7 +180,9 @@ def _validate_record(invite_id: str, rec: object) -> dict:
         or "@" not in email
     ):
         raise InviteStoreError(f"invite store corrupt: invalid email for {invite_id!r}")
-    if not is_known_role(role):
+    # Historical invitation material outlives mutable custom role definitions.
+    # Current role authority is checked under reservation when redeeming.
+    if not isinstance(role, str) or re.fullmatch(r"[a-z][a-z0-9_-]{1,31}", role) is None:
         raise InviteStoreError(f"invite store corrupt: invalid role for {invite_id!r}")
     if (
         not isinstance(token_hash, str)
@@ -209,6 +214,15 @@ def _validate_record(invite_id: str, rec: object) -> dict:
     tenant = rec.get("tenant", "")
     if not isinstance(tenant, str) or len(tenant) > 128 or tenant != tenant.strip():
         raise InviteStoreError(f"invite store corrupt: invalid workspace for {invite_id!r}")
+    workspace_admin_invite = rec.get("workspace_admin_invite", False)
+    if not isinstance(workspace_admin_invite, bool) or (workspace_admin_invite and not tenant):
+        raise InviteStoreError(f"invite store corrupt: invalid workspace issuer for {invite_id!r}")
+    confirmed = rec.get("grant_confirmed_at")
+    if confirmed is not None and (
+        isinstance(confirmed, bool) or not isinstance(confirmed, (int, float))
+        or not math.isfinite(confirmed) or used_at is None or not used_by or confirmed < used_at
+    ):
+        raise InviteStoreError(f"invite store corrupt: invalid grant confirmation for {invite_id!r}")
     clean = dict(rec)
     clean["created_at"] = created
     clean["expires_at"] = expires
@@ -216,9 +230,17 @@ def _validate_record(invite_id: str, rec: object) -> dict:
     return clean
 
 
-def _write(data: dict[str, dict]) -> None:
+def _write(data: dict[str, dict], *, before_effect: Callable[[], None] | None = None) -> None:
     from maverick.file_lock import atomic_write_text
-    atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))
+    options = {"effect_guard": before_effect} if before_effect is not None else {}
+    atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True), **options)
+
+
+def expiry_hours(choice: str) -> int:
+    """The ordinary invitation form's bounded choices; legacy lifetimes remain unchanged."""
+    if choice not in INVITE_EXPIRIES:
+        raise ValueError("Choose an invitation expiry from the list.")
+    return INVITE_EXPIRIES[choice]
 
 
 def _to_invite(rec: dict) -> Invite:
@@ -227,11 +249,15 @@ def _to_invite(rec: dict) -> Invite:
                   created_at=float(rec.get("created_at", 0)),
                   expires_at=float(rec.get("expires_at", 0)),
                   used_at=rec.get("used_at"), used_by=rec.get("used_by"),
-                  tenant=rec.get("tenant", ""))
+                  tenant=rec.get("tenant", ""),
+                  workspace_admin_invite=rec.get("workspace_admin_invite", False),
+                  grant_confirmed_at=rec.get("grant_confirmed_at"))
 
 
 def create_invite(email: str, role: str, *, created_by: str,
-                  ttl_hours: float = INVITE_TTL_HOURS, tenant: str = "") -> tuple[Invite, str]:
+                  ttl_hours: float = INVITE_TTL_HOURS, tenant: str = "",
+                  workspace_admin_invite: bool = False,
+                  before_effect: Callable[[], None] | None = None) -> tuple[Invite, str]:
     """Mint an invite; returns ``(invite, token)``. The token is shown ONCE —
     only its sha256 is stored, so a copied store file yields no working links.
     With ``tenant`` the role is granted inside that workspace only (a
@@ -249,7 +275,7 @@ def create_invite(email: str, role: str, *, created_by: str,
     if not math.isfinite(ttl):
         raise ValueError("invite TTL must be a finite number")
     tenant = (tenant or "").strip()
-    if len(tenant) > 128:
+    if len(tenant) > 128 or (workspace_admin_invite and not tenant):
         raise ValueError("invalid workspace")
     token = "inv_" + secrets.token_urlsafe(32)
     inv_id = "invite_" + secrets.token_hex(8)
@@ -259,6 +285,8 @@ def create_invite(email: str, role: str, *, created_by: str,
            "token_sha256": _hash(token), "used_at": None, "used_by": None}
     if tenant:
         rec["tenant"] = tenant
+    if workspace_admin_invite:
+        rec["workspace_admin_invite"] = True
     with _locked(store_path()):
         data = _load()
         pending = sum(1 for r in data.values()
@@ -266,7 +294,14 @@ def create_invite(email: str, role: str, *, created_by: str,
         if pending >= _MAX_PENDING:
             raise ValueError("too many pending invites — revoke some first")
         data[inv_id] = rec
-        _write(data)
+        if before_effect is None:
+            _write(data)
+        else:
+            def guard() -> None:
+                before_effect()
+                if not rbac.is_known_role(role):
+                    raise ValueError("The invitation role changed. Choose its current role again.")
+            _write(data, before_effect=guard)
     return _to_invite(rec), token
 
 
@@ -289,27 +324,58 @@ def revoke_invite(invite_id: str) -> bool:
 def peek_invite(token: str) -> Invite | None:
     """The pending invite for ``token``, WITHOUT consuming it (the GET
     confirmation page — inert for link scanners). None when unknown/used/expired."""
-    h = _hash(token or "")
+    inv = lookup_invite(token)
+    return inv if inv is not None and inv.pending else None
+
+
+def lookup_invite(token: str) -> Invite | None:
+    """Read the original record, including used links; callers must authorize receipts."""
+    if not isinstance(token, str) or not token.startswith("inv_") or len(token) > 128:
+        return None
+    h = _hash(token)
     for rec in _load().values():
         if secrets.compare_digest(rec.get("token_sha256", ""), h):
-            inv = _to_invite(rec)
-            return inv if inv.pending else None
+            return _to_invite(rec)
     return None
 
 
-def consume_invite(token: str, *, used_by: str | None = None) -> Invite | None:
+def confirm_grant(invite_id: str, principal: str) -> Invite:
+    """Record a completed native grant, never infer one from the current roster."""
+    with _locked(store_path()):
+        data = _load()
+        rec = data.get(invite_id)
+        if rec is None or rec.get("used_at") is None or rec.get("used_by") != principal:
+            raise InviteStoreError("original invitation redemption changed")
+        if rec.get("grant_confirmed_at") is None:
+            rec["grant_confirmed_at"] = max(time.time(), rec["used_at"])
+            _write(data)
+        return _to_invite(rec)
+
+
+def consume_invite(token: str, *, used_by: str | None = None,
+                   before_commit=None) -> Invite | None:
     """Atomically redeem ``token``: marks it used and returns the invite, or
     None when unknown, expired, or already used (single-use is enforced under
     the store lock, so two racing accepts can't both win). ``used_by`` defaults
-    to the invited email's own principal (the local-login case)."""
+    to the invited email's own principal (the local-login case).
+
+    ``before_commit(invite)`` runs under the same lock just before the link is
+    marked used (it saves the colleague's passphrase). If it raises, the link
+    stays unused and the error propagates."""
+    from maverick.authority_effects import authority_effect_fence
+
+    from .rbac import is_known_role
+
     h = _hash(token or "")
-    with _locked(store_path()):
+    with authority_effect_fence(), _locked(store_path()):
         data = _load()
         for rec in data.values():
             if secrets.compare_digest(rec.get("token_sha256", ""), h):
                 inv = _to_invite(rec)
-                if not inv.pending:
+                if not inv.pending or not is_known_role(inv.role):
                     return None
+                if before_commit is not None:
+                    before_commit(inv)
                 rec["used_at"] = time.time()
                 rec["used_by"] = used_by or f"user:{inv.email}"
                 _write(data)
@@ -344,8 +410,9 @@ def send_invite_email(invite: Invite, link: str, *, invited_by: str) -> tuple[bo
     if not mailer.configured():
         return False, "no sending account configured ([email] / EMAIL_USER)"
     days = max(1, int((invite.expires_at - invite.created_at) / 86400))
+    destination = f"the {invite.tenant} workspace" if invite.tenant else "a Lightwork dashboard"
     body = (
-        f"You've been invited to a Lightwork dashboard as {invite.role} "
+        f"You've been invited to {destination} as {invite.role} "
         f"(invited by {invited_by}).\n\n"
         f"Open this link to accept:\n\n    {link}\n\n"
         f"The link works once and expires in {days} day{'s' if days != 1 else ''}. "
@@ -407,15 +474,18 @@ def local_session_secret() -> str:
 
 def local_login_mode() -> bool:
     """True when invite acceptance must itself sign the browser in: invites are
-    on and no OIDC browser login is configured (with SSO, the IdP signs in and
-    the invite only binds the role)."""
+    on and no OIDC or SAML browser login is configured (with SSO, the IdP signs
+    in and the invite only binds the role)."""
     if not invites_enabled():
         return False
     try:
         from maverick.oidc import login_enabled
-        return not login_enabled()
-    except Exception:  # pragma: no cover - oidc config never blocks this gate
-        return True
+
+        from .saml import saml_enabled
+
+        return not login_enabled() and not saml_enabled()
+    except Exception:  # pragma: no cover - an unavailable SSO config cannot enable local login
+        return False
 
 
 def session_ttl_seconds() -> int:
@@ -429,12 +499,21 @@ def session_ttl_seconds() -> int:
     return LOCAL_SESSION_DAYS * 86400
 
 
-def mint_local_session(email: str) -> str:
-    """A signed session cookie value for ``user:<email>`` (no-IdP mode)."""
+def mint_local_session(email: str, request=None) -> str:
+    """A signed session cookie value for ``user:<email>`` (no-IdP mode).
+
+    With ``request`` the session is recorded for the Sessions page (a ``sid``
+    in the cookie, no second factor: a passphrase is one factor). Without one
+    -- tests and older callers -- it is an untracked legacy cookie."""
     from maverick.oidc import validate_subject
     from maverick.web_session import sign_session
 
     email = validate_subject(email)
+    if request is not None:
+        from .oidc_login import mint_browser_session
+
+        return mint_browser_session(request, sub=email, secret=local_session_secret(),
+                                    via="invite", mfa=False, ttl=session_ttl_seconds())
     now = int(time.time())
     return sign_session({"sub": email, "iat": now, "exp": now + session_ttl_seconds()},
                         local_session_secret())
@@ -463,5 +542,9 @@ def local_session_principal(request):
     if is_revoked(sub, payload.get("iat")):
         return None
     from maverick.oidc import VerifiedPrincipal
-    return VerifiedPrincipal(sub=sub, issuer="invite-session", audience="",
-                             claims={"via": "invite"})
+
+    from .oidc_login import session_claims
+    claims = session_claims(payload, request, via="invite")
+    if claims is None:
+        return None
+    return VerifiedPrincipal(sub=sub, issuer="invite-session", audience="", claims=claims)

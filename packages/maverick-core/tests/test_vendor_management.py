@@ -51,7 +51,8 @@ def test_register_is_off_by_default(tmp_path):
 def test_same_name_is_one_record_never_a_duplicate():
     record = _register()
     assert record["id"].startswith("VMR-")
-    assert record["status"] == "active"
+    # Registration is not approval: activation is gated on an assessment.
+    assert record["status"] == "under_review"
     with pytest.raises(RecordConflict):
         _register()
     # Same identity modulo case/whitespace: still the same record id.
@@ -107,6 +108,99 @@ def test_questionnaire_requires_a_registered_template_and_reads_back():
     rows = vm.questionnaire_responses(record["id"])
     assert rows[0]["status"] == "answered"
     assert rows[0]["submissions"][0]["q1"] == "yes"
+
+
+def test_replacing_a_full_questionnaire_link_retains_earlier_replies(monkeypatch):
+    from maverick import form_store
+
+    record = _register()
+    sent = vm.request_questionnaire(
+        record["id"], assessment_type="vendor_risk", actor="ops",
+        expected_revision=record["revision"],
+    )
+    old_token = sent["form_path"].removeprefix("/form/")
+    old_id = sent["questionnaires"][0]["request_id"]
+    monkeypatch.setattr(form_store, "_MAX_LINES", 1)
+    assert form_store.append(old_token, {"vr_q1": "yes"}) == 1
+    with pytest.raises(form_store.FormStoreFull):
+        form_store.append(old_token, {"vr_q1": "no"})
+    replaced = vm.replace_questionnaire_link(
+        record["id"], old_id, actor="admin",
+        expected_revision=sent["revision"],
+    )
+    new_token = replaced["form_path"].removeprefix("/form/")
+    assert new_token != old_token
+    assert vm.questionnaire_for_token(old_token) is None
+    assert vm.questionnaire_for_token(new_token) is not None
+    assert form_store.is_closed(old_token)
+    with pytest.raises(form_store.FormStoreClosed):
+        form_store.append(old_token, {"vr_q1": "no"})
+    assert form_store.append(new_token, {"vr_q1": "no"}) == 1
+
+    current = vm.questionnaire_responses(record["id"])[0]
+    assert current["request_id"] == vm.lookup_digest(new_token)
+    assert current["status"] == "answered"
+    assert current["submissions"][0]["vr_q1"] == "no"
+    assert current["previous_links"][0]["status"] == "replaced"
+    assert current["previous_links"][0]["reply_count"] == 1
+    assert current["previous_links"][0]["submissions"][0]["vr_q1"] == "yes"
+    assert len(vm.get_vendor(record["id"])["questionnaires"]) == 1
+
+    with pytest.raises(RecordConflict):
+        vm.replace_questionnaire_link(
+            record["id"], vm.lookup_digest(new_token), actor="admin",
+            expected_revision=sent["revision"],
+        )
+    assert vm.questionnaire_for_token(new_token) is not None
+
+
+def test_questionnaire_link_remains_closed_if_record_write_fails(monkeypatch):
+    from maverick import form_store
+
+    record = _register()
+    sent = vm.request_questionnaire(
+        record["id"], assessment_type="vendor_risk", actor="ops",
+        expected_revision=record["revision"],
+    )
+    old_token = sent["form_path"].removeprefix("/form/")
+    def fail_after_close(_vendor_id, mutate, **_kwargs):
+        mutate(dict(vm._VENDORS.get(record["id"])))
+        raise RuntimeError("simulated saved-record failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(vm._VENDORS, "update", fail_after_close)
+        with pytest.raises(RuntimeError, match="saved-record failure"):
+            vm.replace_questionnaire_link(
+                record["id"], vm.lookup_digest(old_token), actor="admin",
+                expected_revision=sent["revision"],
+            )
+    assert form_store.is_closed(old_token)
+    assert vm.questionnaire_for_token(old_token) is None
+    assert vm.questionnaire_responses(record["id"])[0]["status"] == "replaced"
+    repaired = vm.replace_questionnaire_link(
+        record["id"], vm.lookup_digest(old_token), actor="admin",
+        expected_revision=sent["revision"],
+    )
+    assert repaired["revision"] > sent["revision"]
+    assert vm.questionnaire_for_token(repaired["form_path"].removeprefix("/form/")) is not None
+
+
+def test_questionnaire_read_failure_does_not_look_unanswered(monkeypatch):
+    from maverick import form_store
+
+    record = _register()
+    vm.request_questionnaire(
+        record["id"], assessment_type="vendor_risk", actor="ops",
+        expected_revision=record["revision"],
+    )
+
+    def fail_read(_token, _cursor):
+        raise OSError("private storage detail")
+
+    monkeypatch.setattr(form_store, "since", fail_read)
+    with pytest.raises(vm.QuestionnaireResponsesUnavailable) as exc:
+        vm.questionnaire_responses(record["id"])
+    assert "private storage detail" not in str(exc.value)
 
 
 def test_monitoring_notes_and_posture():

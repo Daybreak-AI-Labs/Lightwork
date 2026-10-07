@@ -38,13 +38,14 @@ ADMIN_PAGES = (
 #:   settings_store._write  -> config.dashboard_overrides_path(), which is
 #:                             config_path().parent/<basename>
 #:   suite_grants, ui_visibility -> same maverick_home() root
-#:   runtime_overrides      -> OVERRIDES_PATH, a module-level constant bound at
-#:                             IMPORT time. data_dir() is tenant-aware, but
-#:                             freezing it at import captures the tenant active
-#:                             then (none, in practice), so every write lands in
-#:                             the shared file whatever tenant is active later.
-#:                             That freeze is its own latent bug; until it is
-#:                             fixed the sink is global and the gate must match.
+#:   runtime_overrides      -> overrides_path(), resolved per call at the
+#:                             operator floor (MAVERICK_HOME / MAVERICK_TENANT /
+#:                             client binding). A workspace selected for a
+#:                             request deliberately does not move it: the
+#:                             overlay is deployment-wide policy every
+#:                             workspace runs under, so the sink is global and
+#:                             the gate must match. A per-workspace overlay
+#:                             would be a separate, layered design.
 GLOBAL_SINK_MODULES = frozenset({
     "rbac", "invites", "settings_store", "suite_grants", "ui_visibility",
     "runtime_overrides",
@@ -125,6 +126,24 @@ def _gates(fn: ast.AST) -> set[str]:
     }
 
 
+#: Workspace invitations write the shared invite store, but each invite is bound
+#: to one workspace and authorized against that exact workspace: a workspace
+#: administrator may offer at most their own role there, and only that
+#: workspace's administrator may cancel it. They must call the workspace gate.
+WORKSPACE_SCOPED_INVITES = frozenset({
+    ("POST", "/users/workspace-invite"),
+    ("POST", "/users/workspace-invite/revoke"),
+})
+
+
+def _called(fn: ast.AST) -> set[str]:
+    return {
+        c.func.attr if isinstance(c.func, ast.Attribute) else c.func.id
+        for c in ast.walk(fn)
+        if isinstance(c, ast.Call) and isinstance(c.func, (ast.Attribute, ast.Name))
+    }
+
+
 ROUTES_WRITING_GLOBAL = [
     (m, p, fn, sinks) for m, p, fn in _routes()
     if (sinks := _global_sinks_written(fn))
@@ -149,6 +168,10 @@ def test_the_scan_actually_finds_routes() -> None:
 def test_global_sink_routes_use_the_global_gate(method, path, sinks) -> None:
     fn = next(f for m, p, f, _ in ROUTES_WRITING_GLOBAL if (m, p) == (method, path))
     gates = _gates(fn)
+    if (method, path) in WORKSPACE_SCOPED_INVITES:
+        # Checked, not waived: the exact workspace's administrator gate must run.
+        assert "_workspace_invite_authority" in _called(fn), (method, path)
+        return
     assert "require_global_permission" in gates, (
         f"{method} {path} writes deployment-global state ({', '.join(sinks)}) "
         f"but gates with {gates or '{nothing}'}. require_permission honours "

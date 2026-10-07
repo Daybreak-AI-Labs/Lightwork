@@ -52,6 +52,7 @@ def _unscope(scoped_key: str) -> str:
 
 
 def _run_factory(world, goal_id: int | None):
+    observed: dict[str, int] = {}
     def _run(args: dict[str, Any]) -> str:
         if world is None or goal_id is None:
             return "ERROR: kv_memory requires an active goal (world / goal_id missing)"
@@ -94,10 +95,15 @@ def _run_factory(world, goal_id: int | None):
             # lock, so it could flush another thread's half-written
             # transaction. upsert_fact does an ON CONFLICT upsert under
             # _writing().
-            world.upsert_fact(
-                scoped, value, source=_prov.source,
-                trust_tier=int(_prov.trust), sensitivity=_prov.sensitivity.value,
-            )
+            from ..fact_revision import FactConflict
+            try:
+                observed[scoped] = world.upsert_fact(
+                    scoped, value, source=_prov.source,
+                    trust_tier=int(_prov.trust), sensitivity=_prov.sensitivity.value,
+                    expected_revision=observed.get(scoped, 0),
+                )
+            except FactConflict:
+                return "ERROR: fact changed; get its current value before deciding whether to replace it"
             return f"set {user_key!r} ({len(value)} bytes)"
         if op == "get":
             user_key = (args.get("key") or "").strip()
@@ -106,15 +112,25 @@ def _run_factory(world, goal_id: int | None):
             # Route through the locked, backend-portable helper instead of
             # world.conn.execute(... ?): the raw path took torn reads under the
             # serve threadpool and used `?` placeholders that break on Postgres.
-            value = world.get_fact(_scoped_key(goal_id, user_key))
-            if value is None:
+            scoped = _scoped_key(goal_id, user_key)
+            record = world.fact_record(scoped)
+            observed[scoped] = record["revision"] if record else 0
+            if record is None:
                 return f"(no fact stored for {user_key!r})"
-            return value
+            return record["value"]
         if op == "delete":
             user_key = (args.get("key") or "").strip()
             if not user_key:
                 return "ERROR: delete requires key"
-            n = world.delete_fact(_scoped_key(goal_id, user_key))
+            scoped = _scoped_key(goal_id, user_key)
+            from ..fact_revision import FactConflict
+            try:
+                n = world.delete_fact(
+                    scoped, expected_revision=observed.get(scoped, 0),
+                )
+            except FactConflict:
+                return "ERROR: fact changed; get its current value before deciding whether to delete it"
+            observed[scoped] = 0
             return f"deleted {n} row(s)"
         prefix = f"goal:{goal_id}:"
         if op == "list":
@@ -123,19 +139,19 @@ def _run_factory(world, goal_id: int | None):
                 return "(no facts stored for this goal)"
             return "\n".join(f"{_unscope(k)}  ({sz} bytes)" for k, sz in rows)
         if op == "search":
-            q = (args.get("query") or "").strip()
-            if not q:
-                return "ERROR: search requires query"
-            rows = world.search_facts(prefix, q, cap)
-            if not rows:
-                return f"no matches for {q!r}"
-            out = []
-            for k, v in rows:
-                snippet = (v or "")[:200]
-                out.append(f"{_unscope(k)}: {snippet}")
-            return "\n".join(out)
+            return _search(world, prefix, args, cap)
         return f"ERROR: unknown op {op!r}"
     return _run
+
+
+def _search(world, prefix, args, cap):
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "ERROR: search requires query"
+    rows = world.search_facts(prefix, query, cap)
+    if not rows:
+        return f"no matches for {query!r}"
+    return "\n".join(f"{_unscope(key)}: {(value or '')[:200]}" for key, value in rows)
 
 
 def kv_memory(world, goal_id: int | None) -> Tool:
@@ -144,7 +160,7 @@ def kv_memory(world, goal_id: int | None) -> Tool:
         name="kv_memory",
         description=(
             "Persist facts across turns for the current goal. ops: "
-            "set (upsert), get (read), delete, list (recent keys), "
+            "set (create or replace a previously read revision), get (read), delete, list (recent keys), "
             "search (substring across keys+values). Goal-scoped -- "
             "memory doesn't leak across runs. Use recall_past_goals "
             "for cross-goal context."

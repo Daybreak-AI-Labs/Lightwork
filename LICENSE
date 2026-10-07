@@ -1,4 +1,4 @@
-Lightwork Proprietary License
+# Lightwork Proprietary License
 
 Copyright (c) 2026 Christopher Day. All rights reserved.
 
@@ -14,7 +14,7 @@ Licensor. Making the source code visible in a repository does not grant any
 license to it. All rights not expressly granted are reserved.
 
 To request an evaluation, commercial, or enterprise license, contact the
-Licensor: https://github.com/Daybreak-AI-Labs/Lightwork
+Licensor: chris@daybreakailabs.com
 
 Prior releases: specific versions of the Software previously published under
 the MIT License remain available under the MIT License for those versions
@@ -22,7 +22,8 @@ only. This Proprietary License governs the current version and all subsequent
 changes.
 
 "Lightwork", the Lightwork name, and the Lightwork logo are trademarks of the
-Licensor; see TRADEMARK.md. This license grants no right to use those marks.
+Licensor; see https://daybreak-ai-labs.github.io/Lightwork/trademark/. This
+license grants no right to use those marks.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

@@ -39,11 +39,13 @@ def test_jd_match_ranks_roster():
     assert resp.status_code == 200
     matches = resp.json()["matches"]
     assert matches, "a finance JD must hit the shipped roster"
-    assert matches[0]["fit"] == 1.0
+    assert "fit" not in matches[0]  # ranking is relative, not a 100% confidence claim
     assert any((m["suite"] or "").startswith("finance") for m in matches[:3])
     # Explainability fields present.
-    assert {"name", "fit", "description", "suite", "department",
-            "max_risk", "matched_terms"} <= set(matches[0])
+    assert {"name", "display_name", "relevance", "readiness", "description",
+            "suite", "department", "max_risk", "matched_terms"} <= set(matches[0])
+    assert matches[0]["relevance"] in {"strong", "partial", "weak"}
+    assert matches[0]["readiness"]["state"] in {"action_ready", "needs_setup", "unknown"}
 
 
 def test_jd_match_validates_input():
@@ -73,19 +75,23 @@ def test_jd_match_disabled_by_config_knob(monkeypatch, tmp_path):
 
 
 def test_department_scope_filters_catalog_before_ranking(monkeypatch):
+    from types import SimpleNamespace
+
     import maverick.domain as domain
     import maverick.jd_hiring as jd_hiring
     import maverick_dashboard.api as api
 
     profiles = {
-        "finance_ap": object(),
-        "legal_privacy": object(),
-        "generic_helper": object(),
+        "finance_ap": SimpleNamespace(name="finance_ap"),
+        "legal_privacy": SimpleNamespace(name="legal_privacy"),
+        "generic_helper": SimpleNamespace(name="generic_helper"),
+        "generic_legal_fork": SimpleNamespace(name="legal_privacy"),
     }
     suites = {
         "finance_ap": "finance",
         "legal_privacy": "legal",
         "generic_helper": None,
+        "generic_legal_fork": None,
     }
     seen = {}
 
@@ -104,6 +110,7 @@ def test_department_scope_filters_catalog_before_ranking(monkeypatch):
     assert seen["k"] == 2
     assert set(seen["domains"]) == {"finance_ap", "generic_helper"}
     assert "legal_privacy" not in seen["domains"]
+    assert "generic_legal_fork" not in seen["domains"]
 
 
 # ---- /agents/jd/draft -----------------------------------------------------------
@@ -121,6 +128,8 @@ def test_jd_draft_keyless_is_clamped(monkeypatch):
     body = resp.json()
     draft = body["draft"]
     assert body["generated_with_llm"] is False
+    assert body["draft_source"] == "bullet_points"
+    assert body["draft"]["description"] == "Accounts Payable Specialist"
     # The generated deny-floor always applies.
     for tool in ("shell", "write_file", "code_exec"):
         assert tool in draft["deny_tools"]
@@ -128,6 +137,33 @@ def test_jd_draft_keyless_is_clamped(monkeypatch):
     # Editor-prefill shape: workflow rows carry the editor's field names.
     assert draft["workflow"] and {"name", "instruction", "tools", "gate"} <= set(
         draft["workflow"][0])
+
+
+def test_jd_draft_reports_fallback_when_provider_reply_is_unusable(monkeypatch):
+    import maverick.llm as llm_module
+    import maverick.operator_preflight as preflight
+
+    monkeypatch.setattr(preflight, "_role_configuration_missing", lambda *_args: (None, []))
+    monkeypatch.setattr(llm_module, "model_for_role", lambda *_args: "test-model")
+
+    class UnusableLLM:
+        def __init__(self, **_kwargs):
+            pass
+
+        def complete(self, **_kwargs):
+            return type("Reply", (), {"text": "A generic answer, not a pack."})()
+
+    monkeypatch.setattr(llm_module, "LLM", UnusableLLM)
+    resp = client.post("/api/v1/agents/jd/draft", json={
+        "role_title": "Accounts Payable Specialist", "jd_text": FINANCE_JD,
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ai_attempted"] is True
+    assert body["generated_with_llm"] is False
+    assert body["draft_source"] == "bullet_points"
+    assert body["draft"]["description"] == "Accounts Payable Specialist"
+    assert body["draft"]["workflow"][0]["name"].startswith("Process vendor invoices")
 
 
 def test_jd_draft_is_rate_limited(monkeypatch):
@@ -197,4 +233,4 @@ def test_create_goal_with_unknown_domain_400(monkeypatch):
         "title": "x", "domain": "no_such_pack_xyz",
     })
     assert resp.status_code == 400
-    assert "unknown specialist" in resp.json()["detail"]
+    assert "unknown agent or specialist" in resp.json()["detail"]

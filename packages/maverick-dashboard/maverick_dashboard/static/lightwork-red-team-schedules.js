@@ -19,10 +19,10 @@
   } catch (e) { /* names stay generic */ }
   var columns = admin ? 7 : 6;
 
-  function say(el, text) { if (el) el.textContent = String(text || ''); }
+  function say(el, text) { window.mvStatus(el, String(text || '')); }
   function errorText(failure, action) {
     if (typeof window.mvErrorText === 'function') return window.mvErrorText(failure, action);
-    return 'Could not ' + action + '. Please try again.';
+    return 'Could not ' + action + '. Try again.';
   }
   function when(ts) {
     return (typeof window.mvWhen === 'function' ? window.mvWhen(ts) : '') || '';
@@ -104,11 +104,7 @@
   }
 
   function load() {
-    return fetch(api + '/schedules?limit=100', { credentials: 'same-origin' })
-      .then(function (response) {
-        if (!response.ok) throw response;
-        return response.json();
-      })
+    return window.mvFetchJSON(api + '/schedules?limit=100')
       .then(function (data) {
         var items = Array.isArray(data && data.items) ? data.items : [];
         render(items);
@@ -120,15 +116,7 @@
   }
 
   function post(path, body) {
-    return fetch(api + path, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    }).then(function (response) {
-      if (!response.ok) throw response;
-      return response.json();
-    });
+    return window.mvFetchJSON(api + path, { method: 'POST', body: body || {} });
   }
 
   async function cancel(row, button) {

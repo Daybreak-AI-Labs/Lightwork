@@ -179,25 +179,63 @@ def test_export_downloads_the_same_bundle_the_command_writes(env):
     response = env.client.get(f"/api/v1/goals/{env.goal}/export.json")
     assert response.status_code == 200
     assert 'filename="task-' in response.headers["content-disposition"]
-    assert json.loads(response.text) == json.loads(json.dumps(build_goal_bundle(env.world, env.goal), default=str))
+    downloaded = response.json()
+    command = json.loads(json.dumps(build_goal_bundle(env.world, env.goal), default=str))
+    # Separate exports have distinct preparation times, but the same immutable contents.
+    assert downloaded["manifest"].pop("snapshot_prepared_at") > 0
+    assert command["manifest"].pop("snapshot_prepared_at") > 0
+    assert downloaded == command
+    import hashlib
+    assert downloaded["manifest"]["sha256"] == hashlib.sha256(
+        response.content.split(b',"manifest":', 1)[0] + b"}").hexdigest()
     assert env.client.get(f"/api/v1/goals/{env.goal}/export.json", headers=_as("other")).status_code == 404
 
 
 def test_gist_share_needs_confirmation_operate_and_audits_first(env, monkeypatch):
-    import maverick.run_share as run_share
+    import httpx
+    from maverick.run_share import MissingGitHubToken
+    from maverick_dashboard import goal_share_previews as sharing
 
     calls = []
-    monkeypatch.setattr(run_share, "share_run", lambda gid: calls.append(gid) or "https://gist.github.com/x/1")
+    monkeypatch.setattr(sharing, "resolve_token", lambda: "test-gist-token")
+
+    def account(url, **kwargs):
+        assert url == "https://api.github.com/user"
+        return httpx.Response(200, json={"login": "test-account"}, request=httpx.Request("GET", url))
+
+    def upload(payload, token):
+        assert token == "test-gist-token"
+        assert payload["public"] is False
+        assert any(row["kind"] == "goal_shared_gist" and row["phase"] == "dispatch"
+                   for row in env.audit)
+        calls.append(payload)
+        return "https://gist.github.com/x/1"
+
+    monkeypatch.setattr(httpx, "get", account)
+    monkeypatch.setattr(sharing, "upload_payload", upload)
     url = f"/api/v1/goals/{env.goal}/share/gist"
-    assert env.client.post(url, json={"confirm": False}).status_code == 409
-    assert env.client.post(url, json={"confirm": True}, headers=_as("viewer")).status_code == 403
-    assert env.client.post(url, json={"confirm": True}, headers=_as("other")).status_code == 404
+    review = env.client.post(url + "/preview")
+    assert review.status_code == 200, review.text
+    preview = review.json()
+    body = {"preview_id": preview["preview_id"], "sha256": preview["sha256"], "confirm": True}
+    assert env.client.post(url, json={**body, "confirm": False}).status_code == 409
+    assert env.client.post(url, json=body, headers=_as("viewer")).status_code == 403
+    assert env.client.post(url, json=body, headers=_as("other")).status_code == 404
     assert calls == []
-    data = env.client.post(url, json={"confirm": True}).json()
-    assert data == {"shared": True, "url": "https://gist.github.com/x/1"} and calls == [env.goal]
-    assert [r["phase"] for r in env.audit if r["kind"] == "goal_shared_gist"] == ["start", "done"]
-    monkeypatch.setattr(run_share, "share_run", lambda gid: (_ for _ in ()).throw(RuntimeError("no GitHub token")))
-    assert "isn't connected" in env.client.post(url, json={"confirm": True}).json()["message"]
+    data = env.client.post(url, json=body).json()
+    assert data == {"shared": True, "url": "https://gist.github.com/x/1", "attempt": preview["preview_id"]}
+    assert calls == [preview["payload"]]
+    # Lost-response recovery returns the durable receipt and does not upload again.
+    assert env.client.post(url, json=body).json() == data
+    assert len(calls) == 1
+    assert [row["phase"] for row in env.audit if row["kind"] == "goal_shared_gist"] == ["dispatch"]
+
+    def disconnected():
+        raise MissingGitHubToken("no GitHub token")
+
+    monkeypatch.setattr(sharing, "resolve_token", disconnected)
+    missing = env.client.post(url + "/preview")
+    assert missing.status_code == 409 and "not connected" in missing.json()["detail"]
 
 
 # ---- schedule add ------------------------------------------------------------
@@ -299,6 +337,29 @@ def test_business_setup_drafts_then_saves_only_after_confirmation(env, monkeypat
     assert again.status_code == 404, "a draft is approved at most once"
 
 
+def test_business_setup_rejects_existing_specialist_names_before_drafting(env):
+    from maverick.domain import available_domains
+
+    base = "/api/v1/agents/business-setup/draft"
+    before = available_domains()["hr_screening"]
+    original = (before.persona, before.max_risk, before.allow_tools)
+    response = env.client.post(base, json={"name": "HR Screening", "use_ai": False}, headers=_as("boss"))
+    assert response.status_code == 409
+    assert "HR Screening" in response.json()["detail"]
+    assert "existing specialist and its safeguards have not changed" in response.json()["detail"]
+    after = available_domains()["hr_screening"]
+    assert (after.persona, after.max_risk, after.allow_tools) == original
+    assert not list((env.tmp / "domains").glob("*.toml"))
+    assert not any(row["kind"] == "business_agent_drafted" for row in env.audit)
+
+    folder = env.tmp / "domains"
+    folder.mkdir(exist_ok=True)
+    existing = folder / "acme_bakery.toml"
+    existing.write_text("existing draft", encoding="utf-8")
+    response = env.client.post(base, json={"name": "Acme Bakery", "use_ai": False}, headers=_as("boss"))
+    assert response.status_code == 409 and existing.read_text(encoding="utf-8") == "existing draft"
+
+
 def _tool_gap_plan(env, monkeypatch):
     import maverick.provision as provision
 
@@ -376,7 +437,7 @@ def test_business_setup_bounds_documents(env):
 
 # ---- Ekko recording ------------------------------------------------------------
 
-def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env):
+def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env, monkeypatch):
     body = {"events": json.dumps({"app": "excel", "action": "open"}) + "\n", "acknowledge_capture_scope": False}
     assert env.client.post("/api/v1/ekko/recording/import", json=body).status_code == 400
     body["acknowledge_capture_scope"] = True
@@ -386,9 +447,24 @@ def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env):
     assert env.client.post("/api/v1/ekko/recording/import", json=too_big).status_code == 422
     options = env.client.get("/api/v1/ekko/recording/options").json()
     assert options["activity_file"] is True and options["windows_active_app"] is (os.name == "nt")
-    if os.name != "nt":
+    if not options["active_app"]:
+        # This computer has no supported desktop recorder: nothing starts, and
+        # the reply says why in the platform's own words.
         watch = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": True})
-        assert watch.status_code == 409 and "Windows" in watch.json()["detail"]
+        assert watch.status_code == 409
+        assert watch.json()["detail"] == {"message": options["availability_message"], "not_started": True}
+    # Where a recorder is available, watching still needs the capture-scope
+    # acknowledgement and an enabled, enrolled Ekko before anything records.
+    import maverick.ekko_foreground as foreground
+
+    monkeypatch.setattr(foreground, "foreground_options", lambda: {
+        "active_app": True, "observer": "linux_x11_foreground", "platform": "Linux",
+        "availability_message": "Record recognized apps on the local Linux X11 desktop where Lightwork is installed."})
+    monkeypatch.setattr(foreground, "foreground_observer", lambda: pytest.fail("no recorder may open before consent"))
+    unacknowledged = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": False})
+    assert unacknowledged.status_code == 400 and unacknowledged.json()["detail"]["not_started"] is True
+    off = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": True})
+    assert off.status_code == 409 and off.json()["detail"]["not_started"] is True  # Ekko is off
 
 
 def test_ekko_recording_runs_the_daemon_over_the_uploaded_file(env, monkeypatch):
@@ -431,6 +507,10 @@ class FakeLLM:
     def __init__(self, model=None):
         self.model = model
 
+    def _provider_client_config(self, provider):
+        # A reviewed viewpoints request binds the connection identity only.
+        return SimpleNamespace(fingerprint="test-connection:" + provider)
+
     def complete(self, *, system, messages, budget=None, **_):
         budget.check()
         budget.record_tokens(100, 40)
@@ -453,6 +533,9 @@ def ai(env, monkeypatch):
     monkeypatch.setattr(llm, "model_for_role", lambda role: roles.append(role) or "anthropic:configured")
     monkeypatch.setattr(_shared, "require_provider_or_400", lambda role=None: None)
     monkeypatch.setattr(viewpoints_api, "require_provider_or_400", lambda role=None: None)
+    from maverick_dashboard import viewpoints_requests
+    monkeypatch.setattr(viewpoints_requests, "LLM", FakeLLM)
+    monkeypatch.setattr(viewpoints_requests, "model_for_role", llm.model_for_role)
     return roles
 
 
@@ -476,7 +559,7 @@ def test_viewpoints_job_runs_with_chosen_sides(env, ai):
                                                                "for_side": "Sunday trade is worth it"})
     assert started.status_code == 202, started.text
     result = _wait(env.client, "/api/v1/viewpoints/jobs/" + started.json()["job"])["result"]
-    assert result["ran"] is True and result["verdict"] == "for" and ai == ["analyst"]
+    assert result["ran"] is True and result["verdict"] == "for" and set(ai) == {"analyst"}
     assert env.client.get("/api/v1/viewpoints/jobs/" + started.json()["job"], headers=_as("other")).status_code == 404
     assert env.client.post("/api/v1/viewpoints/jobs", json={"question": "Why?", "for_side": "x" * 301}).status_code == 422
 
@@ -497,7 +580,7 @@ def test_viewpoints_job_runs_with_chosen_sides(env, ai):
     ("flow_teach.html", ["tr-learn", "rc-learn", "sg-learn", "lightwork-flow-teach.js"]),
 ])
 def test_pages_offer_the_new_controls_in_plain_words(template, needles):
-    text = (TEMPLATES / template).read_text()
+    text = (TEMPLATES / template).read_text(encoding="utf-8")
     for needle in needles:
         assert needle in text
     for added in re.findall(r'<(?:section|details|div)[^>]*id="(?:task-journal|goal-export|auto-new-sched|tplm-library|'

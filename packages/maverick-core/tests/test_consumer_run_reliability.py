@@ -157,8 +157,9 @@ async def test_run_goal_marks_goal_failed_on_unexpected_error(tmp_path: Path):
             BoomLLM(), world, Budget(max_dollars=1.0), gid,
             sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
         )
-    # The goal must NOT be left 'active' -- it is marked terminal.
-    assert world.get_goal(gid).status == "blocked"
+    # The goal must NOT be left 'active' -- an unexpected error is a terminal
+    # failure ('blocked' is reserved for allowance stops and refusals).
+    assert world.get_goal(gid).status == "failed"
 
 
 # ---------- C: advisories warn at most once per process ----------

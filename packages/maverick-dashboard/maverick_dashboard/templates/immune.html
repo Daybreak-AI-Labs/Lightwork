@@ -21,7 +21,7 @@
   <section class="panel" aria-labelledby="ic-comp-title">
     <h2 id="ic-comp-title">Risky tool combinations</h2>
     <p class="muted">A chain of assistants that can read private data, change things and send data out. Each one is a path a mistake or an attack could use. Narrow an assistant’s tools on the Agents page to close it.</p>
-    <div class="ic-table-wrap"><table class="ic-table"><caption>Chains of assistants with all three abilities</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-comp-caption"><table class="ic-table"><caption id="ic-comp-caption">Chains of assistants with all three abilities</caption>
       <thead><tr><th scope="col">Assistants in the chain</th><th scope="col">Reads private data with</th><th scope="col">Changes things with</th><th scope="col">Sends data out with</th><th scope="col">Risk if data leaves</th></tr></thead>
       <tbody id="ic-comp-rows"><tr><td colspan="5">Loading.</td></tr></tbody></table></div>
     <p><a class="btn btn--ghost" href="/agents">Review assistants and their tools</a></p>
@@ -30,7 +30,7 @@
   <section class="panel" aria-labelledby="ic-ifc-title">
     <h2 id="ic-ifc-title">Sensitive data at the exit</h2>
     <p class="muted" id="ic-ifc-mode">Protection: —</p>
-    <div class="ic-table-wrap"><table class="ic-table"><caption>Recent times labelled data reached a tool that sends it outside</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-ifc-caption"><table class="ic-table"><caption id="ic-ifc-caption">Recent times labelled data reached a tool that sends it outside</caption>
       <thead><tr><th scope="col">Task</th><th scope="col">Tool</th><th scope="col">Kind of data</th><th scope="col">Copied word for word</th><th scope="col">What happened</th></tr></thead>
       <tbody id="ic-ifc-rows"><tr><td colspan="5">Loading.</td></tr></tbody></table></div>
   </section>
@@ -40,7 +40,7 @@
       <h2 id="ic-over-title">Reviewer alertness</h2>
       <span class="badge" id="ic-over-state">Reviewer tests: —</span>
     </div>
-    <p class="muted">Lightwork can place a realistic approval with one planted mistake (for example a changed bank account) in the approvals queue, to check that reviewers catch it. People earn the right to decide alone once they catch enough. Nobody is told which approvals are tests.</p>
+    <p class="muted">Lightwork can place a realistic approval with one planted mistake, such as a changed bank account, in the approvals queue. This checks that reviewers catch it. People earn the right to decide alone once they catch enough. Nobody is told which approvals are tests.</p>
     <div class="ic-actions" id="ic-over-controls"></div>
     {% if can_admin %}
     <form id="ic-canary-form" class="ic-form" hidden>
@@ -70,10 +70,10 @@
       </form>
     </details>
     {% endif %}
-    <div class="ic-table-wrap"><table class="ic-table"><caption>How often each person caught planted mistakes</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-over-caption"><table class="ic-table"><caption id="ic-over-caption">How often each person caught planted mistakes</caption>
       <thead><tr><th scope="col">Person</th><th scope="col">Kind of decision</th><th scope="col">Caught</th><th scope="col">Missed</th><th scope="col">Confidence</th><th scope="col">Trusted to decide alone</th></tr></thead>
       <tbody id="ic-over-rows"><tr><td colspan="6">Loading.</td></tr></tbody></table></div>
-    <div class="ic-table-wrap"><table class="ic-table"><caption>Practice drill results</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-drill-caption"><table class="ic-table"><caption id="ic-drill-caption">Practice drill results</caption>
       <thead><tr><th scope="col">Person</th><th scope="col">Kind of decision</th><th scope="col">Passed</th><th scope="col">Did not pass</th><th scope="col">Confidence</th><th scope="col">Skills kept up</th></tr></thead>
       <tbody id="ic-drill-rows"><tr><td colspan="6">Loading.</td></tr></tbody></table></div>
   </section>
@@ -83,19 +83,19 @@
       <h2 id="ic-twin-title">Practice re-runs</h2>
       <span class="badge" id="ic-twin-state">Recording: —</span>
     </div>
-    <p class="muted">Lightwork can record what tools returned during a task, then re-run the task with the same answers to see whether the assistant still does the same thing. It can also check whether an assistant behaves differently when told it is being watched.</p>
+    <p class="muted">Lightwork can record what tools returned during a task. It then re-runs the task with the same answers to see whether the assistant still does the same thing. It can also check whether an assistant behaves differently when told it is being watched.</p>
     <div class="ic-actions" id="ic-twin-controls"></div>
-    <div class="ic-table-wrap"><table class="ic-table"><caption>Recorded tasks that can be re-run</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-recorded-caption"><table class="ic-table"><caption id="ic-recorded-caption">Recorded tasks that can be re-run</caption>
       <thead><tr><th scope="col">Choose</th><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
       <tbody id="ic-recorded-rows"><tr><td colspan="4">Loading.</td></tr></tbody></table></div>
     {% if can_admin %}<p><button type="button" class="btn btn--ghost" id="ic-awareness">Check behaviour when watched (chosen tasks)</button></p>{% endif %}
-    <div class="ic-table-wrap"><table class="ic-table"><caption>Past re-runs</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-twin-caption"><table class="ic-table"><caption id="ic-twin-caption">Past re-runs</caption>
       <thead><tr><th scope="col">Original task</th><th scope="col">Re-run</th><th scope="col">Told it was watched</th><th scope="col">Result</th><th scope="col">Tool answers reused</th><th scope="col">Close matches</th><th scope="col">Unexpected actions</th><th scope="col">Answer match</th></tr></thead>
       <tbody id="ic-twin-rows"><tr><td colspan="8">Loading.</td></tr></tbody></table></div>
   </section>
 
   <details class="panel">
-    <summary>Rule sets and discovery records (for specialists)</summary>
+    <summary>Rule sets and discovery records (for technical staff)</summary>
     <h3>Check a rule set for conflicts</h3>
     <p class="muted">Choose a rule set file. Lightwork lists rules that forbid something another rule requires.</p>
     <div class="ic-row ic-form">

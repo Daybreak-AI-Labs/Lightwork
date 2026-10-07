@@ -197,6 +197,7 @@ class ConsentDeliveryBridge:
         destination_ids: Sequence[str],
         *,
         limit: int = 100,
+        after_sequence: int = 0,
     ) -> dict[str, Any]:
         """Queue and acknowledge one bounded page in source sequence order.
 
@@ -213,6 +214,7 @@ class ConsentDeliveryBridge:
             tenant,
             subscription_id,
             limit=page_size,
+            after_sequence=after_sequence,
         )
         queued = 0
         skipped = 0

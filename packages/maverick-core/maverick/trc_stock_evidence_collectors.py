@@ -38,7 +38,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Protocol
 from urllib.parse import parse_qsl, quote, urlsplit
 
@@ -431,6 +431,8 @@ class StockCollectorSource:
     region: str | None = None
     stream: str | None = None
     limits: StockCollectorLimits = field(default_factory=StockCollectorLimits)
+    authorizing_principal: str | None = field(default=None, repr=False)
+    workspace_authority: str | None = None
 
     def __post_init__(self) -> None:  # noqa: C901 - closed provider option dispatch
         object.__setattr__(self, "tenant_id", canonical_tenant_id(self.tenant_id))
@@ -447,8 +449,21 @@ class StockCollectorSource:
         if self.provider not in STOCK_PROVIDERS:
             raise StockEvidenceConfigurationError("stock provider is invalid")
         object.__setattr__(self, "origin", _exact_origin(self.origin))
-        if not isinstance(self.credential_env, str) or _ENV_RE.fullmatch(self.credential_env) is None:
+        from .privacy_discovery_credentials import CONNECTION_PATTERN
+
+        saved = isinstance(self.credential_env, str) and re.fullmatch(CONNECTION_PATTERN, self.credential_env)
+        if not isinstance(self.credential_env, str) or (_ENV_RE.fullmatch(self.credential_env) is None and not saved):
             raise StockEvidenceConfigurationError("credential env reference is invalid")
+        if saved and (not isinstance(self.authorizing_principal, str) or
+                      not 1 <= len(self.authorizing_principal) <= 256 or
+                      any(ord(char) < 32 for char in self.authorizing_principal)):
+            raise StockEvidenceConfigurationError("saved account requires its authorizing principal")
+        if not saved and self.authorizing_principal is not None:
+            raise StockEvidenceConfigurationError("legacy credentials cannot carry a saved account owner")
+        if saved and self.workspace_authority not in {"principal_selection", "principal_isolation", "operator_floor"}:
+            raise StockEvidenceConfigurationError("saved account workspace authority is invalid")
+        if not saved and self.workspace_authority is not None:
+            raise StockEvidenceConfigurationError("legacy credentials cannot carry saved workspace authority")
         if not isinstance(self.bindings, tuple) or not 1 <= len(self.bindings) <= 250:
             raise StockEvidenceConfigurationError("control bindings are outside their bound")
         if any(not isinstance(item, ProviderControlBinding) for item in self.bindings):
@@ -522,14 +537,16 @@ class StockCollectorSource:
 
     @property
     def credential_profile_sha256(self) -> str:
-        return _sha256(
-            {
+        profile = {
                 "schema": "lightwork.trc-stock-credential-profile.v1",
                 "tenant_sha256": self.tenant_sha256,
                 "provider": self.provider,
                 "credential_env": self.credential_env,
             }
-        )
+        if self.authorizing_principal is not None:
+            profile["authorizing_principal"] = self.authorizing_principal
+            profile["workspace_authority"] = self.workspace_authority
+        return _sha256(profile)
 
     @property
     def source_revision_sha256(self) -> str:
@@ -550,6 +567,51 @@ class StockCollectorSource:
                 "limits": asdict(self.limits),
             }
         )
+
+
+def managed_source_from_definition(tenant_id: str, definition: object) -> StockCollectorSource:
+    """Project the exact manifest signed by the native collector definition."""
+    manifest = getattr(definition, "source_manifest", None)
+    keys = {"label", "provider", "origin", "scope_ref", "credential_env", "bindings",
+            "region", "stream", "authorizing_principal", "background_authorized", "check_labels", "workspace_authority"}
+    if (not isinstance(manifest, dict) or not keys.issubset(manifest) or set(manifest) - (keys | {"control_labels"}) or
+            manifest.get("background_authorized") is not True or
+            not isinstance(manifest.get("label"), str) or
+            not 1 <= len(manifest["label"].strip()) <= 100 or
+            any(ord(char) < 32 for char in manifest["label"])):
+        raise StockEvidenceConfigurationError("managed source metadata is invalid")
+    bindings = manifest["bindings"]
+    if not isinstance(bindings, list) or any(not isinstance(item, dict) or
+                                           set(item) != {"control_ref", "source_ref"} for item in bindings):
+        raise StockEvidenceConfigurationError("managed source bindings are invalid")
+    labels = manifest["check_labels"]
+    if (not isinstance(labels, dict) or set(labels) != {item["source_ref"] for item in bindings} or
+            any(not isinstance(label, str) or not 1 <= len(label) <= 200 or
+                any(ord(char) < 32 for char in label) for label in labels.values())):
+        raise StockEvidenceConfigurationError("managed source check labels are invalid")
+    controls = manifest.get("control_labels")
+    if controls is not None and (not isinstance(controls, dict) or
+            set(controls) != {item["control_ref"] for item in bindings} or
+            any(not isinstance(label, str) or not 1 <= len(label) <= 500 or
+                any(ord(char) < 32 for char in label) for label in controls.values())):
+        raise StockEvidenceConfigurationError("managed source control labels are invalid")
+    from .privacy_discovery_credentials import CONNECTION_PATTERN
+
+    if not isinstance(manifest["credential_env"], str) or not re.fullmatch(CONNECTION_PATTERN, manifest["credential_env"]):
+        raise StockEvidenceConfigurationError("managed source requires a saved account")
+    return StockCollectorSource(
+        tenant_id=tenant_id,
+        enrollment_id=f"{definition.definition_id}.v{definition.version}",
+        definition_id=definition.definition_id, definition_version=definition.version,
+        definition_integrity_sha256=definition.integrity_sha256,
+        collector_key_id=definition.collector_key_id, capability_revision=definition.capability_revision,
+        provider=manifest["provider"], origin=manifest["origin"], scope_ref=manifest["scope_ref"],
+        credential_env=manifest["credential_env"],
+        bindings=tuple(ProviderControlBinding(**item) for item in bindings),
+        region=manifest["region"], stream=manifest["stream"],
+        authorizing_principal=manifest["authorizing_principal"],
+        workspace_authority=manifest["workspace_authority"],
+    )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -582,6 +644,10 @@ class StockEvidenceHTTPRequest:
     body: bytes | None = field(default=None, repr=False)
     aws_service: str | None = None
     aws_region: str | None = None
+    authorizing_principal: str | None = field(default=None, repr=False)
+    enrollment_id: str | None = None
+    enrollment_revision: int | None = None
+    source_revision_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if self.provider not in STOCK_PROVIDERS:
@@ -589,8 +655,13 @@ class StockEvidenceHTTPRequest:
         object.__setattr__(self, "origin", _exact_origin(self.origin))
         object.__setattr__(self, "path", _path(self.path))
         object.__setattr__(self, "query", _query(self.query))
-        if not isinstance(self.credential_env, str) or _ENV_RE.fullmatch(self.credential_env) is None:
+        from .privacy_discovery_credentials import CONNECTION_PATTERN
+
+        saved = isinstance(self.credential_env, str) and re.fullmatch(CONNECTION_PATTERN, self.credential_env)
+        if not isinstance(self.credential_env, str) or (_ENV_RE.fullmatch(self.credential_env) is None and not saved):
             raise StockEvidenceConfigurationError("credential env reference is invalid")
+        if saved and not self.authorizing_principal:
+            raise StockEvidenceConfigurationError("saved account read lacks an authorizing principal")
         _bounded_float(self.deadline, "deadline", 0.001, 100_000_000_000.0)
         _bounded_float(self.timeout_seconds, "timeout_seconds", 0.1, 60.0)
         _bounded_int(
@@ -842,9 +913,13 @@ class PinnedStockEvidenceHTTPTransport:
         *,
         credential_resolver: CredentialValueResolver | None = None,
         clock: Callable[[], float] = time.time,
+        authorize: Callable[[StockEvidenceHTTPRequest], None] | None = None,
+        request_credential_resolver: Callable[[StockEvidenceHTTPRequest], str] | None = None,
     ) -> None:
         self._credential_resolver = credential_resolver or os.environ.get
         self._clock = clock
+        self._authorize = authorize
+        self._request_credential_resolver = request_credential_resolver
         if not callable(self._credential_resolver) or not callable(self._clock):
             raise StockEvidenceConfigurationError("transport dependencies are invalid")
 
@@ -852,7 +927,13 @@ class PinnedStockEvidenceHTTPTransport:
         return "PinnedStockEvidenceHTTPTransport(credential_owner='ephemeral')"
 
     def _headers(self, request: StockEvidenceHTTPRequest, now: float) -> dict[str, str]:
-        secret = _credential(request.credential_env, self._credential_resolver)
+        if request.credential_env.startswith("connection:"):
+            if self._authorize is None or self._request_credential_resolver is None:
+                raise StockEvidenceAccessDenied("saved_account_authority_unavailable")
+            self._authorize(request)
+            secret = self._request_credential_resolver(request)
+        else:
+            secret = _credential(request.credential_env, self._credential_resolver)
         if request.provider in _AWS_PROVIDERS:
             auth = dict(_aws_signing_headers(request, secret, now=now))
         elif request.provider == OKTA_POSTURE:
@@ -866,6 +947,30 @@ class PinnedStockEvidenceHTTPTransport:
             **auth,
         }
 
+    def _read_body(self, response, request: StockEvidenceHTTPRequest) -> bytes:
+        chunks: list[bytes] = []
+        observed = 0
+        iterator = iter(response.iter_bytes())
+        while True:
+            self._admit(request)
+            try:
+                chunk = next(iterator)
+            except StopIteration:
+                break
+            observed += len(chunk)
+            if observed > request.max_response_bytes:
+                raise StockEvidenceProtocolError("provider_response_too_large")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    def _admit(self, request: StockEvidenceHTTPRequest) -> None:
+        if float(self._clock()) >= request.deadline:
+            raise StockEvidenceUnavailable("provider_deadline_exhausted")
+        if self._authorize is not None:
+            self._authorize(request)
+        if float(self._clock()) >= request.deadline:
+            raise StockEvidenceUnavailable("provider_deadline_exhausted")
+
     def request(self, request: StockEvidenceHTTPRequest) -> StockEvidenceHTTPResponse:
         if not isinstance(request, StockEvidenceHTTPRequest):
             raise StockEvidenceConfigurationError("transport request is invalid")
@@ -878,7 +983,7 @@ class PinnedStockEvidenceHTTPTransport:
             raise StockEvidenceUnavailable("provider_deadline_exhausted")
         timeout = min(request.timeout_seconds, remaining)
         url = request.url
-        headers = self._headers(request, now)
+        self._admit(request)
         try:
             from .enterprise import enterprise_egress_denial
             from .tools._ssrf import BlockedHost, safe_client
@@ -889,13 +994,20 @@ class PinnedStockEvidenceHTTPTransport:
             )
             if denial:
                 raise StockEvidenceAccessDenied("enterprise_egress_denied")
+            self._admit(request)
             with safe_client(url, timeout=timeout, follow_redirects=False) as client:
+                # DNS and connection admission may have waited. Read the exact
+                # current account again before any credential leaves the process.
+                self._admit(request)
+                headers = self._headers(request, float(self._clock()))
+                self._admit(request)
                 with client.stream(
                     request.method,
                     url,
                     headers=headers,
                     content=request.body,
                     follow_redirects=False,
+                    timeout=min(request.timeout_seconds, request.deadline - float(self._clock())),
                 ) as response:
                     if 300 <= response.status_code < 400:
                         raise StockEvidenceProtocolError("provider_redirect_rejected")
@@ -909,13 +1021,7 @@ class PinnedStockEvidenceHTTPTransport:
                             ) from None
                         if size < 0 or size > request.max_response_bytes:
                             raise StockEvidenceProtocolError("provider_response_too_large")
-                    chunks: list[bytes] = []
-                    observed = 0
-                    for chunk in response.iter_bytes():
-                        observed += len(chunk)
-                        if observed > request.max_response_bytes:
-                            raise StockEvidenceProtocolError("provider_response_too_large")
-                        chunks.append(chunk)
+                    body = self._read_body(response, request)
                     kept_headers = {
                         key.lower(): value
                         for key, value in response.headers.items()
@@ -932,7 +1038,6 @@ class PinnedStockEvidenceHTTPTransport:
                         }
                     }
                     status = int(response.status_code)
-                    body = b"".join(chunks)
         except (KeyboardInterrupt, SystemExit):
             raise
         except (StockEvidenceCollectorError, StockEvidenceConfigurationError):
@@ -955,6 +1060,7 @@ class PinnedStockEvidenceHTTPTransport:
             raise StockEvidenceUnavailable("provider_retryable_response")
         if status != 200:
             raise StockEvidenceProtocolError("provider_response_rejected")
+        self._admit(request)
         return StockEvidenceHTTPResponse(status, kept_headers, body)
 
 
@@ -1085,6 +1191,7 @@ class _ProviderFact:
     reason_code: str
     evidence_sha256: str
     watermark: str
+    label: str = ""
 
     def __post_init__(self) -> None:
         _source_ref(self.selector)
@@ -1206,6 +1313,7 @@ def _provider_call(
     locator: str | None,
     *,
     deadline: float,
+    enrollment_revision: int | None = None,
 ) -> StockEvidenceHTTPRequest:
     limit = str(source.limits.page_size)
     provider = source.provider
@@ -1314,6 +1422,10 @@ def _provider_call(
         body=body,
         aws_service=aws_service,
         aws_region=aws_region,
+        authorizing_principal=source.authorizing_principal,
+        enrollment_id=source.enrollment_id,
+        enrollment_revision=enrollment_revision,
+        source_revision_sha256=source.source_revision_sha256,
     )
 
 
@@ -1342,7 +1454,19 @@ def _fact(
             }
         ),
         watermark=_source_ref(observed_watermark),
+        label=_check_label(record, selected),
     )
+
+
+def _check_label(record: Mapping[str, object], fallback: str) -> str:
+    for value in (record.get("Title"), record.get("ConfigRuleName"), record.get("name"),
+                  record.get("displayName"),
+                  (record.get("properties") or {}).get("displayName") if isinstance(record.get("properties"), Mapping) else None,
+                  (record.get("rule") or {}).get("description") if isinstance(record.get("rule"), Mapping) else None,
+                  (record.get("security_advisory") or {}).get("summary") if isinstance(record.get("security_advisory"), Mapping) else None):
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())[:200]
+    return fallback.replace("_", " ").replace("-", " ")[:200]
 
 
 def _parse_provider(  # noqa: C901 - one closed branch per admitted provider
@@ -1623,6 +1747,74 @@ def _status_for_facts(facts: Sequence[_ProviderFact]) -> tuple[str, str]:
     return "unknown", "provider_signal_absent"
 
 
+def available_source_checks(source: StockCollectorSource, transport: StockEvidenceHTTPTransport,
+                            *, clock: Callable[[], float] = time.time) -> dict[str, object]:
+    """An explicit bounded setup read, without creating evidence or collector authority."""
+    deadline = float(clock()) + min(source.limits.max_elapsed_seconds, 60.0)
+    locator = None
+    items: dict[str, str] = {}
+    complete = False
+    for _page in range(3):
+        call = _provider_call(source, locator, deadline=deadline)
+        if source.provider == AWS_CONFIG:
+            payload = {"Limit": source.limits.page_size}
+            if locator is not None:
+                payload["NextToken"] = locator
+            call = replace(call, body=_canonical(payload))
+        response = transport.request(call)
+        result = _parse_provider(source, response, locator=locator)
+        labels = _available_check_labels(source, response)
+        for fact in result.facts:
+            items.setdefault(fact.selector, labels.get(fact.selector, fact.label))
+            if len(items) >= 250:
+                break
+        if result.next_locator is None:
+            complete = len(items) < 250
+            break
+        if len(items) >= 250:
+            break
+        locator = result.next_locator
+    return {"items": [{"id": key, "label": label} for key, label in sorted(items.items())],
+            "complete": complete, "limit": 250,
+            "notice": ("Available checks in this bounded read; no evidence was collected."
+                       if complete else "Only the first three pages or 250 checks are shown. Narrow the account scope to see other checks; no evidence was collected.")}
+
+
+def _available_check_labels(source: StockCollectorSource, response: StockEvidenceHTTPResponse) -> dict[str, str]:
+    payload = _json_value(response.body)
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, Mapping):
+        key = {AWS_SECURITY_HUB: "Findings", AWS_CONFIG: "ComplianceByConfigRules",
+               GCP_SECURITY_COMMAND_CENTER: "listFindingsResults"}.get(source.provider, "value")
+        records = payload.get(key, [])
+    else:
+        return {}
+    labels = {}
+    for item in records:
+        raw = item.get("finding", {}) if source.provider == GCP_SECURITY_COMMAND_CENTER else item
+        if not isinstance(raw, Mapping):
+            continue
+        if source.provider == AWS_SECURITY_HUB:
+            selector = (raw.get("Compliance") or {}).get("SecurityControlId") or raw.get("GeneratorId")
+        elif source.provider == AWS_CONFIG:
+            selector = raw.get("ConfigRuleName")
+        elif source.provider == AZURE_POLICY:
+            selector = raw.get("policyDefinitionReferenceId") or raw.get("policyDefinitionId")
+        elif source.provider == GCP_SECURITY_COMMAND_CENTER:
+            selector = raw.get("category") or raw.get("name")
+        elif source.provider == GITHUB_SECURITY:
+            selector = ((raw.get("rule") or {}).get("id") if source.stream == "code_scanning" else
+                        raw.get("secret_type") if source.stream == "secret_scanning" else
+                        (raw.get("security_advisory") or {}).get("ghsa_id") or
+                        ((raw.get("dependency") or {}).get("package") or {}).get("name"))
+        else:
+            selector = raw.get("id") if source.provider == OKTA_POSTURE else raw.get("name")
+        if isinstance(selector, str):
+            labels[selector] = _check_label(raw, selector)
+    return labels
+
+
 class _StockCollector:
     collector_id: str
 
@@ -1661,7 +1853,8 @@ class _StockCollector:
         if now >= state.deadline:
             raise StockEvidenceUnavailable("provider_deadline_exhausted")
 
-        call = _provider_call(source, state.provider_locator, deadline=state.deadline)
+        call = _provider_call(source, state.provider_locator, deadline=state.deadline,
+                              enrollment_revision=request.enrollment_revision)
         response = self._transport.request(call)
         parsed = _parse_provider(source, response, locator=state.provider_locator)
         state.pages += 1

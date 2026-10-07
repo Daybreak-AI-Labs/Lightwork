@@ -13,18 +13,21 @@ import inspect
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import secrets as _secrets
+import threading
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
 from . import killswitch
-from ._envparse import env_float, env_int
+from ._envparse import env_int
 from .audit.errors import AuditRefused
 from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
 from .env_setting import env_or_config as _env_or_config
@@ -212,8 +215,10 @@ def apply_skill_overlays(
         skills = relevant_skills(brief, available_skills(),
                                  max_n=3 if depth == 0 else 1)
         if skills:
-            base = base + "\n\n" + render_for_prompt(skills)
-            return base, list(skills)
+            delivered = []
+            overlay = render_for_prompt(skills, rendered_skills=delivered)
+            if overlay:
+                return base + "\n\n" + overlay, delivered
     except (ImportError, FileNotFoundError, ValueError):
         pass
     return base, []
@@ -246,12 +251,22 @@ def apply_memory_brief(base: str, *, depth: int) -> str:
 # (1 - this) of the cap, so a recursive research swarm can't burn the budget
 # the orchestrator needs to actually produce the answer (the dogfooded failure:
 # 35 agents, $7.85 spent, zero report). 0 disables it.
-_SYNTHESIS_RESERVE = env_float("MAVERICK_SYNTHESIS_RESERVE", 0.25)
+def _budget_reporting_settings() -> tuple[float, float]:
+    """Read bounded startup choices; an explicit environment value still wins."""
+    from .env_setting import env_or_config_float
+
+    reserve = env_or_config_float("MAVERICK_SYNTHESIS_RESERVE", "agent", "synthesis_reserve", 0.25)
+    interval = env_or_config_float("MAVERICK_SPEND_MIRROR_INTERVAL", "agent", "spend_mirror_interval", 5.0)
+    if not math.isfinite(reserve) or not 0 <= reserve <= 1:
+        reserve = 0.25
+    if not math.isfinite(interval) or not 0 <= interval <= 300:
+        interval = 5.0
+    return reserve, interval
 
 # #614: how often (seconds) the root agent mirrors running spend onto its
 # open episode row so `maverick runs` / `maverick budget` show mid-run spend.
 # Throttled so we don't write the row on every step of a fast loop.
-_SPEND_MIRROR_INTERVAL = env_float("MAVERICK_SPEND_MIRROR_INTERVAL", 5.0)
+_SYNTHESIS_RESERVE, _SPEND_MIRROR_INTERVAL = _budget_reporting_settings()
 
 # Loop guard: a long-horizon failure mode is the model re-issuing the SAME
 # tool call that keeps failing the same way, silently burning budget/steps. We
@@ -302,6 +317,30 @@ _STEP_BUDGET_WARNING = _step_budget_warning_setting()
 
 # How many of an agent's recent tool calls speculative reads predict from.
 _SPECULATION_HISTORY = 20
+# AI-3: one plan decision per task run, shared by every agent in it.
+_PLAN_DECISIONS: dict[tuple[int, int], bool] = {}
+_PLAN_DECISIONS_LOCK = threading.Lock()
+
+
+def _plan_facts(agent) -> tuple[list[str], list[str], float | None]:
+    """The plan so far (newest eight briefs), the agent's tool names and the
+    task's spending cap (a cap, not an estimate). Unreadable parts are empty."""
+    steps: list[str] = []
+    try:
+        for entry in agent.ctx.blackboard.by_kind("plan")[-8:]:
+            brief = str(entry.content).split("brief=", 1)[-1].strip()
+            # The planner's top-level brief repeats the request as its description.
+            brief = re.split(r"\s+Description:", brief.removeprefix("Top-level goal:"), maxsplit=1)[0].strip()
+            if brief and brief not in steps:
+                steps.append(brief[:200])
+    except Exception:  # an unreadable plan is described as missing
+        steps = []
+    try:
+        tools = [t.name for t in agent.tools.all()]
+    except Exception:  # no tool list: only the first action is described
+        tools = []
+    cap = getattr(getattr(agent.ctx, "budget", None), "max_dollars", None)
+    return steps, tools, (float(cap) if isinstance(cap, int | float) else None)
 
 # W1-44: how many blackboard entries posted by OTHER agents since this agent's
 # last tool-running turn are appended to that turn's tool_results message, so
@@ -820,7 +859,9 @@ def _browser_path_accesses(
     del mutating_only  # every started persistent session may save at exit
     if not args.get("action"):
         return []
-    if os.environ.get("MAVERICK_BROWSER_NO_PERSIST") == "1":
+    from .tools.browser import _persist_enabled
+
+    if not _persist_enabled():
         return []
     state = os.environ.get("MAVERICK_BROWSER_STATE", "")
     if not state:
@@ -1041,6 +1082,14 @@ def _tool_call_failed(output: str) -> bool:
     return tool_result_failed(output)
 
 
+class _NotExecutedToolResult(str):
+    """A pre-dispatch refusal returned to the model, never an executed step.
+
+    Keeping this a string preserves the tool-result protocol while letting the
+    learner distinguish a held call from a tool that ran and failed.
+    """
+
+
 def _cascade_draft(role: str, model: str) -> str | None:
     """The cascade's cheap first model for ``role`` (None when off)."""
     try:
@@ -1091,6 +1140,29 @@ def _audit_summary(value: Any, limit: int = 200) -> str:
         s = repr(value)
     s = " ".join((s or "").split())
     return s[:limit] + ("…" if len(s) > limit else "")
+
+
+# Argument names that say what a tool reads or changes: a file, an address,
+# a table. Their values go in the activity record as the resources an AI
+# action accessed (ADM-5), bounded like every other summary.
+_RESOURCE_ARGS = ("path", "file", "file_path", "filename", "url", "uri", "table", "database",
+                  "bucket", "repo", "repository", "channel", "to", "recipient", "dataset")
+
+
+def _resources_accessed(args: Any, limit: int = 5) -> list[str]:
+    """The files, addresses and tables a tool call names, for the audit record."""
+    if not isinstance(args, dict):
+        return []
+    found: list[str] = []
+    for key in _RESOURCE_ARGS:
+        value = args.get(key)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            if isinstance(item, str) and item.strip():
+                found.append(_audit_summary(item))
+            if len(found) >= limit:
+                return found
+    return found
 
 
 def _tool_status(output: str) -> str:
@@ -1647,6 +1719,7 @@ class Agent:
         domain_effort: str | None = None,
         autonomy=None,
         is_goal_root: bool = False,
+        domain_models: dict[str, str] | None = None,
     ):
         self.ctx = ctx
         self.role = role
@@ -1685,6 +1758,10 @@ class Agent:
         # parent's domain so a Rung-2 sector seal catches the whole sub-tree.
         # None == unsectored (the orchestrator and ad-hoc agents).
         self.domain = domain if domain is not None else getattr(parent, "domain", None)
+        # Profile spawns replace the map, including an explicit empty map.
+        # Ordinary supporting agents inherit a private copy, never global state.
+        self._domain_models = dict(domain_models if domain_models is not None
+                                   else getattr(parent, "_domain_models", {}) or {})
         # Per-agent autonomy profile (the agent-as-employee authority dial,
         # maverick.agent_autonomy). The factory's spawn-from-profile sets it from
         # the pack's [autonomy] block; a child inherits its parent's so a sub-tree
@@ -1721,11 +1798,8 @@ class Agent:
         # shows "most successful solutions resolve in ~25 rounds; long-
         # tail iteration past that has diminishing returns." Allow ops
         # to override globally via MAVERICK_MAX_STEPS, default 25.
-        from .env_setting import env_or_config
-        raw_steps = env_or_config("MAVERICK_MAX_STEPS", "agent", "max_steps")
-        self.max_steps = int(raw_steps) if raw_steps and raw_steps.strip() else max_steps
-        if self.max_steps is not None and (type(self.max_steps) is not int or self.max_steps < 1):
-            raise ValueError("MAVERICK_MAX_STEPS / max_steps must be a positive integer")
+        from .config import get_agent_max_steps
+        self.max_steps = get_agent_max_steps(max_steps)
         self.name = f"{role}-{depth}-{uuid.uuid4().hex[:6]}"
         # Register before tool construction: bus tool closures enforce the
         # SwarmContext roster on every send/receive/delegation. If an unusual
@@ -1748,11 +1822,11 @@ class Agent:
         # Otherwise recall_addendum(self.model) raises AttributeError, the
         # addendum's except swallows it, and the learned guidance is silently
         # dropped from every prompt -- the feature becomes a no-op.
-        self.model = model_override or model_for_role(role)
+        self.model = model_override or model_for_role(role, domain_models=self._domain_models)
         # Cascaded routing ([models] cascade): a role with no model of its own
         # starts its turns on a cheaper model and moves to self.model on the
         # kernel's low-confidence signals (see _cascade_turn_model).
-        self._cascade_draft = None if model_override else _cascade_draft(role, self.model)
+        self._cascade_draft = None if model_override or role in self._domain_models else _cascade_draft(role, self.model)
         self._cascade_escalated = False
         self.tools = self._build_tools()
         self.system = self._build_system()
@@ -1809,7 +1883,7 @@ class Agent:
         deny-all grant instead of silently restoring unrestricted authority.
         """
         if explicit is not None:
-            return explicit
+            return self._narrowed_to_run_grant(explicit)
         inherited = getattr(self.ctx, "capability", None)
         if inherited is not None:
             return inherited
@@ -1853,6 +1927,27 @@ class Agent:
             except Exception:
                 pass
             return root
+
+    def _narrowed_to_run_grant(self, explicit):
+        """An explicit grant (a domain pack's envelope) only ever NARROWS the
+        run's own grant -- it never replaces it (UX-012).
+
+        The run's grant is what the requester is allowed to do: the caller's
+        capability, or at the goal root the one minted from the requester's RBAC
+        role, ``[security]`` ACL and active regulatory attenuation. Returning the
+        pack's envelope alone let a read-only user (or a HIPAA deployment that
+        forbids outbound tools) regain those tools by starting the task through a
+        specialist pack. With no run grant (enforcement off, nothing supplied) the
+        pack's envelope stays the boundary, as before.
+        """
+        ambient = getattr(self.ctx, "capability", None)
+        if ambient is None and self.depth == 0:
+            # Mint (and stash on the context) the requester's grant exactly as a
+            # plain orchestrator root would; None when enforcement is off.
+            ambient = self._resolve_capability(None)
+        if ambient is None or ambient is explicit:
+            return explicit
+        return ambient.intersect(explicit, principal=explicit.principal)
 
     @property
     def checkpoint_id(self) -> str:
@@ -2059,32 +2154,104 @@ class Agent:
         if code_exec_on:
             from .tools.code_exec import code_exec_tool
             reg.register(code_exec_tool(self))
-        # Deferred tool loading (default ON): hide the SaaS-connector long
-        # tail behind the find_tools meta-tool so the model's catalog stays
-        # lean -- 470+ connector schemas rode EVERY model turn at consumer
-        # defaults (observed: 601 tools offered per call), dominating context
-        # cost. The mechanism (ToolRegistry.enable_deferred / find_tools)
-        # already existed and was tested; nothing wired it. Everything
-        # registered above (file/shell/spawn/bus/memory/MCP/...) stays
-        # visible; only base_registry's marked long tail defers, and run()
-        # still executes ANY registered tool, so execution semantics are
-        # unchanged. Disable via [capabilities] deferred_tools = false or
-        # MAVERICK_DEFERRED_TOOLS=0.
-        env_dt = os.environ.get("MAVERICK_DEFERRED_TOOLS", "").strip().lower()
-        if env_dt in {"0", "false", "no", "off"}:
-            deferred_on = False
-        elif env_dt in {"1", "true", "yes", "on"}:
-            deferred_on = True
-        else:
-            deferred_on = bool(caps.get("deferred_tools", True))
+        # Deferred tool loading (default ON): the model's per-turn catalog is
+        # what [tools] exposure says, and the rest hides behind the find_tools
+        # meta-tool. run() still executes ANY registered tool, so execution
+        # semantics are unchanged; only what is DESCRIBED up front shrinks.
+        #   exposure = "core" (default): a role-aware core set
+        #     (tools.core_tool_names + [tools] core_extra), or -- for an agent
+        #     running under a pack's allow_tools -- exactly that allow list
+        #     (measured: 237 tools / ~188 KB / ~47k tokens rode EVERY turn
+        #     for every role, ~95% of the first call's input).
+        #   exposure = "full": everything except base_registry's marked SaaS
+        #     long tail, subject to the model's tool ceiling. Overflow stays
+        #     discoverable through find_tools.
+        # A tool the agent's capability refuses (a pack's deny_tools, an
+        # allow list it is outside of, a risk ceiling) is neither shown nor
+        # discoverable. Disable ordinary deferral via [capabilities]
+        # deferred_tools = false or MAVERICK_DEFERRED_TOOLS=0; a model's tool
+        # ceiling and the agent's capability still constrain what it sees.
+        # get_capabilities resolves environment/current/legacy precedence once;
+        # base_registry uses that same resolver for its initial catalog.
+        deferred_on = bool(caps.get("deferred_tools", True))
         deferrable = getattr(reg, "deferrable_names", None) or set()
-        if deferred_on and deferrable:
+        if deferrable:
             from .tools.find_tools import find_tools
             reg.register(find_tools(reg))
-            reg.enable_deferred(core={t.name for t in reg.all()} - set(deferrable))
+            if deferred_on:
+                core, hidden = self._tool_exposure_sets(reg, deferrable)
+                reg.enable_deferred(core=core, hidden=hidden)
+            else:
+                # Disabling deferral widens the visible catalog, never a pack's
+                # authority. Keep refused names out of both model and search.
+                # Also replace any earlier core-only catalog when no capability
+                # envelope is configured; off must not retain legacy deferral.
+                registered = {tool.name for tool in reg.all()}
+                hidden = {name for name in registered
+                          if self.capability is not None and not self.capability.permits(name)}
+                reg.enable_deferred(core=registered - hidden, hidden=hidden)
         return reg
 
+    def _tool_catalog_for_model(self, model: str) -> list[dict]:
+        """Offer capped providers a discoverable catalog, including on failover."""
+        from .providers.openai_provider import _OPENAI_MAX_TOOLS
+
+        if len(self.tools.exposed()) <= _OPENAI_MAX_TOOLS:
+            return self.tools.to_anthropic()
+        from .llm import _fallback_chain_for_dispatch, _parse_spec
+
+        provider, model_id = _parse_spec(model)
+        openai_style = {
+            "openai", "azure", "gemini", "openrouter", "deepseek", "xai",
+            "moonshot", "ollama", "vllm", "tgi", "openai_compatible",
+        }
+        if provider in openai_style:
+            return self.tools.to_anthropic(max_tools=_OPENAI_MAX_TOOLS)
+        fallbacks = _fallback_chain_for_dispatch(model, f"{provider}:{model_id}")
+        if any(_parse_spec(candidate)[0] in openai_style for candidate in fallbacks):
+            return self.tools.to_anthropic(max_tools=_OPENAI_MAX_TOOLS)
+        return self.tools.to_anthropic()
+
+    def _tool_exposure_sets(self, reg: ToolRegistry, deferrable) -> tuple[set[str], set[str]]:
+        """(visible core names, never-discoverable names) for this agent."""
+        try:
+            from .config import get_tool_exposure
+            exposure = get_tool_exposure()
+        except Exception:  # pragma: no cover -- config never blocks tool build
+            exposure = {"exposure": "core", "core_extra": []}
+        registered = {t.name for t in reg.all()}
+        cap = getattr(self, "capability", None)
+        if exposure["exposure"] == "full":
+            core = registered - set(deferrable)
+        else:
+            from .tools import core_tool_names
+            allow = set(getattr(cap, "allow_tools", ()) or ()) if cap is not None else set()
+            if allow:
+                # Pack-aware: the pack's allow_tools are visible in full (the
+                # capability refuses everything else at call time anyway,
+                # apart from the coordination floor it always permits). The
+                # suite data connectors data grounding adds to a pack's grant
+                # are documented as deferred (no context cost), so the marked
+                # long tail stays behind find_tools here too. A deny-all
+                # grant permits nothing, so ``hidden`` below empties it.
+                from .capability import COORDINATION_TOOLS
+                core = ((allow - set(deferrable)) | COORDINATION_TOOLS | {reg.META_TOOL}) & registered
+            else:
+                core = set(core_tool_names(self.role, extra=exposure["core_extra"]))
+        hidden: set[str] = set()
+        if cap is not None:
+            # Discovery reveals only what this grant permits: hidden names are
+            # excluded from find_tools' search space and from activate(), so a
+            # denied tool is never described, and activation never widens
+            # authority -- _capability_permits_denial still gates every call.
+            hidden = {n for n in registered if not cap.permits(n)}
+            core -= hidden
+        return core, hidden
+
     def _build_system(self) -> str:
+        self._instruction_source_goals = set()
+        self._instruction_capture_ready = True
+        self._instruction_preferences_owner = ""
         # Wave 9 fix: coding mode applies to the ORCHESTRATOR too, not
         # just workers. The orchestrator emits the FINAL; if it's still
         # using ORCHESTRATOR_SYSTEM_TEMPLATE (prose-oriented), the patch
@@ -2108,6 +2275,34 @@ class Agent:
         # prior) — global state, not agent-specific. Extracted as the second
         # PromptBuilder collaborator.
         base = apply_global_overlays(base)
+        try:
+            from .experience_preferences import prompt as preference_prompt
+
+            user = getattr(self.ctx, "user_id", None)
+            if user and getattr(self.ctx, "channel", None) == "dashboard":
+                principal = user if str(user).startswith("user:") else "user:" + str(user)
+                from .chat_threads import ChatThreads
+                binding = ChatThreads(self.ctx.world).binding(self.ctx.goal_id)
+                thread_id = binding.root_id if binding and binding.owner == principal else self.ctx.goal_id
+                preferences = preference_prompt(principal, thread=thread_id)
+                base += preferences
+                if preferences:
+                    self._instruction_preferences_owner = principal
+            elif user:
+                from .personal_identity import CHANNELS
+                from .personal_memory import shared_principal
+                channel = getattr(self.ctx, "channel", None)
+                goal = self.ctx.world.get_goal(self.ctx.goal_id)
+                owner = getattr(goal, "owner", "") or ""
+                if channel in CHANNELS and owner.startswith("user:" + channel + ":account:"):
+                    principal = shared_principal(channel, owner[len("user:" + channel + ":"):])
+                    if principal:
+                        preferences = preference_prompt(principal)
+                        base += preferences
+                        if preferences:
+                            self._instruction_preferences_owner = principal
+        except Exception:
+            log.warning("Account response preferences are unavailable; using organization voice.")
 
         # Per-agent role overlays (client role-addendum + domain-pack persona).
         # Third PromptBuilder collaborator.
@@ -2122,9 +2317,16 @@ class Agent:
             depth=self.depth)
         if _skills:
             try:
+                self._instruction_source_goals.update(identity for skill in _skills for identity in skill.source_goal_ids)
+            except Exception:
+                self._instruction_capture_ready = False
+            try:
                 from .skill import stats as skill_stats
+                from .skills import learned_skill_use_key
                 names = [s.name for s in _skills]
-                skill_stats.record_use(names)
+                exact_uses = [key for s in _skills
+                              if (key := learned_skill_use_key(s))]
+                skill_stats.record_use(names + exact_uses)
                 self.ctx.skills_used.update(names)
             except Exception:
                 pass
@@ -2144,7 +2346,7 @@ class Agent:
         Empty (no change) unless [self_harness] is enabled and an addendum
         exists. Fully fail-safe."""
         try:
-            from .self_harness import note_recall, recall_addendum
+            from .self_harness import note_recall, recall_addendum_with_sources
             # Pass this run's domain AND its available tools so guidance mined
             # SCOPED to a department or a tool is recalled only when it applies
             # (model-wide guidance always is): a finance lesson on finance runs, a
@@ -2156,9 +2358,13 @@ class Agent:
             # only that role's prompts (an orchestrator lesson stays off a
             # coder's context of the same model).
             _role = getattr(self, "role", None)
-            addendum = recall_addendum(self.model, domain=_dom, tools=_tools,
-                                       role=_role)
+            addendum, recalled_sources = recall_addendum_with_sources(self.model, domain=_dom, tools=_tools,
+                                                                      role=_role)
             if addendum:
+                try:
+                    self._instruction_source_goals.update(recalled_sources)
+                except Exception:
+                    self._instruction_capture_ready = False
                 # Track that this guidance was USED (throttled, best-effort) so
                 # retirement keeps actively-recalled lines and prunes dormant ones.
                 note_recall(self.model, domain=_dom, tools=_tools, role=_role)
@@ -2249,6 +2455,10 @@ class Agent:
             parse_blocks,
             render_diff,
         )
+        from .git_safety import (
+            git_env_without_user_config,
+            git_metadata_may_execute_filters,
+        )
 
         workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
         blocks = parse_blocks(final)
@@ -2275,6 +2485,19 @@ class Agent:
                 candidate = _Path(temp_root.name) / "worktree"
                 hooks_dir = _Path(temp_root.name) / "hooks"
                 try:
+                    # UX-013: this is HOST git against a workdir the agent (or
+                    # a container it controls) can write. A repo-local
+                    # `filter.<x>.smudge` runs during the checkout below and
+                    # `core.hooksPath` does not stop it, so refuse outright
+                    # (same guard as coding_mode.evaluate_candidate) and run
+                    # git under a scrubbed environment.
+                    if git_metadata_may_execute_filters(workdir):
+                        raise RuntimeError(
+                            "the workspace's git settings (a filter such as "
+                            "git-lfs, or another command) are not allowed to "
+                            "run on the host, so git was not run. This is "
+                            "not a problem with the edits themselves"
+                        )
                     hooks_dir.mkdir(mode=0o700)
                     wt = _sub.run(
                         [
@@ -2283,6 +2506,7 @@ class Agent:
                             "--detach", "--quiet", str(candidate), "HEAD",
                         ],
                         capture_output=True, timeout=60,
+                        env=git_env_without_user_config(),
                     )
                     if wt.returncode != 0:
                         raise RuntimeError(
@@ -2344,6 +2568,7 @@ class Agent:
                                 "remove", "--force", str(apply_workdir),
                             ],
                             capture_output=True, timeout=30,
+                            env=git_env_without_user_config(),
                         )
                     except Exception:
                         pass
@@ -2370,15 +2595,29 @@ class Agent:
             return
         import subprocess as _sub
         from pathlib import Path as _Path
+
+        from .git_safety import (
+            git_env_without_user_config,
+            git_metadata_may_execute_filters,
+        )
         workdir = _Path(getattr(sandbox, "workdir", "."))
+        # UX-013: host git on an agent-writable workdir -- a planted
+        # `filter.<x>.smudge` runs during `reset --hard`. Skip rather than run.
+        if git_metadata_may_execute_filters(workdir):
+            log.warning(
+                "workdir reset skipped: unsafe git filter/fsmonitor metadata in %s",
+                workdir,
+            )
+            return
+        env = git_env_without_user_config()
         try:
             _sub.run(
                 ["git", "-C", str(workdir), "reset", "--hard", "HEAD"],
-                capture_output=True, timeout=20,
+                capture_output=True, timeout=20, env=env,
             )
             _sub.run(
                 ["git", "-C", str(workdir), "clean", "-fd"],
-                capture_output=True, timeout=20,
+                capture_output=True, timeout=20, env=env,
             )
         except Exception:
             pass
@@ -2420,11 +2659,25 @@ class Agent:
                     except OSError:
                         pass
         import subprocess as _sub
+
+        from .git_safety import (
+            git_env_without_user_config,
+            git_metadata_may_execute_filters,
+        )
+        # UX-013: `git apply` runs a repo-local clean/smudge filter too, so the
+        # host fallback refuses a workdir that carries filter metadata.
+        if git_metadata_may_execute_filters(workdir):
+            log.warning(
+                "patch apply refused: unsafe git filter/fsmonitor metadata in %s",
+                workdir,
+            )
+            return False
         try:
             ap = _sub.run(
                 ["git", "-C", str(workdir), "apply", "-"],
                 input=patch.encode("utf-8"),
                 capture_output=True, timeout=30,
+                env=git_env_without_user_config(),
             )
             return ap.returncode == 0
         except Exception:
@@ -2678,7 +2931,7 @@ class Agent:
             reason="read_only_path",
         )
         return (
-            f"DENIED by sandbox policy: path {rendered!r} is read-only. "
+            f"⚠ DENIED by sandbox policy: path {rendered!r} is read-only. "
             "The tool was not executed."
         )
 
@@ -3020,6 +3273,7 @@ class Agent:
         # must refuse the action. Otherwise a classifier/profile bug would turn
         # the authority dial into an execution bypass.
         _autonomy_levels_enabled = False
+        _human_executes = False
         try:
             from . import agent_autonomy as _aa
             from .governance import Decision as _GD
@@ -3037,6 +3291,7 @@ class Agent:
                 _al = _aa.decide(getattr(self, "_autonomy_name", self.role),
                                  getattr(self, "_autonomy", None),
                                  action=name, risk=_risk)
+                _human_executes = _al.execute_by == "human"
                 _amap = {"allow": _GD.ALLOW, "require_human": _GD.REQUIRE_HUMAN,
                          "deny": _GD.DENY}
                 _adec = _amap.get(_al.decision, _GD.REQUIRE_HUMAN)
@@ -3113,6 +3368,16 @@ class Agent:
                 "The tool was not executed.",
                 _gov.compliance_profiles,
             )
+        if _human_executes:
+            from .human_action_drafts import stage
+
+            try:
+                return stage(self, name, args), _gov.compliance_profiles
+            except Exception:
+                log.warning("human action suggestion could not be retained", exc_info=True)
+                return ("The complete suggested action could not be saved for review. "
+                        "No action was performed. Ask the person to review the task before trying another suggestion.",
+                        _gov.compliance_profiles)
         # REQUIRE_HUMAN: the action runs only with a real human's approval
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
@@ -3440,15 +3705,72 @@ class Agent:
                 )
             raise
 
+    def _plan_summary(self, name: str, args: dict) -> str:
+        """What a person reviews before the first action, as one paragraph."""
+        from .plan_review import summary_text
+        steps, _tools, cap = _plan_facts(self)
+        return summary_text(steps, name, args, cap)
+
+    async def _plan_denial(self, name: str, args: dict) -> str | None:
+        """Ask once per task run, before the first action with an outside effect."""
+        from . import practice
+        from .autonomy import confirm_plan_enabled
+        if practice.tool_allowed(name) or not confirm_plan_enabled():
+            return None
+        key = (int(getattr(self.ctx, "goal_id", 0) or 0), int(getattr(self.ctx, "episode_id", 0) or 0))
+        with _PLAN_DECISIONS_LOCK:
+            decided = _PLAN_DECISIONS.get(key)
+        if decided is None:
+            from .safety.consent import require_consent
+            try:
+                from .plan_review import plan_card
+                steps, tools, cap = _plan_facts(self)
+                verdict = await asyncio.to_thread(
+                    require_consent, "confirm_plan", risk="high", scope=f"task {key[0]}",
+                    detail=self._plan_summary(name, args), provenance="plan",
+                    allow_auto_approve=False, consult_ledger=False,
+                    approval_card=plan_card(key[0], steps, name, args, tools, cap))
+                decided = bool(verdict.granted)
+            except Exception:  # an unavailable decision is a refusal
+                decided = False
+            with _PLAN_DECISIONS_LOCK:
+                decided = _PLAN_DECISIONS.setdefault(key, decided)
+                if len(_PLAN_DECISIONS) > 10000:
+                    _PLAN_DECISIONS.pop(next(iter(_PLAN_DECISIONS)))
+        if decided:
+            return None
+        return ("The plan was not confirmed, so nothing ran. Do not take any action. Finish by telling the "
+                "person what you planned to do, so they can change the request and start again.")
+
+    async def _practice_denial(self, name: str, args: dict) -> str | None:
+        """Record, instead of run, a tool that leaves the practice workspace.
+
+        The approval a live run would need is still asked for (in the
+        practice Approvals page), so people practise the decision too; the
+        tool never runs whatever the answer."""
+        from . import practice
+        if not practice.active() or practice.tool_allowed(name):
+            return None
+        from .safety.consent import require_consent
+        from .safety.tool_risk import tool_risk
+        try:
+            verdict = await asyncio.to_thread(
+                require_consent, name, risk=tool_risk(name), provenance="practice", consult_ledger=False,
+                detail=(f"Practice mode: {self.name} wants to use {name}. Deciding lets you practise "
+                        "this approval; the action does not run either way."))
+            granted = bool(verdict.granted)
+        except Exception:  # an unavailable approval is a refusal, as in live work
+            granted = False
+        if not granted:
+            practice.record("refused", name, _audit_summary(args), goal_id=self.ctx.goal_id)
+            return (f"Practice mode: {name} was not approved, so it did not run. Nothing was sent, "
+                    "paid or changed outside practice.")
+        return practice.record("tool", name, _audit_summary(args), goal_id=self.ctx.goal_id)
+
     async def _run_tool(self, name: str, args: dict) -> str:
-        # Record the tool name on this agent's action sequence so a parent can
-        # capture per-sub-agent trajectories (maverick.credit.build_subtrajectories).
-        # Tool NAMES only -- never args -- so this carries no secrets. Lazy-init
-        # to avoid touching the constructor.
-        acts = getattr(self, "_actions", None)
-        if acts is None:
-            acts = self._actions = []
-        acts.append(name)
+        # Add to the action sequence only after all pre-dispatch checks pass.
+        # A refused call must not masquerade as an executed action in credit,
+        # rehearsal context, or learned tool trajectories.
         # Compartment Rung 1: a sealed agent runs no further tools. Its prior
         # blackboard posts are also withheld (see Blackboard.render).
         q = getattr(self.ctx, "quarantine", None)
@@ -3456,7 +3778,7 @@ class Agent:
             # Register this agent's domain so a Rung-2 sector seal reaches it.
             q.register_agent(self.name, getattr(self, "domain", None))
             if q.is_sealed(self.name):
-                return (
+                return _NotExecutedToolResult(
                     f"⚠ Agent sealed by compartment quarantine "
                     f"({q.reason(self.name)}). No further tools will run."
                 )
@@ -3467,7 +3789,7 @@ class Agent:
         # gate on each of those executions; re-scanning them adds nothing).
         suppressed = self._loop_guard_suppression(name, args)
         if suppressed is not None:
-            return suppressed
+            return _NotExecutedToolResult(suppressed)
         shield = self.ctx.shield
         if shield is not None:
             verdict = shield.scan_tool_call(name, args)
@@ -3483,7 +3805,7 @@ class Agent:
                        reason="; ".join(verdict.reasons),
                        score=getattr(verdict, "score", None))
                 self._maybe_seal(q, verdict)
-                return (
+                return _NotExecutedToolResult(
                     f"⚠ BLOCKED by Shield ({verdict.severity}): "
                     f"{'; '.join(verdict.reasons)}. The tool was not executed."
                 )
@@ -3505,18 +3827,11 @@ class Agent:
             self._tool_token_denial,
         ):
             if (d := _gate(name, cap)) is not None:
-                return d
+                return _NotExecutedToolResult(d)
         if (d := self._capability_path_denial(name, args, cap)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
         if (d := self._read_only_path_denial(name, args)) is not None:
-            return d
-        # Operating-Twin pre-execution gates (governed rehearsal defaults on;
-        # both fail open on incidental errors, never an audit-policy refusal):
-        # rehearsal holds an elevated-risk tool the world-model can't vouch for;
-        # a learned guardrail holds an action the data engine has causally shown
-        # lowers outcomes (self-correcting -- dropped when the harm is gone).
-        if (d := self._twin_denial(name)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
         # The browser can follow redirects and later URL-less actions read or
         # interact with the current page. Pass the active host scope into the
         # tool so it can gate the final/current page host before returning
@@ -3524,11 +3839,19 @@ class Agent:
         # the host-scope check so the (possibly rewritten) args carry forward.
         args = self._with_capability_host_scope(name, args, cap)
         if (d := self._capability_host_denial(name, args, cap)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
+        # Hold-mode review commits the final dispatch arguments (including a
+        # browser's active host scope), and never replaces the other gates.
+        d, rehearsal_verdict = await self._twin_check(name, args)
+        if d is not None:
+            return _NotExecutedToolResult(d)
 
         # Autonomy servo (Loop 2): low run-trust tightens the risk ceiling.
-        if (d := self._autonomy_denial(name, cap)) is not None:
-            return d
+        # AI-3: with [autonomy] confirm_plan on, a person confirms the plan
+        # before the task's first action that could reach outside Lightwork.
+        if ((d := self._autonomy_denial(name, cap)) is not None
+                or (d := await self._plan_denial(name, args)) is not None):
+            return _NotExecutedToolResult(d)
 
         # Org oversight control plane (enterprise): policy DENY or REQUIRE_HUMAN
         # sign-off (EU AI Act Art 14). Default-open for non-enterprise installs.
@@ -3538,9 +3861,13 @@ class Agent:
             cap,
         )
         if _governance_refusal is not None:
-            return _governance_refusal
-        if (d := await self._ifc_denial(name, args)) is not None:
-            return d
+            return _NotExecutedToolResult(_governance_refusal)
+        # Practice mode runs last: after every approval and policy check has
+        # had its say, a tool that would reach outside the practice workspace
+        # is recorded in the practice outbox instead of running.
+        if ((d := await self._ifc_denial(name, args)) is not None
+                or (d := await self._practice_denial(name, args)) is not None):
+            return _NotExecutedToolResult(d)
 
         # PreToolUse hooks: any registered hook can BLOCK the call by
         # returning a non-zero exit code (shell hook) or a falsy value
@@ -3557,7 +3884,7 @@ class Agent:
                 self.name, "error",
                 f"tool={name} BLOCKED by PreToolUse hook",
             )
-            return "⚠ BLOCKED by hook. The tool was not executed."
+            return _NotExecutedToolResult("⚠ BLOCKED by hook. The tool was not executed.")
 
         # Dispatch audit: TOOL_CALL proves the request reached the governed
         # execution boundary; TOOL_RESULT below proves whether it completed.
@@ -3578,7 +3905,9 @@ class Agent:
                 call_id=call_id,
             )
         except ValueError:
-            return "ERROR: invalid tool-call evidence identity; dispatch refused"
+            return _NotExecutedToolResult(
+                "ERROR: invalid tool-call evidence identity; dispatch refused"
+            )
         if not self._audit_tool_event(
             "tool_call",
             name=name,
@@ -3588,12 +3917,23 @@ class Agent:
             origin="agent",
             principal=principal,
             input_summary=_audit_summary(args),
+            # Which model acted and what it reached, so an AI action's record
+            # says both (ADM-5).
+            model=str(getattr(self, "model", "") or ""),
+            resources=_resources_accessed(args),
             **_checked_tags(name, keys=_compliance_profiles),
         ):
-            return (
+            return _NotExecutedToolResult(
                 "ERROR: tool dispatch refused because its required audit "
                 "evidence could not be written"
             )
+
+        self._capture_rehearsal_prediction(rehearsal_verdict, name)
+
+        acts = getattr(self, "_actions", None)
+        if acts is None:
+            acts = self._actions = []
+        acts.append(name)
 
         _recent = getattr(self, "_recent_tool_calls", None)
         if _recent is None:
@@ -3840,10 +4180,9 @@ class Agent:
             step_index, tool_name, tool_succeeded, is_final, error, promise, progress)
 
     def _last_tool(self) -> str:
-        """The tool used just before this one (``_actions`` already holds the
-        current call at [-1], so the prior is [-2]); '' at the first tool."""
+        """The last dispatched tool, excluding calls held before dispatch."""
         acts = getattr(self, "_actions", None)
-        return acts[-2] if acts and len(acts) >= 2 else ""
+        return acts[-1] if acts else ""
 
     def _speculative_turn_model(self) -> str:
         """Pick the model for this turn: a cheap draft when the Operating Twin's
@@ -3884,59 +4223,134 @@ class Agent:
             return self.model
         return draft
 
-    def _twin_denial(self, name: str) -> str | None:
-        """The Operating-Twin pre-execution gates, first hold wins: rehearsal
-        (world-model can't vouch) then learned guardrails (causally harmful)."""
-        return self._rehearsal_denial(name) or self._guardrail_denial(name)
+    async def _twin_check(self, name: str, args: dict) -> tuple[str | None, object | None]:
+        """Return a hold and an eligible prediction, with the first hold winning."""
+        denial = self._guardrail_denial(name)
+        if denial is not None:
+            return denial, None
+        return await self._rehearsal_check(name, args)
 
-    def _rehearsal_denial(self, name: str) -> str | None:
-        """Hold an elevated-risk tool the rehearsal twin can't vouch for.
-
-        No-op unless ``[rehearsal]`` is enabled; only ``high``-risk tools are
-        gated; incidental errors fail open. Audit-policy refusals stop dispatch.
-        A confident-good rehearsal
-        proceeds; a confident-poor (BLOCK) or unvouchable (ESCALATE) one returns a
-        non-leaky refusal the model can react to.
-        """
+    def _capture_rehearsal_prediction(self, verdict: object | None, name: str) -> None:
+        """Pin evidence only when a tool reaches the audited dispatch boundary."""
+        if verdict is None:
+            return
         try:
-            from . import rehearsal
-            if not rehearsal.enabled():
-                return None
-            from .safety.tool_risk import tool_risk
-            if tool_risk(name) != "high":
-                return None
-            from .rehearsal_runtime import gate_tool
-            v = gate_tool(domain=self.domain, role=self.role,
-                          last_tool=self._last_tool(), tool_name=name)
-            if v.decision == rehearsal.PROCEED:
-                try:  # pin the prediction as earned-autonomy evidence
-                    # (default-off, module self-gated). Only PROCEED verdicts:
-                    # they used to vanish, and they are exactly the predictions
-                    # reality later grades -- a held action never executes, so
-                    # its prediction must not be scored against the outcome.
-                    from .earned_autonomy import capture_prediction
-                    capture_prediction(
-                        v, principal=getattr(self, "_autonomy_name", self.role),
-                        action=name, risk="high",
-                        goal_id=int(self.ctx.goal_id or 0),
-                        episode_id=int(getattr(self.ctx, "episode_id", 0) or 0))
-                except AuditRefused:
-                    raise
-                except Exception:  # pragma: no cover -- never breaks the loop
-                    pass
-                return None
-            # tamper-evident record of the hold; a refusal propagates
-            from .audit import EventKind, audit_event
-            audit_event(EventKind.SHIELD_BLOCK, agent=self.name, goal_id=self.ctx.goal_id,
-                   stage="rehearsal", reason=f"{v.decision}: {v.reason}")
-            return (
-                f"⚠ Held by pre-execution rehearsal ({v.decision}): {v.reason}. "
-                "The tool was not executed; choose another approach or seek approval."
+            from .earned_autonomy import capture_prediction
+            capture_prediction(
+                verdict,
+                principal=getattr(self, "_autonomy_name", self.role),
+                action=name, risk="high",
+                goal_id=int(self.ctx.goal_id or 0),
+                episode_id=int(getattr(self.ctx, "episode_id", 0) or 0),
             )
         except AuditRefused:
             raise
-        except Exception:  # pragma: no cover -- incidental rehearsal failure
-            return None
+        except Exception:  # pragma: no cover -- prediction is optional
+            pass
+
+    async def _rehearsal_check(self, name: str, args: dict) -> tuple[str | None, object | None]:
+        """Observe a prediction; explicit Hold mode asks a person for release."""
+        enforcing = False
+        try:
+            from . import rehearsal
+            if not rehearsal.enabled():
+                return None, None
+            enforcing = rehearsal.enforcing()
+            from .safety.tool_risk import tool_risk
+            if tool_risk(name) != "high":
+                return None, None
+            from .rehearsal_runtime import gate_tool
+            v = gate_tool(domain=self.domain, role=self.role,
+                          last_tool=self._last_tool(), tool_name=name)
+            if not enforcing:
+                log.info(
+                    "rehearsal observed tool=%s decision=%s support=%s; tool remains eligible for normal checks",
+                    name, v.decision, getattr(v, "support", 0),
+                )
+                return None, v
+            if v.decision == rehearsal.PROCEED:
+                return None, v
+        except AuditRefused:
+            raise
+        except Exception:
+            if enforcing:
+                return (
+                    "Lightwork could not check this high-impact step. Nothing ran. "
+                    "Ask the person in charge to review the task before trying it again."
+                ), None
+            return None, None
+
+        # A prediction is not authority. Bind a fresh person's decision to
+        # this exact goal, tool and argument object; the consent permit also
+        # rechecks the live actor, budget and target before it is consumed.
+        plain_name = {
+            "shell": "run a command", "notebook_exec": "run code",
+            "repl_exec": "run code", "write_file": "save a file",
+            "apply_patch": "change a file", "browser": "use the browser",
+            "http_fetch": "open a web page", "spawn_subagent": "ask a specialist",
+        }.get(name, f"use {name.replace('_', ' ')}")
+        goal_id = int(self.ctx.goal_id or 0)
+        target = {"goal_id": goal_id, "tool": name}
+        parameters = {"goal_id": goal_id, "tool": name, "arguments": args}
+        detail = (
+            "Lightwork has too little reliable experience with this step. "
+            if v.decision == rehearsal.ESCALATE else
+            "Past similar steps suggest this may not work as intended. "
+        ) + "Review it before work continues."
+        try:
+            from .safety.consent import (
+                _dashboard_timeout,
+                approval_undo_grace_seconds,
+                consume_operation_consent,
+                require_operation_consent,
+            )
+            permit = await asyncio.to_thread(
+                require_operation_consent,
+                name, risk="high", scope=f"Task {goal_id}: {plain_name}",
+                detail=detail, provenance="rehearsal",
+                target=target, parameters=parameters,
+                parameter_summary=[
+                    f"Allow Lightwork to {plain_name} once in this task.",
+                    "This decision applies to the exact proposed input; other safety checks still apply.",
+                ],
+                known_effects=[
+                    "If the remaining checks allow it, Lightwork may try this step once. Its effects may persist.",
+                ],
+                unresolved_assumptions=[
+                    "The prediction may be wrong; approval does not guarantee the step will succeed.",
+                    "The action may require another specific approval before it runs.",
+                ],
+                before="The proposed step has not run.",
+                after="The reviewed step is eligible for the remaining safety checks.",
+                irreversible=True,
+                target_provider=lambda: target,
+                parameters_provider=lambda: parameters,
+                require_fresh_person=True,
+                ttl_seconds=max(
+                    300.0, _dashboard_timeout() + approval_undo_grace_seconds() + 30.0,
+                ),
+            )
+            with consume_operation_consent(permit):
+                pass
+        except AuditRefused:
+            raise
+        except Exception:
+            # Invalid/stale cards, a missing approval service, rejection and
+            # timeout all stop the action. Never turn review failure into a
+            # prediction error that the observe-only path would fail open.
+            from .audit import EventKind, audit_event
+            audit_event(
+                EventKind.SHIELD_BLOCK, agent=self.name,
+                goal_id=self.ctx.goal_id, stage="rehearsal",
+                reason=f"{v.decision}: review not granted",
+            )
+            return (
+                "Lightwork paused this high-impact action for review. The review "
+                "was not granted or expired, so nothing ran. Do not retry it "
+                "automatically in this task; ask the person in charge or choose "
+                "another safe approach."
+            ), None
+        return None, v
 
     def _guardrail_denial(self, name: str) -> str | None:
         """Hold an action a learned guardrail flags as causally harmful.
@@ -3992,7 +4406,9 @@ class Agent:
                 ts=_t.time(), goal_id=int(self.ctx.goal_id or 0),
                 episode_id=int(getattr(self.ctx, "episode_id", 0) or 0),
                 step=int(step_index), role=self.role, tool=tool_name or "",
-                tool_succeeded=tool_succeeded, is_final=bool(is_final),
+                tool_succeeded=tool_succeeded,
+                tool_executed=True if tool_name else None,
+                is_final=bool(is_final),
                 error=error or "", promise=promise, progress=progress,
                 domain=self.domain or "", **dag,
             ))
@@ -4043,6 +4459,12 @@ class Agent:
         goal_id = getattr(self.ctx, "goal_id", None)
         if goal_id is None:
             return False
+        from .goal_mutations import GoalMutationConflict
+        from .human_conversation_handoffs import require_ai_open
+        try:
+            require_ai_open(self.ctx.world, goal_id)
+        except GoalMutationConflict:
+            return True
         try:
             goal = self.ctx.world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run
@@ -4075,6 +4497,8 @@ class Agent:
         no equivalent guard, so it could hold a goal 'active' past
         ``max_wall_seconds`` and ignore ``maverick halt`` until it returned.
         """
+        from .template_connections import recheck_active
+        recheck_active()
         budget = self.ctx.budget
         if Agent._goal_cancelled(self):
             raise GoalCancelled("cancelled by the goal owner before dispatch")
@@ -4167,6 +4591,25 @@ class Agent:
             max_chars=_CHAT_LOW_RISK_MAX_CHARS,
         )
 
+    def _note_model_fallback(self, resp) -> None:
+        """Record once per backup model that provider failover answered a turn,
+        so the conversation can say the backup model was used."""
+        primary = getattr(resp, "fallback_from", None)
+        backup = getattr(resp, "served_model", None)
+        if not (isinstance(primary, str) and isinstance(backup, str) and primary and backup):
+            return
+        noted = getattr(self, "_fallbacks_noted", None)
+        if noted is None:
+            noted = self._fallbacks_noted = set()
+        if backup in noted:
+            return
+        noted.add(backup)
+        try:
+            self.ctx.blackboard.post(self.name, "model_fallback",
+                                     f"primary={primary} backup={backup}", provenance="system")
+        except Exception:  # pragma: no cover -- a notice never breaks the run
+            pass
+
     async def _complete_guarded(self, **kw):
         """Await an LLM completion, but ABORT the in-flight call when the
         wall-clock budget is exhausted or the killswitch trips — instead of
@@ -4178,13 +4621,34 @@ class Agent:
             # Waiting for a swarm model slot counts against the wall clock too.
             slot = getattr(self.ctx, "model_slot", None)
             async with slot() if slot else contextlib.nullcontext():
-                return await self.ctx.llm.complete_async(**kw)
+                from .chat_message_actions import answer_only_runtime, require_dispatch_sources
+                require_dispatch_sources()
+                if answer_only_runtime() and not kw.get("tools"):
+                    previous_guard = kw.get("dispatch_guard")
+                    def source_guard():
+                        require_dispatch_sources()
+                        if previous_guard is not None:
+                            previous_guard()
+                    kw["dispatch_guard"] = source_guard
+                from .instruction_capture import runtime_scope
+                with runtime_scope(getattr(self.ctx, "world", None),
+                                   getattr(self.ctx, "goal_id", None),
+                                   getattr(self, "role", ""), getattr(self, "_instruction_source_goals", ()),
+                                   verified=getattr(self, "_instruction_capture_ready", False),
+                                   preferences_owner=getattr(self, "_instruction_preferences_owner", "")):
+                    return await self.ctx.llm.complete_async(**kw)
         return await self._await_wall_clock_guarded(
             _call, in_flight_note="mid-generation")
 
     async def run(self) -> AgentResult:
+        from .compaction.learned import LearnedRunState
+        # A new run/resume never inherits another run's private digest or grant.
+        self._learned_compaction_state = LearnedRunState()
+        self._compaction_completion = SimpleNamespace(complete_async=self._complete_guarded)
+        result = None
         try:
-            return await self._run_traced()
+            result = await self._run_traced()
+            return result
         except GoalCancelled as exc:
             # Keep Agent.run's structured-result contract for parents and
             # standalone callers. The root orchestrator preserves this stop
@@ -4194,6 +4658,17 @@ class Agent:
                 stop_kind="cancelled", stop_detail=str(exc),
                 tool_execution_unknown=bool(getattr(exc, "tool_execution_unknown", False)),
             )
+        finally:
+            # An Agent returned a complete answer and continued after its
+            # summary. This is not the parent's verdict or correctness proof.
+            self._learned_compaction_state.finish(completed=bool(
+                result is not None and not result.error and not result.blocked_on_user
+                and not result.stop_kind and not result.tool_execution_unknown
+                # Zero is an explicit unavailable native checker result.
+                # Other values (including the default) do not prove accuracy.
+                and type(result.verifier_confidence) in (int, float) and result.verifier_confidence > 0
+                and (result.final or result.final_patch)))
+            self._compaction_completion = None
 
     async def _run_traced(self) -> AgentResult:
         # OTel GenAI semconv: every agent execution is an ``invoke_agent``
@@ -4297,7 +4772,7 @@ class Agent:
                 if cache_prewarm_enabled():
                     self.ctx.budget.check()
                     self.ctx.llm.prewarm(
-                        self.system, self.tools.to_anthropic(), self.model,
+                        self.system, self._tool_catalog_for_model(self.model), self.model,
                         budget=self.ctx.budget)
             except Exception:  # pragma: no cover -- prewarm never blocks a run
                 pass
@@ -4346,6 +4821,17 @@ class Agent:
         steps = (range(start_step, self.max_steps) if self.max_steps is not None
                  else itertools.count(start_step))
         for step in steps:
+            if self.depth == 0 and self.ctx.goal_id is not None:
+                from .conversation_inbox import checkpoint as conversation_checkpoint
+                try:
+                    conversation_checkpoint(self.ctx.world, self.ctx.goal_id,
+                                            checkpoint_id=f"{ep_id}:{self.checkpoint_id}:{step}", messages=messages)
+                except Exception as exc:
+                    # Pending guidance is never silently skipped before further
+                    # paid work. A fresh authorized retry replays its receipt.
+                    bb.post(self.name, "error", "Conversation guidance could not be verified at this checkpoint")
+                    return AgentResult(error="Conversation guidance is unavailable; review the pending message before resuming",
+                                       role=self.role, name=self.name, stop_kind="review_checkpoint", stop_detail=type(exc).__name__)
             # Durable checkpoint at the turn boundary: commit the resumable loop
             # state BEFORE the next LLM call, so a crash mid-step loses at most
             # one step's work. Extracted to _save_checkpoint; fail-open.
@@ -4456,9 +4942,10 @@ class Agent:
                 self.ctx.budget.check()
                 messages = await self._await_wall_clock_guarded(
                     lambda messages=messages: compact_with_async(
-                        messages, llm=self.ctx.llm,
+                        messages, llm=getattr(self, "_compaction_completion", None) or self.ctx.llm,
                         conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
                         budget=self.ctx.budget, scope=self.domain,
+                        run_state=getattr(self, "_learned_compaction_state", None),
                     ),
                     in_flight_note="compacting context",
                 )
@@ -4477,14 +4964,15 @@ class Agent:
                 _preview = self._answer_stream_for_turn()
                 if _preview is not None:
                     _turn_kw["on_delta"] = _preview
+                _turn_model = self._speculative_turn_model()
                 resp = await self._complete_guarded(
                     system=self.system,
                     messages=messages,
-                    tools=self.tools.to_anthropic(),
+                    tools=self._tool_catalog_for_model(_turn_model),
                     budget=self.ctx.budget,
                     max_tokens=self._turn_max_tokens(),
                     thinking_budget=self._thinking_budget(),
-                    model=self._speculative_turn_model(),
+                    model=_turn_model,
                     **_turn_kw,
                 )
                 if _preview is not None:
@@ -4513,6 +5001,9 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
                                    stop_kind="killswitch", stop_detail=str(e))
+            self._note_model_fallback(resp)
+            if (compaction_state := getattr(self, "_learned_compaction_state", None)) is not None:
+                compaction_state.note_turn()
 
             # A provider token cutoff is not a completed answer, even if its
             # partial text already contains FINAL. Incomplete tool arguments
@@ -4777,7 +5268,13 @@ class Agent:
                                 f"defensive warnings (accepted anyway): "
                                 f"{def_check.warnings}",
                             )
-                        validation = validate_patch(patch, workdir)
+                        validation = validate_patch(
+                            patch, workdir,
+                            allow_checkout_eol=(
+                                sr_summary is not None
+                                and bool(getattr(self.ctx.sandbox, "host_visible_fs", False))
+                            ),
+                        )
                         if not validation.valid:
                             self._patch_validated = True  # one retry max
                             self._patch_revision_attempts = (
@@ -5081,6 +5578,10 @@ class Agent:
                                 self.ctx.last_verifier_confidence = verdict.confidence
                             except BudgetExceeded:
                                 verdict = None
+                                # Say so in the record: a check that started but
+                                # did not finish must never read as "checked".
+                                bb.post(self.name, "verify",
+                                        "verifier did not complete (budget)")
                             except Exception as e:  # pragma: no cover
                                 bb.post(self.name, "error", f"verifier failed: {e}")
                                 verdict = None
@@ -5395,11 +5896,12 @@ class Agent:
                         self.name, "observation",
                         f"tool={tc.name} -> {output[:500]}",
                     )
-                    self._score_step(
-                        step_index=step,
-                        tool_name=tc.name,
-                        tool_succeeded=not _tool_call_failed(output),
-                    )
+                    if not isinstance(output, _NotExecutedToolResult):
+                        self._score_step(
+                            step_index=step,
+                            tool_name=tc.name,
+                            tool_succeeded=not _tool_call_failed(output),
+                        )
                     tool_results.append(self._make_tool_result(tc.id, output))
             else:
                 for tc in resp.tool_calls:
@@ -5450,7 +5952,7 @@ class Agent:
                             "reconcile state before retrying"
                         )
                         raise
-                    if tc.name == "ask_user":
+                    if tc.name == "ask_user" and not isinstance(output, _NotExecutedToolResult):
                         from .autonomy import assume_when_headless
                         if assume_when_headless():
                             # No human is available to answer (headless /
@@ -5474,11 +5976,12 @@ class Agent:
                         self.name, "observation",
                         f"tool={tc.name} -> {output[:500]}",
                     )
-                    self._score_step(
-                        step_index=step,
-                        tool_name=tc.name,
-                        tool_succeeded=not _tool_call_failed(output),
-                    )
+                    if not isinstance(output, _NotExecutedToolResult):
+                        self._score_step(
+                            step_index=step,
+                            tool_name=tc.name,
+                            tool_succeeded=not _tool_call_failed(output),
+                        )
                     tool_results.append(self._make_tool_result(tc.id, output))
                     # Governed-action lineage (opt-in via [actions] enable /
                     # MAVERICK_GOVERNED_ACTIONS; off by default). Record a
@@ -5488,7 +5991,7 @@ class Agent:
                         from . import governed_actions as _gov
                         if getattr(self, "_lineage_on", None) is None:
                             self._lineage_on = _gov.enabled()
-                        if self._lineage_on:
+                        if self._lineage_on and not isinstance(output, _NotExecutedToolResult):
                             _gov.record_tool_lineage(
                                 self.ctx.goal_id, tc.name, tc.input,
                                 skills=tuple(sorted(self.ctx.skills_used or ())),

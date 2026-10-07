@@ -2,14 +2,16 @@
 {% block title %}Workforce · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% set workforce_actions %}<a class="btn btn--primary" href="#departments">View departments</a>{% endset %}
   {% call hero('Build your workforce', 'Workforce',
                subtitle='Departments & specialists',
                lede='Your AI departments — each team\'s specialists, what
-                     they\'ve delivered, and their performance reviews.') %}
+                     they\'ve delivered, and their performance reviews.',
+               actions=workforce_actions if (can_create_goal and departments) else '') %}
     {{ state('Deployment state',
              deployed_specialists ~ ' specialists deployed',
              badge=departments | length ~ ' departments', badge_class='ok',
-             copy=pack_total ~ ' specialists are available in the catalog. ' ~
+             copy=pack_total ~ ' specialists are listed in the catalog. ' ~
                   configured_connectors ~ ' of ' ~ connector_total ~
                   ' connected apps are set up; whether each one is working is shown on Connections.') }}
   {% endcall %}
@@ -17,12 +19,8 @@
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
-    <div class="bd-slicer" role="group" aria-label="Time range">
-      <button type="button" data-days="30" aria-pressed="false">30d</button>
-      <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
-      <button type="button" data-days="180" aria-pressed="false">180d</button>
-      <button type="button" data-days="365" aria-pressed="false">1y</button>
-    </div>
+    {% from "_tabs.html" import panel_tabs %}
+    {{ panel_tabs('Time range', [('30', '30d'), ('90', '90d'), ('180', '180d'), ('365', '1y')], '90', id='bd-range', data='days', controls=false, activation='manual', hash='range-') }}
   </div>
 
   <div class="bd-kpis" id="bd-kpis"></div>
@@ -63,7 +61,7 @@
       <tbody>
         <tr><td>Tasks finished</td><td>{{ firm.goals_completed }} / {{ firm.goals_total }}</td></tr>
         <tr><td>Human approvals</td><td>{{ firm.human_decisions }} / {{ firm.approvals }}</td></tr>
-        <tr><td>Spend</td><td>${{ '%.2f'|format(firm.spend_dollars) }}</td></tr>
+        <tr><td>Spend</td><td>{{ firm.spend_dollars | money }}</td></tr>
       </tbody>
     </table>
 
@@ -81,7 +79,7 @@
     <ul id="conn-results" class="muted"></ul>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="departments" tabindex="-1">
     <div class="section-head"><h2>Departments</h2></div>
     <div class="card-grid" id="dept-grid">
       {% for d in departments %}
@@ -90,16 +88,19 @@
         <p class="muted">{{ d.charter or
           'No description yet. View the team to see its specialists before you deploy it.' }}</p>
         <p>
-          <span class="badge">{{ d.headcount }} catalog specialists available</span>
+          <span class="badge">{{ d.headcount }} catalog specialists</span>
+          {# Plain text, not role=status: it fills in once on load for every
+             department, and dozens of announcements on load are noise. #}
+          <span class="badge dept-readiness">Checking actions…</span>
           {% if not entitlements.get(d.key) %}<span class="badge">Add-on required</span>{% endif %}
         </p>
         <p>
           <button type="button" class="btn btn--ghost" data-key="{{ d.key }}" data-act="team" aria-label="View {{ d.title }} team">View team</button>
           <button type="button" class="btn btn--ghost" data-key="{{ d.key }}" data-act="review" aria-label="Review {{ d.title }} performance">Performance review</button>
           {% if entitlements.get(d.key) %}
-          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team">Deploy team</button>
+          <button type="button" class="btn" data-key="{{ d.key }}" data-act="deploy" aria-label="Set up {{ d.title }} team">Set up team</button>
           {% else %}
-          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team" aria-describedby="addon-note-{{ d.key }}">Deploy team</button>
+          <button type="button" class="btn" data-key="{{ d.key }}" data-act="deploy" aria-label="Set up {{ d.title }} team" aria-describedby="addon-note-{{ d.key }}">Set up team</button>
           <span id="addon-note-{{ d.key }}" class="muted">paid add-on</span>
           {% endif %}
         </p>
@@ -126,10 +127,14 @@
   </dialog>
 
   <script src="/static/board.js"></script>
+  <script src="/static/lightwork-department-team-updates.js"></script>
   <script>
   (function () {
     'use strict';
     var B = window.LWBoard;
+    // Only people who may deploy a team are told to deploy one.
+    var DEPLOY = {{ 'true' if (can_create_goal and departments) else 'false' }}
+      ? { label: 'Deploy a team', href: '#departments' } : null;
 
     function render(D) {
       var k = document.getElementById('bd-kpis');
@@ -163,9 +168,10 @@
                      pct: r.spend / smax * 100 };
           }), 'Agent spend by department.');
       } else {
-        B.empty(document.getElementById('bd-depts'),
-          'No departmental work on record yet — deploy a team to start it.');
-        B.empty(document.getElementById('bd-dept-spend'), 'No spend on record yet.');
+        B.empty(document.getElementById('bd-depts'), 'No departmental work yet',
+          'Tasks each department finishes and takes on appear here once a deployed team starts work.', DEPLOY);
+        B.empty(document.getElementById('bd-dept-spend'), 'No spend yet',
+          'Agent spend by department appears here as deployed teams finish tasks.' + (DEPLOY ? ' Deploy a team below to start.' : ''));
       }
 
       B.donut(document.getElementById('bd-completion'), {
@@ -210,7 +216,8 @@
         });
         lbox.appendChild(ul);
       } else {
-        B.empty(lbox, 'No work recorded yet — deploy a department to start the record.');
+        B.empty(lbox, 'No work recorded yet',
+          'The specialists with the best delivery appear here once a deployed team finishes tasks.' + (DEPLOY ? ' Deploy a team below to start.' : ''));
       }
     }
 
@@ -232,12 +239,20 @@
 
       function renderTeam(d) {
         var rows = (d.roster || []).map(function (p) {
+          var readiness = p.readiness || {};
+          var missing = (readiness.missing_tools || []).map(human).join(', ');
+          var action = readiness.state === 'needs_setup'
+            ? esc(readiness.label || 'Needs setup') + (missing ? '<br><small>' + esc(missing) + '</small>' : '') +
+              ' <a href="' + esc(readiness.fix_url || '/connections') + '">Review setup</a>'
+            : readiness.state === 'action_ready'
+              ? esc(readiness.label || 'Can start') : 'Setup check unavailable';
           return "<tr><td>" + esc(human(p.name)) + "</td><td>" + esc(p.description) +
-            "</td><td>" + esc(human(p.max_risk)) + "</td></tr>";
+            "</td><td>" + action + "</td><td>" + esc(human(p.max_risk)) + "</td></tr>";
         }).join("");
         return "<table><caption>" + esc(d.title) + " — roster</caption>" +
           "<thead><tr><th scope=\"col\">Specialist</th><th scope=\"col\">Does</th>" +
-          "<th scope=\"col\">Max risk</th></tr></thead><tbody>" + rows + "</tbody></table>";
+          "<th scope=\"col\">Action check</th><th scope=\"col\">Max risk</th></tr></thead><tbody>" + rows + "</tbody></table>" +
+          '<p class="muted">This checks required workflow actions. Live connections, permissions and the AI service are checked when work starts.</p>';
       }
 
       function renderReview(r) {
@@ -262,6 +277,41 @@
       var modalTitle = document.getElementById("dept-modal-title");
       var modalSub = document.getElementById("dept-modal-sub");
       var modalBody = document.getElementById("dept-modal-body");
+      fetch('/api/v1/departments').then(function (r) {
+        if (!r.ok) throw new Error('load');
+        return r.json();
+      }).then(function (departments) {
+        (departments || []).forEach(function (d) {
+          var card = Array.prototype.find.call(document.querySelectorAll('#dept-grid .card'), function (item) {
+            return item.dataset.key === d.key;
+          });
+          if (!card) return;
+          var badge = card.querySelector('.dept-readiness');
+          var deploy = card.querySelector('button[data-act="deploy"]');
+          if (deploy && d.deployed) {
+            deploy.dataset.deployed = 'true';
+            deploy.textContent = 'Update team';
+            deploy.setAttribute('aria-label', 'Update ' + d.title + ' team');
+          }
+          var ready = Number(d.ready_specialists || 0);
+          var unknown = Number(d.unknown_specialists || 0);
+          badge.textContent = unknown
+            ? ready + ' of ' + d.headcount + ' can start; ' + unknown + ' need a setup check'
+            : ready + ' of ' + d.headcount + ' can start';
+          if (ready === 0 && !d.deployed) {
+            if (deploy) {
+              deploy.disabled = true;
+              deploy.title = unknown
+                ? 'Setup checks are unavailable. Try again after your administrator checks this installation.'
+                : 'No specialist in this team can start until its required actions are set up.';
+            }
+          }
+        });
+      }).catch(function () {
+        document.querySelectorAll('.dept-readiness').forEach(function (badge) {
+          badge.textContent = 'Setup check unavailable';
+        });
+      });
       function openModal(title, sub) {
         modalTitle.textContent = title;
         modalSub.textContent = sub || "";
@@ -285,47 +335,12 @@
         var deptTitle = (card.querySelector("h3") || {}).textContent || key;
 
         if (act === "deploy") {
-          if (btn.dataset.inFlight === "true") return;
-          btn.dataset.inFlight = "true";
-          if (!(await mvConfirm(
-            "Deploy the " + deptTitle + " team? This creates an operational fleet and its specialists.",
-            { okText: "Deploy team" }
-          ))) { delete btn.dataset.inFlight; return; }
-          var box = card.querySelector(".dept-detail");
-          box.hidden = false;
-          box.textContent = "Deploying…";
-          btn.disabled = true;
-          btn.setAttribute("aria-busy", "true");
-          try {
-            var response = await fetch("/api/v1/departments/" + encodeURIComponent(key) + "/deploy", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" }
-            });
-            var body = await response.json().catch(function () { return {}; });
-            var res = { ok: response.ok, status: response.status, body: body };
-            if (res.ok) {
-              var f = res.body.fleet || {};
-              box.innerHTML = "<p>Deployed <strong>" + esc(human(f.name)) + "</strong> — " +
-                esc((f.agents || []).length) + " specialists. " +
-                "Give them tasks from <a href=\"/fleets\">Fleets</a>.</p>";
-            } else if (res.status === 402) {
-              box.innerHTML = "<p class=\"muted\">This department is a paid add-on. " +
-                "Ask your administrator to add it to your plan.</p>";
-            } else {
-              // textContent escapes on its own; passing esc()'d text here would
-              // double-encode (show literal &amp; / &lt;).
-              box.textContent = window.mvErrorText
-                ? window.mvErrorText(res, "deploy the " + deptTitle + " team")
-                : "Could not deploy the " + deptTitle + " team. Try again.";
-            }
-          } catch (error) {
-            box.textContent = "Could not deploy the " + deptTitle +
-              " team — check your connection and try again.";
-          } finally {
-            delete btn.dataset.inFlight;
-            btn.removeAttribute("aria-busy");
-            btn.disabled = false;
+          if (!window.LWDepartmentTeamUpdates) {
+            card.querySelector('.dept-detail').hidden = false;
+            card.querySelector('.dept-detail').textContent = 'The team review could not load. Reload this page before saving the team.';
+            return;
           }
+          await window.LWDepartmentTeamUpdates.open(key, btn);
           return;
         }
 
@@ -377,7 +392,7 @@
 
   <div class="section-head"><h2 id="fa-autonomy-title">How independently specialists work</h2></div>
   <section class="panel" aria-labelledby="fa-autonomy-title">
-    <p class="muted" id="fa-autonomy-status" role="status" aria-live="polite">Loading…</p>
+    <p class="muted" id="fa-autonomy-status">Loading…</p>
     <div id="fa-autonomy"></div>
   </section>
   {% include "_workforce_ops.html" %}

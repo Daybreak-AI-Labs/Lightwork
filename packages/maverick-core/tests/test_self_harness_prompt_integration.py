@@ -19,6 +19,16 @@ from maverick.sandbox import LocalBackend
 from maverick.swarm import SwarmContext
 from maverick.world_model import WorldModel
 
+
+def _write_shared_fixture(blocks, path):
+    """Publish synthetic local guidance with explicit source metadata."""
+    sh._write_addenda(blocks, path)
+    meta = sh.load_line_meta(path)
+    for model, block in blocks.items():
+        for line in sh._bullets(block):
+            sh._upsert_line_meta(meta, model, line, {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, path)
+
 _BLOCK = "Operating guidance learned for this model:\n- ALWAYS verify the export window first"
 _NEEDLE = "verify the export window first"
 
@@ -46,7 +56,7 @@ def _agent(ctx, model):
 
 def test_addendum_reaches_system_prompt(ctx, store, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
-    sh._write_addenda({"model-x": _BLOCK}, store)
+    _write_shared_fixture({"model-x": _BLOCK}, store)
     agent = _agent(ctx, "model-x")
     assert agent.model == "model-x"
     assert _NEEDLE in agent.system          # the learned guidance is in the prompt
@@ -56,7 +66,7 @@ def test_model_resolved_before_build_system(ctx, store, monkeypatch):
     # Regression for the init-ordering bug: if self.model weren't set before
     # _build_system ran, the addendum would be silently dropped here.
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
-    sh._write_addenda({"model-x": _BLOCK}, store)
+    _write_shared_fixture({"model-x": _BLOCK}, store)
     agent = _agent(ctx, "model-x")
     assert hasattr(agent, "model") and agent.model == "model-x"
     assert _NEEDLE in agent.system
@@ -65,7 +75,7 @@ def test_model_resolved_before_build_system(ctx, store, monkeypatch):
 def test_cross_model_isolation_in_prompt(ctx, store, monkeypatch):
     # An addendum for model-x must NOT leak into model-y's prompt.
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
-    sh._write_addenda({"model-x": _BLOCK}, store)
+    _write_shared_fixture({"model-x": _BLOCK}, store)
     assert _NEEDLE in _agent(ctx, "model-x").system
     assert _NEEDLE not in _agent(ctx, "model-y").system
 
@@ -73,13 +83,13 @@ def test_cross_model_isolation_in_prompt(ctx, store, monkeypatch):
 def test_disabled_keeps_prompt_unchanged(ctx, store, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     monkeypatch.setattr("maverick.config.load_config", dict)
-    sh._write_addenda({"model-x": _BLOCK}, store)
+    _write_shared_fixture({"model-x": _BLOCK}, store)
     assert _NEEDLE not in _agent(ctx, "model-x").system     # off -> not injected
 
 
 def test_no_addendum_for_model_is_noop(ctx, store, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
-    sh._write_addenda({"some-other-model": _BLOCK}, store)
+    _write_shared_fixture({"some-other-model": _BLOCK}, store)
     # The agent's model has no entry -> prompt is unchanged, no error.
     assert _NEEDLE not in _agent(ctx, "model-x").system
 
@@ -88,12 +98,15 @@ def test_recall_failure_is_fail_safe(ctx, store, monkeypatch):
     # A broken recall must never block agent construction; the prompt degrades
     # to the base (no addendum), not a crash.
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
-    sh._write_addenda({"model-x": _BLOCK}, store)
+    _write_shared_fixture({"model-x": _BLOCK}, store)
 
     def _boom(*a, **k):
         raise RuntimeError("recall blew up")
 
+    # The agent recalls through recall_addendum_with_sources (the guidance and
+    # its permitted sources together); break both public entry points.
     monkeypatch.setattr(sh, "recall_addendum", _boom)
+    monkeypatch.setattr(sh, "recall_addendum_with_sources", _boom)
     agent = _agent(ctx, "model-x")          # must not raise
     assert _NEEDLE not in agent.system
 
@@ -102,7 +115,7 @@ def test_addendum_appended_not_replacing_base(ctx, store, monkeypatch):
     # The addendum AUGMENTS the system prompt -- the base instructions remain.
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     base_only = _agent(ctx, "model-y").system      # no entry for model-y
-    sh._write_addenda({"model-x": _BLOCK}, store)
+    _write_shared_fixture({"model-x": _BLOCK}, store)
     with_addendum = _agent(ctx, "model-x").system
     assert with_addendum.startswith(base_only[:200])   # base preserved as prefix
     assert _NEEDLE in with_addendum and len(with_addendum) > len(base_only)

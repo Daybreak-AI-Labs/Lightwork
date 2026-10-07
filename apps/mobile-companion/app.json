@@ -6,8 +6,19 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "platforms": ["ios", "android"],
-    "ios": { "supportsTablet": true },
-    "android": { "package": "ai.maverick.companion" }
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.maverick.companion"
+    },
+    "android": {
+      "package": "ai.maverick.companion"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

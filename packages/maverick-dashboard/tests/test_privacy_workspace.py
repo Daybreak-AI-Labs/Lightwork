@@ -43,7 +43,7 @@ def test_page_renders_worklist_stats_and_catalog():
     html = resp.text
     # Worklist rows with the risk pair and review triggers.
     assert "Acme CRM" in html and "Globex HRIS" in html
-    assert 'class="btn btn--primary pw-review-btn"' in html
+    assert 'class="btn pw-review-btn"' in html
     # The shared pop-out is on the page.
     assert 'id="arv-dialog"' in html
     # The catalog lists the PRIVACY frameworks — and only those (the finance
@@ -63,6 +63,94 @@ def test_page_empty_state():
     assert "No assessments yet" in resp.text
 
 
+def test_closed_request_exposes_export_cleanup_failure_and_retry(monkeypatch):
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    privacy_ops.fulfill_dsar(request["id"])
+    monkeypatch.setattr(privacy_ops, "_remove_closed_dsar_export", lambda _record: False)
+
+    closed = client.post(f"/api/v1/privacy/dsar/{request['id']}/close")
+    assert closed.status_code == 200
+    assert closed.json()["export_cleanup"]["status"] == "failed"
+    assert "Saved export needs cleanup" in client.get("/privacy").text
+    assert "Retry export cleanup" in client.get(f"/privacy/dsar/{request['id']}").text
+
+    monkeypatch.setattr(privacy_ops, "_remove_closed_dsar_export", lambda _record: True)
+    retried = client.post(f"/api/v1/privacy/dsar/{request['id']}/close")
+    assert retried.status_code == 200
+    assert retried.json()["export_cleanup"]["status"] == "removed"
+    assert "Saved export needs cleanup" not in client.get("/privacy").text
+
+
+def test_collected_access_export_is_not_presented_as_delivered():
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    initial = client.get(f"/privacy/dsar/{request['id']}")
+    assert "Collect their data" in initial.text
+    assert "Collect their data and mark answered" not in initial.text
+
+    collected = privacy_ops.fulfill_dsar(request["id"])
+    assert collected is not None and collected["status"] == "fulfilled"
+    detail = client.get(f"/privacy/dsar/{request['id']}")
+    worklist = client.get("/privacy")
+    report = client.get("/privacy/report")
+    assert all(response.status_code == 200 for response in (detail, worklist, report))
+    assert "Data collected</span>" in detail.text
+    assert "does not confirm that the requester received it" in detail.text
+    assert "The saved export is removed when you close this request" in detail.text
+    assert collected["fulfillment"]["export_path"] not in detail.text
+    assert "Data collected</span>" in worklist.text
+    assert "Completed</span>" not in worklist.text
+    assert "Handled requests answered on time" in report.text
+    assert "It does not confirm delivery or deletion" in report.text
+
+
+def test_collected_export_download_is_verified_audited_and_unavailable_after_close(monkeypatch):
+    from maverick import audit, privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    privacy_ops.fulfill_dsar(request["id"])
+    events = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **fields: events.append((kind, fields)) or True)
+    detail = client.get(f"/privacy/dsar/{request['id']}")
+    assert 'id="dsar-download"' in detail.text
+
+    url = f"/api/v1/privacy/dsar/{request['id']}/export"
+    downloaded = client.post(url)
+    assert downloaded.status_code == 200
+    assert downloaded.headers["cache-control"] == "private, no-store"
+    assert downloaded.headers["content-disposition"].endswith(f'{request["id"]}-data.json"')
+    assert downloaded.json()["subject"]["user_id"] == "person@example.test"
+    assert "_lightwork_export" not in downloaded.json()
+    assert len(events) == 1 and events[0][1]["action"] == "export_access_authorized"
+    assert events[0][1]["record_id"] == request["id"]
+    assert "person@example.test" not in str(events)
+
+    monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: False)
+    refused = client.post(url)
+    assert refused.status_code == 503 and "person@example.test" not in refused.text
+    privacy_ops.close_dsar(request["id"])
+    assert client.post(url).status_code == 404
+    assert 'id="dsar-download"' not in client.get(f"/privacy/dsar/{request['id']}").text
+
+
+def test_collected_export_download_rejects_a_recorded_path_change():
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    privacy_ops.fulfill_dsar(request["id"])
+    def change_path(row):
+        row["fulfillment"] = {**row["fulfillment"], "export_path": "C:/other-person-export.json"}
+
+    privacy_ops._DSAR.update(request["id"], change_path)
+    response = client.post(f"/api/v1/privacy/dsar/{request['id']}/export")
+    assert response.status_code == 409
+    assert "could not be verified" in response.text
+    assert "other-person-export.json" not in response.text
+
+
 def test_templates_catalog_api():
     resp = client.get("/api/v1/assess/templates")
     assert resp.status_code == 200
@@ -80,6 +168,9 @@ def test_approvals_page_still_carries_shared_popout():
 
 def test_records_section_renders_all_four_types():
     from maverick import privacy_ops
+
+    from test_support.plain_language import visible_text
+
     dpa_text = (
         "processor acts on documented instructions from the controller; "
         "audit rights; retention for 12 months"
@@ -114,14 +205,17 @@ def test_records_section_renders_all_four_types():
     privacy_ops.fulfill_dsar(dsar["id"])
 
     html = client.get("/privacy").text
+    # Technical-copy checks apply to the page, not the bundled translation
+    # catalog, which also contains support copy for other workspaces.
+    page_text = visible_text(html)
     # DPA reviews tab: vendor row + the clause-detail trigger.
     assert "Acme Corp" in html and "acme-dpa.pdf" in html
     assert 'class="btn pw-dpa-clauses"' in html
     assert "a person must check it" in html
     assert "How it was read" in html
     assert "Technical record of the file" in html
-    assert "SHA-256" not in html
-    assert "document_id" not in html
+    assert "SHA-256" not in page_text
+    assert "document_id" not in page_text
     # AI registry tab: high-risk tier from the Annex III employment test.
     assert "CV screener" in html
     assert ">High</span>" in html
@@ -132,11 +226,11 @@ def test_records_section_renders_all_four_types():
     assert "jordan@example.com" in html
     assert "days left" in html
     assert "Deletion is never done from this list" in html
-    assert "maverick erase" not in html
-    assert "erase_command" not in html
+    assert "maverick erase" not in page_text
+    assert "erase_command" not in page_text
     # The records tab strip carries the counts (the old hero stat tiles were
     # superseded by the live executive board).
-    assert 'data-tab="dsar"' in html and 'data-tab="ropa"' in html
+    assert 'data-mv-tab="dsar"' in html and 'data-mv-tab="ropa"' in html
 
 
 def test_records_section_hidden_when_disabled(monkeypatch, tmp_path):
@@ -284,3 +378,19 @@ def test_worklist_and_catalog_read_plainly():
     assert "window.prompt" not in html and "window.alert" not in html
     assert "/api/v1/assess/reviewers" in html
     assert "Type (slug)" not in html and "Publish release" not in html
+
+
+def test_program_report_counts_only_recorded_answers():
+    from maverick import privacy_ops
+
+    closed = privacy_ops.open_dsar("j@example.com", "erasure", jurisdiction="eu_gdpr")
+    privacy_ops.close_dsar(closed["id"], closed_by="dpo")
+    waiting = privacy_ops.open_dsar("k@example.com", "erasure")
+    privacy_ops.fulfill_dsar(waiting["id"], fulfilled_by="dpo")
+    html = client.get("/privacy/report").text
+    main = html.split("<main", 1)[-1].split("</main>", 1)[0]
+    assert "0 of 1" in main                        # answered on time, of those closed
+    assert "Closed without a recorded answer" in main
+    assert "Past the 30-day deadline" not in main  # deadlines differ by law
+    api = client.get("/api/v1/privacy/report").json()["dsar"]
+    assert api["open"] == 1 and api["closed_without_response"] == 1

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,12 @@ class _Sandbox:
         self.workdir = workdir
 
     def exec(self, cmd, timeout=None):
-        done = subprocess.run(cmd.split(), cwd=self.workdir, capture_output=True, text=True)
+        args = cmd.split()
+        # The synthetic local backend must use this test environment. Windows
+        # can resolve bare python beside the host executable before PATH.
+        if args[0] == "python":
+            args[0] = sys.executable
+        done = subprocess.run(args, cwd=self.workdir, capture_output=True, text=True)
         return type("R", (), {"stdout": done.stdout, "stderr": done.stderr,
                               "exit_code": done.returncode})()
 
@@ -392,6 +398,27 @@ def test_a_run_cannot_reach_host_git_config_beside_its_working_copy(tmp_path, mo
     assert seen == [["work"]] and not mark.exists() and "a.py" in p["files"]
 
 
+def test_vault_git_never_runs_automatic_maintenance(tmp_path):
+    """git 2.54+ follows a fetch with a detached geometric repack. In the host
+    repository that deleted a pack while clone_work was copying it ("failed to
+    copy file ... pack-*.rev"), so vault git runs with automatic maintenance
+    off. The thresholds are forced to fire in the foreground here."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _sh("init", "-q", "-b", "main", cwd=src)
+    host = tmp_path / "host.git"
+    vault._git(["init", "-q", "--bare", str(host)])
+    eager = {"GIT_CONFIG_PARAMETERS": "'gc.autopacklimit'='1' 'fetch.unpacklimit'='1' "
+                                      "'gc.autodetach'='false' 'maintenance.autodetach'='false'"}
+    for n in range(2):
+        (src / f"f{n}.txt").write_text(f"{n}\n")
+        _sh("add", "-A", cwd=src)
+        _sh("commit", "-q", "-m", str(n), cwd=src)
+        vault._git(["fetch", "-q", str(src), "+refs/heads/*:refs/heads/*"],
+                   git_dir=host, env=eager)
+    assert len(list((host / "objects" / "pack").glob("*.pack"))) == 2
+
+
 def test_the_merge_approval_is_a_structured_card_committing_to_the_head():
     from maverick.approval_cards import decode_approval_detail, digest
     from maverick.codebase.features import _approval_detail
@@ -446,6 +473,30 @@ def test_an_unanswered_approval_can_be_renewed(tmp_path, monkeypatch):
     monkeypatch.setattr(time, "time", lambda: real() + features.APPROVAL_TTL + 60)
     assert features.status(world, p) == "expired"
     assert features.request_approval(world, p) == 2
+
+
+def test_approval_binds_current_saved_proposal_task_and_restores_context(tmp_path, monkeypatch):
+    from maverick.logging_config import current_goal_id, reset_goal_context, set_goal_context
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    world = WorldModel(tmp_path / "world.db")
+    source = world.create_goal("Alice proposal", owner="user:alice")
+    other = world.create_goal("Bob outer work", owner="user:bob")
+    saved = {"id": "0123456789abcdef", "repo": "r", "title": "t", "branch": "lightwork/t-012345",
+             "head": "a" * 40, "base": "b" * 40, "files": ["x.py"], "tests": None, "review": None,
+             "diff_truncated": False, "diff_chars": 1, "status": "pending", "approval_id": None,
+             "goal_id": source}
+    monkeypatch.setattr(features, "_load", lambda *args: dict(saved))
+    monkeypatch.setattr(features, "_save", lambda proposal: None)
+    context = set_goal_context(other)
+    try:
+        stale = dict(saved, goal_id=other)
+        approval_id = features.request_approval(world, stale)
+        assert world.get_approval(approval_id).goal_id == source
+        assert stale["goal_id"] == source
+        assert current_goal_id() == other
+    finally:
+        reset_goal_context(context)
 
 
 def test_an_approved_but_expired_approval_no_longer_merges_and_can_be_renewed(tmp_path, monkeypatch):

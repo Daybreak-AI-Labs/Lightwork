@@ -5,10 +5,12 @@ async function fits(page){expect(await page.evaluate(()=>document.documentElemen
 
 test('Goals keeps search failures distinct and its primary task link opens the normal work view',async({page})=>{
   await page.setViewportSize({width:320,height:820});await page.goto('/goals');
-  await page.route('**/api/v1/goals/search?*',r=>r.fulfill({status:503,contentType:'text/html',body:'Synthetic unavailable service'}));
-  await page.locator('#run-search-q').fill('Browser search task');await expect(page.locator('#run-search-status')).toContainText('could not be completed');
+  // Search reads the retained task list part by part (search-page); a failed part keeps the words and results.
+  await page.route('**/api/v1/goals/search-page?*',r=>r.fulfill({status:503,contentType:'text/html',body:'Synthetic unavailable service'}));
+  await page.locator('#run-search-q').fill('Browser search task');await expect(page.locator('#run-search-status')).toContainText('This part could not be read');
+  await expect(page.locator('#run-search-q')).toHaveValue('Browser search task');
   await expect(page.locator('#run-list')).toContainText('Browser search task');await expect(page.locator('#run-search-retry')).toBeVisible();await fits(page);
-  await page.unroute('**/api/v1/goals/search?*');await page.locator('#run-search-retry').click();await expect(page.locator('#run-search-status')).toContainText('1 matching task.');
+  await page.unroute('**/api/v1/goals/search-page?*');await page.locator('#run-search-retry').click();await expect(page.locator('#run-search-status')).toContainText('1 matching task found');
   const link=page.locator('.g-row__title a',{hasText:'Browser search task'});await link.focus();await page.keyboard.press('Enter');await expect(page).toHaveURL(/\/chat\/goal\/\d+$/);
 });
 

@@ -10,10 +10,20 @@ from __future__ import annotations
 import importlib
 import sys
 import textwrap
+from contextlib import nullcontext
 
+import pytest
 from maverick.tools.lsp_bridge import lsp_bridge
 
 lsp_bridge_module = importlib.import_module("maverick.tools.lsp_bridge")
+
+
+@pytest.fixture(autouse=True)
+def _approved_execution(monkeypatch):
+    monkeypatch.setattr(lsp_bridge_module, "request_execution_consent",
+                        lambda *a, **kw: object())
+    monkeypatch.setattr(lsp_bridge_module, "consume_operation_consent",
+                        lambda permit: nullcontext())
 
 # A minimal LSP server: answers initialize/shutdown, publishes one diagnostic
 # after didOpen, and serves documentSymbol / definition / hover canned.
@@ -100,6 +110,23 @@ def test_symbols(tmp_path, monkeypatch):
     out = _tool().fn({"op": "symbols", "file": str(f)})
     assert "class Widget  :1" in out
     assert "  method spin  :2" in out
+
+
+def test_denied_lsp_does_not_spawn(tmp_path, monkeypatch):
+    from maverick.safety import ConsentDenied
+
+    _use_fake_server(monkeypatch, tmp_path)
+    f = tmp_path / "widget.py"
+    f.write_text("x = 1\n")
+    started = []
+
+    def deny(*args, **kwargs):
+        raise ConsentDenied("lsp_bridge")
+
+    monkeypatch.setattr(lsp_bridge_module, "request_execution_consent", deny)
+    monkeypatch.setattr(lsp_bridge_module, "_LspSession", lambda *a, **kw: started.append(1))
+    assert "not approved" in _tool().fn({"op": "symbols", "file": str(f)})
+    assert started == []
 
 
 def test_definition_and_hover(tmp_path, monkeypatch):

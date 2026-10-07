@@ -82,7 +82,9 @@ def test_export_and_erase_do_not_prefix_match_non_cli_colon_ids(tmp_path: Path):
 
 
 def test_erase_scrubs_dreaming_user_notes(monkeypatch, tmp_path: Path):
-    from maverick import user_notes
+    from maverick import config, user_notes
+    original = config.get_dreaming
+    monkeypatch.setattr(config, "get_dreaming", lambda: {**original(), "user_notes": True})
 
     db = tmp_path / "world.db"
     notes_path = tmp_path / "user_notes.ndjson"

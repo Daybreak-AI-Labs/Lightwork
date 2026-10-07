@@ -306,8 +306,8 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_dynamic_risk"] is True
     assert picked["ai_policy_management"] is True
     assert picked["ai_runtime_guardrails"] is True
-    assert picked["ai_cloud_agent_governance"] is True
-    assert picked["databricks_ai_security_framework"] is True
+    assert picked["ai_cloud_agent_governance"] is False
+    assert picked["databricks_ai_security_framework"] is False
     assert picked["ai_governance_loop"] is True
     assert picked["ai_explainability"] is True
     assert picked["ai_conformity_workflow"] is True
@@ -1129,6 +1129,7 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
         "safety",
         "signed_skills",
         "budget",
+        "approval",
         "sandbox",
         "research_execution",
         "candidate_promotion",
@@ -1150,6 +1151,8 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
         "advanced",
     )
     saved = dict.fromkeys(keys, {"enable": False})
+    # The API access answer rides inside ``advanced``; a saved one is not asked again.
+    saved["advanced"] = {"enable": False, "api_keys": {"api_keys": False}}
     saved["security_suite"] = {
         "vendor_onboarding": True, "vendor_onboarding_owner": owner,
         "vendor_reviewed_uploads": False,

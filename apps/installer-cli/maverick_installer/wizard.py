@@ -9,8 +9,9 @@ Configures Lightwork for a fresh install. Sets up:
   - budget caps
   - API keys (stored beside config.toml, referenced from it via ${VAR})
 
-Writes ``$MAVERICK_CONFIG`` when explicitly selected, otherwise
-``$MAVERICK_HOME/config.toml`` (default ``~/.maverick/config.toml``), plus a
+Writes ``$MAVERICK_CONFIG`` (or ``$LIGHTWORK_CONFIG``) when explicitly
+selected, otherwise ``$MAVERICK_HOME/config.toml`` (or
+``$LIGHTWORK_HOME/config.toml``; default ``~/.maverick/config.toml``), plus a
 sibling ``.env``. The agent reads from the same resolution contract.
 
 v0.1.1 additions (council UX feedback):
@@ -21,11 +22,13 @@ v0.1.1 additions (council UX feedback):
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -52,23 +55,145 @@ def _resolve_config_paths() -> tuple[Path, Path, Path]:
     """Resolve exactly the paths used by :mod:`maverick.config`.
 
     The previous import-time ``Path.home() / '.maverick'`` ignored the
-    documented ``MAVERICK_HOME``/``MAVERICK_CONFIG`` overrides.  The wizard
+    documented home/config overrides.  The standalone installer imports before
+    the core mirrors LIGHTWORK_* to MAVERICK_*, so apply that same precedence
+    here rather than writing into an unrelated home.  The wizard
     could therefore overwrite the real user config and then smoke-test a
     different, still-empty location.  Environment is fixed before a CLI
     process imports this module, so resolving once here keeps the existing
     monkeypatchable constants while aligning both sides of the handoff.
     """
-    explicit = os.environ.get("MAVERICK_CONFIG", "").strip()
+    explicit = (
+        os.environ["MAVERICK_CONFIG"]
+        if "MAVERICK_CONFIG" in os.environ
+        else os.environ.get("LIGHTWORK_CONFIG", "")
+    ).strip()
     if explicit:
         config_file = Path(explicit).expanduser()
         config_dir = config_file.parent
     else:
-        config_dir = Path(os.environ.get("MAVERICK_HOME", "~/.maverick")).expanduser()
+        home = (
+            os.environ["MAVERICK_HOME"]
+            if "MAVERICK_HOME" in os.environ
+            else os.environ.get("LIGHTWORK_HOME", "~/.maverick")
+        )
+        config_dir = Path(home).expanduser()
         config_file = config_dir / "config.toml"
     return config_dir, config_file, config_dir / ".env"
 
 
 CONFIG_DIR, CONFIG_FILE, ENV_FILE = _resolve_config_paths()
+
+
+def _pending_setup_path() -> Path:
+    return CONFIG_FILE.with_name(f".{CONFIG_FILE.name}.lightwork-pending.json")
+
+
+def _existing_setup() -> bool:
+    """Fail closed when a saved file exists or its absence cannot be verified."""
+    for path in (CONFIG_FILE, ENV_FILE, _pending_setup_path()):
+        try:
+            path.lstat()  # Includes dangling links; never follow one into a key file.
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+        return True
+    return False
+
+
+def _existing_setup_notice() -> None:
+    if not CONFIG_FILE.exists() and ENV_FILE.exists():
+        console.print(
+            Panel.fit(
+                "[bold yellow]Lightwork found saved keys but no completed setup.[/bold yellow]\n\n"
+                "Your keys were left unchanged. Ask your Lightwork administrator or support "
+                "to recover this installation.",
+                border_style="yellow",
+            )
+        )
+        return
+    console.print(
+        Panel.fit(
+            "[bold yellow]Lightwork found saved setup files.[/bold yellow]\n\n"
+            "This setup left your current choices and saved keys unchanged. "
+            "Open Lightwork > Settings to change provider keys or task spending, "
+            "or use All settings for other available controls. Some installation "
+            "choices cannot be changed there yet.",
+            border_style="yellow",
+        )
+    )
+
+
+def _pending_setup_bodies() -> tuple[str, str | None] | None:
+    """Read only a complete first-install receipt; never follow a link to keys."""
+    path = _pending_setup_path()
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4_000_000:
+        raise RuntimeError("Interrupted Lightwork setup needs assistance; saved files were not changed.")
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(receipt, dict) or set(receipt) != {"version", "config", "env"}:
+            raise ValueError("invalid setup receipt")
+        config_body, env_body = receipt["config"], receipt["env"]
+        if type(receipt["version"]) is not int or receipt["version"] != 1 or not isinstance(config_body, str):
+            raise ValueError("invalid setup receipt")
+        if env_body is not None and not isinstance(env_body, str):
+            raise ValueError("invalid setup receipt")
+        if len(config_body) + len(env_body or "") > 4_000_000:
+            raise ValueError("oversized setup receipt")
+        tomllib.loads(config_body)
+        return config_body, env_body
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise RuntimeError("Interrupted Lightwork setup needs assistance; saved files were not changed.") from exc
+
+
+def _resume_pending_setup_locked() -> bool:
+    from maverick.file_lock import atomic_write_text
+
+    bodies = _pending_setup_bodies()
+    if bodies is None:
+        return False
+    config_body, env_body = bodies
+    for path, body in ((CONFIG_FILE, config_body), (ENV_FILE, env_body)):
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(metadata.st_mode) or body is None
+                or not _wizard_file_unchanged(path, body.encode("utf-8"))):
+            raise RuntimeError("Interrupted Lightwork setup needs assistance; saved files were not changed.")
+    if env_body is not None and not ENV_FILE.exists():
+        atomic_write_text(ENV_FILE, env_body, mode=0o600)
+    if not CONFIG_FILE.exists():
+        atomic_write_text(CONFIG_FILE, config_body, mode=0o600)
+    _pending_setup_path().unlink()
+    return True
+
+
+def recover_pending_setup() -> bool:
+    """Complete an approved first install after a crash, with no new answers."""
+    from maverick.file_lock import cross_process_lock
+
+    with cross_process_lock(CONFIG_FILE, strict=True):
+        return _resume_pending_setup_locked()
+
+
+def _first_setup_guard() -> int | None:
+    try:
+        if recover_pending_setup():
+            console.print("[green]Lightwork finished the interrupted setup.[/green]")
+            return 0
+    except (OSError, RuntimeError):
+        console.print("[red]Interrupted Lightwork setup needs assistance; saved files were not changed.[/red]")
+        return 1
+    if _existing_setup():
+        _existing_setup_notice()
+        return 1
+    return None
 
 
 def _prior_consent_salt() -> str:
@@ -98,6 +223,8 @@ CHANNELS: list[tuple[str, str, list[str]]] = [
     ("telegram", "Telegram bot (free, easiest)", ["TELEGRAM_BOT_TOKEN"]),
     ("discord", "Discord bot (Gateway WS)", ["DISCORD_BOT_TOKEN"]),
     ("slack", "Slack (Socket Mode)", ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]),
+    ("teams", "Microsoft Teams (Azure Bot, needs a public HTTPS address)",
+     ["TEAMS_APP_ID", "TEAMS_APP_PASSWORD"]),
     ("signal", "Signal (via signal-cli)", []),
     ("email", "Email (IMAP/SMTP, stdlib only)", ["EMAIL_USER", "EMAIL_APP_PASSWORD"]),
     ("matrix", "Matrix (federated)", ["MATRIX_ACCESS_TOKEN"]),
@@ -155,6 +282,7 @@ STEPS: list[tuple[str, str]] = [
     ("safety", "Safety"),
     ("signed_skills", "Signed skills"),
     ("budget", "Budget"),
+    ("approvals", "Approvals"),
     ("sandbox", "Sandbox"),
     ("research_execution", "Research lab"),
     ("candidate_promotion", "Candidate promotion"),
@@ -175,6 +303,7 @@ STEPS: list[tuple[str, str]] = [
     ("assessments", "Assessment assists"),
     ("security_suite", "Security & GRC"),
     ("advanced", "Advanced reasoning"),
+    ("api_keys", "API access"),
     ("web_search", "Web search"),
     ("mcp_servers", "MCP servers"),
     ("plugins", "Plugins"),
@@ -184,6 +313,8 @@ STEPS: list[tuple[str, str]] = [
     ("analytics", "Analytics"),
     ("persona", "Persona"),
     ("notifications", "Notifications"),
+    ("deadline_alerts", "Deadline alerts"),
+    ("daily_summary", "Daily summary and chat approvals"),
     ("webhooks", "Webhooks"),
     ("a2a", "A2A"),
 ]
@@ -221,12 +352,78 @@ def _csv_list(raw: str, *, lower: bool = False) -> list[str]:
     return [x.lower() for x in items] if lower else items
 
 
+def _spending_alert_at(raw) -> list[int] | None:
+    """The wizard's spending-alert answer as ``alert_at``; None keeps the
+    default (50, 75, 100). "none" means no alerts. An answer that cannot be
+    read keeps the default rather than silently turning alerts off."""
+    from maverick.spending_alerts import DEFAULT_ALERT_AT, validate_alert_at
+
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return None
+    if text.lower() in ("none", "off", "no"):
+        return []
+    try:
+        chosen = validate_alert_at([part for part in text.replace(";", ",").split(",") if part.strip()])
+    except ValueError:
+        print("  Spending alerts: keeping 50, 75 and 100 percent (that answer could not be read).")
+        return None
+    return None if chosen == list(DEFAULT_ALERT_AT) else chosen
+
+
+def _typical_cost_min_runs(raw) -> int | None:
+    """The wizard's answer for how many finished tasks a typical cost needs;
+    None keeps the default (10). An answer that cannot be read keeps it too."""
+    from maverick.typical_cost import DEFAULT_MIN_RUNS, validate_min_runs
+
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return None
+    try:
+        chosen = validate_min_runs(text)
+    except ValueError:
+        print(f"  Typical cost: keeping {DEFAULT_MIN_RUNS} finished tasks (that answer could not be read).")
+        return None
+    return None if chosen == DEFAULT_MIN_RUNS else chosen
+
+
 def _safe_float(s: str, *, default: float) -> float:
     """``float()`` that doesn't crash on whitespace, empty, or junk input."""
     try:
         return float(str(s or "").strip())
     except (TypeError, ValueError):
         return default
+
+
+def _prompt_positive_number(question: str, *, default: str, dollars: bool = False) -> float:
+    """Keep a spending or duration answer explicit; never replace bad input."""
+    while True:
+        raw = _q_text(question, default=default).strip()
+        if dollars and raw.startswith("$"):
+            raw = raw[1:].strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            value = float("nan")
+        if math.isfinite(value) and value > 0:
+            return value
+        console.print("[yellow]Enter a number above zero (for example, $10).[/yellow]")
+
+
+def _prompt_positive_dollars(question: str, *, default: str) -> float:
+    return _prompt_positive_number(question, default=default, dollars=True)
+
+
+def _prompt_positive_integer(question: str, *, default: str) -> int:
+    while True:
+        raw = _q_text(question, default=default).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+        console.print("[yellow]Enter a whole number above zero.[/yellow]")
 
 
 # ---------- prompt primitives ----------
@@ -282,6 +479,12 @@ def _q_secret(message: str) -> str:
     return _ask(questionary.password(message)) or ""
 
 
+def _employee_activation_job_choices() -> list[str]:
+    from maverick.config import EMPLOYEE_ACTIVATION_JOBS
+    chosen = _q_checkbox("Which first-job guides may employees use within their existing access?", list(EMPLOYEE_ACTIVATION_JOBS.values()), default=list(EMPLOYEE_ACTIVATION_JOBS.values()))
+    return [key for key, label in EMPLOYEE_ACTIVATION_JOBS.items() if label in chosen]
+
+
 def _q_checkbox(message: str, choices: list[str], default: list[str] | None = None) -> list[str]:
     if questionary is None:
         print(f"{message} (comma-separated numbers, blank = none)")
@@ -318,6 +521,12 @@ def _q_confirm(message: str, default: bool = True) -> bool:
 # ---------- preflight ----------
 
 
+_FILE_WORK_RECOVERY = (
+    "Start Docker or Podman, then open Lightwork > Permissions > Where work "
+    "runs, choose its container, and select Allow file work."
+)
+
+
 def preflight() -> bool:
     """Check the environment before asking any questions.
 
@@ -345,7 +554,8 @@ def preflight() -> bool:
         console.print(f"[red]✗[/red] Can't write to {CONFIG_DIR}: {e}")
         all_ok = False
 
-    # Docker (advisory only -- only matters if user picks docker sandbox)
+    # Docker availability determines whether the simple setup can safely
+    # offer file changes and command execution in an isolated work area.
     if shutil.which("docker"):
         try:
             subprocess.run(
@@ -357,12 +567,15 @@ def preflight() -> bool:
             console.print("[green]✓[/green] Docker is running")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             console.print(
-                "[yellow]![/yellow] Docker installed but daemon isn't responding "
-                "(only matters if you pick the docker sandbox)"
+                "[yellow]![/yellow] Docker isn't running. Simple setup will keep "
+                "file changes and program execution off until an isolated work area is available. "
+                + _FILE_WORK_RECOVERY
             )
     else:
         console.print(
-            "[yellow]![/yellow] Docker not installed (only matters if you pick the docker sandbox)"
+            "[yellow]![/yellow] Docker is not installed. Simple setup will keep "
+            "file changes and program execution off until an isolated work area is available. "
+            + _FILE_WORK_RECOVERY
         )
 
     return all_ok
@@ -656,8 +869,9 @@ def welcome() -> None:
             "[bold]Lightwork installer[/bold]\n\n"
             "Next you'll pick a setup mode: a quick consumer flow (a few\n"
             "questions, safe defaults) or advanced (configure every model,\n"
-            "channel, safety level, and budget). Re-run any time with\n"
-            "[bold]maverick init[/bold].",
+            "channel, safety level, and budget). After setup, use Lightwork\n"
+            "Settings for supported changes.\n\n"
+            f"Setup will be saved at {CONFIG_FILE}.",
             border_style="cyan",
         )
     )
@@ -670,8 +884,8 @@ def pick_deployment() -> str:
         "vps      - Remote server you own (always-on)",
         "phone    - Phone companion (Lightwork runs on desktop/VPS; phone is a frontend)",
     ]
-    # Default to the previously recorded target on a re-run of `maverick init`
-    # (what [deployment] type was written for).
+    # Preview the previously recorded target when this step is called directly;
+    # the setup entry points will not replace an existing installation.
     default = None
     try:
         from maverick.config import get_deployment
@@ -793,6 +1007,7 @@ _ALLOWLIST_CHANNELS = {
     "telegram",
     "discord",
     "slack",
+    "teams",
     "signal",
     "email",
     "matrix",
@@ -810,6 +1025,7 @@ _ALLOWLIST_HINT = {
     "telegram": "numeric Telegram user IDs",
     "discord": "numeric Discord user IDs",
     "slack": "Slack user IDs, e.g. U01ABC",
+    "teams": "Microsoft Entra object IDs of the people allowed, e.g. 12345678-abcd-abcd-abcd-1234567890ab",
     "signal": "phone numbers, e.g. +12345550199",
     "email": "email addresses",
     "matrix": "MXIDs, e.g. @you:matrix.org",
@@ -839,12 +1055,39 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
     elif ch_id == "slack":
         cfg["app_token"] = "${SLACK_APP_TOKEN}"
         cfg["bot_token"] = "${SLACK_BOT_TOKEN}"
+    elif ch_id == "teams":
+        cfg["app_id"] = "${TEAMS_APP_ID}"
+        cfg["app_password"] = "${TEAMS_APP_PASSWORD}"
+        cfg["tenant_id"] = _q_text(
+            "  Microsoft Entra tenant ID (blank only for a multi-tenant app registration)",
+            default="",
+        ).strip()
+        cfg["port"] = _safe_int(_q_text("  Webhook port (forward /webhook/teams here)", default="8771"),
+                                default=8771)
+        cfg["approvals_enabled"] = _q_confirm(
+            "  Let linked approvers decide approval requests from Teams cards?", default=False,
+        )
+        console.print(
+            "  [dim]Register the bot in Azure and point its messaging endpoint at "
+            "https://<your address>/webhook/teams. Steps: docs/channels/teams.md[/dim]"
+        )
     elif ch_id == "signal":
         cfg["phone_number"] = _q_text("  Signal phone number (e.g., +12345550199)", default="")
     elif ch_id == "email":
+        from maverick.mail_auth import valid_trusted_mail_server
+
         cfg["imap_host"] = _q_text("  IMAP server", default="imap.gmail.com")
         cfg["smtp_host"] = _q_text("  SMTP server", default="smtp.gmail.com")
         cfg["smtp_port"] = _safe_int(_q_text("  SMTP port", default="465"), default=465)
+        trusted_server = _q_text(
+            "  Server that checks incoming senders (ask your mail administrator; blank leaves Email off)",
+            default="",
+        ).strip()
+        if valid_trusted_mail_server(trusted_server):
+            cfg["trusted_authserv_id"] = trusted_server.lower()
+        else:
+            cfg["enabled"] = False
+            console.print("  [yellow]Email stays off until you set the incoming sender-check server on the Channels page.[/yellow]")
         cfg["imap_user"] = "${EMAIL_USER}"
         cfg["imap_password"] = "${EMAIL_APP_PASSWORD}"
         cfg["smtp_user"] = "${EMAIL_USER}"
@@ -868,7 +1111,7 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
     elif ch_id == "voice":
         provider = (
             _q_text(
-                "  Voice provider (vapi, retell, bland)",
+                "  Phone service (vapi or retell for conversations; bland for outgoing calls only)",
                 default="vapi",
             )
             .strip()
@@ -886,20 +1129,24 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
         # / ${BLAND_API_KEY} that the user was never asked to enter.
         envs.add(key_env)
         cfg["api_key"] = "${" + key_env + "}"
-        # Inbound webhook auth is Vapi-shaped today; keep the token ref.
+        # Existing installation secret name; both supported services use the
+        # same explicitly configured private Bearer check key.
         cfg["webhook_token"] = "${VAPI_WEBHOOK_TOKEN}"
         cfg["phone_number"] = _q_text(
-            "  Phone number (E.164, optional)",
+            "  Phone number (starts with + and the country code, optional)",
             default="",
         )
         cfg["assistant_id"] = _q_text(
-            "  Assistant/agent ID (optional)",
+            "  Saved assistant ID from Vapi, or saved agent ID from Retell",
             default="",
         )
         cfg["port"] = _safe_int(
             _q_text("  Webhook port", default="8770"),
             default=8770,
         )
+        console.print("  Finish the provider's function form in Settings > All settings > Set up phone conversations. "
+                      "The hosted Lightwork address receives supported requests; no transcript notification starts work. "
+                      "A permitted number does not grant company sign-in or a role.")
     elif ch_id == "whatsapp":
         cfg["account_sid"] = "${TWILIO_ACCOUNT_SID}"
         cfg["auth_token"] = "${TWILIO_AUTH_TOKEN}"
@@ -938,7 +1185,7 @@ def _channel_allowlist(ch_id: str, cfg: dict[str, Any]) -> None:
             )
     elif ch_id == "voice":
         raw = _q_text(
-            "  Allowed caller numbers (E.164, comma-separated; blank = any authenticated caller)",
+            "  Permitted caller numbers (+countrycode, comma-separated; blank refuses all callers)",
             default="",
         )
         callers = _csv_list(raw)
@@ -1072,35 +1319,124 @@ def pick_signed_skills() -> dict[str, Any]:
     }
 
 
+def pick_approvals() -> dict[str, Any]:
+    """``[approval]``: the undo window, the high-risk confirmation and who
+    approves a risky action the requester asked for.
+
+    The Approvals page is the human-in-command loop: a decision can be undone
+    for ``undo_grace_seconds`` (the agent waits that long before acting),
+    approving a high or critical risk request needs an explicit confirmation,
+    and ``separate_approver`` says whether someone other than the person who
+    asked must approve it (default: whenever another approver is available).
+    """
+    console.print()
+    console.print(
+        "[dim]Risky actions wait on the Approvals page for a person for up to 30 "
+        "minutes; after 10 minutes the people who can decide get one in-app "
+        "reminder, and with no decision in time the action is refused. A decision "
+        "can be undone for a short while; the agent only acts once that window "
+        "has passed.[/dim]"
+    )
+    undo_seconds = _safe_int(
+        _q_text("  Seconds a decision can be undone (0 = act at once)", default="30"),
+        default=30,
+    )
+    require_ack = _q_confirm(
+        "  Ask for an explicit confirmation before approving high or critical risk "
+        "requests? (a ticked box for high, typing APPROVE for critical)",
+        default=True,
+    )
+    separate = _q_select(
+        "  Who approves a high or critical risk action someone asked for?",
+        [
+            "when_available - Someone else, whenever another approver is available (default).",
+            "always         - Always someone else, even if the request then waits and expires.",
+            "never          - The person who asked may approve it.",
+        ],
+        default="when_available - Someone else, whenever another approver is available (default).",
+    ).split()[0]
+    record_checks = _q_confirm(
+        "  Keep a record of each approval check (when, risk, kind of action, agent and "
+        "outcome; never the content) so you can preview a threshold change later?",
+        default=True,
+    )
+    retention = _safe_int(
+        _q_text("  Days to keep that record", default="90"), default=90,
+    ) if record_checks else 90
+    return {
+        "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
+        "require_acknowledgement": bool(require_ack),
+        "separate_approver": separate,
+        "record_checks": bool(record_checks),
+        "check_retention_days": max(1, min(retention, 3650)),
+    }
+
+
 def pick_budget() -> dict[str, Any]:
     console.print()
     console.print("[dim]Task limits are optional. Organization spending controls still apply.[/dim]")
-    enabled = _q_confirm("  Add spending, time or tool-count limits to each task?", default=False)
-    budget: dict[str, Any] = {
-        "max_dollars": _safe_float(
-            _q_text("  Max $ per run", default="5.0"),
-            default=5.0,
-        ),
-        "max_wall_seconds": _safe_float(
-            _q_text("  Max wall-clock seconds per run", default="3600"),
-            default=3600.0,
-        ),
-        "max_tool_calls": _safe_int(
-            _q_text("  Max tool calls per run", default="500"),
-            default=500,
-        ),
-    } if enabled else {}
-    # Billing-grade accounting is the safe default. Preserve an explicit false
-    # for legacy/custom gateways, where estimates remain provenance-labelled.
-    budget["strict_pricing"] = _q_confirm(
-        "  Strict pricing? Fail closed if a model has no verified price "
-        "(recommended; choose No only for estimate-only custom gateways)",
+    enabled = _q_confirm(
+        "  Use task limits? Standard goals stop at $2 and 30 minutes; choose No for no task limit.",
         default=True,
     )
+    budget: dict[str, Any] = {
+        "max_dollars": _prompt_positive_dollars("  Max $ per run", default="2.0"),
+        "max_wall_seconds": _prompt_positive_number(
+            "  Max wall-clock seconds per run", default="1800"
+        ),
+        "max_tool_calls": _prompt_positive_integer("  Max tool calls per run", default="500"),
+    } if enabled else {"task_limits_enabled": False}
+    # Keep the safe default and explain the in-product recovery for a private
+    # rate. The legacy estimate mode remains an explicit operator choice.
+    budget["strict_pricing"] = _q_confirm(
+        "  Require a reviewed price before paid AI work? Recommended. "
+        "You can add your contract's spending ceiling in Settings after installation. "
+        "Choose No only if you accept that dollar limits may be under-counted",
+        default=True,
+    )
+    budget["guidance"] = _q_confirm(
+        "  Show known budget headroom before work? This never changes execution limits.", default=True)
+    budget["warnings"] = _q_confirm(
+        "  Show in-product warnings as tasks approach their limits?", default=True)
+    if budget["warnings"]:
+        import math
+        while True:
+            raw_thresholds = _q_text("  Warning thresholds, as fractions of the limit", default="0.8, 0.95, 1.0")
+            try:
+                values = [float(part.strip()) for part in raw_thresholds.split(",")]
+                if not 1 <= len(values) <= 10 or any(not math.isfinite(value) or not 0 < value <= 1 for value in values):
+                    raise ValueError
+            except (TypeError, ValueError):
+                console.print("[yellow]Enter one to ten finite numbers above 0 and at most 1, separated by commas.[/yellow]")
+                continue
+            budget["warning_thresholds"] = sorted(set(values))
+            break
     return budget
 
 
-def pick_capabilities() -> dict[str, bool]:
+def _pick_agent_budget_reporting() -> dict[str, float]:
+    """The same bounded startup choices offered in All settings."""
+    console.print("[dim]Keep part of a task's dollar limit for its final answer. "
+                  "Running-spending updates do not change how charges or limits are counted.[/dim]")
+    choices = {}
+    for field, question, default, maximum in (
+        ("synthesis_reserve", "  Budget kept for the final answer, as a percentage (0–100; zero keeps no reserve)", "25", 100),
+        ("spend_mirror_interval", "  Refresh recorded running spending every how many seconds (0–300; zero updates every step)", "5", 300),
+    ):
+        while True:
+            try:
+                value = float(_q_text(question, default=default).strip())
+                if not math.isfinite(value) or not 0 <= value <= maximum:
+                    raise ValueError
+            except ValueError:
+                console.print(f"[yellow]Enter a number from 0 to {maximum}.[/yellow]")
+                continue
+            choices[field] = value / 100 if field == "synthesis_reserve" else value
+            break
+    return choices
+
+
+def pick_capabilities() -> dict[str, Any]:
     """Opt-in to high-impact tools that ship disabled.
 
     Computer-use, browser, ROS robotics, and code-exec tools have real safety
@@ -1144,6 +1480,16 @@ def pick_capabilities() -> dict[str, bool]:
         "connector schema offered on every turn.",
         default=True,
     )
+    # [tools] exposure: what each request describes up front. The short list
+    # is role-aware (about 30-40 tools; a specialist pack sees its own allow
+    # list) and the rest is one find_tools call away; every tool means the
+    # previous ~240-tool catalog (~47k tokens) on every turn.
+    _exposure_short = "Show agents a short tool list and let them look up the rest (recommended)"
+    _exposure_full = "Show every tool on every request (costs far more per task)"
+    tool_exposure = "core" if _q_select(
+        "How much of the tool list should each request to the AI describe?",
+        [_exposure_short, _exposure_full], default=_exposure_short,
+    ) == _exposure_short else "full"
     jd_hiring = _q_confirm(
         "Enable JD hiring in the Agent Factory? HR can upload a job "
         "description to match it against the specialist roster or draft a "
@@ -1151,6 +1497,9 @@ def pick_capabilities() -> dict[str, bool]:
         "human approval to save).",
         default=True,
     )
+    require_passing_tests = pick_agent_publish_gate()
+    practice_mode = pick_practice_mode()
+    practice_cap = pick_practice_spend_cap() if practice_mode else 1.0
     return {
         "computer_use": use_computer,
         "browser": use_browser,
@@ -1158,8 +1507,58 @@ def pick_capabilities() -> dict[str, bool]:
         "code_exec": use_code_exec,
         "embedded_flash": embedded_flash,
         "deferred_tools": deferred_tools,
+        "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
+        "require_passing_tests": require_passing_tests,
+        "practice_mode": practice_mode,
+        "practice_daily_spend_cap": practice_cap,
     }
+
+
+def pick_practice_mode() -> bool:
+    """Offer practice mode. ON by default.
+
+    People can switch to a separate practice workspace to try tasks,
+    specialists and approvals; anything that would leave Lightwork is
+    recorded instead of sent, and a marker shows on every screen. Written
+    under ``[practice]`` as ``enable`` only when turned off.
+    """
+    return _q_confirm(
+        "Offer practice mode? People can try tasks, specialists and approvals in "
+        "a separate practice workspace where nothing is sent, paid or changed.",
+        default=True,
+    )
+
+
+def pick_practice_spend_cap() -> float:
+    """Daily practice spending cap per person, in dollars. 1.00 by default.
+
+    AI answers in practice are real provider calls that cost real money; they
+    are counted apart from real spending limits and capped by this amount
+    (never more than a real limit that applies). Written under ``[practice]``
+    as ``daily_spend_cap`` only when changed.
+    """
+    return _prompt_positive_dollars(
+        "  Practice spending cap per person per day, in dollars (AI answers in practice "
+        "still cost real money, counted apart from real spending limits)",
+        default="1.00",
+    )
+
+
+def pick_agent_publish_gate() -> bool:
+    """Agent Factory publish gate. ON by default.
+
+    Changed instructions for an agent or specialist are published only after
+    every saved test passes on exactly those instructions; publishing anyway
+    needs a reason that goes to the activity record. Written under
+    ``[agent_factory]`` as ``require_passing_tests`` only when turned off.
+    """
+    return _q_confirm(
+        "Require passing tests before changed agent or specialist instructions "
+        "are published? (Someone can still publish without them by giving a "
+        "reason, which is recorded.)",
+        default=True,
+    )
 
 
 def pick_self_learning() -> dict[str, Any]:
@@ -1375,8 +1774,8 @@ def pick_automation_import() -> dict[str, Any]:
     if not enable:
         return {"enable": False}
     create_schedules = _q_confirm(
-        "  Auto-create Lightwork schedules for imported cron triggers? "
-        "(off = import the template, you activate the schedule yourself)",
+        "  Offer to recreate imported schedules (each reviewed after its draft is published)? "
+        "(off = import the draft, then schedule it yourself in Automations)",
         default=False,
     )
     return {"enable": True, "create_schedules": create_schedules}
@@ -1407,13 +1806,15 @@ def _pick_action_recipe_lineage() -> dict[str, Any]:
     enabled = _q_confirm(
         "Enable signed reviewed evidence for action recipes? "
         "Service signatures attest recorded reviews, not personal reviewer signatures. "
-        "Copied business data needs explicit retention consent; current eligibility is checked before actions.",
+        "Copied business data needs explicit retention consent; current eligibility is checked before actions. "
+        "Older unsigned learned flows may stop until rebuilt from permitted signed examples.",
         default=False,
     )
     out: dict[str, Any] = {"action_recipe_lineage": enabled}
     out["require_action_recipe_lineage"] = _q_confirm(
         "Require governed reviewed lineage for every learned action recipe? "
-        "This blocks raw or stripped-lineage recipes at save, publication and execution.",
+        "This blocks raw or stripped-lineage recipes at save, publication and execution. "
+        "Example capture or signed evidence also blocks them even if this choice is off.",
         default=False,
     )
     if out["require_action_recipe_lineage"] and not enabled:
@@ -1494,7 +1895,8 @@ def pick_flows() -> dict[str, Any]:
     )
     out["action_episode_capture"] = _q_confirm(
         "Enable retaining workflow examples for learning? "
-        "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+        "Each run needs enrollment, encrypted storage, an expiry and a separate human review. "
+        "Older unsigned learned flows may stop until rebuilt from permitted signed examples.",
         default=False,
     )
     out["action_workflow_learning"] = _q_confirm(
@@ -1516,16 +1918,24 @@ def pick_flows() -> dict[str, Any]:
         default=False,
     )
     out.update(_pick_action_recipe_lineage())
+    from maverick.flow.ir import MAX_FLOW_NODE_RETRIES
+
     console.print(
-        "[dim]Retries can recover transient agent/tool failures, but every retry "
-        "can spend provider budget or repeat side effects. Keep the per-node cap "
-        "small unless operations explicitly need more.[/dim]"
+        "[dim]Retries can recover temporary failures, but each attempt can spend "
+        "money or repeat earlier changes. Choose the smallest number you need.[/dim]"
     )
-    retry_cap = _q_text("Max retries per flow node", default="5").strip()
-    try:
-        out["max_node_retries"] = max(0, min(50, int(retry_cap or "5")))
-    except ValueError:
-        out["max_node_retries"] = 5
+    while True:
+        try:
+            retry_cap = int(_q_text(
+                f"Retries for each workflow step (0–{MAX_FLOW_NODE_RETRIES}; zero turns retries off)",
+                default="5",
+            ).strip())
+        except ValueError:
+            retry_cap = -1
+        if 0 <= retry_cap <= MAX_FLOW_NODE_RETRIES:
+            out["max_node_retries"] = retry_cap
+            break
+        console.print(f"[yellow]Enter a whole number from 0 to {MAX_FLOW_NODE_RETRIES}.[/yellow]")
     console.print(
         "[dim]For actionable channel approvals (clickable Approve/Reject links), "
         "the dashboard needs its externally-reachable base URL. Leave blank to "
@@ -1574,6 +1984,10 @@ def pick_knowledge() -> dict[str, Any]:
     if not _q_confirm("Enable per-domain knowledge RAG?", default=False):
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
+    out["reindex_jobs"] = _q_confirm("Enable bounded search index rebuilds with review, progress and cancellation? Paid embedding requires verified cost admission.", default=False)
+    if out["reindex_jobs"]:
+        out["reindex_max_dollars"] = min(1000.0, max(0.0, _safe_float(
+            _q_text("Maximum provider reservation per rebuild (USD, at reviewed standard rates; 0 permits local only)", default="5.0"), default=5.0)))
     embedder = _q_select(
         "  Embedder:",
         [
@@ -1901,6 +2315,10 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "disabled until separately enrolled.",
             default=False,
         )
+        consent_delivery_worker = consent_delivery and _q_confirm(
+            "Run automatic consent delivery for subscriptions separately reviewed in Lightwork? "
+            "No destination is authorized by this installation choice.", default=False,
+        )
         consent_destination_config: dict[str, Any] | None = None
         if consent_delivery and _q_confirm(
             "Configure named Salesforce, Marketo, Adobe Experience Platform, "
@@ -2148,6 +2566,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             **({"native_sdk": consent_native_sdk} if consent_native_sdk is not None else {}),
             "delivery": {
                 "enable": consent_delivery,
+                "worker": {"enable": bool(consent_delivery_worker)},
                 **(
                     {"destinations": consent_destination_config}
                     if consent_destination_config is not None
@@ -2417,6 +2836,13 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "registered-broker interoperability remain separately operated.",
             default=False,
         )
+    privacy_public_rights_form = _q_confirm(
+        "Let people submit privacy requests from your website? Publishes a "
+        "public request form per site or app; requesters confirm their email "
+        "address before a request opens, and deadlines follow the law they "
+        "choose (needs the platform email account for the confirmation link).",
+        default=False,
+    )
     privacy_notice_governance = _q_confirm(
         "Enable governed Privacy Automation notice approvals and publication "
         "intents? Notice content stays external and publication remains local "
@@ -2613,6 +3039,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         or privacy_ott_ctv_rights
         or privacy_drop_management
         or privacy_notice_governance
+        or privacy_public_rights_form
     ):
         data_discovery_config: dict[str, Any] = {"enable": privacy_data_discovery}
         if privacy_discovery_adapter_providers:
@@ -2688,6 +3115,21 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
                 "scheduler_jitter_seconds": 60,
                 "scheduler_retry_max_seconds": 900,
             },
+            **(
+                {
+                    "public_rights_form": {
+                        "enable": True,
+                        "verification_ttl_hours": 24,
+                        "status_ttl_days": 90,
+                        "requests_per_ip_per_hour": 5,
+                        "requests_per_email_per_day": 3,
+                        "internal_target_days": 30,
+                        "max_message_chars": 4000,
+                    }
+                }
+                if privacy_public_rights_form
+                else {}
+            ),
             "notice_governance": {
                 "enable": privacy_notice_governance,
                 **(
@@ -3304,13 +3746,9 @@ def pick_security_suite() -> dict[str, Any]:
         "runtime receipts? Raw runtime content is never persisted by this plane.",
         default=False,
     )
-    ai_cloud_agent_governance = _q_confirm(
-        "Enable named AWS Bedrock, Azure AI Foundry, and Google Vertex AI agent "
-        "inventory, observability, and policy-enforcement intents? This enables "
-        "the required inventory, policy, and runtime-guardrail authorities but "
-        "does not install credentials or claim provider writes.",
-        default=False,
-    )
+    # The canonical cloud-agent authority is not durable in the shipped
+    # runtime. A wizard toggle would write an enabled config that cannot run.
+    ai_cloud_agent_governance = False
     databricks_ai_security_framework = False
     if ai_cloud_agent_governance:
         ai_inventory = True
@@ -4074,6 +4512,119 @@ def pick_oidc() -> dict[str, Any]:
     return result
 
 
+def pick_sign_in_security(sso_enabled: bool) -> dict[str, Any]:
+    """The "Sign-in security" step: require a second factor, how recent it
+    must be for sensitive actions, and the network addresses allowed in.
+
+    Returns a dict the writer emits as ``[auth.mfa]`` and
+    ``[auth.ip_allowlist]``; ``{}`` when nothing was chosen (so the writer
+    emits nothing and the kernel defaults -- off, 15 minutes, everyone --
+    apply). Off by default for compatibility.
+    """
+    console.print(
+        "[dim]Sign-in security. With company sign-in, Lightwork can insist that "
+        "the provider confirmed a second factor (authenticator app, security key "
+        "or code) and ask for a recent one before sensitive actions such as "
+        "changing roles or turning off the emergency stop. You can also limit "
+        "which network addresses may reach Lightwork at all. All OFF by "
+        "default.[/dim]"
+    )
+    result: dict[str, Any] = {}
+    if _q_confirm("Set browser sign-in time limits? You can change them later in Settings.", default=False):
+        result["idle_minutes"] = max(0, min(1440, _safe_int(
+            _q_text("  Sign out inactive browsers after (minutes, zero turns the limit off)", default="30"),
+            default=30,
+        )))
+        if sso_enabled:
+            result["company_hours"] = max(0, min(168, _safe_int(
+                _q_text("  Maximum company sign-in length (hours, zero keeps the existing limit)", default="8"),
+                default=8,
+            )))
+    if sso_enabled and _q_confirm(
+        "Require sign-in with a second factor?", default=False
+    ):
+        result["require"] = True
+        minutes = _safe_int(
+            _q_text(
+                "  Sensitive actions need a second factor no older than (minutes)",
+                default="15",
+            ),
+            default=15,
+        )
+        result["step_up_minutes"] = max(1, min(minutes, 1440))
+    cidrs = _csv_list(
+        _q_text(
+            "Network addresses or ranges allowed to reach Lightwork "
+            "(comma-separated, empty = everyone; include the address you use)",
+            default="",
+        )
+    )
+    if cidrs:
+        import ipaddress
+
+        bad = [c for c in cidrs if _bad_network(c, ipaddress)]
+        while bad:
+            console.print(
+                f"[yellow]Not a network address or range: {', '.join(bad)}[/yellow]"
+            )
+            cidrs = _csv_list(_q_text("  Allowed addresses or ranges", default=""))
+            bad = [c for c in cidrs if _bad_network(c, ipaddress)]
+        if cidrs:
+            result["cidrs"] = cidrs
+    return result
+
+
+def _bad_network(text: str, ipaddress) -> bool:
+    try:
+        ipaddress.ip_network(text, strict=False)
+    except ValueError:
+        return True
+    return False
+
+
+def pick_api_keys() -> dict[str, Any]:
+    """API access for scripts and integrations: personal and service-account
+    keys with scopes, an expiry date and rotation.
+
+    On by default (a key only exists once a signed-in person creates one).
+    Returns the ``[dashboard]`` keys ``api_keys`` and, when changed from the
+    defaults, ``api_key_default_days`` / ``api_key_max_days`` /
+    ``api_key_rotation_grace_hours``; read by ``maverick.config.api_key_settings``.
+    """
+    console.print(
+        "[dim]API access for scripts and integrations: people create their own "
+        "keys on their account page, and administrators create service accounts "
+        "for programs. A key does only what its scopes allow and never more than "
+        "its owner's role, stops on its expiry date, and can be rotated or "
+        "revoked at any time. The shared server token stays as break-glass "
+        "access only.[/dim]"
+    )
+    result: dict[str, Any] = {
+        "api_keys": _q_confirm("Allow API keys for scripts and integrations?", default=True),
+    }
+    if not result["api_keys"]:
+        return result
+    default_days = _safe_int(
+        _q_text("  How many days should a new key last unless the person picks fewer?", default="90"),
+        default=90,
+    )
+    max_days = _safe_int(
+        _q_text("  The longest a key may last, in days", default="365"),
+        default=365,
+    )
+    grace_hours = _safe_int(
+        _q_text("  After rotating a key, how many hours should the old one keep working?", default="24"),
+        default=24,
+    )
+    if default_days != 90:
+        result["api_key_default_days"] = max(1, min(default_days, 3650))
+    if max_days != 365:
+        result["api_key_max_days"] = max(1, min(max_days, 3650))
+    if grace_hours != 24:
+        result["api_key_rotation_grace_hours"] = max(0, min(grace_hours, 720))
+    return result
+
+
 def _ask_external_agent_followups(advanced: dict[str, Any]) -> None:
     """The external-agent gateway's follow-up questions (gateway already on).
 
@@ -4236,15 +4787,39 @@ def _pick_swarm_scale(advanced: dict[str, Any]) -> None:
                 default="16"), default=16))
 
 
+def _pick_image_edit_models() -> dict[str, str]:
+    """The same optional model choices offered after installation."""
+    from maverick.image_edit_models import CHOICES, validate_model
+
+    if not _q_confirm(
+        "Choose models for hosted image edits now? You can change them later in "
+        "All settings > AI models > Images. Replicate image edits may cost money; "
+        "setup makes no images.", default=False,
+    ):
+        return {}
+    choices = {}
+    for field, _env, label in CHOICES:
+        while True:
+            value = _q_text(label + " (blank keeps the built-in choice)", default="").strip()
+            try:
+                choices[field] = validate_model(value)
+                break
+            except ValueError as exc:
+                console.print(str(exc), style="yellow")
+    return choices
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
     Governed learning choices default on; higher-authority or infrastructure
-    features retain explicit opt-ins. All are editable later in
-    ~/.maverick/config.toml.
+    features retain explicit opt-ins. Many have reviewed in-product controls;
+    deployment-only choices require a separate administrator change.
     """
     console.print()
     advanced: dict[str, Any] = {
+        "agent_budget_reporting": _pick_agent_budget_reporting(),
+        "image_edit": _pick_image_edit_models(),
         "cost_aware": _q_confirm(
             "Cost-aware routing? Use the cheapest capable model per role to cut spend.",
             default=False,
@@ -4336,6 +4911,16 @@ def pick_advanced() -> dict[str, Any]:
             "then recalled into that model's system prompt. Inspect or roll it "
             "back any time with `maverick self-harness`. ON by default.",
             default=True,
+        ),
+        "approval_challenges": _q_confirm(
+            "Allow fictional approval challenges and isolated local checks? Uses disposable local requests, "
+            "no customer credentials and no AI calls. Each check and shared file needs separate review; "
+            "no live approval rule is activated. OFF by default.", default=False,
+        ),
+        "instruction_capture": _q_confirm(
+            "Allow private instruction recording on this local installation? Each person must separately authorize "
+            "one task's next completed model call. It records instruction text, makes no extra AI call, "
+            "and does not enable learning. OFF by default.", default=False,
         ),
         "fleet_memory": _q_confirm(
             "Fleet memory? Let EXTERNAL agents (Agentforce, Copilot, custom) "
@@ -4435,6 +5020,7 @@ def pick_advanced() -> dict[str, Any]:
             "retrieval). Every decision is audited. OFF by default.",
             default=False,
         ),
+        "fact_tags": _q_confirm("Organize shared business facts with tags? Tags do not change access.", default=False),
         "temporal_memory": _q_confirm(
             "Temporal memory? Keep a bitemporal history of every fact (validity "
             "windows) instead of overwriting -- answer 'what did we believe on "
@@ -4601,6 +5187,40 @@ def pick_advanced() -> dict[str, Any]:
             "weaken the safety envelope. Turn off to lock the agent roster.",
             default=True,
         ),
+        "allow_runtime_configuration_status": _q_confirm(
+            "Show saved versus startup-acknowledged configuration for running services? Missing or stale service evidence remains unconfirmed.", default=True,
+        ),
+        "allow_employee_task_diagnostics": _q_confirm(
+            "Show employees bounded diagnostics and support guidance for their own tasks? No additional record access is granted.", default=True,
+        ),
+        "employee_activation_jobs": _employee_activation_job_choices(),
+        "allow_employee_activation": _q_confirm(
+            "Guide signed-in employees through readiness checks and their first allowed task? Existing policy and budget limits still apply.", default=True,
+        ),
+        "allow_configuration_profiles": _q_confirm(
+            "Allow reviewed, secret-free configuration profiles and outcome presets? "
+            "Import previews every change and keeps current policy checks.", default=True,
+        ),
+        "allow_conversation_inbox": _q_confirm(
+            "Let people add guidance, queue their next message or start separate work while a task runs? On by default. "
+            "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
+            default=True,
+        ),
+        "allow_human_conversation_handoffs": _q_confirm(
+            "Allow reviewed human help inside Chat? People select an on-duty helper "
+            "and review the brief they share. AI pauses before the helper takes over; "
+            "returning to AI is a separate choice. Off by default.", default=False,
+        ),
+        "allow_chat_message_actions": _q_confirm(
+            "Let people try another answer, edit and resend a message, or branch from an earlier answer? "
+            "The original conversation is kept. Alternatives use current access and spending limits; "
+            "connected actions require a separate review.", default=True,
+        ),
+        "allow_personal_preferences": _q_confirm(
+            "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
+            "Personal choices never grant tools or change security or retention policy.",
+            default=True,
+        ),
         "allow_draft_recovery": _q_confirm(
             "Keep encrypted recovery copies of unfinished dashboard work? "
             "Copies are private to each account and workspace. Credentials and "
@@ -4619,9 +5239,11 @@ def pick_advanced() -> dict[str, Any]:
             default=True,
         ),
         "allow_workspace_recovery": _q_confirm(
-            "Enable administrator workspace snapshots and isolated local restore? "
-            "Requires a separately kept recovery key. External stores and shared "
-            "administration need their own recovery procedures.",
+            "Enable administrator recovery of local work and retained installation "
+            "safety settings? Workspace snapshots need a separately kept recovery key. "
+            "Settings restoration uses verified saved copies and never resets an "
+            "unreadable policy. External stores and other shared administration "
+            "are excluded.",
             default=False,
         ),
         "allow_action_center": _q_confirm(
@@ -4642,14 +5264,114 @@ def pick_advanced() -> dict[str, Any]:
             "Assigned workspace reviewers cannot execute or sign off the live task.",
             default=False,
         ),
+        "allow_work_details": _q_confirm(
+            "Enable named business fields and stages for tasks and security records? "
+            "Your team sets them up in the app and reviews each save. Business labels do not execute or approve work.",
+            default=True,
+        ),
+        "allow_task_handoffs": _q_confirm(
+            "Enable named task handoffs with explicit recipient acceptance, selected evidence and a new-work ceiling? Requires selected deliverable bundles.",
+            default=False,
+        ),
+        "allow_deliverable_bundles": _q_confirm(
+            "Enable selected deliverable bundles with named recipient access, separate human acceptance and offline verification?",
+            default=False,
+        ),
+        "allow_project_workspaces": _q_confirm(
+            "Enable project workspaces with explicit outcomes, milestones and reviewed source context? "
+            "Only explicitly chosen colleagues see planning metadata; private tasks and review packets keep separate access rules.",
+            default=False,
+        ),
+        "allow_employee_companions": _q_confirm(
+            "Enable personal companions for employees enrolled by a workspace "
+            "administrator, with own-task status and optional AI drafts? An "
+            "administrator must permit drafts for each employee. The configured "
+            "AI service receives messages, eligible retained history and permitted "
+            "own-task titles and status. Administrators manage policy and audit "
+            "metadata, without access to private companion history. Companions "
+            "cannot take task actions or use connected sources.",
+            default=False,
+        ),
+        "allow_personal_data_controls": _q_confirm(
+            "Enable My Data, owned-memory controls and verified channel linking? Sharing stays off until the employee chooses it.",
+            default=False,
+        ),
+        "allow_employee_content_access_requests": _q_confirm(
+            "Employee tasks and chats are private to their owner. Enable exceptional "
+            "task/export reads and exact approval-card reads with a separate reviewer, a stated purpose, "
+            "expiry within one hour and a recorded receipt for each read?", default=False,
+        ),
+        "allow_permission_access_requests": _q_confirm(
+            "Enable named employees to request permission reviews from the responsible administrator? Requests never grant access automatically.", default=False,
+        ),
+        "allow_employee_departures": _q_confirm(
+            "Enable reviewed employee-departure controls? Named installation administrators "
+            "can deactivate accounts, remove reviewed local credentials, retire recurring schedules "
+            "and record handoff owners. Closure retains data, holds and explicit named responsibility "
+            "for running work and unverified external outcomes.", default=False,
+        ),
         "allow_outcome_measurement": _q_confirm(
             "Enable measured workflow pilots with paired baseline observations "
             "and explicit accepted outcomes? No savings are assumed.", default=False,
+        ),
+        "allow_commitment_viability": _q_confirm(
+            "Enable a local promise-planning pilot based on the orders, capacity and stock "
+            "your team enters? It suggests decisions but does not reserve anything with suppliers.",
+            default=False,
         ),
         "allow_signing_identity_transition": _q_confirm(
             "Permit installation administrators to review dual-signed publisher or "
             "update-key bridge releases in isolated recovery mode? This is a new "
             "trust decision for all local workspaces; ordinary updates do not need it.",
+            default=False,
+        ),
+        "allow_work_restructuring": _q_confirm(
+            "Enable share preparation safely? Check exact shared preparation across permitted original local cases, with separate complete results and deadlines.",
+            default=False,
+        ),
+        "allow_portable_competence": _q_confirm(
+            "Enable share and qualify local rule structures? Release only reviewed anonymous local rule structures. Qualify them against a target workflow and its own permitted cases before any local use.",
+            default=False,
+        ),
+        "allow_private_task_computation": _q_confirm(
+            "Enable private task calculations? Check a bounded rule using a permitted task attachment and release only a separately approved fixed answer. Original data stays private.",
+            default=False,
+        ),
+        "allow_procedure_interactions": _q_confirm(
+            "Enable check local rules together? Compare two owned local rules in both orders and check all supported starting values before any combined use.", default=False,
+        ),
+        "allow_operational_competence_acquisition": _q_confirm(
+            "Enable teaching-question planning? Compare supported rule alternatives and use only currently permitted effort reports. Teaching and publication remain separate reviews.", default=False,
+        ),
+        "allow_request_program": _q_confirm(
+            "Enable prepare an answer for this request? Check bounded arrangements of your existing taught rules against permitted original cases for one request. Nothing is published automatically.", default=False,
+        ),
+        "allow_commitment_economic_alternatives": _q_confirm(
+            "Enable compare additional-work economics? Compare reported offer prices and full incremental costs with currently protected commitments. Results remain conditional on your stated facts.", default=False,
+        ),
+        "allow_workflow_step_checks": _q_confirm(
+            "Enable try one workflow step? Check one owned taught step against ordinary entered values without running the whole workflow or any connected action.", default=False,
+        ),
+        "allow_applicability_regions": _q_confirm(
+            "Enable checked answer regions? Check both local rule versions across every supported starting situation. Only current separately permitted expected answers can choose a version; unclear situations remain for review.", default=False,
+        ),
+        "allow_governed_rule_evolution": _q_confirm(
+            "Enable rewriting and checking local rules? Build alternative local rules and a complete checking order from one owned published rule. Independently review every change before publication, and retain the exact previous release for restoration.", default=False,
+        ),
+        "allow_recovery_visibility": _q_confirm(
+            "Enable missing-reply practice? Practice with fictional sign-offs to see when identical visible status hides different original outcomes. No live approval or connected service is used.", default=False,
+        ),
+        "allow_semantic_rule_reuse": _q_confirm(
+            "Enable complete rule-behavior evidence reuse? Check every supported input for a local Yes/No or bounded whole-number rule before reusing prior evidence across a rewrite. All checks count toward the reviewed work allowance.", default=False,
+        ),
+        "allow_commitment_capability_learning": _q_confirm(
+            "Enable local additional-work qualification from reported capacity, possible additions and scoped trial results? "
+            "Accepted commitments stay protected. This does not verify supplier stock or reserve resources.",
+            default=False,
+        ),
+        "allow_shared_decision_evidence": _q_confirm(
+            "Enable shared decision reviews using the facts and possible situations your team enters? "
+            "Each case needs explicit sharing permission. Reported facts are not independently verified and no business action runs.",
             default=False,
         ),
         "allow_role_editing": _q_confirm(
@@ -4690,6 +5412,11 @@ def pick_advanced() -> dict[str, Any]:
             "Autonomy gate? When sub-agents disagree, cross-check the answer with a "
             "model panel AND hold irreversible (high-risk) actions until the "
             "disagreement is resolved or a human approves.",
+            default=False,
+        ),
+        "confirm_plan": _q_confirm(
+            "Show the plan before acting? Before a task's first action that could reach "
+            "outside Lightwork, show its plan in Approvals and wait for a person.",
             default=False,
         ),
         "headless_assume": _q_confirm(
@@ -4908,6 +5635,18 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "plugin_workbench": _q_confirm(
+            "Enable the governed plugin qualification workbench? Sandbox checks require a reviewed local Linux image configured later in Settings; no image is downloaded. Ongoing tasks retain pins to plugin bytes already used.", default=False),
+        "workflow_versioning": _q_confirm(
+            "Keep workflow version history, safe input fixtures and administrator-reviewed publication before new schedules?", default=True),
+        "workflow_typed_inputs": _q_confirm(
+            "Allow workflow authors to add dates, choices, optional inputs, defaults and own connected-account selections? Account selections are checked again before execution.", default=True),
+        "connections_self_connect": _q_confirm(
+            "Allow employees to connect their own read-only Google Drive account after an administrator registers the workspace provider app? Other profiles require explicit approval in Settings.", default=False),
+        "extension_form_values": _q_confirm(
+            "Allow people to review and share browser form values with the configured AI service? Values remain off by default for every page.", default=False),
+        "extension_page_structure": _q_confirm(
+            "Allow people to review and share browser page headings and controls with the configured AI service?", default=True),
         "emergent_protocol": _q_confirm(
             "Emergent coordination shorthand? Swarms evolve short codes for the boilerplate "
             "they repeat (cheaper coordination), while every code decodes EXACTLY back to "
@@ -4950,6 +5689,18 @@ def pick_advanced() -> dict[str, Any]:
             "Monthly spending limit for each person, in dollars "
             "(0 = no limit; you can set different limits per person in the dashboard)",
             default="0",
+        ),
+        "spending_alert_at": _q_text(
+            "Alert administrators (and each person, for their own limit) when spending "
+            "reaches these percentages of a spending limit; comma-separated, or none "
+            "for no alerts. The limits still stop paid work at 100%.",
+            default="50, 75, 100",
+        ),
+        "typical_cost_min_runs": _q_text(
+            "Show what an agent's or specialist's past tasks usually cost beside the task "
+            "form once it has finished this many tasks (2 to 1000). It is recorded history, "
+            "never a prediction.",
+            default="10",
         ),
         "tenant_by_user": _q_confirm(
             "Isolate each user into their own tenant? Per-user cross-session memory "
@@ -5023,11 +5774,20 @@ def pick_advanced() -> dict[str, Any]:
             "Off by default; leave off for SQLite or single-tenant installs.",
             default=False,
         ),
+        "copilot_operation_families": [
+            "commitments" if value == "Promise reviews" else value
+            for value in _q_checkbox(
+                "Which action families may Copilot open when enabled? Native permissions still apply.",
+                ["learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
+                 "connections", "artifacts", "notifications", "models", "budget", "plugins",
+                 "Promise reviews"], default=["learning"],
+            )
+        ],
         "allow_copilot_operations": _q_confirm(
-            "Let Copilot show a learning example's current status and open its "
-            "stop-use review? You confirm each decision in a protected form. "
-            "Other product actions are not included. Page controls remain available "
-            "when this is off.", default=False,
+            "Let Copilot open controls that change things in your selected action families? "
+            "Each change requires a fresh review and explicit confirmation. When this is off, "
+            "Copilot still opens pages, focuses controls and shows status, but changes nothing.",
+            default=False,
         ),
         "governed_pg_pool": _q_confirm(
             "Reuse one bounded Postgres connection for governed records? "
@@ -5063,11 +5823,12 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
         "saml": _q_confirm(
-            "Enable SAML 2.0 SSO (alongside or instead of OIDC)? For enterprises "
+            "Prepare company single sign-on (SAML)? For enterprises "
             "whose IdP (Okta, Entra/Azure AD, ADFS) mandates SAML over OIDC. "
-            "Writes a [auth.saml] template you fill in with your SP/IdP details, "
-            "then hand /saml/metadata to the IdP. Needs the [saml] extra (pysaml2) "
-            "and the browser-login session secret. Off by default.",
+            "Keeps it inactive so current access stays available. After installation, "
+            "use Settings > All settings > Single sign-on to upload provider files, "
+            "try a real sign-in and review activation. Included in the standard "
+            "release runtime; off by default.",
             default=False,
         ),
         "security_autofix": _q_confirm(
@@ -5108,7 +5869,7 @@ def pick_advanced() -> dict[str, Any]:
             "Manage a local model server (vLLM / TGI / llama.cpp)? Writes "
             "[local_runtime] so `maverick local-runtime plan` composes the "
             "right batching / KV-cache / precision flags for your engine; "
-            "configure the engine + model in config.toml after the wizard. "
+            "an administrator must prepare the engine and model separately. "
             "Off by default.",
             default=False,
         ),
@@ -5230,7 +5991,8 @@ def pick_advanced() -> dict[str, Any]:
         )
         advanced["flows_action_episode_capture"] = _q_confirm(
             "  Enable retaining workflow examples for learning? "
-            "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+            "Each run needs enrollment, encrypted storage, an expiry and a separate human review. "
+            "Older unsigned learned flows may stop until rebuilt from permitted signed examples.",
             default=False,
         )
         advanced["flows_action_workflow_learning"] = _q_confirm(
@@ -5451,6 +6213,8 @@ def pick_advanced() -> dict[str, Any]:
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
     advanced["oidc"] = pick_oidc()
+    advanced["sign_in_security"] = pick_sign_in_security(
+        bool(advanced["oidc"].get("enabled")))
     advanced["local_owner_setup"] = _q_confirm(
         "Allow first-owner setup in the app on this computer? "
         "A named owner creates a local passphrase and can invite colleagues. "
@@ -5467,8 +6231,41 @@ def pick_advanced() -> dict[str, Any]:
         "of Lightwork already compresses.",
         default=True,
     )
+    # Glass effects ([dashboard] glass) are off by default: solid panels keep
+    # pages fast to respond. People can still turn them on for themselves in
+    # Display preferences; this only changes the starting look for everyone.
+    advanced["dashboard_glass"] = _q_confirm(
+        "Turn on glass effects (see-through, blurred panels) for everyone? "
+        "Pages respond more slowly with them, especially on older computers. "
+        "People can still choose for themselves in Display preferences.",
+        default=False,
+    )
+    # The sidebar ([dashboard] navigation) stays "classic" by default. "areas"
+    # groups every page into nine job-named areas; run the tree test in
+    # docs/research/tree-test before switching it on for everyone.
+    # navigation_personal lets each person try it in Your preferences.
+    advanced["dashboard_navigation"] = "areas" if _q_confirm(
+        "Use the job-named sidebar (areas such as Work, Privacy and Settings) for everyone? "
+        "Keep the classic sidebar until a tree test shows people find pages faster.",
+        default=False,
+    ) else "classic"
+    advanced["dashboard_navigation_personal"] = _q_confirm(
+        "Let each person switch to the job-named sidebar for themselves in Your preferences?",
+        default=False,
+    )
     # Settings > Models lists the models each saved key can reach by asking the
     # provider's own model-list endpoint ([models] discovery, default on).
+    advanced["mobile_offline"] = {"enabled": _q_confirm(
+        "Allow mobile companions to save task copies for up to 24 hours and 2 MB? Shorter limits are available in All settings.", default=True,
+    ), "max_age_seconds": 86400, "max_bytes": 2097152}
+    advanced["device_pairing"] = _pick_device_pairing()
+    advanced["model_guidance"] = _q_confirm(
+        "Show dated model pricing evidence and provider-reported capabilities in Settings?",
+        default=True,
+    )
+    advanced["model_capability_tests"] = _q_confirm(
+        "Allow administrators to explicitly confirm bounded, potentially paid synthetic model tests (at most USD 0.05 and 64 output tokens, no retry)?", default=False,
+    )
     advanced["model_discovery"] = _q_confirm(
         "Let Settings discover the models each provider key can reach (one "
         "bounded model-list request per provider, cached)? Say no to offer "
@@ -5476,6 +6273,18 @@ def pick_advanced() -> dict[str, Any]:
         default=True,
     )
     return advanced
+
+
+def _pick_device_pairing() -> dict[str, Any]:
+    """Keep pairing and optional task-control consent in one ordered group."""
+    pairing = {"enabled": _q_confirm(
+        "Let named members pair personal companions with an expiring code and explicit browser approval? Devices can read only their own work in the chosen workspace.", default=False,
+    ), "credential_hours": 24, "allow_actions": False}
+    if pairing["enabled"]:
+        pairing["allow_actions"] = _q_confirm(
+            "Also allow separately opted-in companions to review and submit answers or Stop on their own tasks? Approvals remain on the dashboard.", default=False,
+        )
+    return pairing
 
 
 def _regulatory_profile_choices() -> list[str]:
@@ -5621,12 +6430,14 @@ def pick_department_access(sso_enabled: bool) -> dict[str, Any]:
     console.print(
         "[dim]Department scoping limits which specialist teams each signed-in "
         "user can see and run — a finance analyst gets the Finance department, "
-        "not Legal. OFF by default (everyone sees every department); you can "
+        "not Legal. The recommended first-login baseline is viewer with no departments; you can "
         "always assign per-user access later on the dashboard Users page.[/dim]"
     )
-    if not _q_confirm("Restrict users to specific departments by default?", default=False):
-        return {}
+    if not _q_confirm("Start new signed-in users as viewers with no departments until granted access?", default=True):
+        console.print("[yellow]New users will be operators with access to every department. Existing deployments keep their chosen settings until you save this choice.[/yellow]")
+        return {"default_role": "operator"}
     result: dict[str, Any] = {
+        "default_role": "viewer",
         "default_suites": _split_csv(
             _q_text(
                 "  Departments a new user may use until granted more (comma-separated "
@@ -5863,7 +6674,11 @@ def pick_knowledge_access() -> dict[str, bool]:
         "enable": _q_confirm(
             "Enable governed Knowledge in the app (recommended)?",
             default=True,
-        )
+        ),
+        "task_context": _q_confirm(
+            "Allow tool-free AI tasks using employee-selected approved source versions?",
+            default=False,
+        ),
     }
 
 
@@ -5973,7 +6788,7 @@ def pick_plugins() -> list[str]:
     except Exception as e:
         console.print(
             f"[yellow]Plugin discovery skipped: {e}[/yellow] "
-            "(no plugins will be offered; re-run the wizard to retry)"
+            "(no plugins will be offered during setup; review plugins in Lightwork later)"
         )
         return []
     if not discovered:
@@ -6134,6 +6949,75 @@ def pick_analytics() -> dict[str, Any]:
     return {"mcp_client_language": True}
 
 
+def pick_usability_survey() -> dict[str, Any]:
+    """Optional in-product ease-of-use survey. OFF by default.
+
+    When on, each signed-in person is offered the 10-question System
+    Usability Scale at most once a quarter (one click hides it) and one ease
+    question after a few common tasks. Answers stay on this server, are
+    reported by the role people choose and never by name. Written under
+    ``[analytics]`` as ``usability_survey``.
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: ask people how easy Lightwork is to use - ten short "
+        "questions at most once a quarter, and one question after a few common "
+        "tasks. Answers stay on this server, are reported by role and never by "
+        "name, and nothing is sent anywhere. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Ask people how easy Lightwork is to use?", default=False):
+        return {}
+    return {"usability_survey": True}
+
+
+def pick_web_vitals() -> dict[str, Any]:
+    """Optional page speed for real visitors (field Core Web Vitals). OFF by default.
+
+    When on, the dashboard times a sample of real page loads in the browser
+    (LCP, INP and CLS) and keeps only counts per page and device class, so
+    Settings > Page speed shows the 75th percentile over the last 28 days.
+    No names, addresses or browsing history are kept, and nothing is sent
+    anywhere. Written under ``[analytics]`` as ``web_vitals`` and
+    ``web_vitals_sample_rate`` (the share of visits measured, 0 to 1).
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: measure how fast pages load and respond for the people "
+        "using Lightwork, on phones and computers. Only counts per page are "
+        "kept on this server; no names or browsing history, and nothing is "
+        "sent anywhere. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Measure page speed for real visitors?", default=False):
+        return {}
+    # ``[analytics] web_vitals_sample_rate``: the share of visits measured.
+    while True:
+        raw = _q_text("Share of visits to measure, from 0 to 1 (0.5 measures every other visit):", default="0.5").strip()
+        rate = _safe_float(raw, default=float("nan"))
+        if math.isfinite(rate) and 0 <= rate <= 1:
+            return {"web_vitals": True, "web_vitals_sample_rate": rate}
+        console.print("[yellow]Enter a number from 0 to 1, for example 0.5.[/yellow]")
+
+
+def pick_usage_measures() -> dict[str, Any]:
+    """Optional, name-free usage measures. OFF by default.
+
+    When on, Lightwork counts whether new people see a finished result of
+    their own task in their first session, and how often AI suggestions are
+    shown, used or dismissed. People and suggestions are kept only as one-way
+    codes and nothing is sent anywhere. Written under ``[analytics]`` as
+    ``usage_measures``.
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: count, without names, whether new people get a first result "
+        "in their first session and how often AI suggestions are used or dismissed. "
+        "Counts stay on this server. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Count first results and AI suggestions, without names?", default=False):
+        return {}
+    return {"usage_measures": True}
+
+
 def pick_persona() -> dict[str, str]:
     """Agent identity: name + voice."""
     if not _q_confirm(
@@ -6155,12 +7039,38 @@ def pick_persona() -> dict[str, str]:
 
 
 def pick_notifications() -> tuple[dict[str, Any], list[str]]:
-    """Run-end notification webhook. Returns (config, env_vars_needed)."""
+    """Private task alerts and shared organization delivery setup."""
+    personal_alerts = _q_confirm(
+        "Show signed-in people in-app alerts (the bell) when their tasks finish, need an answer, or wait for their approval? On by default; email, Slack and Teams stay off until you set them up. They can choose quiet hours and daily digests in Your notifications. Requires personal preferences.",
+        default=True,
+    )
+    personal_critical_bypass = personal_alerts and _q_confirm(
+        "Allow people to opt approval/deadline alerts out of their quiet hours and digest timing?", default=False,
+    )
+    personal_background = personal_alerts and _q_confirm(
+        "Refresh enrolled people's alert inboxes and release digests while their pages are closed? The dashboard must remain running.", default=False,
+    )
+    personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass,
+                       "personal_background": personal_background}
+    personal_config["metric_alerts"] = personal_alerts and _q_confirm(
+        "Show each person task performance and recorded usage alerts? By default, alert when fewer than 80% of at least ten of their recent recorded runs finish successfully. This measures completion, not answer accuracy. Uses up to 5,000 current-access runs completed in the last seven days; recorded usage may not include every provider charge. Change thresholds in All settings; personal Needs attention choices and quiet hours still apply.",
+        default=False,
+    )
+    if personal_background and _q_confirm(
+        "Allow people to opt into alerts in their verified Slack, Telegram or Teams private conversations? Requires My data identity verification and configured channel access.", default=False,
+    ):
+        personal_config["personal_external"] = True
+        personal_config["personal_dashboard_url"] = _q_text("HTTPS dashboard origin for authenticated notification links (no path):", default="")
     if not _q_confirm(
-        "Get pinged when long runs finish? (ntfy / Pushover / Slack / Discord)",
+        "Send shared organization alerts to a channel? Personal task alerts use each person's own notification choices.",
         default=False,
     ):
-        return {}, []
+        return personal_config, []
+
+
+    delivery_receipts = _q_confirm(
+        "Keep content-free delivery results for seven days and enable in-product delivery tests?", default=True,
+    )
     pick = _q_select(
         "  Backend:",
         [
@@ -6177,11 +7087,13 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             "  ntfy topic (any unique string; treat as a password)",
             default="",
         ).strip()
-        return ({"backend": "ntfy", "ntfy_topic": topic}, []) if topic else ({}, [])
+        return ({**personal_config, "backend": "ntfy", "ntfy_topic": topic, "delivery_receipts": delivery_receipts}, []) if topic else (personal_config, [])
     if backend == "pushover":
         return (
             {
+                **personal_config,
                 "backend": "pushover",
+                "delivery_receipts": delivery_receipts,
                 "user_key": "${PUSHOVER_USER_KEY}",
                 "app_token": "${PUSHOVER_APP_TOKEN}",
             },
@@ -6189,15 +7101,146 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         )
     if backend == "slack":
         return (
-            {"backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}"},
+            {**personal_config, "backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["SLACK_NOTIFY_WEBHOOK"],
         )
     if backend == "discord":
         return (
-            {"backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}"},
+            {**personal_config, "backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []
+
+
+def _resolve_private_alert_linking(advanced: dict[str, Any], notifications: dict[str, Any]) -> None:
+    """Do not save private delivery without its in-product linking path."""
+    if not notifications.get("personal_external") or advanced.get("allow_personal_data_controls") is True:
+        return
+    if _q_confirm(
+        "Private Slack and Telegram alerts need My Data so people can verify their own account. Turn on My Data now?",
+        default=False,
+    ):
+        advanced["allow_personal_data_controls"] = True
+    else:
+        notifications["personal_external"] = False
+        notifications.pop("personal_dashboard_url", None)
+        console.print("Private delivery stays off. People can still use in-product task alerts.")
+
+
+def pick_deadline_alerts(notifications: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Alerts when a privacy or governance record is due (``[deadline_alerts]``).
+
+    Reads ``maverick.deadline_alerts``: on by default while the privacy register
+    is on, so declining writes ``enabled = false`` explicitly. Lead times are
+    stored under ``[deadline_alerts.lead_days]`` / ``[deadline_alerts.lead_hours]``.
+    """
+    if not notifications:
+        console.print(
+            "  [dim]Deadline alerts use the notification backend above; without one "
+            "they are recorded on the record page but reach nobody.[/dim]"
+        )
+    if not _q_confirm(
+        "Alert people when a data request, incident clock, assessment renewal, "
+        "vendor contract or approval is due?",
+        default=True,
+    ):
+        return {"enabled": False}
+    mode = _q_select(
+        "  How should alerts be sent?",
+        ["immediate - one message per deadline", "digest - one message per person per check"],
+        default="immediate - one message per deadline",
+    ).split()[0]
+    owner = _q_text(
+        "  Who is named when a record has no assignee?", default="the privacy owner"
+    ).strip() or "the privacy owner"
+    quiet = _q_text(
+        "  Quiet hours for non-urgent alerts (HH:MM-HH:MM, server time; empty = none)",
+        default="",
+    ).strip()
+    cfg: dict[str, Any] = {"enabled": True, "mode": mode, "owner": owner}
+    if quiet:
+        cfg["quiet_hours"] = quiet
+    lead_days = _q_text("  Days before a data request is due to warn (comma-separated)", default="7, 2")
+    cfg["lead_days"] = {"dsar": [_safe_int(x, default=0) for x in _csv_list(lead_days)] or [7, 2],
+                        "assessment": [30, 7], "vendor": [30, 7]}
+    cfg["lead_days"]["dsar"] = [d for d in cfg["lead_days"]["dsar"] if d > 0] or [7, 2]
+    cfg["lead_hours"] = {"incident": [24, 4], "approval": [24, 4]}
+    return cfg
+
+
+def _deadline_alerts_step(state: dict[str, Any], notifications: dict[str, Any] | None) -> dict[str, Any]:
+    """Resume-aware wrapper: reuse a saved answer, else ask and save it."""
+    picked = state.get("deadline_alerts")
+    if picked is None:
+        picked = pick_deadline_alerts(notifications)
+        state["deadline_alerts"] = picked
+        _save_partial(state)
+    return picked
+
+
+def pick_daily_summary(
+    channels: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
+    """Daily summary and chat approvals. Returns ``(my_work, notifications_email,
+    slack_extras, env_vars_needed)``.
+
+    The daily summary ([my_work]) sends each person what is waiting for them
+    (approvals, questions, results, spending) at their own hour through their
+    linked chat apps and email; off unless asked for. Slack approvals need the
+    channel to post cards in and, for the web (non-Socket) receiver, the
+    signing secret.
+    """
+    my_work: dict[str, Any] = {}
+    mail: dict[str, Any] = {}
+    slack: dict[str, Any] = {}
+    envs: list[str] = []
+    if _q_confirm(
+        "Send each person a daily summary of what is waiting for them "
+        "(approvals, questions, results, spending)?",
+        default=False,
+    ):
+        hour = _safe_int(_q_text("  Usual local hour to send it (0-23)", default="8"), default=8)
+        my_work = {"digest_enable": True, "digest_hour": max(0, min(23, hour))}
+        if _q_confirm("  Send summaries by email too? (needs a mail server)", default=False):
+            host = _q_text("  Outgoing mail server (e.g. smtp.example.com)", default="").strip()
+            if host:
+                mail = {
+                    "host": host,
+                    "port": _safe_int(_q_text("  Mail server port", default="587"), default=587),
+                    "user": "${MAVERICK_SMTP_USER}",
+                    "password": "${MAVERICK_SMTP_PASSWORD}",
+                    "from_address": _q_text("  Send as (address)", default="").strip(),
+                    "tls": "starttls",
+                }
+                envs += ["MAVERICK_SMTP_USER", "MAVERICK_SMTP_PASSWORD"]
+    if channels and "slack" in channels and _q_confirm(
+        "Post new approval requests in a Slack channel with Approve / Reject buttons?",
+        default=False,
+    ):
+        room = _q_text("  Slack channel id (starts with C)", default="").strip()
+        if room:
+            slack["approvals_channel"] = room
+        if _q_confirm(
+            "  Will buttons and /lightwork commands reach this server over the web "
+            "(Interactivity URL) rather than Socket Mode?",
+            default=False,
+        ):
+            slack["signing_secret"] = "${SLACK_SIGNING_SECRET}"
+            envs.append("SLACK_SIGNING_SECRET")
+    return my_work, mail, slack, envs
+
+
+def _daily_summary_step(
+    state: dict[str, Any], channels: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Run (or resume) the daily-summary step and fold Slack extras into the
+    Slack channel table. Returns ``(my_work, notifications_email, envs)``."""
+    parts = state.get("_daily_summary") or list(pick_daily_summary(channels))
+    state["_daily_summary"] = parts
+    my_work, mail, slack_extras, envs = parts
+    if slack_extras and isinstance(channels.get("slack"), dict):
+        channels["slack"].update(slack_extras)
+    return my_work, mail, list(envs)
 
 
 def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
@@ -6226,6 +7269,72 @@ def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
         cfg["secret"] = "${MAVERICK_WEBHOOK_SECRET}"
         envs.append("MAVERICK_WEBHOOK_SECRET")
     return cfg, envs
+
+
+def pick_support() -> dict[str, Any]:
+    """Help and support links, asked with the daily summary. Returns the
+    ``[support]`` table (empty when skipped).
+
+    ``status_page_url``: a public service-status page the Help menu links to.
+    ``contact_email``: where "Get help from a person" requests are addressed;
+    without one people send them to their Lightwork administrator. Nothing is
+    ever sent automatically (``maverick.config.get_support``)."""
+    if not _q_confirm(
+        "Add a service-status page or a support contact to the Help menu? Without them, people send help requests to their Lightwork administrator.",
+        default=False,
+    ):
+        return {}
+    support: dict[str, Any] = {}
+    url = _q_text("  Public service-status page (https://..., empty for none):", default="").strip()
+    if url.startswith("https://") and len(url) <= 308 and not any(c in url for c in " \"'<>"):
+        support["status_page_url"] = url
+    elif url:
+        console.print("[yellow]Skipped: the status page must be a secure https:// address.[/yellow]")
+    email = _q_text("  Support contact email (empty: people ask their administrator):", default="").strip()
+    if "@" in email and " " not in email and "." in email.rsplit("@", 1)[-1]:
+        support["contact_email"] = email
+    elif email:
+        console.print("[yellow]Skipped: that is not an email address.[/yellow]")
+    return support
+
+
+def pick_collaboration() -> dict[str, Any]:
+    """Comments and @mentions on tasks, runs, approvals and policies. ON by default.
+
+    People discuss a piece of work where it lives and mention a colleague, who
+    gets it in their own notifications. Only people who can open the item can
+    read its comments or be mentioned. Written as ``[collaboration] comments``
+    (``maverick.comments``); declining writes ``comments = false``.
+    """
+    if _q_confirm(
+        "Let people comment on tasks, runs, approval requests and policies, and mention a colleague "
+        "to notify them? Only people who can open the item see its comments.",
+        default=True,
+    ):
+        return {}
+    return {"comments": False}
+
+
+def pick_suggestions() -> dict[str, Any]:
+    """Suggested edits to AI use rules, data use rules and privacy notices. ON by default.
+
+    Agents and colleagues suggest new wording; each suggestion changes nothing
+    until a person accepts it. Written as ``[collaboration] suggestions`` and
+    ``ai_suggestions`` (``maverick.policy_suggestions``); declining writes false.
+    """
+    if not _q_confirm(
+        "Let agents and colleagues suggest edits to your AI use rules, data use rules and privacy notices? "
+        "Each suggestion shows what it changes and why. Accepting one creates a draft that still needs its usual approval.",
+        default=True,
+    ):
+        return {"suggestions": False}
+    if _q_confirm(
+        "Let the AI assistant draft a suggested edit when someone asks? Each draft uses the AI service "
+        "within the spending cap for one task.",
+        default=True,
+    ):
+        return {}
+    return {"ai_suggestions": False}
 
 
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
@@ -6291,8 +7400,8 @@ def pick_connectors() -> dict[str, str]:
     console.print(
         f"[dim]Lightwork ships {len(entries)} enterprise connectors "
         "(ServiceNow, Salesforce, Snowflake, SAP, Workday, Datadog, ...). "
-        "Full list: docs/connectors.md. Connect any now, or add them later in "
-        "~/.maverick/.env.[/dim]"
+        "Connect any now, or add supported systems later on the "
+        "Lightwork Connections page.[/dim]"
     )
     if not _q_confirm("Connect any enterprise systems now?", default=False):
         return {}
@@ -6418,8 +7527,10 @@ def pick_a2a() -> tuple[dict[str, Any], list[str]]:
         "  [dim]A2A serves an agent card at /.well-known/agent-card.json and a "
         "task endpoint at /a2a/v1 (on `maverick dashboard`). Budget is clamped "
         "to operator caps; a bearer token is required. A2A goals run under a "
-        "tool ceiling (max_risk=medium by default -- edit [a2a].max_risk to "
-        'tighten to "low" or open to "high"/"none").[/dim]'
+        "tool ceiling (medium by default). After installation, use All settings > "
+        "Security > Requests from other agents to manage its password, public "
+        "address, tool permissions and limits. External agents issues individual "
+        "access keys.[/dim]"
     )
     return {"enabled": True, "max_risk": "medium"}, ["MAVERICK_A2A_TOKEN"]
 
@@ -6500,8 +7611,8 @@ def pick_suites() -> dict[str, bool]:
     )
     console.print(
         "[dim]All enabled by default. A disabled suite's agents can't be "
-        "spawned. Editable later in ~/.maverick/config.toml under "
-        "[suites].[/dim]"
+        "spawned. Choose carefully: suite availability is an "
+        "installation-level choice.[/dim]"
     )
     if not _q_confirm("  Customize which suites are enabled? (No = keep all on)", default=False):
         return {}
@@ -6525,11 +7636,10 @@ def pick_license() -> dict[str, Any]:
         "(Gold/Platinum features, add-on suites like fleet)."
     )
     console.print(
-        "[dim]Fail-open by default: the kernel runs with no license. "
-        "Turn enforcement on only for a licensed production deployment. "
-        "A missing/expired license never stops the core — only paid "
-        "add-ons gate off. Editable later under [license] in "
-        "~/.maverick/config.toml.[/dim]"
+        "[dim]License checks are off by default. Turn them on for a licensed "
+        "deployment. A missing or expired license blocks paid add-ons; "
+        "core functions remain available. Later, review or install a license "
+        "in Settings > License and change enforcement in Settings > All settings.[/dim]"
     )
     if not _q_confirm("  Enforce paid-feature entitlements on this deployment?", default=False):
         return {}
@@ -6571,7 +7681,7 @@ def _cfg_deployment(deployment: str | None) -> list[str]:
     if not deployment:
         return []
     # Record the chosen deployment topology (laptop / vps / ...) for
-    # provenance + so a later `maverick init` can default to it.
+    # provenance.
     return [
         "[deployment]",
         f"type = {_toml_str(str(deployment))}",
@@ -6587,8 +7697,7 @@ def _cfg_governance(
     # Record the governance level chosen at onboarding. This is a label for
     # humans + dashboards: the enforceable knobs it expanded to ([audit],
     # [quotas], [self_improvement], retention, ...) are written explicitly
-    # elsewhere in this file, so hand-edits keep working. Re-run
-    # `maverick init` to switch levels.
+    # elsewhere in this file. Use the reviewed Settings control to switch levels.
     if profile:
         values.append(
             f"profile = {_toml_str(str(profile))}   "
@@ -6650,10 +7759,14 @@ def _cfg_providers(
     return lines
 
 
-def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True) -> list[str]:
-    if not role_models and discovery:
+def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True, guidance: bool = True, capability_tests: bool = False) -> list[str]:
+    if not role_models and discovery and guidance and not capability_tests:
         return []
     lines = ["[models]"]
+    if capability_tests:
+        lines.append("capability_tests = true")
+    if not guidance:
+        lines.append("guidance = false")
     for role, spec in role_models.items():
         lines.append(f'{role} = "{spec}"')
     if not discovery:
@@ -6692,6 +7805,17 @@ def _cfg_core(
     lines.append("")
     lines.append("[sandbox]")
     for k, v in sandbox.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
+def _cfg_approval(approval: dict[str, Any] | None) -> list[str]:
+    if not approval:
+        return []
+    # Approvals page: undo window (the agent waits it out), high-risk
+    # confirmation, and who approves a risky action the requester asked for.
+    lines = ["", "[approval]"]
+    for k, v in approval.items():
         _emit_kv(lines, k, v)
     return lines
 
@@ -6810,7 +7934,11 @@ def _cfg_knowledge_access(knowledge_access: dict[str, Any] | None) -> list[str]:
     enabled = knowledge_access.get("enable")
     if type(enabled) is not bool:
         raise ValueError("knowledge access enable must be boolean")
-    return ["", "[knowledge_access]", f"enable = {str(enabled).lower()}"]
+    task_context = knowledge_access.get("task_context", False)
+    if type(task_context) is not bool:
+        raise ValueError("knowledge task context must be boolean")
+    return ["", "[knowledge_access]", f"enable = {str(enabled).lower()}",
+            f"task_context = {str(task_context).lower()}"]
 
 
 def _cfg_ekko(ekko: dict[str, Any] | None) -> list[str]:
@@ -7642,13 +8770,25 @@ def _cfg_capabilities(
     return lines
 
 
-def _cfg_agent_factory(jd_hiring: bool) -> list[str]:
-    # JD hiring is default-on in the kernel (maverick.jd_hiring); only write
+def _cfg_practice(offered: bool, daily_spend_cap: float) -> list[str]:
+    """``[practice]``: written only where it differs from the defaults (on, $1.00 a day)."""
+    body = [] if offered else ["enable = false"]
+    if offered and daily_spend_cap != 1.0:
+        body.append(f"daily_spend_cap = {round(daily_spend_cap, 2)}")
+    return ["", "[practice]", *body] if body else []
+
+
+def _cfg_agent_factory(jd_hiring: bool, require_passing_tests: bool = True) -> list[str]:
+    # JD hiring (maverick.jd_hiring) and the publish gate
+    # (maverick.agent_publish_policy) are default-on in the kernel; only write
     # the table when the operator opted OUT, matching the
     # write-only-on-divergence convention.
-    if jd_hiring:
-        return []
-    return ["", "[agent_factory]", "jd_hiring = false"]
+    lines = []
+    if not jd_hiring:
+        lines.append("jd_hiring = false")
+    if not require_passing_tests:
+        lines.append("require_passing_tests = false")
+    return ["", "[agent_factory]", *lines] if lines else []
 
 
 def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
@@ -7678,6 +8818,30 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if not advanced:
         return []
     lines: list[str] = []
+    budget_reporting = advanced.get("agent_budget_reporting")
+    if budget_reporting is not None:
+        if not isinstance(budget_reporting, dict) or set(budget_reporting) != {"synthesis_reserve", "spend_mirror_interval"}:
+            raise ValueError("Running-task choices are not in the supported form.")
+        values = []
+        for key, maximum in (("synthesis_reserve", 1), ("spend_mirror_interval", 300)):
+            value = budget_reporting[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= maximum:
+                raise ValueError("Running-task choices must be within their displayed limits.")
+            values.append(f"{key} = {float(value)}")
+        lines.extend(["", "[agent]", *values])
+    image_edit = advanced.get("image_edit")
+    if image_edit:
+        from maverick.image_edit_models import CHOICES, validate_model
+
+        if not isinstance(image_edit, dict) or set(image_edit) - {row[0] for row in CHOICES}:
+            raise ValueError("Image model choices are not in the supported form.")
+        image_lines = []
+        for field, _env, _label in CHOICES:
+            value = validate_model(image_edit.get(field, ""))
+            if value:
+                image_lines.append(field + " = " + _toml_str(value))
+        if image_lines:
+            lines.extend(["", "[image_edit]", *image_lines])
     # These governed-learning sections are default-on in the kernel. Preserve a
     # deliberate "no" from the advanced wizard instead of silently omitting the
     # table (which would now mean on). True choices are emitted with their richer
@@ -7740,11 +8904,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[connector_limits]")
         lines.append(f"max_attempts = {int(advanced['connector_max_attempts'])}")
-    if advanced.get("autonomy_gate") or advanced.get("headless_assume"):
+    if advanced.get("autonomy_gate") or advanced.get("headless_assume") or advanced.get("confirm_plan"):
         lines.append("")
         lines.append("[autonomy]")
         if advanced.get("autonomy_gate"):
             lines.append("enable = true")
+        # AI-3: a person confirms the plan before the first outside action.
+        if advanced.get("confirm_plan"):
+            lines.append("confirm_plan = true")
         # Independent axis: assume-and-proceed instead of blocking on ask_user.
         if advanced.get("headless_assume"):
             lines.append("headless_assume = true")
@@ -7984,6 +9151,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("# Externally-reachable dashboard base URL for signed channel")
             lines.append("# Approve/Reject links (actionable approvals).")
             _emit_kv(lines, "public_url", advanced["flows_public_url"])
+    if "workflow_typed_inputs" in advanced or "workflow_versioning" in advanced:
+        lines.extend(["", "[workflows]"])
+        _emit_kv(lines, "typed_inputs", advanced.get("workflow_typed_inputs", True) is True)
+        _emit_kv(lines, "versioning", advanced.get("workflow_versioning", True) is True)
     if advanced.get("connections"):
         lines.append("")
         lines.append("[connections]")
@@ -7991,6 +9162,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# can be wired from the dashboard without <NAME>_TOKEN env vars; an")
         lines.append("# existing env var still takes precedence (maverick.connections).")
         lines.append("enable = true")
+        _emit_kv(lines, "allow_self_connect", advanced.get("connections_self_connect") is True)
+        _emit_kv(lines, "self_connect_profiles", "google-drive")
     if advanced.get("emergent_protocol"):
         lines.append("")
         lines.append("[emergent_protocol]")
@@ -8017,7 +9190,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     _person_limit = _safe_float(advanced.get("spending_person_monthly") or 0, default=0.0)
     _workspace_limit = _workspace_limit if math.isfinite(_workspace_limit) else 0.0
     _person_limit = _person_limit if math.isfinite(_person_limit) else 0.0
-    if _workspace_limit > 0 or _person_limit > 0:
+    _alert_at = _spending_alert_at(advanced.get("spending_alert_at"))
+    _min_runs = _typical_cost_min_runs(advanced.get("typical_cost_min_runs"))
+    if _workspace_limit > 0 or _person_limit > 0 or _alert_at is not None or _min_runs is not None:
         # Starting limits; administrators change them in the dashboard
         # (Admin > Spending limits), which then takes precedence.
         lines.append("")
@@ -8028,6 +9203,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         if _person_limit > 0:
             lines.append(f"default_user_dollars = {_person_limit:.2f}")
             lines.append('default_user_period = "month"')
+        if _alert_at is not None:
+            # In-app alerts at these percentages of each limit (default 50, 75, 100).
+            lines.append(f"alert_at = [{', '.join(str(p) for p in _alert_at)}]")
+        if _min_runs is not None:
+            # Finished tasks needed before a typical cost is shown (default 10).
+            lines.append(f"typical_cost_min_runs = {_min_runs}")
     if advanced.get("tenant_by_user"):
         lines.append("")
         lines.append("[tenancy]")
@@ -8161,18 +9342,85 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # and as ONE [features] table (two tables would be a duplicate-key TOML
     # error). The kernel reads these via config.get_features.
     _feature_locks = []
+    if advanced.get("allow_runtime_configuration_status") is False:
+        lines.extend(["[settings]", "runtime_status = false"])
+    if advanced.get("allow_employee_task_diagnostics") is False:
+        _feature_locks.append("employee_task_diagnostics = false")
+    if advanced.get("allow_employee_activation") is False:
+        _feature_locks.append("employee_activation = false")
     if advanced.get("allow_copilot_operations") is True:
         _feature_locks.append("copilot_operations = true")
+        families = advanced.get("copilot_operation_families", ["learning"])
+        allowed_families = {"learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
+                            "connections", "artifacts", "notifications", "models", "budget", "plugins",
+                            "commitments"}
+        if not isinstance(families, list) or any(value not in allowed_families for value in families):
+            raise ValueError("Choose registered Copilot action families.")
+        lines.append("[copilot]")
+        _emit_kv(lines, "operation_families", list(dict.fromkeys(families)))
     if advanced.get("allow_workflow_readiness") is False:
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
         _feature_locks.append("project_reviews = true")
+    if "allow_work_details" in advanced:
+        lines.extend(["[work_details]"])
+        _emit_kv(lines, "enable", advanced["allow_work_details"] is True)
+    if advanced.get("allow_task_handoffs") is True:
+        _feature_locks.append("task_handoffs = true")
+    if advanced.get("allow_deliverable_bundles") is True:
+        _feature_locks.append("deliverable_bundles = true")
+    if advanced.get("allow_project_workspaces") is True:
+        _feature_locks.append("project_workspaces = true")
+    if advanced.get("allow_employee_companions") is True:
+        _feature_locks.append("employee_companions = true")
+    if advanced.get("allow_employee_content_access_requests") is True:
+        _feature_locks.append("employee_content_access_requests = true")
+    if advanced.get("allow_personal_data_controls") is True:
+        _feature_locks.append("personal_data_controls = true")
+    if advanced.get("allow_permission_access_requests") is True:
+        _feature_locks.append("permission_access_requests = true")
+    if advanced.get("allow_employee_departures") is True:
+        _feature_locks.append("employee_departures = true")
     if advanced.get("allow_outcome_measurement") is True:
         _feature_locks.append("outcome_measurement = true")
+    if advanced.get("allow_commitment_viability") is True:
+        _feature_locks.append("commitment_viability = true")
+    if advanced.get("allow_work_restructuring") is True:
+        _feature_locks.append("work_restructuring = true")
+    if advanced.get("allow_portable_competence") is True:
+        _feature_locks.append("portable_competence = true")
+    if advanced.get("allow_private_task_computation") is True:
+        _feature_locks.append("private_task_computation = true")
+    if advanced.get("allow_procedure_interactions") is True:
+        _feature_locks.append("procedure_interactions = true")
+    if advanced.get("allow_operational_competence_acquisition") is True:
+        _feature_locks.append("operational_competence_acquisition = true")
+    if advanced.get("allow_request_program") is True:
+        _feature_locks.append("request_program = true")
+    if advanced.get("allow_commitment_economic_alternatives") is True:
+        _feature_locks.append("commitment_economic_alternatives = true")
+    if advanced.get("allow_workflow_step_checks") is True:
+        _feature_locks.append("workflow_step_checks = true")
+    if advanced.get("allow_applicability_regions") is True:
+        _feature_locks.append("applicability_regions = true")
+    if advanced.get("allow_governed_rule_evolution") is True:
+        _feature_locks.append("governed_rule_evolution = true")
+    if advanced.get("allow_recovery_visibility") is True:
+        _feature_locks.append("recovery_visibility = true")
+    if advanced.get("allow_semantic_rule_reuse") is True:
+        _feature_locks.append("semantic_rule_reuse = true")
+    if advanced.get("allow_commitment_capability_learning") is True:
+        _feature_locks.append("commitment_capability_learning = true")
+    if advanced.get("allow_shared_decision_evidence") is True:
+        _feature_locks.append("shared_decision_evidence = true")
     if advanced.get("allow_workspace_recovery") is True:
         _feature_locks.append("workspace_recovery = true")
     if advanced.get("allow_signing_identity_transition") is True:
         _feature_locks.append("signing_identity_transition = true")
+    if advanced.get("allow_configuration_profiles") is False:
+        _feature_locks.append("configuration_profiles = false")
+    if advanced.get("allow_personal_preferences") is False:
+        _feature_locks.append("personal_preferences = false")
     if advanced.get("allow_draft_recovery") is False:
         _feature_locks.append("draft_recovery = false")
     if advanced.get("allow_support_center") is False:
@@ -8187,10 +9435,20 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("pack_editing = false")
     if advanced.get("allow_role_editing") is False:
         _feature_locks.append("role_editing = false")
+    if type(advanced.get("allow_human_conversation_handoffs")) is bool:
+        _feature_locks.append("human_conversation_handoffs = " + str(advanced["allow_human_conversation_handoffs"]).lower())
     if _feature_locks:
         lines.append("")
         lines.append("[features]")
         lines.extend(_feature_locks)
+    if advanced.get("allow_conversation_inbox") is True:
+        lines.extend(["", "[conversation_inbox]", "enabled = true", "guidance = true", "queue = true", "independent = true", "max_pending = 20"])
+    elif advanced.get("allow_conversation_inbox") is False:
+        # On by default, so only a deliberate "no" is written (and stays off).
+        lines.extend(["", "[conversation_inbox]", "enabled = false"])
+    if type(advanced.get("allow_chat_message_actions")) is bool:
+        lines.extend(["", "[chat_message_actions]",
+                      "enabled = " + str(advanced["allow_chat_message_actions"]).lower()])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")
@@ -8236,6 +9494,16 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[attachments]")
         lines.extend(_attach_lines)
+    if "approval_challenges" in advanced:
+        if type(advanced["approval_challenges"]) is not bool:
+            raise ValueError("Local approval challenge permission must be on or off.")
+        lines.append("")
+        lines.append("[approval_challenges]")
+        lines.append("enable = " + ("true" if advanced["approval_challenges"] else "false"))
+    if "instruction_capture" in advanced:
+        lines.append("")
+        lines.append("[instruction_capture]")
+        lines.append("enable = " + ("true" if advanced["instruction_capture"] else "false"))
     if advanced.get("reflexion"):
         lines.append("")
         lines.append("[reflexion]")
@@ -8456,10 +9724,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[memory_guard]")
         lines.append("enable = true")
-    if advanced.get("temporal_memory"):
+    if advanced.get("temporal_memory") or advanced.get("fact_tags"):
         lines.append("")
         lines.append("[memory]")
-        lines.append("temporal = true")
+        if advanced.get("temporal_memory"):
+            lines.append("temporal = true")
+        if advanced.get("fact_tags"):
+            lines.append("fact_tags = true")
     if advanced.get("fairness_monitor"):
         lines.append("")
         lines.append("[fairness_monitor]")
@@ -8575,6 +9846,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     tool_lines: list[str] = []
     if advanced.get("deferred_tools"):
         tool_lines.append("deferred_loading = true")
+    if advanced.get("tool_exposure") == "full":
+        tool_lines.append('exposure = "full"')
     if advanced.get("output_cache"):
         tool_lines.append("output_cache = true")
     if advanced.get("hardware_sensors"):
@@ -8633,22 +9906,59 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
+    glass_on = advanced.get("dashboard_glass") is True
+    navigation_lines = {key: value for key, value in (
+        ("navigation", "areas" if advanced.get("dashboard_navigation") == "areas" else None),
+        ("navigation_personal", True if advanced.get("dashboard_navigation_personal") is True else None),
+    ) if value is not None}
+    api_keys = advanced.get("api_keys") if isinstance(advanced.get("api_keys"), dict) else {}
+    # Only a deliberate change is written: the app's defaults (on, 90 / 365
+    # days, 24 hours) apply when the table says nothing.
+    api_key_lines = {k: v for k, v in api_keys.items()
+                     if k in ("api_key_default_days", "api_key_max_days",
+                              "api_key_rotation_grace_hours")}
+    if api_keys.get("api_keys") is False:
+        api_key_lines = {"api_keys": False}
     if isinstance(dept, dict) and (
-        dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off
+        "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
+        or "local_owner_setup" in advanced or compress_off or glass_on or navigation_lines or api_key_lines
+        or "employee_activation_jobs" in advanced or "extension_form_values" in advanced
+        or "extension_page_structure" in advanced
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
         # turn IdP (SCIM) team membership into a role / department grant.
         lines.append("")
         lines.append("[dashboard]")
+        if "employee_activation_jobs" in advanced:
+            _emit_kv(lines, "employee_activation_jobs", advanced["employee_activation_jobs"])
+        for capture_key in ("extension_form_values", "extension_page_structure"):
+            if capture_key in advanced:
+                _emit_kv(lines, capture_key, advanced[capture_key] is True)
         if "local_owner_setup" in advanced:
             _emit_kv(lines, "local_owner_setup", advanced["local_owner_setup"] is True)
         if compress_off:
             # Default-on in the app; only a deliberate "no" is written.
             lines.append("# Response compression off: a proxy in front already compresses.")
             _emit_kv(lines, "compress", False)
-        if dept.get("default_suites"):
+        if glass_on:
+            # Default-off in the app; only a deliberate "yes" is written.
+            lines.append("# Glass effects for everyone until people choose their own.")
+            _emit_kv(lines, "glass", "on")
+        if navigation_lines:
+            # Default classic, chosen by nobody; only a deliberate "yes" is written.
+            lines.append("# The job-named sidebar (areas), for everyone or for people who choose it.")
+            for key, value in navigation_lines.items():
+                _emit_kv(lines, key, value)
+        if api_key_lines:
+            lines.append("# API keys for scripts and integrations (maverick.config.api_key_settings).")
+            for key in ("api_keys", "api_key_default_days", "api_key_max_days",
+                        "api_key_rotation_grace_hours"):
+                if key in api_key_lines:
+                    _emit_kv(lines, key, api_key_lines[key])
+        if "default_role" in dept:
+            _emit_kv(lines, "default_role", dept["default_role"])
+        if "default_suites" in dept:
             lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))
         # Group names contain spaces, so the TOML key must be a quoted string
@@ -8666,16 +9976,36 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 lines.append(f"{_toml_str(group)} = [{rendered}]")
     if advanced.get("saml"):
         lines.append("")
-        # SAML 2.0 SP browser SSO (alongside OIDC). Fill in the SP/IdP details
-        # then hand /saml/metadata to the IdP. Needs the [saml] extra (pysaml2)
-        # and the [auth.oidc] session_secret above. See docs/security-hardening.md.
+        # The ordinary guided setup supplies real values and separately reviews
+        # activation. An installer template must never disable owner sign-in.
         lines.append("[auth.saml]")
+        lines.append("enabled = false")
         lines.append('sp_entity_id = "https://YOUR-HOST/saml/metadata"')
         lines.append('acs_url = "https://YOUR-HOST/saml/acs"')
         lines.append('idp_metadata_url = "https://IDP/app/metadata"   # or idp_metadata_file')
         lines.append("# want_assertions_signed = true")
         lines.append('# sp_cert_file = ""   # to sign AuthnRequests / decrypt')
         lines.append('# sp_key_file = ""')
+    security = advanced.get("sign_in_security") or {}
+    if isinstance(security, dict) and any(key in security for key in ("company_hours", "idle_minutes")):
+        lines.append("")
+        lines.append("[auth.sessions]")
+        for key in ("company_hours", "idle_minutes"):
+            if key in security:
+                _emit_kv(lines, key, int(security[key]))
+    if isinstance(security, dict) and security.get("require"):
+        # Second factor at sign-in + step-up for sensitive actions. Read by
+        # maverick.config.get_auth_mfa (the dashboard's mfa_policy).
+        lines.append("")
+        lines.append("[auth.mfa]")
+        lines.append("require = true")
+        _emit_kv(lines, "step_up_minutes", int(security.get("step_up_minutes") or 15))
+    if isinstance(security, dict) and security.get("cidrs"):
+        # Network addresses allowed to reach the dashboard. Read by
+        # maverick.config.get_ip_allowlist (the dashboard's ip_allowlist).
+        lines.append("")
+        lines.append("[auth.ip_allowlist]")
+        _emit_kv(lines, "cidrs", [str(c) for c in security["cidrs"]])
     return lines
 
 
@@ -8708,10 +10038,13 @@ def _cfg_plugins(
     plugin_grant: list[str] | None,
     plugin_enforce: bool,
     ts_plugins: list[list[str]] | None,
+    workbench: bool | None = None,
 ) -> list[str]:
-    if not (plugins or ts_plugins):
+    if not (plugins or ts_plugins or workbench is not None):
         return []
     lines = ["", "[plugins]"]
+    if workbench is not None:
+        _emit_kv(lines, "workbench", workbench is True)
     if plugins:
         _emit_kv(lines, "enabled", plugins)
     if plugin_grant:
@@ -8760,6 +10093,24 @@ def _cfg_rate_limits(rate_limits: dict[str, str] | None) -> list[str]:
         # spec is free-text ("N/seconds"); escape via _toml_str so a stray
         # quote/backslash can't corrupt the config the wizard writes.
         lines.append(f"{key} = {_toml_str(spec)}")
+    return lines
+
+
+def _cfg_deadline_alerts(cfg: dict[str, Any] | None) -> list[str]:
+    """``[deadline_alerts]`` plus its lead-time sub-tables (nested dicts are
+    not something _emit_kv renders)."""
+    if not cfg:
+        return []
+    flat = {k: v for k, v in cfg.items() if not isinstance(v, dict)}
+    lines = _cfg_table("deadline_alerts", flat)
+    for sub in ("lead_days", "lead_hours"):
+        table = cfg.get(sub)
+        if isinstance(table, dict) and table:
+            # Lead times are whole numbers, not strings (what _emit_kv would write).
+            lines += ["", f"[deadline_alerts.{sub}]"]
+            for key, values in table.items():
+                rendered = ", ".join(str(int(v)) for v in (values or []))
+                lines.append(f"{key} = [{rendered}]")
     return lines
 
 
@@ -8854,18 +10205,27 @@ def _write_wizard_file(path: Path, body: str) -> None:
     console.print(f"[green]ok[/green] wrote {path} (chmod 600)")
 
 
-def _publish_wizard_configuration(config_body: str, env_body: str | None) -> None:
-    """Publish complete files, rolling environment changes back on config failure.
-
-    Each file is atomic. This does not claim crash-atomic replacement of two
-    directory entries; ordinary save failures restore the previous pair.
-    """
+def _publish_wizard_configuration(
+    config_body: str, env_body: str | None, *, protect_existing: bool = False,
+) -> None:
+    """Publish complete files; first installs can resume after an abrupt exit."""
     from maverick.file_lock import atomic_write_text, cross_process_lock
 
     tomllib.loads(config_body)  # Never replace .env for an invalid configuration.
     with cross_process_lock(CONFIG_FILE, strict=True):
+        if protect_existing and _existing_setup():
+            raise FileExistsError(
+                "Lightwork found saved setup files. Nothing was replaced; "
+                "open Lightwork Settings to make changes."
+            )
         old_env = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else None
         env_changed = env_body is not None and not _wizard_file_unchanged(ENV_FILE, env_body.encode("utf-8"))
+        receipt_path = _pending_setup_path()
+        if protect_existing:
+            receipt = json.dumps({"version": 1, "config": config_body, "env": env_body})
+            if len(receipt.encode("utf-8")) > 4_000_000:
+                raise ValueError("Lightwork setup is too large to save safely")
+            atomic_write_text(receipt_path, receipt, mode=0o600)
         try:
             if env_body is not None:
                 _write_wizard_file(ENV_FILE, env_body)
@@ -8876,7 +10236,11 @@ def _publish_wizard_configuration(config_body: str, env_body: str | None) -> Non
                     ENV_FILE.unlink(missing_ok=True)
                 else:
                     atomic_write_text(ENV_FILE, old_env, mode=0o600)
+            if protect_existing and not CONFIG_FILE.exists():
+                receipt_path.unlink(missing_ok=True)
             raise
+        if protect_existing:
+            receipt_path.unlink()
 
 
 def _prepare_wizard_workspace(sandbox: dict[str, Any]) -> dict[str, Any]:
@@ -8924,10 +10288,15 @@ def write_config(
     analytics: dict[str, Any] | None = None,
     persona: dict[str, str] | None = None,
     notifications: dict[str, Any] | None = None,
+    deadline_alerts: dict[str, Any] | None = None,
     webhooks: dict[str, Any] | None = None,
     deliverables: dict[str, Any] | None = None,
     personas: dict[str, Any] | None = None,
     a2a: dict[str, Any] | None = None,
+    my_work: dict[str, Any] | None = None,
+    notifications_email: dict[str, Any] | None = None,
+    support: dict[str, Any] | None = None,
+    collaboration: dict[str, Any] | None = None,
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
@@ -8949,6 +10318,9 @@ def write_config(
     license_cfg: dict[str, Any] | None = None,
     governance_profile: str | None = None,
     per_tenant_keys: bool = False,
+    first_outcome: dict[str, Any] | None = None,
+    approval: dict[str, Any] | None = None,
+    protect_existing: bool = False,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     sandbox = _prepare_wizard_workspace(sandbox)
@@ -9036,9 +10408,12 @@ def write_config(
     )
     lines += _cfg_role_models(
         role_models, discovery=advanced.get("model_discovery") is not False,
+        guidance=advanced.get("model_guidance") is not False,
+        capability_tests=advanced.get("model_capability_tests") is True,
     )
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
+    lines += _cfg_approval(approval)
     lines += _cfg_skills(skills)
     lines += _cfg_research_execution(research_execution)
     lines += _cfg_candidate_promotion(candidate_promotion)
@@ -9090,16 +10465,26 @@ def write_config(
     embedded_flash = bool(capability_config.pop("embedded_flash", False))
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
+    require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
+    # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
+    practice_mode = bool(capability_config.pop("practice_mode", True))
+    practice_cap = _safe_float(capability_config.pop("practice_daily_spend_cap", 1.0), default=1.0)
+    # Tool exposure lives under [tools] (kernel: maverick.agent via
+    # config.get_tool_exposure); "core" is the default, so only "full" is
+    # written (write-only-on-divergence, like the other [tools] keys).
+    if str(capability_config.pop("tool_exposure", "core")).lower() == "full":
+        advanced["tool_exposure"] = "full"
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
-    lines += _cfg_agent_factory(jd_hiring)
+    lines += _cfg_agent_factory(jd_hiring, require_passing_tests)
+    lines += _cfg_practice(practice_mode, practice_cap)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers)
     lines += _cfg_mcp_servers(mcp_servers)
     lines += _cfg_registries("mcp_registries", mcp_registries)
     lines += _cfg_registries("template_registries", template_registries)
-    lines += _cfg_plugins(plugins, plugin_grant, plugin_enforce, ts_plugins)
+    lines += _cfg_plugins(plugins, plugin_grant, plugin_enforce, ts_plugins, workbench=(advanced or {}).get("plugin_workbench"))
     lines += _cfg_security(
         tool_acl,
         bool((advanced or {}).get("security_autofix")),
@@ -9110,10 +10495,18 @@ def write_config(
     lines += _cfg_table("analytics", analytics)
     lines += _cfg_table("persona", persona)
     lines += _cfg_table("notifications", notifications)
+    lines += _cfg_table("mobile_offline", (advanced or {}).get("mobile_offline"))
+    lines += _cfg_table("device_pairing", (advanced or {}).get("device_pairing"))
+    lines += _cfg_deadline_alerts(deadline_alerts)
+    lines += _cfg_table("notifications.email", notifications_email)
+    lines += _cfg_table("my_work", my_work)
+    lines += _cfg_table("support", support)
+    lines += _cfg_table("collaboration", collaboration)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
     lines += _cfg_table("a2a", a2a)
+    lines += _cfg_table("first_outcome", first_outcome)
 
     # SECURITY: config.toml is NOT secret-free. Unlike API keys (which live in
     # ~/.maverick/.env and are referenced via ${VAR}), the OIDC browser-login
@@ -9123,7 +10516,7 @@ def write_config(
     # secret-bearing in backups/log redaction. chmod 600 so multi-user hosts
     # don't leak it to other accounts.
     config_body = "\n".join(lines) + "\n"
-    _publish_wizard_configuration(config_body, env_body)
+    _publish_wizard_configuration(config_body, env_body, protect_existing=protect_existing)
 
 
 def smoke_test() -> bool:
@@ -9201,15 +10594,19 @@ def run_fast() -> int:
     Skips every prompt. Writes a minimal config that runs on Anthropic
     Claude (BYOK via ANTHROPIC_API_KEY env), the Docker sandbox when its
     daemon is up (else local), balanced safety, $5/run cap. Users can
-    `maverick init` later to customize.
+    use Lightwork Settings after installation to change supported options.
     """
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     welcome()
     if not preflight():
         console.print("[red]Preflight failed.[/red] Fix the issues above and re-run.")
         return 1
     console.print(
         "[bold]Fast setup:[/bold] using safe defaults. "
-        "Run `maverick init` (no --fast) anytime to customize.\n"
+        "Open Lightwork Settings after setup to make changes.\n"
+        f"Setup will be saved at {CONFIG_FILE}.\n"
     )
     providers = ["anthropic"]
     role_models: dict[str, str] = {}  # use ROLE_MODELS defaults
@@ -9235,15 +10632,15 @@ def run_fast() -> int:
     }
     denied_tools = ["computer", "browser"]
     if backend == "local":
-        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit"])
         console.print(
-            "[yellow]![/yellow] Docker daemon not detected — using the "
-            "[bold]local[/bold] sandbox with host-mutating tools disabled. "
-            "Run [bold]maverick init[/bold] to switch to docker once it's up."
+            "[yellow]![/yellow] Docker isn't running. Lightwork can answer questions, "
+            "but it cannot create files or run programs in this setup. "
+            + _FILE_WORK_RECOVERY
         )
     capabilities = {"computer_use": False, "browser": False, "ros": False}
     # Pick up the API key from the env if it's already there;
-    # otherwise the wizard's later run can populate ~/.maverick/.env.
+    # otherwise a key can be added from Lightwork Settings.
     keys: dict[str, str] = {}
     if os.environ.get("ANTHROPIC_API_KEY"):
         keys["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
@@ -9257,6 +10654,7 @@ def run_fast() -> int:
         keys,
         capabilities,
         tool_acl={"denied_tools": denied_tools},
+        protect_existing=True,
     )
     # smoke_test() returns a bool and it was discarded, so `maverick init
     # --fast` printed "Fast setup finished" and exited 0 over a broken install
@@ -9270,27 +10668,84 @@ def run_fast() -> int:
                 "[bold red]Fast setup failed its smoke test.[/bold red]\n\n"
                 "The config was written, but the checks above did not pass, so "
                 "this install is not ready to run.\n"
-                "Fix the failures listed above, then re-run "
-                "[bold]maverick init --fast[/bold] (or `maverick doctor`).",
+                "Review the failures above and open Lightwork Settings "
+                "to finish setup.",
                 border_style="red",
+            )
+        )
+        return 1
+    if not keys:
+        console.print()
+        console.print(
+            Panel.fit(
+                "[bold yellow]Setup saved, but AI is not connected.[/bold yellow]\n\n"
+                "No AI provider key was found, so Lightwork cannot run a task yet. "
+                "Open Lightwork > Settings > AI services and add your provider key.\n"
+                f"Saved setup: {CONFIG_FILE}",
+                border_style="yellow",
             )
         )
         return 1
     console.print()
     console.print(
         Panel.fit(
-            "[bold green]Fast setup finished.[/bold green]\n\n"
-            'Try: [bold]maverick start "hello"[/bold]\n'
-            "(If ANTHROPIC_API_KEY wasn't set, edit ~/.maverick/.env first.)\n"
-            "[dim]The maverick command is also available as lightwork.[/dim]",
-            border_style="green",
+            ("[bold yellow]Fast setup saved. File work is off.[/bold yellow]\n\n"
+             if backend == "local" else "[bold green]Fast setup finished.[/bold green]\n\n")
+            + 'Try: [bold]maverick start "hello"[/bold]\n'
+            + (_FILE_WORK_RECOVERY + "\n" if backend == "local" else "")
+            + f"Saved setup: {CONFIG_FILE}\n"
+            + "[dim]The maverick command is also available as lightwork.[/dim]",
+            border_style="yellow" if backend == "local" else "green",
         )
     )
     return 0
 
 
-CONSUMER_DEMO_GOAL = "Write me a haiku about Tuesday."
-CONSUMER_DEMO_MODEL = "anthropic:claude-haiku-4-5"
+def first_outcome_choices() -> list[str]:
+    """Menu labels for the department picker, from the kernel's list."""
+    from maverick.sample_outcomes import departments
+
+    return [row["label"] for row in departments()]
+
+
+def pick_first_outcome() -> str:
+    """Final consumer question: which team tries Lightwork first?
+
+    Returns the department slug for :mod:`maverick.sample_outcomes`. Falls
+    back to the default department on anything it doesn't recognise, so an
+    <Enter> or a stubbed answer never lands outside the eight choices.
+    """
+    from maverick.sample_outcomes import DEFAULT_DEPARTMENT, get, resolve_department
+
+    console.print()
+    console.print(
+        "[dim]Your first task runs a real specialist on bundled sample data "
+        "(a made-up company). Everything it produces is marked as sample "
+        "data and never counts as real evidence.[/dim]"
+    )
+    pick = _q_select(
+        "Which team will try Lightwork first?",
+        first_outcome_choices(),
+        default=get(DEFAULT_DEPARTMENT).label,
+    )
+    return resolve_department(pick) or DEFAULT_DEPARTMENT
+
+
+def prepare_first_outcome(department: str, workdir: str) -> dict[str, Any]:
+    """Create the department's sample workspace under ``workdir``.
+
+    Returns the ``[first_outcome]`` table to record: the chosen department
+    and whether the sample workspace was actually created (a copy failure
+    is recorded as ``false``, never hidden).
+    """
+    from maverick.sample_outcomes import create_sample_workspace
+
+    created = True
+    try:
+        create_sample_workspace(department, workdir)
+    except OSError:
+        created = False
+    return {"department": department, "sample_workspace_created": created}
 
 
 def pick_mode() -> str:
@@ -9322,20 +10777,22 @@ def pick_mode() -> str:
     return pick.split()[0]
 
 
-def _consumer_budget() -> dict[str, float]:
+def _consumer_budget() -> dict[str, Any]:
     """Single-question budget chip picker for consumer mode."""
     pick = _q_select(
-        "Add an optional spending limit to each task?",
-        ["No task limit", "$1", "$5", "$20", "custom"],
-        default="No task limit",
+        "Task limits for each goal? Standard is $2 and 30 minutes.",
+        ["Standard ($2, 30 minutes)", "No task limit", "$1", "$5", "$20", "custom"],
+        default="Standard ($2, 30 minutes)",
     )
     if pick == "No task limit":
-        return {}
+        return {"task_limits_enabled": False}
+    if pick == "Standard ($2, 30 minutes)":
+        return {"max_dollars": 2.0, "max_wall_seconds": 1800.0}
     if pick == "custom":
-        dollars = _safe_float(_q_text("  Custom cap ($)", default="5.0"), default=5.0)
+        dollars = _prompt_positive_dollars("  Custom cap ($)", default="5.0")
     else:
         dollars = float(pick.lstrip("$"))
-    return {"max_dollars": dollars}
+    return {"max_dollars": dollars, "max_wall_seconds": 1800.0}
 
 
 def _consumer_api_key() -> dict[str, str]:
@@ -9343,7 +10800,7 @@ def _consumer_api_key() -> dict[str, str]:
 
     No DevTools paste, no jargon. Three escape hatches:
       1. Paste the key (the default).
-      2. Skip for now (write config without keys; user can re-run later).
+      2. Skip for now (write config without keys; add one in Settings later).
       3. Open the console in a browser to make a key.
     """
     console.print()
@@ -9355,8 +10812,7 @@ def _consumer_api_key() -> dict[str, str]:
     val = _q_secret("  Paste your Anthropic API key (leave blank to skip):")
     if not val.strip():
         console.print(
-            "[yellow]Skipped.[/yellow] You can add one later by running "
-            "[bold]maverick init[/bold] again."
+            "[yellow]Skipped.[/yellow] You can add one later in Lightwork Settings."
         )
         return {}
     # Validate with the 7-day cache.
@@ -9381,9 +10837,11 @@ def write_consumer_config(
     user_name: str,
     keys: dict[str, str],
     workdir: str,
-    budget: dict[str, float],
+    budget: dict[str, Any],
     profile: str | None = None,
-) -> None:
+    first_outcome: str | None = None,
+    protect_existing: bool = False,
+) -> str:
     """Write a consumer-mode config with the safety-seat safe defaults.
 
     Single source of truth shared by the CLI consumer flow
@@ -9392,8 +10850,11 @@ def write_consumer_config(
     ``profile`` is the governance level from :data:`GOVERNANCE_PROFILES`
     (unknown values fall back to the default) -- it layers the learning
     lifecycle + governance posture on top of the safety-seat base, which
-    is identical at every level. Creates the workspace dir. Raises on
-    write failure (caller renders the branded error).
+    is identical at every level. Creates the workspace dir, and the sample
+    workspace for ``first_outcome`` (a department slug from
+    :mod:`maverick.sample_outcomes`) when one was picked. Raises on write
+    failure (caller renders the branded error). Returns the work-area backend
+    actually saved so both installers can explain its capabilities honestly.
     """
     preset = GOVERNANCE_PROFILES.get(profile or "")
     if preset is None:
@@ -9402,6 +10863,10 @@ def write_consumer_config(
             GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE],
         )
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
+    first_outcome_table = (
+        prepare_first_outcome(first_outcome, str(Path(workdir).expanduser()))
+        if first_outcome else None
+    )
     backend = "docker" if _docker_available() else "local"
     # Computer + browser always require explicit opt-in (consumer is
     # never asked). When there's no Docker sandbox to contain it, also
@@ -9410,7 +10875,7 @@ def write_consumer_config(
     # the container is the blast radius, not the user's machine.
     denied_tools = ["computer", "browser"]
     if backend == "local":
-        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit"])
     write_config(
         ["anthropic"],  # providers
         {},  # role_models -> kernel defaults
@@ -9443,18 +10908,24 @@ def write_consumer_config(
         persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
         web_search_enabled=True,
         governance_profile=profile,
+        first_outcome=first_outcome_table,
+        protect_existing=protect_existing,
     )
+    return backend
 
 
 def run_consumer() -> int:
     """Four-question consumer flow. Writes a minimal config with
     consumer-grade safe defaults, then prints a one-line demo command."""
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     console.print()
     console.print(
         Panel.fit(
             "[bold]Lightwork setup[/bold]\n\n"
-            "Five quick questions. About a minute. You can change anything later\n"
-            "by running [bold]maverick init[/bold] again.",
+            "Five quick questions. About a minute. You can change supported\n"
+            "options later in Lightwork Settings.",
             border_style="cyan",
         )
     )
@@ -9482,42 +10953,59 @@ def run_consumer() -> int:
 
     budget = _consumer_budget()
 
+    department = pick_first_outcome()
+
     try:
-        write_consumer_config(
+        backend = write_consumer_config(
             user_name=user_name,
             keys=keys,
             workdir=workdir,
             budget=budget,
             profile=profile,
+            first_outcome=department,
+            protect_existing=True,
         )
     except Exception as e:
         show_install_failure(e)
         return 1
 
-    # First-goal nudge. Don't run the goal here (the kernel doesn't
+    if backend == "local":
+        console.print(
+            "[yellow]File changes and program execution are off.[/yellow] "
+            "Docker was not running during setup. Lightwork can still answer "
+            "questions and work with the features that do not need a work area. "
+            + _FILE_WORK_RECOVERY
+        )
+
+    # First-outcome nudge. Don't run the task here (the kernel doesn't
     # stream into a wizard window today, and shelling out from inside
-    # the installer is ugly); print the one-liner instead. The Haiku
-    # model keeps the demo under $0.01 and finishes in a couple of
-    # seconds even on cold connections.
+    # the installer is ugly); print the one-liner instead. No model flag:
+    # the pack and the configured role models pick the model.
+    from maverick.sample_outcomes import cli_command
+    from maverick.sample_outcomes import get as first_outcome_for
+
+    outcome = first_outcome_for(department)
     console.print()
     if keys:
         console.print(
             Panel.fit(
-                f"[bold green]Setup complete, {user_name}.[/bold green]\n\n"
-                "Try your first goal:\n"
-                f'  [bold]maverick start "{CONSUMER_DEMO_GOAL}" --model {CONSUMER_DEMO_MODEL}[/bold]\n\n'
-                "Then:\n"
-                "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
-                "[dim]The maverick command is also available as lightwork.[/dim]",
-                border_style="green",
+                (f"[bold yellow]Setup saved, {user_name}. File work is off.[/bold yellow]\n\n"
+                 if backend == "local" else
+                 f"[bold green]Setup complete, {user_name}.[/bold green]\n\n")
+                + f"Your first task ({outcome.label}, on sample data, waits in {outcome.lands_in}):\n"
+                + f"  [bold]{cli_command(department)}[/bold]\n\n"
+                + (_FILE_WORK_RECOVERY + "\n\n" if backend == "local" else "")
+                + "Then:\n"
+                + "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+                + "[dim]The maverick command is also available as lightwork.[/dim]",
+                border_style="yellow" if backend == "local" else "green",
             )
         )
     else:
         console.print(
             Panel.fit(
                 f"[bold yellow]Setup saved without an API key, {user_name}.[/bold yellow]\n\n"
-                "Add one later by exporting ANTHROPIC_API_KEY or by running\n"
-                "[bold]maverick init[/bold] again.",
+                "Open Lightwork Settings to add a provider key when ready.",
                 border_style="yellow",
             )
         )
@@ -9674,15 +11162,11 @@ GOVERNANCE_CHOICES: list[str] = [
 
 
 def _prior_governance_profile() -> str | None:
-    """The [governance] profile recorded by a previous `maverick init`, if any.
+    """The [governance] profile recorded by a previous installation, if any.
 
-    Same pattern as pick_deployment's prior-choice defaulting: a re-run of the
-    wizard must default to what the operator ALREADY chose. Without this, an
-    operator on a regulated install re-running init to change a name would
-    silently downgrade to essentials -- dropping audit signing, quotas, and
-    signed approvals -- by accepting the default. Reads CONFIG_FILE (the file
-    this wizard writes) rather than the kernel loader so it honors the same
-    path every other wizard read/write uses.
+    Kept for callers that preview the onboarding choice. The active setup
+    entry points refuse to overwrite a saved installation; governance changes
+    belong to Settings > All settings. Reads the wizard's configured path.
     """
     try:
         cfg = tomllib.loads(CONFIG_FILE.read_text())
@@ -9695,7 +11179,7 @@ def _prior_governance_profile() -> str | None:
 def pick_governance_profile() -> str:
     """One onboarding question: how much governance does this business need?
 
-    Defaults to the previously configured level on a re-run, else
+    Defaults to a previously configured level when previewed, else
     :data:`DEFAULT_GOVERNANCE_PROFILE`; falls back to the default on anything
     it doesn't recognise, so an <Enter> or a stubbed answer never lands
     outside the three supported levels.
@@ -9704,7 +11188,7 @@ def pick_governance_profile() -> str:
     console.print(
         "[dim]Every level gets self-learning and self-improvement. The level "
         "sets how much governance wraps it -- you can change it any time by "
-        "re-running maverick init.[/dim]"
+        "using Lightwork > Settings > All settings.[/dim]"
     )
     prior = _prior_governance_profile()
     default = next(
@@ -9725,6 +11209,9 @@ def run_express() -> int:
     single-user feature at once. The shortcut for "I want everything on"
     without sitting through the full advanced wizard. Host-dangerous and
     infra-shaped toggles stay off (and are listed for the user)."""
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     console.print()
     console.print(
         Panel.fit(
@@ -9733,7 +11220,7 @@ def run_express() -> int:
             "the flow engine, named connections, the self-improvement lifecycle\n"
             "(reflexion, dreaming, experience, self-harness, data engine),\n"
             "governed memory, web search, durable execution, and all 53 suites.\n\n"
-            "[dim]Left off (enable later via `maverick init` advanced): computer/\n"
+            "[dim]Left off pending administrator review: computer/\n"
             "browser control, code execution, autonomous self-modification, at-rest\n"
             "encryption + multi-tenancy, messaging channels, and license enforcement\n"
             "(leaving enforcement off is what keeps every paid feature unlocked).[/dim]",
@@ -9771,7 +11258,7 @@ def run_express() -> int:
     # runs against the user's host filesystem, not a container blast radius.
     denied_tools = ["computer", "browser"]
     if backend == "local":
-        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit"])
     try:
         write_config(
             providers=["anthropic"],
@@ -9812,29 +11299,39 @@ def run_express() -> int:
             ),
             governance_profile=profile,
             tool_acl={"denied_tools": denied_tools},
+            protect_existing=True,
         )
     except Exception as e:
         show_install_failure(e)
         return 1
 
+    if backend == "local":
+        console.print(
+            "[yellow]File changes and program execution are off.[/yellow] "
+            "Docker was not running during setup. Lightwork can still answer "
+            "questions and use features that do not need a work area. "
+            + _FILE_WORK_RECOVERY
+        )
+
     console.print()
     if keys:
         console.print(
             Panel.fit(
-                f"[bold green]Everything's on, {user_name}.[/bold green]\n\n"
-                "Open the dashboard:\n"
-                "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
-                "[dim]Change anything in ~/.maverick/config.toml, or re-run "
-                "maverick init.[/dim]",
-                border_style="green",
+                (f"[bold yellow]Setup saved, {user_name}. File work is off.[/bold yellow]\n\n"
+                 if backend == "local" else
+                 f"[bold green]Setup saved, {user_name}.[/bold green]\n\n")
+                + "Open the dashboard:\n"
+                + "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+                + (_FILE_WORK_RECOVERY + "\n\n" if backend == "local" else "")
+                + "[dim]Open Lightwork Settings to change supported options.[/dim]",
+                border_style="yellow" if backend == "local" else "green",
             )
         )
     else:
         console.print(
             Panel.fit(
-                f"[bold yellow]Everything's on, but no API key yet, {user_name}.[/bold yellow]\n\n"
-                "Add one by exporting ANTHROPIC_API_KEY or re-running "
-                "[bold]maverick init[/bold].",
+                f"[bold yellow]Setup saved without an API key, {user_name}.[/bold yellow]\n\n"
+                "Open Lightwork Settings to add a provider key.",
                 border_style="yellow",
             )
         )
@@ -9918,6 +11415,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _announce()
     budget = state.get("budget") or pick_budget()
     state["budget"] = budget
+    _save_partial(state)
+
+    _announce()
+    approval = state.get("approval") or pick_approvals()
+    state["approval"] = approval
     _save_partial(state)
 
     _announce()
@@ -10037,10 +11539,19 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     state["advanced"] = advanced
     _save_partial(state)
 
+    _announce()
+    if "api_keys" not in advanced:
+        # Carried inside ``advanced`` so write_config's signature stays put;
+        # the writer emits the keys under [dashboard].
+        advanced["api_keys"] = pick_api_keys()
+        state["advanced"] = advanced
+        _save_partial(state)
+
     return {
         "safety": safety,
         "signed_skills": signed_skills,
         "budget": budget,
+        "approval": approval,
         "sandbox": sandbox,
         "research_execution": research_execution,
         "candidate_promotion": candidate_promotion,
@@ -10127,7 +11638,7 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     _announce()
     analytics = state.get("analytics")
     if analytics is None:
-        analytics = pick_analytics()
+        analytics = {**pick_analytics(), **pick_usability_survey(), **pick_web_vitals(), **pick_usage_measures()}
         state["analytics"] = analytics
         _save_partial(state)
 
@@ -10144,7 +11655,22 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     }
 
 
+def _run_short_setup_mode(resume: bool) -> int | None:
+    # A saved partial state belongs to the advanced flow, not the mode picker.
+    if resume:
+        return None
+    mode = pick_mode()
+    if mode == "consumer":
+        return run_consumer()
+    if mode == "express":
+        return run_express()
+    return None
+
+
 def run(fast: bool = False, resume: bool = False) -> int:
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     if fast:
         return run_fast()
     # A non-interactive stdin (CI, Docker build, `... | maverick init`) can't
@@ -10155,20 +11681,14 @@ def run(fast: bool = False, resume: bool = False) -> int:
         console.print(
             "[yellow]maverick init needs an interactive terminal.[/yellow]\n"
             "  - run it in a terminal, or\n"
-            "  - use  [bold]maverick init --fast[/bold]  for recommended defaults, or\n"
-            "  - edit  ~/.maverick/config.toml  by hand (see docs/configuration.md)."
+            "  - use  [bold]maverick init --fast[/bold]  for recommended defaults.\n"
+            "After setup, use Lightwork Settings to make changes."
         )
         return 1
     welcome()
-    # Council round-2: mode picker on every launch. Consumer is default.
-    # Skip the picker on --resume since it implies an in-progress
-    # advanced flow.
-    if not resume:
-        mode = pick_mode()
-        if mode == "consumer":
-            return run_consumer()
-        if mode == "express":
-            return run_express()
+    short_result = _run_short_setup_mode(resume)
+    if short_result is not None:
+        return short_result
     if not preflight():
         console.print(
             "[red]Preflight failed.[/red] Fix the issues above and re-run `maverick init`."
@@ -10253,6 +11773,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     safety = _simple["safety"]
     signed_skills = _simple["signed_skills"]
     budget = _simple["budget"]
+    approval = _simple["approval"]
     sandbox = _simple["sandbox"]
     research_execution = _simple["research_execution"]
     candidate_promotion = _simple["candidate_promotion"]
@@ -10299,7 +11820,21 @@ def run(fast: bool = False, resume: bool = False) -> int:
 
     _announce()
     notifications, notify_envs = state.get("_notifications_pair") or pick_notifications()
+    _resolve_private_alert_linking(advanced, notifications)
+    state["advanced"] = advanced
     state["_notifications_pair"] = [notifications, notify_envs]
+    _save_partial(state)
+
+    _announce()
+    deadline_alerts = _deadline_alerts_step(state, notifications)
+
+    _announce()
+    my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
+    support_cfg = state.get("_support") if isinstance(state.get("_support"), dict) else pick_support()
+    state["_support"] = support_cfg
+    collaboration_cfg = (state.get("_collaboration") if isinstance(state.get("_collaboration"), dict)
+                         else {**pick_collaboration(), **pick_suggestions()})
+    state["_collaboration"] = collaboration_cfg
     _save_partial(state)
 
     _announce()
@@ -10325,6 +11860,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     extra_envs = (
         set(web_search_envs)
         | set(notify_envs)
+        | set(summary_envs)
         | set(webhook_envs)
         | set(a2a_envs)
         | set(deliverable_envs)
@@ -10377,10 +11913,15 @@ def run(fast: bool = False, resume: bool = False) -> int:
         analytics=analytics,
         persona=persona,
         notifications=notifications,
+        deadline_alerts=deadline_alerts,
         webhooks=webhooks,
         deliverables=deliverables,
         personas=personas,
         a2a=a2a_cfg,
+        my_work=my_work_cfg,
+        notifications_email=notifications_email,
+        support=support_cfg,
+        collaboration=collaboration_cfg,
         web_search_enabled=web_search_enabled,
         skills=signed_skills
         if (
@@ -10405,6 +11946,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         value=value or None,
         assessments=assessments or None,
         security_suite=security_suite,
+        approval=approval,
         suites=suites,
         license_cfg=license_cfg or None,
         # The advanced flow applies no preset -- the operator hand-picked
@@ -10414,6 +11956,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         # as tier-less) or borrowing a level name the knobs may not match.
         governance_profile="custom",
         per_tenant_keys=per_tenant_keys,
+        protect_existing=True,
     )
     _clear_partial()
     ok = smoke_test()

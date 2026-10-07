@@ -21,8 +21,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
+from collections import OrderedDict
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from random import Random
@@ -174,29 +177,44 @@ def context_key(role: str, tier: int) -> str:
     return f"{role or 'default'}:t{int(tier)}"
 
 
-_shared: ContextualBandit | None = None
+_shared: OrderedDict[tuple[str | None, str], ContextualBandit] = OrderedDict()
 _shared_lock = threading.Lock()
+_SHARED_LIMIT = 64
+
+
+def _storage_binding() -> tuple[tuple[str | None, str], Path]:
+    from ..paths import canonical_tenant_id, current_tenant_id_strict, data_dir
+
+    tenant = current_tenant_id_strict()
+    tenant = canonical_tenant_id(tenant) if tenant is not None else None
+    path = data_dir("router_bandit.json").resolve()
+    return (tenant, os.path.normcase(str(path))), path
 
 
 def shared() -> ContextualBandit:
-    global _shared
+    key, path = _storage_binding()
     with _shared_lock:
-        if _shared is None:
-            from ..file_lock import ensure_private_directory
-            from ..paths import data_dir
+        bandit = _shared.get(key)
+        if bandit is not None:
+            _shared.move_to_end(key)
+            return bandit
+    # Loading native storage may wait. Keep unrelated tenants out of that wait.
+    from ..file_lock import ensure_private_directory
 
-            path = data_dir("router_bandit.json")
-            ensure_private_directory(path.parent)
-            _shared = ContextualBandit(path=path)
-        return _shared
+    ensure_private_directory(path.parent)
+    candidate = ContextualBandit(path=path)
+    with _shared_lock:
+        bandit = _shared.setdefault(key, candidate)
+        _shared.move_to_end(key)
+        while len(_shared) > _SHARED_LIMIT:
+            _shared.popitem(last=False)
+        return bandit
 
 
 def reset_shared() -> None:
-    global _shared
     with _shared_lock:
-        _shared = None
-    with _chosen_lock:
-        _chosen.clear()
+        _shared.clear()
+    clear_choice()
 
 
 def pick(role: str, tier: int, viable_arms: list[str],
@@ -215,38 +233,100 @@ def pick(role: str, tier: int, viable_arms: list[str],
     return chosen or (fallback() if fallback else None)
 
 
-# The context each arm was last chosen for by the live router, so the outcome
-# of the call that follows is credited to the right task class. Arms are the
-# router's fixed provider:model rows, so this stays small.
-_chosen: dict[str, str] = {}
-_chosen_lock = threading.Lock()
+@dataclass(frozen=True)
+class _RoutingCredit:
+    binding: tuple[str | None, str]
+    role: str
+    tier: int
+    arm: str
+    bandit: ContextualBandit = field(repr=False, compare=False)
+
+
+class _RoutedModel(str):
+    """A live route remains a string while retaining its original decision.
+
+    Serialization deliberately produces an ordinary model string, not a new
+    routing decision. Agents and retained LLM clients may hold the live value.
+    """
+
+    __slots__ = ("_credit",)
+
+    def __new__(cls, credit: _RoutingCredit):
+        value = str.__new__(cls, credit.arm)
+        object.__setattr__(value, "_credit", credit)
+        return value
+
+    def __setattr__(self, name, value):
+        raise AttributeError("A routing decision is immutable")
+
+    def __reduce__(self):
+        return str, (str(self),)
+
+
+_pending: ContextVar[_RoutingCredit | None] = ContextVar("router_v3_choice", default=None)
+_USE_PENDING = object()
+
+
+def clear_choice() -> None:
+    """Discard legacy pending credit at every native model-resolution entry."""
+    _pending.set(None)
+
+
+def _current_credit(credit: object, arm: str) -> bool:
+    if not isinstance(credit, _RoutingCredit) or credit.arm != arm or not enabled():
+        return False
+    binding, _ = _storage_binding()
+    path = credit.bandit.path
+    return (binding == credit.binding and path is not None
+            and os.path.normcase(str(path.resolve())) == binding[1])
+
+
+def capture_call(model: str) -> _RoutingCredit | None:
+    """Bind a logical call only to the original live routed model value.
+
+    An equal explicit string is not evidence that v3 selected this call. This
+    also clears pending credit when the caller uses a fixed or non-v3 model.
+    """
+    clear_choice()
+    credit = model._credit if isinstance(model, _RoutedModel) else None
+    return credit if _current_credit(credit, str(model)) else None
 
 
 def choose_for(role: str, tier: int, viable_arms: list[str]) -> str | None:
     """The live router's entry point (``cost.router.pick``): choose among the
-    viable arms and remember the context, so :func:`note_call` can credit
+    viable arms and retain this exact decision, so :func:`note_call` can credit
     the outcome."""
-    chosen = pick(role, tier, viable_arms)
+    clear_choice()
+    if not enabled() or not viable_arms:
+        return None
+    bandit = shared()
+    chosen = pick(role, tier, viable_arms, bandit=bandit)
     if chosen:
-        with _chosen_lock:
-            _chosen[chosen] = context_key(role, tier)
-    return chosen
+        binding, _ = _storage_binding()
+        credit = _RoutingCredit(binding, role, int(tier), chosen, bandit)
+        _pending.set(credit)
+        return _RoutedModel(credit)
+    return None
 
 
-def note_call(provider: str, model: str, *, success: bool, dollars: float) -> bool:
+def note_call(provider: str, model: str, *, success: bool, dollars: float,
+              credit: object = _USE_PENDING) -> bool:
     """Credit one finished model call to the arm the router chose for it.
 
     Called by ``maverick.llm`` after every provider call; a no-op (False)
     unless the bandit is on and this arm was chosen by the router."""
     arm = f"{provider}:{model}"
-    with _chosen_lock:
-        context = _chosen.get(arm)
-    if context is None or not enabled():
+    if credit is _USE_PENDING:
+        credit = _pending.get()
+        clear_choice()
+    if not _current_credit(credit, arm):
         return False
-    shared().record_outcome(context, arm, success=bool(success),
-                            dollars=max(float(dollars or 0.0), 0.0))
+    credit.bandit.record_outcome(context_key(credit.role, credit.tier), arm,
+                                success=bool(success),
+                                dollars=max(float(dollars or 0.0), 0.0))
     return True
 
 
 __all__ = ["ContextualBandit", "context_key", "pick", "enabled",
-           "shared", "reset_shared", "DEFAULT_EPSILON", "choose_for", "note_call"]
+           "shared", "reset_shared", "DEFAULT_EPSILON", "choose_for", "note_call",
+           "capture_call", "clear_choice"]

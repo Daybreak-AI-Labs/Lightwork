@@ -80,6 +80,38 @@ def _local(request: Request, *, mutate=False):
         raise HTTPException(403, "Open this Lightwork page before submitting the form.")
 
 
+def sign_in_available_for(cfg: dict, *, bootstrap: bool = False) -> bool:
+    """Whether this configuration still permits the loopback owner login.
+
+    Explicitly disabled OIDC/SAML details are stageable. Active or malformed
+    enterprise identity policy never counts as owner-passphrase recovery.
+    """
+    auth_table = cfg.get("auth")
+    if "auth" in cfg and not isinstance(auth_table, dict):
+        return False
+    if auth_table:
+        if bootstrap or not set(auth_table) <= {"oidc", "saml"}:
+            return False
+        saml_table = auth_table.get("saml")
+        if saml_table is not None and (not isinstance(saml_table, dict) or saml_table.get("enabled") is not False):
+            return False
+        oidc_table = auth_table.get("oidc", {})
+        if not isinstance(oidc_table, dict):
+            return False
+        enabled = config.env_flag("MAVERICK_OIDC_ENABLED")
+        oidc_enabled = enabled if enabled is not None else bool(oidc_table.get("enabled", False))
+        if oidc_enabled:
+            return False
+    dashboard = cfg.get("dashboard") or {}
+    if not isinstance(dashboard, dict):
+        return False
+    proxy_enabled = config.env_flag("MAVERICK_PROXY_AUTH")
+    return not (cfg.get("proxy_auth") or proxy_enabled is True
+                or any(os.environ.get(name) for name in (
+                    "MAVERICK_DASHBOARD_TOKEN", "LIGHTWORK_DASHBOARD_TOKEN"))
+                or dashboard.get("token"))
+
+
 def _policy(*, bootstrap=False):
     from . import auth
 
@@ -92,10 +124,7 @@ def _policy(*, bootstrap=False):
     # Partial enterprise identity configuration also denies local enrollment.
     from ._shared import dashboard_token
 
-    if (cfg.get("auth") or cfg.get("proxy_auth")
-            or any(os.environ.get(name) for name in (
-                "MAVERICK_DASHBOARD_TOKEN", "LIGHTWORK_DASHBOARD_TOKEN"))
-            or dashboard_token()
+    if (not sign_in_available_for(cfg, bootstrap=bootstrap) or dashboard_token()
             or auth.oidc_enabled() or auth.proxy_auth_enabled()
             or auth._saml_policy_configured()):
         raise HTTPException(409, "This installation uses managed sign-in. Use its configured sign-in method.")
@@ -143,7 +172,7 @@ def _credentials(email, password):
     return email, password
 
 
-def _finish(row):
+def _finish(row, request=None):
     from . import invites, rbac
     if row["status"] == "pending":
         principal = "user:" + row["email"]
@@ -158,7 +187,7 @@ def _finish(row):
         _write(row)
     elif rbac.get_stored_role("user:" + row["email"]) is None:
         raise HTTPException(403, "This local account no longer has an assigned role. Contact a current administrator.")
-    return invites.mint_local_session(row["email"])
+    return invites.mint_local_session(row["email"], request=request)
 
 
 def enroll(request: Request, *, email: str, password: str, confirm: bool):
@@ -181,7 +210,7 @@ def enroll(request: Request, *, email: str, password: str, confirm: bool):
                "password_hash": _password(password, salt), "status": "pending",
                "created_at": time.time(), "failures": 0, "locked_until": 0}
         _write(row)
-        return _finish(row)
+        return _finish(row, request)
 
 
 def login(request: Request, *, email: str, password: str):
@@ -206,4 +235,38 @@ def login(request: Request, *, email: str, password: str):
         _enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
         row.update(failures=0, locked_until=0)
         _write(row)
-        return _finish(row)
+        return _finish(row, request)
+
+
+def verify_recovery(request: Request, *, email: str, password: str):
+    """Verify the existing owner for one restricted operation; mint no session.
+
+    The caller must enforce its prospective managed policy. This primitive
+    never enrolls an owner, completes pending enrollment or restores a role.
+    """
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.oidc import VerifiedPrincipal
+
+    from . import auth, rbac
+
+    _local(request, mutate=True)
+    email, password = _credentials(email, password)
+    with authority_effect_fence(), _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        row = _read()
+        if row is None or row["status"] != "ready":
+            raise HTTPException(409, "Complete this computer's owner setup before using restricted recovery.")
+        if row["locked_until"] > time.time():
+            raise HTTPException(429, "Wait one minute before trying the owner passphrase again.")
+        match = hmac.compare_digest(_password(password, row["salt"]), row["password_hash"])
+        if not match or email != row["email"]:
+            row["failures"] = min(5, row["failures"] + 1)
+            row["locked_until"] = time.time() + 60 if row["failures"] == 5 else 0
+            _write(row)
+            raise HTTPException(401, "The email or passphrase was not accepted.")
+        role = rbac.get_stored_role("user:" + row["email"])
+        if role is None or "admin" not in rbac.permissions_for(role):
+            raise HTTPException(403, "The original owner's current role cannot manage installation sign-in.")
+        auth._enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
+        row.update(failures=0, locked_until=0)
+        _write(row)
+        return row

@@ -2,14 +2,15 @@
 
 The plan-tree page swaps the static <ul> for a JS-driven Cytoscape graph
 that fetches /api/v1/goals/{id}/tree and polls it. These tests lock in:
-  - the interactive container (#plan-tree) + the SRI-pinned CDN script,
+  - the interactive container (#plan-tree) + the SRI-pinned local script,
   - the existing tree JSON API still works unchanged,
-  - the CSP on the plan page allows the CDN host (and only that page),
-  - the no-JS <noscript> fallback still renders.
+  - the plan page uses a self-only script policy,
+  - the accessible list renders with and without JavaScript.
 """
 from __future__ import annotations
 
 import pytest
+from maverick_dashboard.app import static_url
 
 fastapi = pytest.importorskip("fastapi")
 TestClient = pytest.importorskip("fastapi.testclient").TestClient
@@ -45,8 +46,9 @@ def test_plan_page_renders_interactive_container_and_script(client, world_with_t
     body = resp.text
     # The interactive graph mount point.
     assert 'id="plan-tree"' in body
-    # Cytoscape vendored from the CDN, SRI-pinned + crossorigin.
-    assert "cdn.jsdelivr.net/npm/cytoscape" in body
+    # Cytoscape ships with the dashboard, using the unchanged version and SRI.
+    assert f'src="{static_url("cytoscape-3.30.2.min.js")}"' in body
+    assert "cdn.jsdelivr.net/npm/cytoscape" not in body
     assert "integrity=" in body and "sha384-" in body
     assert 'crossorigin="anonymous"' in body
     # It fetches the live tree endpoint and polls.
@@ -56,13 +58,18 @@ def test_plan_page_renders_interactive_container_and_script(client, world_with_t
     assert "Refresh to see live state" not in body
 
 
-def test_plan_page_keeps_noscript_fallback(client, world_with_tree):
+def test_plan_page_keeps_always_available_accessible_list(client, world_with_tree):
     _, g1, *_ = world_with_tree
     body = client.get(f"/goals/{g1}/plan").text
-    assert "<noscript>" in body
+    assert '<section aria-label="Task steps and relationships">' in body
+    assert 'id="plan-tree-list"' in body and "<noscript>" not in body
+    assert 'id="plan-tree" role="img" hidden' in body
     # The root task links from the fallback markup (by address, not a "#id").
     assert f'href="/chat/goal/{g1}"' in body
-    assert "in_progress" not in body.split("<noscript>")[1].split("</noscript>")[0]
+    fallback = body.split('id="plan-tree-list"')[1].split("</section>")[0]
+    assert "in_progress" not in fallback
+    assert "root task" in fallback and "subtask A" in fallback and "subtask B" in fallback
+    assert "hidden" not in fallback
 
 
 def test_tree_api_still_returns_json(client, world_with_tree):
@@ -75,12 +82,12 @@ def test_tree_api_still_returns_json(client, world_with_tree):
     assert child_ids == sorted([g2, g3])
 
 
-def test_plan_page_csp_allows_cdn_only_there(client, world_with_tree):
+def test_plan_page_csp_uses_local_scripts(client, world_with_tree):
     _, g1, *_ = world_with_tree
     plan_csp = client.get(f"/goals/{g1}/plan").headers.get("Content-Security-Policy", "")
-    # The plan page allows the Cytoscape CDN on script-src...
-    assert "https://cdn.jsdelivr.net" in plan_csp
-    # ...but connect-src stays self-only (the poll hits our own API).
+    # The graph and the live poll both use only dashboard resources.
+    assert "cdn.jsdelivr.net" not in plan_csp
+    assert "script-src 'self' 'unsafe-inline';" in plan_csp
     assert "connect-src 'self'" in plan_csp
     assert "object-src 'none'" in plan_csp
     # Other dashboard pages remain locked to 'self' (no CDN host).

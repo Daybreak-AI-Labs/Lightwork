@@ -30,7 +30,7 @@
     { value: "other", label: "Another reason" },
   ];
 
-  function say(text) { statusLine.textContent = text; }
+  function say(text) { window.mvStatus(statusLine, text); }
   function fail(action) { return function (f) { var t = R.errorText(f, action); say(t); if (window.mvToast) { window.mvToast(t, { error: true }); } }; }
   function words(value) {
     if (value === null || value === undefined || value === "") { return ""; }
@@ -81,7 +81,7 @@
     else { box.appendChild(R.el("p", "muted", "Your IT team hasn't set up the vendor web address yet. Send the access code once they have.")); }
     row("Access code", result.token);
     box.appendChild(R.button("I've copied it", "ghost", function () { box.hidden = true; box.textContent = ""; }));
-    box.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(box);
   }
 
   // ---- lists ----------------------------------------------------------------
@@ -107,7 +107,14 @@
     return Promise.all(jobs).then(function () {
       if (!canAudit) { say("Only auditors and administrators can see invitations."); render(); return; }
       return loadInvitations(false).then(function () { say("Up to date."); });
-    }).catch(fail("load the invitations"));
+    }).catch(function (f) {
+      fail("load the invitations")(f);
+      // The list never stays on "Loading…": say what happened and offer a retry.
+      var box = document.getElementById("tpc-invitations");
+      box.textContent = "";
+      box.appendChild(window.mvEmpty((window.LightworkI18n ? window.LightworkI18n.text("Invitations could not be loaded") : "Invitations could not be loaded"), R.errorText(f, "load the invitations"),
+        { label: (window.LightworkI18n ? window.LightworkI18n.text("Try again") : "Try again"), onClick: loadAll }));
+    });
   }
 
   function assessmentOf(inv) { return state.assessments.filter(function (a) { return a.assessment_id === inv.assessment_id; })[0]; }
@@ -232,7 +239,7 @@
   }
   function openInvite() {
     var usable = state.assessments.filter(function (a) { var t = templateOf(a); return t && t.state === "approved"; });
-    if (!usable.length) { say("Start an assessment on the Third-Party Lifecycle page first. Its questions are what the vendor answers."); return; }
+    if (!usable.length) { say("Start an assessment on the Third-party lifecycle page first. Its questions are what the vendor answers."); return; }
     var limits = (state.sharing && state.sharing.limits) || { invitation_seconds: 86400, retention_seconds: 31536000, max_artifacts: 20, max_artifact_bytes: 10485760 };
     fillSelect(F("assessment"), usable.map(function (a) { var t = templateOf(a); return { value: a.assessment_id, label: vendorName(a.vendor_ref) + " · " + words(t.title_ref) }; }));
     var exp = expiryField("Link works for");
@@ -246,10 +253,10 @@
     if (!mb.length) { mb = [Math.max(0, Math.floor(limits.max_artifact_bytes / 1048576))]; }
     fillSelect(F("max_size"), mb.map(function (n) { return { value: String(n), label: n + " MB" }; })); F("max_size").value = String(mb[mb.length - 1]);
     state.notice = null;
-    document.getElementById("tpc-notice-name").textContent = "No file chosen yet.";
+    document.getElementById("tpc-notice-name").textContent = "No file chosen yet. Choose the notice file to attach.";
     syncRespondents();
     panel.hidden = false;
-    panel.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(panel);
     F("assessment").focus();
   }
   F("assessment").addEventListener("change", syncRespondents);

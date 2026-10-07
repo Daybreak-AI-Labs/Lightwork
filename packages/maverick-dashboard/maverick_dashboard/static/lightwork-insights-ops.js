@@ -10,12 +10,10 @@
     return node;
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function get(path) {
-    var response = await window.fetch(path, {credentials: 'same-origin', cache: 'no-store'});
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(path, {cache: 'no-store'});
   }
   function table(headers, rows) {
     var t = el('table'), head = el('tr');
@@ -74,7 +72,7 @@
         var body = t.querySelector('tbody');
         data.tasks.forEach(function (d) {
           var tr = el('tr');
-          [d.day, d.finished, d.stopped].forEach(function (v) { tr.appendChild(el('td', null, String(v))); });
+          [(window.mvDateAbsolute && window.mvDateAbsolute(d.day)) || d.day, d.finished, d.stopped].forEach(function (v) { tr.appendChild(el('td', null, String(v))); });
           var cell = el('td', null, String(d.finished + d.stopped) + ' '); cell.appendChild(bar(d.finished + d.stopped, max)); tr.appendChild(cell);
           body.appendChild(tr);
         });

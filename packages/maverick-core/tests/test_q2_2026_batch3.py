@@ -79,27 +79,34 @@ _HAS_CHROMA = importlib.util.find_spec("chromadb") is not None
 
 
 @pytest.mark.skipif(not _HAS_CHROMA, reason="chromadb not installed")
-def test_chroma_store_round_trip(tmp_path):
+def test_chroma_store_round_trip(tmp_path, monkeypatch):
     from maverick.vector_store import ChromaStore
-    store = ChromaStore(collection="t1", path=tmp_path / "vs")
+    monkeypatch.setenv("ANONYMIZED_TELEMETRY", "False")
+    store = ChromaStore(collection="test_round_trip", path=tmp_path / "vs", embedding_function=None)
     store.add(
         ["the user prefers dark mode", "morning is best for cold calls"],
         ids=["fact-1", "fact-2"],
         metadatas=[{"topic": "ui"}, {"topic": "sales"}],
+        embeddings=[[1.0, 0.0], [0.0, 1.0]],
     )
     assert store.count() == 2
-    hits = store.query("UI preference", top_k=1)
+    hits = store.query(embedding=[1.0, 0.0], top_k=1)
     assert len(hits) == 1
-    assert hits[0]["id"] in {"fact-1", "fact-2"}
+    assert hits[0]["id"] == "fact-1"
+    assert hits[0]["document"] == "the user prefers dark mode"
+    assert hits[0]["metadata"] == {"topic": "ui"}
 
 
 @pytest.mark.skipif(not _HAS_CHROMA, reason="chromadb not installed")
-def test_chroma_store_delete_and_reset(tmp_path):
+def test_chroma_store_delete_and_reset(tmp_path, monkeypatch):
     from maverick.vector_store import ChromaStore
-    store = ChromaStore(collection="t2", path=tmp_path / "vs")
-    store.add(["a", "b", "c"], ids=["i1", "i2", "i3"])
+    monkeypatch.setenv("ANONYMIZED_TELEMETRY", "False")
+    store = ChromaStore(collection="test_delete_reset", path=tmp_path / "vs", embedding_function=None)
+    store.add(["a", "b", "c"], ids=["i1", "i2", "i3"],
+              embeddings=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
     store.delete(["i2"])
     assert store.count() == 2
+    assert {hit["id"] for hit in store.query(embedding=[1.0, 0.0, 0.0], top_k=3)} == {"i1", "i3"}
     store.reset()
     assert store.count() == 0
 

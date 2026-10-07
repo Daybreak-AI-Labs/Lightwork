@@ -257,21 +257,32 @@ def _GuidedJsonlObserver(path: Path, *, follow: bool = False):  # noqa: N802 -- 
     return GuidedJsonlObserver(path, follow=follow)
 
 
+def _selected_observer_kind(observer_name: str | None) -> str:
+    from ..ekko_foreground import foreground_options
+
+    return foreground_options()["observer"] or str(observer_name)
+
+
 def _observer_from_options(events: Path | None, observer_name: str | None, follow: bool):
     if events is not None and observer_name is not None:
         raise click.UsageError("--events and --observer are mutually exclusive")
     if events is not None:
         return _GuidedJsonlObserver(events, follow=follow)
-    if observer_name == "windows":
+    if observer_name in {"windows", "macos", "linux-x11", "desktop"}:
         try:
-            from ..ekko_daemon import WindowsForegroundObserver
-            return WindowsForegroundObserver()
+            from ..ekko_foreground import foreground_observer, foreground_options
+
+            expected = {"windows": "windows_foreground", "macos": "macos_foreground",
+                        "linux-x11": "linux_x11_foreground"}.get(observer_name)
+            if expected and foreground_options()["observer"] != expected:
+                raise OSError("the selected platform recorder is unavailable")
+            return foreground_observer()
         except (ImportError, OSError, RuntimeError) as exc:
             raise click.ClickException(
-                "the explicit Windows observer is unavailable on this system"
+                "the selected desktop recorder is unavailable on this computer"
             ) from exc
     raise click.UsageError(
-        "choose an explicit observer: --events FILE or --observer windows"
+        "choose an explicit observer: --events FILE or --observer desktop"
     )
 
 
@@ -282,7 +293,7 @@ def _observer_from_options(events: Path | None, observer_name: str | None, follo
     default=None, help="Strict guided JSONL event stream.",
 )
 @click.option(
-    "--observer", "observer_name", type=click.Choice(["windows"]), default=None,
+    "--observer", "observer_name", type=click.Choice(["desktop", "windows", "macos", "linux-x11"]), default=None,
     help="Explicit platform observer (never selected automatically).",
 )
 @click.option(
@@ -298,7 +309,7 @@ def ekko_run(
         raise click.UsageError("--events and --observer are mutually exclusive")
     if events is None and observer_name is None:
         raise click.UsageError(
-            "choose an explicit observer: --events FILE or --observer windows"
+            "choose an explicit observer: --events FILE or --observer desktop"
         )
     if follow and events is None:
         raise click.UsageError("--follow requires --events")
@@ -315,7 +326,7 @@ def ekko_run(
         required=True,
         state="start_authorized",
         policy_digest=policy.fingerprint(),
-        observer="guided_jsonl" if events is not None else "windows_foreground",
+        observer="guided_jsonl" if events is not None else _selected_observer_kind(observer_name),
     )
     observer = _observer_from_options(events, observer_name, follow)
     from ..ekko_daemon import EkkoDaemon

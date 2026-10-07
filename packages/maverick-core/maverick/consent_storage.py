@@ -1392,9 +1392,13 @@ def move_store(path: Path) -> dict[str, Any]:
     """Copy one store file into its schema: all or nothing, originals kept."""
     target = connect(path, timeout=60.0)
     try:
+        target.row_factory = sqlite3.Row
         source = _open_source(path)
         try:
             tables = _source_tables(source)
+            preference_store = {
+                "consent_meta", "consent_profiles", "consent_receipts", "consent_outbox"
+            } <= {table for table, _sql in tables}
             for _table, sql in tables:
                 target.execute(_if_not_exists(sql))
             for sql in _source_extras(source):
@@ -1403,12 +1407,26 @@ def move_store(path: Path) -> dict[str, Any]:
             copied = 0
             try:
                 target._raw("SET CONSTRAINTS ALL DEFERRED")
+                if preference_store:
+                    # Startup may have initialized an empty shared target.
+                    # Recompute this derived marker from the copied source;
+                    # otherwise it is an extra row and can suppress backfill.
+                    target.execute(
+                        "DELETE FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+                    )
                 for table, _sql in tables:
                     target._raw(f"ALTER TABLE {_quoted(table)} DISABLE TRIGGER USER")
                 for table, _sql in tables:
                     copied += _copy_table(source, target, table)
                 for table, _sql in tables:
                     target._raw(f"ALTER TABLE {_quoted(table)} ENABLE TRIGGER USER")
+                if preference_store:
+                    from .consent_preferences import ConsentPreferenceStore
+
+                    ConsentPreferenceStore._ensure_restoration_floor_schema(target)
+                    ConsentPreferenceStore._backfill_restoration_floors(
+                        target, clock=time.time
+                    )
                 version = int(source.execute("PRAGMA user_version").fetchone()[0])
                 if version:
                     target.execute(f"PRAGMA user_version={version}")

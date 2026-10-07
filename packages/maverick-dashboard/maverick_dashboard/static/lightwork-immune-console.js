@@ -27,7 +27,7 @@
     return e;
   }
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || ""); }
-  function say(text) { if (statusEl) { statusEl.textContent = text; } }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(text) { if (errorEl) { errorEl.textContent = text; } if (window.mvToast) { window.mvToast(text, { error: true }); } }
   function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function text(id, value) {
@@ -49,28 +49,20 @@
     return human(pair[1]) + " (" + human(pair[0]) + ")";
   }
 
-  async function failure(response, action) {
-    var body = null;
-    try { body = await response.json(); } catch (e) { body = null; }
-    var plain = body && window.mvPlainDetail && window.mvPlainDetail(body.detail);
-    if (plain && [404, 409, 422, 503].indexOf(response.status) >= 0) {
+  function failure(error, action) {
+    var plain = window.mvPlainDetail && window.mvPlainDetail(error && error.detail);
+    if (plain && [404, 409, 422, 503].indexOf(error.status) >= 0) {
       return plain;
     }
-    return window.mvErrorText(response, action);
+    return error && error.message ? error.message : window.mvErrorText(error, action);
   }
 
   async function call(method, url, body, action) {
-    var response;
-    try {
-      response = await fetch(url, {
-        method: method, credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body)
-      });
-    } catch (e) { fail(window.mvErrorText(e, action)); return null; }
-    if (!response.ok) { fail(await failure(response, action)); return null; }
+    var data;
+    try { data = await window.mvFetchJSON(url, { method: method, body: body }, action); }
+    catch (error) { fail(failure(error, action)); return null; }
     if (errorEl) { errorEl.textContent = ""; }
-    try { return await response.json(); } catch (e) { return {}; }
+    return data || {};
   }
 
   function button(label, cls, onClick) {
@@ -143,8 +135,8 @@
       ], emptyText);
     }
     scoreRows("ic-over-rows", over.canary, over.available ? "No reviewer tests have been decided yet." :
-      "Reviewer results are not available right now.", "Yes", "Not yet");
-    scoreRows("ic-drill-rows", over.drill, "No drill results yet.", "Yes", "Not yet");
+      "Reviewer results are not available right now. Try again in a minute.", "Yes", "Not yet");
+    scoreRows("ic-drill-rows", over.drill, "No drill results yet. Record one above after a drill.", "Yes", "Not yet");
     rows("ic-twin-rows", twin.replays, [
       function (r) { return task(r.production_goal); },
       function (r) { return task(r.twin_goal); },
@@ -240,11 +232,17 @@
     if (out) { say("Re-run started. Its result appears under Past re-runs when it finishes."); }
   }
 
-  async function forget(g) {
-    var ok = await window.mvConfirm("Delete the recording for “" + g.title + "”? It can no longer be re-run. Past re-run results are kept.", { okText: "Delete" });
-    if (!ok) { return; }
-    var out = await call("DELETE", "/api/v1/immune/twin/" + encodeURIComponent(g.id), undefined, "delete the recording");
-    if (out) { say("Recording deleted."); await loadAll(true); }
+  function forget(g) {
+    // One action with a way back (CTL-1): deleted when the Undo time is up.
+    var pick = document.querySelector('.ic-pick[value="' + String(Number(g.id)) + '"]');
+    var row = pick ? pick.closest("tr") : null;
+    if (row) { row.hidden = true; }
+    window.mvUndo("Recording for “{title}” deleted. Past re-run results are kept.", { values: {title: g.title},
+      action: "delete the recording",
+      run: function (keepalive) { return fetch("/api/v1/immune/twin/" + encodeURIComponent(g.id), { method: "DELETE", keepalive: keepalive, headers: { Accept: "application/json" } }); },
+      undo: function () { if (row) { row.hidden = false; } },
+      done: function () { say("Recording deleted."); return loadAll(true); }
+    });
   }
 
   async function awareness() {
@@ -257,17 +255,25 @@
     if (out) { say("Check started. Results appear under Past re-runs when it finishes."); }
   }
 
+  // A table whose data never arrived says so instead of "Loading." forever.
+  function settleLoading(message) {
+    Array.prototype.forEach.call(root.querySelectorAll("tbody"), function (body) {
+      if (body.textContent.trim() !== "Loading.") { return; }
+      var cell = body.querySelector("td");
+      if (cell) { cell.textContent = message; }
+    });
+  }
+
   async function loadAll(keepStatus) {
     try {
-      var response = await fetch(root.dataset.apiUrl, { credentials: "same-origin", headers: { "Accept": "application/json" } });
-      if (!response.ok) { say(""); fail(window.mvErrorText(response, "load the safety summary")); return; }
-      renderSummary(await response.json());
-      var c = await fetch("/api/v1/immune/choices", { credentials: "same-origin", headers: { "Accept": "application/json" } });
-      if (c.ok) { choices = await c.json(); renderChoices(); }
+      renderSummary(await window.mvFetchJSON(root.dataset.apiUrl, {}, "load the safety summary"));
+      try { choices = await window.mvFetchJSON("/api/v1/immune/choices"); renderChoices(); } catch (e) { /* choices stay as they were */ }
+      settleLoading((window.LightworkI18n ? window.LightworkI18n.text("Not available right now. Reload the page to try again.") : "Not available right now. Reload the page to try again."));
       if (!keepStatus) { say("Up to date."); }
     } catch (error) {
       say("");
-      fail(window.mvErrorText(error, "load the safety summary"));
+      fail(error.message);
+      settleLoading((window.LightworkI18n ? window.LightworkI18n.text("Could not be loaded. Reload the page to try again.") : "Could not be loaded. Reload the page to try again."));
     }
   }
 

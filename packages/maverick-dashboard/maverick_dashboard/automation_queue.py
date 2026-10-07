@@ -306,6 +306,7 @@ def enqueue_flow_run_once(
     definition_version: int = 0,
     definition_revision: str = "",
     subflow_digests: dict[str, str | None] | None = None,
+    repair_existing: bool = True,
 ) -> tuple[str, bool]:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
@@ -390,7 +391,7 @@ def enqueue_flow_run_once(
             if idem_key else None
         )
         if existing is not None:
-            if existing.status == "queued":
+            if repair_existing and existing.status == "queued":
                 _ensure_queued_flow_job(existing, tenant=str(
                     _job_tenant_payload().get("tenant") or ""))
             return existing.run_id, True
@@ -541,7 +542,7 @@ def enqueue_published_flow_run_once(
                     raise store.FlowSnapshotError("Legacy event identity is ambiguous; reconcile the existing run before retrying")
                 if all(str(original[k]) == str(v) for k, v in identity.items()):
                     idem_key = legacy_key
-        return enqueue_flow_run_once(
+        result = enqueue_flow_run_once(
             flow_id,
             data,
             owner,
@@ -556,7 +557,21 @@ def enqueue_published_flow_run_once(
             definition_version=int(locked_release["definition_version"]),
             definition_revision=str(locked_release["definition_revision"]),
             subflow_digests=dict(locked_release.get("subflow_digests") or {}),
+            repair_existing=False,
         )
+    if result[1]:
+        # Do not wait for an executing run while holding its definition fence:
+        # execution needs that fence to finish its immutable schema checkpoint.
+        with store.run_lock(result[0]):
+            existing = store.load_run(result[0], owner=owner, flow_id=flow_id)
+            if (existing is None
+                    or existing.release_id != str(locked_release["release_id"])
+                    or existing.definition_digest != str(locked_release["definition_digest"])):
+                raise store.FlowSnapshotError("The original queued workflow changed before recovery.")
+            if existing.status == "queued":
+                _ensure_queued_flow_job(existing, tenant=str(
+                    _job_tenant_payload().get("tenant") or ""))
+    return result
 
 
 def enqueue_published_flow_run(
@@ -776,17 +791,26 @@ def _handle_dream(_job=None) -> None:
     Learning stores are tenant-scoped, so the one process-global cron explicitly
     visits the shared/client floor and every active tenant."""
     from maverick import dreaming
+    from maverick.self_improvement_runner import (
+        nightly_self_harness_enabled,
+        run_nightly_self_harness,
+    )
 
     def _cycle() -> None:
         # Enablement can be overridden per tenant; check it inside the pin.
-        if dreaming.enabled():
-            # Same rollback point `maverick dream` takes: a scheduled cycle must
-            # never mutate learned state that `dream --rollback` cannot undo.
-            # A snapshot failure raises before dream_cycle runs (fail closed).
-            cfg = dreaming.settings()
-            if cfg.get("snapshots", True):
-                dreaming.snapshot_learning_state(keep_last=int(cfg.get("snapshot_keep_last", 5)))
-            dreaming.dream_cycle(_world())
+        if dreaming.enabled() or nightly_self_harness_enabled():
+            from maverick.learning_guard import check_learning_halt
+
+            check_learning_halt("dreaming", "scheduled")
+            # One required safety copy covers the complete combined cycle.
+            # The copy is durable before either learning family may change.
+            world = _world()
+            with dreaming.learning_mutation_scope():
+                try:
+                    if dreaming.enabled():
+                        dreaming.dream_cycle(world)
+                finally:
+                    run_nightly_self_harness(world)
 
     _run_for_active_tenants("scheduled dream cycle", _cycle)
 
@@ -1289,6 +1313,13 @@ def _notify_flow(flow, run) -> None:
         STATUS_INDETERMINATE,
         STATUS_PAUSED_APPROVAL,
     )
+    choice = getattr(flow, "notify_on", "all")
+    if not isinstance(choice, str) or choice not in {"all", "problems"}:
+        return
+    if choice == "problems" and run.status not in {
+        STATUS_FAILED, STATUS_BUDGET_LIMITED, STATUS_INDETERMINATE,
+    }:
+        return
     name = flow.name or flow.id
     if run.status == STATUS_PAUSED_APPROVAL:
         body, prio = _approval_body(name, run), "high"
@@ -1454,6 +1485,82 @@ def _initial_delivery_is_executable(run) -> bool:
     return run.status in {"queued", STATUS_CLAIMED}
 
 
+def _legacy_event_flow_compatible(run, current: dict, generation: str) -> bool:
+    """Prove an old run was reserved by today's non-mail trigger generation."""
+    import re
+
+    from .event_poll import _event_key
+
+    source = current.get("source")
+    if (source not in {"http_json", "rss", "oauth_http_json", "github_issues", "file_dir", "form"}
+            or current.get("owner") != run.owner
+            or current.get("flow") != run.flow_id
+            or current.get("flow_revision") != run.release_id
+            or not isinstance(run.input_data, dict)):
+        return False
+    if source == "file_dir":
+        # Current file events carry the content identity, not their old path
+        # display ID. A legacy file cursor cannot reconstruct that identity.
+        field = "id"
+    elif source == "github_issues":
+        field = "number"
+    elif source == "form":
+        field = "_seq"
+    else:
+        field = str((current.get("config") or {}).get("id_field") or "id")
+    value = run.input_data.get(field)
+    if (not isinstance(value, (str, int, float)) or isinstance(value, bool)
+            or not 0 < len(str(value)) < 2000
+            or value == "***redacted***"
+            or (source == "file_dir" and not re.fullmatch(r"[a-f0-9]{64}", str(value)))):
+        return False
+    return run.idem_key == _event_key(generation, {}, str(value))
+
+
+def _event_flow_start_problem(run) -> str:
+    """Fail closed unless an event run still has source/binding proof."""
+    import re
+
+    origin = str(run.origin or "")
+    if not origin.startswith("event:"):
+        return ""
+    from maverick.paths import current_tenant_id
+
+    from . import event_triggers_store
+    from .event_poll import _trigger_key
+
+    if origin.startswith("event:") and not origin.startswith("event:v2:"):
+        name = origin.removeprefix("event:")
+        current = event_triggers_store.get_trigger(
+            name, tenant=current_tenant_id() or "", strict=True,
+        )
+        if current is not None and _legacy_event_flow_compatible(
+            run, current, _trigger_key(current),
+        ):
+            return ""
+        return "This earlier automation run needs review before it can start"
+    parts = origin.split(":", 4)
+    if (len(parts) != 5 or parts[1] != "v2" or not parts[2]
+            or not re.fullmatch(r"[a-f0-9]{64}", parts[3]) or not parts[4]):
+        return "This earlier automation run needs review before it can start"
+    source, generation, name = parts[2:]
+    if source != "imap_email":
+        return ""
+    # The producer only writes v2 IMAP provenance after verifying the received
+    # event. Flow input data is credential-redacted before storage, so it cannot
+    # be used as an independent provenance receipt here.
+    current = event_triggers_store.get_trigger(
+        name, tenant=current_tenant_id() or "", strict=True,
+    )
+    if (current is None or current.get("source") != source
+            or current.get("owner") != run.owner
+            or current.get("flow") != run.flow_id
+            or current.get("flow_revision") != run.release_id
+            or _trigger_key(current) != generation):
+        return "Email automation changed before this run started; review and create a new run"
+    return ""
+
+
 def _reserve_initial_flow_slot(flow, payload: dict, run_id: str, dry_run: bool) -> bool:
     """Claim a live concurrency slot, defer, or terminally skip this delivery."""
     if (
@@ -1502,6 +1609,10 @@ def _handle_flow_run(job=None) -> None:
                 _mark_flow_run_failed(run_id, "queue reservation does not match flow")
                 return
             if not _initial_delivery_is_executable(placeholder):
+                return
+            event_problem = _event_flow_start_problem(placeholder)
+            if event_problem:
+                _mark_flow_run_failed(run_id, event_problem)
                 return
             if not placeholder.definition_digest:
                 _mark_flow_run_failed(
@@ -1895,47 +2006,18 @@ def _save_autonomous_flow_change(store, current, candidate):
 
 def _auto_apply_proposals() -> None:
     """Autonomously APPLY the strongest self-rewrite proposal per flow (the
-    forward arrow, gated on ``[flows] auto_apply``). Two directions are applied
-    without a human:
+    forward arrow, gated on ``[flows] auto_apply``). Current proposals require
+    human review of the work definition:
 
-    * SOFTEN (action -> agent): a chronically-failing fixed step handed to an
-      agent; the brief derives from the node.
+    * SOFTEN (action -> agent): action inputs do not establish replacement AI
+      instructions. Preserve the fixed action until a person reviews them.
     * HARDEN (agent -> action): never auto-applied. Even when telemetry infers
       a likely tool, that inference is model-influenced and must remain a
       surfaced proposal for human review before it can persist a direct action.
 
-    Skips a node that already has a pending apply (so it is measured -- and
-    auto-reverted if it regresses -- before another change). Idempotent +
-    conservative: one apply per flow per pass."""
-    from maverick.flow import evolution_log, evolve, store
-    from maverick.flow.ir import NODE_ACTION
-    for f in store.list_flows():
-        for prop in evolve.maybe_propose(f):
-            if evolution_log.last_apply(f.id, prop.node_id):
-                continue                            # already changed -> let it be measured first
-            node = f.nodes.get(prop.node_id)
-            kwargs: dict = {}
-            if prop.from_kind == NODE_ACTION:       # soften: derive the brief
-                kwargs["brief"] = (node.brief or node.label) if node else ""
-            else:
-                continue                            # harden stays human-gated, even with an inferred tool
-            try:
-                changed = evolve.apply_proposal(f, prop.node_id, prop.to_kind, **kwargs)
-            except (KeyError, ValueError):
-                continue
-            if changed.validate():
-                continue                            # never save a structurally broken flow
-            saved = _save_autonomous_flow_change(store, f, changed)
-            if saved is None:
-                continue
-            evolution_log.record_apply(f.id, prop.node_id, prop.from_kind, prop.to_kind,
-                                       saved.version, source="auto-apply",
-                                       before_revision=store.flow_cohort(f),
-                                       after_revision=store.flow_cohort(saved))
-            log.info("auto-applied rewrite: flow=%s node=%s %s->%s (%.0f%% over %d)%s",
-                     f.id, prop.node_id, prop.from_kind, prop.to_kind, prop.mean * 100, prop.n,
-                     f" via {prop.inferred_tool}" if prop.inferred_tool else "")
-            break                                    # one apply per flow per pass
+    Suggestions remain visible through the native proposals reader. Automatic
+    measured rollback in the preceding pass is unchanged."""
+    return
 
 
 def _handle_flow_cron(job=None) -> None:
@@ -2118,6 +2200,52 @@ def _dream_cron() -> str:
         return _DREAM_CRON_DEFAULT
 
 
+def refresh_runtime(request) -> None:
+    """Apply in-product schedule changes while the dashboard owns its runtime.
+
+    No workers are launched by offline API clients or during shutdown. The
+    lifespan's existing supervisor continues to own any newly started workers.
+    """
+    supervisor = getattr(request.app.state, "lifecycle_supervisor", None)
+    if supervisor is None or supervisor.phase != "running":
+        return
+    try:
+        if start():
+            reconcile()
+    except Exception as exc:
+        from fastapi import HTTPException
+
+        log.exception("scheduled work could not apply saved settings")
+        raise HTTPException(status_code=503, detail=(
+            "Your settings were saved, but scheduled work could not be updated. "
+            "Try saving again. If this continues, ask your administrator to check Lightwork."
+        )) from exc
+
+
+def nightly_learning_status() -> dict:
+    """Tenant-local scheduled review receipts, with no customer content."""
+    from maverick.audit import default_audit_log
+    from maverick.self_improvement_runner import nightly_self_harness_enabled
+
+    status = {"enabled": nightly_self_harness_enabled(), "state": "not_run", "when": None}
+    try:
+        rows = default_audit_log().tail(2000)
+        event = next((row for row in reversed(rows)
+                      if row.get("agent") == "self_harness_nightly"), None)
+        if event is not None:
+            phase = event.get("phase")
+            status.update(state={"started": "running", "completed": "completed"}.get(phase, "stopped"),
+                          when=event.get("ts"))
+            for key in ("models_reviewed", "patterns_found", "improvements_adopted",
+                        "improvements_retired", "reviews_held_back", "examples_prepared",
+                        "inspection_only", "transfer_held_back"):
+                if key in event:
+                    status[key] = event[key]
+    except Exception:
+        status["state"] = "unavailable"
+    return status
+
+
 def _flywheel_cron() -> str:
     try:
         expr = str((config.load_config().get("data_engine") or {}).get("cron") or "").strip()
@@ -2130,9 +2258,10 @@ def reconcile() -> None:
     """Seed the tick + dream + flywheel cron jobs for whichever subsystems are
     enabled."""
     from maverick import automation_events, data_engine, dreaming, flow
+    from maverick.self_improvement_runner import nightly_self_harness_enabled
     if automation_events.enabled():
         _ensure_cron(TICK_KIND, _TICK_CRON)
-    if dreaming.enabled():
+    if dreaming.enabled() or nightly_self_harness_enabled():
         _ensure_cron(DREAM_KIND, _dream_cron())
     if data_engine.enabled():
         _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
@@ -2161,8 +2290,20 @@ def start() -> bool:
     idempotent. Returns whether the pool was started."""
     global _worker, _worker_threads, _worker_stopping
     from maverick import automation_events, data_engine, dreaming, flow
+    from maverick.self_improvement_runner import nightly_self_harness_enabled
+    from maverick.tenant.registry import list_tenants
+
+    from .executive_report_schedules import KIND as report_kind
+    from .executive_report_schedules import execute as execute_report
+    from .third_party_executive_reports_composition import third_party_executive_reports_enabled
+
+    try:
+        report_enabled = any(third_party_executive_reports_enabled(row.id) for row in list_tenants()
+                             if row.status == "active")
+    except Exception:
+        report_enabled = False
     if not (automation_events.enabled() or dreaming.enabled()
-            or data_engine.enabled() or flow.enabled()):
+            or data_engine.enabled() or flow.enabled() or nightly_self_harness_enabled() or report_enabled):
         return False
     with _LOCK:
         if any(thread.is_alive() for thread in _worker_threads):
@@ -2179,6 +2320,8 @@ def start() -> bool:
         w.register(FLOW_EVOLVE_KIND, _handle_flow_evolve)
         w.register(FLOW_CRON_KIND, _handle_flow_cron)
         w.register(ASSESS_SWEEP_KIND, _handle_assess_sweep)
+        from .app import app
+        w.register(report_kind, lambda job: execute_report(app, job))
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged

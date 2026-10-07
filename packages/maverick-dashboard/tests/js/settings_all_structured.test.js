@@ -7,6 +7,8 @@ const {test}=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {JSDOM}=require("jsdom");
+const {shell} = require('./_shell');
+const {reviewedSaving} = require('./_settings_review');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<20;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -58,10 +60,11 @@ const HTML=`<!doctype html><main>
   <button data-save>Save</button><button data-reset>Reset to default</button><p data-row-status></p></div>
 </section></div><p id="settings-all-empty" hidden></p></main>`;
 
-async function page(handler){
+async function page(handler,warnings){
   const dom=new JSDOM(HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[],confirms=[];
   w.mvConfirm=async message=>{confirms.push(message);return true;};
+  reviewedSaving(w,{confirms,warnings});
   w.mvErrorText=(failure,action)=>"Could not "+action+".";
   w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{
@@ -70,6 +73,7 @@ async function page(handler){
     calls.push({url,method:init.method||"GET",body});
     return handler(url,body,calls.length);
   };
+  shell(w);
   w.eval(read("static/lightwork-settings-all.js"));
   await flush();
   return {dom,w,d,calls,confirms};
@@ -169,15 +173,17 @@ test("choosing a governance level shows what it changes before saving",async()=>
   }finally{ui.dom.window.close();}
 });
 
-test("a level's learning systems are named when asking to go ahead",async()=>{
-  const ui=await page((url,body)=>body.confirm?saved(ui,"governance.profile",{value:"regulated",value_text:"Regulated"})
-    :reply(409,{detail:"confirmation required",confirm:[{id:"learning.dreaming",label:"Learn from recent work on a schedule",kind:"learning",warning:"This learning system will be turned on."}]}));
+test("a level's learning systems are named in the review before going ahead",async()=>{
+  const learning=changes=>changes.some(c=>c.id==="governance.profile")
+    ?[{label:"Learn from recent work on a schedule",kind:"learning",warning:"This learning system will be turned on."}]:[];
+  const ui=await page(()=>saved(ui,"governance.profile",{value:"regulated",value_text:"Regulated"}),learning);
   try{
     const r=row(ui,"governance.profile");
     r.querySelector("[data-input]").value="regulated";
     await click(r.querySelector("[data-save]"));
-    assert.match(ui.confirms[0],/^This turns on learning systems\. Learn from recent work on a schedule:/);
+    assert.match(ui.confirms[0],/^Learn from recent work on a schedule: This learning system will be turned on\./);
     assert.doesNotMatch(ui.confirms[0],/lowers a protection/);
+    assert.equal(ui.calls.length,1);assert.equal(ui.calls[0].body.confirm,true);
   }finally{ui.dom.window.close();}
 });
 

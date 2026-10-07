@@ -8,14 +8,17 @@ activate either draft.
 
 That detailed example requires a reviewed `guided` integration to supply the
 semantic labels `download/report` and `create/presentation`. The built-in
-Windows metadata observer deliberately knows only that the user moved between
+desktop metadata observers deliberately know only that the user moved between
 allowlisted applications; it never guesses a document action from a process
-name.
+name. Windows uses a fixed executable map, Mac uses a fixed application bundle
+map, and local Linux X11 uses a fixed executable map. Unsupported identities are
+discarded before recording. Wayland, remote X11 and headless desktops are
+unavailable; supported Linux reads are bounded in a private process.
 
 Ekko is a client-controlled sensor, so it is independent of Lightwork's
 default-on governed learning. A client must complete all three gates:
 
-1. set `[ekko] enable = true` (or `MAVERICK_EKKO=1`);
+1. enable Ekko through All settings or the installer;
 2. enroll a named owner and device with a positive application allowlist; and
 3. start a reviewed collector explicitly.
 
@@ -44,7 +47,22 @@ closed rather than opening a network path.
 
 ## Configure and enroll
 
-Run `maverick init` in advanced mode, or add:
+After installation, use All settings to enable Ekko and review its limits.
+On Ekko, read What Ekko records, enroll the named device and open Record activity.
+The page explains the installed computer's current availability; confirm
+permission, then separately choose Record allowed apps on the Lightwork computer.
+Pause, Stop and withdrawal use the same current native device/session controls.
+Recording happens on the computer running Lightwork, including when the browser
+is on another computer. Copilot opens these same permissions without recording
+anything or changing an entered choice.
+
+An interrupted Start reply may leave a recording active. Check the current
+watching state or Stop before starting again; a missing session during admission
+does not prove nothing started. The temporary recording job is not a durable
+Original receipt across a server restart.
+
+The following operator configuration and compatibility commands describe the
+same native policy for installations managed outside the ordinary page:
 
 ```toml
 [ekko]
@@ -66,8 +84,8 @@ Then use the lifecycle commands:
 ```text
 maverick ekko enroll --device DEVICE --apps excel,powerpoint --days 30
 maverick ekko status --device DEVICE
-# Explicit Windows application-transition observer (no titles or content):
-maverick ekko run --device DEVICE --observer windows
+# Explicit installed-computer application-transition observer (no titles or content):
+maverick ekko run --device DEVICE --observer desktop
 # Or a reviewed semantic integration in guided capture mode:
 maverick ekko run --device DEVICE --events reviewed-events.jsonl
 maverick ekko pause --device DEVICE
@@ -78,9 +96,10 @@ maverick ekko erase --device DEVICE --yes
 maverick ekko forget --device DEVICE --yes
 ```
 
-`run` is foreground by design and never chooses an observer on its own. On
-Windows, `--observer windows` records only transitions among a fixed mapping of
-allowlisted executable identities; it does not read window titles, UI trees,
+`run` is foreground by design and needs an explicit observer choice.
+`--observer desktop` selects the installed supported platform; `windows`,
+`macos` and `linux-x11` explicitly require the named platform. The fixed maps
+record only recognized, enrolled application transitions, not window titles, UI trees,
 screens, clipboard, keyboard, URLs, or document content. Windows supplies the
 foreground process image path transiently; Ekko immediately reduces it to the
 basename for fixed-map lookup and never emits or persists the path. The
@@ -102,8 +121,10 @@ dashboard deployments use the verified dashboard principal instead.
 Application names in policy and guided events are canonical IDs such as
 `excel`, `powerpoint`, and `chrome`, not executable names. A reviewed platform
 adapter maps `EXCEL.EXE`, a macOS bundle ID, or an equivalent platform identity
-to that fixed vocabulary. The bundled Windows adapter has a fixed executable
-map. Unknown identities are dropped, never persisted verbatim.
+to that fixed vocabulary. The bundled desktop adapters use fixed maps.
+Unknown identities are dropped, never persisted verbatim. Mac/Linux native
+library contracts and timeout isolation were qualified locally; physical
+Mac/Linux desktop and compiled-installer acceptance remain separately unverified.
 
 ## Production collector boundary
 

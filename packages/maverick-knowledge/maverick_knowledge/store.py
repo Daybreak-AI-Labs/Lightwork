@@ -12,6 +12,7 @@ import json
 import math
 import sqlite3
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -40,13 +41,14 @@ class VectorStore(Protocol):
 
     def add_with_identity(
         self, collection: str, items: list[tuple[str, str, list[float], dict]], fingerprint: str,
+        *, effect_guard=None, publication_scope=None,
     ) -> None:
         """Atomically bind immutable document provenance and embedding identity."""
         ...
 
     def replace_source_with_identity(
         self, collection: str, items: list[tuple[str, str, list[float], dict]], fingerprint: str,
-        *, source: str, snapshot: list[StoredChunk],
+        *, source: str, snapshot: list[StoredChunk], effect_guard=None, publication_scope=None,
     ) -> None:
         """Compare the prior source and atomically publish its complete revision."""
         ...
@@ -166,20 +168,23 @@ class SqliteVectorStore:
             )
             self._db.commit()
 
-    def add_with_identity(self, collection, items, fingerprint: str) -> None:
+    def add_with_identity(self, collection, items, fingerprint: str, *, effect_guard=None, publication_scope=None) -> None:
         """Bind document provenance and identity in one publication transaction."""
-        self._publish_with_identity(collection, items, fingerprint)
+        self._publish_with_identity(collection, items, fingerprint, effect_guard=effect_guard, publication_scope=publication_scope)
 
     def replace_source_with_identity(
-        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk],
+        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk], effect_guard=None, publication_scope=None,
     ) -> None:
-        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot)
+        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot,
+                                    effect_guard=effect_guard, publication_scope=publication_scope)
 
     def _publish_with_identity(
-        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None,
+        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None, effect_guard=None, publication_scope=None,
     ) -> None:
-        with self._lock, self._db:
+        with publication_scope() if publication_scope is not None else nullcontext(), self._lock, self._db:
             self._db.execute("BEGIN IMMEDIATE")
+            if effect_guard is not None:
+                effect_guard()
             rows = self._db.execute(
                 "SELECT id, text, meta FROM chunks WHERE collection = ?", (collection,),
             )
@@ -198,6 +203,8 @@ class SqliteVectorStore:
                 if source is not None else []
             )
             pending = _document_publication(items, existing)
+            if effect_guard is not None:
+                effect_guard()
             self._db.executemany(
                 "INSERT INTO chunks VALUES (?,?,?,?,?)",
                 [(collection, cid, text, json.dumps(vec), json.dumps(meta))
@@ -207,6 +214,8 @@ class SqliteVectorStore:
                 "DELETE FROM chunks WHERE collection = ? AND id = ?",
                 [(collection, cid) for cid in removed],
             )
+            if effect_guard is not None:
+                effect_guard()
 
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
@@ -546,20 +555,23 @@ class PgVectorStore:
         cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (json.dumps([self._namespace, collection]),))
 
-    def add_with_identity(self, collection, items, fingerprint: str) -> None:
-        self._publish_with_identity(collection, items, fingerprint)
+    def add_with_identity(self, collection, items, fingerprint: str, *, effect_guard=None, publication_scope=None) -> None:
+        self._publish_with_identity(collection, items, fingerprint, effect_guard=effect_guard, publication_scope=publication_scope)
 
     def replace_source_with_identity(
-        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk],
+        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk], effect_guard=None, publication_scope=None,
     ) -> None:
-        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot)
+        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot,
+                                    effect_guard=effect_guard, publication_scope=publication_scope)
 
     def _publish_with_identity(
-        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None,
+        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None, effect_guard=None, publication_scope=None,
     ) -> None:
         def dispatch():
-            with self._lock, self._db.transaction(), self._db.cursor() as cur:
+            with publication_scope() if publication_scope is not None else nullcontext(), self._lock, self._db.transaction(), self._db.cursor() as cur:
                 self._collection_fence(cur, collection)
+                if effect_guard is not None:
+                    effect_guard()
                 found = cur.execute(
                     f"SELECT 1 FROM {self._table} WHERE namespace = %s AND collection = %s "
                     "AND (meta ->> 'embedding_fingerprint') IS DISTINCT FROM %s LIMIT 1",
@@ -581,6 +593,8 @@ class PgVectorStore:
                     if source is not None else []
                 )
                 pending = _document_publication(items, existing)
+                if effect_guard is not None:
+                    effect_guard()
                 cur.executemany(
                     f"INSERT INTO {self._table} (namespace, collection, id, text, embedding, meta) "
                     "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb)",
@@ -593,6 +607,8 @@ class PgVectorStore:
                         "AND id = ANY(%s)",
                         (self._namespace, collection, removed),
                     )
+                if effect_guard is not None:
+                    effect_guard()
         with metered_operation("pgvector", category="storage", service="vector-store:pgvector",
                                operation="knowledge-identity-fenced-add") as call:
             call(dispatch)
@@ -1135,7 +1151,7 @@ def build_store(cfg: dict | None = None):
     if backend == "qdrant":
         return QdrantStore(
             url=cfg.get("url") or None,
-            api_key=cfg.get("api_key") or None,
+            api_key=cfg.get("store_api_key") or None,
             dim=int(cfg.get("dim", 1024)),
             namespace=_namespace_from_cfg(cfg),
         )

@@ -90,8 +90,9 @@ def good_tool_source(name: str) -> str:
 
 def grant_generated_source(name: str, source: str) -> None:
     """Record the exact durable grant that production write creates."""
+    from maverick.learning_content import lineage, publish
     from maverick.safety.consent import grant_persistent
-
+    publish(self_learning.generated_tools_dir() / f"{name}.py", source, lineage())
     tenant = current_tenant_id() or "shared"
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
     grant_persistent(
@@ -245,7 +246,7 @@ class TestLedger:
         path = tmp_path / "learned.ndjson"
         valid = (
             '{"kind":"skill","name":"safe","need":"need","outcome":"acquired",'
-            '"source":"catalog","ts":1.0}'
+            '"source":"catalog","ts":1.0,"content_version":1,"owner":"","goal_id":null}'
         )
         path.write_text(
             "\n".join([
@@ -1065,11 +1066,11 @@ class TestGeneratedTools:
         }
         assert not (self_learning.GENERATED_TOOLS_DIR / "delete_me.py").exists()
         assert not consent._check_ledger("register-generated-tool", scope)
-        assert "consent is missing or revoked" in live.fn({})
+        assert live.fn({}).startswith("ERROR:")
         assert events[-1][1] == {
             "agent": "self_learning",
             "operation": "generated_tool_authority_revoked",
-            "name": "delete_me",
+            "name_sha256": hashlib.sha256(b"delete_me").hexdigest(),
             "tenant": "shared",
             "source_sha256": digest,
             "consent_revoked": True,
@@ -1131,6 +1132,8 @@ class TestGeneratedTools:
         target = self_learning.GENERATED_TOOLS_DIR / "orphan_tool.py"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source, encoding="utf-8")
+        from maverick.learning_content import lineage, publish
+        publish(target, source, lineage())
         monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: True)
 
         report = self_learning.delete_generated_tool("orphan_tool")
@@ -2030,6 +2033,16 @@ class TestLearnTool:
 
 
 class TestPreflight:
+    @pytest.fixture(autouse=True)
+    def signed_catalog_prerequisites(self, monkeypatch):
+        from maverick import config
+        ed25519 = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519")
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+        public = ed25519.Ed25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        existing = config.get_skills()
+        monkeypatch.setattr(config, "get_skills", lambda: {**existing, "trusted_pubkeys": [public]})
+
     @pytest.mark.asyncio
     async def test_pre_acquires_matching_skill(self, monkeypatch):
         from maverick import self_learning as sl

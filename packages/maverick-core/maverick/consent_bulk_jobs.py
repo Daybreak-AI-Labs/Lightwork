@@ -200,8 +200,13 @@ def _validate_item(  # noqa: C901 - operation-specific closed contracts
     required: set[str]
     allowed: set[str]
     if operation == "export_receipts":
+        if "after_sequence" in item:
+            raise ConsentBulkJobValidationError(
+                "Receipt exports from a saved position are not supported. "
+                "Select up to the latest 500 records per person."
+            )
         required = common
-        allowed = common | {"after_sequence", "receipt_limit"}
+        allowed = common | {"receipt_limit"}
     elif operation == "edit_preferences":
         required = common | {
             "expected_revision",
@@ -261,10 +266,8 @@ def _validate_item(  # noqa: C901 - operation-specific closed contracts
     if operation == "reactivate":
         _timestamp(item["reactivation_at"], "reactivation_at")
     if operation == "export_receipts":
-        if "after_sequence" in item:
-            _integer(item["after_sequence"], "after_sequence", 0, 2**63 - 1)
         if "receipt_limit" in item:
-            _integer(item["receipt_limit"], "receipt_limit", 1, 100_000)
+            _integer(item["receipt_limit"], "receipt_limit", 1, 500)
     return item
 
 
@@ -364,6 +367,8 @@ class ConsentBulkJobStore:
                 );
                 CREATE INDEX IF NOT EXISTS consent_bulk_jobs_due
                     ON consent_bulk_jobs(tenant, state, scheduled_for, created_at);
+                CREATE INDEX IF NOT EXISTS consent_bulk_jobs_browse
+                    ON consent_bulk_jobs(tenant, created_at DESC, job_id DESC);
                 CREATE TABLE IF NOT EXISTS consent_bulk_items (
                     tenant TEXT NOT NULL,
                     job_id TEXT NOT NULL,
@@ -572,6 +577,7 @@ class ConsentBulkJobStore:
         *,
         expected_revision: int,
         idempotency_key: str,
+        actor_sha256: str | None = None,
     ) -> dict[str, Any]:
         """Explicitly grant credits with CAS and idempotency."""
 
@@ -579,7 +585,10 @@ class ConsentBulkJobStore:
         granted = _integer(amount, "amount", 1, 1_000_000_000)
         revision = _integer(expected_revision, "expected_revision", 1, 2**31 - 1)
         key_sha = self._idempotency(idempotency_key)
+        actor = _digest(actor_sha256, "actor_sha256") if actor_sha256 is not None else None
         request = {"amount": granted, "expected_revision": revision}
+        if actor is not None:
+            request["actor_sha256"] = actor
         request_sha = _sha256(request)
         now = self._now()
         with self._connect() as connection:
@@ -594,7 +603,7 @@ class ConsentBulkJobStore:
                 )
                 if replay is not None:
                     connection.execute("COMMIT")
-                    return replay
+                    return {key: value for key, value in replay.items() if key != "actor_sha256"}
                 updated = connection.execute(
                     "UPDATE consent_bulk_credits SET available = available + ?, "
                     "revision = revision + 1, updated_at = ? WHERE tenant = ? "
@@ -604,13 +613,15 @@ class ConsentBulkJobStore:
                 if updated.rowcount != 1:
                     raise ConsentBulkJobConflict("credit account revision changed")
                 result = self._credit_row(connection, tenant)
+                if actor is not None:
+                    result["added"] = granted
                 self._save_replay(
                     connection,
                     tenant=tenant,
                     namespace="credits.grant",
                     key_sha256=key_sha,
                     request_sha256=request_sha,
-                    result=result,
+                    result={**result, **({"actor_sha256": actor} if actor is not None else {})},
                     now=now,
                 )
                 connection.execute("COMMIT")
@@ -619,6 +630,26 @@ class ConsentBulkJobStore:
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
                 raise
+
+    def granted_credit_for_request(
+        self, tenant_id: str, *, idempotency_key: str, actor_sha256: str,
+    ) -> dict[str, Any] | None:
+        """Read the original actor's accepted allowance, never grant it again."""
+        tenant = _tenant(tenant_id)
+        key, actor = self._idempotency(idempotency_key), _digest(actor_sha256, "actor_sha256")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT result_json FROM consent_bulk_idempotency WHERE tenant = ? "
+                "AND namespace = 'credits.grant' AND key_sha256 = ?", (tenant, key),
+            ).fetchone()
+            if row is None:
+                return None
+            result = _loads(row["result_json"], "idempotency result")
+            if not isinstance(result, dict):
+                raise ConsentBulkJobError("stored allowance result is invalid")
+            if not hmac.compare_digest(str(result.get("actor_sha256", "")), actor):
+                return None
+            return {key: value for key, value in result.items() if key != "actor_sha256"}
 
     @staticmethod
     def _credit_row(connection: sqlite3.Connection, tenant: str) -> dict[str, Any]:
@@ -668,14 +699,17 @@ class ConsentBulkJobStore:
             raise ConsentBulkJobValidationError("bulk-job item identifiers must be unique")
         actor = _digest(actor_sha256, "actor_sha256")
         now = self._now()
-        scheduled = _timestamp(scheduled_for, "scheduled_for", allow_none=True) or now
+        requested_schedule = _timestamp(scheduled_for, "scheduled_for", allow_none=True)
+        scheduled = requested_schedule or now
         key_sha = self._idempotency(idempotency_key)
         request = {
             "kind": kind,
             "operation": operation,
             "items": normalized,
             "actor_sha256": actor,
-            "scheduled_for": scheduled,
+            # Hash the submitted choice, not the clock used to start immediate
+            # work. Otherwise an identical retry always conflicts a moment later.
+            "scheduled_for": requested_schedule,
         }
         request_sha = _sha256(request, maximum=max(_MAX_JSON_BYTES, len(normalized) * _MAX_ITEM_BYTES))
         credits = len(normalized)
@@ -755,6 +789,8 @@ class ConsentBulkJobStore:
                     payload={
                         "kind": kind,
                         "operation": operation,
+                        "executor_scope": "job",
+                        "receipt_revision_chain": True,
                         "total_items": len(normalized),
                         "scheduled_for": scheduled,
                         "request_sha256": request_sha,
@@ -806,35 +842,139 @@ class ConsentBulkJobStore:
         with self._connect() as connection:
             return self._job_row(connection, tenant, job)
 
+    def job_executor_scope(self, tenant_id: str, job_id: str) -> str:
+        """Preserve earlier jobs' effect keys while isolating new jobs' keys."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM consent_bulk_events WHERE tenant = ? AND job_id = ? "
+                "AND event_type = 'job.created' ORDER BY sequence LIMIT 1",
+                (_tenant(tenant_id), _text(job_id, "job_id")),
+            ).fetchone()
+            if row is None:
+                raise ConsentBulkJobNotFound("bulk job admission is unavailable")
+            event = _loads(row["payload_json"], "job admission")
+            scope = event.get("executor_scope", "legacy") if isinstance(event, dict) else None
+            if scope not in {"legacy", "job"}:
+                raise ConsentBulkJobError("bulk job execution scope is invalid")
+            return scope
+
+    def receipt_execution_item(
+        self, tenant_id: str, job_id: str, item: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Advance a reviewed profile version only through verified job results.
+
+        Two receipts selected for one person share the version reviewed in the
+        UI. Each native change advances it. A failed predecessor or an unrelated
+        edit must never authorize later changes by blindly incrementing it.
+        """
+        tenant, job = _tenant(tenant_id), _text(job_id, "job_id")
+        selected = dict(item)
+        with self._connect() as connection:
+            admission = connection.execute(
+                "SELECT payload_json FROM consent_bulk_events WHERE tenant = ? AND job_id = ? "
+                "AND event_type = 'job.created' ORDER BY sequence LIMIT 1", (tenant, job),
+            ).fetchone()
+            if admission is None:
+                raise ConsentBulkJobNotFound("bulk job admission is unavailable")
+            if _loads(admission["payload_json"], "job admission").get("receipt_revision_chain") is not True:
+                return selected  # Keep pre-existing jobs' native replay inputs.
+            current = connection.execute(
+                "SELECT ordinal, input_sha256 FROM consent_bulk_items "
+                "WHERE tenant = ? AND job_id = ? AND item_id = ?",
+                (tenant, job, _text(selected.get("item_id"), "item_id")),
+            ).fetchone()
+            if current is None or not hmac.compare_digest(
+                _sha256(selected, maximum=_MAX_ITEM_BYTES), str(current["input_sha256"]),
+            ):
+                raise ConsentBulkJobError("stored bulk-job item integrity failed")
+            rows = connection.execute(
+                "SELECT input_json, input_sha256, state, result_json, result_sha256 "
+                "FROM consent_bulk_items WHERE tenant = ? AND job_id = ? AND ordinal < ? "
+                "ORDER BY ordinal", (tenant, job, current["ordinal"]),
+            ).fetchall()
+        revision = selected["expected_revision"]
+        for row in rows:
+            previous = _loads(row["input_json"], "bulk-job item", maximum=_MAX_ITEM_BYTES)
+            if not isinstance(previous, dict) or not hmac.compare_digest(
+                _sha256(previous, maximum=_MAX_ITEM_BYTES), str(row["input_sha256"]),
+            ):
+                raise ConsentBulkJobError("stored predecessor integrity failed")
+            if (previous.get("profile_id") != selected["profile_id"] or
+                    previous.get("expected_revision") != selected["expected_revision"]):
+                continue
+            if row["state"] != "succeeded":
+                raise ConsentBulkJobConflict("an earlier selected record was not confirmed")
+            result = _loads(row["result_json"], "bulk-job result", maximum=_MAX_RESULT_BYTES)
+            if (not isinstance(result, dict) or not hmac.compare_digest(
+                    _sha256(result, maximum=_MAX_RESULT_BYTES), str(row["result_sha256"])) or
+                    result.get("profile_id") != selected["profile_id"] or
+                    result.get("receipt_id") != previous.get("receipt_id") or
+                    type(result.get("profile_revision")) is not int or
+                    result["profile_revision"] != revision + 1):
+                raise ConsentBulkJobError("predecessor result could not be confirmed")
+            revision = result["profile_revision"]
+        selected["expected_revision"] = revision
+        return selected
+
+    def created_job_for_request(
+        self, tenant_id: str, *, idempotency_key: str, actor_sha256: str,
+    ) -> dict[str, Any] | None:
+        """Read an actor's original submission without creating or running work."""
+        tenant = _tenant(tenant_id)
+        key = self._idempotency(idempotency_key)
+        actor = _digest(actor_sha256, "actor_sha256")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT result_json FROM consent_bulk_idempotency "
+                "WHERE tenant = ? AND namespace = 'jobs.create' AND key_sha256 = ?",
+                (tenant, key),
+            ).fetchone()
+            if row is None:
+                return None
+            original = _loads(row["result_json"], "idempotency result")
+            if not isinstance(original, dict):
+                raise ConsentBulkJobError("stored idempotency result is invalid")
+            if not hmac.compare_digest(str(original.get("actor_sha256", "")), actor):
+                return None
+            try:
+                return self._job_row(connection, tenant, _text(original.get("job_id"), "job_id"))
+            except ConsentBulkJobNotFound:
+                # The immutable admission remains after a retained job is purged.
+                return {**original, "retained": False}
+
     def list_jobs(
         self,
         tenant_id: str,
         *,
         state: str | None = None,
         limit: int = 100,
+        before_job_id: str | None = None,
     ) -> dict[str, Any]:
         tenant = _tenant(tenant_id)
         page_size = _integer(limit, "limit", 1, _MAX_READ_LIMIT)
         if state is not None and state not in _STATES:
             raise ConsentBulkJobValidationError("state is invalid")
         with self._connect() as connection:
-            if state is None:
-                rows = connection.execute(
-                    "SELECT job_id FROM consent_bulk_jobs WHERE tenant = ? "
-                    "ORDER BY created_at DESC, job_id DESC LIMIT ?",
-                    (tenant, page_size + 1),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT job_id FROM consent_bulk_jobs WHERE tenant = ? AND state = ? "
-                    "ORDER BY created_at DESC, job_id DESC LIMIT ?",
-                    (tenant, state, page_size + 1),
-                ).fetchall()
+            predicates, arguments = ["tenant = ?"], [tenant]
+            if state is not None:
+                predicates.append("state = ?")
+                arguments.append(state)
+            if before_job_id is not None:
+                anchor = self._job_row(connection, tenant, _text(before_job_id, "before_job_id"))
+                predicates.append("(created_at < ? OR (created_at = ? AND job_id < ?))")
+                arguments.extend((anchor["created_at"], anchor["created_at"], anchor["job_id"]))
+            rows = connection.execute(
+                "SELECT job_id FROM consent_bulk_jobs WHERE " + " AND ".join(predicates)
+                + " ORDER BY created_at DESC, job_id DESC LIMIT ?",
+                (*arguments, page_size + 1),
+            ).fetchall()
             jobs = [
                 self._job_row(connection, tenant, str(row["job_id"]))
                 for row in rows[:page_size]
             ]
-        return {"jobs": jobs, "truncated": len(rows) > page_size}
+        more = len(rows) > page_size
+        return {"jobs": jobs, "truncated": more,
+                "next_before_job_id": jobs[-1]["job_id"] if more and jobs else None}
 
     def cancel_job(
         self,
@@ -993,6 +1133,7 @@ class ConsentBulkJobStore:
         worker_sha256: str,
         executor: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
         batch_size: int = 100,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """Claim a due job and execute one bounded batch.
 
@@ -1006,12 +1147,16 @@ class ConsentBulkJobStore:
         job = _text(job_id, "job_id")
         worker = _digest(worker_sha256, "worker_sha256")
         batch = _integer(batch_size, "batch_size", 1, 500)
+        revision = (_integer(expected_revision, "expected_revision", 1, 2**31 - 1)
+                    if expected_revision is not None else None)
         if not callable(executor):
             raise TypeError("bulk-job executor must be callable")
         now = self._now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                if revision is not None and self._job_row(connection, tenant, job)["revision"] != revision:
+                    raise ConsentBulkJobConflict("bulk-job revision changed before this part started")
                 claimed = self._claim(
                     connection,
                     tenant=tenant,
@@ -1375,19 +1520,21 @@ class ConsentBulkJobStore:
         return {"recovered_job_ids": recovered, "recovered_count": len(recovered)}
 
     def history(
-        self, tenant_id: str, job_id: str, *, limit: int = 100
+        self, tenant_id: str, job_id: str, *, limit: int = 100,
+        before_sequence: int | None = None,
     ) -> dict[str, Any]:
         tenant = _tenant(tenant_id)
         job = _text(job_id, "job_id")
         page_size = _integer(limit, "limit", 1, _MAX_READ_LIMIT)
+        before = 2**63 - 1 if before_sequence is None else _integer(before_sequence, "before_sequence", 1, 2**63 - 1)
         with self._connect() as connection:
             self._job_row(connection, tenant, job)
             rows = connection.execute(
                 "SELECT sequence, event_id, event_type, payload_json, payload_sha256, "
                 "previous_event_sha256, event_sha256, created_at "
-                "FROM consent_bulk_events WHERE tenant = ? AND job_id = ? "
+                "FROM consent_bulk_events WHERE tenant = ? AND job_id = ? AND sequence < ? "
                 "ORDER BY sequence DESC LIMIT ?",
-                (tenant, job, page_size + 1),
+                (tenant, job, before, page_size + 1),
             ).fetchall()
         events: list[dict[str, Any]] = []
         for row in rows[:page_size]:
@@ -1408,7 +1555,8 @@ class ConsentBulkJobStore:
                     "created_at": float(row["created_at"]),
                 }
             )
-        return {"job_id": job, "events": events, "truncated": len(rows) > page_size}
+        return {"job_id": job, "events": events, "truncated": len(rows) > page_size,
+                "next_before_sequence": events[-1]["sequence"] if len(rows) > page_size else None}
 
     def verify_integrity(self, tenant_id: str) -> dict[str, Any]:
         tenant = _tenant(tenant_id)

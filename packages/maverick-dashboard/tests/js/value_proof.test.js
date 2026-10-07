@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-value-proof.js"), "utf8");
@@ -40,6 +41,7 @@ function answers(over) {
 async function fixture(html, { over, confirm = true } = {}) {
   const dom = new JSDOM(html, { url: "https://lightwork.example/savings", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   const table = answers(over);
   window.mvErrorText = (failure, action) => `Could not ${action}.`;
@@ -80,7 +82,7 @@ test("savings page shows results, automatic approvals with Withdraw and the reco
   const ui = await fixture(PROOF);
   t.after(() => ui.window.close());
   assert.match(ui.doc.getElementById("vp-comp").textContent, /Invoices12-40%\+10%Getting cheaper/);
-  assert.match(ui.doc.getElementById("vp-dept").textContent, /No department has enough runs/);
+  assert.match(ui.doc.getElementById("vp-dept").textContent, /No department has enough tasks/);
   assert.match(ui.doc.getElementById("vp-ea").textContent, /Approved automatically/);
   assert.match(ui.doc.getElementById("vp-ea-state").textContent, /10 real outcomes/);
   assert.match(ui.doc.getElementById("vp-fleet").textContent, /No outside agents/);
@@ -117,6 +119,22 @@ test("checking a record file reports in plain words", async (t) => {
   const sent = ui.calls.find((c) => c.method === "POST");
   assert.equal(sent.url, "/api/v1/value-proof/record-verify");
   assert.match(ui.doc.getElementById("vp-check-result").textContent, /intact and was signed by this Lightwork installation/);
+});
+
+test("a self-signed record does not claim another Lightwork installation as its origin", async (t) => {
+  const ui = await fixture(PROOF, { over: { "/record-verify": {
+    intact: true, from_this_installation: false, records: 1,
+  } } });
+  t.after(() => ui.window.close());
+  const input = ui.doc.getElementById("vp-check-file");
+  Object.defineProperty(input, "files", { value: [new ui.window.File(
+    ['{"sig":"x"}'], "record.json", { type: "application/json" },
+  )] });
+  ui.doc.getElementById("vp-check").dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
+  await ui.settle();
+  const message = ui.doc.getElementById("vp-check-result").textContent;
+  assert.match(message, /who signed it has not been verified/);
+  assert.doesNotMatch(message, /different Lightwork installation/);
 });
 
 test("a learning statement from another installation is checked with its key file", async (t) => {

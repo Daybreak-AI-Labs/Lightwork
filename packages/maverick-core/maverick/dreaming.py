@@ -39,6 +39,9 @@ broken or steered by injected text even with the LLM on.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import hashlib
 import json
 import logging
 import os
@@ -46,11 +49,14 @@ import re
 import stat
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from .file_lock import (
+    _canonical_lock_path,
+    _windows_extended_path,
     atomic_read_text,
     atomic_write_bytes,
     atomic_write_text_chunks,
@@ -140,6 +146,8 @@ class DreamInsight:
     evidence: int = 1          # how many episodes back this insight
     channel: str | None = None # reflexion scope; None = unscoped local runs
     user_id: str | None = None # reflexion scope; None = unscoped local runs
+    owner: str | None = None  # None means legacy ownership is unverified
+    source_goal_ids: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -172,6 +180,9 @@ class DreamReport:
     skills_quarantined: int = 0
     learning_frozen: bool = False
     departments: list[str] = field(default_factory=list)
+    cycle_id: str = ""
+    saved_point: str = ""
+    activity_recorded: bool = False
 
     def summary(self) -> str:
         depts = ", ".join(self.departments) if self.departments else "(generic only)"
@@ -194,6 +205,16 @@ class DreamReport:
             f"rehearsal(s), pruned {self.reflexions_pruned} stale reflexion(s)."
             f"{extra} Departments touched: {depts}."
         )
+
+
+class DreamAuditError(RuntimeError):
+    """A cycle boundary was not confirmed; completed learning is not undone."""
+
+    def __init__(self, report: DreamReport, *, started: bool):
+        self.report = report
+        self.started = started
+        super().__init__("Learning completion was not recorded" if started
+                         else "Learning could not record its start")
 
 
 def _tokens(s: str) -> set[str]:
@@ -305,6 +326,8 @@ def cluster_failures(
             if (head.get("channel"), head.get("user_id")) != (
                 f.get("channel"), f.get("user_id"),
             ):
+                continue
+            if head.get("owner") != f.get("owner"):
                 continue
             if _jaccard(ft, _tokens(str(head.get("goal_text", "")))) >= similarity:
                 cluster.append(f)
@@ -439,10 +462,14 @@ def synthesize_insight(
     user_ids = {f.get("user_id") for f in cluster}
     channel = next(iter(channels)) if len(channels) == 1 else None
     user_id = next(iter(user_ids)) if len(user_ids) == 1 else None
+    owners = {f.get("owner") for f in cluster}
+    owner = next(iter(owners)) if len(owners) == 1 else None
+    goal_ids = sorted({f["goal_id"] for f in cluster if type(f.get("goal_id")) is int and f["goal_id"] > 0})
     return DreamInsight(
         ts=now if now is not None else time.time(),
         kind=kind, domain=domain, text=text, evidence=len(cluster),
         channel=channel, user_id=user_id,
+        owner=owner, source_goal_ids=goal_ids,
     )
 
 
@@ -466,6 +493,7 @@ def promote_shared_insights(
         if not f.get("domain")
         and f.get("channel") is None
         and f.get("user_id") is None
+        and f.get("owner") == ""
     ]
     for cluster in cluster_failures(generic_unscoped_failures, min_cluster=min_cluster):
         promoted.append(synthesize_insight(
@@ -521,6 +549,8 @@ def load_insights(path: Path | str | None = None) -> list[DreamInsight]:
                     if "channel" in d else _LEGACY_SCOPE_UNKNOWN,
                     user_id=d.get("user_id")
                     if "user_id" in d else _LEGACY_SCOPE_UNKNOWN,
+                    owner=d.get("owner"),
+                    source_goal_ids=[gid for gid in d.get("source_goal_ids", []) if type(gid) is int and gid > 0],
                 ))
             except (ValueError, TypeError):
                 continue
@@ -532,12 +562,16 @@ def load_insights(path: Path | str | None = None) -> list[DreamInsight]:
 def append_insights(
     new: list[DreamInsight], *, path: Path | str | None = None,
     max_insights: int = 100,
+    before_write: Callable[[int, int, str], None] | None = None,
+    raise_on_error: bool = False,
 ) -> int:
     """Append novel insights, dedup against the store, cap to most recent.
 
     An insight is a duplicate when an existing same-department insight's text
     is lexically contained at/above the threshold. The whole store is
-    rewritten atomically so a crash can't leave a torn NDJSON line.
+    rewritten atomically so a crash can't leave a torn NDJSON line. The return
+    count is new rows retained after the capacity limit, not candidates that
+    were immediately dropped.
     """
     default_store = path is None
     path = Path(path) if path is not None else insights_path()
@@ -551,6 +585,7 @@ def append_insights(
             existing = load_insights(path)
             written = 0
             refreshed = 0
+            new_row_ids: set[int] = set()
             for ins in new or []:
                 safe_text = _sanitize(ins.text)[:1_000]
                 if not safe_text:
@@ -562,6 +597,7 @@ def append_insights(
                      if e.domain == ins.domain
                      and e.channel == ins.channel
                      and e.user_id == ins.user_id
+                     and e.owner == ins.owner
                      and _containment(it, _tokens(e.text)) >= _DEDUP_THRESHOLD),
                     None,
                 )
@@ -570,28 +606,43 @@ def append_insights(
                     # standing insight is refreshed instead of aging out.
                     dup.ts = max(dup.ts, ins.ts)
                     dup.evidence += max(1, ins.evidence)
+                    dup.source_goal_ids = sorted(set(dup.source_goal_ids) | set(ins.source_goal_ids))
                     refreshed += 1
                     continue
                 existing.append(ins)
+                new_row_ids.add(id(ins))
                 written += 1
             if not (written or refreshed):
                 return 0
             existing.sort(key=lambda i: i.ts)
             keep = existing[-max(1, max_insights):]
+            retained = sum(id(ins) in new_row_ids for ins in keep)
+            if before_write is not None:
+                lines = [json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep]
+                # The existing text writer uses platform-default newline
+                # translation, so hash the bytes that it will actually publish.
+                encoded = "".join(lines).replace("\n", os.linesep).encode("utf-8")
+                digest = hashlib.sha256(encoded).hexdigest()
+                before_write(retained, refreshed, digest)
+            else:
+                lines = (json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep)
             _atomic_write_lines(
                 path,
-                (json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep),
+                lines,
             )
     except (OSError, RuntimeError) as e:
+        if raise_on_error:
+            raise
         log.warning("dreaming: insight write failed: %s", e)
         return 0
-    return written
+    return retained
 
 
 def recall_insights(
     goal_text: str, *, domain: str | None = None, k: int = 2,
     path: Path | str | None = None, min_score: float = 0.05,
     channel: str | None = None, user_id: str | None = None,
+    owner: str | None = None,
 ) -> list[tuple[float, DreamInsight]]:
     """Top-k consolidated insights for this goal, same-department boosted.
 
@@ -602,12 +653,21 @@ def recall_insights(
     entries = load_insights(path)
     if not entries:
         return []
+    from .memory_ownership import current_owner, source_allowed
+    try:
+        owner = current_owner() if owner is None else owner
+    except Exception:
+        return []
     qt = _tokens(goal_text)
     newest = max(e.ts for e in entries)
     oldest = min(e.ts for e in entries)
     span = newest - oldest
     scored: list[tuple[float, DreamInsight]] = []
     for e in entries:
+        if e.owner != owner or (owner and not e.source_goal_ids):
+            continue
+        if any(not source_allowed(goal_id, owner) for goal_id in e.source_goal_ids):
+            continue
         if e.channel != channel or e.user_id != user_id:
             continue
         sim = _jaccard(qt, _tokens(e.text))
@@ -856,9 +916,9 @@ def retire_stale_skills(
     Reversible by moving the file back. Returns the retired skill names.
     """
     from .skill import stats as skill_stats
-    from .skill.distillation_local import _STORE
+    from .skill.distillation_local import _default_store
     default_store = store is None
-    store_dir = Path(store) if store is not None else _STORE
+    store_dir = Path(store) if store is not None else _default_store()
     if not store_dir.is_dir():
         return []
     reasons: dict[str, str] = {}
@@ -951,7 +1011,7 @@ def build_rehearsal_cases(
     # unscoped local failures are eligible for offline practice.
     trusted_failures = [
         f for f in failures
-        if f.get("channel") is None and f.get("user_id") is None
+        if f.get("channel") is None and f.get("user_id") is None and f.get("owner") == ""
     ]
 
     cases: list[dict] = []
@@ -1163,6 +1223,13 @@ def _replay_critiques(
         from .pilot_learning import excluded
         if excluded(d.get("goal_id")):
             continue
+        from .memory_ownership import current_owner
+        if not d.get("goal_id"):
+            continue
+        try:
+            owner = current_owner(goal_id=d["goal_id"])
+        except Exception:
+            continue
         critique = str(d.get("verifier_critique", "") or "").strip()
         brief = str(d.get("task_brief_text", "") or "").strip()
         try:
@@ -1177,6 +1244,7 @@ def _replay_critiques(
             "failure_class": "verifier_critique",
             "reflection": critique[:240],
             "domain": None,
+            "owner": owner, "goal_id": d["goal_id"],
         })
     return out
 
@@ -1203,8 +1271,12 @@ def _replay_donations(
             rec = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        from .pilot_learning import excluded
-        if excluded(rec.get("goal_id")):
+        from .memory_ownership import source_allowed
+        if not isinstance(rec, dict) or not source_allowed(rec.get("goal_id"), ""):
+            continue
+        # Imported donation directories have no authenticated local subject
+        # binding. Only explicitly unowned source records may become shared.
+        if rec.get("source_ownership") != "unowned":
             continue
         brief = str(rec.get("task_brief_text", "") or "").strip()
         if not brief:
@@ -1219,6 +1291,7 @@ def _replay_donations(
                 "goal": brief, "success": True,
                 "tools": list(rec.get("tools_used", []) or []),
                 "t": ts, "domain": None,
+                "owner": "", "goal_id": rec.get("goal_id"),
             })
         elif outcome:
             failures.append({
@@ -1226,12 +1299,14 @@ def _replay_donations(
                 "failure_class": f"fleet_{outcome}",
                 "reflection": str(rec.get("verifier_critique", "") or "")[:240],
                 "domain": None,
+                "owner": "", "goal_id": rec.get("goal_id"),
             })
     return successes, failures
 
 
 def _replay_failures(reflexion_path: Path | str | None) -> list[dict]:
     from . import reflexion as _r
+    from .memory_ownership import source_allowed
     kwargs: dict = {"limit": 200}
     if reflexion_path is not None:
         kwargs["path"] = Path(reflexion_path)
@@ -1242,8 +1317,10 @@ def _replay_failures(reflexion_path: Path | str | None) -> list[dict]:
             "channel": getattr(r, "channel", None),
             "user_id": getattr(r, "user_id", None),
             "domain": getattr(r, "domain", None),
+            "owner": getattr(r, "owner", None), "goal_id": getattr(r, "goal_id", None),
         }
         for r in _r.list_recent(**kwargs)
+        if isinstance(r.owner, str) and source_allowed(r.goal_id, r.owner)
     ]
 
 
@@ -1390,7 +1467,7 @@ def dream_cycle(
     budget: Any | None = None,
     shield: Any | None = None,
 ) -> DreamReport:
-    """Run one full dream cycle. Deterministic and fail-open.
+    """Run one full dream cycle with recorded signed learning boundaries.
 
     Deterministic and LLM-free by default. If ``[dreaming] llm_consolidation``
     and the independent provider-egress authority are on, and a configured
@@ -1405,6 +1482,11 @@ def dream_cycle(
     check_learning_halt("dreaming", "start")
     cfg = {**settings(), **(settings_override or {})}
     report = DreamReport()
+    if audit:
+        report.cycle_id = uuid.uuid4().hex
+        current_snapshot = _mutation_snapshot.get()
+        report.saved_point = current_snapshot[1].name if current_snapshot else ""
+        _audit_cycle(report, phase="started")
     if insights_path is None:
         insights_path = globals()["insights_path"]()
     if rehearsals_path is None:
@@ -1543,15 +1625,16 @@ def _maybe_audit_cycle(report: DreamReport, *, audit: bool) -> None:
         _audit_cycle(report)
 
 
-def _audit_cycle(report: DreamReport) -> None:
-    """Learning audit trail: one tamper-evident row per dream cycle.
-
-    `maverick audit verify` then covers the learning system the same way it
-    covers tool calls -- provably governed learning. Never raises."""
+def _audit_cycle(report: DreamReport, *, phase: str = "completed") -> None:
+    """Do not mistake an unsigned, refused or unconfirmed row for a receipt."""
     try:
         from .audit import EventKind, record
-        record(
-            EventKind.LEARNING_UPDATE, agent="dreaming",
+        written = record(
+            EventKind.LEARNING_UPDATE, agent="dreaming", _require_signed=True,
+            event_id="dream:" + report.cycle_id + ":" + phase,
+            cycle_id=report.cycle_id, phase=phase, saved_point=report.saved_point,
+            goals_replayed=report.goals_replayed,
+            failures_replayed=report.failures_replayed,
             insights_written=report.insights_written,
             insights_expired=report.insights_expired,
             insights_retired=report.insights_retired,
@@ -1564,26 +1647,83 @@ def _audit_cycle(report: DreamReport) -> None:
             user_notes_written=report.user_notes_written,
             departments=",".join(report.departments),
         )
-    except Exception as e:  # pragma: no cover -- audit never blocks a dream
-        log.debug("dreaming: audit row skipped: %s", e)
+        if written is not True:
+            raise RuntimeError("The signed activity record did not confirm the row")
+    except Exception as exc:
+        # Completion failure must not imply that preceding learning was undone.
+        raise DreamAuditError(report, started=phase != "started") from exc
+    if phase == "completed":
+        report.activity_recorded = True
+
+
+def recent_cycle_activity() -> list[dict[str, Any]]:
+    """Verified current-day metadata only; missing completion is not failure.
+
+    This checks segment signatures, not external checkpoints or historical
+    completeness. Refuse an oversized/unreadable day instead of clipping it.
+    """
+    from .audit import default_audit_log, iter_events
+    from .audit.reader import event_paths
+
+    directory = default_audit_log().audit_dir
+    paths = event_paths(audit_dir=directory)
+    if not paths or not paths[0].exists():
+        return []
+    with cross_process_lock(paths[0], strict=True):
+        if paths[0].stat().st_size > 16 * 1024 * 1024:
+            raise RuntimeError("Today's activity record is too large for this view")
+        cycles = {}
+        for count, event in enumerate(iter_events(day=paths[0].stem, audit_dir=directory, strict=True, verify=True), 1):
+            if count > 10000:
+                raise RuntimeError("Today's activity record is too large for this view")
+            cycle = event.get("cycle_id")
+            if event.get("agent") != "dreaming" or not isinstance(cycle, str) or not re.fullmatch(r"[a-f0-9]{32}", cycle):
+                continue
+            phase = event.get("phase")
+            if phase not in {"started", "completed"}:
+                continue
+            row = cycles.setdefault(cycle, {"cycle_id": cycle, "completion_recorded": False})
+            if phase == "completed":
+                row["completion_recorded"] = True
+                for key in ("goals_replayed", "failures_replayed", "insights_written", "skills_distilled", "skills_retired", "skills_quarantined"):
+                    value = event.get(key)
+                    if type(value) is not int or value < 0:
+                        raise RuntimeError("The learning activity counts cannot be safely read")
+                    row[key] = value
+            when = event.get("ts")
+            if isinstance(when, bool) or not isinstance(when, (float, int)) or not 0 <= when < 253402300799:
+                raise RuntimeError("The learning activity time cannot be safely read")
+            row["time"] = when
+            name = event.get("saved_point", "")
+            if not isinstance(name, str) or (name and not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name)):
+                raise RuntimeError("The learning saved point cannot be safely read")
+            row["saved_point"] = name
+    return sorted(cycles.values(), key=lambda row: row["time"], reverse=True)[:20]
 
 
 # ---------- snapshots, rollback, dry-run (learning governance) ----------
 
 def _live_stores() -> dict[str, Path]:
     """The learned-state files/dirs a snapshot covers, resolved per tenant."""
+    from . import learning_store, self_harness
     from . import reflexion as _r
     from . import user_notes as _un
     from .skill import stats as _ss
-    from .skill.distillation_local import _STORE
-    return {
+    from .skill.distillation_local import _default_store
+    stores = {
         "reflexions.ndjson": _r.default_path(),
         "insights.ndjson": Path(insights_path()),
         "rehearsals.ndjson": Path(rehearsals_path()),
         "user_notes.ndjson": _un.default_path(),
         "skill_stats.json": _ss._resolve(None),
-        "learned-skills": _tenant_path("learned-skills", _STORE),
+        "learned-skills": _default_store(),
+        "guardrails.json": data_dir("guardrails.json"),
+        "procedural_memory.json": data_dir("procedural_memory.json"),
     }
+    if learning_store.guidance_source()["mode"] == "files":
+        stores["model-instructions.json"] = self_harness._store_path()
+        stores["model-instruction-evidence.json"] = self_harness._meta_path()
+    return stores
 
 
 def snapshots_dir() -> Path:
@@ -1591,6 +1731,220 @@ def snapshots_dir() -> Path:
 
 
 _SNAPSHOT_TRANSACTION = ".learning-state-transaction"
+_SNAPSHOT_COVERAGE = ".learning-state-coverage.json"
+_WORLD_GUIDANCE = "model-guidance.world.json"
+_LEGACY_FAMILIES = frozenset({
+    "reflexions.ndjson", "insights.ndjson", "rehearsals.ndjson",
+    "user_notes.ndjson", "skill_stats.json", "learned-skills",
+})
+_FAMILY_LABELS = {
+    "reflexions.ndjson": "Lessons from completed work",
+    "insights.ndjson": "Learning insights",
+    "rehearsals.ndjson": "Practice questions",
+    "user_notes.ndjson": "Learned preferences",
+    "skill_stats.json": "Skill use and effectiveness",
+    "learned-skills": "Learned skills",
+    "guardrails.json": "Learned safeguards",
+    "procedural_memory.json": "Learned habits",
+    "model-instructions.json": "Accepted model instructions",
+    "model-instruction-evidence.json": "Model instruction evidence",
+    _WORLD_GUIDANCE: "Accepted model instructions and evidence",
+}
+_mutation_snapshot: contextvars.ContextVar[tuple[str, Path] | None] = contextvars.ContextVar(
+    "learning_cycle_safety_copy", default=None,
+)
+
+
+def _state_binding(stores: dict[str, Path], *, native: bool) -> dict:
+    from . import learning_store
+    from .paths import current_tenant_id_strict
+
+    return {
+        "native": native,
+        "tenant": current_tenant_id_strict(),
+        "paths": {name: hashlib.sha256(_canonical_lock_path(path).encode()).hexdigest()
+                  for name, path in stores.items()},
+        "guidance": learning_store.guidance_source() if native else None,
+    }
+
+
+def _fs_path(path: Path | str) -> Path:
+    """Use the same Win32 spelling as the private native file/lock helpers."""
+    return Path(_windows_extended_path(path)) if os.name == "nt" else Path(path)
+
+
+def _snapshot_inventory(root: Path) -> dict[str, dict]:
+    """Bound saved bytes and directories before any restoration is admitted."""
+    root = _fs_path(root)
+    inventory = {}
+    total = 0
+    for path in _bounded_snapshot_paths(root):
+        if path.name == _SNAPSHOT_COVERAGE and path.parent == root:
+            continue
+        if len(inventory) >= 4096 or _path_is_alias(path):
+            raise RuntimeError("The safety copy exceeds its supported bounds or contains an alias")
+        name = path.relative_to(root).as_posix()
+        if path.is_dir():
+            inventory[name] = {"kind": "directory"}
+        elif path.is_file():
+            size = path.stat().st_size
+            total += size
+            if size > 32 * 1024 * 1024 or total > 128 * 1024 * 1024:
+                raise RuntimeError("The safety copy exceeds its supported size")
+            data = _read_stable_private_file(path)
+            inventory[name] = {"kind": "file", "size": len(data),
+                               "sha256": hashlib.sha256(data).hexdigest()}
+        else:
+            raise RuntimeError("The safety copy contains an unsupported file")
+    return inventory
+
+
+def _read_coverage(root: Path) -> dict | None:
+    root = _fs_path(root)
+    path = root / _SNAPSHOT_COVERAGE
+    if not path.exists():
+        return None
+    if path.stat().st_size > 1024 * 1024:
+        raise RuntimeError("The safety copy coverage is too large")
+    try:
+        row = json.loads(_read_stable_private_file(path))
+    except (ValueError, UnicodeError) as exc:
+        raise RuntimeError("The safety copy coverage cannot be read") from exc
+    if (not isinstance(row, dict) or set(row) != {"version", "binding", "families", "inventory"}
+            or type(row["version"]) is not int or row["version"] != 1
+            or not isinstance(row["binding"], dict) or not isinstance(row["families"], list)
+            or len(row["families"]) > 100 or not all(isinstance(n, str) for n in row["families"])
+            or len(set(row["families"])) != len(row["families"])
+            or not isinstance(row["inventory"], dict) or len(row["inventory"]) > 4096):
+        raise RuntimeError("The safety copy coverage is invalid")
+    for name in row["families"]:
+        _validate_store_name(name)
+    if _snapshot_inventory(root) != row["inventory"]:
+        raise RuntimeError("The saved safety copy has changed; no learning state was restored")
+    if any(name.split("/")[0] not in row["families"] for name in row["inventory"]):
+        raise RuntimeError("The safety copy contains an unreviewed learning family")
+    return row
+
+
+def snapshot_coverage(name: str, directory: Path | str | None = None) -> dict:
+    """Customer-safe coverage of a current saved point; no paths or content."""
+    base = _fs_path(directory if directory is not None else snapshots_dir())
+    with cross_process_lock(base / _SNAPSHOT_TRANSACTION, strict=True):
+        names = _snapshot_names_unlocked(base)
+        chosen = names[-1] if name == "latest" and names else name
+        if chosen not in names:
+            raise ValueError("This saved learning point is no longer available")
+        root = base / chosen
+        _harden_private_tree(root)
+        row = _read_coverage(root)
+        families = row["families"] if row else sorted(_LEGACY_FAMILIES)
+        return {
+            "version": 1 if row else 0,
+            "revision": _snapshot_revision(root, row),
+            "labels": [_FAMILY_LABELS.get(n, "Additional learned guidance") for n in families],
+            "integrity_verified": bool(row),
+            "notice": ("The saved learning information is checked before restoration."
+                       if row else "Older saved point: six learning families only; the original copy was not verified when it was made. The information reviewed now is checked again before restoration."),
+            "source_notice": "Restore requires the same workspace and learning storage used by this saved point.",
+            "preserved": "Customer work, activity, approvals, evaluation examples and transfer history stay current.",
+        }
+
+
+def _snapshot_revision(root: Path, coverage: dict | None, *, inventory: dict | None = None) -> str:
+    if inventory is None and not coverage:
+        inventory = _snapshot_inventory(root)
+    reviewed = coverage or {"legacy": True, "inventory": inventory}
+    return hashlib.sha256(json.dumps(reviewed, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+
+def _verified_snapshot_bytes(path: Path, root: Path, inventory: dict) -> bytes:
+    path, root = _fs_path(path), _fs_path(root)
+    data = _read_stable_private_file(path)
+    expected = inventory.get(path.relative_to(root).as_posix())
+    actual = {"kind": "file", "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    if expected != actual:
+        raise RuntimeError("The saved learning bytes changed during restoration")
+    return data
+
+
+def _restore_coverage(root: Path, stores: dict[str, Path], *, native: bool):
+    from . import learning_store
+
+    coverage = _read_coverage(root)
+    if not coverage:
+        return ({k: v for k, v in stores.items() if k in _LEGACY_FAMILIES}
+                if native else stores), None, None
+    saved = coverage["binding"]
+    current = _state_binding(stores, native=native)
+    world_family = {_WORLD_GUIDANCE} if native and current["guidance"]["mode"] == "world" else set()
+    if (set(saved) != {"native", "tenant", "paths", "guidance"}
+            or any(saved[k] != current[k] for k in ("native", "tenant", "guidance"))
+            or not isinstance(saved["paths"], dict)
+            or any(current["paths"].get(k) != v for k, v in saved["paths"].items())
+            or set(coverage["families"]) != set(saved["paths"]) | world_family):
+        raise RuntimeError("This safety copy belongs to different learning storage; nothing was restored")
+    stores = {k: v for k, v in stores.items() if k in coverage["families"]}
+    world_state = None
+    if _WORLD_GUIDANCE in coverage["families"]:
+        world_state = json.loads(_verified_snapshot_bytes(root / _WORLD_GUIDANCE, root, coverage["inventory"]))
+        learning_store.validate_guidance_snapshot(world_state, current["guidance"])
+    return stores, world_state, coverage
+
+
+def _refresh_restored_guidance(restored: list[str], failures: dict[str, str]) -> None:
+    from . import negative_knowledge, procedural_memory
+
+    for name, refresh in (("guardrails.json", negative_knowledge.refresh_shared),
+                          ("procedural_memory.json", procedural_memory.refresh_shared)):
+        if name in restored:
+            try:
+                refresh()
+            except Exception as exc:  # noqa: BLE001 -- cache is part of restore
+                failures[name] = f"{type(exc).__name__}: current guidance refresh failed"
+
+
+def prepare_learning_snapshot(*, keep_last: int | None = None) -> Path:
+    """Require a complete retained boundary before an approved learning cycle."""
+    cfg = settings()
+    if not cfg.get("snapshots", True):
+        raise RuntimeError("Turn on learning safety copies before running improvements")
+    check_learning_halt("dreaming", "snapshot")
+    binding = hashlib.sha256(json.dumps(
+        _state_binding(_live_stores(), native=True), sort_keys=True,
+    ).encode()).hexdigest()
+    current = _mutation_snapshot.get()
+    if current is not None:
+        if current[0] != binding or not _fs_path(current[1]).is_dir():
+            raise RuntimeError("Learning storage changed; prepare a new safety copy")
+        with cross_process_lock(snapshots_dir() / _SNAPSHOT_TRANSACTION, strict=True):
+            _restore_coverage(current[1], _live_stores(), native=True)
+        return current[1]
+    snap = snapshot_learning_state(
+        keep_last=int(keep_last if keep_last is not None else cfg.get("snapshot_keep_last", 5)),
+        publish_empty=True, raise_on_error=True,
+    )
+    if snap is None:
+        raise RuntimeError("A learning safety copy could not be prepared")
+    if hashlib.sha256(json.dumps(
+        _state_binding(_live_stores(), native=True), sort_keys=True,
+    ).encode()).hexdigest() != binding:
+        raise RuntimeError("Learning storage changed; prepare a new safety copy")
+    return snap
+
+
+@contextlib.contextmanager
+def learning_mutation_scope(*, keep_last: int | None = None):
+    """Share one strict boundary across a combined dream/nightly cycle."""
+    snap = prepare_learning_snapshot(keep_last=keep_last)
+    binding = hashlib.sha256(json.dumps(
+        _state_binding(_live_stores(), native=True), sort_keys=True,
+    ).encode()).hexdigest()
+    _restore_coverage(snap, _live_stores(), native=True)
+    token = _mutation_snapshot.set((binding, snap))
+    try:
+        yield snap
+    finally:
+        _mutation_snapshot.reset(token)
 
 
 @dataclass(frozen=True)
@@ -1629,12 +1983,14 @@ class LearningRollbackError(RuntimeError):
 
 
 def _path_is_alias(path: Path) -> bool:
+    path = _fs_path(path)
     is_junction = getattr(path, "is_junction", None)
     return path.is_symlink() or bool(callable(is_junction) and is_junction())
 
 
 def _read_stable_private_file(path: Path) -> bytes:
     """Read one single-link regular file through an identity-bound handle."""
+    path = _fs_path(path)
     ensure_private_file(path)
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(path, flags)
@@ -1653,9 +2009,13 @@ def _read_stable_private_file(path: Path) -> bytes:
             or (opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino)
         ):
             raise PermissionError(f"learned store is not a stable private file: {path}")
+        if opened.st_size > 32 * 1024 * 1024:
+            raise RuntimeError("The learned guidance file exceeds its supported size")
         with os.fdopen(fd, "rb") as source:
             fd = -1
-            data = source.read()
+            data = source.read(32 * 1024 * 1024 + 1)
+        if len(data) > 32 * 1024 * 1024:
+            raise RuntimeError("The learned guidance file exceeds its supported size")
         after = path.lstat()
         if (
             _path_is_alias(path)
@@ -1678,6 +2038,7 @@ def _copy_private_snapshot_file(source: str, target: str) -> str:
 
 def _prepare_snapshot_base(base: Path, *, default_store: bool) -> Path:
     """Prepare the integrity boundary without hijacking a caller directory."""
+    base = _fs_path(base)
     if default_store:
         return ensure_private_directory(base)
     # A caller-selected existing directory must already be private; never
@@ -1685,10 +2046,27 @@ def _prepare_snapshot_base(base: Path, *, default_store: bool) -> Path:
     return prepare_private_directory(base)
 
 
+def _bounded_snapshot_paths(root: Path) -> list[Path]:
+    pending = [_fs_path(root)]
+    paths = []
+    while pending:
+        directory = pending.pop()
+        if _path_is_alias(directory):
+            raise PermissionError("The safety copy contains an alias")
+        for path in directory.iterdir():
+            if len(paths) >= 4096 or _path_is_alias(path):
+                raise RuntimeError("The safety copy exceeds its supported bounds or contains an alias")
+            paths.append(path)
+            if path.is_dir():
+                pending.append(path)
+    return sorted(paths, key=lambda path: len(path.parts))
+
+
 def _harden_private_tree(root: Path) -> None:
     """Verify a snapshot tree contains only private regular files/dirs."""
+    root = _fs_path(root)
     ensure_private_directory(root)
-    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts)):
+    for path in _bounded_snapshot_paths(root):
         if _path_is_alias(path):
             raise PermissionError(f"snapshot tree contains an alias: {path}")
         if path.is_dir():
@@ -1700,6 +2078,7 @@ def _harden_private_tree(root: Path) -> None:
 
 
 def _snapshot_names_unlocked(base: Path) -> list[str]:
+    base = _fs_path(base)
     if not base.is_dir() or _path_is_alias(base):
         return []
     return sorted(
@@ -1710,7 +2089,7 @@ def _snapshot_names_unlocked(base: Path) -> list[str]:
 
 def _validate_store_name(name: str) -> str:
     safe = str(name)
-    if safe in {"", ".", ".."} or Path(safe).name != safe:
+    if safe in {"", ".", "..", _SNAPSHOT_COVERAGE} or Path(safe).name != safe:
         raise ValueError(f"invalid learned-store snapshot name: {safe!r}")
     return safe
 
@@ -1721,7 +2100,7 @@ def _validated_stores(stores: dict[str, Path]) -> dict[str, Path]:
         name = _validate_store_name(raw_name)
         if name in out:
             raise ValueError(f"duplicate learned-store snapshot name: {name!r}")
-        out[name] = Path(raw_path)
+        out[name] = _fs_path(raw_path)
     return out
 
 
@@ -1746,8 +2125,12 @@ def snapshot_learning_state(
     snapshot could restore another concurrent rollout's state.
     """
     import shutil
+
+    from . import learning_store
+
+    native = stores is None
     default_store = directory is None
-    base = Path(directory) if directory is not None else snapshots_dir()
+    base = _fs_path(directory if directory is not None else snapshots_dir())
     stores = _validated_stores(stores if stores is not None else _live_stores())
     stamp = time.strftime(
         "%Y%m%dT%H%M%SZ", time.gmtime(now if now is not None else time.time()),
@@ -1761,9 +2144,12 @@ def snapshot_learning_state(
         # The lock helper privately creates a missing base before acquiring its
         # sidecar.  Preparing *inside* the lock avoids a first-use race where a
         # second process observes the directory before the creator hardens it.
-        with cross_process_lock(base / _SNAPSHOT_TRANSACTION, strict=True):
+        with (cross_process_lock(base / _SNAPSHOT_TRANSACTION, strict=True),
+              learning_store.guidance_fence() if native else contextlib.nullcontext()):
             _prepare_snapshot_base(base, default_store=default_store)
             ensure_private_directory(staging)
+            binding = _state_binding(stores, native=native)
+            families = list(stores)
             copied = 0
             for name, src in stores.items():
                 if _path_is_alias(src):
@@ -1787,9 +2173,22 @@ def snapshot_learning_state(
                     with cross_process_lock(src, strict=True):
                         atomic_write_bytes(target, _read_stable_private_file(src))
                 copied += 1
+            if native and binding["guidance"]["mode"] == "world":
+                state = learning_store.export_guidance_snapshot()
+                atomic_write_bytes(staging / _WORLD_GUIDANCE, json.dumps(
+                    state, sort_keys=True, allow_nan=False,
+                ).encode())
+                families.append(_WORLD_GUIDANCE)
+                copied += 1
             if not copied and not publish_empty:
                 shutil.rmtree(staging, ignore_errors=True)
                 return None
+            if _state_binding(stores, native=native) != binding:
+                raise RuntimeError("Learning storage changed while preparing its safety copy")
+            atomic_write_bytes(staging / _SNAPSHOT_COVERAGE, json.dumps({
+                "version": 1, "binding": binding, "families": families,
+                "inventory": _snapshot_inventory(staging),
+            }, sort_keys=True, allow_nan=False).encode())
             _harden_private_tree(staging)
             os.replace(staging, final)
             _harden_private_tree(final)
@@ -1812,23 +2211,25 @@ def snapshot_learning_state(
 
 
 def list_snapshots(directory: Path | str | None = None) -> list[str]:
-    base = Path(directory) if directory is not None else snapshots_dir()
+    base = _fs_path(directory if directory is not None else snapshots_dir())
     return _snapshot_names_unlocked(base)
 
 
 def _remove_path(path: Path) -> None:
     import shutil
 
+    path = _fs_path(path)
     if path.is_dir() and not _path_is_alias(path):
         shutil.rmtree(path)
     else:
         path.unlink(missing_ok=True)
 
 
-def _restore_private_directory(src: Path, live: Path) -> None:
+def _restore_private_directory(src: Path, live: Path, *, expected_inventory: dict | None = None) -> None:
     """Stage a directory restore and recover the incumbent on swap failure."""
     import shutil
 
+    src, live = _fs_path(src), _fs_path(live)
     if not live.parent.exists():
         ensure_private_directory(live.parent)
     elif not live.parent.is_dir() or _path_is_alias(live.parent):
@@ -1847,6 +2248,8 @@ def _restore_private_directory(src: Path, live: Path) -> None:
             copy_function=_copy_private_snapshot_file,
         )
         _harden_private_tree(staged)
+        if expected_inventory is not None and _snapshot_inventory(staged) != expected_inventory:
+            raise RuntimeError("The saved learning directory changed during restoration")
         if had_live:
             if live.is_dir() and not _path_is_alias(live):
                 _harden_private_tree(live)
@@ -1893,7 +2296,7 @@ def _restore_private_directory(src: Path, live: Path) -> None:
 
 def rollback_learning_state(
     snapshot: str = "latest", *, directory: Path | str | None = None,
-    stores: dict[str, Path] | None = None,
+    stores: dict[str, Path] | None = None, expected_revision: str | None = None,
 ) -> list[str]:
     """Restore every learned store from a snapshot (learning rollback, half 2).
 
@@ -1903,8 +2306,11 @@ def rollback_learning_state(
     that is the point). Returns the restored store names only after every
     required store succeeds. A partial restore raises
     :class:`LearningRollbackError` with a per-store report."""
+    from . import learning_store
+
+    native = stores is None
     default_store = directory is None
-    base = Path(directory) if directory is not None else snapshots_dir()
+    base = _fs_path(directory if directory is not None else snapshots_dir())
     if not base.exists():
         if snapshot != "latest":
             raise ValueError(
@@ -1912,7 +2318,8 @@ def rollback_learning_state(
             )
         return []
     _prepare_snapshot_base(base, default_store=default_store)
-    with cross_process_lock(base / _SNAPSHOT_TRANSACTION, strict=True):
+    with (cross_process_lock(base / _SNAPSHOT_TRANSACTION, strict=True),
+          learning_store.guidance_fence() if native else contextlib.nullcontext()):
         names = _snapshot_names_unlocked(base)
         if not names:
             if snapshot != "latest":
@@ -1926,6 +2333,13 @@ def rollback_learning_state(
         src_dir = base / chosen
         _harden_private_tree(src_dir)
         stores = _validated_stores(stores if stores is not None else _live_stores())
+        stores, world_state, coverage = _restore_coverage(src_dir, stores, native=native)
+        inventory = coverage["inventory"] if coverage else _snapshot_inventory(src_dir)
+        if expected_revision is not None:
+            if not isinstance(expected_revision, str) or not re.fullmatch("[0-9a-f]{64}", expected_revision):
+                raise ValueError("Review the selected saved learning point again")
+            if _snapshot_revision(src_dir, coverage, inventory=inventory) != expected_revision:
+                raise RuntimeError("This saved learning point changed after review; nothing was restored")
         restored: list[str] = []
         failures: dict[str, str] = {}
         required = [
@@ -1934,6 +2348,8 @@ def rollback_learning_state(
             or Path(live).exists()
             or _path_is_alias(Path(live))
         ]
+        if world_state is not None:
+            required.append(_WORLD_GUIDANCE)
         for name, live in stores.items():
             src = src_dir / name
             if not src.exists():
@@ -1941,11 +2357,14 @@ def rollback_learning_state(
             live = Path(live)
             try:
                 if src.is_dir():
-                    _restore_private_directory(src, live)
+                    prefix = name + "/"
+                    _restore_private_directory(src, live, expected_inventory={
+                        k[len(prefix):]: v for k, v in inventory.items() if k.startswith(prefix)
+                    })
                 else:
                     ensure_private_file(src)
                     with cross_process_lock(live, strict=True):
-                        atomic_write_bytes(live, _read_stable_private_file(src))
+                        atomic_write_bytes(live, _verified_snapshot_bytes(src, src_dir, inventory))
                 restored.append(name)
             except Exception as e:  # noqa: BLE001 -- report all store failures
                 failures[name] = f"{type(e).__name__}: {e}"[:500]
@@ -1955,6 +2374,14 @@ def rollback_learning_state(
         restored.extend(_remove_post_snapshot_stores(
             src_dir, stores, failures=failures,
         ))
+        if world_state is not None:
+            try:
+                learning_store.restore_guidance_snapshot(world_state)
+                restored.append(_WORLD_GUIDANCE)
+            except Exception as exc:  # noqa: BLE001 -- retain partial receipt
+                failures[_WORLD_GUIDANCE] = f"{type(exc).__name__}: guidance restore failed"
+        if native:
+            _refresh_restored_guidance(restored, failures)
         for missing in sorted(set(required) - set(restored) - set(failures)):
             failures[missing] = "restore produced no completion receipt"
         if failures:
@@ -1984,10 +2411,11 @@ def _remove_post_snapshot_stores(
     Each is removed via rename-aside so a failure can't half-delete a dir store.
     """
     removed: list[str] = []
+    src_dir = _fs_path(src_dir)
     for name, live in stores.items():
         if (src_dir / name).exists():
             continue  # in the snapshot -> handled by the restore loop
-        live = Path(live)
+        live = _fs_path(live)
         if not live.exists() and not _path_is_alias(live):
             continue
         tombstone = live.with_name(
@@ -2076,6 +2504,9 @@ __all__ = [
     "rehearsal_completed",
     "benchmark_regressed",
     "snapshot_learning_state",
+    "snapshot_coverage",
+    "prepare_learning_snapshot",
+    "learning_mutation_scope",
     "list_snapshots",
     "LearningRollbackReport",
     "LearningRollbackError",

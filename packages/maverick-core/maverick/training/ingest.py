@@ -36,15 +36,16 @@ from .schema import TrainingStep, TrainingTrajectory, to_klear_jsonl
 log = logging.getLogger(__name__)
 
 
-def load_donations(outbox: Path) -> Iterator[dict]:
+def load_donations(outbox: Path, *, world=None) -> Iterator[dict]:
     """Yield each donated record (raw dict) from the outbox directory."""
     if not outbox.exists():
         return
     for p in sorted(outbox.glob("*.json")):
         try:
             record = json.loads(p.read_text(encoding="utf-8"))
-            from ..pilot_learning import excluded
-            if isinstance(record, dict) and not excluded(record.get("goal_id")):
+            from ..memory_ownership import source_allowed
+            if (isinstance(record, dict) and record.get("source_ownership") == "unowned"
+                    and source_allowed(record.get("goal_id"), "", world=world)):
                 yield record
         except json.JSONDecodeError:
             continue
@@ -62,6 +63,9 @@ def fetch_steps_for_goal(world, goal_id: int) -> list[dict]:
         return []
     from ..pilot_learning import excluded
     if excluded(goal_id):
+        return []
+    from ..memory_ownership import source_allowed
+    if not source_allowed(goal_id, "", world=world):
         return []
     out: list[dict] = []
     since = 0
@@ -240,7 +244,7 @@ def klear_rows(outbox: Path, world=None) -> Iterator[dict]:
     best-of-N candidates scored by objective tests (so a passing vs failing
     candidate pairs within the task_family). ``world`` (optional) supplies the
     goal_events; donations may have been pruned before ingestion."""
-    for record in load_donations(outbox):
+    for record in load_donations(outbox, world=world):
         events = (
             fetch_steps_for_goal(world, record.get("goal_id", 0))
             if world else []

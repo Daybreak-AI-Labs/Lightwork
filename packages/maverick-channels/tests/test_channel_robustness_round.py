@@ -106,17 +106,20 @@ def test_voice_handler_error_is_generic_not_leaked(monkeypatch):
         raise RuntimeError(f"db connect failed token={secret}")
 
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")  # pragma: allowlist secret
-    chan = VoiceChannel(handler=_raises, api_key="vapi-test-key")
+    chan = VoiceChannel(handler=_raises, api_key="vapi-test-key", assistant_id="fixture-assistant",
+                        allowed_callers=["+12025550111"])
     client = TestClient(chan._app)
     resp = client.post(
         "/webhook/voice",
-        json={"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1", "call": {"id": "call1"}}},
+        json={"message": {"type": "tool-calls", "call": {"id": "call1", "assistantId": "fixture-assistant",
+              "customer": {"number": "+12025550111"}}, "toolCallList": [
+              {"id": "event1", "name": "lightwork_request", "parameters": {"request": "hi"}}]}},
         headers={"Authorization": "Bearer voice-secret"},
     )
     assert resp.status_code == 200
-    body = resp.json()["response"]
+    body = resp.json()["results"][0]["result"]
     assert secret not in body
-    assert "error" in body.lower()  # a generic apology, no raw detail
+    assert "no confirmed result" in body.lower()  # Explicit uncertainty, no raw detail.
 
 
 # --- fix 3: outbound egress hygiene (mentions / empty / self-loop) ---------

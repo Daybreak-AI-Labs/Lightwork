@@ -5,6 +5,20 @@
 // checked by the server; this script only guides and shows results.
 (() => {
   'use strict';
+  function renderReview(host, changes) {
+    if (!host || !Array.isArray(changes) || !changes.length || changes.length > 16390 ||
+        changes.some(row => !row || Object.keys(row).some(key => !['label', 'after'].includes(key)) ||
+          typeof row.label !== 'string' || typeof row.after !== 'string') ||
+        new TextEncoder().encode(JSON.stringify(changes)).length > 600000) return false;
+    const wrapper = document.createElement('div'); wrapper.className = 'lx-complete-review';
+    const count = document.createElement('p'); count.textContent = 'Complete review · ' + changes.length + ' details'; wrapper.append(count);
+    const list = document.createElement('dl'); list.style.cssText = 'overflow-wrap:anywhere;white-space:pre-wrap;min-width:0';
+    changes.forEach(row => { const label = document.createElement('dt'), value = document.createElement('dd');
+      label.textContent = row.label; value.textContent = row.after; value.style.marginInlineStart = '0';
+      list.append(label, value); });
+    wrapper.append(list); host.append(wrapper); return true;
+  }
+  window.LightworkLearningCapture = Object.freeze({renderReview});
   const card = document.getElementById('lx-card');
   if (!card) return;
   const enc = encodeURIComponent;
@@ -13,7 +27,52 @@
   const KINDS = { string: 'Text', integer: 'Whole number', number: 'Number', boolean: 'Yes or no', null: 'Nothing',
     object: 'Group of details', array: 'List' };
   const DAY = 86400;
-  let prepared = null, model = null, record = null, busy = false;
+  let prepared = null, model = null, record = null, busy = false, scope = null, reviewed = null, pending = null, epoch = 0;
+  const decisionBase = '/api/v1/learning-example-decisions/' + enc(card.dataset.flowId || '') + '/' + enc(card.dataset.runId || '');
+  const pendingKey = 'lightwork-example-decision:' + card.dataset.flowId + ':' + card.dataset.runId;
+  function remember() { try { if (pending) sessionStorage.setItem(pendingKey, JSON.stringify(pending)); else sessionStorage.removeItem(pendingKey); } catch (_) {} }
+  function forgetPrivate() { epoch++; scope = null; reviewed = null; pending = null; remember(); clearCurrentState(); $('decision-review').replaceChildren(); $('original-choice').replaceChildren(); $('original').hidden = true; }
+  async function decisionApi(path, body) {
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+    try { const response = await fetch(decisionBase + path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+      headers: {'Content-Type': 'application/json', ...(scope ? {'X-Lightwork-Example-Context': scope} : {})}, body: body === undefined ? undefined : JSON.stringify(body)});
+      if (response.redirected) throw Object.assign(new Error('Please sign in again.'), {status: 401});
+      const text = await response.text(); if (text.length > 1100000) throw new Error('The complete review could not be read safely. Nothing was confirmed.');
+      const value = JSON.parse(text); if (!response.ok) throw Object.assign(new Error(typeof value.detail === 'string' ? value.detail : value.detail && value.detail.message || 'Check current status before continuing.'), {status: response.status, code: value.detail && value.detail.code});
+      if (scope && value.context !== scope) throw Object.assign(new Error('Your account or workspace changed.'), {status: 403});
+      return value;
+    } finally { clearTimeout(timer); }
+  }
+  function showOriginal(message) { $('original').hidden = !pending && !$('original-choice').options.length; $('original-status').textContent = message || 'Check the original decision without repeating it.'; }
+  async function readOriginal() {
+    if (!pending && scope && $('original-choice').value) pending = {operation: $('original-choice').value, context: scope};
+    if (!pending || pending.context !== scope) return;
+    const started = epoch, value = await decisionApi('/requests/' + enc(pending.operation)); if (started !== epoch) return;
+    showOriginal(value.message + ' Current example: ' + human(value.current_status) + '.');
+    if (value.confirmed) { reviewed = null; $('decision-review').replaceChildren(); await load(); showOriginal(value.message + ' This is a historical decision; current status is shown separately.'); }
+  }
+  async function prepareDecision(kind) {
+    if (!record || !scope) return;
+    const reason = $(kind === 'grant' ? 'grant-reason' : 'review-reason').value.trim();
+    if (!reason) { say('Enter a brief reason before reviewing your decision.'); return; }
+    const body = {context: scope, kind, reason};
+    if (kind === 'grant') { body.use_until = Math.min(endOfDay($('grant-until').value), record.retain_until - 60); body.retain_copies = $('grant-copies').checked; }
+    const started = epoch, value = await decisionApi('/review', body); if (started !== epoch) return;
+    const host = $('decision-review'); host.replaceChildren();
+    if (!renderReview(host, value.changes)) { reviewed = null; say('The complete review could not be displayed. Nothing was confirmed. Check current status.'); return; }
+    reviewed = {token: value.token, operation: value.operation, context: scope};
+    const choice = make('label', 'mv-form__field'); const check = make('input'); check.type = 'checkbox';
+    choice.append(check, document.createTextNode(' I reviewed every retained detail and this decision.')); host.append(choice);
+    const save = make('button', 'btn btn--primary', kind === 'grant' ? 'Confirm learning permission' : kind === 'accept' ? 'Confirm acceptance' : 'Confirm rejection'); save.type = 'button'; save.disabled = true;
+    check.addEventListener('change', () => { save.disabled = !check.checked; });
+    save.addEventListener('click', () => run(async () => { if (!check.checked || !reviewed) return;
+      const original = reviewed; pending = {operation: original.operation, context: original.context}; remember(); reviewed = null;
+      host.replaceChildren(); showOriginal('Recording your reviewed decision…');
+      try { const result = await decisionApi('/apply', {token: original.token, confirmed: true}); if (started !== epoch) return; showOriginal(result.message); await load(); }
+      catch (error) { if (error.status === 401 || error.status === 403 || error.code === 'example_context_changed') throw error;
+        showOriginal('The decision could not be confirmed. Read its original result; nothing will be submitted again automatically.'); say(error.message); }
+    })); host.append(save); host.scrollIntoView({block: 'start'}); check.focus();
+  }
 
   function make(tag, cls, text) {
     const node = document.createElement(tag);
@@ -22,22 +81,18 @@
     return node;
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(String(value)) : String(value).replace(/[_.-]+/g, ' '); }
-  function say(text) { $('status').textContent = text; }
-  function failText(failure, what) {
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
-  }
-  async function api(path, body) {
-    const response = await fetch(base + path, {
-      method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if (!response.ok) throw response;
-    return response.json();
+  function say(text) { window.mvStatus($('status'), text); }
+  async function api(path, body, action) {
+    return window.mvFetchJSON(base + path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', body: body}, action);
   }
   function isoDay(epoch) { const d = new Date(epoch * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function endOfDay(value) { const t = Date.parse(value + 'T23:59:00'); return Number.isFinite(t) ? t / 1000 : NaN; }
   function show(section) { ['enroll', 'review', 'grant'].forEach(name => { $(name).hidden = name !== section; }); $('next').hidden = true; }
+  function clearCurrentState() {
+    prepared = null; model = null; record = null; reviewed = null; show(null);
+    $('describe').replaceChildren(); $('evidence').replaceChildren(); $('decision-review').replaceChildren();
+    $('review-reason').value = ''; $('grant-reason').value = ''; $('grant-copies').checked = false;
+  }
 
   // ---- plain editor for a data description ------------------------------------------
   function blank(kind) {
@@ -121,35 +176,6 @@
   }
 
   // ---- showing a recorded example ---------------------------------------------------------
-  function rows(value, prefix, out) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      Object.keys(value).forEach(k => rows(value[k], (prefix ? prefix + ' › ' : '') + human(k), out));
-    } else if (Array.isArray(value)) {
-      value.forEach((item, i) => rows(item, prefix + ' ' + (i + 1), out));
-    } else {
-      out.push([prefix || 'Value', value === true ? 'Yes' : value === false ? 'No' : value === null ? 'Nothing' : String(value)]);
-    }
-    return out;
-  }
-  function table(caption, value) {
-    const wrap = make('div');
-    wrap.append(make('h3', null, caption));
-    const list = make('dl');
-    rows(value, '', []).slice(0, 200).forEach(([k, v]) => list.append(make('dt', null, k), make('dd', null, v)));
-    wrap.append(list);
-    return wrap;
-  }
-  function evidence(detail) {
-    const host = $('evidence');
-    host.replaceChildren();
-    const ev = detail.evidence || {};
-    host.append(table('What the run started with', ev.inputs || {}));
-    (ev.slots || []).forEach((slot, i) => {
-      host.append(table('Action ' + (i + 1) + ': ' + human(slot.tool) + ', what it was sent', slot.arguments || {}));
-      host.append(table('Action ' + (i + 1) + ': what it gave back', slot.result || {}));
-    });
-  }
-
   function status(row) {
     record = row;
     const kind = row.status;
@@ -158,8 +184,12 @@
       show(null); say('This run is being kept as a learning example. Approve its actions as usual; review it here when it finishes.'); return;
     }
     if (kind === 'awaiting_review') { show('review'); say('The run finished. Review what it did before it can be used for learning.'); return; }
-    if (kind === 'accepted' && row.grant_sha256) {
+    if (kind === 'accepted' && row.training_available === true) {
       show(null); $('next').hidden = false; say('Accepted, and new flows may learn from it.'); return;
+    }
+    if (kind === 'accepted' && row.grant_sha256) {
+      show(null); say('Permission to learn from this example has ended. Keep a fresh run as a new example if this work still needs to be taught.');
+      return;
     }
     if (kind === 'accepted') {
       show('grant');
@@ -175,26 +205,50 @@
       expired: 'This example has expired.', unusable: 'This run didn’t produce a usable example.' }[kind] || 'This run isn’t a learning example.');
   }
 
-  async function run(what, action) {
+  async function run(action) {
     if (busy) return;
-    busy = true; card.setAttribute('aria-busy', 'true');
-    try { await action(); } catch (failure) { say(failText(failure, what)); $('status').focus(); }
-    finally { busy = false; card.setAttribute('aria-busy', 'false'); }
+    busy = true; card.setAttribute('aria-busy', 'true'); ['refresh', 'accept', 'reject', 'grant-go', 'original-read', 'original-choice'].forEach(name => $(name).disabled = true);
+    try { await action(); } catch (failure) {
+      if (failure && (failure.status === 401 || failure.status === 403 || failure.code === 'example_context_changed')) forgetPrivate();
+      else { reviewed = null; $('decision-review').replaceChildren(); }
+      say(failure && (failure.status === 401 || failure.status === 403)
+        ? 'This learning example is not available to your account right now. Private details and unfinished review were cleared.'
+        : failure && failure.message || 'We could not confirm current status. Your entered reason is kept; read the original result after an interrupted decision.');
+      $('status').focus();
+    } finally { busy = false; card.setAttribute('aria-busy', 'false'); ['refresh', 'accept', 'reject', 'grant-go', 'original-read', 'original-choice'].forEach(name => $(name).disabled = false); }
   }
   async function load() {
-    let row = null;
-    try { row = await api(''); } catch (failure) {
-      if (!(failure && failure.status === 404)) { say(failText(failure, 'check this run')); return; }
+    const started = epoch, oldReason = $('review-reason').value, oldGrant = $('grant-reason').value;
+    clearCurrentState(); say('Checking this run’s learning status…');
+    try {
+      const history = await decisionApi('/history'); if (started !== epoch) return;
+      scope = history.context; const choice = $('original-choice'); choice.replaceChildren();
+      history.choices.forEach(item => { const option = make('option', null, item.label); option.value = item.value; choice.append(option); });
+      try { const saved = JSON.parse(sessionStorage.getItem(pendingKey)); if (saved && saved.context === scope && /^[a-f0-9]{32}$/.test(saved.operation)) pending = saved; } catch (_) {}
+      const fromLink = new URLSearchParams(location.search).get('example_decision');
+      if (fromLink && /^[a-f0-9]{32}$/.test(fromLink)) pending = {context: scope, operation: fromLink};
+      if (pending && pending.context !== scope) { pending = null; remember(); }
+      if (pending && !history.choices.some(item => item.value === pending.operation)) { const option = make('option', null, 'Original submitted decision'); option.value = pending.operation; choice.append(option); }
+      if (pending) choice.value = pending.operation;
+      showOriginal();
+    } catch (error) { if (error.status !== 404) throw error; }
+    let row = null, value = null;
+    try { value = await decisionApi(''); if (started !== epoch) return; row = value.record; } catch (failure) {
+      if (!(failure && failure.status === 404)) throw failure;
     }
     if (row) {
-      status(row);
-      if (row.status === 'awaiting_review') evidence(await api('/detail'));
+      if (scope && scope !== value.context) { forgetPrivate(); say('Your account or workspace changed. Reload before continuing.'); return; }
+      scope = value.context; status(row);
+      $('review-reason').value = oldReason; $('grant-reason').value = oldGrant;
+      if (row.status === 'awaiting_review' && !renderReview($('evidence'), value.changes)) { show(null); say('The complete retained details could not be displayed. Nothing can be approved from this preview.'); }
       return;
     }
-    try { prepared = await api('/suggestion'); } catch (failure) {
-      show(null);
-      say('This run can’t become a learning example. Examples start at the flow’s first approval, before any action runs, and example collection must be turned on.');
-      return;
+    try { prepared = await api('/suggestion', undefined, 'check this run’s learning status'); } catch (failure) {
+      if (failure && (failure.status === 404 || failure.status === 409)) {
+        say('This run can’t become a learning example now. Examples start at the flow’s first approval, before any action runs, and example collection must be on.');
+        return;
+      }
+      throw failure;
     }
     model = prepared.suggestion;
     const now = Date.now() / 1000;
@@ -206,45 +260,31 @@
     say('This run is waiting at its first approval, so it can be kept as a learning example.');
   }
 
-  $('enroll-go').addEventListener('click', () => run('keep this run as an example', async () => {
+  $('enroll-go').addEventListener('click', () => run(async () => {
     if (!prepared || !model) return;
     const now = Date.now() / 1000;
     const until = Math.min(endOfDay($('until').value), now + (prepared.max_days || 7) * DAY - 60);
     if (!(until > now)) { say('Choose a date from today up to a week ahead.'); return; }
     const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(
-      'Keep this run’s details as a learning example until ' + new Date(until * 1000).toLocaleDateString() + '? It’s encrypted and only you can review it.',
+      'Keep this run’s details as a learning example until ' + (window.mvDateAbsolute ? window.mvDateAbsolute(until) : new Date(until * 1000).toLocaleDateString()) + '? It’s encrypted and only you can review it.',
       { okText: 'Keep as example' });
     if (!ok) return;
     const row = await api('', { expected_pause_binding: prepared.expected_pause_binding, allowed_tools: prepared.allowed_tools,
-      input_schema: model.input_schema, tool_data_schemas: model.tool_data_schemas, retain_until: until });
+      input_schema: model.input_schema, tool_data_schemas: model.tool_data_schemas, retain_until: until }, 'keep this run as a learning example');
     status(row);
   }));
-  function review(accepted) {
-    return run('record your review', async () => {
-      if (!record) return;
-      const reason = $('review-reason').value.trim();
-      if (!reason) { say('Say briefly why, then choose again.'); $('review-reason').focus(); return; }
-      const row = await api('/review', { expected_revision: record.revision, expected_episode_sha256: record.episode_sha256,
-        reviewed: true, accepted: accepted, rationale: reason });
-      status(row);
-    });
-  }
-  $('accept').addEventListener('click', () => review(true));
-  $('reject').addEventListener('click', () => review(false));
-  $('grant-go').addEventListener('click', () => run('allow learning from this example', async () => {
-    if (!record) return;
-    const reason = $('grant-reason').value.trim();
-    if (!reason) { say('Say briefly why it may be used for learning.'); $('grant-reason').focus(); return; }
-    if (!$('grant-copies').checked) { say('Tick the box to keep the copies made while learning.'); return; }
-    const until = Math.min(endOfDay($('grant-until').value), record.retain_until - 60);
-    if (!(until > Date.now() / 1000)) { say('Choose a date before the example expires.'); return; }
-    const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(
-      'Allow new flows to learn from this example until ' + new Date(until * 1000).toLocaleDateString() + '? Copies made while learning are kept until then, even if you withdraw it later.',
-      { okText: 'Allow learning' });
-    if (!ok) return;
-    const row = await api('/training-grant', { expected_revision: record.revision, expected_episode_sha256: record.episode_sha256,
-      use_until: until, retain_derived_copies: true, rationale: reason });
-    status(row);
-  }));
-  run('check this run', load);
+  $('accept').addEventListener('click', () => run(() => prepareDecision('accept')));
+  $('reject').addEventListener('click', () => run(() => prepareDecision('reject')));
+  $('grant-go').addEventListener('click', () => run(() => prepareDecision('grant')));
+  $('original-choice').addEventListener('change', () => { const value = $('original-choice').value; pending = value ? {operation: value, context: scope} : null; remember(); showOriginal(); });
+  $('original-read').addEventListener('click', () => run(readOriginal));
+  ['review-reason', 'grant-reason', 'grant-until', 'grant-copies'].forEach(name => $(name).addEventListener('input', () => { reviewed = null; $('decision-review').replaceChildren(); }));
+  window.addEventListener('lightwork:context-changed', forgetPrivate);
+  document.addEventListener('lightwork:workspace-changing', forgetPrivate);
+  document.addEventListener('lightwork:copilot-context-changed', event => {
+    if (event.detail && event.detail.reason === 'selection') { reviewed = null; $('decision-review').replaceChildren(); run(async () => { const value = await decisionApi(''); if (value.context !== scope) forgetPrivate(); }); }
+    else forgetPrivate();
+  });
+  $('refresh').addEventListener('click', () => run(load));
+  run(load);
 })();

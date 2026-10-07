@@ -20,6 +20,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_runtime as runtime
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import save_catalog
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = runtime.entries(catalog.S, catalog.C, catalog.Column)
@@ -48,7 +50,7 @@ def _isolated(tmp_path, monkeypatch):
 def _save(changes, confirm=True):
     from maverick import config
 
-    r = client.post(API, json={"changes": changes, "confirm": confirm})
+    r = save_catalog(client, API, json={"changes": changes, "confirm": confirm})
     config.reset_config_cache()
     return r
 
@@ -62,9 +64,11 @@ def _set(setting_id, value):
 def test_learning_cache_setting_reuses_a_checked_answer(monkeypatch):
     from maverick import orchestrator
     from maverick.cache import learning
+    from maverick_dashboard.app import _world
 
     learning.reset_shared()
-    goal = types.SimpleNamespace(id=7, owner="ada", title="Build the app", description="")
+    world = _world()
+    goal = world.get_goal(world.create_goal("Build the app", "", owner="ada"))
     orchestrator._maybe_store_learning_cache(goal, "run make -j test", 0.9)
     assert orchestrator._maybe_learning_cache_block(goal, None) is None  # off: today
 
@@ -430,6 +434,7 @@ def test_director_profiles_setting_shapes_a_director_run(monkeypatch):
                  "MAVERICK_REVIEW_CHECKPOINT_TOOL_CALLS"):
         monkeypatch.setenv(name, "placeholder")  # restored after the test
     monkeypatch.setattr("maverick.runner.configured_max_dollars", lambda: 12.0)
+    monkeypatch.setattr("maverick.runner.configured_goal_ceiling_dollars", lambda: 12.0)
     title, description, cap = _apply_director("supervised", "Close the books", "", 10.0)
     assert cap == 12.0  # never above the configured spending cap
     assert os.environ["MAVERICK_CONSENT_MODE"] == "dashboard"
@@ -531,7 +536,7 @@ def start_env(monkeypatch, tmp_path):
     monkeypatch.setattr("maverick_dashboard.api.require_provider_or_400", lambda: None)
     monkeypatch.setattr(dashboard, "check_goal_rate_limit", lambda request, **_: None)
     monkeypatch.setattr("maverick.runner.configured_max_dollars", lambda: 10.0)
-    monkeypatch.setattr("maverick_dashboard.api.configured_max_dollars", lambda: 10.0)
+    monkeypatch.setattr("maverick.runner.configured_goal_ceiling_dollars", lambda: 10.0)
     calls = []
 
     async def run(goal_id, *args, **kwargs):
@@ -656,3 +661,14 @@ def test_cost_collection_limits_reach_the_collector():
     assert r.status_code == 409  # raising a limit needs a confirmation
     r = _save([{"id": "ai_cost_roi.collector_limits.page_cap", "value": 51}])
     assert r.status_code == 400  # beyond what the collector accepts
+
+
+def test_supervised_log_normalizes_split_crlf_without_removing_meaningful_spaces():
+    from maverick_dashboard import service_supervisor as supervisor
+
+    service = supervisor.Service("model_proxy")
+    pending = supervisor._take_lines(service, b"", b"  ready  \r")
+    assert list(service.log) == []
+    pending = supervisor._take_lines(service, pending, b"\nnext\n")
+    assert pending == b""
+    assert list(service.log) == ["  ready  ", "next"]

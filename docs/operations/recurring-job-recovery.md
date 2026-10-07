@@ -40,6 +40,30 @@ that child from an independent identical schedule. Such rows become `failed` wit
 visible in failed-job counts and are excluded from automatic terminal-row purge.
 No business handler is run for them automatically.
 
+## In-product schedule management and recovery
+
+Automations retains a schedule definition while occurrences run, pause, or retire.
+Changes compare the displayed revision inside the queue transaction. Pausing stops
+new occurrence admission; running work and its existing retries retain their
+payload. Changing future runs cancels only unattempted future occurrences, records
+why, and creates the next occurrence strictly after the current time. Resume does
+not replay missed occurrences. History and definition versions remain visible even
+when an active occurrence has left the pending queue.
+
+For a parked recurrence, an administrator chooses **Review recovery**. The review
+shows retained queue evidence and explicitly labels the historical external result
+unknown. Confirm that old workers are stopped, record the rationale, and either
+link the reviewed existing successor or authorize one future occurrence. The
+confirmation binds the exact job, attempt, definition and successor evidence plus
+the authenticated workspace. Changed evidence refuses the decision. This operation
+never reruns the historical business action. **History → Download audit history**
+exports definition decisions and retained occurrence states. Ordinary queue
+retention still bounds occurrence history; definition versions remain durable.
+
+The direct UI and API use the existing queue reconciliation transaction. Copilot
+operation routing for schedule management is not yet connected and must not claim
+that it performed these changes.
+
 ## Explicit local operator reconciliation
 
 This recovery API is for an administrator who already has filesystem authority over

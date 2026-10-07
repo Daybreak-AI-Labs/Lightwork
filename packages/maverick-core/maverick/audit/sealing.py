@@ -18,8 +18,10 @@ Exposed as ``maverick audit seal``; runs only when at-rest encryption is enabled
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from ..file_lock import (
@@ -99,9 +101,37 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
     atomic_write_bytes(path, data, mode=0o600)
 
 
+def _selected_paths(audit_dir, today, expected_sources):
+    if expected_sources is None:
+        return sorted(audit_dir.glob("*.ndjson"))
+    if any(not _DAY_RE.fullmatch(Path(name).stem) or name != Path(name).name
+           or not name.endswith(".ndjson") or Path(name).stem >= today for name in expected_sources):
+        raise SegmentReadError("reviewed audit selection is invalid")
+    return [audit_dir / name for name in sorted(expected_sources)]
+
+
+def _source_digest(source):
+    source.seek(0)
+    hasher = hashlib.sha256()
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _missing_source(audit_dir, expected_sources):
+    if audit_dir.exists():
+        return False
+    if expected_sources:
+        raise SegmentReadError("reviewed audit source is missing")
+    return True
+
+
 def seal_closed_segments(audit_dir: Path | None = None, *,
                          today: str | None = None,
-                         dry_run: bool = False) -> dict[str, str]:
+                         dry_run: bool = False,
+                         expected_sources: Mapping[str, str] | None = None,
+                         before_effect: Callable[[str, str], None] | None = None,
+                         completed: Callable[[str, str], None] | None = None) -> dict[str, str]:
     """Seal every closed (date < today), not-yet-sealed day-file in place.
 
     Requires at-rest encryption to be enabled (raises
@@ -125,9 +155,10 @@ def seal_closed_segments(audit_dir: Path | None = None, *,
     today = today or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
 
     report: dict[str, str] = {}
-    if not audit_dir.exists():
+    if _missing_source(audit_dir, expected_sources):
         return report
-    for p in sorted(audit_dir.glob("*.ndjson")):
+    paths = _selected_paths(audit_dir, today, expected_sources)
+    for p in paths:
         if not _DAY_RE.fullmatch(p.stem):
             continue                              # not a date-named day-file
         if p.stem >= today:
@@ -137,19 +168,41 @@ def seal_closed_segments(audit_dir: Path | None = None, *,
             with cross_process_lock(p, strict=True):
                 with os.fdopen(open_private_read(p), "rb") as source:
                     already = is_sealed(source.read(8))
+                    source_digest = _source_digest(source)
+                if expected_sources is not None and source_digest != expected_sources[p.name]:
+                    raise SegmentReadError("reviewed audit source changed")
                 if already:
                     report[p.name] = "already sealed"
                     continue
                 if dry_run:
                     report[p.name] = "would seal"
                     continue
+                if before_effect:
+                    before_effect(p.name, source_digest)
 
-                def chunks(path=p):
+                def chunks(path=p, expected_digest=source_digest):
                     # Close the source before atomic publication (Windows),
                     # while retaining the stable rewrite lock through rename.
                     with os.fdopen(open_private_read(path), "rb") as source:
                         initial = os.fstat(source.fileno())
-                        yield from encode_stream(source, seal)
+                        # Authenticate the exact plaintext consumed by the
+                        # streaming encoder before publishing its replacement.
+                        class CheckedSource:
+                            def __init__(self):
+                                self.hasher = hashlib.sha256()
+                            def read(self, size=-1):
+                                chunk = source.read(size)
+                                self.hasher.update(chunk)
+                                return chunk
+                            def seek(self, offset, whence=os.SEEK_SET):
+                                result = source.seek(offset, whence)
+                                if offset == 0 and whence == os.SEEK_SET:
+                                    self.hasher = hashlib.sha256()
+                                return result
+                        checked = CheckedSource()
+                        yield from encode_stream(checked, seal)
+                        if checked.hasher.hexdigest() != expected_digest:
+                            raise SegmentReadError("reviewed audit source changed during sealing")
                         final, visible = os.fstat(source.fileno()), path.lstat()
                         if ((initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
                                 != (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns)
@@ -158,6 +211,8 @@ def seal_closed_segments(audit_dir: Path | None = None, *,
 
                 atomic_write_bytes_chunks(p, chunks(), mode=0o600)
                 report[p.name] = "sealed"
+                if completed:
+                    completed(p.name, "sealed")
         except OSError as e:
             report[p.name] = f"error ({e})"
     return report

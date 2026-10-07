@@ -14,9 +14,8 @@ leave saved records unreadable. Before such a save is written this module:
   way in or their administrator role and no working replacement is proven,
   or when Lightwork would refuse to start;
 * otherwise asks for confirmation (the page shows the sentence) whenever the
-  person will be signed out or must sign in a new way -- only after the
-  sign-in provider or key service passed the same check its "Test
-  connection" button runs.
+  person will be signed out or must sign in a new way. A provider connection
+  check is not proof that a person can sign in again.
 
 The server's access token set in the environment is the break-glass way in:
 a person using it can never be locked out by a change here, because nothing
@@ -25,6 +24,8 @@ on this page can change it.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -74,7 +75,8 @@ def merged_config(layers: dict[str, Any], writes: dict | None = None) -> dict:
             node.pop(path[-1], None)
         else:
             node[path[-1]] = value
-    cfg = _deep_merge(layers.get("base") or {}, here)
+    from maverick.config_resets import merge_dashboard
+    cfg = merge_dashboard(layers.get("base") or {}, here, _deep_merge)
     return _deep_merge(cfg, layers.get("operator") or {})
 
 
@@ -127,7 +129,9 @@ class Access:
     proxy_header: str
     proxy_table: dict
     invites: bool
+    local_owner_login_open: bool
     invite_secret: str
+    auth_policy_fingerprint: str
     require_auth: bool
     client_enforced: bool
     claimed: bool
@@ -156,15 +160,19 @@ def _oidc(cfg: dict) -> dict:
     issuer = _text("MAVERICK_OIDC_ISSUER", table, "issuer")
     client_id = _text("MAVERICK_OIDC_CLIENT_ID", table, "client_id")
     secret = _secret("MAVERICK_OIDC_SESSION_SECRET", table, "session_secret")
-    endpoints = (_text("MAVERICK_OIDC_AUTHORIZATION_ENDPOINT", table, "authorization_endpoint")
-                 and _text("MAVERICK_OIDC_TOKEN_ENDPOINT", table, "token_endpoint"))
+    client_secret = _secret("MAVERICK_OIDC_CLIENT_SECRET", table, "client_secret")
+    redirect_uri = _text("MAVERICK_OIDC_REDIRECT_URI", table, "redirect_uri")
+    audience = _text("MAVERICK_OIDC_AUDIENCE", table, "audience")
     return {"enabled": enabled, "issuer": issuer, "secret": secret,
-            "login": bool(enabled and client_id and secret and (issuer or endpoints))}
+            "login": bool(enabled and client_id and client_secret and redirect_uri
+                          and audience and secret and issuer)}
 
 
 def _saml(cfg: dict, oidc_secret: str) -> tuple[bool, bool]:
     auth = cfg.get("auth") if isinstance(cfg.get("auth"), dict) else {}
     raw = auth.get("saml") if isinstance(auth, dict) else None
+    if isinstance(raw, dict) and raw.get("enabled") is False:
+        return False, False
     policy = bool(raw) if isinstance(raw, dict) else raw is not None
     table = raw if isinstance(raw, dict) else {}
     login = bool(str(table.get("sp_entity_id") or "").strip()
@@ -233,7 +241,11 @@ def access_for(cfg: dict) -> Access:
         proxy_header=(os.environ.get("MAVERICK_PROXY_AUTH_HEADER")
                       or str(proxy_table.get("header") or "") or "X-Forwarded-User").strip(),
         proxy_table=proxy_table, invites=bool(invites_flag),
+        local_owner_login_open=local_owner.sign_in_available_for(cfg),
         invite_secret=_secret("MAVERICK_DASHBOARD_SESSION_SECRET", dashboard, "session_secret"),
+        auth_policy_fingerprint=hashlib.sha256(
+            json.dumps(cfg.get("auth"), sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest(),
         require_auth=bool(require), client_enforced=_client_enforced(cfg), claimed=claimed,
         admins=_admins(cfg), default_role=str(dashboard.get("default_role") or "operator"),
         group_roles={str(k).strip().casefold(): str(v).strip().lower()
@@ -298,13 +310,17 @@ def _route_survives(route: str, request, before: Access, after: Access) -> bool:
         return (after.proxy and bool(request.headers.get(after.proxy_header))
                 and _proxy_trusts(after.proxy_table, host))
     if route == "invite":
-        # Invitation sessions only count while company sign-in is not set up.
-        return (after.invites and not after.oidc_login
+        # Existing local sessions are not a recovery path when the owner
+        # passphrase route would refuse the next sign-in.
+        return (after.invites and after.local_owner_login_open and not after.oidc_login
                 and after.invite_secret == before.invite_secret)
     if route == "session":
-        return (after.oidc_login or after.saml_login) and after.oidc_secret == before.oidc_secret
+        return ((after.oidc_login or after.saml_login)
+                and after.oidc_secret == before.oidc_secret
+                and after.auth_policy_fingerprint == before.auth_policy_fingerprint)
     # A sign-in token presented by a program.
-    return after.oidc and after.oidc_issuer == before.oidc_issuer
+    return (after.oidc and after.oidc_issuer == before.oidc_issuer
+            and after.auth_policy_fingerprint == before.auth_policy_fingerprint)
 
 
 def _owner_can_return(request, principal: str | None, after_cfg: dict, after: Access) -> bool:
@@ -361,27 +377,25 @@ def _someone_is_admin(after: Access) -> bool:
 
 # ------------------------------------------------------------------- review
 def _proven_sign_in(after: Access, values: dict) -> tuple[bool, str]:
-    """A browser sign-in that exists after the save and passed its check."""
+    """Provider checks cannot prove that a human can sign in after this save."""
     from . import settings_tests
 
     failure = ""
     if after.oidc_login:
-        outcome = settings_tests.check_oidc(values)
-        if outcome.ok:
-            return True, ""
-        failure = outcome.message
+        outcome = settings_tests.check_oidc_login(values)
+        failure = ("Provider details are reachable, but no person has completed a sign-in "
+                   "through this configuration yet." if outcome.ok else outcome.message)
     if after.saml_login:
-        outcome = settings_tests.check_saml(values)
-        if outcome.ok:
-            return True, ""
-        failure = failure or outcome.message
+        outcome = settings_tests.check_saml_login(values)
+        failure = failure or ("Provider metadata is reachable, but no person has completed a "
+                              "sign-in through this configuration yet." if outcome.ok else outcome.message)
     return False, failure
 
 
 def _unproven_message(route: str, after: Access, failure: str) -> str:
     if failure:
-        return (f"{failure} Until your company sign-in passes this check, this change would "
-                "lock you out, so nothing was changed.")
+        return (f"{failure} This change would lock you out before a verified sign-in or "
+                "recovery route is available, so nothing was changed.")
     if route == "token":
         return ("This change would stop the access token you are using from working, and you "
                 "would have no other working way back in. Set up and test a sign-in method "
@@ -413,6 +427,11 @@ def _way_back(request, route: str, principal: str | None, after_cfg: dict, after
     if _owner_can_return(request, principal, after_cfg, after):
         return ("You will be signed out and will need to sign in again with the owner "
                 "account's email and passphrase.")
+    from .company_signin_migration import guarded_transition
+
+    migration = guarded_transition(request, after_cfg)
+    if migration:
+        return migration
     proven, failure = _proven_sign_in(after, values)
     if proven:
         if not (principal and _stays_admin(principal, after)) and not _someone_is_admin(after):
@@ -459,8 +478,10 @@ def review_sign_in(request, changes: list[dict], layers: dict[str, Any], writes:
 
 
 def _owner_sign_in_open(cfg: dict) -> bool:
-    """The owner's passphrase sign-in is allowed by this configuration."""
-    return not (cfg.get("auth") or cfg.get("proxy_auth") or _token(cfg))
+    """Disabled OIDC details are drafts; they do not pause local owner login."""
+    from .local_owner import sign_in_available_for
+
+    return sign_in_available_for(cfg)
 
 
 def _is_owner(principal: str | None) -> bool:
@@ -552,13 +573,58 @@ def _prerequisites(changed: set[str], values: dict[str, object]) -> None:
                           "hold yet, so Lightwork would refuse to start. Fix those first.")
 
 
+def review_allowed_addresses(request, changes: list[dict],
+                             prospective: dict[str, object]) -> None:
+    """The request that saves the allowed-address list must itself match it,
+    or the person saving would be locked out the moment it is written."""
+    if not any(c["setting"].id == "auth.ip_allowlist.cidrs" for c in changes):
+        return
+    from . import ip_allowlist
+
+    entries = prospective.get("auth.ip_allowlist.cidrs") or []
+    if not isinstance(entries, list) or not entries:
+        return
+    networks, rejected = ip_allowlist.parse_networks(entries)
+    if rejected:
+        raise Refused("These entries are not network addresses or ranges: "
+                      + ", ".join(rejected) + ". Nothing was changed.")
+    address = ip_allowlist.client_ip(request)
+    shown = str(address) if address is not None else "unknown"
+    if address is None or not any(address in network for network in networks):
+        raise Refused(f"The address you are using now ({shown}) is not in that list, so "
+                      "saving it would lock you out. Add it, or the range it belongs to, "
+                      "first.")
+
+
+def review_second_factor(request, changes: list[dict],
+                         prospective: dict[str, object]) -> None:
+    """Turning on "Require a second factor" from a session that has none
+    would end that session at the next request: refuse, and say why."""
+    if not any(c["setting"].id == "auth.mfa.require" and c["new"] is True
+               for c in changes):
+        return
+    route, principal = caller_route(request)
+    if route in {"token", "local"} or not principal:
+        return
+    from .mfa_policy import principal_mfa
+
+    proved, _when = principal_mfa(getattr(request.state, "principal", None))
+    if not proved:
+        raise Refused("Your current sign-in didn't include a second factor, so requiring "
+                      "one now would sign you out. Sign in again with your authenticator "
+                      "first, then turn this on.")
+
+
 def review(request, changes: list[dict], layers: dict[str, Any], writes: dict,
            prospective: dict[str, object]) -> list[dict]:
     """Every confirmation the save needs; :class:`Refused` when it must not happen."""
     _prerequisites({c["setting"].id for c in changes}, prospective)
+    review_allowed_addresses(request, changes, prospective)
+    review_second_factor(request, changes, prospective)
     return (review_sign_in(request, changes, layers, writes, prospective)
             + review_keys(changes, prospective))
 
 
 __all__ = ["Access", "Refused", "access_for", "caller_route", "merged_config", "review",
-           "review_keys", "review_sign_in"]
+           "review_allowed_addresses", "review_keys", "review_second_factor",
+           "review_sign_in"]

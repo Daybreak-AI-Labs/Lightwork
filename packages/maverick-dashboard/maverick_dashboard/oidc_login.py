@@ -47,7 +47,7 @@ import time
 from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from maverick.oidc import (
     OIDCError,
     VerifiedPrincipal,
@@ -337,9 +337,105 @@ def _principal_from_request_session(request: Request):
     from .session_revocation import is_revoked
     if is_revoked(sub, payload.get("iat")):
         return None
-    return VerifiedPrincipal(
-        sub=sub, issuer="oidc-session", audience="", claims={"via": "session"},
+    claims = session_claims(payload, request, via="session")
+    if claims is None:
+        return None
+    return VerifiedPrincipal(sub=sub, issuer="oidc-session", audience="", claims=claims)
+
+
+def session_claims(payload: dict, request: Request, *, via: str) -> dict | None:
+    """Claims for a verified session cookie, or ``None`` when the session was
+    ended on the Sessions page (or its record cannot be read: fail closed).
+
+    A cookie carrying a ``sid`` must be an active row in
+    :mod:`session_registry`; its ``mfa``/``mfa_at`` come from that record's
+    minting, not from the cookie alone. A cookie without a ``sid`` predates
+    session tracking and is accepted, unverified for a second factor, until
+    it expires."""
+    sid = payload.get("sid")
+    claims: dict = {"via": via, "mfa": False, "mfa_at": None, "sid": ""}
+    # A workspace invitation needs the email asserted for THIS signed session.
+    # The subject directory retains historical aliases and cannot prove which
+    # address the provider asserted at the current login.
+    idp_email = _normalized_invite_email(payload.get("idp_email"))
+    if via == "session" and idp_email:
+        claims["idp_email"] = idp_email
+    if not isinstance(sid, str) or not sid:
+        from .session_policy import company_ttl, idle_minutes
+
+        try:
+            if idle_minutes():
+                return None  # Legacy cookies cannot establish current activity.
+            if via == "session" and _now() >= float(payload["iat"]) + company_ttl(_SESSION_TTL):
+                return None
+        except (KeyError, TypeError, ValueError, OSError):
+            return None
+        return claims
+    from . import session_registry
+
+    try:
+        record = session_registry.current(sid, principal=f"user:{payload.get('sub')}")
+        if record is None:
+            return None
+    except session_registry.SessionStoreError:
+        return None
+    client = getattr(request, "client", None)
+    session_registry.touch(
+        sid, ip=str(getattr(client, "host", "") or ""),
+        user_agent=request.headers.get("user-agent", ""),
     )
+    claims["sid"] = sid
+    if payload.get("mfa") is True:
+        claims["mfa"] = True
+        claims["mfa_at"] = payload.get("mfa_at", payload.get("iat"))
+    return claims
+
+
+def _normalized_invite_email(value: object) -> str:
+    """A provider-asserted email suitable for matching a workspace invite."""
+    if not isinstance(value, str):
+        return ""
+    email = value.strip().casefold()
+    return email if 3 <= len(email) <= 254 and "@" in email and not any(c.isspace() for c in email) else ""
+
+
+def _oidc_invite_email(claims: dict) -> str:
+    """Keep the current login's signed address, never a historical alias."""
+    if claims.get("email_verified") is False:
+        return ""
+    for key in ("email", "upn", "preferred_username", "sub"):
+        email = _normalized_invite_email(claims.get(key))
+        if email:
+            return email
+    return ""
+
+
+def mint_browser_session(request: Request, *, sub: str, secret: str, via: str, mfa: bool,
+                         ttl: int, extra: dict | None = None) -> str:
+    """Sign a session cookie and record it in :mod:`session_registry`.
+
+    One place for every sign-in flow (OIDC, SAML, invitation, owner), so each
+    session carries the same ``sid``/``mfa``/``mfa_at`` fields and appears on
+    the Sessions page. A record that cannot be written refuses the sign-in
+    (:class:`session_registry.SessionStoreError`): a session nobody can list
+    or end is not one Lightwork should issue."""
+    from . import session_registry
+
+    now = _now()
+    sid = session_registry.new_sid()
+    payload = {"sub": sub, "iat": now, "exp": now + ttl, "sid": sid, "mfa": bool(mfa)}
+    if mfa:
+        payload["mfa_at"] = now
+    if extra:
+        payload.update(extra)
+    client = getattr(request, "client", None)
+    session_registry.register(
+        sid=sid, principal=f"user:{sub}", via=via, mfa=bool(mfa),
+        mfa_at=float(now) if mfa else None, issued_at=now, expires_at=now + ttl,
+        ip=str(getattr(client, "host", "") or ""),
+        user_agent=request.headers.get("user-agent", ""),
+    )
+    return sign_session(payload, secret)
 
 
 @router.get("/auth/login")
@@ -387,6 +483,23 @@ async def auth_login(request: Request):
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    # Ask the provider for the configured authentication context (a second
+    # factor) when the administrator listed one; the callback still checks the
+    # ID token, because a request parameter is a hint, not proof.
+    try:
+        from .mfa_policy import policy as _mfa_policy
+
+        acr_values = _mfa_policy()["acr_values"]
+    except Exception:
+        acr_values = []
+    if acr_values:
+        params["acr_values"] = " ".join(acr_values)
+    # ``?fresh=1`` (the step-up link): the provider must ask the person to
+    # sign in again rather than reuse its own session, so ``auth_time`` and
+    # the session's second factor are new.
+    if request.query_params.get("fresh"):
+        params["prompt"] = "login"
+        params["max_age"] = "0"
     auth_url = endpoints["authorization_endpoint"] + "?" + urlencode(params)
 
     response = RedirectResponse(auth_url, status_code=302)
@@ -397,16 +510,23 @@ async def auth_login(request: Request):
     return response
 
 
-def _fail():
+def _fail(return_to: str | None = None, *, reason: str = ""):
     """Build a failure response that also clears both auth cookies.
 
     Used on every callback error path so a half-finished/forged login leaves no
     stale transaction or session cookie behind. We surface the failure as a
     redirect to ``/auth/error`` rather than a raw 4xx so the user lands on a
     page, not a JSON blob (the CSRF/state-mismatch case is the documented
-    exception — it returns a 400 inline).
+    exception — it returns a 400 inline). ``reason`` selects one of the fixed
+    plain explanations that page may show (``mfa``, ``store``); anything else
+    stays generic so a failure mode never leaks to an attacker.
     """
-    response = RedirectResponse("/auth/error", status_code=303)
+    from urllib.parse import urlencode
+
+    params = {"return_to": _safe_return_to(return_to)}
+    if reason in _ERROR_REASONS:
+        params["reason"] = reason
+    response = RedirectResponse("/auth/error?" + urlencode(params), status_code=303)
     _clear_cookie(response, TX_COOKIE)
     _clear_cookie(response, SESSION_COOKIE)
     return response
@@ -426,6 +546,10 @@ async def auth_callback(request: Request):
       5. set the signed session cookie and redirect to the (sanitized)
          ``return_to``.
     """
+    from .company_signin_tests import COOKIE as test_cookie
+    from .company_signin_tests import finish as finish_test
+    if request.cookies.get(test_cookie):
+        return await finish_test(request)
     if not login_enabled():
         raise HTTPException(status_code=404)
 
@@ -449,24 +573,24 @@ async def auth_callback(request: Request):
     code = request.query_params.get("code") or ""
     if not code:
         log.warning("OIDC callback: no authorization code present")
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     # (3) resolve + https-check the token endpoint, then exchange the code.
     try:
         endpoints = resolve_endpoints(cfg)
     except OIDCError:
         log.warning("OIDC callback: could not resolve token endpoint")
-        return _fail()
+        return _fail(tx.get("return_to"))
     token_endpoint = endpoints["token_endpoint"]
     if not token_endpoint.lower().startswith("https://"):
         log.warning("OIDC callback: refusing non-https token endpoint")
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     tx_id = str(tx.get("jti") or "")
     tx_exp = int(tx.get("exp") or 0)
     if not await _consume_tx_once(tx_id, tx_exp):
         log.warning("OIDC callback: replayed or malformed transaction cookie")
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     code_verifier = tx.get("cv") or ""
     try:
@@ -479,7 +603,7 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     id_token = ""
     if isinstance(token_data, dict):
@@ -489,7 +613,7 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     # (4) verify the ID token — reuse the kernel verifier (no re-implementation).
     try:
@@ -499,7 +623,7 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     # (4b) bind the ID token to THIS login: its nonce must match the one we
     # sent on /auth/login (OIDC replay protection — a spec-compliant IdP echoes
@@ -511,12 +635,40 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
+
+    # (4c) second factor: with "Require a second factor" on, the ID token must
+    # prove one (RFC 8176 ``amr`` or a configured ``acr``). Refused sign-ins
+    # get a page with one plain sentence, not a session.
+    from .mfa_policy import claims_prove_mfa, require_mfa
+
+    mfa = claims_prove_mfa(principal.claims)
+    if require_mfa() and not mfa:
+        log.warning("OIDC callback: sign-in refused, no second factor in the ID token")
+        await asyncio.get_running_loop().run_in_executor(
+            None, _shared_release_tx, tx_id
+        )
+        return _fail(reason="mfa")
 
     # (5) success: set the signed session cookie, clear the tx cookie, redirect.
     return_to = _safe_return_to(tx.get("return_to"))
-    session_payload = {"sub": principal.sub, "iat": _now(), "exp": _now() + _SESSION_TTL}
-    session_cookie = sign_session(session_payload, cfg.session_secret)
+    try:
+        from .session_policy import company_ttl
+
+        ttl = company_ttl(_SESSION_TTL)
+        session_cookie = mint_browser_session(
+            request, sub=principal.sub, secret=cfg.session_secret, via="session",
+            mfa=mfa, ttl=ttl,
+            extra={"oidc_issuer": principal.issuer,
+                   "oidc_audience": principal.audience,
+                   "idp_email": _oidc_invite_email(principal.claims or {})},
+        )
+    except Exception:
+        log.warning("OIDC callback: session record unavailable; refusing sign-in")
+        await asyncio.get_running_loop().run_in_executor(
+            None, _shared_release_tx, tx_id
+        )
+        return _fail(reason="store")
 
     # Record this sub against the user's stable IdP identifiers so a later SCIM
     # deprovision can revoke this session even if the IdP's sub is pairwise and
@@ -534,7 +686,7 @@ async def auth_callback(request: Request):
     response = RedirectResponse(return_to, status_code=303)
     _set_cookie(
         response, SESSION_COOKIE, session_cookie,
-        max_age=_SESSION_TTL, secure=_cookie_secure(request),
+        max_age=ttl, secure=_cookie_secure(request),
     )
     _clear_cookie(response, TX_COOKIE)
     return response
@@ -542,7 +694,7 @@ async def auth_callback(request: Request):
 
 def _csrf_reject():
     """Return a 400 that also clears both auth cookies (state mismatch / CSRF)."""
-    out = PlainTextResponse("invalid state", status_code=400)
+    out = _login_error_response(status_code=400)
     _clear_cookie(out, TX_COOKIE)
     _clear_cookie(out, SESSION_COOKIE)
     return out
@@ -697,18 +849,56 @@ def _session_sub_unchecked(request: Request) -> str | None:
     return None
 
 
+_ERROR_REASONS = {
+    "mfa": ("Sign in again with your authenticator", None),
+    "store": ("Sign-in could not be recorded",
+              "Lightwork could not record this sign-in, so it was not completed. "
+              "Try again; if it keeps happening, ask an administrator to check the server."),
+}
+
+
 @router.get("/auth/error")
 async def auth_error(request: Request):
-    """Generic login-failure landing page (no detail that aids an attacker)."""
+    """Login-failure landing page.
+
+    Generic by default (no detail that aids an attacker). The two documented
+    reasons are the person's own to act on: a sign-in without a second factor
+    while one is required, and a session record that could not be written."""
     if not login_enabled():
         raise HTTPException(status_code=404)
-    return PlainTextResponse("login failed", status_code=401)
+    reason = request.query_params.get("reason", "")
+    if reason in _ERROR_REASONS:
+        from .app import templates
+        from .mfa_policy import MFA_MISSING_MESSAGE
+
+        title, message = _ERROR_REASONS[reason]
+        # The person has no session yet: the public shell, not the app's.
+        return templates.TemplateResponse(
+            request, "auth_error.html",
+            {"title": title, "message": message or MFA_MISSING_MESSAGE,
+             "action_href": "/auth/login?fresh=1", "action_label": "Sign in again"},
+            status_code=403, headers={"Cache-Control": "no-store"},
+        )
+    return _login_error_response(request.query_params.get("return_to"))
+
+
+def _login_error_response(return_to: str | None = None, *, status_code: int = 401):
+    from urllib.parse import urlencode
+
+    from .app import templates
+
+    template = templates.env.get_template("auth_error.html")
+    return HTMLResponse(template.render(
+        restart_url="/auth/login?" + urlencode({"return_to": _safe_return_to(return_to)}),
+    ), status_code=status_code, headers={"Cache-Control": "no-store"})
 
 
 __all__ = [
     "router",
     "TX_COOKIE",
     "SESSION_COOKIE",
+    "mint_browser_session",
+    "session_claims",
     "_principal_from_request_session",
     "_consume_tx_once",
     "_exchange_code_for_tokens",

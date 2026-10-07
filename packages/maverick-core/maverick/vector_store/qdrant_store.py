@@ -10,9 +10,9 @@ Defaults to local persistent mode under ``~/.maverick/qdrant/`` (chmod
   - ``MAVERICK_QDRANT_URL``  -> remote server URL (overrides path)
   - ``MAVERICK_QDRANT_API_KEY`` -> remote API key
 
-Optional dep behind ``[qdrant]`` extra. qdrant-client >= 1.6 ships
-fastembed integration; this adapter uses ``client.add``/``client.query``
-so embeddings happen client-side without an extra wiring step.
+Optional dep behind ``[qdrant]`` extra. Text embeddings run client-side
+through FastEmbed. Older clients retain their text helpers; current clients
+use native point operations while preserving the recorded embedding space.
 """
 from __future__ import annotations
 
@@ -116,21 +116,32 @@ class QdrantStore:
                 pass
             self._client = QdrantClient(path=str(store_path))
 
-        if embedding_model:
-            # Switch the built-in fastembed model. Default is
-            # sentence-transformers/all-MiniLM-L6-v2 (384-dim).
+        self._collection = collection
+        self._embedding_model = embedding_model
+        self._legacy_text = all(callable(getattr(self._client, name, None)) for name in ("add", "query"))
+        self._text_bridge = None
+        if embedding_model and self._legacy_text:
+            # An explicit model failure must never silently switch vector space.
             try:
                 self._client.set_model(embedding_model)
-            except Exception as e:  # pragma: no cover -- depends on backend
-                log.warning("qdrant: set_model(%s) failed: %s", embedding_model, e)
-
-        self._collection = collection
+            except Exception:
+                try:
+                    self._client.close()
+                except Exception:
+                    log.warning("qdrant: client cleanup failed after rejected text model")
+                raise
         location = url or str(store_path.resolve())
         self.recall_identity = hashlib.sha256(f"{location}:{collection}".encode()).hexdigest()
         self.requires_precomputed_embeddings = True
         self.supports_atomic_recall = all(callable(getattr(self._client, name, None)) for name in (
             "upsert", "query_points", "collection_exists", "get_collection",
         ))
+
+    def _text(self):
+        if self._text_bridge is None:
+            from .qdrant_text import TextBridge
+            self._text_bridge = TextBridge(self)
+        return self._text_bridge
 
     def upsert_one(self, document: str, *, id: str, metadata: dict,
                    embedding: list[float] | None = None) -> None:
@@ -209,6 +220,8 @@ class QdrantStore:
             m = dict(metadatas[i]) if metadatas else {}
             m[_NSID_KEY] = _stored_id(ids[i], tenant_id)
             metas.append(m)
+        if not self._legacy_text:
+            return self._text().add(documents, [_point_id(i, tenant_id) for i in ids], metas)
         metered_transport_call(
             "qdrant",
             lambda: self._client.add(
@@ -239,6 +252,8 @@ class QdrantStore:
         if not text:
             return []
         tenant_id = _active_tenant()
+        if not self._legacy_text:
+            return self._text().query(text, tenant_id=tenant_id, top_k=top_k)
         want = max(1, min(top_k, 100))
         prefix = f"tenant:{tenant_id}:" if tenant_id is not None else None
         # The similarity search spans the whole collection, but writes are
@@ -354,14 +369,17 @@ class QdrantStore:
             return 0
 
     def reset(self) -> None:
-        """Drop and recreate the collection. Tests use this; runtime
+        """Clear the collection. Tests use this; runtime
         users should prefer ``delete(ids)``.
 
-        Recreate after the drop so a ``query`` before the next ``add`` doesn't
+        Current clients clear points while retaining schema and model identity.
+        Legacy clients recreate after the drop so a query before the next add doesn't
         hit a missing collection. ``client.add`` auto-creates with the
         fastembed vector params, so recreate with the same params; if the
         client can't supply them (older versions / no model loaded) we leave
         the next ``add`` to lazily recreate."""
+        if not self._legacy_text:
+            return self._text().reset()
         def dispatch() -> None:
             first_error: Exception | None = None
             try:

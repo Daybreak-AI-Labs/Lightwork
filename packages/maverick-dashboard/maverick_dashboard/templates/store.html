@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Skill Store · Lightwork{% endblock %}
+{% block title %}Skill store · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% set can_install = is_admin and install_allowed %}
-  {% call hero('Workforce capability', 'Store',
+  {% call hero('Workforce capability', 'Skill store',
                subtitle='Ready-made skills',
                lede='Skills other people have written and checked. Each one is
                      locked to the exact version that was checked, so what you
@@ -66,7 +66,7 @@
             <button class="btn btn--ghost store__btn" disabled>Added</button>
           {% else %}
             <button class="btn btn--primary store__btn install" data-name="{{ e.name }}" data-label="{{ label }}"
-                    aria-label="Add {{ label }}" {% if not can_install %}disabled{% endif %}>Add</button>
+                    aria-label="Add to workspace: {{ label }}" {% if not can_install %}disabled{% endif %}>Add to workspace</button>
           {% endif %}
         </div>
       {% endfor %}
@@ -85,7 +85,7 @@
   <p id="store-msg" role="status" aria-live="polite" class="muted st-msg"></p>
 
   {% if catalog_admin %}
-  <div class="section-head"><h2>Where Skills Come From</h2></div>
+  <div class="section-head"><h2>Where skills come from</h2></div>
   <div class="panel">
     <p class="muted">The Store lists skills from these catalogs. Add your organization's own catalog to
       offer your team the skills you have checked.</p>
@@ -97,10 +97,10 @@
           <td>{% if catalogs_default %}Built-in catalog{% else %}{{ url }}{% endif %}</td>
           <td>
             {% if not catalogs_default %}
-            <form method="post" action="/store/catalogs" data-st-confirm="Stop listing skills from {{ url }}?" class="st-inline">
+            <form method="post" action="/store/catalogs" data-st-ok="Stop listing this catalog" data-st-confirm="Stop listing skills from {{ url }}?" class="st-inline">
               <input type="hidden" name="action" value="remove" />
               <input type="hidden" name="url" value="{{ url }}" />
-              <button type="submit" class="btn btn--danger" aria-label="Remove catalog {{ url }}">Remove</button>
+              <button type="submit" class="btn btn--danger" aria-label="Remove catalog {{ url }}">Remove catalog</button>
             </form>
             {% else %}<span class="muted">Always available</span>{% endif %}
           </td>
@@ -119,7 +119,7 @@
     <p id="st-catalog-help" class="muted st-small">Your IT team gives you this web address. Adding your own
       catalog replaces the built-in one.</p>
     {% if not catalogs_default %}
-    <form method="post" action="/store/catalogs" data-st-confirm="Go back to the built-in catalog? Your own catalogs will be removed from this list." class="st-inline">
+    <form method="post" action="/store/catalogs" data-st-ok="Use the built-in catalog" data-st-confirm="Go back to the built-in catalog? Your own catalogs will be removed from this list." class="st-inline">
       <input type="hidden" name="action" value="reset" />
       <button type="submit" class="btn">Use the built-in catalog</button>
     </form>
@@ -179,7 +179,7 @@
         form.addEventListener('submit', function(event) {
           if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
           event.preventDefault();
-          window.mvConfirm(form.dataset.stConfirm, {okText: 'Continue'}).then(function(ok) {
+          window.mvConfirm(form.dataset.stConfirm, {okText: form.dataset.stOk}).then(function(ok) {
             if (!ok) return;
             form.dataset.confirmed = 'true';
             if (form.requestSubmit) form.requestSubmit(); else form.submit();
@@ -227,7 +227,7 @@
             btn.removeAttribute('aria-busy');
             if (!installed) {
               btn.disabled = false;
-              btn.textContent = 'Add';
+              btn.textContent = 'Add to workspace';
             }
           }
         });

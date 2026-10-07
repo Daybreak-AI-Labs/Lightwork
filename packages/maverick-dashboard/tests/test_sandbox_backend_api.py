@@ -18,11 +18,12 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import config
+    from maverick import config, runtime_overrides
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
     config.reset_config_cache()
     yield
     config.reset_config_cache()

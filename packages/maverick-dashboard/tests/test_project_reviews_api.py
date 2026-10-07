@@ -167,7 +167,10 @@ def test_record_search_uses_current_review_authority_and_metadata_only(setup, mo
     monkeypatch.setattr(api.config, "get_features", lambda: {"project_reviews": False})
     monkeypatch.setattr(api, "ProjectReviews", lambda *args, **kwargs: pytest.fail("Disabled search opened the review store"))
     disabled = find("owner")
-    assert disabled["coverage"] == [{"source": "project reviews", "state": "unavailable", "indexed": None}]
+    # Switched off is not a failed search: the source reports not available
+    # and the results stay complete, without opening the review store.
+    assert disabled["coverage"] == [{"source": "project reviews", "state": "not available", "indexed": None}]
+    assert disabled["complete"] is True
 
 
 def test_feature_gate_workspace_context_current_membership_and_scim_fail_closed(setup, monkeypatch):

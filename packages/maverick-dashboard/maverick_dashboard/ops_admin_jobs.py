@@ -105,7 +105,7 @@ def public(job: dict[str, Any] | None) -> dict[str, Any] | None:
     if job is None:
         return None
     return {key: job.get(key) for key in ("id", "kind", "state", "started_at", "finished_at",
-                                          "result", "error")}
+                                          "result", "error", "record_warning")}
 
 
 __all__ = ["JobBusy", "start", "get", "latest", "wait", "public", "MAX_JOBS"]

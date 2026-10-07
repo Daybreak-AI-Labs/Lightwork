@@ -152,6 +152,23 @@ def _bad_keys(exc: BaseException) -> HTTPException:
                               "right files. Nothing was changed.")
 
 
+def _record_key_result(actor: str, job: dict[str, Any]) -> None:
+    """Record the observed result, without claiming a failed job changed no keys."""
+    from maverick.audit import EventKind, audit_event
+
+    result = job.get("result") if job["state"] == "done" else None
+    failed = result.get("failed") if isinstance(result, dict) else None
+    audit_event(
+        EventKind.CONTROL_PLANE_ACTION, agent="dashboard", _global=True,
+        verb="workspace_keys_reprotect_finished", principal="*", actor=actor,
+        ok=job["state"] == "done" and failed == 0,
+        job_id=job["id"], state=job["state"],
+        reprotected=(sum(row.get("result") == "Re-protected" for row in result.get("rows", []))
+                     if isinstance(result, dict) else None),
+        failed=failed,
+    )
+
+
 @router.post("/keys/preview")
 async def keys_preview(body: KeysIn, request: Request) -> dict:
     _mutation(request)
@@ -169,13 +186,23 @@ async def keys_preview(body: KeysIn, request: Request) -> dict:
 @router.post("/keys/rotate")
 async def keys_rotate(body: KeysIn, request: Request) -> dict:
     _mutation(request)
+    from .step_up import require_recent_mfa
+
+    require_recent_mfa(request, "rotate_keys")
     if body.confirm is not True:
         raise HTTPException(409, "Confirm to re-protect the workspaces. Nothing was changed.")
     from maverick.tenant.kms_fleet import rotate_local_fleet
     current, new = body.current_key.strip(), body.new_key.strip()
     if current == new:
         raise HTTPException(422, "Choose two different key files: the current key and the new one.")
-    await run_in_threadpool(_record, request, "workspace_keys_reprotect")
+    actor = caller_principal(request) or "local administrator"
+    try:
+        await run_in_threadpool(_record, request, "workspace_keys_reprotect_requested")
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise HTTPException(503, "Nothing was changed because the activity record is unavailable. "
+                                "Ask your administrator to check it before trying again.") from exc
+        raise
 
     def work() -> dict[str, Any]:
         return _plain(rotate_local_fleet(current, new, dry_run=False), preview=False)
@@ -184,7 +211,8 @@ async def keys_rotate(body: KeysIn, request: Request) -> dict:
         return "The workspaces could not be re-protected. Check that you chose the right key files; " \
                "workspaces that were already done keep the new key."
     try:
-        job = ops_jobs.start("workspace-keys", work, failure=failure)
+        job = ops_jobs.start("workspace-keys", work, failure=failure,
+                             on_finish=lambda finished: _record_key_result(actor, finished))
     except ops_jobs.JobBusy as exc:
         raise HTTPException(409, "Workspaces are already being re-protected. Wait for that to finish.") from exc
     return {"job": ops_jobs.public(job)}
@@ -195,5 +223,5 @@ async def job_status(job_id: str, request: Request) -> dict:
     require_global_permission(request, "admin")
     job = ops_jobs.get(job_id[:32])
     if job is None or job["kind"] != "workspace-keys":
-        raise HTTPException(404, "That job is no longer listed.")
+        raise HTTPException(404, "That task is no longer listed. Start it again if needed.")
     return {"job": ops_jobs.public(job)}

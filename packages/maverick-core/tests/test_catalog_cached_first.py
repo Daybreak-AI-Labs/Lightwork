@@ -127,6 +127,9 @@ def test_preflight_search_runs_inside_cached_first(monkeypatch):
     monkeypatch.setattr(self_learning, "search_capabilities", search)
     monkeypatch.setattr(self_learning, "provider_egress_enabled", lambda: False)
     monkeypatch.setattr(self_learning, "check_learning_halt", lambda *a, **k: None)
+    # Preflight searches only once signed skill preparation is ready (trusted
+    # publishers, signature checking); that readiness has its own tests.
+    monkeypatch.setattr(self_learning, "skill_acquisition_readiness", lambda: {"ready": True})
     monkeypatch.setattr("maverick.skills.load_skills", list)
     import asyncio
 

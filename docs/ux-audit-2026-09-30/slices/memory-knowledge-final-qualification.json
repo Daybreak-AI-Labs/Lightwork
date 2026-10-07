@@ -1,0 +1,257 @@
+[
+  {
+    "id": "LW-105",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. After A states a preference and coworkers create over 20 newer conversations, A retains it until their own expiry/retraction; erasure still removes it.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "user_notes._preference_rows groups by exact channel/user before its per-person 20-conversation window; rebuilds preserve current sources, source erasure and durable personal suppression."
+    ],
+    "validation": [
+      "test_user_notes quiet-person/twenty-one-coworker, exact-scope erasure and concurrent-erasure tests passed in the 441-case batch.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Learned preference extraction remains deliberately bounded and heuristic; unsupported paraphrases are not promised to be semantically equivalent.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-106",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Always respond with short bullet point summaries followed by Never respond with short bullet point summaries yields current preference; deletion/edit invalidates old source; no arbitrary old instruction wins.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "user_notes orders real source turns newest first and resolves overlapping preference topics without treating opposite polarity as interchangeable old content; source conversation/turn/time/hash enables edit/delete invalidation."
+    ],
+    "validation": [
+      "Latest-opposite preference, source-edit, deleted conversation and failed-source-rebuild regressions passed in the 441-case batch.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Semantic interpretation beyond the supported explicit preference phrases remains a product limit; source-authorized manual correction/suppression is available through My Data.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-110",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. Operator flags authorized source/version without deletion rights; derivative checks/independent approval retained; no inaccessible source disclosure.\n2. An ordinary user can submit a visible source/version and business reason, then receive request status.\n3. Submitting a request grants no approval or apply authority, shared-memory change or training-policy change.\n4. Administrators retain independent approval, legal-hold handling and control of separate training rights.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "KnowledgeAccessService.submit_feedback checks current exact reference/purpose and requester, bounds intake, and uses the durable existing independent rights-request engine. Native request status is requester scoped. product_operations_knowledge_feedback adds the same narrow feedback and own-status journey with authenticated selection; even administrators use employee intake through this adapter."
+    ],
+    "validation": [
+      "Native Knowledge API/operator boundaries plus three real local-cookie Copilot feedback tests passed in the 27-case final batch. Tests cover duplicate request identity, source revocation before dispatch, account/workspace binding, private other-requester exclusion, unchanged source approval and no review/apply rights. Knowledge source-selection JS passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Independent review, legal holds, processor application and separate training rights remain administrative workflows; this implementation does not certify downstream external deletion.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-111",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. Stale precedent differs visibly from current approved evidence; reviewer opens exact fragment and rejects one value independently.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "assessment_memory.source_evidence binds suggestions to exact saved answers, pinned questionnaire/policy revision, approval owner and current/stale/unreviewed state. Supporting and dissenting evidence are distinct. The per-answer panel opens exact fragments, compares current source and independently rejects or reviews one suggested value."
+    ],
+    "validation": [
+      "Assessment-memory regressions passed in the 441-case batch; all 12 assessment answer-editor JS tests passed in the 42-case controller batch, including independent rejection and exact-source recheck.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Agreement among precedents is displayed as agreement, not factual certainty. Human assessment and accessibility review remain necessary.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-113",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. denied source contributes no snippet/count; revocation invalidates search and queued use; metadata-only mode never sends content to a model; stale source cannot be attached to new work without recheck",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "The shared finder exposes distinct business-metadata and approved-knowledge modes. Approved knowledge delegates the current purpose-aware native service and exact-version detail. Metadata stays content-free and model-free; selected-source analysis rechecks current ACL before new use."
+    ],
+    "validation": [
+      "Knowledge core/API and exact-source runtime/admission tests passed in the 441-case batch; shared finder controller checks passed in the 42-case batch. Existing dedicated record-search tests were previously passed by the knowledge slice.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "This does not authorize indiscriminate enterprise full-text indexing or source access. Live processors and external permission systems are not qualified by local fixtures.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-114",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. seeded record beyond initial cap can be found via targeted query; source failures remain visible; pagination after permission change is refused; performance budget measured on large fixtures\n2. Find the oldest accessible record beyond every current cap through source-side filtered/paged search.\n3. Paging remains stable across concurrent edits and rechecks permission; available, partial and unavailable sources are distinct.\n4. Inaccessible content is absent from counts and snippets.\n5. Stage historical task lookup before broader indexing; new metadata adapters and direct source-recovery links retain performance, tenant and retention boundaries.\n6. Optional scoped full-text search requires deliberate data policy; private notes/document contents stay excluded by default.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "record_history source-native historical windows reach beyond old current-head caps, with exact-owner metadata adapters for tasks, workflows/templates, automations, projects, connections and shared facts. Sealed source/context/filter cursors, date/order controls, bounded scans, unavailable/partial coverage and source recovery links preserve policy. Additive owner/date indexes exist for both database backends."
+    ],
+    "validation": [
+      "All record-history tests passed in the 441-case batch, including beyond-cap records, current principal authority, cursor tenant binding, source denial and budgets. Earlier knowledge-slice measurement used 10,050 tasks: 250 metadata heads in 0.172-0.235s; 1,005 questionnaires, 501 vault records and 501 reports reached beyond former caps. Finder JS passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Those performance numbers are earlier controlled SQLite fixture measurements, not installed PostgreSQL or production benchmarks. Large/slow inventories require explicit date narrowing; private contents are not indexed.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-115",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. selecting source does not make private content available outside its ACL; stale/revoked source blocks or requests replacement before use; resulting answer links exact version; task copy cannot silently retain revoked source access",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "knowledge_task_context stores immutable encrypted source-reference/purpose/owner bindings for an explicit tool-free source-analysis task. Queue admission, provider dispatch, publication and private output read recheck source access. Result links identify exact versions; ordinary task history/export/copy retains status/link without inheriting source contents or rights. Existing task_context configuration/installer gates remain."
+    ],
+    "validation": [
+      "Core knowledge_task_context and native knowledge_task_admission tests passed in the 441-case batch; native source-analysis JS was qualified earlier by the knowledge slice. Model effects are mocked; source revocation and uncertain dispatch do not cause paid auto-retry.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "This is the explicitly labelled source-analysis workflow; arbitrary action agents do not accept these source bindings. Already-transmitted provider content cannot be recalled.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-116",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. A 26th older chat and content-only match are reachable; empty/loading/error states disclose search scope; access boundaries remain identical.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "Recent chat filtering states its 25-title scope and offers broader discovery. The conversation library searches persisted current-owner message content with bounded continuation and honest loading/empty/error states; it does not confer other-owner thread access."
+    ],
+    "validation": [
+      "New test_conversation_organization content-only match older than 26 new chats passed in the 441-case batch; a matching other-owner thread was excluded. Existing organization tests preserved exact root identity and archived views.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Library pages are bounded and require explicit continuation for older windows. Installed-browser performance and accessibility are not inferred from Python/controller tests.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-117",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Stale edits and deletes refuse on expected-revision mismatch while independent facts remain editable.\n2. Show readable current-versus-draft comparison and preserve the unsaved draft.\n3. Apply the concurrency contract to SQLite, PostgreSQL and agent writes; history retention is not a substitute for lost-update prevention.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "SQLite/PostgreSQL and agent fact mutation paths compare durable observed revision before changing value/history. Direct native editor preserves drafts with current-value comparison. The seven shared fact operations reuse native write/delete/tag helpers, current context and permissions, exact selection and actual global database revision. Governed metadata-only receipts prevent a retried create from resurrecting subsequently deleted data; unknown writes never redispatch."
+    ],
+    "validation": [
+      "Native facts/core/CAS checks passed in the 319-pass batch; all 12 new shared fact tests passed in the final 27-case batch, including stale edit/delete/tag, actual revision, lost response, audit failure, post-delete replay, selection/role/context changes and shared token recovery. All 19 form JS cases passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls.",
+      "Receipt recovery integration is complete: fact-receipt-recovery.json records 15 passing inventory/authority cases for authenticated byte preservation and held startup reconciliation. An old receipt absence does not authorize replay."
+    ],
+    "remaining": [
+      "Real PostgreSQL concurrency remains unqualified. Explicit trusted maintenance writers can still omit expected revision by design. Receipt recovery classification is integrated; minimal barriers remain retained and disclosed in My Data.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-118",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. Expose source/run, author, last update, trust/sensitivity, version comparison or restore, and expiry where policy permits.\n2. Explain stop-use versus permanent removal and any retained temporal history before removing an existing fact.\n3. Historical and sensitive values retain equal access control; personal actions cannot override administrator memory policies.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "Native fact detail/history and Copilot inspection expose recorded author/source/run, update time, trust/sensitivity and retained versions. Restore creates a newly reviewed CAS edit. Both removal previews distinguish stopping recall from erasing retained history. Personal/task reserved namespaces are excluded by the same read boundary as current values."
+    ],
+    "validation": [
+      "Exact historical restore, current-role/context refusal and private-prefix refusal passed in the final 27-case batch; direct editor restore and retained-history UI were included in existing form/source tests.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "The fact schema has no individual expiry; the UI explicitly says this and identifies workspace retention. No expiry, permanent erasure or override of administrator policy is invented.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-119",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. A 10,000-fact synthetic dataset renders one bounded page and reliably finds a late item.\n2. Provide scoped search, pagination, tag/source/age filters and bulk review with explicit selection.\n3. Keep draft and new-fact workflows simple; do not allow cross-tenant queries or casual destructive bulk operations.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "Shared-only server query/source/date/tag filtering and 50-record paging avoid loading all values into the page; current-context/catalog-revision snapshot guards continuation. Tags are governed by memory.fact_tags with existing Settings and installer controls. Explicit multi-selection is read-only, and single-record mutation uses the current page selection in native Copilot actions."
+    ],
+    "validation": [
+      "The real 10,000-fact late-match/bounded-page regression passed in the facts/core batch; tag/filter, private-prefix and stale snapshot checks passed. Final shared tests include a second search page, exact tags and blocked multi-record mutation; 19 form JS cases include selection and context clearing.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "No destructive bulk mutation is provided. Installed-browser scale/accessibility and PostgreSQL performance remain environment qualifications; selection and response size limits remain explicit.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-120",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Dataset 251's unique approved purpose is selectable through a distinct-purpose query or complete authorized pagination.\n2. Revoked or disallowed purposes remain unusable; loading or availability is explicit.\n3. Unauthorized source names and purposes are not disclosed.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "KnowledgeAccessService.available_purposes traverses the complete native paged registry and performs current detail authorization before exposing each purpose. It no longer derives choices from only the first 250 registered datasets."
+    ],
+    "validation": [
+      "Purpose inventory beyond 251 newer revoked sources passed in the 441-case batch; revoking the remaining authorized old source removes the purpose. Native API and controller state tests passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Authorization remains current-source/purpose based; discovering a purpose does not approve any inaccessible dataset or permit later use after revocation.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-121",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. An injected registry failure cannot show an authoritative empty inventory.\n2. Unavailable, loading, empty and no-access states are distinct, with safe retry and preserved query.\n3. Errors do not reveal backend internals or inaccessible sources.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "Native purpose discovery distinguishes unavailable from empty and sanitizes storage failures. The Knowledge page renders explicit loading/empty/unavailable states and retry while retaining query on transient failures; access/context loss clears private content."
+    ],
+    "validation": [
+      "Injected registry-failure API and Knowledge controller tests passed in the 441-case and 41-case final batches. Current-source denial and malformed response tests preserve the fail-closed boundary.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Unavailable backends still require service recovery. The UI does not expose backend internals or treat an outage as an authoritative empty inventory.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ]
+  },
+  {
+    "id": "LW-122",
+    "status": "implemented-test-needed",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Provide a durable bounded job with previewed collection size and cost ceiling, progress, safe-boundary cancellation and recoverable status after disconnect.\n2. A synthetic interruption recovers the existing job status without blindly reindexing again.\n3. Cancellation cannot corrupt the live index; preserve existing administrator confirmation and AI cost warning.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
+    "implementation_evidence": [
+      "knowledge_reindex_jobs provides durable bounded jobs, exact collection/model/limit preview, a zero-provider-cost local ceiling, 64-passage cancellation checkpoints, private shadow vectors and source-CAS atomic publication. Interrupted jobs recover status and explicitly resume saved work; native admin controls and shared Copilot use the same service. Settings/installer gates and caps are implemented.",
+      "3dd047f integrates hosted checkpoint 2d1f72d: supported standard Voyage and OpenAI rebuilds review captured price/input limits, expiry and configuration/source identity; use cumulative native Budget, organization and provider admission; record real returned usage; retain uncertain receipts without resending; bind encrypted shadow batches and atomic publication proof. Current account/settings/credentials/source changes stop further dispatch.",
+      "Administrator reindex_max_dollars is exposed in Settings and installer. Native library and typed Copilot show the same rate-based reservation and observed/unresolved costs. Deployment model, endpoint and credentials are unchanged."
+    ],
+    "validation": [
+      "Hosted-reindex-qualification-2026-10-01.md records 137 native synthetic cases passed in ordinary mode and the same 137 with both secure switches. Covers actual local cost authorities, incomplete usage, changed model/config/source/principal, partial accounting and pre/post-publication crash recovery. The earlier secure catalog cohort passed 1579 checks; counts overlap and must not be summed.",
+      "Changed-file Ruff, full repository Vulture, Python 3.10 syntax, JavaScript syntax and whitespace passed in the isolated source. Integrated full suites and installed-browser qualification remain separate."
+    ],
+    "remaining": [
+      "Fresh consolidated runtime/browser qualification is pending. No live provider billing or vendor-invoice guarantee is claimed. The captured list-rate contracts exclude taxes and negotiated terms and expire after 2026-11-01.",
+      "Cohere v4 and custom/unpriced routes refuse dispatch until current first-party pricing or a separately verified agreement exists. No deployment change, guessed rate, silent fallback or paid automatic retry substitutes for that evidence. Distributed PostgreSQL publication and installed-model performance remain environment qualification."
+    ]
+  }
+]

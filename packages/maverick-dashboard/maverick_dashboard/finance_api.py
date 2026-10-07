@@ -299,7 +299,7 @@ async def review_regulatory_alert(
     alert_id: str,
     body: schemas.RegulatoryAlertReviewIn,
 ) -> dict[str, Any]:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     _ensure_enabled()
     actor = _actor(request)
 

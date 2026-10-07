@@ -98,13 +98,16 @@ def _models(S, C) -> tuple:
           "A sentence added to every agent's instructions, for example: Always cite your "
           "sources.", "text", "AI models", "", "maverick.persona",
           subgroup="Effort and planning", max_length=500, pattern=r"[^\n\r<>{}]{0,500}"),
-        S("persona", "user_name", "What agents call you",
-          "The name agents use for the person they work for. Leave empty for no name.",
-          "text", "AI models", "", "maverick.persona", subgroup="Effort and planning",
-          max_length=60, pattern=r"[^\n\r<>{}]{0,60}"),
         S("agent_factory", "jd_hiring", "Hire agents from a job description",
           "Offer the page that turns a written job description into a new agent.", "toggle",
           "AI models", True, "maverick.jd_hiring", subgroup="Effort and planning"),
+        S("agent_factory", "require_passing_tests", "Require passing tests before publishing instructions",
+          "Changed instructions for an agent or specialist are published only after every saved test "
+          "passes on exactly those instructions. Someone can still publish without a passing run by "
+          "giving a reason, which is written to the activity record.", "toggle",
+          "AI models", True, "maverick.agent_publish_policy", subgroup="Effort and planning", weaker=False,
+          warning="Changed instructions could be published without any test run.",
+          aliases="publish gate test set test cases agent tests answer checks"),
 
         # ------------------------------------------------ conversation length
         S("context", "max_output_tokens", "Longest reply per step",
@@ -179,6 +182,12 @@ def _models(S, C) -> tuple:
           env=("MAVERICK_COMPACTION_HYBRID",)),
 
         # ------------------------------------------------------- model routing
+        S("models", "guidance", "Show model choice guidance",
+          "Show provider-reported capabilities and dated pricing evidence alongside model choices. Unknown details remain unknown.",
+          "toggle", "AI models", True, "maverick.model_guidance", subgroup="Model choices"),
+        S("models", "capability_tests", "Allow bounded model generation tests",
+          "Let administrators review and explicitly confirm one synthetic model call, capped at USD 0.05 and 64 output tokens or lower workspace limits. Cancellation cannot retract a sent request; uncertain calls are never retried.",
+          "toggle", "AI models", False, "maverick.model_tests", subgroup="Model choices"),
         S("models", "catalog", "Extra models to offer",
           "Models that are not in the built-in list, so they can be chosen everywhere. Write "
           "each as the service name, a colon and the model name.", "list", "AI models", [],
@@ -299,6 +308,13 @@ def _providers(S) -> tuple:
           subgroup="AI service addresses", env=("MAVERICK_PER_TENANT_KEYS",), weaker=True,
           warning="Workspaces with their own key will send their work to the AI service "
                   "under that key instead of the shared one."),
+        S("providers", "test_receipt_max_age_days", "Trust a passing connection test for",
+          "How long a passing AI service connection test counts as \"Connected\". After this, "
+          "the service reads \"not tested yet\" again until you test it.", "number",
+          "Integrations", 30, "maverick.config", subgroup="AI service addresses", minimum=1,
+          maximum=365, integer=True, unit="days", env=("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS",),
+          weaker="higher",
+          warning="A longer period means a key that stopped working can show as connected for longer."),
         S("provider_failover.policy", "failover_on", "Move to a backup model after",
           "The kinds of failure that send a request on to the backup models. With none "
           "ticked, every failure except a wrong key or a bad request does.", "multiselect",
@@ -492,7 +508,9 @@ def _safety(S, C) -> tuple:
                    ("auto-approve", "Allow them all")),
           weaker=True, order=("auto-deny", "dashboard", "ask", "", "auto-approve"),
           env=("MAVERICK_CONSENT_MODE",),
-          warning="Actions that can't be undone will go ahead with less oversight."),
+          aliases="approval approvals approve risky irreversible undo undone permanent threshold",
+          warning="Actions that can't be undone will go ahead with less oversight.",
+          preview="approval_checks"),
         S("safety", "constitution", "Your own phrases to block",
           "Requests and answers containing any of these words or phrases are treated as a "
           "threat of the level you choose. Separate phrases with commas.", "rules", "Safety",
@@ -776,10 +794,35 @@ def _tools(S, C) -> tuple:
           "finishes.", "number", "Performance", None, "maverick.latency_budget",
           subgroup="Reusing tool results", minimum=100, maximum=600000, integer=True,
           unit="milliseconds", none_text="Off", env=("MAVERICK_TOOL_LATENCY_BUDGET_MS",)),
-        S("capabilities", "deferred_tools", "Hide rarely used connectors until needed",
-          "Keep the long list of business-system connectors out of each request until an "
-          "agent searches for one.", "toggle", "Performance", True, "maverick.agent",
-          subgroup="Reusing tool results", env=("MAVERICK_DEFERRED_TOOLS",)),
+        S("tools", "exposure", "Tools described on each request",
+          "When Use a short tool list is on, choose the starting list described to the AI. The short "
+          "list fits the agent's role, and a specialist pack sees its own tools; agents can "
+          "look up any other permitted tool when they need it. Models with a smaller tool "
+          "limit keep key actions and let agents look up the rest.", "select", "Performance", "core",
+          "maverick.config", subgroup="Reusing tool results",
+          choices=(("core", "A short list, and agents look up the rest (recommended)"),
+                   ("full", "A longer list, up to the model's limit (costs more)")),
+          env=("MAVERICK_TOOL_EXPOSURE",), aliases="tool catalog exposure context tokens"),
+        S("tools", "core_extra", "Tools always described",
+          "When Use a short tool list is on, describe these tools too, by tool name.",
+          "list", "Performance", [], "maverick.config", subgroup="Reusing tool results",
+          item_label="Tool name", item_hint="scan_finance_anomalies",
+          pattern=r"[a-z0-9_]{1,80}", item_error="a tool name such as read_file",
+          max_items=50),
+        S("capabilities", "deferred_tools", "Use a short tool list",
+          "Describe a smaller set of tools to the AI, and let it find other permitted tools "
+          "when needed. Turn off to describe the longer list. Tool permissions and the AI's "
+          "own tool limit still apply. Saving here replaces an earlier tool-loading choice.",
+          "toggle", "Performance", True, "maverick.agent", partial_default=True,
+          subgroup="Reusing tool results", env=("MAVERICK_DEFERRED_TOOLS",),
+          aliases="deferred loading connectors core tool catalog"),
+        S("capabilities", "web_search", "Let agents and specialists search the web",
+          "Allow agents and specialists whose work calls for current web information to use Web search. "
+          "Lightwork uses a connected search service when available, with a public-search "
+          "fallback; whether a search succeeds is checked when it runs.",
+          "toggle", "Integrations", False, "maverick.agent",
+          subgroup="Web research", restart=True, weaker=True,
+          warning="Agents and specialists will be allowed to send search terms to the web search service."),
         S("limits", "file_write_quota_mb", "Most a task may write to files",
           "The most data one task may write to the work area. Leave empty for no limit.",
           "number", "Spending & limits", None, "maverick.file_quota", minimum=1,
@@ -842,8 +885,8 @@ def _memory(S) -> tuple:
                    ("pgvector", "Your company database")),
           env=("MAVERICK_VECTOR_STORE",), weaker="change",
           warning="Summaries of past tasks will be stored in a different place."),
-        S("session_tree", "max_depth", "Longest chain of copied runs",
-          "How many times a run may be copied from a copy.", "number", group, 10,
+        S("session_tree", "max_depth", "Longest chain of copied tasks",
+          "How many times a task may be copied from a copy.", "number", group, 10,
           "maverick.config", subgroup="Recall of past work", minimum=1, maximum=100,
           integer=True, unit="copies"),
         S("skills", "embed_threshold", "How closely a skill must match by meaning",
@@ -862,6 +905,10 @@ def _memory(S) -> tuple:
           "The key for the hosted indexing service. It is stored sealed and never shown "
           "again.", "secret", group, "", "maverick.config", subgroup="Document search",
           max_length=500),
+        S("knowledge", "store_api_key", "Qdrant index key",
+          "The key for your Qdrant index. It is separate from the indexing service "
+          "key, stored sealed and never shown again.", "secret", group, "",
+          "maverick.config", subgroup="Document search", max_length=500),
         S("knowledge", "path", "File for the search index",
           "Where on the server the search index is kept when it is a file here. Leave empty "
           "to keep it in each workspace's own folder.", "text", group, "", "maverick.config",
@@ -914,7 +961,8 @@ def _switches(S) -> tuple:
         S("agent", "max_steps", "Most steps an agent may take",
           "Stop an agent after this many steps on one task. Leave empty for no step limit; "
           "the spending and time limits still apply.", "number", "AI models", None,
-          "maverick.agent", subgroup="How agents work", minimum=1, maximum=10000,
+          # Read by maverick.config.get_agent_max_steps, which every agent calls.
+          "maverick.config", subgroup="How agents work", minimum=1, maximum=10000,
           integer=True, unit="steps", none_text="No step limit", env=("MAVERICK_MAX_STEPS",),
           weaker="higher", warning="Agents will be able to take more steps on one task."),
         S("agent", "parallel_tools", "Run independent actions at the same time",
@@ -930,7 +978,7 @@ def _switches(S) -> tuple:
         S("thinking", "adaptive_floor", "Reply room when thinking is automatic",
           "The reply length, in tokens, allowed when a model decides for itself how much to "
           "think. Thinking is billed like written text.", "number", "AI models", 8192,
-          "maverick.providers.anthropic_provider", subgroup="How agents work", minimum=2048,
+          "maverick.providers.anthropic_limits", subgroup="How agents work", minimum=2048,
           maximum=128000, integer=True, unit="tokens",
           env=("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR",)),
         S("voice", "only_mode", "Talk to agents by voice only",
@@ -1037,10 +1085,6 @@ def _switches(S) -> tuple:
           warning="Skills from any web address, which may not have been reviewed, can be "
                   "installed."),
         # ------------------------------------------------------------ caching
-        S("cache", "llm_responses", "Reuse identical AI answers",
-          "Keep AI answers on this server and reuse one when exactly the same request is "
-          "made again.", "toggle", "Performance", False, "maverick.cache.llm",
-          subgroup="Caching", env=("MAVERICK_LLM_CACHE",)),
         S("cache", "messages", "Cache conversation history with Claude",
           "Ask Claude's service to keep the stable part of long conversations, which makes "
           "follow-up turns cheaper.", "toggle", "Performance", True,
@@ -1490,6 +1534,19 @@ def _startup_limits(S) -> tuple:
     """Limits the kernel reads once when it starts (the environment still wins)."""
     how, length = "How agents work", "Conversation length"
     return (
+        S("agent", "synthesis_reserve", "Budget kept for the final answer",
+          "Helper agents stop before using this share of a task's dollar limit, leaving the lead "
+          "agent room to write its answer. 0.25 keeps one quarter; zero keeps no reserve. This "
+          "applies only when the task has a dollar limit. Restart the service after saving.",
+          "number", "AI models", 0.25, "maverick.agent", subgroup=how, minimum=0,
+          maximum=1, step=0.05, unit="share", restart=True,
+          env=("MAVERICK_SYNTHESIS_RESERVE",)),
+        S("agent", "spend_mirror_interval", "Refresh recorded running spending every",
+          "How often the lead agent updates the recorded spending of a running task. This "
+          "does not change spending limits or how charges are counted. Zero updates at every "
+          "step. Restart the service after saving.", "number", "Performance", 5.0,
+          "maverick.agent", subgroup="Running tasks", minimum=0, maximum=300, step=0.5,
+          unit="seconds", restart=True, env=("MAVERICK_SPEND_MIRROR_INTERVAL",)),
         S("agent", "loop_guard", "Stop agents repeating the same action",
           "When an agent keeps making exactly the same request and getting the same result, "
           "tell it to change course, and in the end refuse the repeat.", "toggle", "AI models",
@@ -1593,7 +1650,9 @@ def _startup_limits(S) -> tuple:
           maximum=100, integer=True, scale=1000000, unit="MB", restart=True,
           env=("MAVERICK_OPENAPI_CALL_MAX_BYTES",)),
         S("models", "openai_max_tools", "Most tools offered to OpenAI-style models",
-          "OpenAI-style services refuse requests offering more tools than this.", "number",
+          "OpenAI-style services refuse requests offering more tools than this. Lightwork "
+          "keeps key actions available and lets agents find the rest. Change this only "
+          "when your AI service supports a different limit.", "number",
           "AI models", 128, "maverick.providers.openai_provider", subgroup="Model choices",
           minimum=1, maximum=1024, integer=True, unit="tools", restart=True,
           env=("MAVERICK_OPENAI_MAX_TOOLS",)),

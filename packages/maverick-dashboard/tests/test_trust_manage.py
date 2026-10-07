@@ -86,7 +86,7 @@ def test_unmanaged_agent_actions_explain_the_config_file():
 def test_trust_page_has_register_form_and_row_actions():
     _register()
     page = client.get("/trust").text
-    assert "Add an Outside Agent" in page
+    assert "Add an outside agent" in page
     assert 'id="trust-add"' in page
     assert "data-trust-revoke" in page
     assert "data-trust-remove" in page
@@ -136,9 +136,11 @@ def test_edit_refuses_installation_defined_agents():
 
 
 def test_check_access_replays_the_decision_in_plain_words():
-    assert _register(max_risk="medium").status_code == 201
+    # A deliberately rated read-only tool: an unrated name is treated as high
+    # risk and would be refused under this medium ceiling.
+    assert _register(max_risk="medium", allow_tools=["web_search"]).status_code == 201
     ok = client.post("/api/v1/trust/agents/partner-copilot/check",
-                     json={"direction": "inbound", "tools": ["research"], "risk": "low"})
+                     json={"direction": "inbound", "tools": ["web_search"], "risk": "low"})
     assert ok.status_code == 200 and ok.json()["allowed"] is True
     denied = client.post("/api/v1/trust/agents/partner-copilot/check",
                          json={"direction": "outbound"})

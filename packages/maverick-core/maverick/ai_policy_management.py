@@ -926,7 +926,34 @@ def _bounded_rows(
     maximum: int,
     label: str,
 ) -> list[dict[str, Any]]:
-    rows = store.list(limit=maximum + 1)
+    if maximum <= 10_000:
+        rows = store.list(limit=maximum + 1)
+    else:
+        # The governed backend admits at most 10,001 rows per list read. The
+        # evaluation domain supports 25,000: use its existing bounded identity
+        # iterator and integrity-checked get rather than an invalid list limit.
+        # Iterators rotate at their end; stop on a previously read identity.
+        rows, seen, cursor = [], set(), ""
+        while len(seen) <= maximum:
+            budget = min(10_000, maximum + 1 - len(seen))
+            window = list(store.iter_record_ids(start_after=cursor, limit=budget))
+            if not window:
+                break
+            for next_cursor, identifier in window:
+                cursor = next_cursor
+                if identifier in seen:
+                    if identifier != rows[0]["id"]:
+                        raise AIPolicyManagementStateError(f"{label} changed during its bounded cursor scan")
+                    return rows
+                seen.add(identifier)
+                row = store.get(identifier)
+                if row is None:
+                    raise AIPolicyManagementStateError(f"{label} changed during its bounded read")
+                rows.append(row)
+                if len(rows) > maximum:
+                    raise AIPolicyManagementStateError(f"{label} exceeds its governed limit")
+            if len(window) < budget:
+                break
     if len(rows) > maximum:
         raise AIPolicyManagementStateError(f"{label} exceeds its governed limit")
     return rows

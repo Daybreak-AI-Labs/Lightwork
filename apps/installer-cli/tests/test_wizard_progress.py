@@ -6,14 +6,15 @@ from __future__ import annotations
 
 def test_steps_list_is_ordered_and_unique():
     from maverick_installer import wizard
-    assert len(wizard.STEPS) == 38
+    assert len(wizard.STEPS) == 42
     keys = [k for k, _ in wizard.STEPS]
     assert keys[0] == "deployment"
     assert keys[-1] == "a2a"
-    assert keys[8] == "research_execution"
-    assert keys[9] == "candidate_promotion"
-    assert keys[10] == "knowledge_access"
-    assert keys[24:27] == ["assessments", "security_suite", "advanced"]
+    assert keys[7] == "approvals"
+    assert keys[9] == "research_execution"
+    assert keys[10] == "candidate_promotion"
+    assert keys[11] == "knowledge_access"
+    assert keys[25:28] == ["assessments", "security_suite", "advanced"]
     assert len(set(keys)) == len(keys)  # no dupes
 
 
@@ -22,14 +23,14 @@ def test_steps_list_is_ordered_and_unique():
 def test_step_indicator_formats_step_n_of_m():
     from maverick_installer import wizard
     out = wizard._step_indicator(3)
-    assert "Step 3/38" in out
+    assert "Step 3/42" in out
     assert wizard.STEPS[2][1] in out  # the label
 
 
 def test_step_indicator_includes_breadcrumb_of_done_labels():
     from maverick_installer import wizard
     out = wizard._step_indicator(3, done=["Deployment", "Providers"])
-    assert "Step 3/38" in out
+    assert "Step 3/42" in out
     assert "Deployment" in out
     assert "Providers" in out
 
@@ -37,17 +38,24 @@ def test_step_indicator_includes_breadcrumb_of_done_labels():
 def test_step_indicator_no_breadcrumb_when_done_empty():
     from maverick_installer import wizard
     out = wizard._step_indicator(1, done=[])
-    assert "Step 1/38" in out
+    assert "Step 1/42" in out
     assert "›" not in out
 
 
 # ---------- indicator surfaces in run() ----------
 
-def test_run_prints_step_indicators(monkeypatch):
+def test_run_prints_step_indicators(monkeypatch, tmp_path):
     import io
 
     from maverick_installer import wizard
     from rich.console import Console
+
+    # A fresh installation. The config paths are frozen at the wizard's first
+    # import, which in a shared worker can be an earlier test's home holding a
+    # saved setup; run() would then stop at the existing-setup notice.
+    monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path / ".maverick")
+    monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / ".maverick" / "config.toml")
+    monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".maverick" / ".env")
 
     # Use a no-color console so Rich doesn't fragment "Step N/M" with
     # inline ANSI codes, which would break the substring assertions.
@@ -102,14 +110,18 @@ def test_run_prints_step_indicators(monkeypatch):
     # keep their defaults rather than reaching a real prompt.
     monkeypatch.setattr(wizard, "_q_text",
                         lambda *a, **kw: kw.get("default", ""))
+    # Choice questions in unstubbed steps (e.g. who approves a risky action
+    # the requester asked for) take their defaults too.
+    monkeypatch.setattr(wizard, "_q_select",
+                        lambda *a, **kw: kw.get("default") or (a[1][0] if len(a) > 1 and a[1] else ""))
 
     rc = wizard.run()
     assert rc == 0
 
     out = wizard.console.file.getvalue()
-    assert "Step 1/38" in out
-    assert "Step 3/38" in out
-    assert "Step 26/38 Security & GRC" in out
-    assert "Step 38/38" in out
+    assert "Step 1/42" in out
+    assert "Step 3/42" in out
+    assert "Step 27/42 Security & GRC" in out
+    assert "Step 42/42" in out
     # Breadcrumb of earlier answers trails later steps.
     assert "Deployment" in out

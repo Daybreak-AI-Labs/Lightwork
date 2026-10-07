@@ -39,6 +39,9 @@ function fixture({ mobile = true, collapsed = false, mainInert = false, headerHe
   const body = new Element();
   const properties = new Map();
   body.style = { setProperty(name, value) { properties.set(name, value); } };
+  // The root gets the same measured height: scroll-padding-top reads it there.
+  const rootProperties = new Map();
+  document.documentElement = { style: { setProperty(name, value) { rootProperties.set(name, value); } } };
   let measuredHeight = headerHeight;
   let onHeaderResize;
   const topbar = { getBoundingClientRect() { return { height: measuredHeight }; } };
@@ -73,7 +76,9 @@ function fixture({ mobile = true, collapsed = false, mainInert = false, headerHe
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ui.js"), "utf8",
   );
   const start = source.indexOf("    // Sidebar toggle.");
-  const end = source.indexOf("    // Preferences popover:", start);
+  // This fixture exercises navigation, not the following appearance controller.
+  const appearance = source.indexOf("      var system = window.matchMedia", start);
+  const end = source.lastIndexOf("    (function () {", appearance);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   vm.runInNewContext(source.slice(start, end), {
@@ -89,7 +94,7 @@ function fixture({ mobile = true, collapsed = false, mainInert = false, headerHe
     },
   });
   return {
-    document, body, toggle, backdrop, sidebar, main, footer, firstControl, navLink, skipLink, properties,
+    document, body, toggle, backdrop, sidebar, main, footer, firstControl, navLink, skipLink, properties, rootProperties,
     resize(matches) { media.matches = matches; media.listeners.change(); },
     resizeHeader(height) { measuredHeight = height; onHeaderResize(); },
   };
@@ -164,7 +169,9 @@ test("drawer closing preserves a page section that was already inert", () => {
 test("navigation tracks wrapped header height without changing the header minimum", () => {
   const ui = fixture({ headerHeight: 94.5 });
   assert.equal(ui.properties.get("--shell-topbar-h"), "95px");
+  assert.equal(ui.rootProperties.get("--shell-topbar-h"), "95px");
   ui.resizeHeader(55);
   assert.equal(ui.properties.get("--shell-topbar-h"), "55px");
+  assert.equal(ui.rootProperties.get("--shell-topbar-h"), "55px");
   assert.equal(ui.properties.has("--topbar-h"), false);
 });

@@ -248,7 +248,7 @@ def test_dns_timeout_is_checked_before_http_but_resolver_itself_is_synchronous(m
     timed = bounded.AttemptDeadline(invocation, 101.0)
     events = []
 
-    def resolve(_host):
+    def resolve(_host, *, require_public=False):
         events.append("DNS returned")
         clock[0] = 102
         return "93.184.216.34"
@@ -261,7 +261,9 @@ def test_dns_timeout_is_checked_before_http_but_resolver_itself_is_synchronous(m
 
 def test_deadline_transport_retains_ip_pin_tls_hostname_and_redirect_denial(monkeypatch):
     seen = []
-    monkeypatch.setattr(_ssrf, "resolve_pinned_ip", lambda _host: "93.184.216.34")
+    monkeypatch.setattr(
+        _ssrf, "resolve_pinned_ip", lambda _host, *, require_public=False: "93.184.216.34"
+    )
 
     def handler(request):
         seen.append(request)

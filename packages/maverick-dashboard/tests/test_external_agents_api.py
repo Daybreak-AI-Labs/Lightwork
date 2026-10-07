@@ -51,6 +51,12 @@ def _isolated(tmp_path, monkeypatch):
                         lambda: tmp_path / "agent_trust.json")
     monkeypatch.setattr(external_agents, "registry_path",
                         lambda: tmp_path / "external_agents.json")
+    # Unrated action names take the high refusal floor, so the deployment
+    # rates this fixture's platform actions and fake connector read the way an
+    # operator classifies their own (wire_transfer/send_contract stay high).
+    (tmp_path / "config.toml").write_text(
+        '[security.tool_risk]\nresearch = "low"\ncrm_update = "medium"\n"fakecrm.read" = "low"\n',
+        encoding="utf-8")
     config.reset_config_cache()
     yield
     config.reset_config_cache()
@@ -71,6 +77,16 @@ def _mint() -> str:
     return r.json()["token"]
 
 
+def _stub_review_is_current(monkeypatch, assurance):
+    """These stubbed records stand for a current reviewed declaration only
+    while it is approved for the observed version. The full review binding
+    (record digests, profile and hierarchy) is model_risk_assurance's own
+    check, which hand-written stub records cannot satisfy."""
+    monkeypatch.setattr(assurance._DEFAULT, "_declaration_is_current", lambda declaration, observation: (
+        declaration.get("status") == "approved"
+        and declaration.get("observed_version_digest") == observation.get("version_digest")))
+
+
 def test_enroll_mint_and_roster_roundtrip():
     r = _enroll()
     assert r.status_code == 201
@@ -86,6 +102,58 @@ def test_enroll_mint_and_roster_roundtrip():
     detail = client.get("/api/v1/external-agents/sf-quotebot").json()
     assert detail["department"] == "sales"
     assert client.get("/api/v1/external-agents/ghost").status_code == 404
+
+
+def test_connected_change_readback_and_copilot_use_safe_native_metadata_only(monkeypatch):
+    from maverick import external_agents as xa
+    from maverick_dashboard import product_operations as operations
+
+    assert _enroll(description="Order helper").status_code == 201
+    with xa._sidecar_locked():
+        data = xa._load_sidecar()
+        data["sf-quotebot"]["executions"] = {
+            "synthetic-unknown": {"status": "indeterminate", "connector": "salesforce", "op": "patch",
+                "created_at": time.time(), "finished_at": time.time(),
+                "digest": "PRIVATE-SYNTHETIC-DIGEST", "path": "/private/customer/record", "body": {"private": "PRIVATE-SYNTHETIC-BODY"}},
+            "synthetic-confirmed": {"status": "executed", "connector": "jira", "op": "post", "created_at": time.time()-1},
+            "synthetic-accepted": {"status": "accepted", "connector": "jira", "op": "post", "created_at": time.time()-2},
+        }
+        xa._save_sidecar(data)
+    before = xa.registry_path().read_bytes()
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Reading execution metadata must not repair an approval, write authority or contact a connector")
+
+    monkeypatch.setattr(xa, "_save_sidecar", forbidden)
+    monkeypatch.setattr(xa, "execute_status", forbidden)
+    monkeypatch.setattr(xa, "_perform_execution", forbidden)
+    response = client.get("/api/v1/external-agents/sf-quotebot")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    detail = response.json()
+    assert detail["execution_readback"][0]["status"] == "Result unknown — check connected service"
+    assert detail["execution_readback"][1]["status"] == "Request completed"
+    assert detail["execution_readback"][2]["status"] == "Accepted; completion unconfirmed"
+    assert "Completion has not been confirmed" in detail["execution_readback"][2]["notice"]
+    assert detail["execution_readback"][0]["action"] == "Update"
+    page = client.get("/external-agents/sf-quotebot")
+    assert page.status_code == 200 and "Recent connected changes" in page.text
+    assert page.headers["cache-control"] == "private, no-store"
+    assert client.get("/static/lightwork-external-agent-executions.js").status_code == 200
+    monkeypatch.setattr(operations, "_gate", lambda _request: None)
+    monkeypatch.setattr(operations, "enabled_families", lambda: {"connections"})
+    selection = {"kind": "external_agent", "id": "sf-quotebot"}
+    catalog = client.post("/api/v1/copilot/product-operations/catalog",
+        json={"page": "/external-agents/sf-quotebot", "selection": selection}).json()
+    action = next(row for row in catalog["operations"] if row["id"] == "external_agents.execution_status")
+    read = client.post("/api/v1/copilot/product-operations/prepare", json={
+        "page": "/external-agents/sf-quotebot", "selection": selection, "operation": action["id"],
+        "context": catalog["context"], "revision": action["revision"], "arguments": {}})
+    assert read.status_code == 200 and read.json()["read_only"] is True
+    assert "No connected service was contacted" in read.text
+    combined = response.text + page.text + str(catalog) + read.text
+    assert "PRIVATE-SYNTHETIC" not in combined and "/private/customer/record" not in combined
+    assert xa.registry_path().read_bytes() == before
 
 
 def test_enroll_validates_platform_and_surface():
@@ -274,6 +342,7 @@ def test_external_runtime_guardrail_is_authenticated_exact_bound_and_transient(
         lambda _result: {"schema": "normalized-runtime-risk"},
     )
     monkeypatch.setattr(assurance, "enabled", lambda: True)
+    _stub_review_is_current(monkeypatch, assurance)
     monkeypatch.setattr(
         assurance,
         "get_observation",
@@ -342,6 +411,8 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
     from maverick import external_agents
     from maverick import model_risk_assurance as assurance
 
+    # Safeguard activity is retained per workspace; unbound mode refuses it.
+    monkeypatch.setenv("MAVERICK_TENANT", "gateway-workspace")
     _enroll()
     token = _mint()
     headers = {"Authorization": f"Bearer {token}"}
@@ -369,7 +440,7 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
                     "policy_sha256": "a" * 64,
                     "evaluated_at": 1_800_000_000.0,
                     "asset_binding": {
-                        "tenant_ref": "TEN-" + ("b" * 24),
+                        "tenant_ref": runtime._tenant_ref(),
                         "asset_id": asset_id,
                         "asset_revision": 2,
                         "asset_version_digest": digest,
@@ -378,8 +449,11 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
             )
 
     monkeypatch.setattr(runtime, "enabled", lambda: True)
+    # Recording the refusal checks the switch itself, as the enabled runtime does.
+    monkeypatch.setattr(runtime, "require_enabled", lambda: None)
     monkeypatch.setattr(runtime, "default_service", Service())
     monkeypatch.setattr(assurance, "enabled", lambda: True)
+    _stub_review_is_current(monkeypatch, assurance)
     monkeypatch.setattr(
         assurance,
         "get_observation",
@@ -437,6 +511,8 @@ def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatc
     from maverick import governed_rest
     from maverick import model_risk_assurance as assurance
 
+    # Safeguard activity is retained per workspace; unbound mode refuses it.
+    monkeypatch.setenv("MAVERICK_TENANT", "gateway-workspace")
     _enroll()
     token = _mint()
     headers = {"Authorization": f"Bearer {token}"}
@@ -488,7 +564,7 @@ def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatc
                     ),
                     "evaluated_at": 1_800_000_000.0 + current_call,
                     "asset_binding": {
-                        "tenant_ref": "TEN-" + ("b" * 24),
+                        "tenant_ref": runtime._tenant_ref(),
                         "asset_id": asset_id,
                         "asset_revision": 2,
                         "asset_version_digest": digest,
@@ -503,6 +579,7 @@ def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatc
     monkeypatch.setattr(runtime, "enabled", lambda: True)
     monkeypatch.setattr(runtime, "default_service", Service())
     monkeypatch.setattr(assurance, "enabled", lambda: True)
+    _stub_review_is_current(monkeypatch, assurance)
     monkeypatch.setattr(
         assurance,
         "get_observation",
@@ -794,7 +871,7 @@ def test_scorecard_page_renders_and_404s_unknown():
     assert client.get("/external-agents/ghost").status_code == 404
 
 
-def test_boards_carry_platform_segments():
+def test_boards_keep_external_agent_platform_segments_out_of_local_scope():
     _enroll()
     token = _mint()
     bare = TestClient(app)
@@ -803,11 +880,18 @@ def test_boards_carry_platform_segments():
               json={"title": "Quote", "outcome": "success", "summary": "s",
                     "cost_dollars": 2.0})
     spend = client.get("/api/v1/dashboards/spend").json()
-    assert any(r["label"] == "Salesforce Agentforce"
-               for r in spend["by_platform"])
+    # Ingested work belongs to the service principal, not the local operator.
+    assert spend["by_platform"] == []
     wf = client.get("/api/v1/dashboards/workforce").json()
-    (row,) = [r for r in wf["platforms"]
-              if r["label"] == "Salesforce Agentforce"]
+    assert wf["platforms"] == []
+    # Explicitly unscoped internal calculations retain platform attribution;
+    # HTTP owner filters must never silently opt into this scope.
+    from maverick.world_model import open_world
+    from maverick_dashboard.api import _external_platform_spend, _external_platform_workforce
+    world = open_world()
+    assert _external_platform_spend(world, None, 0) == [
+        {"label": "Salesforce Agentforce", "cost": 2.0, "runs": 1}]
+    (row,) = _external_platform_workforce(world, None)
     assert row["completed"] == 1 and row["spend"] == pytest.approx(2.0)
 
 
@@ -1000,7 +1084,7 @@ def test_execute_read_end_to_end_over_http(monkeypatch):
                         "path": "/opportunities"})
     assert r.status_code == 200
     verdict = r.json()
-    assert verdict["allowed"] is True and verdict["rule"] == "executed"
+    assert verdict["allowed"] is True and verdict["rule"] == "executed", verdict
     assert verdict["status"] == "executed"
     assert "42 open opportunities" in verdict["result"]
     assert conn.reads == [{"path": "/opportunities"}]

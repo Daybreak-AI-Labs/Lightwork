@@ -7,7 +7,7 @@ const report=()=>({context:'alice',id:'OPL-test',revision:2,title:'Synthetic pil
   provider_costs:{status:'current',current_totals_by_currency:{},allocations:[]}});
 async function fixture(intercept=()=>undefined){
   const dom=new JSDOM(read('templates/outcome_pilots.html').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,''),{url:'https://lightwork.test',runScripts:'outside-only'}),{window:w}=dom,d=w.document,calls=[];
-  d.getElementById('outcome-pilots').dataset.context='alice';
+  d.getElementById('outcome-pilots').dataset.context='alice';d.getElementById('outcome-pilots').dataset.enabled='true';
   w.fetch=async(url,options)=>{const call={url:new URL(url,w.location),...options};calls.push(call);let value=await intercept(call);if(value instanceof Error)throw value;if(value instanceof Response)return value;
     if(value===undefined){const route=call.url.pathname;if(route.endsWith('/sources'))value={context:'alice',items:[],coverage:[],specialists:[]};else if(route.endsWith('/provider-costs'))value=call.method==='PUT'?{context:'alice',id:'OPL-test',revision:3}:{context:'alice',items:[source],total:1,next_offset:null};else if(route.endsWith('/OPL-test'))value=report();else value={context:'alice',items:[{id:'OPL-test',title:'Pilot',cases:2}]};}
     return new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});
@@ -30,7 +30,7 @@ test('allocation derives amounts from a selected source, requires review and sen
 test('changed attribution resets review, over-allocation cannot save, and a lost response keeps exact retry inputs',async t=>{
   let writes=0;const ui=await fixture(call=>{if(call.method==='PUT'){writes++;return new Error('Connection interrupted');}});t.after(ui.close);const form=await select(ui),percent=form.querySelectorAll('input[type="number"]'),confirm=form.querySelector('input[type="checkbox"]');
   confirm.checked=true;ui.fill(percent[0],'70');assert.equal(confirm.checked,false);ui.fill(percent[1],'70');confirm.checked=true;submit(ui,form);await ui.settle();assert.equal(writes,0);assert.match(form.textContent,/exceed 100%/);
-  ui.fill(percent[1],'30');confirm.checked=true;submit(ui,form);await ui.settle();assert.equal(writes,1);assert.equal(percent[0].value,'70');submit(ui,form);await ui.settle();assert.equal(writes,2);const requests=ui.calls.filter(c=>c.method==='PUT');assert.equal(requests[0].body,requests[1].body);assert.match(ui.d.getElementById('op-status').textContent,/Connection interrupted/);
+  ui.fill(percent[1],'30');confirm.checked=true;submit(ui,form);await ui.settle();assert.equal(writes,1);assert.equal(percent[0].value,'70');submit(ui,form);await ui.settle();assert.equal(writes,2);const requests=ui.calls.filter(c=>c.method==='PUT');assert.equal(requests[0].body,requests[1].body);assert.match(ui.d.getElementById('op-status').textContent,/not responding\. Keep your inputs/);
 });
 
 test('pending allocation uses shared busy protection and blocks duplicate writes',async t=>{

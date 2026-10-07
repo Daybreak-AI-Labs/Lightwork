@@ -154,13 +154,17 @@ Requests carry three headers over the raw body:
 | Header | Value |
 | --- | --- |
 | `X-Lightwork-Agent-Id` | The enrolled agent id |
-| `X-Maverick-Timestamp` | Unix seconds; the signature covers it |
-| `X-Maverick-Signature` | `sha256=` + hex `HMAC-SHA256(secret, "<ts>." + raw_body)` |
+| `X-Lightwork-Timestamp` | Unix seconds; the signature covers it |
+| `X-Lightwork-Signature` | `sha256=` + hex `HMAC-SHA256(secret, "<ts>." + raw_body)` |
 
 This is exactly Lightwork's outbound webhook signature format: sign
 `b"<timestamp>." + body` with HMAC-SHA256 and prefix the hex digest with
 `sha256=`. Timestamps older than 300 seconds are rejected; signature
 comparison is constant-time.
+
+Existing `X-Maverick-Timestamp` and `X-Maverick-Signature` headers remain
+accepted. If both names are sent, their values must match; conflicting values
+are rejected before authentication. No signing-key change is required.
 
 Each signed request is also **single use**: the signature is deterministic
 over (secret, timestamp, body), so a captured request replayed inside the
@@ -177,7 +181,7 @@ request carries four headers:
 | Header | Value |
 | --- | --- |
 | `X-Lightwork-Agent-Id` | The enrolled agent id |
-| `X-Maverick-Timestamp` | Unix seconds |
+| `X-Lightwork-Timestamp` | Unix seconds; the matching legacy name is also accepted |
 | `X-Lightwork-Nonce` | A fresh random string (≤128 bytes), single-use |
 | `X-Lightwork-Request-Signature` | Hex Ed25519 signature over the message below |
 
@@ -285,7 +289,8 @@ TypeScript helpers for the screen-then-act, report-after loop.
    advisory because the external runtime still owns the effect. Use
    `/api/v1/external/execute` for a Lightwork-enforced connector effect.
 
-Paste-in packaging (deployable Apex invocable classes + the exact Setup clicks): [`examples/external-agents/agentforce/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/examples/external-agents/agentforce/).
+Paste-in packaging (deployable Apex invocable classes and Setup instructions)
+is in `examples/external-agents/agentforce/` in the licensed package.
 
 ### AWS Bedrock Agents
 
@@ -301,7 +306,8 @@ Paste-in packaging (deployable Apex invocable classes + the exact Setup clicks):
    the run at completion.
 4. Rotation = mint a new rest token and update the Secrets Manager value.
 
-Paste-in packaging (SAM template + forwarder Lambda + action-group schema): [`examples/external-agents/bedrock/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/examples/external-agents/bedrock/).
+Paste-in packaging (SAM template, forwarder Lambda, and action-group schema)
+is in `examples/external-agents/bedrock/` in the licensed package.
 
 ### OpenAI / LangChain
 
@@ -564,7 +570,9 @@ stoppable — **while it happens**, open a live run:
    `{goal_id, heartbeat_seconds}`. The goal lands **active** on the
    Operating Record immediately.
 2. `POST /api/v1/external/runs/{goal_id}/heartbeat` at least every
-   `heartbeat_seconds` (default 60; the deployment's orphan-reclaim window).
+   `heartbeat_seconds` (default 15, one quarter of the default 60-second
+   orphan-reclaim window). The returned interval includes room for normal
+   request delay; schedule the next beat from the last successful response.
    The reply is the kill switch: `{"continue": false, "reason": ...}` means
    **stop working now** — containment, revocation, expiry, and reclaimed or
    finished runs all return false. An agent that ignores it stops refreshing

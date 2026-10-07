@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard.plain_labels import fill_placeholders, pack_display_name
 from maverick_dashboard.tool_summary import plain_tool_summary
 
-from test_support.plain_language import developer_terms
+from test_support.plain_language import developer_terms, visible_text
 
 HTML = {"Accept": "text/html", "Origin": "http://testserver"}
 _TECHNICAL = re.compile(
@@ -199,16 +199,23 @@ def test_feature_off_and_named_sign_in_pages_say_what_is_actually_wrong():
                         raise_server_exceptions=False)
     off = client.get("/__off", headers=HTML)
     assert off.status_code == 403
-    assert "This page is turned off" in off.text and 'href="/settings#settings-sections"' in off.text
-    assert "Permission required" not in off.text and "disabled in Settings" not in off.text
+    off_text = visible_text(off.text)
+    assert "This page is turned off" in off_text and 'href="/settings#settings-sections"' in off.text
+    assert "Permission required" not in off_text and "disabled in Settings" not in off_text
     named = client.get("/__named", headers=HTML)
-    assert "Sign in with your own account" in named.text and "Choose a workspace" in named.text
-    assert "named account" not in named.text
+    assert named.status_code == 403
+    named_text = visible_text(named.text)
+    assert "Sign in with your own account" in named_text and "Choose a workspace" in named_text
+    assert "named account" not in named_text
     role = client.get("/__role", headers=HTML)
-    assert "Permission required" in role.text and "admin required" not in role.text
+    assert role.status_code == 403
+    role_text = visible_text(role.text)
+    assert "Permission required" in role_text and "admin required" not in role_text
     expired = client.get("/__expired", headers=HTML)
-    assert "Your sign-in has expired. Sign in again." in expired.text
-    assert "access token" not in expired.text and "session or" not in expired.text
+    assert expired.status_code == 401
+    expired_text = visible_text(expired.text)
+    assert "Your sign-in has expired. Sign in again." in expired_text
+    assert "access token" not in expired_text and "session or" not in expired_text
     # API callers keep the exact machine-readable reason.
     assert client.get("/__off", headers={"Accept": "application/json"}).json() == {
         "detail": "Action Center is disabled in Settings or configuration is unavailable."
@@ -230,7 +237,7 @@ def test_action_center_turned_off_shows_the_turned_off_page(monkeypatch):
 
 def test_sidebar_uses_a_plain_name_for_app_consent():
     page = _client().get("/tools", headers=HTML)
-    assert "Consent in Your Apps" in page.text
+    assert "Mobile app consent" in page.text
     assert "Native Consent SDK" not in page.text
 
 
@@ -253,8 +260,13 @@ def test_grc_studio_and_pilot_review_use_pickers_not_typed_references():
     assert 'id="grcs-collector-choice"' in studio and 'id="grcs-projection-target"' in studio
     assert "Copy the collector" not in studio
     visible = _without_technical(studio)
-    for field in ('id="grcs-collector-digest"', 'name="target_revision"', 'name="target_id"'):
+    for field in ('name="target_revision"', 'name="target_id"'):
         assert field not in visible, field
+    # The chosen source's exact reference travels in hidden fields the picker
+    # fills; nobody types or reads a fingerprint.
+    for field in ("grcs-collector-id", "grcs-collector-version", "grcs-collector-digest"):
+        tags = re.findall(r"<input[^>]*\bid=\"" + field + r"\"[^>]*>", visible)
+        assert tags and all('type="hidden"' in tag for tag in tags), field
     pilots = _static("templates/outcome_pilots.html")
     assert '<select class="select" id="op-review-reference"' in pilots
     assert "Pilot reference shared by its owner" not in pilots and 'pattern="OPL-' not in pilots

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Tracker Scans · Lightwork{% endblock %}
+{% block title %}Tracker scans · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set si_on = consent_scan_inventory_enabled %}
 {% set si_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set si_audit = consent_can_audit if consent_can_audit is defined else true %}
 <div class="governance-workbench" id="csi-root" data-enabled="{{ 'true' if si_on else 'false' }}" data-can-admin="{{ 'true' if si_admin else 'false' }}" data-can-audit="{{ 'true' if si_audit else 'false' }}">
-  {{ hero('Consent review', 'Tracker Scans',
+  {{ hero('Consent review', 'Tracker scans',
           lede='Scan your websites on a schedule to find the trackers they load, review each one, and add the reviewed trackers to your consent tracker list.') }}
   {% include "_consent_nav.html" %}
   {% if not si_on %}
@@ -184,18 +184,13 @@
 (function () {
   "use strict";
   var API = "/api/v1/consent/scan-inventory";
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path, options) {
-    var opts = Object.assign({cache: "no-store"}, options || {});
-    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("csi-root")) start();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (CW && document.getElementById("csi-root")) { if (window.mvFetchJSON) start(); else document.addEventListener("DOMContentLoaded", start); }
 
   function start() {
     var $ = function (id) { return document.getElementById(id); };
@@ -428,7 +423,7 @@
     async function loadChoices() {
       if (state.choicesLoaded) return;
       try {
-        var both = await Promise.all([fetch("/api/v1/consent/trackers?limit=500", {cache: "no-store"}).then(function (r) { return r.ok ? r.json() : {trackers: []}; }), fetch("/api/v1/consent/policies?limit=500", {cache: "no-store"}).then(function (r) { return r.ok ? r.json() : {policies: []}; })]);
+        var both = await Promise.all([window.mvFetchJSON("/api/v1/consent/trackers?limit=500", {cache: "no-store"}).catch(function (error) { if (!error.status) throw error; return {trackers: []}; }), window.mvFetchJSON("/api/v1/consent/policies?limit=500", {cache: "no-store"}).catch(function (error) { if (!error.status) throw error; return {policies: []}; })]);
         state.trackers = both[0].trackers || both[0].items || [];
         var purposes = {};
         (both[1].policies || []).forEach(function (p) { Object.keys(p.purposes || {}).forEach(function (k) { purposes[k] = true; }); });

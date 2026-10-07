@@ -24,13 +24,23 @@ import math
 import re
 import threading
 from collections import OrderedDict
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .paths import data_dir
+from .paths import data_dir, diagnostic_data_dir, reset_tenant, set_tenant
 
 log = logging.getLogger(__name__)
 
-OVERRIDES_PATH = data_dir("runtime-overrides.toml")
+# ``OVERRIDES_PATH`` stays a Path for callers and tests that inspect or
+# monkeypatch it, but the built-in location is resolved at *call time* by
+# :func:`overrides_path`: a home, tenant floor or client binding established
+# after this module was imported must not be ignored. Identity (not equality)
+# tells an intentional override from this untouched compatibility value, which
+# is computed without any storage admission so importing can never fail.
+_INITIAL_OVERRIDES_PATH = diagnostic_data_dir("runtime-overrides.toml")
+OVERRIDES_PATH = _INITIAL_OVERRIDES_PATH
 _VALID_TOOL_NAME = re.compile(r"^[a-z0-9_-]+$")
 
 # One overlay file holds every surface (denied_tools, models, budget, plugins,
@@ -41,11 +51,26 @@ _VALID_TOOL_NAME = re.compile(r"^[a-z0-9_-]+$")
 # every mutator's read-modify-write in-process (RLock) and cross-process (flock).
 _OVERRIDE_LOCK = threading.RLock()
 _mutation_context = threading.local()
+_setting_audit: ContextVar[object | None] = ContextVar(
+    "runtime_override_setting_audit", default=None,
+)
+
+
+@contextmanager
+def setting_audit_callback(callback):
+    """Bind a dashboard audit hook to a serialized runtime-overlay write."""
+    token = _setting_audit.set(callback)
+    try:
+        yield
+    finally:
+        _setting_audit.reset(token)
+
+
 _LKG_LIMIT = 8
 _LOAD_FAILURE_LIMIT = 32
 _MAX_OVERRIDE_BYTES = 1024 * 1024
 _KNOWN_TOP_LEVEL = frozenset(
-    {"security", "models", "budget", "plugins", "access", "styles", "mcp_servers"}
+    {"security", "models", "model_rates", "budget", "plugins", "access", "styles", "mcp_servers"}
 )
 _MCP_SPEC_KEYS = frozenset(
     {
@@ -69,6 +94,36 @@ class RuntimeOverridesSecurityError(RuntimeError):
     """The operator policy exists but cannot be read or validated safely."""
 
 
+def overrides_path() -> Path:
+    """The overlay file to read and write right now.
+
+    This is the DEPLOYMENT-wide policy: denied tools, the model allow-list and
+    pins, the spend cap and dashboard-added MCP servers are shared control-plane
+    state that every workspace runs under, and only a global administrator may
+    change them. A workspace selected for the current request or run therefore
+    does not move the file -- resolving it per workspace would stop a global
+    administrator's tool denies from applying inside workspaces. Only the
+    operator's floor (``MAVERICK_HOME``, ``MAVERICK_TENANT``, a bound client)
+    is honoured, and it is read on every call.
+
+    A location that cannot be resolved fails closed like an unreadable policy:
+    consumers re-raise :class:`RuntimeOverridesSecurityError` but swallow other
+    exceptions, which would silently drop the deny-list.
+    """
+    if OVERRIDES_PATH is not _INITIAL_OVERRIDES_PATH:
+        return Path(OVERRIDES_PATH)
+    token = set_tenant(None)  # ignore a request- or run-scoped workspace
+    try:
+        return data_dir("runtime-overrides.toml")
+    except Exception as exc:
+        raise RuntimeOverridesSecurityError(
+            "refusing to continue: the operator policy location cannot be "
+            "resolved; repair the tenant or client binding"
+        ) from exc
+    finally:
+        reset_tenant(token)
+
+
 def _serialized(fn):
     """Serialize a mutator's whole read-modify-write of the overlay file. The
     public mutators never call one another, so the non-reentrant flock can't
@@ -77,7 +132,7 @@ def _serialized(fn):
     def _wrap(*args, **kwargs):
         from .authority_effects import authority_effect_fence
         from .file_lock import cross_process_lock
-        with authority_effect_fence(), _OVERRIDE_LOCK, cross_process_lock(OVERRIDES_PATH):
+        with authority_effect_fence(), _OVERRIDE_LOCK, cross_process_lock(overrides_path()):
             previous = getattr(_mutation_context, "strict_reads", False)
             _mutation_context.strict_reads = True
             try:
@@ -95,7 +150,7 @@ def _tomllib():
     return tomllib
 
 
-def _cache_key() -> str:
+def _cache_key(path: Path) -> str:
     """Stable lexical identity for the policy path.
 
     Resolving symlinks makes the key depend on whether the link currently
@@ -103,9 +158,9 @@ def _cache_key() -> str:
     would otherwise change the key and bypass its last-known-good policy.
     """
     try:
-        return str(OVERRIDES_PATH.absolute())
+        return str(path.absolute())
     except OSError:
-        return str(OVERRIDES_PATH)
+        return str(path)
 
 
 def _remember_valid(key: str, state: dict) -> dict:
@@ -211,6 +266,14 @@ def _validate_loaded_state(state: object) -> dict:
             or not _VALID_MODEL.fullmatch(model.strip())
         ):
             raise ValueError("models contains an invalid role or model id")
+
+    rates = _require_table(state, "model_rates")
+    if len(rates) > 100:
+        raise ValueError("too many administrator-approved model rates")
+    for model, rate in rates.items():
+        if not isinstance(model, str) or not _VALID_MODEL.fullmatch(model):
+            raise ValueError("model_rates contains an invalid model id")
+        _validate_model_rate(rate)
 
     budget = _require_table(state, "budget")
     _reject_unknown_keys(budget, {"max_dollars", "task_limits_enabled"}, "budget")
@@ -329,11 +392,12 @@ def _validate_loaded_state(state: object) -> dict:
 
 
 def _load() -> dict:
-    key = _cache_key()
+    path = overrides_path()
+    key = _cache_key(path)
     try:
         # lstat distinguishes a genuinely absent policy from a dangling or
         # unreadable symlink, which must fail closed rather than look empty.
-        OVERRIDES_PATH.lstat()
+        path.lstat()
     except FileNotFoundError:
         with _OVERRIDE_LOCK:
             retained = key in _last_known_good
@@ -351,7 +415,7 @@ def _load() -> dict:
     except OSError as exc:
         return _recover_or_raise(key, exc)
     try:
-        state = _validate_loaded_state(_read_overlay(OVERRIDES_PATH))
+        state = _validate_loaded_state(_read_overlay(path))
     except Exception as exc:
         # Every read, schema, and delegated MCP validation failure has the same
         # fail-closed contract. Critical consumers special-case
@@ -382,13 +446,13 @@ def _recover_or_raise(key: str, exc: Exception) -> dict:
                 log.error(
                     "runtime_overrides: cannot read or validate %s; retaining "
                     "the in-process last-known-good policy: %s",
-                    OVERRIDES_PATH,
+                    key,
                     exc,
                 )
             return state
     raise RuntimeOverridesSecurityError(
         f"refusing to continue with unreadable or invalid operator policy "
-        f"{OVERRIDES_PATH}; repair or restore the file"
+        f"{key}; repair or restore the file"
     ) from exc
 
 
@@ -412,7 +476,7 @@ def denied_tools() -> set[str]:
     if dropped:
         log.warning(
             "runtime_overrides: ignoring %d invalid denied_tools entr(y/ies) in %s: %r",
-            len(dropped), OVERRIDES_PATH, dropped[:10],
+            len(dropped), overrides_path(), dropped[:10],
         )
     if valid:
         key = ",".join(sorted(valid))
@@ -422,7 +486,7 @@ def denied_tools() -> set[str]:
                 _announced.popitem(last=False)
             log.info(
                 "runtime_overrides: %s is denying %d tool(s) via the dashboard "
-                "overlay: %s", OVERRIDES_PATH, len(valid), ", ".join(sorted(valid)),
+                "overlay: %s", overrides_path(), len(valid), ", ".join(sorted(valid)),
             )
     return valid
 
@@ -435,6 +499,43 @@ _VALID_MODEL = re.compile(r"^[A-Za-z0-9_.:/-]{1,128}$")
 # special "default" that applies to every role. Tight charset so a hand-edited
 # file can't inject junk keys.
 _VALID_ROLE = re.compile(r"^[a-z_]{1,40}$")
+_MODEL_RATE_KEYS = frozenset({
+    "input_per_mtok", "output_per_mtok", "source", "as_of", "valid_until",
+    "approved_at", "approved_by",
+})
+
+
+def _validate_model_rate(rate: object) -> dict:
+    """An operator-attested *ceiling*, never a vendor-verified invoice rate."""
+    if not isinstance(rate, dict) or set(rate) != _MODEL_RATE_KEYS:
+        raise ValueError("model rate requires both prices, source, dates and approver")
+    for key in ("input_per_mtok", "output_per_mtok"):
+        value = rate[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1_000_000:
+            raise ValueError("model rate must be a finite non-negative USD amount")
+    if not (rate["input_per_mtok"] or rate["output_per_mtok"]):
+        raise ValueError("a zero-cost model needs provider evidence, not an entered rate")
+    for key, limit in (("source", 300), ("approved_by", 200)):
+        value = rate[key]
+        if not isinstance(value, str) or not value.strip() or len(value) > limit or any(ord(c) < 32 for c in value):
+            raise ValueError(f"invalid model rate {key}")
+    try:
+        as_of = date.fromisoformat(rate["as_of"])
+        expires = date.fromisoformat(rate["valid_until"])
+        approved = datetime.fromisoformat(rate["approved_at"].replace("Z", "+00:00"))
+    except (TypeError, AttributeError, ValueError) as exc:
+        raise ValueError("model rate dates are invalid") from exc
+    today = datetime.now(timezone.utc).date()
+    if (approved.tzinfo is None or as_of > today or expires < as_of
+            or (expires - as_of).days > 366
+            or approved.astimezone(timezone.utc).date() > today):
+        raise ValueError("model rate dates require a current, dated source")
+    return rate
+
+
+def model_rate_overrides() -> dict[str, dict]:
+    """Read the shared, validated rate ceilings without changing routing."""
+    return copy.deepcopy(_load().get("model_rates") or {})
 
 
 def _models_overlay() -> dict[str, str]:
@@ -610,7 +711,8 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
                  allowed: set[str] | None = None,
                  mcp: dict[str, dict] | None = None,
                  style: str | None = None,
-                 task_limits: bool | None = None) -> None:
+                 task_limits: bool | None = None,
+                 model_rates: dict[str, dict] | None = None) -> None:
     """Serialise the whole overlay: [security] denied_tools + optional [models]
     (default + per-role) + [budget] max_dollars + [plugins] enabled/disabled +
     [access] allowed_models + [mcp_servers.<name>] tables. One file holds every
@@ -619,8 +721,9 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     callers preserve what they don't touch. Atomic write at 0o600; no tomli-w
     dependency.
     """
-    OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    rendered = ", ".join(_toml_string(n) for n in sorted(denied))
+    path = overrides_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rendered =", ".join(_toml_string(n) for n in sorted(denied))
     body = (
         "# Dashboard-managed overrides. Edit via the dashboard's\n"
         "# permissions page, not by hand (the dashboard rewrites this\n"
@@ -657,6 +760,11 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     active_style = style_override() if style is None else style
     if active_style:
         body += f"\n[styles]\nactive = {_toml_string(active_style)}\n"
+    rates = model_rate_overrides() if model_rates is None else model_rates
+    if rates:
+        body += "\n[model_rates]\n"
+        for spec, rate in sorted(rates.items()):
+            body += f"{_toml_string(spec)} = {_toml_inline(rate)}\n"
     # MCP server tables come last: once a subtable header is emitted every
     # following key belongs to it, so no top-level section may follow.
     servers = mcp_overlay() if mcp is None else mcp
@@ -668,10 +776,18 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     # Parse and validate before replacement. A renderer/schema bug must never
     # atomically replace the last valid operator policy with corrupt TOML.
     state = _validate_loaded_state(_tomllib().loads(body))
-    atomic_write_text(OVERRIDES_PATH, body)
+    from .runtime_policy_recovery import retain_current, retain_written
+    retain_current()
+    audit = _setting_audit.get()
+    if audit is not None:
+        audit("prepared", _load(), state)
+    atomic_write_text(path, body)
+    retain_written(body)
+    if audit is not None:
+        audit("completed", {}, state)
     # Keep the fallback synchronized with writes from this process.
     with _OVERRIDE_LOCK:
-        _remember_valid(_cache_key(), state)
+        _remember_valid(_cache_key(path), state)
 
 
 def _toml_string(value: str) -> str:
@@ -739,6 +855,36 @@ def clear_default_model() -> None:
     models = _models_overlay()
     models.pop("default", None)
     _write_state(denied_tools(), models or None, budget_override())
+
+
+@_serialized
+def set_model_rate(spec: str, *, input_per_mtok: float, output_per_mtok: float,
+                   source: str, as_of: str, valid_until: str, approved_by: str) -> dict:
+    """Approve a sourced USD ceiling for a route without claiming vendor verification."""
+    model = _validate_model(spec)
+    rate = _validate_model_rate({
+        "input_per_mtok": float(input_per_mtok),
+        "output_per_mtok": float(output_per_mtok),
+        "source": source.strip(), "as_of": as_of, "valid_until": valid_until,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": approved_by,
+    })
+    if date.fromisoformat(valid_until) < datetime.now(timezone.utc).date():
+        raise ValueError("model rate has expired")
+    rates = model_rate_overrides()
+    rates[model] = rate
+    _write_state(denied_tools(), _models_overlay() or None, budget_override(),
+                 model_rates=rates)
+    return copy.deepcopy(rate)
+
+
+@_serialized
+def clear_model_rate(spec: str) -> None:
+    model = _validate_model(spec)
+    rates = model_rate_overrides()
+    rates.pop(model, None)
+    _write_state(denied_tools(), _models_overlay() or None, budget_override(),
+                 model_rates=rates)
 
 
 @_serialized
@@ -913,10 +1059,11 @@ __all__ = [
     "RuntimeOverridesSecurityError",
     "denied_tools", "disable_tool", "enable_tool",
     "default_model_override", "set_default_model", "clear_default_model",
+    "model_rate_overrides", "set_model_rate", "clear_model_rate",
     "role_model_override", "set_role_models",
     "budget_override", "set_budget", "clear_budget",
     "plugin_overlay", "enable_plugin", "disable_plugin", "reset_plugin",
     "allowed_models", "set_allowed_models",
     "mcp_overlay", "add_mcp_server", "remove_mcp_server",
-    "OVERRIDES_PATH",
+    "OVERRIDES_PATH", "overrides_path",
 ]

@@ -13,7 +13,7 @@
   }
 
   function invalidResponse() {
-    var error = new Error("Lightwork sent an answer this page could not read.");
+    var error = new Error("Lightwork sent an answer this page could not read. Refresh the page and try again.");
     error.code = "response_invalid_json";
     return error;
   }
@@ -72,7 +72,7 @@
     if (!response.ok) {
       var failure = new Error(
         payload && typeof payload.detail === "string" ?
-          payload.detail : "The operation failed."
+          payload.detail : "That didn't work. Refresh the page and try again."
       );
       failure.status = response.status;
       throw failure;
@@ -124,7 +124,7 @@
   var TEMPLATE_RE = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$/;
 
   function byId(id) { return document.getElementById(id); }
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(failure, action) { say(R.errorText(failure, action)); }
   function language(code) { return LANGUAGE[String(code || "").toLowerCase()] || String(code || "").toUpperCase(); }
   function brokerName(ref) { return R.human(ref); }
@@ -244,7 +244,7 @@
       { label: "Record the result", when: function (r) { return can.admin && r.usable && r.request && r.request.status === "PENDING" && !activeOutcome(r); }, run: openOutcome },
       { label: "Close request", kind: "primary", when: function (r) { return can.admin && r.usable && r.request && r.request.status === "PENDING" && activeOutcome(r); }, run: closeRequest },
       { label: "Withdraw", kind: "danger", when: function (r) { return can.admin && r.state === "active"; }, run: withdrawRecord }
-    ], { text: can.admin ? "No DROP requests yet. Use “Add a DROP request” when DROP sends you one." : "No DROP requests yet." });
+    ], { text: can.admin ? "No DROP requests yet. Use “Add a DROP request” when DROP sends you one." : "No DROP requests yet. They appear here when an administrator adds one." });
 
     var waiting = byId("drop-waiting");
     if (waiting) {
@@ -266,7 +266,7 @@
         { label: "Registration valid until", value: function (b) { return b.valid_until ? R.day(b.valid_until) : ""; } }
       ], state.brokers, [
         { label: "Remove", kind: "danger", when: function (b) { return can.admin && b.state === "active"; }, run: removeBroker }
-      ], { text: can.admin ? "No data brokers yet. Add the broker registration your DROP requests arrive under." : "No data brokers yet." });
+      ], { text: can.admin ? "No data brokers yet. Add the broker registration your DROP requests arrive under." : "No data brokers yet. They appear here when an administrator adds one." });
     }
     fillBrokers();
   }
@@ -480,13 +480,40 @@
     } catch (failure) { fail(failure, "send the removal for approval"); }
   }
 
+  var reviewGeneration = 0, reviewing = false;
+  function clearReview() {
+    reviewGeneration += 1;
+    if (reviewing) { var cancel = byId("mv-confirm-cancel"); if (cancel) cancel.click(); }
+  }
+  [window, document].forEach(function (target) { ["lightwork:workspace-changed", "lightwork:account-context-changed"].forEach(function (name) { target.addEventListener(name, clearReview); }); });
+  async function confirmReview(text) {
+    var dialog = byId("mv-confirm"), message = byId("mv-confirm-msg");
+    if (dialog && dialog.open) return false;
+    var previous = message ? message.style.cssText : "";
+    var answer = R.confirm(text, "Approve this exact change"); reviewing = true;
+    if (message) { message.style.whiteSpace = "pre-wrap"; message.style.overflowWrap = "anywhere"; message.style.maxHeight = "60vh"; message.style.overflowY = "auto"; }
+    try { return await answer; }
+    finally { reviewing = false; if (message) { message.textContent = ""; message.style.cssText = previous; } }
+  }
   async function approve(change) {
-    var text = "Approve “" + (CHANGE[change.kind] || R.human(change.kind)) + "”" + (describe(change) ? " (" + describe(change) + ")" : "") +
-      "? Only approve changes you have checked yourself. It takes effect straight away.";
-    if (!(await R.confirm(text, "Approve"))) return;
+    var generation = reviewGeneration;
     try {
+      var review = await request("/authority/proposals/" + encodeURIComponent(change.proposal_id) + "/review");
+      if (generation !== reviewGeneration) return;
+      if (review.proposal.revision !== change.revision || review.proposal.kind !== change.kind || review.proposed_by_you) {
+        say("The change is no longer available for your independent approval. Refresh the list."); return;
+      }
+      var labels = {action: "Change", broker_ref: "Data broker", drop_id: "DROP request", status: "Result", request_type: "Requested action", language: "Reply language", valid_until: "Valid until", observed_at: "Evidence recorded on", expected_version: "Current source version", record_revision: "Request version", evidence_revision: "Evidence version", deletion_verified: "Deletion checked", opt_out_verified: "Opt-out checked", search_complete: "Search completed", exemption_approved: "Exemption approved", provider_operations_complete: "Work in connected services completed", expected_current_revision: "Current signing key version", key_revision: "Signing key version", from_revision: "Previous key version", to_revision: "New key version", objects_migrated: "Records moved", remaining_dependencies: "Records still depending on the old key", template_id: "Privacy request form", migration_id: "Key change record", registration_sha256: "Registration file identity", evidence_sha256: "Evidence file identity", broker_registration_sha256: "Broker registration file identity", subject_binding_sha256: "Protected person identity", new_key_ref: "Protected signing key reference"};
+      var text = "Review “" + (CHANGE[change.kind] || R.human(change.kind)) + "”\n\n" + Object.keys(review.contents).map(function (key) {
+        if (!labels[key]) throw new Error("This change contains information this view cannot explain. Nothing was approved.");
+        var value = review.contents[key];
+        if (value && typeof value === "object") throw new Error("The complete change could not be shown. Nothing was approved.");
+        return labels[key] + ": " + (value === true ? "Yes" : value === false ? "No" : value === null ? "Not provided" : key === "valid_until" || key === "observed_at" ? R.when(value) : key === "action" && CHANGE[value] ? CHANGE[value] : typeof value === "number" || /sha256$/.test(key) || key === "new_key_ref" || key === "template_id" ? String(value) : R.human(value));
+      }).join("\n") + "\nKeep this review until: " + R.when(review.proposal.retained_until) +
+        "\n\nRecorded file identities do not show the original files. Check those files through your organization's approved channel. Approval records a local decision and can take effect immediately; it does not prove an outside result.";
+      if (!(await confirmReview(text)) || generation !== reviewGeneration) return;
       await request("/authority/proposals/" + encodeURIComponent(change.proposal_id) + "/approve", "POST",
-        { expected_revision: change.revision, idempotency_key: R.newKey() });
+        { expected_revision: review.proposal.revision, idempotency_key: R.newKey() });
       say("Approved. The change is now in effect.");
       await load();
     } catch (failure) {
@@ -587,7 +614,7 @@
   // requests, and asking would only fail. If the check itself fails, try anyway.
   refreshStatus().then(function (st) {
     if (st && st.enabled === false) {
-      showNothing("Nothing to show: California DROP requests are turned off.");
+      showNothing("Nothing to show: California DROP requests are turned off. An administrator can turn them on in Settings.");
       return;
     }
     return load();

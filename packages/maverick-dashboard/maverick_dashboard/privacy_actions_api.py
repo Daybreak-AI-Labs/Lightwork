@@ -39,7 +39,9 @@ async def collect_microsoft365(request: Request, request_id: str, body: CollectI
     from .api import _request_actor
 
     if not df.enabled():
-        raise HTTPException(status_code=403, detail="Data-request fulfilment is turned off.")
+        from .feature_gate import feature_off
+
+        raise feature_off("dsar_fulfillment", "Answering data requests")
     try:
         result = await run_in_threadpool(
             df.collect_graph_sources,
@@ -67,8 +69,11 @@ async def collect_microsoft365(request: Request, request_id: str, body: CollectI
             more = " (more exist)" if probe.get("more") else ""
             found.append(f"{label}: {probe.get('items', 0)} item(s){more}")
         else:
-            found.append(f"{label}: nothing found")
-    return {"message": "Microsoft 365 checked. " + "; ".join(found) + "." if found else "Microsoft 365 checked."}
+            found.append(f"{label}: could not be checked")
+    complete = bool(found) and all(probe.get("collected") for probe in result.get("probes") or [])
+    heading = "Microsoft 365 checked." if complete else "Microsoft 365 check is incomplete."
+    return {"message": heading + (" " + "; ".join(found) + "." if found else ""),
+            "complete": complete, "revision": (result.get("record") or {}).get("revision", body.revision)}
 
 
 __all__ = ["SOURCE_LABELS", "router"]

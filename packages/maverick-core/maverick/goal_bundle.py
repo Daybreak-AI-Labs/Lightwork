@@ -1,31 +1,26 @@
-"""A task's full trajectory as one portable bundle (``maverick export``).
-
-The bundle holds the goal record, every event (up to 10,000) and the episode
-summaries (up to 200). No prompt content is included unless it was logged to
-events. Shared by the command line and the dashboard's download button so
-both produce exactly the same file.
-"""
+"""Compatible bounded v1 task/event/episode bundles from one read snapshot."""
 from __future__ import annotations
 
-from dataclasses import asdict
+import json
 
-MAX_EVENTS = 10_000
-MAX_EPISODES = 200
+from .goal_archive import (
+    MAX_ARCHIVE_BYTES,
+    MAX_EPISODES,
+    MAX_EVENTS,
+    IncompleteGoalBundle,
+    prepare_goal_archive,
+)
 
 
 def build_goal_bundle(world, goal_id: int) -> dict | None:
-    """The export bundle for ``goal_id``, or ``None`` when there is no such goal."""
-    goal = world.get_goal(goal_id)
-    if goal is None:
+    """Compatibility adapter; HTTP downloads stream the same prepared file."""
+    prepared = prepare_goal_archive(world, goal_id)
+    if prepared is None:
         return None
-    events = world.goal_events(goal_id, limit=MAX_EVENTS)
-    episodes = world.list_episodes(limit=MAX_EPISODES, goal_id=goal_id)
-    return {
-        "v": 1,
-        "goal": asdict(goal),
-        "events": [asdict(e) for e in events],
-        "episodes": [asdict(e) for e in episodes],
-    }
+    try:
+        return json.load(prepared.stream)
+    finally:
+        prepared.close()
 
 
-__all__ = ["MAX_EPISODES", "MAX_EVENTS", "build_goal_bundle"]
+__all__ = ["IncompleteGoalBundle", "MAX_ARCHIVE_BYTES", "MAX_EPISODES", "MAX_EVENTS", "build_goal_bundle", "prepare_goal_archive"]

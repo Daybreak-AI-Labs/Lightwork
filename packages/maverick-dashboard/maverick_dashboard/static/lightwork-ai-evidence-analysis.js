@@ -47,7 +47,7 @@ const REVOKE_REASONS = [
 const state = { artifacts: [], criteria: [], analyses: [] };
 
 function setStatus(element, message, failed = false) {
-  element.textContent = message;
+  window.mvStatus(element, message, {error: !!failed});
   element.dataset.state = failed ? "failed" : "ready";
 }
 
@@ -65,7 +65,7 @@ function human(value) {
 
 function when(ts) {
   if (typeof window !== "undefined" && typeof window.mvWhen === "function") return window.mvWhen(ts);
-  return ts ? new Date(ts * 1000).toLocaleString() : "";
+  return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
 }
 
 function plainError(status, action) {
@@ -74,36 +74,25 @@ function plainError(status, action) {
   }
   if (status === 403) return `Could not ${action}. You do not have permission to do this.`;
   if (status === 409) return `Could not ${action}. This changed since you opened it. Refresh the page and try again.`;
-  return `Could not ${action}. Something went wrong. Please try again.`;
+  return `Could not ${action}. Something went wrong. Try again.`;
 }
 
 async function apiRequest(path, options = {}, action = "finish this") {
-  const response = await fetch(`${apiBase}${path}`, {
-    cache: "no-store",
-    credentials: "same-origin",
-    redirect: "error",
-    referrerPolicy: "no-referrer",
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  let payload;
   try {
-    payload = await response.json();
-  } catch (_error) {
-    const error = new Error("Lightwork returned something unexpected. Refresh the page and try again.");
-    error.status = response.status;
+    return await window.mvFetchJSON(`${apiBase}${path}`, {
+      cache: "no-store", credentials: "same-origin", redirect: "error", referrerPolicy: "no-referrer", ...options,
+      // The server's own detail stays out of the sentence: it is kept as technical text.
+      messages: { 409: `Could not ${action}. This changed since you opened it. Refresh the page and try again.` },
+    }, action);
+  } catch (error) {
+    if (error.unreadable) {
+      const unexpected = new Error("Lightwork returned something unexpected. Refresh the page and try again.");
+      unexpected.status = error.status;
+      throw unexpected;
+    }
+    error.technical = typeof error.detail === "string" ? error.detail : "";
     throw error;
   }
-  if (!response.ok) {
-    const error = new Error(plainError(response.status, action));
-    error.status = response.status;
-    error.technical = payload && typeof payload.detail === "string" ? payload.detail : "";
-    throw error;
-  }
-  return payload;
 }
 
 async function run(label, operation) {
@@ -112,7 +101,7 @@ async function run(label, operation) {
   try {
     return await operation();
   } catch (error) {
-    setStatus(operationStatus, error && error.message ? error.message : "Something went wrong. Please try again.", true);
+    setStatus(operationStatus, error && error.message ? error.message : "Something went wrong. Try again.", true);
     technical(error && error.technical ? error.technical : undefined);
     throw error;
   }
@@ -222,7 +211,7 @@ function renderAnalyses() {
   tbody.textContent = "";
   if (!state.analyses.length) {
     const tr = document.createElement("tr");
-    const td = cell(can.operate ? "No analyses here yet. Use Analyze a document above to start one." : "No analyses here yet.");
+    const td = cell(can.operate ? "No analyses here yet. Use Analyze a document above to start one." : "No analyses here yet. They appear here when an operator analyzes a document.");
     td.colSpan = 6;
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -369,6 +358,23 @@ async function history(record) {
 }
 
 // ---- status ------------------------------------------------------------
+// Nothing loads until analysis is available: say why in each loader instead
+// of leaving "Loading…" there.
+function settleLoaders(message) {
+  for (const id of ["artifact-select", "criteria-select"]) {
+    const select = document.getElementById(id);
+    select.textContent = "";
+    option(select, "", "Not available right now");
+  }
+  const tbody = document.getElementById("analyses-rows");
+  tbody.textContent = "";
+  const tr = document.createElement("tr");
+  const td = cell(message);
+  td.colSpan = 6;
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+}
+
 async function refreshStatus() {
   setStatus(runtimeStatus, "Checking whether analysis is available…");
   operations.disabled = true;
@@ -377,7 +383,7 @@ async function refreshStatus() {
     const tesseractDetected = payload.external_parser_binaries_detected &&
       payload.external_parser_binaries_detected.tesseract === true;
     const ocrNotice = tesseractDetected ? "" :
-      " Text inside images can't be read on this installation.";
+      " Text inside images can't be read on this installation. Upload a text or PDF version instead.";
     if (payload.ready === true && payload.operational_composition_verified === true) {
       setStatus(runtimeStatus, `Evidence analysis is ready.${ocrNotice}`);
       operations.disabled = false;
@@ -390,11 +396,14 @@ async function refreshStatus() {
     }
     if (payload.enabled === true) {
       setStatus(runtimeStatus, "Evidence analysis is turned on, but setup isn't finished. Ask an administrator to complete it.", true);
+      settleLoaders("Analyses appear here once an administrator finishes the setup.");
     } else {
-      setStatus(runtimeStatus, "Evidence analysis is turned off for this workspace.", true);
+      setStatus(runtimeStatus, "Evidence analysis is turned off for this workspace. Ask an administrator to turn it on.", true);
+      settleLoaders("Analyses appear here once AI evidence analysis is turned on.");
     }
   } catch (error) {
     setStatus(runtimeStatus, error.message, true);
+    settleLoaders(plainError(error.status, "load analyses"));
   }
   return false;
 }
@@ -557,6 +566,8 @@ if (purgeButton) {
   });
 }
 
-if (shell && apiBase) {
+// A turned-off module shows its gate instead of this workbench's checks:
+// nothing is requested, and the page already says when analyses will appear.
+if (shell && apiBase && shell.dataset.moduleEnabled !== "false") {
   loadAll().catch(() => {});
 }

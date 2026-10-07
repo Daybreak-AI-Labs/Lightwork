@@ -156,6 +156,29 @@ def test_record_download_and_check_round_trip(client):
     assert client.post(API + "/record-verify", json={"document": "[1,2]"}).status_code == 422
 
 
+def test_record_check_reports_a_foreign_capsule_as_intact_but_not_from_here(client):
+    """The check page separates "unedited" from "made by this installation":
+    a capsule another key signed is intact yet must never read as ours."""
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from maverick import operating_record as orec
+
+    other = ed25519.Ed25519PrivateKey.generate()
+    body = {"schema_version": 1, "ts": 1.0, "learned": {},
+            "records": [{"ts": 1.0, "kind": "goal", "subject": "From elsewhere"}]}
+    capsule = {**body, "key_id": "elsewhere",
+               "pubkey": other.public_key().public_bytes(
+                   encoding=serialization.Encoding.Raw,
+                   format=serialization.PublicFormat.Raw).hex(),
+               "sig": other.sign(orec._canonical(body)).hex()}
+
+    out = client.post(API + "/record-verify", json={"document": json.dumps(capsule)}).json()
+
+    assert out["intact"] is True and out["from_this_installation"] is False
+    assert out["records"] == 1
+
+
 def test_learning_statement_download_and_check(client):
     pytest.importorskip("cryptography")
     r = client.get(API + "/memory-export")

@@ -154,7 +154,9 @@ def test_users_page_manages_custom_roles_end_to_end():
     assert r.status_code == 400
     assert "still assigned" in r.json()["detail"]
 
-    assert client.post("/users/remove", data={"principal": "user:dana"},
+    from maverick_dashboard.access_explanations import standard_role
+    reviewed = standard_role("user:dana")
+    assert client.post("/users/remove", data={"principal": "user:dana", "expected_standard": reviewed["revision"]},
                        follow_redirects=False).status_code == 303
     assert client.post("/users/roles/delete", data={"name": "records-officer"},
                        follow_redirects=False).status_code == 303

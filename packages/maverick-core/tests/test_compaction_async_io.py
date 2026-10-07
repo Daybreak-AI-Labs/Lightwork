@@ -185,7 +185,7 @@ async def test_async_plugin_precedence_and_hybrid_outcomes(monkeypatch):
     picker = SimpleNamespace(pick=lambda messages: ("summarize", "test"),
                              record=lambda *args, **kwargs: records.append(kwargs))
     monkeypatch.setattr(cp, "_configured_name", lambda: "")
-    monkeypatch.setattr(cp, "_HYBRID_PICKER", picker)
+    monkeypatch.setattr(cp, "_hybrid_picker", lambda: picker)
     monkeypatch.setitem(cp._REGISTRY, "learned", marker)
     assert await cp.compact_with_async(source) == [{"role": "user", "content": "marker"}]
     assert records == [{"success": True}]
@@ -201,6 +201,9 @@ async def test_real_agent_stops_during_compaction_before_primary_request(tmp_pat
     from maverick.world_model import WorldModel
 
     llm = _LLM(delay=True)
+    # An in-run digest waits for its turn interval unless the history is over
+    # the byte ceiling; a tiny ceiling makes the first turn digest the history.
+    monkeypatch.setenv("MAVERICK_COMPACT_MAX_TOTAL_BYTES", "1")
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("compaction guard regression", "")
     budget = Budget(max_dollars=1, max_wall_seconds=30)

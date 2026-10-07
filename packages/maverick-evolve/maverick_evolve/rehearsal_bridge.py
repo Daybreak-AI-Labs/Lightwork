@@ -1,7 +1,7 @@
 """Bridge the kernel's dream-time rehearsal queue into the eval harness.
 
 ``maverick dream`` queues the biggest recurring failure patterns as practice
-cases (``~/.maverick/dreams/rehearsals.ndjson``). This bridge turns that
+cases in the current installation and workspace. This bridge turns that
 queue into :class:`~maverick_evolve.eval_harness.EvalCase` objects, so
 ``evolve_with_eval`` / ``evolve_continuous`` optimize agent configs against
 the operator's OWN recurring failures instead of (or alongside) a synthetic
@@ -41,7 +41,11 @@ def cases_from_rehearsals(
     more to fitness than one seen twice). Empty list when the queue is
     missing or empty — callers fall back to their synthetic case set.
     """
-    p = Path(path) if path is not None else DEFAULT_REHEARSALS
+    if path is None:
+        from maverick.dreaming import rehearsals_path
+        p = rehearsals_path()
+    else:
+        p = Path(path)
     if not p.exists():
         return []
     rows: list[dict] = []

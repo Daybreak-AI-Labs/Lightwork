@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.routing import Match
 
 PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
 TEMPLATES = PACKAGE / "templates"
@@ -74,12 +75,17 @@ class _AssetParser(HTMLParser):
         attrs: list[tuple[str, str | None]],
     ) -> None:
         attributes = dict(attrs)
-        candidate = attributes.get("href" if tag == "link" else "src")
-        if candidate and candidate.startswith("/static/"):
-            # Shell assets carry a content-hash query (W3-77); count by path.
-            candidate = candidate.split("?")[0]
-            self.assets.add(candidate)
-            self.asset_counts[candidate] += 1
+        candidates = [attributes.get("href" if tag == "link" else "src")]
+        # The Copilot's scripts are named on its button and loaded after the
+        # first paint (d2ae8bd8); they are still shell assets that must be
+        # mounted and served.
+        candidates += [attributes.get("data-copilot-src"), attributes.get("data-operations-src")]
+        for candidate in candidates:
+            if candidate and candidate.startswith("/static/"):
+                # Shell assets carry a content-hash query (W3-77); count by path.
+                candidate = candidate.split("?")[0]
+                self.assets.add(candidate)
+                self.asset_counts[candidate] += 1
 
 
 def _effective_routes(routes: Iterable[object]) -> list[object]:
@@ -141,13 +147,16 @@ def test_exposed_governance_pages_use_shared_shell_and_mounted_assets(
         'id="mv-copilot-egress"',
     ):
         assert shell_marker in response.text
-    assert "may be sent to that provider" in response.text
+    assert "may be sent to it. Do not include document text" in response.text  # the Copilot egress notice
 
     parser = _AssetParser()
     parser.feed(response.text)
     expected_assets = SHARED_ASSETS | page_assets
     assert expected_assets <= parser.assets
-    assert parser.assets <= registered
+    routes = _effective_routes(dashboard_client.app.routes)
+    for asset in parser.assets:
+        scope = {"type": "http", "method": "GET", "path": asset, "root_path": ""}
+        assert any(route.matches(scope)[0] == Match.FULL for route in routes), asset
     assert all(parser.asset_counts[asset] == 1 for asset in page_assets)
 
     for asset in parser.assets:
@@ -162,6 +171,8 @@ def test_exposed_governance_pages_use_shared_shell_and_mounted_assets(
             assert content_type == "image/jpeg", asset
         elif asset.endswith(".png"):
             assert content_type == "image/png", asset
+        elif asset.endswith(".woff2"):  # the shell's preloaded font
+            assert content_type == "font/woff2", asset
         else:  # pragma: no cover - update this contract when adding an asset kind
             pytest.fail(f"unasserted static asset type: {asset}")
 
@@ -210,7 +221,10 @@ def test_all_copilot_contexts_have_registered_pages_and_new_role_nav_links(
             expected_default = expected_floors[path]
         assert page["default"] == expected_default
         assert page.get("in_nav", True) is True
-        assert ui_visibility.customer_ready(page) is True
+        if path in ui_visibility.not_ready_paths():
+            assert ui_visibility.customer_ready(page) is False
+        else:
+            assert ui_visibility.customer_ready(page) is True
 
     def nav_paths(role: str) -> set[str]:
         return {link["href"] for group in ui_visibility.nav_groups(role) for link in group["links"]}
@@ -221,8 +235,10 @@ def test_all_copilot_contexts_have_registered_pages_and_new_role_nav_links(
         "/consent/global-opt-out",
     }
     admin_only_paths = {"/administration/document-vault"}
-    assert new_paths - audit_only_paths - admin_only_paths <= nav_paths("operator")
-    assert new_paths <= nav_paths("admin")
+    ready_paths = new_paths - ui_visibility.not_ready_paths()
+    assert ready_paths - audit_only_paths - admin_only_paths <= nav_paths("operator")
+    assert ready_paths <= nav_paths("admin")
+    assert ui_visibility.not_ready_paths().isdisjoint(nav_paths("admin"))
     read_only_workbenches = {
         "/ai-evidence-analysis",
         "/assess/evidence-autopopulation",
@@ -257,6 +273,6 @@ def test_authenticated_ui_uses_resolved_shared_token_names() -> None:
     }
     assert offenders == {}
 
-    for token in ("--warn", "--font-serif", "--font-mono"):
+    for token in ("--warn", "--font-sans", "--font-mono"):
         assert re.search(rf"{re.escape(token)}\s*:", shared_css), token
         assert any(f"var({token})" in source for source in sources.values()), token

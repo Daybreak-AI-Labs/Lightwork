@@ -2,8 +2,8 @@
 
 Buttons for the operator tasks that were only reachable from a terminal:
 the installation health check, the go-live readiness check, the settings-file
-check, the license summary, the background work queue (including resuming a
-paused schedule), at-rest encryption maintenance and live diagnostics. Every
+check, the license summary, the background work queue with native schedule
+review links, at-rest encryption maintenance and live diagnostics. Every
 route calls the same kernel functions the terminal commands call and answers in
 plain sentences; the exact technical rows are returned separately so the page
 can keep them inside a collapsed "Technical details" section.
@@ -21,9 +21,10 @@ recorded with the person who made them.
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -113,19 +114,20 @@ def _readiness() -> list[dict[str, Any]]:
     try:
         from maverick.crypto_at_rest import at_rest_enabled
         on = bool(at_rest_enabled())
-        rows.append(_row("encryption", "Stored data is encrypted", on,
-                         "Saved records are encrypted on disk." if on
-                         else "Saved records are not encrypted on disk. Whoever installed Lightwork can turn this on.",
+        rows.append(_row("encryption", "Protection for new saved records", on,
+                         "New supported records are encrypted on disk. Check Encryption to review older records and key custody." if on
+                         else "Protection for new supported records is off. Review Encryption in Maintenance before changing it.",
                          "See encryption", "#maintenance-encryption"))
     except Exception:  # noqa: BLE001
         rows.append(_row("encryption", "Stored data is encrypted", False,
                          "The encryption setting could not be read.", "See encryption", "#maintenance-encryption"))
     try:
-        from maverick.config import any_provider_configured
-        ok = bool(any_provider_configured())
-        rows.append(_row("provider", "AI provider connected", ok,
-                         "At least one AI provider key is saved." if ok else "No AI provider key is saved yet.",
-                         "Add a provider key", "/settings#settings-integrations"))
+        from .provider_readiness import workspace_readiness
+        readiness = workspace_readiness()
+        ok = readiness["verdict"] == "ready"
+        action = readiness["next_action"] or {"label": "Open providers", "href": "/providers"}
+        rows.append(_row("provider", "AI provider connected", ok, readiness["reason"],
+                         action["label"], action["href"]))
     except Exception:  # noqa: BLE001
         rows.append(_row("provider", "AI provider connected", False,
                          "The provider settings could not be read.", "Open provider keys",
@@ -142,7 +144,21 @@ async def readiness(request: Request) -> dict:
 
 # ---- installation health (maverick doctor) ---------------------------------
 
-def _doctor() -> dict[str, Any]:
+def installation_health_context(request: Request, expected: str | None = None) -> dict[str, str]:
+    from .draft_api import context_for
+    _admin(request)
+    context = context_for(request)
+    if expected is not None and expected != context:
+        raise HTTPException(409, "The signed-in account or workspace changed. Reload Help before running a check.")
+    return {"context": context}
+
+
+@router.get("/health-context")
+def health_context(request: Request) -> dict[str, str]:
+    return installation_health_context(request)
+
+
+def _doctor(*, before_check=None) -> dict[str, Any]:
     from maverick import health
     rows: list[dict[str, str]] = []
 
@@ -159,6 +175,8 @@ def _doctor() -> dict[str, Any]:
     # diagnose() prints through health._row; collect the rows instead. One run
     # at a time: the collector is swapped in for the duration of the check.
     with _DOCTOR_LOCK:
+        if before_check is not None:
+            before_check()
         original = health._row
         health._row = collect
         try:
@@ -182,10 +200,27 @@ def _doctor() -> dict[str, Any]:
             "technical": rows}
 
 
+def _health_worker(request: Request, context: str) -> dict[str, Any]:
+    def current() -> None:
+        with auth.fresh_configuration():
+            installation_health_context(request, context)
+    current()
+    return _doctor(before_check=current)
+
+
 @router.post("/health-check")
 async def health_check(request: Request) -> dict:
     _mutation(request)  # runs live checks (it may contact your AI provider)
-    return await run_in_threadpool(_doctor)
+    context = installation_health_context(request, request.headers.get("X-Lightwork-Health-Context"))["context"]
+    try:
+        result = await run_in_threadpool(_health_worker, request, context)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, "The health check could not finish. No settings were repaired or changed. Ask an installation administrator to review the saved safety settings.") from exc
+    with auth.fresh_configuration():
+        installation_health_context(request, context)
+    return result
 
 
 # ---- settings file check (maverick config-lint) ----------------------------
@@ -249,7 +284,7 @@ _FEATURE_NAMES = {
     "fleet_memory": "Shared fleet memory",
     "siem_export": "Security log export",
     "advanced_evolve": "Advanced self-improvement",
-    "custom_pack_factory": "Custom specialist teams",
+    "custom_pack_factory": "Custom agents",
     "multi_tenant": "Multiple workspaces",
 }
 
@@ -321,23 +356,12 @@ class ResumeIn(BaseModel):
 
 @router.post("/queue/{job_id}/resume")
 async def queue_resume(job_id: int, body: ResumeIn, request: Request) -> dict:
-    """Let a paused recurring schedule run again from its next occurrence.
-
-    The run that could not be confirmed stays stopped and is never repeated;
-    ``attempts`` is the value the page was showing, so a job that changed
-    since is refused rather than resumed blind."""
+    """Refuse the old shortcut; native recovery needs a complete exact review."""
     _mutation(request)
-    from maverick.job_queue import JobQueue
-
-    def _do() -> int:
-        return JobQueue().reconcile_recurrence(
-            job_id, expected_attempts=body.attempts, rearm=True, confirm=True)
-    try:
-        next_id = await run_in_threadpool(_do)
-    except ValueError as exc:
-        raise HTTPException(409, "This schedule changed since the list was loaded. Refresh and try again.") from exc
-    await run_in_threadpool(_record, request, "queue_resume", job_id=job_id, next_job_id=next_id)
-    return {"resumed": True, "next": next_id}
+    raise HTTPException(409, {
+        "message": "Open this schedule in Automations to review what happened and choose its next step.",
+        "href": "/automations?recover_schedule=" + str(job_id),
+    })
 
 
 # ---- encryption (maverick encryption migrate / rotate) ---------------------
@@ -386,39 +410,59 @@ def _encryption() -> dict[str, Any]:
 @router.get("/encryption")
 async def encryption_status(request: Request) -> dict:
     _admin(request)
-    return await run_in_threadpool(_encryption)
+    from .encryption_maintenance import current
+    state = await run_in_threadpool(current, request)
+    state.pop("key_revision", None)
+    return JSONResponse(state, headers={"Cache-Control": "private, no-store"})
 
 
-@router.post("/encryption/protect-older")
-async def encryption_protect_older(request: Request) -> dict:
+class EncryptionReview(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: Literal["protect", "rotate"]
+
+
+class EncryptionChange(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    review: str = Field(min_length=1, max_length=8192)
+    operation: str = Field(pattern=r"^[a-f0-9]{32}$")
+    confirm: bool
+
+
+@router.post("/encryption/review")
+async def encryption_review(body: EncryptionReview, request: Request):
     _mutation(request)
-    from maverick.crypto_at_rest import EncryptionUnavailable
-    from maverick.encryption_migrate import migrate_world_db
-
-    db = await run_in_threadpool(_world_db)
-    if db is None:
-        raise HTTPException(409, _SHARED_DATABASE_NOTE + " Nothing was changed here.")
-
-    def _do() -> int:
-        return sum(migrate_world_db(db, dry_run=False, backup=False).values()) if db.exists() else 0
-    try:
-        count = await run_in_threadpool(_do)
-    except EncryptionUnavailable as exc:
-        raise HTTPException(503, "Encryption is not set up on this installation, so nothing was changed.") from exc
-    await run_in_threadpool(_record, request, "encryption_protect_older", records=count)
-    return {"protected": count}
+    from .encryption_maintenance import prepare
+    return JSONResponse(await run_in_threadpool(prepare, request, body.action),
+                        headers={"Cache-Control": "private, no-store"})
 
 
-@router.post("/encryption/new-key")
-async def encryption_new_key(request: Request) -> dict:
+@router.get("/encryption/actions/{operation}")
+async def encryption_action_receipt(operation: str, request: Request):
+    _admin(request)
+    from .encryption_maintenance import receipt
+    return JSONResponse({"receipt": await run_in_threadpool(receipt, request, operation)},
+                        headers={"Cache-Control": "private, no-store"})
+
+
+async def _encryption_change(request, body, action):
     _mutation(request)
-    from maverick.crypto_at_rest import EncryptionUnavailable, rotate_at_rest_key
-    try:
-        await run_in_threadpool(rotate_at_rest_key)
-    except EncryptionUnavailable as exc:
-        raise HTTPException(503, "Encryption is not set up on this installation, so no new key was made.") from exc
-    await run_in_threadpool(_record, request, "encryption_new_key")
-    return {"rotated": True}
+    from .draft_api import context_for
+    from .encryption_maintenance import execute
+    if body.confirm is not True or body.context != context_for(request):
+        raise HTTPException(409, "Review the action in your current account and workspace before confirming it.")
+    return JSONResponse(await run_in_threadpool(execute, request, action, body.review, body.operation),
+                        headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/encryption/protect-older", dependencies=[Depends(_mutation)])
+async def encryption_protect_older(body: EncryptionChange, request: Request) -> dict:
+    return await _encryption_change(request, body, "protect")
+
+
+@router.post("/encryption/new-key", dependencies=[Depends(_mutation)])
+async def encryption_new_key(body: EncryptionChange, request: Request) -> dict:
+    return await _encryption_change(request, body, "rotate")
 
 
 # ---- live diagnostics (maverick diag circuits / ratelimits) ----------------
@@ -426,20 +470,28 @@ async def encryption_new_key(request: Request) -> dict:
 def _diagnostics() -> dict[str, Any]:
     from maverick.circuit_breaker import snapshot
     from maverick.rate_limit_predictor import report
+
+    from .plain_labels import provider_name
+
     paused = [s for s in snapshot() if s.get("state") in {"open", "half_open", "half-open"}]
+    groups: dict[tuple[str, str], int] = {}
+    for entry in paused:
+        key = str(entry.get("key") or "").split(":", 2)
+        name = provider_name(key[1]) + " connection" if len(key) > 1 and key[0] == "llm" else "Connected service"
+        state = "Paused after repeated errors" if entry.get("state") == "open" else "A new request may check this connection"
+        groups[(name, state)] = groups.get((name, state), 0) + 1
     return {
-        "paused_services": [{"name": str(s.get("key") or "").split(":")[0].capitalize() or "A service",
-                             "state": "Paused after repeated errors" if s.get("state") == "open"
-                             else "Trying again"} for s in paused],
-        "recent_calls": [{"provider": str(r.get("provider") or "").capitalize(),
-                          "calls": int(r.get("recorded") or 0)} for r in report()],
+        "paused_services": [{"name": name + (f" ({count} recorded connections)" if count > 1 else ""),
+                             "state": state} for (name, state), count in sorted(groups.items())[:64]],
+        "recent_calls": [{"provider": provider_name(str(r.get("provider") or "")),
+                          "calls": int(r.get("recorded") or 0)} for r in report()[:64]],
     }
 
 
 @router.get("/diagnostics")
 async def diagnostics(request: Request) -> dict:
     _admin(request)
-    return await run_in_threadpool(_diagnostics)
+    return JSONResponse(await run_in_threadpool(_diagnostics), headers={"Cache-Control": "private, no-store"})
 
 
 # ---- one-button installation checks -----------------------------------------
@@ -589,7 +641,9 @@ def _client_status() -> dict[str, Any]:
     bound = bool(st.get("bound"))
     if bound:
         summary = (f"This installation holds data for one organisation: {st.get('client_id')}. "
-                   "You can download all of it, or erase all of it when they leave.")
+                   "You can request a local data export here. To remove its local folder, "
+                   "Lightwork must be stopped first. Other workspaces, connected services, "
+                   "and saved copies need separate review.")
     elif st.get("enforced"):
         summary = ("This installation must be set up for one organisation, but none is set. "
                    "Whoever installed Lightwork needs to fix this.")
@@ -692,6 +746,53 @@ async def client_erase_preview(request: Request, keep_activity_record: bool = Tr
     }
 
 
+@router.get("/client/erase/receipt/{receipt_id}")
+async def client_erase_receipt(receipt_id: str, request: Request) -> JSONResponse:
+    """Download the surviving signed record without reopening erased client data."""
+    import json
+    import re
+
+    from maverick.audit import verify_chain
+    from maverick.paths import maverick_home
+
+    _admin(request)
+    if not re.fullmatch(r"[0-9a-f]{32}", receipt_id):
+        raise HTTPException(404, "That activity receipt was not found.")
+    base = maverick_home() / "client-erasure"
+    directory = base / receipt_id
+    receipt = directory / "events.ndjson"
+    key_file = directory / "verification-key.hex"
+    try:
+        if (directory.is_symlink() or directory.resolve().parent != base.resolve()
+                or receipt.is_symlink() or key_file.is_symlink()
+                or not receipt.is_file() or not key_file.is_file()):
+            raise HTTPException(404, "That activity receipt was not found.")
+        if receipt.stat().st_size > 64_000 or key_file.stat().st_size > 256:
+            raise ValueError("receipt is too large")
+        with key_file.open("rb") as key_stream, receipt.open("rb") as receipt_stream:
+            key_bytes = key_stream.read(257)
+            original_bytes = receipt_stream.read(64_001)
+        if len(key_bytes) > 256 or len(original_bytes) > 64_000:
+            raise ValueError("receipt is too large")
+        public_key = key_bytes.decode("utf-8").strip()
+        original = original_bytes.decode("utf-8")
+        with receipt.open("rb") as receipt_stream:
+            if verify_chain(receipt, public_key) or original_bytes != receipt_stream.read(64_001):
+                raise ValueError("receipt verification failed")
+        status = json.loads(original.splitlines()[-1]).get("status", "requested")
+    except HTTPException:
+        raise
+    except (OSError, RuntimeError, UnicodeError, ValueError, IndexError) as exc:
+        raise HTTPException(503, "The activity receipt could not be verified. Ask an administrator to check it.") from exc
+    return JSONResponse(
+        {"receipt_id": receipt_id, "status": status, "events_ndjson": original,
+         "verification_key": public_key,
+         "verification_scope": "Signature valid against the included key; keep an independent copy of that key to detect replacement."},
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+                 "Content-Disposition": f'attachment; filename="lightwork-activity-receipt-{receipt_id}.json"'},
+    )
+
+
 class EraseIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     organisation: str = Field(min_length=1, max_length=64)
@@ -709,30 +810,22 @@ async def client_erase(body: EraseIn, request: Request) -> dict:
     _mutation(request)
     if body.confirm is not True:
         raise HTTPException(409, "Confirm the erase to continue. Nothing was erased.")
-    from maverick.client import ClientBindingError, client_id, erase_client
+    from maverick.client import client_id
     current = await run_in_threadpool(client_id)
     if not current:
         raise HTTPException(409, "This installation is not set up for one organisation, so nothing was erased.")
     if current != body.organisation:
         raise HTTPException(409, "The name typed does not match this organisation, or it changed since the page "
                                  "was loaded. Nothing was erased.")
-    # Recorded first: without the activity record kept, the erase removes the
-    # record it would otherwise land in.
-    try:
-        await run_in_threadpool(_record, request, "client_erase_requested", organisation=current,
-                                keep_activity_record=body.keep_activity_record)
-    except HTTPException as exc:
-        raise HTTPException(503, "The erase could not be added to the activity record, "
-                                 "so nothing was erased.") from exc
-    try:
-        result = await run_in_threadpool(lambda: erase_client(keep_audit=body.keep_activity_record))
-    except ClientBindingError as exc:
-        raise HTTPException(409, "This installation is not set up for one organisation, so nothing was erased.") from exc
-    await run_in_threadpool(_record, request, "client_erase", organisation=current,
-                            removed=int(result.get("removed") or 0),
-                            keep_activity_record=body.keep_activity_record)
-    return {"erased": True, "files_removed": int(result.get("removed") or 0),
-            "kept_activity_record": bool(result.get("kept_audit"))}
+    # This request runs inside the live dashboard, which holds tenant database
+    # handles and may have workers writing the same root. On Windows a file can
+    # survive deletion while siblings are removed; other platforms can recreate
+    # deleted files before the server stops. Never begin a partial live erase.
+    raise HTTPException(
+        409,
+        "Lightwork must be stopped before local data can be erased safely. "
+        "This running page cannot do that yet. Nothing was erased.",
+    )
 
 
 # ---- tidy up old records (maverick gc) --------------------------------------

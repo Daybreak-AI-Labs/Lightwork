@@ -11,21 +11,14 @@ from maverick_dashboard import compliance_scope_actions_api as api
 
 @pytest.fixture()
 def page_client() -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
-    templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
+    templates = Jinja2Templates(
+        directory=str(template_dir),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
     app.include_router(api.router, prefix="/api/v1")
 

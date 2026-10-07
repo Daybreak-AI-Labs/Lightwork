@@ -22,8 +22,11 @@ from __future__ import annotations
 import logging
 import os
 
+from ..run_outcome import GoalCancelled
 from . import KEEP_RECENT_TURNS, MAX_TOOL_OUTPUT_BYTES, compact_messages
 from .requests import STOP_ERRORS
+
+STOP_ERRORS = (*STOP_ERRORS, GoalCancelled)
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +62,7 @@ def compact_with_strategy(
     strategy: str | None = None,
     budget=None,
     scope: str | None = None,
+    run_state=None,
 ) -> list[dict]:
     """Compact ``messages`` with the configured (or given) strategy.
 
@@ -69,30 +73,39 @@ def compact_with_strategy(
     cursor. Any strategy error falls back to the default path.
     """
     name = configured_strategy() if strategy is None else strategy
+    if name == "learned" and run_state is not None:
+        keep_recent, max_tool_bytes = run_state.keep_recent, run_state.max_tool_bytes
+    limits = {"max_total_bytes": run_state.max_total_bytes} if name == "learned" and run_state is not None else {}
     if name not in STRATEGIES:
         return compact_messages(
             messages, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
         )
     try:
         result = _invoke(name, messages, llm=llm, conversation_id=conversation_id,
-                         keep_recent=keep_recent, budget=budget, scope=scope)
-        return compact_messages(result, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes)
+                         keep_recent=keep_recent, budget=budget, scope=scope, run_state=run_state)
+        result = compact_messages(result, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes, **limits)
+        if name == "learned" and run_state is not None:
+            run_state.remember(result)
+        return result
     except STOP_ERRORS:
         raise
     except Exception as e:
         log.warning("compaction strategy %r failed (%s); using default path", name, e)
         return compact_messages(
             messages, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
+            **limits,
         )
 
 
-def _invoke(name, messages, *, llm, conversation_id, keep_recent, budget, scope,
+def _invoke(name, messages, *, llm, conversation_id, keep_recent, budget, scope, run_state=None,
             asynchronous=False):
     """Resolve the same implementation and arguments for both I/O drivers."""
     kwargs = {"keep_recent": keep_recent}
     if name == "learned":
         from .learned import LearnedSummarizer
-        obj = LearnedSummarizer(llm=llm, budget=budget, scope=scope)
+        obj = (run_state.resolve(messages, llm=llm, budget=budget, scope=scope,
+                                 conversation_id=conversation_id) if run_state is not None
+               else LearnedSummarizer(llm=llm, budget=budget, scope=scope))
         method = "compact"
     else:
         if name == "multimodal":
@@ -115,21 +128,28 @@ def _invoke(name, messages, *, llm, conversation_id, keep_recent, budget, scope,
 async def compact_with_strategy_async(
     messages: list[dict], *, llm=None, conversation_id: str | None = None,
     keep_recent: int = KEEP_RECENT_TURNS, max_tool_bytes: int = MAX_TOOL_OUTPUT_BYTES,
-    strategy: str | None = None, budget=None, scope: str | None = None,
+    strategy: str | None = None, budget=None, scope: str | None = None, run_state=None,
 ) -> list[dict]:
     """Async strategy dispatch; stops escape and ordinary failures use heuristic."""
     name = configured_strategy() if strategy is None else strategy
+    if name == "learned" and run_state is not None:
+        keep_recent, max_tool_bytes = run_state.keep_recent, run_state.max_tool_bytes
+    limits = {"max_total_bytes": run_state.max_total_bytes} if name == "learned" and run_state is not None else {}
     if name in STRATEGIES:
         try:
             result = await _invoke(
                 name, messages, llm=llm, conversation_id=conversation_id,
-                keep_recent=keep_recent, budget=budget, scope=scope, asynchronous=True)
-            return compact_messages(result, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes)
+                keep_recent=keep_recent, budget=budget, scope=scope,
+                run_state=run_state, asynchronous=True)
+            result = compact_messages(result, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes, **limits)
+            if name == "learned" and run_state is not None:
+                run_state.remember(result)
+            return result
         except STOP_ERRORS:
             raise
         except Exception as exc:
             log.warning("compaction strategy %r failed (%s); using default path", name, exc)
-    return compact_messages(messages, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes)
+    return compact_messages(messages, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes, **limits)
 
 
 __all__ = ["STRATEGIES", "configured_strategy", "compact_with_strategy",

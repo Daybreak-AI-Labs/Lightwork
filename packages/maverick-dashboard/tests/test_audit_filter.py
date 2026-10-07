@@ -18,6 +18,8 @@ def _tmp_audit(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     log = AuditLog(tmp_path / "audit")
     monkeypatch.setattr(audit, "default_audit_log", lambda: log)
+    from maverick.audit import reader
+    monkeypatch.setattr(reader, "resolve_audit_dir", lambda tenant: log.audit_dir)
     return log
 
 
@@ -41,7 +43,8 @@ def test_audit_page_lists_kinds_and_filters(monkeypatch, tmp_path):
 
     # Filtered to shield_block: the tool_call events are gone.
     filtered = client.get("/audit?kind=shield_block").text
-    assert "jailbreak attempt" in filtered
+    assert "Stopped by the safety filter" in filtered
+    assert "jailbreak attempt" not in filtered
     assert "input_summary" not in filtered  # tool_call rows filtered out
 
 
@@ -52,6 +55,46 @@ def test_audit_unknown_kind_yields_no_rows(monkeypatch, tmp_path):
     r = _client().get("/audit?kind=does_not_exist")
     assert r.status_code == 200
     assert "input_summary" not in r.text  # no matching events
+
+
+def test_setting_filter_reads_deployment_chain_only_for_global_admin(monkeypatch, tmp_path):
+    import maverick.audit as audit
+    from maverick.audit import reader
+    from maverick.audit.writer import AuditLog
+    from maverick_dashboard import app as dashboard
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    local = AuditLog(tmp_path / "workspace-audit")
+    deployment = AuditLog(tmp_path / "deployment-audit")
+    monkeypatch.setattr(audit, "default_audit_log", lambda: local)
+    monkeypatch.setattr(audit, "global_audit_log", lambda: deployment)
+    monkeypatch.setattr(reader, "resolve_audit_dir", lambda _tenant: local.audit_dir)
+    allowed = {"global": True}
+    monkeypatch.setattr(dashboard, "has_global_permission", lambda _request, _permission: allowed["global"])
+    _ev(local, "setting_changed", actor="user:workspace", section="workspace", key="workspaceonlykey", old=False, new=True)
+    _ev(deployment, "setting_changed", actor="user:administrator", section="features", key="deploymentonlykey",
+        old={"private": "SECRET-BEFORE"}, new={"private": "SECRET-AFTER"}, phase="completed")
+
+    client = _client()
+    global_view = client.get("/audit?kind=setting_changed")
+    assert global_view.status_code == 200, global_view.text
+    assert "matching deployment events" in global_view.text
+    assert 'title="Recorded in the deployment-wide log' in global_view.text
+    assert "deploymentonlykey" in global_view.text and "Completed" in global_view.text
+    assert "workspaceonlykey" not in global_view.text
+    assert "SECRET-BEFORE" not in global_view.text and "SECRET-AFTER" not in global_view.text
+    assert "values before and after" in global_view.text  # metadata boundary is explicit
+
+    allowed["global"] = False
+    workspace_view = client.get("/audit?kind=setting_changed")
+    assert workspace_view.status_code == 200, workspace_view.text
+    assert "matching deployment events" not in workspace_view.text
+    assert 'title="Recorded in the deployment-wide log' not in workspace_view.text
+    assert "deployment-wide setting entries" not in workspace_view.text
+    assert "workspaceonlykey" in workspace_view.text
+    assert "deploymentonlykey" not in workspace_view.text
 
 
 def test_incomplete_tail_is_visible_in_api_and_page(monkeypatch, tmp_path):

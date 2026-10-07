@@ -298,3 +298,29 @@ async def test_resumed_orchestrator_reads_history_and_appends_to_same_chat(tmp_p
         assert [(t.role, t.goal_id) for t in turns] == [
             ("user", root), ("assistant", root), ("user", child), ("assistant", child)]
         assert "Updated assistant report" in turns[-1].content
+
+
+def test_history_pages_relative_to_selected_turn_without_future_displacement(worlds):
+    _, world = worlds
+    root = _create(world)["goal_id"]
+    world.set_goal_status(root, "done")
+    conversation = ChatThreads(world).binding(root).conversation_id
+    selected = None
+    for index in range(220):
+        goal = _create(world, root=root, token=f"history-{index}")["goal_id"]
+        world.append_turn(conversation, "assistant", f"Answer {index}", goal_id=goal)
+        world.set_goal_status(goal, "done")
+        if index == 8:
+            selected = goal
+    early, more = ChatThreads(world).history(selected, limit=50)
+    assert early and not more
+    assert all(turn.goal_id < selected for turn in early)
+    cursor, collected = None, []
+    while True:
+        page, more = ChatThreads(world).history(goal, before_id=cursor, limit=50)
+        collected.extend(turn.id for turn in page)
+        if not more:
+            break
+        cursor = page[0].id
+    assert len(collected) > 200
+    assert len(collected) == len(set(collected))

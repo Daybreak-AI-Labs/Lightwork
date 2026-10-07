@@ -17,8 +17,10 @@ Restore scans tar streams without ``getmembers``/``extractall``, enforces hard
 member/path/type/per-file/expanded-size limits, writes only into a private
 staging tree, and authenticates/verifies the complete payload before touching
 live state. Application is journaled: originals plus SQLite sidecars are saved
-first, and any failure rolls the entire file set back. An interrupted restore
-is recovered from its private journal before the next restore begins.
+first, and a failure rolls ordinary payloads back. Tenant namespace claims and
+deletion tombstones remain append-only even after a failed publication: releasing
+that history could reauthorize old identities. An interrupted restore is recovered
+from its private journal before the next restore begins.
 """
 from __future__ import annotations
 
@@ -529,6 +531,18 @@ def _manifest_files(
         expected[rel] = (digest, size)
     if total > _expanded_limit():
         raise BackupError("manifest declares too much expanded data")
+    if "withheld_key_files" in manifest:
+        withheld = manifest["withheld_key_files"]
+        if not isinstance(withheld, list) or len(withheld) > MAX_ARCHIVE_MEMBERS:
+            raise BackupError("backup excluded-key list is missing or oversized")
+        seen = set()
+        for name in withheld:
+            relative = _safe_relative_path(name, label="excluded key path")
+            normalized = relative.as_posix()
+            folded = unicodedata.normalize("NFC", normalized).casefold()
+            if not _is_key_material(relative) or folded in seen or folded in portable:
+                raise BackupError("backup excluded-key list conflicts with its payload")
+            seen.add(folded)
     return expected
 
 
@@ -812,21 +826,60 @@ def _validate_restore_schemas(stage: Path, manifest: dict[str, Any]) -> None:
 # and the audit signing keys (all ``*.key``). A wrapped DEK (keys/dek.wrapped)
 # is ciphertext under the primary key and public keys are public; both stay in
 # the archive because recovery of the encrypted payload needs them.
+#
+# The same key folders sit inside every workspace folder (``tenants/<id>/``):
+# each workspace's audit signing key, and a client deployment's at-rest key and
+# keyring. A whole-home archive withholds those too -- matching the archive root
+# alone left them bundled next to the data they unlock.
 _KEY_MATERIAL_ROOTS = (("keys",), ("audit", "keys"))
 
 
-def _is_key_material(relative: Path) -> bool:
+def _key_material_scope(relative: Path) -> tuple[str, ...] | None:
+    """The folder a raw key file belongs to: ``()`` for the data root's own keys,
+    ``("tenants", <id>)`` for one workspace's; ``None`` when it is not key material."""
     parts = relative.parts
-    return relative.suffix == ".key" and any(parts[: len(root)] == root for root in _KEY_MATERIAL_ROOTS)
+    scope: tuple[str, ...] = ()
+    if len(parts) > 2 and parts[0] == "tenants":
+        scope, parts = parts[:2], parts[2:]
+    if relative.suffix == ".key" and any(parts[: len(root)] == root for root in _KEY_MATERIAL_ROOTS):
+        return scope
+    return None
 
 
-def _excluded_from_snapshot(relative: Path, *, include_keys: bool) -> bool:
+def _is_key_material(relative: Path) -> bool:
+    return _key_material_scope(relative) is not None
+
+
+def _keys_included(relative: Path, include_keys: bool | frozenset) -> bool:
+    """Is the raw key file at ``relative`` part of the set ``include_keys`` names?
+    ``True`` takes every key; a set of scopes (see :func:`_archive_includes_keys`)
+    only the keys of those folders."""
+    if include_keys is True:
+        return True
+    return bool(include_keys) and _key_material_scope(relative) in include_keys
+
+
+def withheld_key_files() -> list[str]:
+    """Raw key files a default (keys-excluded) backup of the current data root
+    leaves out, relative to that root: the copies the operator must escrow
+    separately. ``maverick backup create`` prints this list."""
+    root = _client_root()
+    if not root.is_dir():
+        return []
+    return sorted(
+        relative.as_posix()
+        for relative in (path.relative_to(root) for path in root.rglob("*.key"))
+        if _is_key_material(relative) and (root / relative).is_file()
+    )
+
+
+def _excluded_from_snapshot(relative: Path, *, include_keys: bool | frozenset) -> bool:
     return (
         not relative.parts
         or relative.parts[0] in {"backups", _RESTORE_TX_ROOT}
         or relative.name == f"{_RESTORE_LOCK_TARGET}.lock"
         or relative.name.endswith(_SKIP_SUFFIXES)
-        or (not include_keys and _is_key_material(relative))
+        or (_is_key_material(relative) and not _keys_included(relative, include_keys))
         or _is_reserved_restore_path(PurePosixPath(relative.as_posix()))
     )
 
@@ -846,7 +899,8 @@ def _is_sqlite_file(path: Path) -> bool:
         raise BackupError("could not inspect a possible SQLite database") from exc
 
 
-def _stage(root: Path, stage: Path, *, include_keys: bool) -> dict[str, dict[str, Any]]:
+def _stage(root: Path, stage: Path, *, include_keys: bool | frozenset,
+           withheld_keys: list[str] | None = None) -> dict[str, dict[str, Any]]:
     root, stage = _filesystem_path(root), _filesystem_path(stage)
     files: dict[str, dict[str, Any]] = {}
     total = 0
@@ -854,6 +908,15 @@ def _stage(root: Path, stage: Path, *, include_keys: bool) -> dict[str, dict[str
     for source in sorted(root.rglob("*")):
         relative = source.relative_to(root)
         if _excluded_from_snapshot(relative, include_keys=include_keys):
+            if withheld_keys is not None and _is_key_material(relative) and not _keys_included(relative, include_keys):
+                try:
+                    info = source.lstat()
+                except OSError as exc:
+                    raise BackupError("An excluded key file could not be inspected.") from exc
+                if not stat.S_ISDIR(info.st_mode):
+                    withheld_keys.append(_safe_relative_path(relative.as_posix(), label="excluded key path").as_posix())
+                    if len(withheld_keys) > MAX_ARCHIVE_MEMBERS:
+                        raise BackupError("The excluded-key list exceeds the backup limit.")
             continue
         try:
             info = source.lstat()
@@ -925,7 +988,8 @@ def create_backup(
     Existing destination paths are refused rather than overwritten.
 
     ``include_keys`` defaults to ``False``: the at-rest encryption key (and
-    rotation keyring) and the audit signing key are excluded from the
+    rotation keyring) and the audit signing key, those of the data root and of
+    every workspace folder under it, are excluded from the
     archive, matching docs/encryption.md's escrow guidance to keep key
     material off the same copy as the data it decrypts. Pass
     ``include_keys=True`` only when the operator has explicitly chosen to
@@ -960,7 +1024,8 @@ def create_backup(
     with _temporary_directory(prefix="mvk-backup-") as temporary:
         temp_root = file_lock.ensure_private_directory(temporary)
         stage = file_lock.ensure_private_directory(temp_root / "data")
-        files = _stage(root, stage, include_keys=include_keys)
+        withheld_keys: list[str] = []
+        files = _stage(root, stage, include_keys=include_keys, withheld_keys=withheld_keys)
         schema_version = _world_schema_version(stage / "world.db")
         if not files:
             raise BackupError(f"no data files to back up at {root}")
@@ -970,12 +1035,16 @@ def create_backup(
             "created_at": time.time(),
             "world_schema_version": schema_version,
             "files": files,
+            "withheld_key_files": withheld_keys,
             **({"recovery": recovery_metadata} if recovery_metadata is not None else {}),
         }, key)
+        encoded_manifest = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False)
+        if len(encoded_manifest.encode("utf-8")) > MAX_MANIFEST_BYTES:
+            raise BackupError("The complete backup manifest exceeds its supported size.")
         manifest_path = temp_root / MANIFEST
         file_lock.atomic_create_text(
             manifest_path,
-            json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False),
+            encoded_manifest,
         )
 
         staged_archive = _unique_private_empty(destination.parent, destination.name)
@@ -1207,11 +1276,66 @@ def _validate_journal_entries(document: dict[str, Any]) -> list[dict[str, Any]]:
     return validated
 
 
+def _tenant_lifecycle_barrier(relative: str) -> bool:
+    from .recovery_authorities import TENANT_LIFECYCLE_AUTHORITY_POLICIES, authority_policy
+
+    return authority_policy(relative, is_sqlite=False) in TENANT_LIFECYCLE_AUTHORITY_POLICIES.values()
+
+
+def _lifecycle_conflict() -> BackupError:
+    return BackupError(
+        "Restore would erase or rewrite tenant lifecycle history. Current namespace "
+        "reservations and workspace deletions must be retained; reconcile this "
+        "snapshot in a separate isolated installation. Force cannot bypass this guard."
+    )
+
+
+def _guard_lifecycle_replacement(root: Path, stage: Path, targets: set[str]) -> None:
+    """Refuse an older barrier set before publishing any ordinary payload."""
+    for relative in targets:
+        if not _tenant_lifecycle_barrier(relative):
+            continue
+        destination = _live_path(root, relative)
+        if not os.path.lexists(destination):
+            continue
+        _validate_optional_live_file(destination)
+        source = stage.joinpath(*PurePosixPath(relative).parts)
+        if not source.is_file() or _sha256(destination) != _sha256(source):
+            raise _lifecycle_conflict()
+
+
+def _publish_lifecycle_barrier(source: Path, destination: Path) -> None:
+    """Publish once; a concurrently created claim or retirement always wins."""
+    if not os.path.lexists(destination):
+        # Unlike ordinary restore files, identity history must never use replace.
+        # Publish fully written private bytes atomically without replacing a
+        # concurrent claimant; readers cannot observe a partial JSON record.
+        try:
+            with os.fdopen(file_lock.open_private_read(source), "rb") as reader:
+                file_lock.atomic_create_bytes_chunks(
+                    destination, iter(lambda: reader.read(_COPY_CHUNK), b""),
+                )
+            return
+        except FileExistsError:
+            pass
+    _validate_optional_live_file(destination)
+    if not source.is_file() or _sha256(destination) != _sha256(source):
+        raise _lifecycle_conflict()
+
+
 def _rollback(root: Path, tx: Path, document: dict[str, Any]) -> None:
     entries = _validate_journal_entries(document)
     for entry in reversed(entries):
         rel = entry["rel"]
         destination = _live_path(root, rel)
+        if _tenant_lifecycle_barrier(rel):
+            # This applies to journals written by older versions as well. A
+            # failed restore cannot release a name or undo a later retirement.
+            if os.path.lexists(destination):
+                _validate_optional_live_file(destination)
+            elif entry["existed"]:
+                _publish_lifecycle_barrier(tx / "originals" / Path(*PurePosixPath(rel).parts), destination)
+            continue
         if _is_sqlite_file(destination) or entry["sidecars"]:
             for suffix in _DB_SIDECARS:
                 sidecar = Path(str(destination) + suffix)
@@ -1263,8 +1387,16 @@ def _recover_transactions(root: Path, *, allow_unsigned: bool) -> None:
         tx_root.rmdir()
 
 
-def _archive_includes_keys(expected: dict) -> bool:
-    return any(_is_key_material(Path(*PurePosixPath(name).parts)) for name in expected)
+def _archive_includes_keys(expected: dict) -> frozenset:
+    """The key folders (see :func:`_key_material_scope`) this archive carries raw
+    keys for; empty (falsy) when it carries none.
+
+    Per folder, not all-or-nothing: an archive made before workspace keys were
+    withheld holds them but no key of the data root. Reading that as "this
+    archive includes keys" would make the live root keys it lacks replacement
+    targets and delete them."""
+    scopes = (_key_material_scope(Path(*PurePosixPath(name).parts)) for name in expected)
+    return frozenset(scope for scope in scopes if scope is not None)
 
 
 def _replacement_targets(root: Path, expected: dict) -> set[str]:
@@ -1340,6 +1472,7 @@ def _apply_transaction(
     committed = False
     try:
         targets = _replacement_targets(root, expected) if replace_existing else set(expected)
+        _guard_lifecycle_replacement(root, stage, targets)
         flow_markers = _flow_index_restore_markers(targets)
         targets.update(flow_markers)
         entries = [_capture_original(root, tx, rel) for rel in sorted(targets)]
@@ -1352,6 +1485,11 @@ def _apply_transaction(
             rel = entry["rel"]
             source = stage / Path(*PurePosixPath(rel).parts)
             destination = _live_path(root, rel)
+            if _tenant_lifecycle_barrier(rel):
+                # Recheck at publication: a new claim/deletion can appear after
+                # the initial inventory. No replace or unlink is allowed here.
+                _publish_lifecycle_barrier(source, destination)
+                continue
             if _is_sqlite_file(destination) or _is_sqlite_file(source):
                 for suffix in _DB_SIDECARS:
                     sidecar = Path(str(destination) + suffix)
@@ -1653,4 +1791,5 @@ __all__ = [
     "restore_backup",
     "read_manifest",
     "data_backups_dir",
+    "withheld_key_files",
 ]

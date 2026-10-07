@@ -15,9 +15,11 @@ from starlette.concurrency import run_in_threadpool
 from . import action_center
 from .auth import (
     caller_principal,
+    caller_suites,
+    domain_suites_allowed,
     goal_owner_filter,
+    has_permission,
     require_permission,
-    scope_to_suites,
     suite_allowed,
 )
 from .draft_api import context_for
@@ -93,6 +95,38 @@ def _vendor_reconciliation_rows(request) -> dict:
     return {"items": rows, "complete": complete}
 
 
+def _evidence_source_approvals(request) -> dict:
+    """Current managed setups that this administrator can independently review."""
+    from maverick import trc_continuous_evidence as evidence
+
+    from . import auth
+    from .trc_setup_api import _source_access, _source_store, managed_definition_guard
+
+    with auth.fresh_configuration():
+        if (not auth.has_global_permission(request, "admin")
+                or not auth.suite_allowed(request, "it_grc") or not evidence.enabled()):
+            return {"items": [], "coverage": "disabled", "limit": 64}
+        _evidence, store, _owner, context = _source_store(request)
+        definitions = store.list_source_definitions(limit=65)
+        actor = store._actor_sha256()
+        items = []
+        for definition in definitions[:64]:
+            if definition.state != "pending" or definition.created_by_sha256 == actor:
+                continue
+            guard = managed_definition_guard(request, definition)
+            if guard is not None:
+                guard()
+            items.append({"id": definition.definition_id,
+                          "title": definition.source_manifest["label"],
+                          "updated_at": definition.created_at,
+                          "version": [definition.version, definition.integrity_sha256]})
+    with auth.fresh_configuration():
+        if _source_access(request)[3] != context:
+            raise HTTPException(409, "Your access or workspace changed. Refresh Action Center.")
+    return {"items": items, "coverage": "partial" if len(definitions) > 64 else "current",
+            "limit": 64}
+
+
 def _model(request):
     from maverick.assessment import custom_template_records, list_saved
 
@@ -105,7 +139,12 @@ def _model(request):
     )
 
     principal = caller_principal(request)
-    specs = scope_to_suites(request, _deliverable_specs(), suite_of=lambda spec: spec.get("suite"))
+    def specs():
+        allowed = caller_suites(request)
+        return [
+            spec for spec in _deliverable_specs()
+            if allowed is None or set(spec["suites"]) <= allowed
+        ]
     mapping = {kind: suite for suite, kinds in (("finance", FINANCE_ASSESSMENT_TYPES),
         ("privacy", PRIVACY_ASSESSMENT_TYPES), ("security", SECURITY_ASSESSMENT_TYPES)) for kind in kinds}
     try:
@@ -125,9 +164,27 @@ def _model(request):
     if config.get_features().get("vendor_onboarding") is True:
         def vendor_reconciliations():
             return _vendor_reconciliation_rows(request)
+    from .auth import can_access_goal
+    from .content_access import can_read_approval
+    from .flow_approval_inbox import pending_for_request
+    def connection_attention():
+        from .connection_dependencies import connection_attention as owned_connections
+        return owned_connections(request)
+    def governance_reviews():
+        from .action_center_governance_sources import collect
+        return collect(request)
     return action_center.collect(_world(), principal=principal, owner=goal_owner_filter(request),
         specs=specs, assessments=list_saved, assessment_allowed=allowed,
-        project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations)
+        project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations,
+        evidence_source_approvals=lambda: _evidence_source_approvals(request),
+        governance_reviews=governance_reviews,
+        connection_attention=connection_attention,
+        flow_approvals=lambda: pending_for_request(request, limit=action_center.SOURCE_LIMIT),
+        approval_allowed=lambda row: (
+            has_permission(request, "operate", api_scope="approvals:decide")
+            and can_read_approval(request, row, world=_world())
+        ),
+        task_allowed=lambda goal: can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain))
 
 
 async def _snapshot(request):
@@ -141,6 +198,12 @@ async def _snapshot(request):
         preference = await run_in_threadpool(action_center.preferences, context)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Attention preferences are unavailable; no read or snooze state was changed.") from exc
+    from . import auth
+
+    with auth.fresh_configuration():
+        require_enabled(request)
+        if context_for(request) != context:
+            raise HTTPException(409, "Your account or workspace changed. Reload current decisions.")
     return action_center.apply_preferences({**model, "context": context}, preference, now=time.time())
 
 
@@ -148,7 +211,9 @@ async def _snapshot(request):
 async def inbox(request: Request, response: Response,
                 kind: Literal[
                     "all", "approval", "signoff", "assessment", "project_review",
-                    "vendor_reconciliation",
+                    "vendor_reconciliation", "task_attention", "connection_attention",
+                    "evidence_source_approval",
+                    "lifecycle_review", "drop_authority_review", "trust_center_review", "disclosure_review",
                 ] = "all",
                 view: Literal["active", "unread", "snoozed", "overdue", "all"] = "active",
                 assignment: Literal["all", "mine", "available"] = "all",

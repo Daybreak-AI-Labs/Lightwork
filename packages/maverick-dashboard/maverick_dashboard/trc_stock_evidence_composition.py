@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,10 @@ from maverick.trc_stock_evidence_collectors import (
     StockCollectorDirectory,
     StockCollectorLimits,
     StockCollectorSource,
+    StockEvidenceAccessDenied,
     StockEvidenceConfigurationError,
     StockEvidenceHTTPTransport,
+    managed_source_from_definition,
 )
 
 from .trc_continuous_evidence_scheduler import (
@@ -251,6 +253,86 @@ def _default_transport_factory(_tenant_id: str) -> StockEvidenceHTTPTransport:
     return PinnedStockEvidenceHTTPTransport(credential_resolver=get_secret)
 
 
+def native_source_store(tenant_id: str):
+    from maverick.paths import data_dir
+    from maverick.trc_continuous_evidence import ContinuousEvidenceStore
+
+    return ContinuousEvidenceStore(
+        data_dir("tech_risk_compliance", "continuous-evidence.sqlite3", tenant=tenant_id),
+        tenant_id=tenant_id,
+    )
+
+
+def source_account_metadata(source: StockCollectorSource) -> dict[str, Any]:
+    """Current usable saved account metadata, without forwarding its token."""
+    from maverick import connections
+
+    if not connections.enabled() or not source.authorizing_principal:
+        raise StockEvidenceAccessDenied("saved_account_unavailable")
+    _, name, revision = source.credential_env.split(":")
+    with connections.bind_principal(source.authorizing_principal):
+        rows = connections.list_connections()
+    record = next((row for row in rows if row["name"] == name), None)
+    admitted = {source.provider}
+    if source.provider == "github_security":
+        admitted.add("github")
+    if (not record or record.get("revision") != revision or not record.get("has_token") or
+            not connections._may_use(record, source.authorizing_principal) or
+            record.get("connector") not in admitted or
+            str(record.get("base_url", "")).rstrip("/") != source.origin):
+        raise StockEvidenceAccessDenied("saved_account_changed_or_revoked")
+    return record
+
+
+def source_account_credential(request) -> str:
+    """Resolve one exact saved revision at the physical request boundary."""
+    from maverick import connections
+
+    _, name, revision = request.credential_env.split(":")
+    with connections.bind_principal(request.authorizing_principal):
+        record = connections.get_connection(name)
+        connector = "github" if request.provider == "github_security" and record and record.get("connector") == "github" else request.provider
+        value = connections.resolve_named(name, expected_revision=revision,
+                                          connector=connector, origin=request.origin)
+    token = value.get("token")
+    if not isinstance(token, str) or not token:
+        raise StockEvidenceAccessDenied("saved_account_unavailable")
+    return token
+
+
+def source_workspace_authorized(tenant: str, owner: str, mode: str) -> bool:
+    from maverick.paths import implicit_tenant_id, tenant_by_user_enabled
+    from maverick.tenant.registry import is_active
+
+    from .workspace_tenants import principal_can_select
+
+    if not is_active(tenant):
+        return False
+    if mode == "principal_selection":
+        return principal_can_select(owner, tenant)
+    if mode == "principal_isolation":
+        return tenant_by_user_enabled() and canonical_tenant_id(f"api:{owner}") == tenant
+    if mode == "operator_floor":
+        config = _tenant_config(tenant)
+        dashboard = config.get("dashboard", {})
+        configured = dashboard.get("active_tenant") if isinstance(dashboard, Mapping) else None
+        return tenant in {implicit_tenant_id(), configured}
+    return False
+
+
+def source_owner_authorized(tenant: str, owner: str, mode: str) -> None:
+    """The durable source owner retains the same current setup capability."""
+    from . import rbac, ui_visibility
+    from .auth import global_role_for_principal, role_for_principal, stored_automation_identity
+
+    _principal, _user, suites = stored_automation_identity(owner)
+    if ("admin" not in rbac.permissions_for(global_role_for_principal(owner)) or
+            not ui_visibility.is_visible(ui_visibility.page_for("/compliance/continuous-evidence"), role_for_principal(owner)) or
+            (suites is not None and "it_grc" not in suites) or
+            not source_workspace_authorized(tenant, owner, mode)):
+        raise StockEvidenceAccessDenied("saved_source_owner_authority_revoked")
+
+
 @dataclass(frozen=True, slots=True)
 class TrcStockEvidenceComposition:
     """Immutable scheduler dependency bundle for pre-built source manifests."""
@@ -337,9 +419,71 @@ class ConfigDrivenTrcStockEvidenceComposition:
 
     def _settings(self, tenant_id: str) -> StockCollectorSettings:
         tenant = canonical_tenant_id(tenant_id)
-        return stock_collector_settings(
+        settings = stock_collector_settings(
             self._config_loader(tenant),
             tenant_id=tenant,
+        )
+        if not settings.feature_enabled or not settings.stock_enabled:
+            return settings
+        definitions = native_source_store(tenant).list_source_definitions()
+        if len(definitions) > _MAX_SOURCES:
+            raise TrcStockEvidenceCompositionError("stock_collector_sources_invalid")
+        managed = tuple(managed_source_from_definition(tenant, item) for item in definitions)
+        legacy_ids = {source.definition_id for source in settings.sources}
+        if (len(settings.sources) + len(managed) > _MAX_SOURCES or
+                any(item.definition_id in legacy_ids for item in managed)):
+            raise TrcStockEvidenceCompositionError("managed_and_installation_source_conflict")
+        if any(item.collector_id not in settings.enabled_collector_ids for item in managed):
+            raise TrcStockEvidenceCompositionError("stock_collector_not_allowlisted")
+        return replace(settings, sources=settings.sources + managed)
+
+    def _managed_guard(self, tenant_id: str, request) -> None:
+        if not request.credential_env.startswith("connection:"):
+            return
+        try:
+
+            tenant = canonical_tenant_id(tenant_id)
+            if current_tenant_id_strict() != tenant:
+                raise StockEvidenceAccessDenied("saved_account_workspace_changed")
+            owner = request.authorizing_principal
+            source = next((item for item in self._settings(tenant).sources
+                           if item.enrollment_id == request.enrollment_id), None)
+            if source is None or source.source_revision_sha256 != request.source_revision_sha256:
+                raise StockEvidenceAccessDenied("source_changed")
+            source_owner_authorized(tenant, owner, source.workspace_authority)
+            store = native_source_store(tenant)
+            definition = store.get_definition(source.definition_id, source.definition_version)
+            enrollment = store.get_enrollment(source.enrollment_id)
+            if (definition.state != "approved" or enrollment.state != "active" or
+                    enrollment.revision != request.enrollment_revision or
+                    enrollment.definition_integrity_sha256 != definition.integrity_sha256 or
+                    enrollment.asset_scope_sha256 != source.asset_scope_sha256 or
+                    enrollment.credential_profile_sha256 != source.credential_profile_sha256):
+                raise StockEvidenceAccessDenied("source_collection_authority_changed")
+            source_account_metadata(source)
+        except StockEvidenceAccessDenied:
+            raise
+        except Exception as exc:
+            raise StockEvidenceAccessDenied("saved_account_authority_unavailable") from exc
+
+    def _source_credential_ready(self, source: StockCollectorSource) -> bool:
+        if not source.credential_env.startswith("connection:"):
+            return self._credential_ref_present(source.credential_env)
+        try:
+            source_account_metadata(source)
+            return True
+        except StockEvidenceAccessDenied:
+            return False
+
+    def _production_transport(self, tenant_id: str):
+        if self._transport_factory is not _default_transport_factory:
+            return self._transport_factory(tenant_id)
+        from maverick.secret_provider import get_secret
+
+        return PinnedStockEvidenceHTTPTransport(
+            credential_resolver=get_secret,
+            authorize=lambda request: self._managed_guard(tenant_id, request),
+            request_credential_resolver=source_account_credential,
         )
 
     def _directory(
@@ -349,9 +493,11 @@ class ConfigDrivenTrcStockEvidenceComposition:
         settings = self._settings(tenant_id)
         directory = StockCollectorDirectory(
             settings.sources,
-            transport_factory=self._transport_factory,
+            transport_factory=self._production_transport,
             include_local_soc2=settings.include_local_soc2,
-            credential_ref_present=self._credential_ref_present,
+            credential_ref_present=lambda name: any(
+                self._source_credential_ready(source) for source in settings.sources if source.credential_env == name
+            ),
         )
         return directory, settings
 

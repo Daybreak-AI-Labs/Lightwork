@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Ekko Work Discovery · Lightwork{% endblock %}
+{% block title %}Ekko · Lightwork{% endblock %}
 
 {% block content %}
 {% from "_hero.html" import hero %}
@@ -41,7 +41,7 @@
   }
 </style>
 
-{% call hero('Digital workforce intelligence', 'EKKO',
+{% call hero('Digital workforce intelligence', 'Ekko',
              subtitle='Work Discovery',
              lede='With your permission, notices which approved apps you move between (never what you type,
                    read or see) and suggests repeated work Lightwork could take over.',
@@ -119,7 +119,7 @@
         <div class="ekko-controls">
           <button class="btn btn--primary" type="button" id="ekko-start" hidden>Start watching</button>
           <button class="btn" type="button" id="ekko-pause" hidden>Pause</button>
-          <button class="btn btn--primary" type="button" id="ekko-resume" hidden>Resume</button>
+          <button class="btn btn--primary" type="button" id="ekko-resume" hidden>Resume watching</button>
           <button class="btn" type="button" id="ekko-stop" hidden>Stop watching</button>
           <button class="btn btn--ghost" type="button" id="ekko-revoke">Withdraw my permission</button>
           <span id="ekko-session-msg" class="muted" role="status" aria-live="polite"></span>
@@ -131,19 +131,27 @@
       <div class="section-head">
         <h2 id="ekko-recording-heading" tabindex="-1">Record activity</h2>
       </div>
-      <p class="ekko-note">Ekko learns from activity recorded on an enrolled device. Record it here from an activity file
-        exported by a guided recording, or, when Lightwork runs on Windows, from which allowed app is in front. Only the
-        apps and details your enrollment allows are kept; everything else is skipped.</p>
+      <p class="ekko-note">Ekko can notice which allowed app is in front on the computer where Lightwork is installed.
+        Recording is available on Windows, Mac and supported Linux desktops. Only the apps and details your enrollment
+        allows are kept; everything else is skipped. Recording uses the computer where Lightwork is installed, including
+        when you open this page from another device.</p>
+      <p id="ekko-rec-availability" class="ekko-note" role="status" aria-live="polite">Checking whether this computer can record activity…</p>
       <label class="ekko-consent" for="ekko-rec-consent">
         <input id="ekko-rec-consent" type="checkbox">
         <span>I understand Ekko records only the allowed apps and actions, and I can pause or stop at any time.</span>
       </label>
-      <label for="ekko-rec-file"><strong>Activity file</strong></label>
-      <input class="input" id="ekko-rec-file" type="file" accept=".jsonl,.txt,application/json,text/plain">
       <div class="ekko-controls">
-        <button class="btn btn--primary" type="button" id="ekko-rec-import">Record from this file</button>
-        <button class="btn" type="button" id="ekko-rec-watch" hidden>Record the app in front on this computer</button>
+        <button class="btn btn--primary" type="button" id="ekko-rec-watch" hidden>Start app recording</button>
+        <button class="btn btn--ghost" type="button" id="ekko-rec-check">Check recording status</button>
       </div>
+      <details style="margin-top: var(--space-3);">
+        <summary>Import an existing activity recording (optional)</summary>
+        <p class="ekko-note">Already have an activity recording? Import it here using the same enrollment limits.
+          Your administrator must allow detailed recording for this option.</p>
+        <label for="ekko-rec-file"><strong>Activity file</strong></label>
+        <input class="input" id="ekko-rec-file" type="file" accept=".jsonl,.txt,application/json,text/plain">
+        <button class="btn" type="button" id="ekko-rec-import">Record from this file</button>
+      </details>
       <p id="ekko-rec-msg" class="muted" role="status" aria-live="polite"></p>
     </section>
 
@@ -154,6 +162,9 @@
       </div>
       <p class="ekko-note">Ranked by how often the same steps repeat—not employee productivity,
         speed, attendance or performance. Time savings are estimates until you check them.</p>
+      <p class="ekko-note" id="ekko-workflows-off" role="note" hidden>
+        Workflows are off. {% if ekko.can_control and not ekko.workflows_control_managed %}<a href="/learning#lrn-flows-on">Turn them on in Learning</a> to draft a workflow from a suggestion.{% elif ekko.workflows_control_managed %}Ask the person who manages this Lightwork installation to turn them on. You can still draft an assistant.{% else %}Ask your workspace administrator to turn them on. You can still draft an assistant.{% endif %}
+      </p>
       <div id="ekko-opportunities" class="ekko-stack" style="margin-top: var(--space-3);" aria-live="polite">
         <div class="mv-empty">
           <div class="mv-empty__title">No suggestions yet</div>
@@ -269,17 +280,13 @@
   }
 
   async function request(path, options, action) {
-    var response;
-    try { response = await fetch(path, options || {}); }
-    catch (e) { throw new Error(mvErrorText(e, action)); }
-    var data = null;
-    try { data = await response.json(); } catch (e) { data = null; }
-    if (!response.ok) {
-      var plain = data && window.mvPlainDetail && window.mvPlainDetail(data.detail);
-      if ([400, 409, 422].indexOf(response.status) >= 0 && plain) {
-        throw new Error(plain);
-      }
-      throw new Error(mvErrorText(response, action));
+    var data;
+    try { data = await window.mvFetchJSON(path, options || {}, action); }
+    catch (error) {
+      var plain = window.mvPlainDetail && window.mvPlainDetail(error.detail);
+      if ([400, 409, 422].indexOf(error.status) >= 0 && plain) throw new Error(plain);
+      if (error.unreadable) throw new Error(MALFORMED);
+      throw error;
     }
     if (data === null) throw new Error(MALFORMED);
     return data;
@@ -307,7 +314,7 @@
     var target = document.getElementById('ekko-allowed-apps');
     target.textContent = '';
     if (!status.allowed_apps.length) {
-      target.appendChild(mvEl('span', 'muted', 'None yet — nothing is noticed'));
+      target.appendChild(mvEl('span', 'muted', 'None yet. Nothing is noticed until you turn watching on for this device.'));
       return;
     }
     status.allowed_apps.forEach(function (name) {
@@ -343,9 +350,7 @@
     }
   }
 
-  function renderStatus(status) {
-    current = status;
-    fillDevices();
+  function renderWatching(status) {
     var session = status.session;
     var collectorState = status.collector_state || 'waiting';
     var state = (!status.enabled) ? 'idle'
@@ -378,6 +383,20 @@
 
     setText('ekko-stat-events', status.event_count);
     setText('ekko-stat-collector', collectorWord(collectorState));
+    document.getElementById('ekko-watch').hidden = !enrolled;
+    var activeState = session ? session.state : '';
+    document.getElementById('ekko-start').hidden = !(status.enabled && enrolled && !['running', 'paused'].includes(activeState));
+    document.getElementById('ekko-pause').hidden = activeState !== 'running';
+    document.getElementById('ekko-resume').hidden = activeState !== 'paused';
+    document.getElementById('ekko-stop').hidden = !['running', 'paused'].includes(activeState);
+  }
+
+  function renderStatus(status) {
+    current = status;
+    fillDevices();
+    document.getElementById('ekko-workflows-off').hidden = !!status.workflows_enabled;
+    renderWatching(status);
+    var enrolled = !!(status.enrollment && status.enrollment.active);
     setText('ekko-stat-apps', status.allowed_apps.length);
     setText('ekko-stat-retention', status.retention_days + ' days');
     setText('ekko-capture-level', status.capture_level === 'application_metadata'
@@ -402,12 +421,6 @@
     }
 
     renderEnroll(status, enrolled);
-    document.getElementById('ekko-watch').hidden = !enrolled;
-    var activeState = session ? session.state : '';
-    document.getElementById('ekko-start').hidden = !(status.enabled && enrolled && !['running', 'paused'].includes(activeState));
-    document.getElementById('ekko-pause').hidden = activeState !== 'running';
-    document.getElementById('ekko-resume').hidden = activeState !== 'paused';
-    document.getElementById('ekko-stop').hidden = !['running', 'paused'].includes(activeState);
   }
 
   function stepText(step) {
@@ -447,6 +460,8 @@
       var actions = mvEl('div', 'mv-row__actions');
       var flow = mvEl('button', 'btn btn--primary', 'Draft a workflow');
       flow.type = 'button'; flow.dataset.id = item.opportunity_id; flow.dataset.kind = 'flow';
+      flow.disabled = !current.workflows_enabled;
+      if (flow.disabled) flow.setAttribute('aria-describedby', 'ekko-workflows-off');
       var agent = mvEl('button', 'btn', 'Draft an assistant');
       agent.type = 'button'; agent.dataset.id = item.opportunity_id; agent.dataset.kind = 'agent';
       actions.appendChild(flow); actions.appendChild(agent);
@@ -463,6 +478,15 @@
       renderCandidates(found.candidates);
     } catch (e) { mvToast(e.message, {error: true}); }
   }
+
+  document.addEventListener('lightwork:ekko-recording-status', function (event) {
+    var status = event.detail;
+    if (status && status.device_id === device()) {
+      current.session = status.session;
+      current.collector_state = status.collector_state;
+      renderWatching(status);
+    }
+  });
 
   function chooseDevice(id) {
     if (!DEVICE_RE.test(id)) {
@@ -511,7 +535,7 @@
     var days = Number(document.getElementById('ekko-enroll-days').value);
     var names = apps.map(appName).join(', ');
     if (!(await mvConfirm('Enroll this device so Ekko may notice ' + names + ' for ' + days +
-        ' days? Nothing is watched until you press “Start watching”.', {okText: 'Enroll'}))) return;
+        ' days? Nothing is recorded until you start a recorder.', {okText: 'Enroll'}))) return;
     var btn = document.getElementById('ekko-enroll-go');
     btn.disabled = true; msg.textContent = 'Enrolling…';
     try {
@@ -575,14 +599,23 @@
   }
 
   async function handoff(id, kind) {
+    if (kind === 'flow' && !current.workflows_enabled) {
+      mvToast('Workflows are off. See the note above these suggestions.', {error: true}); return;
+    }
     try {
       var result = await request('/api/v1/ekko/candidates/' + encodeURIComponent(id) + '/handoff', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({device_id: device(), kind: kind})
       }, 'start a draft');
-      sessionStorage.setItem('lightwork.authoring-handoff', JSON.stringify({
-        kind: result.kind, brief: result.brief, created_at: Date.now()
-      }));
+      if (typeof result.context !== 'string' || !result.context) throw new Error('Could not verify this workspace. Try again.');
+      var prepared = {
+        kind: result.kind, brief: result.brief, context: result.context, created_at: Date.now()
+      };
+      if (result.kind === 'flow') {
+        if (!result.flow || !Array.isArray(result.flow.nodes)) throw new Error('Could not prepare the suggested workflow. Try again.');
+        prepared.flow = result.flow;
+      }
+      sessionStorage.setItem('lightwork.authoring-handoff', JSON.stringify(prepared));
       window.location.href = result.redirect;
     } catch (e) { mvToast(e.message, {error: true}); }
   }

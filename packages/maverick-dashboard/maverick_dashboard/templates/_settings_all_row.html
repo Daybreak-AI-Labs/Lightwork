@@ -3,10 +3,10 @@
 {% macro setting_row(s, g) %}
 {% set cid = 'sa-' ~ s.id | replace('.', '-') | replace('*', 'all') %}
 <div class="settings-all-row" data-setting-id="{{ s.id }}" data-control="{{ s.control }}"
-     data-source="{{ s.source }}" data-warning="{{ s.warning }}"
+     data-revision="{{ s.revision }}" data-source="{{ s.source }}" data-warning="{{ s.warning }}"
      data-in-group="{{ g.slug }}" data-order="{{ s.order }}"
      {% if s.subgroup %}data-subgroup="{{ s.subgroup_slug }}"{% endif %}
-     data-search="{{ (s.label ~ ' ' ~ s.help ~ ' ' ~ s.aliases ~ ' ' ~ s.group ~ ' ' ~ s.subgroup) | lower }}">
+     data-search="{{ (s.id ~ ' ' ~ s.id|replace('.', ' ') ~ ' ' ~ s.label ~ ' ' ~ s.help ~ ' ' ~ s.aliases ~ ' ' ~ s.group ~ ' ' ~ s.subgroup) | lower }}">
   <div class="settings-all-about-row">
     {% if s.control in ['multiselect', 'toggle', 'rate', 'keys', 'table', 'list', 'rules', 'picks', 'fingerprint', 'document'] %}
     <span class="settings-all-label" id="{{ cid }}-label">{{ s.label }}</span>
@@ -25,6 +25,7 @@
     {% if s.warning %}<p class="muted settings-all-warning">{{ s.warning_lead }} {{ s.warning }}</p>{% endif %}
   </div>
   <div class="settings-all-control">
+    {% if s.id in ['persona.name','persona.style','persona.addendum','dashboard.theme','dashboard.density','dashboard.glass','budget.max_wall_seconds','budget.max_tool_calls','budget.max_output_tokens','models.vision','speculative.draft_model','verification.cross_family_model'] %}<label><input type="checkbox" data-profile-select> Export preference</label>{% endif %}
     {% if s.locked %}
       <p class="muted">Set by your server's deployment settings, so it can't be changed here.</p>
     {% elif s.control == 'toggle' %}
@@ -36,11 +37,16 @@
       </label>
     {% elif s.control == 'select' %}
       <select class="select" id="{{ cid }}" data-input aria-describedby="{{ cid }}-help"
-              {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% endif %}>
+              {% if s.choices_url %}data-select-choices-url="{{ s.choices_url }}"{% endif %}
+              {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% if s.preview_any %} data-preview-any{% endif %}{% endif %}>
         {% for c in s.choices %}
         <option value="{{ c.value }}" {% if c.value == s.value %}selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
+      {% if s.choices_url %}
+      <button type="button" class="btn ghost" data-select-choices-load>Load installed environments</button>
+      <p class="muted" data-select-choices-notice role="status">Installed choices are read only when you load or refresh this list. Your current choice is kept until you review and save a change.</p>
+      {% endif %}
       {% if s.empty_hint %}<p class="muted">{{ s.empty_hint }} <a href="/users">Open People</a></p>{% endif %}
       {% if s.preview_url %}<div class="settings-all-preview" data-preview aria-live="polite"></div>{% endif %}
     {% elif s.control == 'multiselect' %}
@@ -62,9 +68,11 @@
                {% if s.maximum is not none %}max="{{ s.maximum }}"{% endif %}
                step="{{ s.step }}"
                value="{{ '' if s.value is none else s.value }}"
-               {% if s.optional %}placeholder="No limit"{% endif %}>
+               {% if s.optional %}placeholder="No limit"{% endif %}
+               {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% endif %}>
         <span class="muted" id="{{ cid }}-unit">{{ s.unit }}</span>
       </div>
+      {% if s.preview_url %}<div class="settings-all-preview" data-preview aria-live="polite"></div>{% endif %}
     {% elif s.control == 'rate' %}
       <div class="settings-all-number">
         <label for="{{ cid }}-count" class="sr-only">{{ s.label }}: how many</label>
@@ -97,7 +105,7 @@
             <button class="btn btn--ghost" type="button" data-pick-remove aria-label="Remove {{ p.label }}">Remove</button></li>
           {% endfor %}
         </ul>
-        <p class="muted" data-picks-empty {% if s.picks %}hidden{% endif %}>{{ s.empty_text or 'Nothing chosen yet.' }}</p>
+        <p class="muted" data-picks-empty {% if s.picks %}hidden{% endif %}>{{ s.empty_text or 'Nothing chosen yet. Choose from the list below.' }}</p>
         <label class="settings-all-field" for="{{ cid }}-find">Find
           <input class="input" type="search" id="{{ cid }}-find" data-pick-search maxlength="80"
                  placeholder="Search by name" autocomplete="off">
@@ -122,7 +130,7 @@
       </div>
     {% elif s.control == 'document' %}
       <div class="settings-all-document" data-document>
-        <p data-document-text>{{ s.document.text if s.document else 'Nothing imported yet.' }}</p>
+        <p data-document-text>{{ s.document.text if s.document else 'Nothing imported yet. Import a document below.' }}</p>
         <ul class="settings-all-list-items" aria-labelledby="{{ cid }}-label" data-document-items>
           {% for k in (s.document['items'] if s.document else []) %}
           <li>{{ k.label }}, fingerprint <strong>{{ k.fingerprint }}</strong></li>
@@ -134,10 +142,15 @@
         </label>
       </div>
     {% elif s.control == 'path' %}
+      {% if s.id == 'auth.saml.idp_metadata_file' and (s.value or '').startswith('managed-saml:') %}
+      <input type="hidden" id="{{ cid }}" data-input value="{{ s.value }}">
+      <p>Provider files are stored privately. <a href="/settings/all#company-saml-setup">Open guided single sign-on setup</a> to review a replacement.</p>
+      {% else %}
       <input class="input" type="text" id="{{ cid }}" data-input maxlength="{{ s.max_length }}"
              value="{{ s.value or '' }}" spellcheck="false" autocomplete="off"
              placeholder="{{ 'Full location of the folder on the server' if s.path_kind == 'folder' else 'Full location of the file on the server' }}"
              aria-describedby="{{ cid }}-help">
+      {% endif %}
     {% elif s.control == 'list' %}
       <div class="settings-all-list" data-list data-item-label="{{ s.item_label }}" data-item-hint="{{ s.item_hint }}" data-max-length="{{ s.max_length }}">
         <ul class="settings-all-list-items" aria-labelledby="{{ cid }}-label">
@@ -244,7 +257,7 @@
           {% endfor %}
           </tbody>
         </table>
-        <p class="muted" data-table-empty {% if s.rows %}hidden{% endif %}>{{ 'No other limits yet.' if s.row_kind == 'rate' else 'No tools are offered yet.' }}</p>
+        <p class="muted" data-table-empty {% if s.rows %}hidden{% endif %}>{{ 'No other limits yet. Add one below.' if s.row_kind == 'rate' else 'No tools are offered yet. Add one below.' }}</p>
         <div class="settings-all-table-add">
           {% if s.row_kind == 'rate' %}
           <label class="settings-all-field" for="{{ cid }}-find">Find a tool
@@ -275,13 +288,18 @@
         <button class="btn btn--ghost" type="button" data-secret-replace aria-controls="{{ cid }}">{{ 'Replace' if s.is_set else 'Add' }}</button>
         <input class="input" type="password" id="{{ cid }}" data-input autocomplete="new-password"
                maxlength="{{ s.max_length }}" hidden aria-labelledby="{{ cid }}-label" aria-describedby="{{ cid }}-help">
+        {% if s.id == 'auth.oidc.session_secret' %}
+        <button class="btn btn--ghost" type="button" data-signin-key-create>{{ 'Create a replacement sign-in key' if s.is_set else 'Create a secure sign-in key' }}</button>
+        <p class="muted">Creates an unsaved protected value. Review Save setting before it changes sign-in.</p>
+        {% endif %}
       </div>
     {% endif %}
     {% if not s.locked %}
     <div class="settings-all-actions">
-      <button class="btn btn--primary" type="button" data-save>Save</button>
+      <button class="btn btn--primary" type="button" data-save>Save setting</button>
       {% if s.test_label %}<button class="btn btn--ghost" type="button" data-test>{{ s.test_label }}</button>{% endif %}
-      <button class="btn btn--ghost" type="button" data-reset>Reset to default</button>
+      <button class="btn btn--ghost" type="button" data-reset>Reset to product default</button>
+      <button class="btn btn--ghost" type="button" data-inherit>Use inherited value</button>
     </div>
     {% endif %}
     <p class="muted settings-all-row-status" role="status" aria-live="polite" data-row-status></p>

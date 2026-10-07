@@ -18,6 +18,16 @@ def test_finance_is_a_department_with_finance_packs():
     assert d.members == sorted(set(d.members))
 
 
+def test_every_shipped_suite_has_a_customer_label_and_charter():
+    shipped = set(SUITE_PREFIXES.values())
+    assert shipped <= set(dept.SUITE_LABELS)
+    for key in shipped:
+        label, charter = dept.SUITE_LABELS[key]
+        assert label.strip() and charter.strip(), key
+        assert label == dept.department_title(key)
+        assert charter == dept.department_charter(key)
+
+
 def test_list_departments_covers_only_real_suites_sorted_by_title():
     depts = dept.list_departments()
     assert depts, "expected at least one populated department"
@@ -42,6 +52,18 @@ def test_disabled_suite_drops_the_department():
     assert "finance" not in keys
     assert dept.get_department("finance", cfg) is None
     assert dept.roster("finance", cfg) == []
+
+
+def test_inherited_suite_fork_is_in_its_department(tmp_path, monkeypatch):
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    assert "client_fork" in dept.get_department("aerospace_defense").members
+    assert "client_fork" not in {
+        member for department in dept.list_departments({"suites": {"aerospace_defense": False}})
+        for member in department.members
+    }
 
 
 def test_unknown_suite_key_is_none():
@@ -124,6 +146,46 @@ def test_deploy_saves_when_entitled(monkeypatch, tmp_path):
     saved = load_fleet(dept.fleet_name_for("finance", "user:alice"))
     assert saved is not None and saved.owner == "user:alice"
     assert {a.name for a in saved.agents} == {a.name for a in fleet.agents}
+
+
+def test_repeat_deploy_keeps_team_edits_and_only_adds_new_catalog_members(monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    from maverick.fleet import Fleet, FleetAgent, load_fleet, save_fleet
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    initial = dept.deploy_department("finance", "user:alice")
+    original = initial.agents[0]
+    edited = replace(original, role="custom_role", description="Customer's own instructions")
+    manual = FleetAgent("customer_added", "custom_role", "Customer addition")
+    # Mirror an ordinary fleet edit, which rebuilds the object without the
+    # department marker and intentionally removes one catalog specialist.
+    save_fleet(Fleet(name=initial.name, owner=initial.owner,
+                     agents=(edited, *initial.agents[2:], manual), created_at=initial.created_at))
+    again = dept.deploy_department("finance", "user:alice")
+    assert again.agents == (edited, *initial.agents[2:], manual)
+    assert again.created_at == initial.created_at
+    assert set(again.department_members_added) == {agent.name for agent in initial.agents}
+    legacy, count = dept.merge_department_fleet(
+        initial, replace(again, department_members_added=()),
+        known_members=dept.get_department("finance").members,
+    )
+    assert count == 0 and legacy.agents == again.agents
+
+    newcomer = FleetAgent("finance_new", "finance", "New catalog specialist", "finance_new")
+    proposed = replace(initial, agents=(*initial.agents, newcomer))
+    merged, count = dept.merge_department_fleet(
+        proposed, load_fleet(initial.name), known_members=[*dept.get_department("finance").members, newcomer.name],
+    )
+    assert count == 1 and merged.agents == (*again.agents, newcomer)
+    # An administrator may later remove that specialist too; a repeat update
+    # must not recreate it.
+    removed = replace(merged, agents=again.agents)
+    merged_again, count = dept.merge_department_fleet(
+        proposed, removed, known_members=[*dept.get_department("finance").members, newcomer.name],
+    )
+    assert count == 0 and merged_again.agents == again.agents
 
 
 def test_deploy_unknown_department_is_none(monkeypatch):

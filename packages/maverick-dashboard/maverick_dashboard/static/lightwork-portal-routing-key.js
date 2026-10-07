@@ -7,7 +7,7 @@
   const api = '/api/v1/third-party/portal-routing-key';
   const el = (id) => document.getElementById('portal-key-' + id);
   let busy = false, state = null;
-  const when = (seconds) => new Date(seconds * 1000).toLocaleString();
+  const when = (seconds) => (window.mvTimeAbsolute ? window.mvTimeAbsolute(seconds) : new Date(seconds * 1000).toLocaleString());
   function render(data) {
     state = data;
     root.hidden = false;
@@ -26,9 +26,8 @@
   }
   async function load() {
     try {
-      const response = await fetch(api, {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json'}});
-      if (!response.ok) return; // not an installation administrator: stay hidden
-      render(await response.json());
+      // A refusal (not an installation administrator) leaves it hidden.
+      render(await window.mvFetchJSON(api, {cache: 'no-store'}));
     } catch (_) { /* stays hidden */ }
   }
   el('confirm').addEventListener('change', update);
@@ -45,7 +44,7 @@
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: JSON.stringify({confirm: true, grace_hours: hours})});
       if (!response.ok) {
-        const reason = typeof window.mvErrorText === 'function' ? await window.mvErrorText(response, 'change the link key') : 'The link key could not be changed. Nothing was changed.';
+        const reason = typeof window.mvErrorText === 'function' ? await window.mvErrorText(response, 'change the link key') : 'The link key could not be changed. Nothing was changed. Try again.';
         el('state').textContent = reason;
         return;
       }

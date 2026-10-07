@@ -40,6 +40,14 @@ _MAX_DRAFT_CONCURRENCY = 32
 _INPUT_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _TOOL_PARAM_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
+_SCHEDULE_INTENT_RE = re.compile(
+    r"(?i)\b(?:every|each)\s+(?:weekday|day|week|month|monday|tuesday|wednesday|"
+    r"thursday|friday|saturday|sunday)\b|\b(?:schedule|scheduled|recurring)\b"
+)
+_APPROVAL_INTENT_RE = re.compile(
+    r"(?i)\b(?:ask|get|require|wait for)\b.{0,80}\b(?:approv\w*|sign[ -]?off|before)\b|"
+    r"\b(?:approv\w*|sign[ -]?off)\b.{0,80}\bbefore\b"
+)
 _METADATA_INSTRUCTION_RE = re.compile(
     r"(?i)\b(ignore|override|system prompt|developer message|instruction|"
     r"exfiltrat|credential|secret|token)\b|https?://|webhook"
@@ -81,7 +89,7 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"action","tool":"<tool name>","params":{...},"next":"<id|null>"}
 - {"id","kind":"branch","condition":"<key op value>","if_true":"<id>","if_false":"<id>"}
 - {"id","kind":"switch","condition":"<data key to route on>","cases":[{"value":"<match>","to":"<id>"}],"next":"<id|null = the default arm>"}
-- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"concurrent":<true to run iterations in parallel>,"next":"<id|null>"}
+- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"concurrent":<true to run iterations in parallel>,"concurrency":<optional integer 1 to 8 for maximum items at once; omit or 0 keeps the shared workflow limit>,"next":"<id|null>"}
 - {"id","kind":"while","condition":"<keep-looping condition>","body":{<a nested flow>},"limit":<max passes>,"next":"<id|null>"}
 - {"id","kind":"parallel","branches":[{<nested flow>},...],"next":"<id|null>"}
 - {"id","kind":"approval","prompt":"<what a human approves>","choices":["<optional verdicts beyond approve/reject>"],"assignee":"<who to notify, optional>","expires_after":<seconds until it auto-resolves>,"on_expire":"<id to route on expiry, optional (else rejected)>","form":[{"name":"<field>","label":"<prompt>"}],"next":"<id|null>"}
@@ -94,7 +102,7 @@ Each node is one of these kinds (include only the fields for its kind):
 Any "agent" or "action" node may also set "retries":<n> (re-try on failure; optional "retry_backoff":<seconds> for exponential wait), "on_error":"<id>" (route there if it fails), and "timeout":<seconds> (per-node execution cap).
 
 Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. Transforms: text (upper lower trim title concat replace split join slice regex), data (default length first last index keys json), number (add sub mul div round abs int), time (now today add_days datefmt -- UTC, ISO-formatted so dates compare lexically). E.g. {{datefmt(now(),"%Y-%m-%d")}}, {{add_days('', 3)}} (3 days from today), {{regex(email,"@(.+)$")}}, {{join(split(csv,","),"; ")}}.
-For a connector credential in an action param, use {{secret('NAME')}} -- it resolves from the secure vault at run time and never lands in the flow definition or run data. Never inline a raw API key.
+Never put credentials or secret(...) expressions in action parameters. Native connector actions resolve their own authorized Connections account after current workspace, owner, tool, origin and credential-revision checks. If the intended connector lacks that binding, explain the missing account/setup step; do not invent a credential mapping or use deployment environment secrets.
 A "branch"/"while" condition is "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data, composable with and/or. A "switch" routes by matching a data key against each case value."""
 
 FLOW_DRAFT_SYSTEM = """You design automation FLOWS and output STRICT JSON only.
@@ -548,10 +556,24 @@ def draft_flow(description: str, *, tools=None, tool_docs=None, tool_schemas=Non
                 "preview only; install and risk-classify each action tool before "
                 "save or execution: " + "; ".join(unclassified[:3]))
         return flow, notes
-    except Exception as e:
-        notes.append(f"couldn't build a full graph ({type(e).__name__}); "
-                     "starting from a single agent step you can expand")
-        fallback = single_agent_flow(flow_id or "", description[:60] or "New flow", description)
+    except Exception:
+        missing = []
+        if _SCHEDULE_INTENT_RE.search(description):
+            missing.append("schedule")
+        if _APPROVAL_INTENT_RE.search(description):
+            missing.append("approval step")
+        if missing:
+            notes.insert(0, "Only one AI task was drafted. The requested " +
+                         " and ".join(missing) +
+                         (" were not included. Add them before publishing."
+                          if len(missing) > 1 else
+                          " was not included. Add it before publishing."))
+        else:
+            notes.insert(0, "Only one AI task was drafted. Review the steps you asked for before publishing.")
+        title = description[:60].rstrip()
+        if len(description) > 60 and " " in title:
+            title = title.rsplit(" ", 1)[0]
+        fallback = single_agent_flow(flow_id or "", title or "New flow", description)
         return fallback, notes
 
 

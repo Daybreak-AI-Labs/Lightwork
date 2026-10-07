@@ -149,7 +149,9 @@ class Mailbox:
         self.fetched.append(int(args[0]))
         if self.fetch_error:
             return "NO", [None]
-        return "OK", [(b"header", b"From: synthetic@example.invalid\r\nSubject: Order\r\n\r\nbody")]
+        return "OK", [(b"header", b"From: synthetic@example.invalid\r\n"
+                       b"Authentication-Results: mx.example.invalid; dmarc=pass header.from=example.invalid\r\n"
+                       b"Subject: Order\r\n\r\nbody")]
 
     def logout(self):
         return "BYE", []
@@ -164,7 +166,47 @@ def mailbox(monkeypatch):
 
 
 IMAP_CONFIG = {"host": "mail.invalid", "username": "synthetic",
-               "password_env": "SYNTHETIC_IMAP_PASSWORD", "include_body": True}  # pragma: allowlist secret - synthetic environment-variable name
+               "password_env": "SYNTHETIC_IMAP_PASSWORD", "include_body": True,  # pragma: allowlist secret
+               "trusted_authserv_id": "mx.example.invalid",
+               "allowed_senders": "synthetic@example.invalid"}  # pragma: allowlist secret - synthetic environment-variable name
+
+
+def test_imap_requires_sender_verification_and_an_explicit_people_list(mailbox):
+    source = ev.ImapEmailSource()
+    with pytest.raises(ev.EventSourceError, match="server that checks"):
+        source.poll({k: v for k, v in IMAP_CONFIG.items() if k != "trusted_authserv_id"}, "")
+    with pytest.raises(ev.EventSourceError, match="permitted email senders"):
+        source.poll({k: v for k, v in IMAP_CONFIG.items() if k != "allowed_senders"}, "")
+    with pytest.raises(ev.EventSourceError, match="encrypted mail connection"):
+        source.poll({**IMAP_CONFIG, "use_ssl": False}, "")
+    baseline = source.poll(IMAP_CONFIG, "")
+    mailbox.uids.append(31)
+    original_uid = mailbox.uid
+
+    def forged_uid(operation, *args):
+        if operation == "fetch":
+            return "OK", [(b"header", b"From: synthetic@example.invalid\r\n"
+                           b"Authentication-Results: relay.evil.invalid; dmarc=pass header.from=example.invalid\r\n"
+                           b"Subject: Forged\r\n\r\nbody")]
+        return original_uid(operation, *args)
+
+    mailbox.uid = forged_uid
+    rejected = source.poll(IMAP_CONFIG, baseline.cursor)
+    assert rejected.events == []
+    assert ev._decode_cursor(rejected.cursor, "imap") == ["800", 31]
+    mailbox.uid = original_uid
+    mailbox.uids.append(32)
+    assert [row["uid"] for row in source.poll(IMAP_CONFIG, rejected.cursor).events] == ["32"]
+
+
+def test_imap_authenticated_but_unlisted_sender_does_not_start_work(mailbox):
+    source = ev.ImapEmailSource()
+    baseline = source.poll(IMAP_CONFIG, "")
+    mailbox.uids.append(31)
+    other = {**IMAP_CONFIG, "allowed_senders": "someone-else@example.invalid"}
+    rejected = source.poll(other, baseline.cursor)
+    assert rejected.events == []
+    assert ev._decode_cursor(rejected.cursor, "imap") == ["800", 31]
 
 
 def test_imap_initial_highwater_fetches_no_history_and_reset_rebaselines(mailbox):

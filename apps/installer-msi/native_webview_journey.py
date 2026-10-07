@@ -18,6 +18,7 @@ import time
 import uuid
 from itertools import islice
 from pathlib import Path
+from urllib.parse import urlsplit
 
 try:
     import tomllib
@@ -302,7 +303,13 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
         self.record("first-launch-and-named-owner")
         self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
         self.view.navigate("http://127.0.0.1:8765/start")
-        self.view.click('a[href="/auth/local-owner"]')
+        # Fresh installations now open owner setup directly; older first-run
+        # pages still offer the explicit link.
+        landing = urlsplit(self.view.call("GET", self.view.session + "/url")).path
+        if landing == "/start":
+            self.view.click('a[href="/auth/local-owner"]')
+        elif landing != "/auth/local-owner":
+            raise RuntimeError("Native first-owner setup did not open its expected page.")
         self.view.fill('input[name="email"]', "native-owner@example.test")
         self.view.fill('input[name="password"]', self.password)
         self.view.click('input[name="confirm"]')

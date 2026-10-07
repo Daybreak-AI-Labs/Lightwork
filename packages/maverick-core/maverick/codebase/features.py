@@ -128,7 +128,8 @@ def _host_commit(host: Path, work: Path, base: str, branch: str, message: str) -
 
 
 def propose(world, name: str, title: str, description: str, run: Runner, *,
-            reviewer: Reviewer | None = None, sandbox_factory=None) -> dict:
+            reviewer: Reviewer | None = None, sandbox_factory=None,
+            owner: str = "") -> dict:
     """Run a feature swarm and park its change for human approval."""
     from ..ifc import labelled_run
     repo = vault.get(name)
@@ -141,7 +142,8 @@ def propose(world, name: str, title: str, description: str, run: Runner, *,
                         git_dir=host).strip()
             work = vault.clone_work(host, work_tmp / "work", repo.default_branch)
             _git(["checkout", "-q", "-b", branch], cwd=work)
-            goal_id = world.create_goal(f"[{name}] {title}", _brief(repo, title, description))
+            goal_id = world.create_goal(f"[{name}] {title}", _brief(repo, title, description),
+                                        owner=owner, execution_principal=owner)
             with labelled_run({f"code:{name}"}, mode=repo.protect):
                 run(goal_id, work)
             head = _host_commit(host, work, base, branch,
@@ -220,9 +222,14 @@ def request_approval(world, p: dict) -> int:
         if appr is not None and not (appr.status in ("pending", "approved")
                                      and _approval_expired(appr)):
             raise VaultError(f"proposal {p['id']} already has approval #{appr.id} ({appr.status})")
-        p["approval_id"] = world.create_approval(
-            "codebase_merge", risk="high", scope=p["repo"], provenance="codebase",
-            requested_by="agent:codebase", detail=_approval_detail(p))
+        from ..logging_config import reset_goal_context, set_goal_context
+        context = set_goal_context(p.get("goal_id"))
+        try:
+            p["approval_id"] = world.create_approval(
+                "codebase_merge", risk="high", scope=p["repo"], provenance="codebase",
+                requested_by="agent:codebase", detail=_approval_detail(p))
+        finally:
+            reset_goal_context(context)
         _save(p)
         caller.update(p)
         return p["approval_id"]
@@ -384,7 +391,8 @@ def push(world, pid: str) -> str:
     return p["branch"]
 
 
-def default_runner(*, max_dollars: float | None = None) -> Runner:
+def default_runner(*, max_dollars: float | None = None, user_id: str | None = None,
+                   allowed_suites: frozenset[str] | None = None) -> Runner:
     """Run the goal as a normal governed swarm whose sandbox is the working copy."""
     def run(goal_id: int, work: Path) -> object:
         from ..budget import Budget
@@ -395,7 +403,8 @@ def default_runner(*, max_dollars: float | None = None) -> Runner:
         world = open_world()
         try:
             return run_goal_sync(LLM(), world, Budget(max_dollars=max_dollars), goal_id,
-                                 sandbox=build_sandbox(workdir=str(work)))
+                                 sandbox=build_sandbox(workdir=str(work)),
+                                 user_id=user_id, allowed_suites=allowed_suites)
         finally:
             close_world_if_owned(world)
     return run

@@ -72,14 +72,18 @@ def test_local_distillation_excludes_protected_goal_even_outside_running_context
 def test_training_ingest_does_not_rehydrate_holdout_events_or_donated_text(protected):
     from maverick.training.ingest import fetch_steps_for_goal, load_donations
     class World:
+        def get_goal(self, goal_id):
+            from types import SimpleNamespace
+            return SimpleNamespace(owner="")
+
         def goal_events(self, *args, **kwargs):
             pytest.fail("holdout business history must not be fetched for training")
     assert fetch_steps_for_goal(World(), 11) == []
     outbox = protected / "outbox"
     outbox.mkdir()
-    (outbox / "held.json").write_text(json.dumps({"goal_id": 11, "task_brief_text": "private held-out case"}), encoding="utf-8")
-    (outbox / "dev.json").write_text(json.dumps({"goal_id": 12, "task_brief_text": "permitted development case"}), encoding="utf-8")
-    assert [row["goal_id"] for row in load_donations(outbox)] == [12]
+    (outbox / "held.json").write_text(json.dumps({"goal_id": 11, "source_ownership": "unowned", "task_brief_text": "private held-out case"}), encoding="utf-8")
+    (outbox / "dev.json").write_text(json.dumps({"goal_id": 12, "source_ownership": "unowned", "task_brief_text": "permitted development case"}), encoding="utf-8")
+    assert [row["goal_id"] for row in load_donations(outbox, world=World())] == [12]
 
 
 def test_donation_and_semantic_index_refuse_before_payload_or_provider_work(protected, monkeypatch):

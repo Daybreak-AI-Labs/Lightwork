@@ -402,6 +402,22 @@ class TestMaterialize:
         rt_title, rt_body = tpl.render()
         assert "Post to Slack" in rt_body
 
+    def test_another_owner_cannot_reimport_over_existing_template(self):
+        from maverick.templates import load_template
+
+        automation = n8n.translate(WEBHOOK_WORKFLOW)
+        imported = ai.materialize(automation, owner="user:alice")
+        original = load_template(imported.template_name)
+        assert original.owner == "user:alice"
+
+        with pytest.raises(PermissionError, match="owned by another principal"):
+            ai.materialize(automation, owner="user:bob")
+
+        retained = load_template(imported.template_name)
+        assert retained.owner == "user:alice"
+        assert retained.generation == original.generation
+        assert retained.body == original.body
+
     def test_schedule_automation_with_queue_creates_schedule(self):
         a = n8n.translate(CRON_WORKFLOW)
         q = _FakeQueue()

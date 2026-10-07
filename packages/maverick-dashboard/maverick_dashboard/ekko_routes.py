@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -160,6 +161,7 @@ def _public_collector(value) -> dict:
 
 def _status_data(request: Request, device_id: str) -> dict:
     from maverick.config import get_ekko
+    from maverick.flow import enabled as flows_enabled
 
     device = _device_id(device_id)
     policy = get_ekko()
@@ -198,6 +200,8 @@ def _status_data(request: Request, device_id: str) -> dict:
     blocked = set(policy.get("blocked_apps") or [])
     return {
         "enabled": bool(policy.get("enable", False)),
+        "workflows_enabled": flows_enabled(),
+        "workflows_control_managed": "MAVERICK_FLOWS" in os.environ,
         "control_managed": "MAVERICK_EKKO" in os.environ,
         # What a person may choose from when enrolling: the admin ceiling,
         # minus anything the blocklist always wins over.
@@ -625,15 +629,32 @@ def ekko_candidate_handoff(
     auth.require_permission(request, "operate")
     from maverick.audit import EventKind
     from maverick.config import get_ekko
+    from maverick.flow import enabled as flows_enabled
     from maverick.work_discovery import build_draft_bundle
 
+    from .in_app_routes import _draft_context
+
+    if payload.kind == "flow" and not flows_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Workflows are off for this installation. Ask the person who manages Lightwork to turn them on."
+                if "MAVERICK_FLOWS" in os.environ else
+                "Workflows are off. An administrator can turn them on in Learning; then try again."
+            ),
+        )
     store = _store(request, payload.device_id)
     candidate = _candidate(store, get_ekko(), opportunity_id)
-    # Build the provider-free core preview to prove the candidate can become a
-    # valid governed artifact, but return only a bounded brief to the browser's
-    # existing canonical authoring handoff. Nothing is saved or activated here.
+    # Give the workflow editor the exact provider-free, validated graph. Agent
+    # handoffs still use a bounded brief. Neither path saves or activates work.
     bundle = build_draft_bundle(candidate, owner=_owner(request))
     brief = _handoff_brief(candidate, payload.kind)
+    prepared_flow = bundle.flow.to_dict() if payload.kind == "flow" else None
+    if prepared_flow is not None:
+        prepared_flow.pop("owner", None)
+        prepared_flow["id"] = f"{prepared_flow['id']}-{secrets.token_hex(4)}"
+        prepared_flow["version"] = 0  # the editor still needs an explicit save
+    context = _draft_context(request)
     _audit(
         EventKind.EKKO_EXPORT,
         opportunity_id=candidate.opportunity_id,
@@ -643,10 +664,12 @@ def ekko_candidate_handoff(
     return {
         "kind": payload.kind,
         "brief": brief,
+        "context": context,
         "opportunity_id": candidate.opportunity_id,
         "redirect": "/flows/designer" if payload.kind == "flow" else "/workflow-builder",
         "unsaved": bool(bundle.unsaved),
         "requires_human_approval": bool(bundle.requires_human_approval),
+        **({"flow": prepared_flow} if prepared_flow is not None else {}),
     }
 
 

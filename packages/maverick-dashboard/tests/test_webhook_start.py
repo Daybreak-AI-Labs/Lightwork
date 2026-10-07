@@ -232,7 +232,7 @@ def test_webhook_applies_only_configured_budget_ceiling(
 ):
     import maverick.runner as runner
 
-    monkeypatch.setattr(runner, "configured_max_dollars", lambda: ceiling)
+    monkeypatch.setattr(runner, "configured_goal_ceiling_dollars", lambda: ceiling)
     body = json.dumps({"title": "greedy", "budget": 1_000_000}).encode()
     resp = client.post("/webhook/start", content=body, headers=_headers(body))
     assert resp.status_code == 201

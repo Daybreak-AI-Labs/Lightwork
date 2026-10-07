@@ -31,14 +31,14 @@ def _gen_unscoped(rng, model="M"):
         fc = rng.choice(_CLASSES)
         fam = rng.choice(_FAMILIES)
         for i in range(rng.randint(1, 6)):
-            recs.append({"model_id": model, "failure_class": fc,
+            recs.append({"owner": "", "goal_id": 0, "model_id": model, "failure_class": fc,
                          "goal_text": f"{fam} variant {i % 3}",
                          "failure_msg": rng.choice([f"{fc} boom", "timed out", "err"])})
     return recs
 
 
 def _scoped(rng, model="M"):
-    return [{"model_id": model, "failure_class": rng.choice(_CLASSES),
+    return [{"owner": "", "goal_id": 0, "model_id": model, "failure_class": rng.choice(_CLASSES),
              "goal_text": f"{rng.choice(_FAMILIES)} {i}", "failure_msg": "evil",
              "channel": rng.choice(["slack:x", "email:y"]),
              "user_id": rng.choice([None, "u1"])}
@@ -46,7 +46,7 @@ def _scoped(rng, model="M"):
 
 
 def _other_model(rng):
-    return [{"model_id": rng.choice(["X", "Y", "Z"]),
+    return [{"owner": "", "goal_id": 0, "model_id": rng.choice(["X", "Y", "Z"]),
              "failure_class": rng.choice(_CLASSES),
              "goal_text": f"{rng.choice(_FAMILIES)} {i}", "failure_msg": "m"}
             for i in range(rng.randint(1, 6))]
@@ -58,7 +58,7 @@ def _noise(rng, model="M"):
     out = []
     for _ in range(rng.randint(0, 6)):
         toks = " ".join(f"z{rng.randrange(10**9)}" for _ in range(5))
-        out.append({"model_id": model, "failure_class": rng.choice(_CLASSES),
+        out.append({"owner": "", "goal_id": 0, "model_id": model, "failure_class": rng.choice(_CLASSES),
                     "goal_text": toks, "failure_msg": "noise"})
     return out
 

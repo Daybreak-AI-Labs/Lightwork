@@ -12,20 +12,15 @@ from maverick_dashboard import ai_cloud_agent_governance_workbench as workbench
 
 @pytest.fixture()
 def environment(monkeypatch: pytest.MonkeyPatch):
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
+    templates = Jinja2Templates(
+        directory=str(template_dir),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
+        nav_groups=[],
     )
     state = {"enabled": True}
     monkeypatch.setattr(workbench, "_tenant_id", lambda: "tenant-cloud-agents")
@@ -35,6 +30,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         lambda _request, _permission: None,
     )
     app = FastAPI()
+    app.state.ai_cloud_agent_governance_runtime_factory = lambda *_args: None
     app.include_router(
         workbench.create_ai_cloud_agent_governance_workbench_router(
             templates,
@@ -104,7 +100,8 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
     finally:
         workbench._tenant_id = monkeypatch_target
     assert unavailable.status_code == 200
-    assert "This page isn't ready yet" in unavailable.text
+    assert "Choose a workspace first" in unavailable.text
+    assert 'id="cag-root"' not in unavailable.text  # fails closed: no working controls
     template = (template_dir / "ai_cloud_agent_governance.html").read_text(encoding="utf-8")
     for unsafe in (".innerHTML", ".outerHTML", "insertAdjacentHTML", "eval("):
         assert unsafe not in template
@@ -116,6 +113,86 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
         'name="native_resource_id"',
     ):
         assert forbidden not in template
+
+
+def _page(monkeypatch, *, tenant, probe=None, app_probe=None, with_factory=True):
+    """Render the page for one availability situation and return its visible text."""
+    from maverick_dashboard.app import _theme_context
+
+    template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
+    templates = Jinja2Templates(directory=str(template_dir), context_processors=[_theme_context])
+    templates.env.globals.update(
+        {
+            "theme": "dark", "font": "default", "lang": "en", "density": "comfortable",
+            "custom_theme_css": "", "custom_theme_names": [], "dir": "ltr",
+            "nav_groups": [], "t": lambda key: key,
+        }
+    )
+    monkeypatch.setattr(workbench, "_tenant_id", lambda: tenant)
+    monkeypatch.setattr(workbench, "require_permission", lambda _request, _permission: None)
+    app = FastAPI()
+    if app_probe is not None:
+        app.state.ai_cloud_agent_governance_enabled_probe = app_probe
+    if with_factory:
+        app.state.ai_cloud_agent_governance_runtime_factory = lambda *_args: None
+    app.include_router(
+        workbench.create_ai_cloud_agent_governance_workbench_router(templates, enabled_probe=probe)
+    )
+    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+        "/assurance/cloud-agents"
+    )
+    assert response.status_code == 200
+    assert 'id="cag-root"' not in response.text  # never a working page in these states
+    return _visible_text(response.text), response.text
+
+
+def test_workbench_asks_for_a_workspace_only_when_none_is_selected(monkeypatch) -> None:
+    text, html = _page(monkeypatch, tenant="", probe=lambda _tenant: True)
+    assert "Choose a workspace first" in text
+    assert 'href="/workspace/tenant?next=/assurance/cloud-agents"' in html
+    assert "not available in this installation" not in text
+
+
+def test_workbench_does_not_blame_the_workspace_when_the_service_is_not_connected(
+    monkeypatch,
+) -> None:
+    """A workspace IS selected; nothing on this installation supplies the cloud
+    agent service. Telling the user to choose a workspace (and offering only
+    Reload) sent them round a loop that can never end."""
+    text, html = _page(monkeypatch, tenant="local", probe=None)
+    assert "Choose a workspace" not in text
+    assert "not available in this installation" in text
+    assert 'href="/help"' in html  # a real next step
+    assert "Reload" not in text  # reloading cannot fix it
+    assert _BANNED.search(text) is None, _BANNED.search(text)
+
+    no_workspace, _html = _page(monkeypatch, tenant="", probe=None)
+    assert "not available in this installation" in no_workspace
+    assert "Choose a workspace" not in no_workspace
+
+
+def test_workbench_does_not_offer_actions_without_runtime_factory(monkeypatch) -> None:
+    text, html = _page(
+        monkeypatch, tenant="local", app_probe=lambda _tenant: True, with_factory=False
+    )
+    assert "not available in this installation" in text
+    assert 'id="cag-root"' not in html
+
+
+def test_workbench_offers_reload_only_when_the_service_could_not_be_reached(
+    monkeypatch,
+) -> None:
+    def _broken(_tenant):
+        raise RuntimeError("probe failed")
+
+    text, html = _page(monkeypatch, tenant="local", probe=_broken)
+    assert "couldn't reach" in text
+    assert "Reload" in text
+    assert "Choose a workspace" not in text
+    assert _BANNED.search(text) is None, _BANNED.search(text)
+
+    not_a_bool, _html = _page(monkeypatch, tenant="local", probe=lambda _tenant: "yes")
+    assert "couldn't reach" in not_a_bool
 
 
 def test_workbench_factory_rejects_invalid_dependencies() -> None:
@@ -130,9 +207,9 @@ def test_workbench_factory_rejects_invalid_dependencies() -> None:
         )
 
 
-def test_dashboard_mounts_page_api_visibility_and_security_link() -> None:
+def test_dashboard_mounts_page_api_but_hides_unavailable_workbench() -> None:
     from maverick_dashboard.app import app
-    from maverick_dashboard.ui_visibility import page_for
+    from maverick_dashboard.ui_visibility import not_ready_paths, page_for
 
     paths = set(app.openapi()["paths"])
     assert "/assurance/cloud-agents" in paths
@@ -142,10 +219,11 @@ def test_dashboard_mounts_page_api_visibility_and_security_link() -> None:
     assert selected is not None
     assert selected["floor"] == "operate"
     assert selected["in_nav"] is True
+    assert "/assurance/cloud-agents" in not_ready_paths()
     security = (
         Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "security.html"
     ).read_text(encoding="utf-8")
-    assert 'href="/assurance/cloud-agents"' in security
+    assert 'href="/assurance/cloud-agents"' not in security
 
 
 def test_cloud_agent_script_is_served() -> None:

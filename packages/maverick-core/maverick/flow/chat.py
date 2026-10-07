@@ -72,8 +72,9 @@ Patch ops (use ONLY these):
 - {"op":"add_node","node":{<a node object>},"after":"<existing node id>"}   (omit "after" to add unlinked)
 - {"op":"remove_node","id":"<node id>"}
 - {"op":"set_field","id":"<node id>","field":"<node field>","value":<new value>}
-- {"op":"set_flow_field","field":"name|start|notify|max_seconds|max_dollars|schedule","value":<new value>}
-- {"op":"rewire","id":"<node id>","field":"next|if_true|if_false|on_error","to":"<node id or null>"}
+- {"op":"set_flow_field","field":"name|start|notify|notify_on|max_seconds|max_dollars|schedule|timezone|max_concurrent|inputs","value":<new value>}
+  notify enables alerts. notify_on is "all" (approval, problems and completion) or "problems" (failed, spending-limited or uncertain runs only).
+- {"op":"rewire","id":"<node id>","field":"next|if_true|if_false|on_error|on_expire","to":"<node id or null>"}
 
 Node objects use the flow schema below. New node ids must be short unique slugs not already in the flow.
 
@@ -87,6 +88,10 @@ Rules:
   and either explain it or propose the smallest patch that fixes it.
 - Prefer the smallest set of patches that satisfies the request. Never invent tool names: only use
   tools from the provided list (or use an "agent" node with a clear brief).
+- To change questions asked when a person starts a run, set the full "inputs" list. Each item needs
+  a unique key, a plain-language label, and a type: text, number, bool, or date. Preserve existing
+  questions unless the user asks to remove them. Use an IANA name for "timezone" (for example,
+  America/New_York), and an integer from 0 to 32 for "max_concurrent" (0 means no limit).
 - Insert an "approval" node before anything irreversible (sending, paying, deleting).
 - Output the JSON object ONLY -- no prose, no code fence.
 
@@ -429,13 +434,13 @@ def chat_flow(message: str, *, flow: Flow | None = None, history=(),
             raw_text, label="model output", maximum=_MAX_MODEL_OUTPUT_CHARS,
         )
     except ValueError:
-        out.reply = "I couldn't produce a safe structured answer for that."
-        out.notes.append("model output failed the provider-boundary safety check")
+        out.reply = "The workflow assistant could not prepare a safe reply. No workflow change was prepared."
+        out.notes.append("Try a shorter, clearer request.")
         return out
     raw = _extract_json(raw_text)
     if raw is None:
-        out.reply = "I couldn't produce a structured answer for that -- try rephrasing."
-        out.notes.append("model did not return JSON")
+        out.reply = "The workflow assistant's answer could not be read. No workflow change was prepared."
+        out.notes.append("Describe the change you want, then try again.")
         return out
     out.reply = str(raw.get("reply") or "").strip() or "Done."
     patches = raw.get("patches")

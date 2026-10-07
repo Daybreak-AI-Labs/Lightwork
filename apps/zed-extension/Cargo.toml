@@ -12,7 +12,10 @@ repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
 crate-type = ["cdylib"]
 
 [dependencies]
-# Pinned to the API generation this scaffold was written against. Not
-# compiled here (needs the Rust toolchain + wasm32-wasip1 target + Zed);
-# bump if Zed's minimum has moved — see README "Status".
-zed_extension_api = "0.2.0"
+# Keep the extension's WIT/API generation explicit; Cargo.lock pins transitive inputs.
+zed_extension_api = "=0.7.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "debuginfo"

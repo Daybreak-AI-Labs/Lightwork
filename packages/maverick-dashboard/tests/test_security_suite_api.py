@@ -359,8 +359,8 @@ def test_security_pages_and_report_render_seeded_program():
     assert "Print or save as PDF" in report.text
 
     for route, phrase in (
-        ("/security/threats", "Platform Threat Hunter"),
-        ("/security/soc", "Environment Threat Hunter"),
+        ("/security/threats", "Lightwork threat check"),
+        ("/security/soc", "Threat monitoring"),
     ):
         response = client.get(route)
         assert response.status_code == 200, response.text

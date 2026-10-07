@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 
 SQLITE_SCHEMA = (
@@ -23,6 +23,16 @@ POSTGRES_SCHEMA = SQLITE_SCHEMA.replace("updated_at REAL", "updated_at DOUBLE PR
 
 class SubmissionConflict(ValueError):
     pass
+
+
+def _preparation_inputs(status, result, marker):
+    if status not in {"draft", "blocked"} or (result is not None and not isinstance(result, str)):
+        raise SubmissionConflict("Choose a draft or an explicitly prepared, unstarted task")
+    if marker is not None and (
+            not isinstance(marker, dict) or set(marker) != {"channel", "key"}
+            or any(not isinstance(value, str) or not value or len(value) > 200
+                   or any(ord(char) < 32 for char in value) for value in marker.values())):
+        raise SubmissionConflict("Use the exact original task preparation identity")
 
 
 @dataclass(frozen=True)
@@ -60,18 +70,26 @@ class SubmissionStore:
             self.seal, self.open = _seal, _unseal
 
     @contextmanager
-    def transaction(self, lock: str):
+    def transaction(self, lock: str, *, effect_guard=None):
         self._check_context()
         if self.sqlite:
             with self.world._writing() as connection:
                 if not connection.in_transaction:
                     connection.execute("BEGIN IMMEDIATE")
+                if effect_guard:
+                    effect_guard()
                 yield connection
+                if effect_guard:
+                    effect_guard()
         else:
             key = int.from_bytes(hashlib.sha256(f"{self.tenant}\0{lock}".encode()).digest()[:8], "big", signed=True)
             with self.world._tx() as cursor:
                 cursor.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+                if effect_guard:
+                    effect_guard()
                 yield cursor
+                if effect_guard:
+                    effect_guard()
 
     def execute(self, connection, sql, parameters=()):
         if self.sqlite:
@@ -121,15 +139,23 @@ class SubmissionStore:
 
     def create(self, *, token, fingerprint, owner, title, description, manifest,
                parent_id=None, domain="", project_id=None, kind="chat",
-               chat_text=None, chat_root_id=None):
+               chat_text=None, chat_root_id=None, connection_references=None,
+               chat_prior=(), attachment_records=(), submission_detail=None, before_create=None,
+               initial_status="draft", initial_result=None, processed_message=None, effect_guard=None):
+        from .template_connections import packed
+        _preparation_inputs(initial_status, initial_result, processed_message)
+        selection = packed(owner, connection_references or [])
         key = self.token_key(token, owner)
-        with self.transaction("submission:" + key) as connection:
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             prior = self._receipt(connection, key)
             if prior is not None:
                 if prior["fingerprint"] != fingerprint:
                     raise SubmissionConflict("Submission key already belongs to different content")
                 prior["created"] = False
                 return prior
+            if before_create is not None:
+                before_create(connection)
+            self._prepared_marker(connection, processed_message)
             chat = None
             if chat_text is not None:
                 from .chat_threads import ChatThreads
@@ -148,8 +174,11 @@ class SubmissionStore:
                     parent_values += scoped_values
                 if self.execute(connection, parent_sql, parent_values).fetchone() is None:
                     raise SubmissionConflict("Parent task is unavailable in this tenant")
-            columns = "parent_id,title,description,status,created_at,updated_at,owner,domain,project_id"
-            values = [parent_id, self.seal(title), self.seal(description), "draft", now, now, owner, domain, project_id]
+            columns = "parent_id,title,description,status,created_at,updated_at,owner,domain,project_id,connection_selection"
+            values = [parent_id, self.seal(title), self.seal(description), initial_status, now, now, owner, domain, project_id, self.seal(selection)]
+            if initial_result is not None:
+                columns += ",result"
+                values.append(self.seal(initial_result))
             if not self.sqlite:
                 columns += ",tenant_id"
                 values.append(self.tenant)
@@ -157,21 +186,54 @@ class SubmissionStore:
             cursor = self.execute(connection, sql + ("" if self.sqlite else " RETURNING id"), tuple(values))
             goal_id = int(cursor.lastrowid if self.sqlite else cursor.fetchone()[0])
             detail = {"manifest": manifest, "kind": kind,
-                      "message": "Submission admitted as a draft; preparing attachments."}
-            detail = {"manifest": manifest, "message": "Submission admitted as a draft; preparing attachments."}
+                      "message": ("Pilot task prepared; no work has started. Freeze its pilot plan before starting it separately."
+                                  if initial_status == "blocked" else "Submission admitted as a draft; preparing attachments.")}
+            if processed_message is not None:
+                detail["processed_message"] = dict(processed_message)
+            if submission_detail:
+                if set(submission_detail) & set(detail):
+                    raise SubmissionConflict("Submission metadata cannot replace native admission state")
+                detail.update(submission_detail)
             if chat is not None:
                 detail["conversation_id"] = chat.record(connection, root_id=chat_root_id or goal_id,
-                                                       goal_id=goal_id, owner=owner, text=chat_text)
+                                                       goal_id=goal_id, owner=owner, text=chat_text,
+                                                       prior=chat_prior)
+            if attachment_records:
+                self.admit(goal_id, attachment_records, connection=connection, verify_existing=True)
+            self._prepared_marker(connection, processed_message, goal_id=goal_id, now=now)
             self.execute(connection, "INSERT INTO attachment_submissions "
                          "(submission_key,tenant_id,owner,goal_id,fingerprint,state,detail,updated_at) "
-                         "VALUES(?,?,?,?,?,'draft',?,?)",
-                         (key, self.tenant, owner, goal_id, fingerprint, self.seal(json.dumps(detail)), now))
-            return {**self._receipt(connection, key), "created": True}
+                         "VALUES(?,?,?,?,?,?,?,?)",
+                         (key, self.tenant, owner, goal_id, fingerprint,
+                          "admitted" if initial_status == "blocked" else "draft", self.seal(json.dumps(detail)), now))
+            result = {**self._receipt(connection, key), "created": True}
+            if before_create is not None:
+                before_create(connection)
+            return result
 
-    def update(self, key, *, state, message, coverage=None):
+    def _prepared_marker(self, connection, marker, *, goal_id=None, now=None):
+        if marker is None:
+            return
+        if goal_id is None:
+            scope, scoped = ("1=1", ()) if self.sqlite else self.scope()
+            existing = self.execute(connection, "SELECT goal_id FROM processed_messages "
+                f"WHERE channel=? AND external_id=? AND {scope}",
+                (marker["channel"], marker["key"], *scoped)).fetchone()
+            if existing is not None:
+                raise SubmissionConflict("This original task preparation is already retained. Read its original outcome; no new task was created.")
+            return
+        columns = "channel,external_id,goal_id,seen_at"
+        values = [marker["channel"], marker["key"], goal_id, now]
+        if not self.sqlite:
+            columns += ",tenant_id"
+            values.append(self.tenant)
+        self.execute(connection, f"INSERT INTO processed_messages({columns}) "
+            f"VALUES({','.join('?' for _ in values)})", tuple(values))
+
+    def update(self, key, *, state, message, coverage=None, effect_guard=None):
         if state not in {"draft", "admitted", "ready", "rejected"}:
             raise ValueError("Invalid submission state")
-        with self.transaction("submission:" + key) as connection:
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             receipt = self._receipt(connection, key)
             if receipt is None:
                 raise LookupError("Unknown submission")
@@ -182,12 +244,12 @@ class SubmissionStore:
                 detail["coverage"] = coverage
             self.execute(connection, "UPDATE attachment_submissions SET state=?,detail=?,updated_at=? WHERE submission_key=?",
                          (state, self.seal(json.dumps(detail)), time.time(), key))
-            self.execute(connection, "UPDATE goals SET result=? WHERE id=? AND status='draft'",
-                         (self.seal(message), receipt["goal_id"]))
+            # Preparation is a receipt state, not an answer. Writing it to
+            # goals.result makes the chat render it as Lightwork's response.
             return self._receipt(connection, key)
 
-    def claim_dispatch(self, key):
-        with self.transaction("submission:" + key) as connection:
+    def claim_dispatch(self, key, *, effect_guard=None):
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             receipt = self._receipt(connection, key)
             if receipt is None or receipt["state"] != "ready":
                 return False
@@ -205,9 +267,9 @@ class SubmissionStore:
                          (time.time(), key))
             return True
 
-    def record_dispatch_intent(self, key, intent):
+    def record_dispatch_intent(self, key, intent, *, effect_guard=None):
         """Retain reviewed runner context before the cross-store dispatch boundary."""
-        with self.transaction("submission:" + key) as connection:
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             receipt = self._receipt(connection, key)
             if receipt is None:
                 raise LookupError("Unknown submission")
@@ -231,14 +293,14 @@ class SubmissionStore:
         return {"key": row[0], "goal_id": int(row[1]), "fingerprint": row[2], "state": row[3],
                 "detail": json.loads(self.open(row[4]))}
 
-    def admit(self, goal_id, records, *, publish=None):
+    def admit(self, goal_id, records, *, publish=None, connection=None, verify_existing=False):
         from .attachments import MAX_FILE_BYTES, MAX_GOAL_BYTES, AttachmentRejected
 
         if not records:
             return []
         if len(records) > 128:
             raise AttachmentRejected("Too many attachments in one batch")
-        with self.transaction(f"attachments:{goal_id}") as connection:
+        with (self.transaction(f"attachments:{goal_id}") if connection is None else nullcontext(connection)) as connection:
             params = (goal_id,)
             sql = "SELECT id FROM goals WHERE id=?"
             if not self.sqlite:
@@ -252,9 +314,10 @@ class SubmissionStore:
                                      (goal_id,)).fetchone()[0])
             terms = " OR ".join("(filename=? AND mime=? AND size_bytes=? AND sha256=?)" for _ in identities)
             values = (goal_id, *(value for identity in identities for value in identity))
-            existing = self.execute(connection, "SELECT id,filename,mime,size_bytes,sha256 FROM attachments "
+            existing = self.execute(connection, "SELECT id,filename,mime,size_bytes,sha256,path FROM attachments "
                                     f"WHERE goal_id=? AND ({terms})", values).fetchall()
             known = {(row[1], row[2], int(row[3]), row[4]): int(row[0]) for row in existing}
+            paths = {(row[1], row[2], int(row[3]), row[4]): row[5] for row in existing}
             novel = set(identities) - known.keys()
             if any(not 0 < item[2] <= MAX_FILE_BYTES for item in identities) or total + sum(item[2] for item in novel) > MAX_GOAL_BYTES:
                 raise AttachmentRejected("Per-goal attachment quota exceeded")
@@ -267,5 +330,18 @@ class SubmissionStore:
                     cursor = self.execute(connection, sql + ("" if self.sqlite else " RETURNING id"),
                                           (goal_id, *identity[:3], identity[3], str(record.path), time.time()))
                     known[identity] = int(cursor.lastrowid if self.sqlite else cursor.fetchone()[0])
+                    paths[identity] = str(record.path)
+                elif verify_existing:
+                    from pathlib import Path
+
+                    from .attachments import _verify_stored_attachment
+                    try:
+                        _verify_stored_attachment(Path(paths[identity]), identity[3])
+                    except (OSError, AttachmentRejected):
+                        if publish is None:
+                            raise
+                        repaired = publish(record)
+                        self.execute(connection, "UPDATE attachments SET path=? WHERE id=? AND goal_id=?",
+                                     (str(repaired.path), known[identity], goal_id))
                 ids.append(known[identity])
             return ids

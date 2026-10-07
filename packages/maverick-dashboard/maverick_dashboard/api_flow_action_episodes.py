@@ -76,7 +76,7 @@ class EpisodeWithdrawIn(_StrictModel):
     rationale: str = Field(min_length=1, max_length=2000)
 
 
-def _service(request: Request, flow_id: str, *, human=False, maintenance=False):
+def _service(request: Request, flow_id: str, *, human=False, maintenance=False, receipt=False):
     from maverick.flow import store
     from maverick.flow.action_episode_review import ActionEpisodeReviewService
 
@@ -86,7 +86,7 @@ def _service(request: Request, flow_id: str, *, human=False, maintenance=False):
     if not actor:
         raise HTTPException(status_code=401, detail="an authenticated user identity is required")
     require_permission(request, "operate")
-    if not maintenance:
+    if not maintenance and not receipt:
         _require_flows()
     try:
         tenant = current_tenant_id_strict()
@@ -115,7 +115,7 @@ def _service(request: Request, flow_id: str, *, human=False, maintenance=False):
     def authorize(context, capability, resource):
         if context != ctx or resource != flow_id or capability not in _CAPABILITIES:
             raise HTTPException(status_code=404, detail="no such action episode")
-        if maintenance and capability != "flow.episode.withdraw":
+        if (maintenance and capability != "flow.episode.withdraw") or (receipt and capability != "flow.episode.read"):
             raise HTTPException(status_code=403, detail="only evidence withdrawal is available through this control")
         if (caller_principal(request) != actor or current_tenant_id_strict() != tenant
                 or role_for_principal(actor) != role

@@ -1,8 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Discovery · Lightwork{% endblock %}
+{% block title %}{{ 'Inventory · Permissions' if tab_host else 'Discovery' }} · Lightwork{% endblock %}
 {% block content %}
+  {% if tab_host %}
+  {% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+  <div {{ panel_attrs(tab_host.selected) }}>
+  <h2>Inventory</h2>
+  <p class="muted">You can't govern what you can't see.</p>
+  {% else %}
   <h1 class="page-title">Discovery</h1>
   <p class="page-subtitle">Everything Lightwork can use here and keep under your rules — actions, connected tool servers, AI providers, channels and outside agents. You can't govern what you can't see.</p>
+  {% endif %}
 
   <p><a class="btn btn--primary" href="/api/v1/compliance/packet">Download the compliance file</a></p>
 
@@ -50,7 +57,7 @@
         {% endfor %}
       </ul>
     </details>
-    {% else %}<p class="muted">No tool servers connected.</p>{% endif %}
+    {% else %}<p class="muted">No tool servers connected. Add one in Tool servers to give agents more tools.</p>{% endif %}
   </div>
 
   <div class="grid">
@@ -62,7 +69,7 @@
     <div class="panel">
       <div class="section-head"><h2>Channels</h2></div>
       {% if discovery.channels %}<p>{% for c in discovery.channels %}<span class="badge">{{ c|humanize }}</span> {% endfor %}</p>
-      {% else %}<p class="muted">No channels installed.</p>{% endif %}
+      {% else %}<p class="muted">No channels installed. Connect a chat app in Channels to give work from it.</p>{% endif %}
     </div>
     <div class="panel">
       <div class="section-head"><h2>Outside agents</h2></div>
@@ -73,4 +80,5 @@
       </p>
     </div>
   </div>
+  {% if tab_host %}</div>{% endif %}
 {% endblock %}

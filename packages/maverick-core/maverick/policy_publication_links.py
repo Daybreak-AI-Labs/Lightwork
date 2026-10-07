@@ -320,6 +320,21 @@ def _no_secret_details(value: object) -> None:
             _no_secret_details(item)
 
 
+
+def _emit_published(result: dict[str, Any], actor: str) -> None:
+    """``policy.published`` for webhook subscribers; never raises."""
+    try:
+        from .webhook_events import emit, record_link
+
+        emit("policy.published", record_type="policy", record_id=str(result.get("policy_id") or ""),
+             title=f"policy {result.get('policy_id')} version {result.get('current_version')}",
+             summary={"link_id": result.get("link_id"), "version": result.get("current_version"),
+                      "effective_at": result.get("effective_at")},
+             link=record_link("/settings#policy-publication"), payload={"actor_id": actor})
+    except Exception:  # pragma: no cover - webhooks never block a publication
+        pass
+
+
 class PolicyPublicationStore:
     """SQLite authority for exact-version policy publication links."""
 
@@ -1719,7 +1734,9 @@ class PolicyPublicationStore:
                 result=result,
                 now=now,
             )
-            return {**result, "idempotent_replay": False}
+        if not no_change:
+            _emit_published(result, actor)
+        return {**result, "idempotent_replay": False}
 
     def rotate_private_capability(
         self,

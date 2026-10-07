@@ -119,7 +119,8 @@ def _init_git_repo(path: Path) -> None:
         ["git", "config", "user.name", "t"],
     ):
         subprocess.run(cmd, cwd=path, check=True, capture_output=True, env={**env})
-    (path / "f.txt").write_text("base\n")
+    # Keep the patch fixture's LF hunk byte-for-byte on Windows too.
+    (path / "f.txt").write_bytes(b"base\n")
     subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True, env=env)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=path, check=True,
                    capture_output=True, env=env)

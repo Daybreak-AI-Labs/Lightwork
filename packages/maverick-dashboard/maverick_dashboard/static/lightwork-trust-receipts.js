@@ -43,27 +43,25 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
+    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Try again.";
   }
   function problem(message) { var e = new Error(message); e.plain = true; return e; }
-  function say(id, text) { var el = document.getElementById(id); if (el) { el.textContent = text; } }
+  function say(id, text) { window.mvStatus(document.getElementById(id), text); }
   function explain(id, action) {
     return function (failure) { say(id, failure && failure.plain ? failure.message : errorText(failure, action)); };
   }
 
-  function request(path, options) {
-    var settings = Object.assign({ credentials: "same-origin", headers: { Accept: "application/json" } }, options || {});
-    if (settings.body) { settings.headers["Content-Type"] = "application/json"; }
-    return fetch(apiBase + path, settings);
+  // The page's requests carry a JSON string body; mvFetchJSON sends it as is.
+  function settingsFor(options) {
+    var settings = Object.assign({}, options || {});
+    if (settings.body) { settings.headers = Object.assign({ "Content-Type": "application/json" }, settings.headers); }
+    return settings;
   }
   async function json(path, options) {
-    var response = await request(path, options);
-    if (!response.ok) { throw response; }
-    return response.json();
+    return window.mvFetchJSON(apiBase + path, settingsFor(options));
   }
   async function text(path, options) {
-    var response = await request(path, options);
-    if (!response.ok) { throw response; }
+    var response = await window.mvFetchJSON(apiBase + path, Object.assign(settingsFor(options), { raw: true }));
     return { text: await response.text(), response: response };
   }
 
@@ -78,13 +76,13 @@
   function when(ts) {
     var n = Number(ts);
     if (!isFinite(n) || n <= 0) { return "—"; }
-    return new Date(n * 1000).toLocaleString();
+    return window.mvTimeAbsolute(n);
   }
 
   function readFile(input, what) {
     var file = input.files && input.files[0];
     if (!file) { return Promise.reject(problem("Choose the " + what + " first.")); }
-    if (file.size > maxBytes) { return Promise.reject(problem("That file is too large to be a Lightwork " + what + ".")); }
+    if (file.size > maxBytes) { return Promise.reject(problem("That file is too large to be a Lightwork " + what + ". Choose the " + what + " file you were sent.")); }
     return file.text();
   }
 
@@ -126,7 +124,7 @@
     status.days.forEach(function (day, index) {
       var option = document.createElement("option");
       option.value = day;
-      var label = new Date(day + "T12:00:00").toLocaleDateString();
+      var label = window.mvDateAbsolute(day) || day;
       option.textContent = label + (index === 0 ? " (latest)" : "");
       daySelect.appendChild(option);
     });
@@ -241,8 +239,8 @@
   async function checkReceipt() {
     var raw = String(await readFile(document.getElementById("rcp-file"), "receipt file")).trim();
     var parsed;
-    try { parsed = JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork receipt."); }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) { throw problem("That file isn't a Lightwork receipt."); }
+    try { parsed = JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork receipt. Choose the receipt file you were sent."); }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) { throw problem("That file isn't a Lightwork receipt. Choose the receipt file you were sent."); }
     // Sent verbatim: re-encoding would change number formatting and break the signature.
     var body = { receipt: raw, keys: [], use_local_keys: document.getElementById("rcp-local-keys").checked };
     var key = keyFrom("rcp-extra-key");
@@ -266,7 +264,7 @@
 
   async function checkProof() {
     var raw = String(await readFile(document.getElementById("rcp-proof-file"), "proof file")).trim();
-    try { JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork proof file."); }
+    try { JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork proof file. Choose the proof file you were sent."); }
     var key = keyFrom("rcp-proof-key");
     var body = { bundle: raw, use_own_key: !key };
     if (key) { body.key = key; }
@@ -290,9 +288,7 @@
 
   async function turnOnSigning() {
     if (!(await window.mvConfirm("Sign every entry in the activity record so any later change can be detected? New entries are signed after Lightwork restarts.", { okText: "Turn on" }))) { return; }
-    var response = await fetch("/api/v1/compliance/switches/signed_audit", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json" } });
-    if (!response.ok) { throw response; }
-    var data = await response.json();
+    var data = await window.mvFetchJSON("/api/v1/compliance/switches/signed_audit", { method: "POST" });
     say("rcp-signing-msg", data.active ? "Signing is on." : "Saved. Signing starts after Lightwork restarts.");
     await loadStatus();
   }
@@ -339,7 +335,7 @@
 
   loadStatus().then(function (st) {
     if (st.days.length) { return loadRows(st.days[0]); }
-    say("rcp-rows-note", "No activity has been recorded yet.");
+    say("rcp-rows-note", "No activity has been recorded yet. Receipts appear here as agents act.");
     return null;
   }).catch(function (failure) {
     mark("danger", "Unavailable", "Trust receipts are not available", errorText(failure, "load trust receipts"));

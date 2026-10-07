@@ -20,8 +20,11 @@ crashing logs an error but doesn't take the others down.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
+import re
 from pathlib import Path
 
 from .config import load_config
@@ -35,6 +38,111 @@ from .world_model import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _channel_conversation_user(msg, principal_id: str, memory_user_id: str) -> str:
+    """Keep room/thread history separate without changing the owner's identity."""
+    recipient = str(msg.user_id)
+    thread = str(getattr(msg, "conversation_ref", None) or "")
+    # Slack DMs (and legacy Teams chats) already used the sender-only key.
+    # Keep it so an open question survives an upgrade. Room-based Slack
+    # messages carry an explicit thread anchor and take the scoped key below.
+    if not thread and (recipient == principal_id or msg.channel in {"slack", "teams"}):
+        return memory_user_id
+    context = json.dumps([recipient, thread], separators=(",", ":"))
+    digest = hashlib.sha256(context.encode("utf-8")).hexdigest()
+    return f"{memory_user_id}:conversation:{digest}"
+
+
+def _channel_answer_text(msg) -> str:
+    """Email's generated Subject line is routing metadata, not the answer."""
+    text = msg.text.strip()
+    if msg.channel == "email" and text.startswith("Subject: ") and "\n\n" in text:
+        text = text.split("\n\n", 1)[1].strip()
+    return text
+
+
+def _question_id_required(msg) -> bool:
+    """A Slack room thread is task-specific; inboxes and topics are long lived."""
+    return not (msg.channel == "slack" and getattr(msg, "conversation_ref", None))
+
+
+def _question_reply(goal_id: int, questions: list, *, require_id: bool = False) -> str:
+    lines = [f"Question #{q.id} for task #{q.goal_id}: {q.question}" for q in questions]
+    if len(questions) == 1 and not require_id:
+        instructions = "Reply here with your answer and I’ll continue this task."
+    else:
+        instructions = ("Reply with the question number and your answer, for example "
+                        f"#{questions[0].id} your answer. Send a new request normally. "
+                        "I’ll continue this task when its questions are answered.")
+    return "\n".join([*lines, instructions])
+
+
+def queued_channel_question(watch: dict, msg, account_sha256: str) -> tuple[str | None, bool]:
+    """Read a queued goal's question under its original sender and tenant.
+
+    The second return value retires a watch whose goal finished without an
+    open question. An unavailable identity or world keeps it for later review.
+    """
+    from .oidc import oidc_enabled
+    from .paths import tenant_by_user_enabled, tenant_scope
+    from .personal_identity import CHANNELS, account_identity
+
+    principal = msg.principal_id
+    if oidc_enabled():
+        if msg.channel not in {"slack", "teams"}:
+            return None, False
+        from . import channel_oidc_bridge
+
+        principal = channel_oidc_bridge.resolve(
+            msg.channel, account_sha256, msg.provider_tenant_id,
+            msg.provider_sender_id,
+        )
+        if not principal:
+            return None, False
+    expected_tenant = f"{msg.channel}:{principal}" if tenant_by_user_enabled() else None
+    if watch.get("tenant") != expected_tenant:
+        return None, False
+    memory_user_id = (account_identity(principal, account_sha256)
+                      if msg.channel in CHANNELS and account_sha256 else principal)
+    if _linked_channel_refusal(msg.channel, memory_user_id, account_sha256):
+        return None, False
+    owner = f"user:{msg.channel}:{memory_user_id}"
+    execution_principal = f"user:{msg.channel}:{principal}"
+    if (watch.get("owner") != owner
+            or watch.get("execution_principal") != execution_principal):
+        return None, False
+
+    from .world_model import close_world_if_owned, open_world
+
+    with tenant_scope(tenant=expected_tenant):
+        world = open_world()
+        try:
+            goal_id = watch.get("goal_id")
+            goal = world.get_goal(goal_id)
+            if goal is None or goal.owner != owner or goal.execution_principal != execution_principal:
+                return None, False
+            questions = [
+                q for q in world.open_channel_questions(
+                    watch["conversation_id"], owner, execution_principal,
+                ) if q.goal_id == goal_id
+            ]
+            if questions:
+                text = _question_reply(goal_id, questions,
+                                       require_id=_question_id_required(msg))
+                try:
+                    from maverick_shield import Shield
+                except ImportError:
+                    pass
+                else:
+                    verdict = Shield.from_config().scan_output(text)
+                    if not verdict.allowed:
+                        text = (f"Task #{goal_id} needs an answer, but its question "
+                                "cannot be shown in this chat. Open Lightwork to review it.")
+                return text, False
+            return None, goal.status in {"blocked", "done", "failed", "cancelled"}
+        finally:
+            close_world_if_owned(world)
 
 
 def _reclaim_tenant_orphans() -> int:
@@ -77,6 +185,15 @@ def _reclaim_tenant_orphans() -> int:
     return total
 
 
+def _completed_reply(completed, goal_id: int, channel: str = "") -> str:
+    """A finished task's reply: an agent-written answer carries the AI mark
+    (AI-2); a stop or failure message is the product's own words."""
+    if completed.status != "done":
+        return completed.result
+    from .compliance import label_ai_answer
+    return label_ai_answer(completed.result, goal_id, channel=channel or "")
+
+
 class Server:
     def __init__(
         self,
@@ -90,6 +207,7 @@ class Server:
     ):
         created_sandbox = sandbox is None
         self.world = world
+        self._db_path: Path | None = None
         self.llm = llm
         self.sandbox = build_sandbox() if sandbox is None else sandbox
         self.max_depth = max_depth
@@ -101,6 +219,8 @@ class Server:
         self._owns_sandbox = (
             created_sandbox if owns_sandbox is None else bool(owns_sandbox)
         )
+        self._runtime_receipt = None
+        self._runtime_configuration_native = False
         self._resources_closed = False
         self._stopping = False
         self._stopped = False
@@ -127,6 +247,8 @@ class Server:
         if tenant is None:
             world = self.world
         else:
+            if self._db_path is not None:
+                raise RuntimeError("An explicit database cannot be combined with per-user workspace selection.")
             # Postgres is one shared transactional backend whose row-level
             # tenant boundary comes from tenant_scope/current_tenant_strict.
             # Creating a tenant SQLite world here silently splits channel
@@ -208,16 +330,40 @@ class Server:
         # reply target and expose the human via msg.principal_id; the tenant, the
         # conversation key, and the runner's user_id must ALL agree on it -- else a
         # user's world.db lands under a different tenant than their memory/audit.
-        # When OIDC is enabled, do not trust the channel-provided principal:
-        # fail closed unless a verified ID token supplies the Lightwork principal.
+        # An explicit ID token always has priority: a bad token cannot inherit
+        # a previously linked chat account. First-party Slack/Teams delivery
+        # can instead use a separately confirmed OIDC bridge, but only with a
+        # current durable app receipt and exact provider account/sender tuple.
         if oidc_enabled():
-            try:
-                principal_id = verify_oidc_token(_extract_oidc_token(msg)).principal
-            except OIDCError:
-                log.warning(
-                    "OIDC authentication failed for inbound %s message",
-                    msg.channel or "unknown",
-                )
+            token = _extract_oidc_token(msg)
+            if token or _oidc_token_present(msg):
+                try:
+                    principal_id = verify_oidc_token(token).principal
+                except OIDCError:
+                    log.warning("OIDC authentication failed for inbound %s message", msg.channel or "unknown")
+                    return "⚠ Authentication failed: OIDC token is missing or invalid."
+            elif msg.channel in {"slack", "teams"}:
+                from . import channel_oidc_bridge
+
+                account_sha256 = getattr(msg, "_verified_channel_account_sha256", None)
+                provider_tenant = getattr(msg, "provider_tenant_id", None)
+                sender_id = getattr(msg, "provider_sender_id", None)
+                try:
+                    proof_reply = channel_oidc_bridge.observe(
+                        msg.channel, account_sha256, provider_tenant, sender_id, msg.text,
+                    )
+                    if proof_reply is not None:
+                        return proof_reply
+                    principal_id = channel_oidc_bridge.resolve(
+                        msg.channel, account_sha256, provider_tenant, sender_id,
+                    )
+                except Exception:
+                    log.exception("Chat identity proof unavailable for %s", msg.channel)
+                    principal_id = None
+                if not principal_id:
+                    return ("⚠ Connect this chat account from My work before asking "
+                            "Lightwork to start a task.")
+            else:
                 return "⚠ Authentication failed: OIDC token is missing or invalid."
         else:
             principal_id = getattr(msg, "principal_id", msg.user_id)
@@ -261,6 +407,27 @@ class Server:
         if refusal:
             return refusal
 
+        # The adapter has authenticated the sender and tenant. A linking
+        # command is control-plane proof, never a prompt or remembered turn.
+        from .personal_identity import CHANNELS, account_identity, prove_channel_command
+        account_sha256 = getattr(msg, "_verified_channel_account_sha256", None)
+        memory_user_id = (account_identity(principal_id, account_sha256)
+                          if msg.channel in CHANNELS and account_sha256 else principal_id)
+        identity_refusal = _linked_channel_refusal(msg.channel, memory_user_id, account_sha256)
+        if identity_refusal:
+            return identity_refusal
+        try:
+            proof_reply = prove_channel_command(msg.text, channel=msg.channel or "unknown", user_id=memory_user_id,
+                                                sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256,
+                                                private_destination=getattr(msg, "_verified_private_destination", None))
+        except Exception:
+            log.warning("Personal identity proof unavailable")
+            if msg.text.startswith("LIGHTWORK LINK"):
+                return "Identity linking could not be confirmed. Check My Data before retrying."
+            proof_reply = None
+        if proof_reply is not None:
+            return proof_reply
+
         # Per-tenant concurrency ceiling (noisy-neighbor protection). Derived
         # from the tenant's plan entitlement; no-op when tenant is None or the
         # plan is unlimited. Held across the whole goal run and released in the
@@ -289,36 +456,35 @@ class Server:
             disclosure = first_turn_disclosure(
                 world,
                 channel=msg.channel or "unknown",
-                user_id=principal_id,
+                user_id=_channel_conversation_user(msg, principal_id, memory_user_id),
             )
 
             conversation = world.get_or_create_conversation(
                 channel=msg.channel or "unknown",
-                user_id=principal_id,
+                user_id=_channel_conversation_user(msg, principal_id, memory_user_id),
             )
-            world.append_turn(conversation.id, "user", msg.text)
 
             from .deployment import require_enterprise_or_die
             require_enterprise_or_die()
 
-            title = msg.text[:80]
             # Persist the exact principal the runner will execute under.  The
             # identity is opaque and stays in the database; tenant path code
             # independently percent-encodes it before any filesystem use.
             execution_user_id = f"{msg.channel or 'unknown'}:{principal_id}"
-            # [channels.routing] rules may send this message to a specialist
-            # pack; with no rules (or no match) nothing changes.
-            from .channel_autorouting import specialist_for
-            specialist = specialist_for(msg)
-            goal_id = world.create_goal(
-                title,
-                msg.text,
-                owner=f"user:{execution_user_id}",
-                execution_principal=f"user:{execution_user_id}",
-                **({"domain": specialist} if specialist else {}),
+            owner = f"user:{msg.channel or 'unknown'}:{memory_user_id}"
+            execution_principal = f"user:{execution_user_id}"
+            answer = self._channel_answer(
+                world, msg, conversation.id, owner, execution_principal,
             )
-            if specialist:
-                log.info("goal #%s routed to specialist %s", goal_id, specialist)
+            if answer is not None:
+                goal_id, answered_question, early_reply = answer
+                if early_reply is not None:
+                    return self._channel_output(early_reply, disclosure)
+            else:
+                answered_question = None
+                goal_id = self._new_channel_goal(
+                    world, msg, conversation.id, owner, execution_principal,
+                )
 
             # Inbound channel attachments (Slack files, email/Telegram
             # attachments) become goal attachments, exactly like a dashboard
@@ -351,6 +517,7 @@ class Server:
                     channel=msg.channel or "unknown",
                     user_id=execution_user_id,
                     conversation_id=conversation.id,
+                    **({"db_path": self._db_path} if self._db_path is not None else {}),
                 )
             except Exception:
                 log.exception("goal #%s dispatch failed", goal_id)
@@ -362,6 +529,14 @@ class Server:
                 return "⚠ An internal error occurred. Try again or check the logs."
 
             if dispatch_status == "queued":
+                # The worker may ask later. The durable channel receipt keeps
+                # this binding so the adapter can deliver that question after
+                # the initial queued acknowledgement has been sent.
+                msg._channel_question_watch = {
+                    "goal_id": goal_id, "conversation_id": conversation.id,
+                    "tenant": tenant, "owner": owner,
+                    "execution_principal": execution_principal,
+                }
                 # QueueDispatcher returns after authenticated enqueue. It cannot
                 # supply a final channel reply yet, so be explicit rather than
                 # pretending the goal completed (or holding this event loop open
@@ -382,8 +557,13 @@ class Server:
                 # status string itself as an answer. A remote worker must share the
                 # same world backend for this to succeed.
                 completed = world.get_goal(goal_id)
-                if completed is not None and completed.result is not None:
-                    result = completed.result
+                questions = (world.open_questions(goal_id)
+                             if completed is not None and completed.status == "blocked" else [])
+                if questions:
+                    result = _question_reply(goal_id, questions,
+                                             require_id=_question_id_required(msg))
+                elif completed is not None and completed.result is not None:
+                    result = _completed_reply(completed, goal_id, getattr(msg, "channel", ""))
                 else:
                     known_status = (
                         dispatch_status
@@ -395,17 +575,115 @@ class Server:
                         "but its result is not available in this process."
                     )
 
-            if self._shield is not None:
-                verdict = self._shield.scan_output(result)
-                if not verdict.allowed:
-                    return f"⚠ Output blocked: {'; '.join(verdict.reasons)}"
+            if answered_question is not None:
+                result = (f"I saved your answer to Question #{answered_question.id} "
+                          f"and continued task #{goal_id}.\n\n{result}")
 
-            if disclosure is not None:
-                return f"{disclosure}\n\n{result}"
-            return result
+            return self._saved_channel_output(world, msg, goal_id, result, disclosure,
+                owner=owner, execution_principal=execution_principal, principal=principal_id)
         finally:
             # Always free the tenant's concurrency slot, on every exit path.
             tenant_concurrency.release(tenant)
+
+    @staticmethod
+    def _new_channel_goal(world, msg, conversation_id, owner, execution_principal):
+        from .channel_autorouting import specialist_for
+
+        specialist = specialist_for(msg)
+        goal_id = world.create_goal(
+            msg.text[:80], msg.text, owner=owner,
+            execution_principal=execution_principal,
+            **({"domain": specialist} if specialist else {}),
+        )
+        world.append_turn(conversation_id, "user", msg.text, goal_id=goal_id)
+        if specialist:
+            log.info("goal #%s routed to specialist %s", goal_id, specialist)
+        return goal_id
+
+    @staticmethod
+    def _channel_answer(world, msg, conversation_id, owner, execution_principal):
+        """Bind a channel reply to one still-open question, or return None."""
+        pending = world.open_channel_questions(conversation_id, owner, execution_principal)
+        if not pending:
+            return (None, None, "") if getattr(msg, "question_reply_only", False) else None
+        answer_text = _channel_answer_text(msg)
+        selected = re.match(r"^#(\d+)\s*[:.-]?\s+(.+)$", answer_text, re.DOTALL)
+        if selected:
+            question_id = int(selected.group(1))
+            answer_text = selected.group(2).strip()
+            question = next((q for q in pending if q.id == question_id), None)
+            if question is None:
+                message = (f"Question #{question_id} is not open in this conversation.\n"
+                           + _question_reply(pending[0].goal_id, pending,
+                                             require_id=_question_id_required(msg)))
+                return None, None, message
+        elif len(pending) == 1 and not _question_id_required(msg):
+            question = pending[0]
+        elif _question_id_required(msg) and not getattr(msg, "question_reply_only", False):
+            # A long-lived inbox can have a blocked task and a fresh request.
+            # Only an explicit question id is an answer in that context.
+            return None
+        else:
+            return None, None, _question_reply(pending[0].goal_id, pending,
+                                               require_id=_question_id_required(msg))
+        if not answer_text:
+            return None, None, _question_reply(question.goal_id, [question],
+                                               require_id=_question_id_required(msg))
+        if not world.answer_open_channel_question(
+            question.id, question.goal_id, answer_text,
+            conversation_id=conversation_id, owner=owner,
+            execution_principal=execution_principal,
+        ):
+            return None, None, "That question changed while you replied. Check the latest task message."
+        world.append_turn(conversation_id, "user", msg.text, goal_id=question.goal_id)
+        remaining = world.open_questions(question.goal_id)
+        if remaining:
+            message = (f"Answer to Question #{question.id} saved for task #{question.goal_id}.\n"
+                       + _question_reply(question.goal_id, remaining,
+                                         require_id=_question_id_required(msg)))
+            return question.goal_id, question, message
+        return question.goal_id, question, None
+
+    def _channel_output(self, result: str, disclosure: str | None) -> str:
+        if not result:
+            return ""
+        if self._shield is not None:
+            verdict = self._shield.scan_output(result)
+            if not verdict.allowed:
+                return f"⚠ Output blocked: {'; '.join(verdict.reasons)}"
+        return f"{disclosure}\n\n{result}" if disclosure is not None else result
+
+    def _saved_channel_output(self, world, msg, goal_id, result, disclosure, **identity):
+        from .channel_reply_results import prepare_reply
+
+        text = self._channel_output(result, disclosure)
+        if not text or text.startswith("⚠ Output blocked:"):
+            return text
+        try:
+            if msg.channel == "voice":
+                from maverick_channels.voice import require_saved_source
+
+                from .paths import current_tenant_id_strict
+
+                goal = world.get_goal(goal_id)
+                if goal is not None and goal.status == "done":
+                    source = {"goal_id": goal.id, **identity, "tenant": current_tenant_id_strict(),
+                              "channel": msg.channel,
+                              "account_sha256": getattr(msg, "_verified_channel_account_sha256", None),
+                              "provider_tenant_id": msg.provider_tenant_id,
+                              "provider_sender_id": msg.provider_sender_id,
+                              "voice_result_sha256": hashlib.sha256((goal.result or "").encode()).hexdigest()}
+                    require_saved_source(source)
+                    # Voice returns text to the provider, never artifact files.
+                    # Bind that answer even when no downloadable artifact exists.
+                    msg._channel_reply_material = {"source": source, "files": []}
+                    return text
+            return prepare_reply(world, msg, goal_id, text, **identity)
+        except PermissionError:
+            return "This task's saved output is no longer available to this chat account. Open Lightwork to review current access."
+        except (ValueError, OSError):
+            log.warning("Saved channel output files could not be prepared", exc_info=True)
+            return text + "\n\nSaved files could not be prepared for this chat. Open the task in Lightwork to review its output."
 
     @staticmethod
     def _store_inbound_attachments(world, goal_id: int, items) -> int:
@@ -448,15 +726,8 @@ class Server:
         return stored
 
     def add_channel(self, channel) -> None:
-        # Opt-in rich rendering ([channels] rich_render): wrap so replies with
-        # math/Mermaid also ship a rendered HTML artifact. A pure passthrough
-        # decorator that is a no-op for plain text and returns the channel
-        # unchanged when the knob is off (default), so wiring it here is safe.
-        try:
-            from maverick_channels.rich_render import maybe_wrap
-            channel = maybe_wrap(channel)
-        except Exception:  # pragma: no cover -- rendering must never block wiring
-            log.exception("rich_render wrap failed; using channel as-is")
+        # The durable native handler prepares rich/file replies before custody;
+        # decorating send() cannot intercept an adapter's saved-reply transport.
         self._channels.append(channel)
 
     async def run(self) -> None:
@@ -491,6 +762,8 @@ class Server:
                         channel.start(), name=f"channel-{channel.name}",
                     )
                 )
+            from .runtime_configuration import start as start_runtime_receipt
+            self._runtime_receipt = start_runtime_receipt("channels") if self._runtime_configuration_native else None
             results = await asyncio.gather(*self._tasks, return_exceptions=True)
             for c, result in zip(self._channels, results, strict=False):
                 if isinstance(result, Exception):
@@ -529,6 +802,8 @@ class Server:
         if self._resources_closed:
             return
         self._resources_closed = True
+        if self._runtime_receipt is not None:
+            self._runtime_receipt.close()
         if self._owns_sandbox:
             close = getattr(self.sandbox, "close", None)
             if callable(close):
@@ -578,6 +853,10 @@ def _wire_slack(server, cfg):
         # [channels.slack] thread_replies: answers post under the asking
         # message's thread instead of interleaving into the channel.
         thread_replies=cfg.get("thread_replies"),
+        # Approval buttons and slash commands decide against the server's world;
+        # [channels.slack] approvals_channel is where new cards are posted.
+        world=server.world,
+        approvals_channel=cfg.get("approvals_channel"),
     ))
 
 
@@ -602,13 +881,16 @@ def _wire_email(server, cfg):
         handler=server._handle_message,
         imap_host=cfg["imap_host"],
         imap_user=cfg["imap_user"],
-        imap_password=cfg["imap_password"],
+        imap_password=cfg.get("imap_password") or "",
         smtp_host=cfg["smtp_host"],
         smtp_user=cfg["smtp_user"],
-        smtp_password=cfg["smtp_password"],
+        smtp_password=cfg.get("smtp_password") or "",
         smtp_port=cfg.get("smtp_port", 465),
         poll_interval=cfg.get("poll_interval", 30),
         allowed_user_ids={str(v) for v in allowed_user_ids} if allowed_user_ids is not None else None,
+        trusted_authserv_id=cfg.get("trusted_authserv_id") or "",
+        oauth_config={key: cfg.get(key) for key in
+                      ("email_auth", "oauth_account", "oauth_tenant", "oauth_principal")},
     ))
 
 
@@ -742,9 +1024,42 @@ def _wire_irc(server, cfg):
 
 
 def _wire_voice(server, cfg):
-    from maverick_channels.voice import VoiceChannel
+    from maverick_channels.voice import VoiceChannel, configuration_identity
+
+    from .paths import (
+        TenantPolicyError,
+        current_tenant_id_strict,
+        reset_tenant,
+        set_tenant,
+        tenant_by_user_enabled,
+    )
+
+    expected = configuration_identity(cfg)
+    installation_tenant, expected_by_user = current_tenant_id_strict(), tenant_by_user_enabled()
+    def current_authority():
+        from .config import config_source_errors, load_global_config
+
+        token = set_tenant(installation_tenant)
+        try:
+            current = load_global_config().get("channels", {}).get("voice", {})
+            return (not config_source_errors(include_tenant=False) and current.get("enabled") is True
+                    and tenant_by_user_enabled() == expected_by_user and configuration_identity(current) == expected)
+        except (TenantPolicyError, ValueError, TypeError, AttributeError):
+            return False
+        finally:
+            reset_tenant(token)
+
+    async def handle(message):
+        # Server owns the identity/tenant decision. Caller-scoped receipt
+        # custody must not supply a different initial configuration context.
+        token = set_tenant(installation_tenant)
+        try:
+            return await server._handle_message(message)
+        finally:
+            reset_tenant(token)
+
     server.add_channel(VoiceChannel(
-        handler=server._handle_message,
+        handler=handle,
         # Let VoiceChannel resolve the key from the provider-specific env
         # var (VAPI/RETELL/BLAND) when config doesn't pin one explicitly.
         api_key=cfg.get("api_key"),
@@ -754,6 +1069,7 @@ def _wire_voice(server, cfg):
         provider=cfg.get("provider", "vapi"),
         webhook_token=cfg.get("webhook_token") or os.environ.get("VAPI_WEBHOOK_TOKEN"),
         allowed_callers=cfg.get("allowed_callers"),
+        current_authority=current_authority,
     ))
 
 
@@ -767,6 +1083,25 @@ def _wire_mattermost(server, cfg):
         bot_token=os.environ.get("MATTERMOST_BOT_TOKEN") or cfg.get("bot_token"),
         allowed_user_ids={str(v) for v in allowed_user_ids} if allowed_user_ids is not None else None,
         poll_interval=cfg.get("poll_interval", 10),
+    ))
+
+
+def _wire_teams(server, cfg):
+    from maverick_channels.teams import TeamsChannel, channel_config
+    settings = channel_config(cfg)
+    server.add_channel(TeamsChannel(
+        handler=server._handle_message,
+        app_id=settings["app_id"],
+        app_password=settings["app_password"],
+        tenant_id=settings["tenant_id"] or None,
+        allowed_tenants=settings["allowed_tenants"] or None,
+        allowed_user_ids=settings["allowed_users"],
+        # [channels.teams] approvals_enabled: approval cards in Teams, decided
+        # through the dashboard's own decision path.
+        approvals_enabled=settings["approvals_enabled"],
+        port=settings["port"],
+        bot_name=settings["bot_name"],
+        service_url=settings["service_url"],
     ))
 
 
@@ -788,6 +1123,7 @@ _WIRES = {
     "voice":    _wire_voice,
     "irc":      _wire_irc,
     "mattermost": _wire_mattermost,
+    "teams": _wire_teams,
 }
 
 # Tables under [channels] that configure every channel rather than naming one.
@@ -874,8 +1210,23 @@ def _advise_channel_tenancy(server) -> None:
         pass
 
 
-def build_from_config() -> Server:
+def build_from_config(db: Path | None = None) -> Server:
     cfg = load_config()
+    if db is not None:
+        from .grpc_dispatcher import configured_target
+        from .paths import tenant_by_user_enabled
+        from .world_model_backends import is_postgres_configured
+
+        queue = cfg.get("queue") or {}
+        if (not isinstance(queue, dict) or queue.get("backend")
+                or configured_target() or tenant_by_user_enabled()
+                or is_postgres_configured()):
+            raise RuntimeError(
+                "--db selects one local database and cannot be combined with "
+                "a network worker, Postgres, or per-user workspaces. Use local "
+                "execution for that database, or omit --db to use the configured shared workspace."
+            )
+        db = Path(db).expanduser().resolve()
     # Validate the routes this server can actually instantiate. A credential
     # for an unrelated provider must not unblock startup, while valid keyless
     # localhost and Codex CLI routes must not be rejected.
@@ -896,7 +1247,7 @@ def build_from_config() -> Server:
             f"({detail}). Run 'maverick init' or `maverick preflight`."
         )
 
-    world = open_world()
+    world = open_world(db) if db is not None else open_world()
     sandbox = None
     server = None
     try:
@@ -920,6 +1271,8 @@ def build_from_config() -> Server:
             owns_world=True,
             owns_sandbox=True,
         )
+        server._runtime_configuration_native = True
+        server._db_path = db
 
         channels_cfg = cfg.get("channels", {})
         for name, wire in _WIRES.items():
@@ -1024,3 +1377,36 @@ def _extract_oidc_token(msg) -> str:
             return authorization[len(prefix):].strip()
         return authorization.strip()
     return ""
+
+
+def _oidc_token_present(msg) -> bool:
+    """An explicitly supplied, even empty, credential must be verified."""
+    for attr in ("id_token", "oidc_token", "authorization"):
+        if getattr(msg, attr, None) is not None:
+            return True
+    raw = getattr(msg, "raw", None)
+    if isinstance(raw, dict):
+        if any(key in raw for key in ("id_token", "oidc_token")):
+            return True
+        headers = raw.get("headers")
+    else:
+        headers = getattr(raw, "headers", None)
+    try:
+        return headers is not None and any(
+            key in headers for key in ("authorization", "Authorization")
+        )
+    except (TypeError, AttributeError):
+        return False
+
+
+def _linked_channel_refusal(channel, user_id, account_sha256):
+    from .personal_identity import CHANNELS, channel_membership_current
+    if channel not in CHANNELS or not account_sha256:
+        return None
+    try:
+        if not channel_membership_current(channel, user_id):
+            return "Your linked workspace membership is no longer active. Ask your administrator to review access."
+    except Exception:
+        log.warning("Linked channel membership could not be verified")
+        return "Workspace identity policy is unavailable. No task was started; try again later."
+    return None

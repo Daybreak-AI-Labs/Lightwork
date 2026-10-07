@@ -178,21 +178,20 @@ def test_existing_key_permissions_are_repaired_before_read(monkeypatch):
     if car.os.name != "nt":
         car._KEY_PATH.parent.chmod(0o755)
         car._KEY_PATH.chmod(0o644)
-    path_type = type(car._KEY_PATH)
-    original_read_text = path_type.read_text
+    original_read_text = file_lock.atomic_read_text
     observed = {}
 
-    def checked_read_text(self, *args, **kwargs):
-        if self == car._KEY_PATH:
+    def checked_read_text(path, *args, **kwargs):
+        if path == car._KEY_PATH:
             observed["key_private_before_read"] = (
-                file_lock.private_path_is_restricted(self)
+                file_lock.private_path_is_restricted(path)
             )
             observed["parent_private_before_read"] = (
-                file_lock.private_path_is_restricted(self.parent, 0o700)
+                file_lock.private_path_is_restricted(path.parent, 0o700)
             )
-        return original_read_text(self, *args, **kwargs)
+        return original_read_text(path, *args, **kwargs)
 
-    monkeypatch.setattr(path_type, "read_text", checked_read_text)
+    monkeypatch.setattr(file_lock, "atomic_read_text", checked_read_text)
 
     assert car._load_or_create_key() == b"k" * 32
     assert observed == {
@@ -205,13 +204,14 @@ def test_existing_key_permissions_are_repaired_before_read(monkeypatch):
 def test_memory_tool_seals_on_disk(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     monkeypatch.setenv("MAVERICK_MEMORY_DIR", str(tmp_path / "mem"))
-    from maverick.tools.memory import memory
+    from maverick.tools.memory import memory, memory_root_for
 
     tool = memory()
     out = tool.fn({"command": "create", "path": "notes.md",
                    "file_text": "patient SSN 123-45-6789"})
     assert "wrote" in out
-    raw = (tmp_path / "mem" / "notes.md").read_bytes()
+    raw = (memory_root_for("") / "notes.md").read_bytes()
+    assert not (tmp_path / "mem" / "notes.md").exists()  # no shared-root write
     assert car.is_sealed(raw)          # on-disk file is ciphertext
     assert b"123-45-6789" not in raw   # plaintext absent on disk
     view = tool.fn({"command": "view", "path": "notes.md"})
@@ -219,16 +219,20 @@ def test_memory_tool_seals_on_disk(monkeypatch, tmp_path):
 
 
 @requires_crypto
-def test_memory_reads_legacy_plaintext(monkeypatch, tmp_path):
+def test_memory_reads_legacy_plaintext_within_current_owned_scope(monkeypatch, tmp_path):
     memdir = tmp_path / "mem"
-    memdir.mkdir()
-    (memdir / "old.md").write_text("legacy note", encoding="utf-8")  # pre-encryption
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     monkeypatch.setenv("MAVERICK_MEMORY_DIR", str(memdir))
-    from maverick.tools.memory import memory
+    from maverick.tools.memory import memory, memory_root_for
+
+    owned = memory_root_for("")
+    owned.mkdir(parents=True)
+    (owned / "old.md").write_text("legacy note", encoding="utf-8")  # pre-encryption
+    (memdir / "other.md").write_text("unowned shared note", encoding="utf-8")
 
     view = memory().fn({"command": "view", "path": "old.md"})
     assert "legacy note" in view       # transparent plaintext fallback
+    assert "not found" in memory().fn({"command": "view", "path": "other.md"})
 
 
 @requires_crypto
@@ -594,6 +598,22 @@ def test_rotation_keeps_old_data_readable(monkeypatch):
     new_blob = car.seal(b"post-rotation secret")
     assert new_blob[: len(car._MAGIC_V2)] == car._MAGIC_V2
     assert car.unseal(new_blob) == b"post-rotation secret"
+
+
+@requires_crypto
+def test_named_rotation_recovers_original_key_without_another_change():
+    old = car.seal(b"existing private work")
+    reviewed = car.key_rotation_version()
+    operation = "a" * 64
+    identity = car.rotate_at_rest_key(operation_id=operation, expected_version=reviewed)
+    assert car.rotation_receipt(operation) == identity
+    assert car.rotate_at_rest_key(operation_id=operation, expected_version=reviewed) == identity
+    assert len(list(car._keyring_dir().glob("*.key"))) == 1
+    assert car.unseal(old) == b"existing private work"
+    assert file_lock.private_path_is_restricted(car._rotation_intent(operation))
+    with pytest.raises(car.EncryptionUnavailable, match="changed after review"):
+        car.rotate_at_rest_key(operation_id="b" * 64, expected_version=reviewed)
+    assert not car._rotation_intent("b" * 64).exists()
 
 
 def test_explicit_postgres_refuses_node_local_key_rotation(monkeypatch):

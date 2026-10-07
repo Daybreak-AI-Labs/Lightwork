@@ -11,21 +11,14 @@ from maverick_dashboard import consent_scan_notice_proposals_api as api
 
 @pytest.fixture()
 def page_client() -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
-    templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
+    templates = Jinja2Templates(
+        directory=str(template_dir),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
     app.include_router(api.router, prefix="/api/v1")
 
@@ -46,7 +39,7 @@ def test_page_exposes_complete_honest_operator_workbench(page_client) -> None:
     response = page_client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200
     page = response.text
-    assert "Disclosure Suggestions" in page
+    assert "Disclosure suggestions" in page
     assert "Three different people take part" in page
     assert "does not change your website or write any notice text" in page
     assert "/api/v1/consent/scan-notice-proposals" in page
@@ -185,5 +178,5 @@ def test_main_dashboard_mounts_page_api_visibility_tips_and_parent_links(
     client = TestClient(app, headers={"Origin": "http://testserver"})
     response = client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200, response.text
-    assert "Scan Disclosure Proposals" in response.text
+    assert "Disclosure suggestions" in response.text
     assert 'data-module-gate="consent_preferences.scanner.notice_proposals"' in response.text

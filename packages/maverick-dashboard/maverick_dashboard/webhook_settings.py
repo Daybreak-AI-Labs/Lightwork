@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import stat
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -229,6 +230,17 @@ def _commit(before: dict, cleaned: str, action: str, principal: str,
     authorize()
     if _stable_snapshot() != before:
         raise WebhookSettingsConflict("Webhook settings changed. Refresh status and review again.")
+    operation_id = uuid.uuid4().hex
+    from . import webhook_settings_recovery as recovery
+
+    # Seal once before publication, so recovery can identify the exact bytes
+    # intended by this review rather than guessing from a matching secret.
+    prepared_text = settings_store._dump(data)
+    data = settings_store._tomllib().loads(prepared_text)
+    prepared_text = settings_store._dump(data)
+    journal = recovery.prepare(before, cleaned, action, principal, operation_id, prepared_text)
+    _record(principal, action, before, None, operation_id, "reviewed")
+    journal = recovery.reviewed(journal)
     try:
         settings_store._write(data)
         authorize()
@@ -238,7 +250,7 @@ def _commit(before: dict, cleaned: str, action: str, principal: str,
         if after["authority"] != before["authority"] or after["value"] != expected or after["outbound"] != expected_outbound:
             raise WebhookSettingsConflict("The change did not become active. The app's previous settings were restored. Refresh status.")
         result = _public(after, principal)
-        _record(principal, action, before, after)
+        _record(principal, action, before, after, operation_id, "confirmed")
     except Exception:
         try:
             settings_store._restore_provider_overlay(path=path, existed=existed,
@@ -247,19 +259,35 @@ def _commit(before: dict, cleaned: str, action: str, principal: str,
             raise WebhookSettingsUnavailable("The change could not be confirmed or restored. Refresh status and contact your installation administrator before trying again.") from exc
         raise
     result["result"] = "active" if action == "set" else "app_copy_removed"
+    try:
+        recovery.completed(journal, after, "reviewed_change")
+    except Exception:
+        # The accepted outcome already exists. Keep its pending journal for
+        # exact-state readback; do not roll back an audit-confirmed publication.
+        result["history_pending"] = True
+    result["operation_id"] = operation_id
     return result
 
 
-def _record(principal: str, action: str, before: dict, after: dict) -> None:
-    """One activity-record row per change: whether a secret is active before
-    and after, never the secret. A refused row undoes the change."""
+def _record(principal: str, action: str, before: dict, after: dict | None,
+            operation_id: str, phase: str) -> None:
+    """Link reviewed intent to verified outcome; never record secret material."""
     from maverick.audit import AuditRefused, EventKind, audit_event
 
     try:
-        audit_event(EventKind.SETTING_CHANGED, agent="dashboard", _global=True, actor=principal,
-                    section="webhooks", key="secret", action=action,
-                    old="set" if before["value"] else "not set",
-                    new="set" if after["value"] else "not set", source="settings")
+        accepted = audit_event(
+            EventKind.SETTING_CHANGED, agent="dashboard", _global=True,
+            actor=principal, section="webhooks", key="secret", action=action,
+            operation_id=operation_id, phase=phase,
+            old="set" if before["value"] else "not set",
+            new=("set" if after["value"] else "not set") if after else "unconfirmed",
+            old_source=before["source"],
+            new_source=after["source"] if after else "unconfirmed",
+            source="settings",
+        )
     except AuditRefused as exc:
         raise WebhookSettingsUnavailable(
-            "The change could not be recorded in the activity record, so it was undone.") from exc
+            "The activity record refused this change. No new setting was kept.") from exc
+    if not accepted:
+        raise WebhookSettingsUnavailable(
+            "The activity record could not confirm this change. Refresh status before trying again.")

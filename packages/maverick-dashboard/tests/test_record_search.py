@@ -66,12 +66,30 @@ def test_task_owner_and_department_filter_before_search_counts(monkeypatch):
     monkeypatch.setattr(app_module, "_deliverable_specs", lambda: [{"domain":"privacy_report"}])
     monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
     monkeypatch.setattr(sources, "require_permission", lambda *args: None)
-    monkeypatch.setattr(sources, "suite_allowed", lambda request, suite: suite != "security_ops")
+    monkeypatch.setattr(sources, "domain_suites_allowed", lambda request, domain: domain != "sec_report")
     projection = sources._tasks(object())
     assert calls[0]["owner"] == "user:alice" and calls[0]["limit"] == 1001
     assert [(row["title"], row["kind"]) for row in projection.items] == [("Visible", "report")]
     value = search.search({"tasks":lambda:projection}, query="NEVER_SEARCH_BODY")
     assert value["total"] == 0 and "NEVER_RETURN_RESULT" not in json.dumps(value)
+
+
+def test_inherited_suite_fork_is_hidden_from_task_search(monkeypatch, tmp_path):
+    from maverick_dashboard import app as app_module
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module, "_world", lambda: SimpleNamespace(list_goals=lambda **kw: [
+        SimpleNamespace(id=1, title="Private inherited task", status="done", domain="client_fork"),
+    ]))
+    monkeypatch.setattr(app_module, "_deliverable_specs", list)
+    monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr("maverick_dashboard.auth.caller_suites", lambda request: frozenset({"finance"}))
+
+    assert sources._tasks(object()).items == []
 
 
 def test_assessment_suite_filter_precedes_matches_and_counts(monkeypatch):
@@ -171,6 +189,29 @@ def test_shell_renders_search_context_and_serves_new_assets():
             assert "html" not in response.headers["content-type"]
 
 
+def test_chat_shell_emits_search_context_so_record_search_can_run():
+    """The chat pages show the finder's record controls, so they must also carry
+    the context the record-search script needs; without it the script returns
+    early and 'Search records' silently does nothing."""
+    from maverick_dashboard import app as dash_app
+    dash_app._world_cache.clear()
+    world = world_model.WorldModel(world_model.DEFAULT_DB)
+    gid = world.create_goal("find the vendor", "")
+    world.close()
+    marker = 'name="lightwork-search-context" content="'
+    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+        for path in ("/chat", f"/chat/goal/{gid}"):
+            page = client.get(path)
+            assert page.status_code == 200, (path, page.text)
+            assert 'id="navfinder-search"' in page.text, path
+            assert "lightwork-record-search.js" in page.text, path
+            assert marker in page.text, path
+        # Same context value as the product shell, so the API accepts it.
+        shell = client.get("/goals").text
+        chat = client.get("/chat").text
+        assert shell.split(marker)[1].split('"')[0] == chat.split(marker)[1].split('"')[0]
+
+
 def test_review_links_reach_registered_pages_with_bounded_references(monkeypatch):
     monkeypatch.setenv("MAVERICK_TENANT", "workspace-a")
     with TestClient(app, headers={"Origin":"http://testserver"}) as client:
@@ -181,3 +222,125 @@ def test_review_links_reach_registered_pages_with_bounded_references(monkeypatch
             assert response.status_code == 200, (path, response.text)
         assert client.get("/administration/document-vault?document=../secret").status_code == 404
         assert client.get("/third-party/executive-reports?report=../secret").status_code == 404
+
+
+def test_finder_knowledge_mode_delegates_current_native_acl_and_metadata_never_calls_it(monkeypatch):
+    from urllib.parse import unquote
+
+    from maverick_dashboard import knowledge_access_api as knowledge
+    context = "a" * 64
+    monkeypatch.setattr(api, "context_for", lambda request: context)
+    monkeypatch.setattr(api, "sources_for", lambda request, kind: {"vendors": lambda: search.Source([])})
+    calls = []
+    async def native(payload, request, response):
+        calls.append(payload)
+        return {"items": [{"reference": {"kind": "dataset", "asset_id": "source", "version": "v1", "manifest_sha256": "b" * 64}, "title": "Current source", "summary": "Approved passage", "eligibility": {"fresh_until": 2000000000}}], "complete": True, "next_cursor": None}
+    monkeypatch.setattr(knowledge, "search", native)
+    with TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Search-Context": context}) as client:
+        assert client.post("/api/v1/records/search", json={"query": "name"}).status_code == 200
+        assert calls == []
+        approved = client.post("/api/v1/records/search", json={"query": "name", "mode": "knowledge", "purpose": "business"})
+        assert approved.status_code == 200
+        assert calls[0].purpose == "business" and calls[0].context == context
+        row = approved.json()["items"][0]
+        assert json.loads(unquote(row["href"].split("#source=", 1)[1]))["reference"]["version"] == "v1"
+        async def revoked(*args):
+            raise HTTPException(409, "Current source access unavailable")
+        monkeypatch.setattr(knowledge, "search", revoked)
+        assert client.post("/api/v1/records/search", json={"query": "name", "mode": "knowledge", "purpose": "business"}).status_code == 409
+
+
+def test_ordinary_task_metadata_does_not_scan_unrelated_domain_packs(monkeypatch):
+    from maverick_dashboard import app as app_module
+    goals = [SimpleNamespace(id=1, title="Plain task", status="done", domain="")]
+    monkeypatch.setattr(app_module, "_world", lambda: SimpleNamespace(list_goals=lambda **kw: goals))
+    monkeypatch.setattr(app_module, "_deliverable_specs", lambda: pytest.fail("unrelated packs scanned"))
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
+    assert sources._tasks(object()).items[0]["kind"] == "task"
+
+
+def test_switched_off_or_closed_sources_do_not_mark_the_search_partial():
+    def off():
+        raise search.SourceOff("no workspace selected")
+
+    def closed():
+        raise HTTPException(403, "disabled")
+
+    def broken():
+        raise OSError("store unreadable")
+
+    calm = search.search({"tasks": lambda: search.Source([record("1")]), "vault": off, "reviews": closed}, query="acme")
+    assert calm["complete"] is True and calm["total"] == 1
+    assert [row["state"] for row in calm["coverage"]] == ["current", "not available", "not available"]
+    assert all(row["indexed"] is None for row in calm["coverage"][1:])
+    # A source that actually failed still says the results may be incomplete.
+    failed = search.search({"tasks": lambda: search.Source([record("1")]), "vault": broken}, query="acme")
+    assert failed["complete"] is False and failed["coverage"][1]["state"] == "unavailable"
+    assert "unreadable" not in json.dumps(failed)
+
+
+def test_turned_off_sources_report_off_before_opening_a_store(monkeypatch):
+    from maverick import vendor_management
+    from maverick_dashboard import governed_document_vault_api as vault_api
+
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr(sources, "require_suite", lambda *args: None)
+    model = search.search({"vendors": lambda: sources._vendors(object()),
+                           "onboarding": lambda: sources._onboarding(object())}, query="")
+    assert [row["state"] for row in model["coverage"]] == ["not available", "not available"]
+    assert model["complete"] is True
+    monkeypatch.setattr(vendor_management, "list_vendors", lambda: (_ for _ in ()).throw(OSError("disk")))
+    monkeypatch.setattr(vault_api, "_tenant_id", lambda: (_ for _ in ()).throw(HTTPException(409, "select a workspace")))
+    model = search.search({"vendors": lambda: sources._vendors(object()),
+                           "vault": lambda: sources._vault(object())}, query="")
+    assert [row["state"] for row in model["coverage"]] == ["unavailable", "not available"]
+
+
+def test_best_matching_titles_come_first():
+    rows = [record("1", "Quarterly report for Acme"), record("2", "Acme quarterly"),
+            record("3", "Report"), record("4", "Annual report"), record("5", "Reporting acme")]
+    rows[0]["state"] = "report pending"
+    model = search.search({"vendors": lambda: search.Source(rows)}, query="report")
+    assert [row["id"] for row in model["items"]] == ["3", "5", "4", "1"]
+    by_reference = search.search({"vendors": lambda: search.Source(rows)}, query="2")
+    assert by_reference["items"][0]["id"] == "2"
+
+
+def test_task_templates_show_readable_blanks_in_results(tmp_path, monkeypatch):
+    from maverick import flow, templates
+    from maverick_dashboard import record_history as history
+    monkeypatch.setattr(history, "require_permission", lambda *args: None)
+    monkeypatch.setattr(history, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(flow, "enabled", lambda: False)
+    body = tmp_path / "weekly.md"
+    body.write_text("metadata", encoding="utf-8")
+    weekly = templates.Template("weekly-update", "Weekly update for {{ team }}", "Body", owner="user:alice", path=body)
+    monkeypatch.setattr(templates, "list_templates", lambda: ["weekly-update"])
+    monkeypatch.setattr(templates, "load_template", lambda name: weekly)
+    rows = history._workflows(object())
+    assert [row["title"] for row in rows] == ["Weekly update for [Team]"]
+    assert "{{" not in json.dumps(rows)
+
+
+def test_switched_off_workspace_modules_are_not_available_not_failed(monkeypatch):
+    from maverick.third_party_executive_reports import ThirdPartyExecutiveReportConfigError
+    from maverick_dashboard import third_party_executive_reports_api as reports_api
+    from maverick_dashboard import vendor_onboarding_composition as onboarding
+
+    monkeypatch.setattr(reports_api, "_require_report_permission", lambda request, permission: None)
+    monkeypatch.setattr(reports_api, "_tenant_id", lambda: "workspace-a")
+    monkeypatch.setattr(onboarding, "settings", lambda: SimpleNamespace(enable=False))
+
+    def reports_request(code):
+        def factory(**kwargs):
+            raise ThirdPartyExecutiveReportConfigError(code)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(third_party_executive_reports_runtime_factory=factory)))
+
+    with tenant_scope(tenant="workspace-a"):
+        model = search.search({"reports": lambda: sources._reports(reports_request("executive_report_disabled")),
+                               "onboarding": lambda: sources._onboarding(object())}, query="")
+    assert [row["state"] for row in model["coverage"]] == ["not available", "not available"]
+    assert model["complete"] is True
+    broken = search.search({"reports": lambda: sources._reports(reports_request("executive_report_configuration_unavailable"))}, query="")
+    assert broken["coverage"][0]["state"] == "unavailable" and broken["complete"] is False

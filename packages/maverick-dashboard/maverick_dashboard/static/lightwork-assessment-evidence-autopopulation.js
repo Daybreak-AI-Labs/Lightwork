@@ -54,7 +54,7 @@
     catch (_error) { throw failure("Lightwork returned something unexpected. Refresh the page and try again.", "response_invalid_json"); }
     if (!isRecord(payload)) throw failure("Lightwork returned something unexpected. Refresh the page and try again.", "response_invalid");
     if (!response.ok) {
-      var error = failure(friendly(response.status), "request_failed");
+      var error = failure(friendly(response.status, response.headers), "request_failed");
       error.status = response.status;
       error.technical = typeof payload.detail === "string" ? payload.detail : "";
       throw error;
@@ -62,13 +62,14 @@
     return payload;
   }
 
-  function friendly(status) {
+  function friendly(status, headers) {
     if (typeof window !== "undefined" && typeof window.mvErrorText === "function") {
-      return window.mvErrorText({status: status}, "finish this");
+      // Headers carry the turned-off reason, so "off" is never read as "no permission".
+      return window.mvErrorText({status: status, headers: headers}, "finish this");
     }
     if (status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (status === 409) return "This changed since you opened it. Refresh the page and try again.";
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   function identifier(value, label) {
@@ -197,7 +198,7 @@
   }
   function when(ts) {
     if (typeof window.mvWhen === "function") return window.mvWhen(ts);
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function documentName(artifactId) {
     var match = /^(.+)\.[0-9a-f]{8}$/.exec(String(artifactId || ""));
@@ -226,7 +227,7 @@
     setText(status, message || "Done.");
   }
   function showError(error) {
-    setText(status, error && error.message ? error.message : "Something went wrong. Please try again.");
+    setText(status, error && error.message ? error.message : "Something went wrong. Try again.");
     setText(output, error && error.technical ? error.technical : "");
   }
   function sessionById(id) {
@@ -317,7 +318,7 @@
       Array.prototype.slice.call(box.querySelectorAll("label, p")).forEach(function (node) { node.remove(); });
       var note = document.createElement("p");
       note.className = "muted";
-      note.textContent = "Approved evidence couldn't be loaded. AI evidence analysis may be turned off.";
+      note.textContent = "Approved evidence couldn't be loaded. AI evidence analysis may be turned off; ask your administrator to check it.";
       box.appendChild(note);
     });
   }
@@ -380,7 +381,7 @@
       var td = document.createElement("td"); td.colSpan = 5;
       td.textContent = error && error.status === 403
         ? "You need auditor access to see the list of suggestions. Ask an administrator."
-        : (error && error.message) || "Couldn't load suggestions.";
+        : (error && error.message) || "Couldn't load suggestions. Refresh the page and try again.";
       tr.appendChild(td); queue.appendChild(tr);
     });
   }
@@ -513,7 +514,7 @@
       setText(pill, "Unavailable");
       setText(document.getElementById("aep-status-detail"), error && error.status === 403
         ? "You need auditor access to check availability. Ask an administrator."
-        : (error && error.message) || "Couldn't check availability.");
+        : (error && error.message) || "Couldn't check availability. Refresh the page and try again.");
     });
   }
 

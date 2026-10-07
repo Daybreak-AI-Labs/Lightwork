@@ -61,7 +61,8 @@ class TestPerTenantDomainIsolation:
         monkeypatch.delenv("MAVERICK_DOMAINS_DIR", raising=False)
 
         monkeypatch.setenv("MAVERICK_TENANT", "alpha")
-        save_profile(DomainProfile(name="alpha_only", persona="x"), approved=True)
+        save_profile(DomainProfile(name="alpha_only", persona="x",
+                                   allow_tools=["read_file"], max_risk="low"), approved=True)
         assert "alpha_only" in available_domains()  # visible to its own business
 
         monkeypatch.setenv("MAVERICK_TENANT", "beta")
@@ -87,7 +88,8 @@ class TestPerTenantDomainIsolation:
 
         token = set_tenant("slack:alice")
         try:
-            save_profile(DomainProfile(name="alice_only", persona="x"), approved=True)
+            save_profile(DomainProfile(name="alice_only", persona="x",
+                                       allow_tools=["read_file"], max_risk="low"), approved=True)
             assert "alice_only" in available_domains()
         finally:
             reset_tenant(token)

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 const base = path.resolve(__dirname, "../../maverick_dashboard");
 const read = name => fs.readFileSync(path.join(base, name), "utf8");
 const tick = async () => { await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); };
@@ -23,14 +24,16 @@ async function harness() {
     const at=overrides.findIndex(item=>item.match(call));
     if(at>=0) return overrides.splice(at,1)[0].run(call);
     if(url.includes("/episode-capture/withdrawal")) return response({...state.record,episode_sha256:"b".repeat(64),review_sha256:"c".repeat(64)});
-    if(url.includes("/copilot/context")) return response({boundaries:[],suggested_questions:[]});
+    if(url.includes("/copilot/context")) return response({client_context:"c".repeat(64),boundaries:[],suggested_questions:[]});
     if(url.includes("/copilot/operations?")) return response(envelope());
     if(url.endsWith("/prepare")) return response({...envelope(),operation_id:operationId,token:"sealed-review",expires_at:Date.now()/1000+600});
     if(url.endsWith("/execute")) {state.record=record({revision:4,status:"withdrawn",withdrawal_available:false});return response({...envelope(),operation_id:operationId,outcome:"confirmed"});}
     if(url.endsWith("/propose")) return response({...envelope(),proposal:{operation_id:state.proposal,source:"built_in"}});
-    if(url==="/api/v1/copilot") return response({reply:"Helpful guidance",mode:"built_in"});
+    if(url==="/api/v1/copilot") return response({reply:"Helpful guidance",mode:"built_in",
+      conversation_token:"server-sealed-guide-token"});
     throw Error("Unexpected request "+url);
   };
+  shell(w);
   w.eval(read("static/lightwork-copilot.js"));w.eval(read("static/lightwork-learning-example.js"));await tick();
   const get=id=>d.getElementById(id);
   return {dom,w,d,calls,state,envelope,get,
@@ -62,6 +65,16 @@ test("a conversational proposal opens review but is never consent or rationale",
   await h.ask("What happened?");
   const modelRequests=h.calls.filter(c=>c.url==="/api/v1/copilot"||c.url.endsWith("/propose"));
   assert.doesNotMatch(JSON.stringify(modelRequests),/Never send this reason/);h.close();
+});
+test("a stale learning example does not announce a review that failed to open",async()=>{
+  const h=await harness();await h.open();
+  h.override(c=>c.url.includes('/copilot/operations?'),()=>response({detail:'unavailable'},503));
+  await h.ask("Stop using this example");
+  assert.equal(h.get("mv-copilot-input").value,"Stop using this example");
+  assert.doesNotMatch(h.get("mv-copilot-log").textContent,/Review this example below/);
+  assert.match(h.get("mv-copilot-note").textContent,/could not be opened/);
+  assert.equal(h.get("le-form").hidden,true);
+  h.close();
 });
 test("scope change clears private reason and review, then requires current preparation",async()=>{
   const h=await harness();await h.open();await h.choose();h.get("le-reason").value="Prior account";
@@ -165,7 +178,16 @@ test("an unavailable catalog clears prior questions before legacy guidance",asyn
   h.get('mv-copilot-close').click();
   h.override(c=>c.url.includes('/copilot/operations?'),()=>response({detail:{code:'operation_denied'}},403));
   await h.open();assert.equal(h.get('mv-copilot-log').textContent,'');await h.ask('Account B question');
-  const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);assert.deepEqual(last.body.history,[]);h.close();
+  const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);assert.equal(last.body.conversation_token,null);h.close();
+});
+test("turning off optional actions does not erase the page guide's recent chat",async()=>{
+  const h=await harness();h.state.proposal=null;await h.open();await h.ask('Earlier question');
+  h.get('mv-copilot-close').click();
+  h.override(c=>c.url.includes('/copilot/operations?'),()=>response({detail:{code:'operation_disabled'}},403));
+  await h.open();assert.match(h.get('mv-copilot-log').textContent,/Earlier question/);
+  await h.ask('Follow-up question');
+  const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);
+  assert.equal(last.body.conversation_token,'server-sealed-guide-token');h.close();
 });
 test("feature-disabled Copilot does not erase a direct-page draft",async()=>{
   const h=await harness();h.get('le-withdraw').click();h.get('le-reason').value='Direct review';

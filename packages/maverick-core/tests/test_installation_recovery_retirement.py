@@ -8,6 +8,16 @@ import pytest
 from maverick import installation_recovery as maintenance
 
 
+def reviewed_authorize(**kwargs):
+    from maverick.installation_handoff import save_review
+    if not kwargs.get("rollback_id"):
+        release = {"version": "1.0.1", "runtime_sha256": hashlib.sha256(b"new-runtime").hexdigest(),
+                   "installer_sha256": hashlib.sha256(b"new").hexdigest(), "signature": "fixture-reviewed-signature"}
+        kwargs["review_id"] = save_review(release)["id"]
+    return maintenance.authorize(**kwargs)
+
+
+
 def digest(value):
     return hashlib.sha256(value).hexdigest()
 
@@ -27,7 +37,7 @@ def installation(tmp_path, monkeypatch):
 
 
 def grant():
-    return maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
+    return reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
 
 
 def row(identifier):

@@ -84,13 +84,13 @@ def test_put_assumptions_persists_and_recomputes():
     resp = client.put("/api/v1/savings/assumptions", json={
         "hourly_rate": 200.0,
         "hours_per_task": 0.5,
-        "currency": "eur",
+        "currency": "usd",
         "departments": {"legal_privacy": {"hourly_rate": 400.0}},
     })
     assert resp.status_code == 200, resp.text
     saved = resp.json()["assumptions"]
     assert saved["hourly_rate"] == 200.0
-    assert saved["currency"] == "EUR"
+    assert saved["currency"] == "USD"
     assert saved["departments"]["legal_privacy"]["hourly_rate"] == 400.0
     # The override inherits the new global hours.
     assert saved["departments"]["legal_privacy"]["hours_per_task"] == 0.5
@@ -111,6 +111,7 @@ def test_put_assumptions_null_department_clears_override():
 
 
 def test_put_assumptions_validates_input():
+    assert client.put("/api/v1/savings/assumptions", json={"currency": "EUR"}).status_code == 422
     assert client.put("/api/v1/savings/assumptions",
                       json={"hourly_rate": -5}).status_code == 422
     assert client.put("/api/v1/savings/assumptions",

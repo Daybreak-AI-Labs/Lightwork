@@ -89,6 +89,30 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
+def _reopen_learning_job_admission():
+    """Undo a previous test's dashboard shutdown for learning-task admission.
+
+    Leaving a ``with TestClient(app)`` block runs the dashboard's coordinated
+    shutdown, which closes learning-task admission for the whole process. A
+    real server exits at that point; the test process does not, so every later
+    test on that worker was refused ("This server is stopping"). Reopen it
+    before each test once the prior workers have finished, exactly as a
+    restarted dashboard does.
+    """
+    import time
+
+    module = sys.modules.get("maverick_dashboard.learning_jobs")
+    if module is not None:
+        for _attempt in range(50):
+            try:
+                module.open_admission()
+                break
+            except RuntimeError:  # a prior test's worker is still writing its outcome
+                time.sleep(0.1)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
     """Give every package a fresh dynamic home, including on Windows.
 

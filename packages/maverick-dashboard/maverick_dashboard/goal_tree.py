@@ -28,7 +28,7 @@ def goal_nodes(world, *, owner: str | None = None, limit: int = 300) -> list[dic
     goals = world.list_goals(owner=owner, limit=max(1, min(int(limit), 1000)))
     return [
         {"id": g.id, "parent_id": g.parent_id, "title": g.title or "",
-         "status": g.status}
+         "status": g.status, "updated_at": g.updated_at}
         for g in goals
     ]
 

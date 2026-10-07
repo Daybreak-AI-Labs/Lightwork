@@ -408,7 +408,7 @@ def _iso(ts: float | None) -> str:
 # --------------------------------------------------------------------------
 # Tenant linkage (provisioning and deprovisioning both fail closed)
 # --------------------------------------------------------------------------
-def _provision_tenant(uid: str, display_name: str) -> None:
+def _provision_tenant(uid: str, display_name: str, username: str = "") -> None:
     """Create the tenant before the SCIM identity is made active.
 
     The old best-effort helper swallowed every registry failure, allowing POST
@@ -421,14 +421,41 @@ def _provision_tenant(uid: str, display_name: str) -> None:
 
     if registry.get_tenant(uid) is not None:
         raise RuntimeError("SCIM tenant id already exists")
-    try:
-        registry.create_tenant(uid, display_name=display_name or uid)
-    except Exception:
-        # create_tenant persists the registry row before materializing its
-        # workspace. If that final mkdir fails, compensate the partial row so a
-        # failed SCIM POST cannot leave an orphan active tenant either.
-        _rollback_provisioned_tenant(uid)
-        raise
+    # A refusal does not prove ownership of this UUID: another provisioner may
+    # have reserved it after the read above. Core creates its private namespace
+    # before publication. Preserve ambiguous state for operator review; only
+    # compensate after this call returned successfully and a later SCIM step
+    # failed. A retry chooses a new UUID, never adopts retained state.
+    # Only a typed pre-publication name refusal is safe to retry. An arbitrary
+    # failure might have committed a tenant; never adopt or delete that state.
+    base = display_name.strip() or username.strip() or uid
+    user = username.strip()
+    if len(user) > 80:
+        user = user[:79].rstrip() + "…"
+    qualifier = f" ({user})" if user and base.casefold() != username.casefold() else ""
+
+    def bounded(suffix: str) -> str:
+        available = 200 - len(suffix)  # Workspace editor's visible-name limit.
+        if len(base) <= available:
+            return base + suffix
+        return base[:available - 1].rstrip() + "…" + suffix
+
+    candidates = [bounded("")]
+    if qualifier:
+        candidates.append(bounded(qualifier))
+    for label in candidates:
+        try:
+            registry.create_tenant(uid, display_name=label)
+        except registry.DuplicateWorkspaceName:
+            continue
+        return
+    for number in range(2, 1001):
+        try:
+            registry.create_tenant(uid, display_name=bounded(f"{qualifier} #{number}"))
+        except registry.DuplicateWorkspaceName:
+            continue
+        return
+    raise registry.DuplicateWorkspaceName("No distinct SCIM workspace name is available")
 
 
 def _rollback_provisioned_tenant(uid: str) -> None:
@@ -624,7 +651,7 @@ async def create_user(request: Request):
                 scim_type="uniqueness",
             )
         try:
-            _provision_tenant(uid, rec["displayName"] or username)
+            _provision_tenant(uid, rec["displayName"] or username, username)
         except Exception:
             return _scim_error(500, "tenant provisioning failed")
         try:

@@ -18,6 +18,16 @@
   var outputNode = document.getElementById("tper-output");
   var editor = document.getElementById("tper-editor");
   var createForm = document.getElementById("tper-create-form");
+  var canCreate = document.getElementById("tper-create-controls").dataset.authorized === "true";
+  var startingReview = document.getElementById("tper-starting-review");
+  var startingGeneration = 0;
+  var boundaryGeneration = 0;
+  var startingPending = null;
+  var startingBusy = false;
+  var BRAND_FIELDS = [
+    ["organization_name", "Organization name"], ["report_title", "Report title"], ["footer_text", "Footer text"],
+    ["primary_color", "Main color"], ["accent_color", "Highlight color"], ["text_color", "Text color"],
+  ];
   var mutationControls = Array.prototype.slice.call(document.querySelectorAll("[data-tper-mutation]"));
   var destructiveInFlight = false;
   var ready = false;
@@ -69,37 +79,42 @@
     var declared = response.headers.get("Content-Length");
     if (declared !== null && Number(declared) > maximum) {
       if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
-      throw failure("Lightwork sent more than this page can show. Please try again.");
+      throw failure("Lightwork sent more than this page can show. Try again.");
     }
     if (!response.body || typeof response.body.getReader !== "function") {
       var buffer = new Uint8Array(await response.arrayBuffer());
-      if (buffer.byteLength > maximum) { throw failure("Lightwork sent more than this page can show. Please try again."); }
+      if (buffer.byteLength > maximum) { throw failure("Lightwork sent more than this page can show. Try again."); }
       return buffer;
     }
     var reader = response.body.getReader(); var chunks = []; var total = 0;
     while (true) {
       var part = await reader.read(); if (part.done) { break; }
       total += part.value.byteLength;
-      if (total > maximum) { await reader.cancel(); throw failure("Lightwork sent more than this page can show. Please try again."); }
+      if (total > maximum) { await reader.cancel(); throw failure("Lightwork sent more than this page can show. Try again."); }
       chunks.push(part.value);
     }
     var bytes = new Uint8Array(total); var offset = 0;
     chunks.forEach(function (chunk) { bytes.set(chunk, offset); offset += chunk.byteLength; });
     return bytes;
   }
-  async function requestJson(path, options) {
+  async function requestJson(path, options, expectedContext) {
     var response = await global.fetch(apiBase + path, Object.assign({ credentials: "same-origin", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer", headers: { "Accept": "application/json", "Content-Type": "application/json" } }, options || {}));
     if (!response.ok) { throw response; }
+    if (expectedContext && !/^application\/json(?:;|$)/i.test(response.headers.get("Content-Type") || "")) { throw failure("The saved choices could not be read. Open their current starting point again."); }
+    if (expectedContext && (response.headers.get("X-Lightwork-Report-Context") !== expectedContext || currentContext() !== expectedContext)) {
+      if (response.body) { await response.body.cancel(); }
+      throw failure("Your account or workspace changed. Your saved choices were not opened.");
+    }
     var bytes = await readBounded(response, MAX_JSON_BYTES);
     if (!bytes.byteLength) { return {}; }
     try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
-    catch (_error) { throw failure("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw failure("Lightwork sent an answer this page could not read. Try again."); }
   }
   function show(label, payload) {
-    statusNode.textContent = label;
+    window.mvStatus(statusNode, label);
     outputNode.textContent = payload === undefined ? "" : JSON.stringify(payload, null, 2);
   }
-  function busy(label) { statusNode.textContent = label; outputNode.textContent = ""; }
+  function busy(label) { window.mvStatus(statusNode, label); outputNode.textContent = ""; }
 
   // ---- confirmed, single-flight changes ----------------------------------------
   function confirmDestructive(message, okText) { return R.confirm(message, okText); }
@@ -160,6 +175,7 @@
       { label: "Status", value: stateBadge },
     ], items, [
       { label: "What's inside", run: showReport },
+      { label: "Use as a starting point", when: function (r) { return canCreate && r.state === "active"; }, run: function (r) { return openStartingPoint(currentContext(), r.report_id, r.integrity_sha256, function () { return true; }); } },
       { label: "Download PDF", kind: "primary", when: function (r) { return r.state === "active" && r.artifact_available === true; }, run: downloadReport },
       { label: "Withdraw", kind: "danger", when: function (r) { return canAdmin && r.state === "active"; }, run: revokeReport },
     ], { text: "No reports yet. Create one from the vendors, assessments and contracts you already track.", action: { label: "New report", run: openEditor } });
@@ -202,7 +218,7 @@
       grant.token = null;
       if (!response.ok) { throw response; }
       var bytes = await readBounded(response, MAX_PDF_BYTES);
-      if (response.headers.get("Content-Type") !== "application/pdf") { throw failure("The PDF couldn't be downloaded. Please try again."); }
+      if (response.headers.get("Content-Type") !== "application/pdf") { throw failure("The PDF couldn't be downloaded. Try again."); }
       var url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
       var link = document.createElement("a"); link.href = url; link.download = (R.slug(titleOf(report), "report")) + ".pdf";
       document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
@@ -275,7 +291,7 @@
       if (items === null || items === undefined) {
         box.appendChild(R.el("p", "muted", "You can't see these records, or this area isn't turned on."));
       } else if (!items.length) {
-        box.appendChild(R.el("p", "muted", "None yet."));
+        box.appendChild(R.el("p", "muted", "None yet. They appear here once added."));
       } else {
         var list = R.el("div", "tper-group-list");
         items.forEach(function (item) {
@@ -296,8 +312,11 @@
   async function openEditor() {
     if (!ready) { show("Reports aren't available right now."); return; }
     editor.hidden = false;
+    var stamp = draftStamp(); var boundary = boundaryGeneration;
     document.getElementById("tper-sources-status").textContent = "Loading your records…";
     await loadSources();
+    if (boundary !== boundaryGeneration) { return; }
+    if (draftStamp() !== stamp) { show("Your draft changed while records loaded. Your entered choices are kept."); return; }
     renderSources();
     document.getElementById("tper-sources-status").textContent = "Tick the records this report should sum up.";
     createForm.elements.namedItem("report_title").focus();
@@ -309,13 +328,126 @@
     });
   }
 
+  // Saved choices are read privately and reviewed before replacing a draft.
+  function currentContext() {
+    var meta = document.querySelector('meta[name="lightwork-preference-context"]');
+    return meta ? meta.content : "";
+  }
+  function draftStamp() {
+    return JSON.stringify(BRAND_FIELDS.map(function (field) { return createForm.elements.namedItem(field[0]).value; }).concat(
+      Array.prototype.slice.call(createForm.querySelectorAll('input[name="include"]')).map(function (box) { return [box.value, box.checked]; })));
+  }
+  function clearStartingPoint() {
+    startingGeneration += 1; startingPending = null;
+    startingReview.hidden = true;
+    ["tper-starting-name", "tper-starting-brand", "tper-starting-sources", "tper-starting-source-status", "tper-starting-status"].forEach(function (id) { document.getElementById(id).textContent = ""; });
+  }
+  function selectedCurrentSources(record) {
+    var sources = sourcesOf(record);
+    if (!sources.length || sources.length > 500) { throw failure("These saved choices cannot be copied here. Choose records for a new report instead."); }
+    return sources.map(function (source) {
+      var group = GROUPS.find(function (item) { return item.kind === source.source_kind; });
+      if (!group || typeof source.source_id !== "string") { throw failure("These saved choices cannot be copied here. Choose records for a new report instead."); }
+      var item = (S.sources[source.source_kind] || []).find(function (value) { return value.value === source.source_id; });
+      return { kind: source.source_kind, id: source.source_id, label: item ? item.label : "Name unavailable in this view", available: Boolean(item) };
+    });
+  }
+  async function readStartingPoint(context, report, revision) {
+    var record = await requestJson("/reports/" + encodeURIComponent(report), undefined, context);
+    if (!record || record.report_id !== report || record.integrity_sha256 !== revision || record.state !== "active" || !record.brand) {
+      throw failure("This saved report changed or is no longer available. Choose its current starting point again.");
+    }
+    if (record.brand.brand_asset_metadata_ref || record.brand.brand_asset_metadata_sha256) {
+      throw failure("This saved report also uses a branding file that this editor cannot copy. Choose a new layout instead.");
+    }
+    if (BRAND_FIELDS.some(function (field) { return typeof record.brand[field[0]] !== "string"; })) { throw failure("These saved layout choices could not be read completely."); }
+    return record;
+  }
+  function renderStartingPoint(pending) {
+    var record = pending.record;
+    document.getElementById("tper-starting-name").textContent = titleOf(record) + " — saved " + R.when(record.created_at);
+    var brands = document.getElementById("tper-starting-brand"); brands.textContent = "";
+    BRAND_FIELDS.forEach(function (field) { brands.appendChild(R.el("dt", "", field[1])); brands.appendChild(R.el("dd", "", record.brand[field[0]])); });
+    var list = document.getElementById("tper-starting-sources"); list.textContent = "";
+    pending.sources.forEach(function (source) { list.appendChild(R.el("li", "", kindTitle(source.kind) + ": " + source.label + (source.available ? " — will be selected" : " — will not be selected"))); });
+    var available = pending.sources.filter(function (source) { return source.available; }).length;
+    document.getElementById("tper-starting-source-status").textContent = pending.sources.length + " saved record choices reviewed. " + available + " currently available" + (available < pending.sources.length ? "; " + (pending.sources.length - available) + " unavailable in this view and excluded from the new draft." : ".");
+    document.getElementById("tper-starting-use").disabled = available === 0;
+    document.getElementById("tper-starting-status").textContent = available ? "Read every choice, then use them or keep your current draft." : "None of these records can be selected here. Your current draft is kept.";
+    startingReview.hidden = false;
+    document.getElementById("tper-starting-title").focus();
+  }
+  async function openStartingPoint(context, report, revision, isCurrent) {
+    if (startingBusy || !ready || !canCreate || typeof isCurrent !== "function" || !isCurrent() || !/^[0-9a-f]{64}$/.test(context) || currentContext() !== context || !/^[0-9a-f]{64}$/.test(revision) || typeof report !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(report)) { return false; }
+    clearStartingPoint(); var generation = startingGeneration; var stamp = draftStamp(); startingBusy = true;
+    try {
+      var record = await readStartingPoint(context, report, revision);
+      await loadSources();
+      await readStartingPoint(context, report, revision);
+      if (generation !== startingGeneration || currentContext() !== context || !isCurrent()) { return false; }
+      if (draftStamp() !== stamp) { throw failure("Your draft changed while the saved choices loaded. Your work is kept; open the starting point again to review it."); }
+      var sources = selectedCurrentSources(record);
+      startingPending = { context: context, report: report, revision: revision, record: record, sources: sources, sourceStamp: JSON.stringify(sources), draftStamp: stamp, generation: generation };
+      editor.hidden = false; renderStartingPoint(startingPending); return true;
+    } catch (error) {
+      if (generation === startingGeneration) {
+        if (error && (error.status === 401 || error.status === 403)) { clearPrivateStartingPoint(); }
+        else { clearStartingPoint(); show(messageOf(error, "review saved choices")); }
+      }
+      return false;
+    } finally { startingBusy = false; }
+  }
+  async function useStartingPoint() {
+    var pending = startingPending;
+    if (!pending || startingBusy) { return; }
+    if (draftStamp() !== pending.draftStamp) { clearStartingPoint(); show("Your draft changed after this review. Your work is kept; review the saved choices again."); return; }
+    startingBusy = true; document.getElementById("tper-starting-use").disabled = true;
+    try {
+      await readStartingPoint(pending.context, pending.report, pending.revision);
+      await loadSources();
+      await readStartingPoint(pending.context, pending.report, pending.revision);
+      if (pending !== startingPending || pending.generation !== startingGeneration || currentContext() !== pending.context) { return; }
+      if (draftStamp() !== pending.draftStamp) { throw failure("Your draft changed while the choices were checked. Your work is kept; review the saved choices again."); }
+      var sources = selectedCurrentSources(pending.record);
+      if (JSON.stringify(sources) !== pending.sourceStamp) { pending.sources = sources; pending.sourceStamp = JSON.stringify(sources); renderStartingPoint(pending); document.getElementById("tper-starting-status").textContent = "Available record choices changed. Read the updated review before using them."; return; }
+      renderSources();
+      BRAND_FIELDS.forEach(function (field) { createForm.elements.namedItem(field[0]).value = pending.record.brand[field[0]]; });
+      var selected = new Set(sources.filter(function (source) { return source.available; }).map(function (source) { return source.kind + "\u0000" + source.id; }));
+      createForm.querySelectorAll('input[name="include"]').forEach(function (box) { box.checked = selected.has(box.value); });
+      clearStartingPoint();
+      document.getElementById("tper-sources-status").textContent = "Saved choices copied into this draft. Creating the report reads these records again.";
+      show("Choices copied. Review your new draft, then separately choose Create report.");
+      createForm.elements.namedItem("report_title").focus();
+    } catch (error) { if (pending === startingPending) {
+      if (error && (error.status === 401 || error.status === 403)) { clearPrivateStartingPoint(); }
+      else { clearStartingPoint(); show(messageOf(error, "use saved choices")); }
+    } }
+    finally { startingBusy = false; if (startingPending) { document.getElementById("tper-starting-use").disabled = !startingPending.sources.some(function (source) { return source.available; }); } }
+  }
+  document.getElementById("tper-starting-use").addEventListener("click", useStartingPoint);
+  document.getElementById("tper-starting-cancel").addEventListener("click", clearStartingPoint);
+  global.LightworkExecutiveReports = Object.freeze({ openStartingPoint: openStartingPoint });
+  function clearPrivateStartingPoint() {
+    boundaryGeneration += 1;
+    clearStartingPoint(); setMutationReady(false); S.reports = []; S.sources = {}; S.vendorNames = {};
+    document.getElementById("tper-reports").textContent = ""; document.getElementById("tper-report-detail").textContent = ""; outputNode.textContent = "";
+    document.getElementById("tper-report-detail").hidden = true;
+    document.getElementById("tper-admin-list").textContent = ""; document.getElementById("tper-count").textContent = "";
+    document.getElementById("tper-revoke-form").elements.namedItem("report").options.length = 1;
+    createForm.reset(); document.getElementById("tper-sources").textContent = ""; editor.hidden = true;
+    show("Your account, workspace or access changed. Reload this page before reading reports again.");
+  }
+  ["workspace-changed", "account-context-changed", "lightwork:workspace-changed", "lightwork:account-context-changed"].forEach(function (name) { global.addEventListener(name, clearPrivateStartingPoint); document.addEventListener(name, clearPrivateStartingPoint); });
+
   // ---- loading -----------------------------------------------------------------
   async function refresh() {
+    var boundary = boundaryGeneration;
     var mark = document.getElementById("tper-runtime-state");
     var headline = document.getElementById("tper-runtime-headline");
     var detail = document.getElementById("tper-runtime-detail");
     try {
       var state = await requestJson("/status");
+      if (boundary !== boundaryGeneration) { return; }
       setMutationReady(state.ready === true);
       mark.dataset.state = state.ready ? "ready" : "failed";
       mark.className = "badge " + (state.ready ? "ok" : "warn");
@@ -325,9 +457,11 @@
       var reports = await requestJson("/reports?limit=100");
       S.reports = Array.isArray(reports.items) ? reports.items : [];
       if (!S.namesLoaded) { await loadVendorNames(); S.namesLoaded = true; }
+      if (boundary !== boundaryGeneration) { return; }
       renderReports();
       show("Reports refreshed.", reports);
     } catch (error) {
+      if (boundary !== boundaryGeneration) { return; }
       setMutationReady(false);
       mark.dataset.state = "failed";
       mark.className = "badge warn";
@@ -429,7 +563,7 @@
         { label: "When", value: function (e) { return R.when(e.occurred_at); } },
         { label: "What happened", value: function (e) { return ACTIONS[e.action] || words(e.action); } },
         { label: "Report", value: function (e) { return byId[e.report_id] || "An earlier report"; } },
-      ], result.items || [], [], { text: "No report history yet." });
+      ], result.items || [], [], { text: "No report history yet. Each report you prepare appears here." });
       show("Report history loaded.", result);
     } catch (error) { show(messageOf(error, "load the report history")); }
   });
@@ -441,7 +575,7 @@
     var record = S.reports.filter(function (r) { return r.report_id === requested; })[0];
     try {
       if (!record) { record = await requestJson("/reports/" + encodeURIComponent(requested)); }
-      if (!record || record.report_id !== requested) { throw failure("The linked report couldn't be found."); }
+      if (!record || record.report_id !== requested) { throw failure("The linked report couldn't be found. Refresh the page to see the latest."); }
       showReport(record);
     } catch (error) { show(messageOf(error, "open the linked report")); }
   });

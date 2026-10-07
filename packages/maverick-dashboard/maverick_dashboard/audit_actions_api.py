@@ -23,7 +23,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from .auth import caller_principal, require_global_permission, require_permission
@@ -47,11 +47,23 @@ KIND_LABELS: dict[str, str] = {
     "config_remediated": "Setting fixed automatically", "tenant_plan_changed": "Workspace plan changed",
     "tenant_quota_changed": "Workspace limits changed",
     "spending_limits_changed": "Spending limits changed", "tenant_created": "Workspace created",
+    "tenant_default_registered": "Default workspace registered",
     "workspace_selected": "Workspace chosen", "access_grant_changed": "Access changed",
     "federation_delegate": "Access passed to a partner", "agent_trust_denied": "Outside assistant not trusted",
     "control_plane_action": "Administrator action", "learning_update": "Learning changed",
+    "tenant_suspended": "Workspace paused", "tenant_resumed": "Workspace resumed",
+    "tenant_deleted": "Workspace removed",
     "codebase_action": "Code project action", "immune_action": "Safety monitoring action",
     "approval_decision": "Approval decided", "approval_requested": "Approval requested",
+    "channel_approval_decision": "Approval decided in a chat app",
+}
+# Approval steps recorded as consent results, named for what the person did.
+APPROVAL_ACTION_LABELS: dict[str, str] = {
+    "approval_decision_undone": "Approval decision undone",
+    "approval_confirmation": "Approval confirmed",
+    "approval_rejection_reason": "Rejection reason recorded",
+    "approval_revision_requested": "Sent back for changes",
+    "approval_decided_via_channel": "Approval decided in a chat app",
 }
 FIELD_LABELS: dict[str, str] = {
     "goal_id": "Task", "tool": "Tool", "name": "Name", "reason": "Reason", "detail": "Details",
@@ -63,16 +75,52 @@ FIELD_LABELS: dict[str, str] = {
     "obligations_checked": "Rules checked", "source": "Source", "tenant": "Workspace",
     "tenant_id": "Workspace", "labels": "Kinds of data", "outcome": "Outcome", "line": "Lesson",
     "phase": "Step", "repo": "Code project", "proposal": "Change",
+    "email": "Email", "channel": "Chat app", "enabled": "Turned on", "suites": "Departments",
+    "occurred_at": "Occurred at", "approval_id": "Approval", "scope": "Recorded in",
+    "decided_by": "Decided by", "previously_decided_by": "Earlier decision by",
+    "self_approval": "Approved own request",
 }
-_HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id"}
+_HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id", "projection",
+           "decided_by_person"}
+# Machine identifiers (event ids, fingerprints, 64-hex tokens) are kept for
+# support staff under "Technical details" instead of in the readable row.
+_TECHNICAL_KEYS = {"approval_event_id", "event_id", "request_id", "idempotency_key",
+                   "session_id", "trace_id", "correlation_id", "digest", "sha256", "artifact_sha256",
+                   "row_hash", "previous_tenant"}
+_TECHNICAL_VALUE = re.compile(r"^(?:[a-z0-9_-]+-)?[0-9a-f]{32,}$", re.IGNORECASE)
+# Epoch timestamps recorded alongside the event (never shown as a raw float).
+_TIME_KEYS = {"occurred_at", "created_at", "decided_at", "expires_at", "started_at",
+              "ended_at", "finished_at", "updated_at", "requested_at", "at"}
 _PERSON_KEYS = ("principal", "actor", "user", "requested_by", "decided_by", "owner")
+# Shown as a person's name too, but never the row's "Who" (an undo row's Who is
+# the person who undid it).
+_NAMED_KEYS = frozenset(_PERSON_KEYS) | {"previously_decided_by"}
 _SLUG_KEYS = {"name", "tool", "action", "stage", "provider", "rule", "outcome", "status",
-              "decision", "risk", "source", "phase", "labels", "agent"}
+              "decision", "risk", "source", "phase", "labels", "agent", "channel"}
 _SLUG = re.compile(r"[a-z][a-z0-9]*(?:[_.:-][a-z0-9]+)*")
 
 
 def kind_label(kind: object) -> str:
     return KIND_LABELS.get(str(kind or ""), humanize(kind) or "Activity")
+
+
+def event_label(event: dict) -> str:
+    """Name a known administrator action without exposing arbitrary audit text."""
+    if event.get("kind") == "consent_result":
+        action = event.get("action")
+        if action is None and isinstance(event.get("payload"), dict):
+            action = event["payload"].get("action")
+        if isinstance(action, str) and action in APPROVAL_ACTION_LABELS:
+            return APPROVAL_ACTION_LABELS[action]
+    if event.get("kind") == "control_plane_action":
+        from .content_access import VISIBLE_CONTROL_ACTIONS
+
+        action = event.get("action")
+        if action is None and isinstance(event.get("payload"), dict):
+            action = event["payload"].get("action")
+        if isinstance(action, str) and action in VISIBLE_CONTROL_ACTIONS:
+            return humanize(action)
+    return kind_label(event.get("kind"))
 
 
 def field_label(key: object) -> str:
@@ -84,8 +132,10 @@ def value_text(key: str, value: Any) -> str:
         return "—"
     if isinstance(value, bool):
         return "Yes" if value else "No"
-    if key in _PERSON_KEYS and isinstance(value, str):
+    if key in _NAMED_KEYS and isinstance(value, str):
         return humanize_principal(value).name
+    if key == "scope" and value == "deployment":
+        return "Deployment-wide record (all workspaces)"
     if key in _SLUG_KEYS and isinstance(value, str) and _SLUG.fullmatch(value):
         return humanize(value)
     if isinstance(value, float):
@@ -106,22 +156,48 @@ def event_person(event: dict) -> str:
     return ""
 
 
+def is_time_key(key: object) -> bool:
+    key = str(key)
+    return key in _TIME_KEYS or key.endswith(("_at", "_ts"))
+
+
+def _technical(key: str, value: Any) -> bool:
+    if key in _TECHNICAL_KEYS:
+        return True
+    return isinstance(value, str) and bool(_TECHNICAL_VALUE.fullmatch(value.strip()))
+
+
 def event_details(event: dict) -> list[tuple[str, str, str]]:
-    """``[(raw key, label, text)]`` for the visible detail fields of an event."""
+    """``[(raw key, label, text)]`` for the readable detail fields of an event."""
+    # An approval step's action is already the event's name ("Approval confirmed").
+    named = event.get("kind") == "consent_result" and event.get("action") in APPROVAL_ACTION_LABELS
     return [(str(k), field_label(k), value_text(str(k), v))
-            for k, v in event.items() if k not in _HIDDEN]
+            for k, v in event.items() if k not in _HIDDEN and not _technical(str(k), v)
+            and not (named and k == "action")]
+
+
+def event_technical(event: dict) -> list[tuple[str, str, str]]:
+    """The machine identifiers of an event, shown under "Technical details"."""
+    return [(str(k), field_label(k), value_text(str(k), v))
+            for k, v in event.items() if k not in _HIDDEN and _technical(str(k), v)]
 
 
 def event_who(event: dict) -> str:
     person = event_person(event)
     if person:
         return humanize_principal(person).name
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    if event.get("decided_by_person") is True or payload.get("decided_by_person") is True:
+        # A person decided, but the recorded name can't be shown as text.
+        return "A person (name not shown)"
     agent = event.get("agent")
     return humanize(agent) if agent else "Lightwork"
 
 
 def page_helpers() -> dict:
-    return {"kind_label": kind_label, "event_details": event_details, "event_who": event_who}
+    return {"kind_label": kind_label, "event_label": event_label,
+            "event_details": event_details, "event_who": event_who,
+            "event_technical": event_technical, "is_time_key": is_time_key}
 
 
 def _day(value: str | None) -> str | None:
@@ -169,7 +245,12 @@ class CheckIn(BaseModel):
 
 
 class PreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     preview: bool = True
+    review: str | None = Field(default=None, pattern=r"^AAR-[a-f0-9]{32}$")
+    operation: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    reconcile: bool = False
+    acknowledge_uncertain: bool = False
 
 
 class ForwardIn(BaseModel):
@@ -211,6 +292,10 @@ async def check_log(request: Request, body: CheckIn) -> dict:
         paths = [p for p in sorted(audit_dir.glob("*.ndjson")) if p.name != "anchors.ndjson"] \
             if audit_dir.exists() else []
         paths = [p for p in paths if (not since or p.stem >= since) and (not until or p.stem <= until)]
+        if len(paths) > 400:
+            raise HTTPException(status_code=422, detail=(
+                "Choose a smaller date range. Up to four hundred recorded days can be checked at once; "
+                "split this range into separate checks."))
         problems: list[str] = []
         unsigned = 0
         for path in paths[-400:]:
@@ -224,7 +309,7 @@ async def check_log(request: Request, body: CheckIn) -> dict:
         anchor_breaks = verify_anchors(audit_dir) if audit_dir.exists() else []
         if anchor_breaks:
             problems.append("The record that links the days together shows a day was removed or changed.")
-        retired = retention_purged_days(audit_dir) if audit_dir.exists() else []
+        retired = retention_purged_days(audit_dir) if audit_dir.exists() and not anchor_breaks else []
         return {"days_checked": len(paths[-400:]), "intact": not problems and not unsigned,
                 "problems": problems[:50], "unsigned_days": unsigned,
                 "removed_by_policy": len(retired)}
@@ -241,7 +326,10 @@ def csv_safe(value: object) -> object:
 
 def _rows(since: str | None, until: str | None, fmt: str) -> Iterator[str]:
     from maverick.audit.export import iter_audit_events, to_cef, to_jsonl
+
+    from .content_access import audit_metadata
     events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
+    events = (audit_metadata(event) for event in events)
     if fmt == "csv":
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -254,7 +342,7 @@ def _rows(since: str | None, until: str | None, fmt: str) -> Iterator[str]:
             when = (_dt.datetime.fromtimestamp(float(ts), _dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                     if isinstance(ts, (int, float)) else "")
             details = "; ".join(f"{label}: {text}" for _k, label, text in event_details(ev))
-            writer.writerow([when, csv_safe(kind_label(ev.get("kind"))), csv_safe(event_who(ev)),
+            writer.writerow([when, csv_safe(event_label(ev)), csv_safe(event_who(ev)),
                              ev.get("goal_id") if ev.get("goal_id") is not None else "",
                              csv_safe(details)])
             yield buf.getvalue()
@@ -295,7 +383,8 @@ async def forward(request: Request, body: ForwardIn) -> dict:
         from maverick.audit.export import iter_audit_events, to_jsonl
         forwarder.parse_dest(dest)
         events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
-        return forwarder.forward((to_jsonl(ev) for ev in events), dest)
+        from .content_access import audit_metadata
+        return forwarder.forward((to_jsonl(audit_metadata(ev)) for ev in events), dest)
     try:
         sent = await run_in_threadpool(_run)
     except Exception as exc:  # noqa: BLE001 -- a transport failure is reported plainly
@@ -307,23 +396,15 @@ async def forward(request: Request, body: ForwardIn) -> dict:
 
 @router.post("/audit/seal")
 async def seal(request: Request, body: PreviewIn) -> dict:
-    require_permission(request, "admin")
-    from maverick.audit.sealing import seal_closed_segments
-    from maverick.crypto_at_rest import EncryptionUnavailable
-    try:
-        report = await run_in_threadpool(lambda: seal_closed_segments(dry_run=body.preview))
-    except EncryptionUnavailable as exc:
-        raise HTTPException(status_code=409, detail=(
-            "Turn on encryption for stored data first (on the Compliance page).")) from exc
-    done = sum(1 for s in report.values() if s in ("sealed", "would seal"))
-    if not body.preview:
-        _audit_event(request, "audit_seal", days=done)
-    return {"preview": body.preview, "days": done}
+    return await _maintenance(request, body, "seal")
 
 
 @router.post("/audit/rotate-key")
 async def rotate_key(request: Request) -> dict:
     require_global_permission(request, "admin")
+    from .step_up import require_recent_mfa
+
+    require_recent_mfa(request, "rotate_keys")
     from maverick.audit.signing import _have_crypto, rotate_audit_keypair
     if not _have_crypto():
         raise HTTPException(status_code=503, detail="Signing is not available on this installation.")
@@ -334,31 +415,59 @@ async def rotate_key(request: Request) -> dict:
 
 @router.post("/audit/write-once/push")
 async def worm_push(request: Request, body: PreviewIn) -> dict:
-    require_global_permission(request, "admin")
-    from maverick.audit.worm import WormUnavailable, push_closed_dayfiles
+    return await _maintenance(request, body, "copy")
+
+
+async def _maintenance(request: Request, body: PreviewIn, action: str) -> dict:
+    from . import audit_action_service as native
+    if body.preview:
+        return await _maintenance_call(native.prepare, request, action, reconcile=body.reconcile)
+    if not body.review or not body.operation:
+        raise HTTPException(409, "Review the exact closed days and destination before continuing. No maintenance action was started.")
+    return await _maintenance_call(native.execute, request, action, body.review, body.operation,
+                                   acknowledge_uncertain=body.acknowledge_uncertain)
+
+
+async def _maintenance_call(function, *args, **kwargs):
     try:
-        report = await run_in_threadpool(lambda: push_closed_dayfiles(dry_run=body.preview))
-    except WormUnavailable as exc:
-        raise HTTPException(status_code=409, detail=(
-            "Write-once storage is not set up for this installation.")) from exc
-    failed = [n for n, s in report.items() if s.startswith(("error", "refused"))]
-    shipped = sum(1 for s in report.values() if s.startswith(("pushed", "re-pushed", "would")))
-    if not body.preview:
-        _audit_event(request, "audit_write_once_push", days=shipped, failed=len(failed))
-    return {"preview": body.preview, "days": shipped, "failed": len(failed)}
+        return await run_in_threadpool(function, *args, **kwargs)
+    except HTTPException:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(503, "The saved maintenance result could not be read. Keep the original review and read it again before considering another action.") from exc
+
+
+@router.get("/audit/action-reviews")
+async def maintenance_reviews(request: Request) -> dict:
+    from . import audit_action_service as native
+    return await _maintenance_call(native.inventory, request)
+
+
+@router.get("/audit/action-reviews/{review}")
+async def maintenance_result(request: Request, review: str) -> dict:
+    from . import audit_action_service as native
+    return await _maintenance_call(native.receipt, request, review)
+
+
+@router.post("/audit/action-reviews/{review}/cancel")
+async def cancel_maintenance(request: Request, review: str) -> dict:
+    from . import audit_action_service as native
+    return await _maintenance_call(native.cancel, request, review)
+
+
+@router.get("/audit/action-reviews/{review}/evidence")
+async def maintenance_evidence(request: Request, review: str):
+    from fastapi.responses import JSONResponse
+
+    from . import audit_action_service as native
+    return JSONResponse(await _maintenance_call(native.evidence, request, review), headers={
+        "Content-Disposition": 'attachment; filename="activity-maintenance-review.json"', "Cache-Control": "private, no-store"})
 
 
 @router.get("/audit/write-once/check")
 async def worm_check(request: Request) -> dict:
-    require_permission(request, "audit")
-    from maverick.audit.worm import WormUnavailable, verify
-    try:
-        report = await run_in_threadpool(verify)
-    except WormUnavailable as exc:
-        raise HTTPException(status_code=409, detail=(
-            "Write-once storage is not set up for this installation.")) from exc
-    missing = sorted(n.split(".")[0] for n, s in report.items() if s != "ok")
-    return {"days": len(report), "copied": len(report) - len(missing), "not_copied": missing[:100]}
+    from . import audit_action_service as native
+    return await _maintenance_call(native.check_copies, request)
 
 
 @router.get("/audit/proof-key")
@@ -366,9 +475,9 @@ async def proof_key(request: Request) -> dict:
     require_permission(request, "audit")
     from maverick.attestation import publisher_key
     try:
-        key_id, pub = await run_in_threadpool(publisher_key)
+        key_id, pub = await run_in_threadpool(lambda: publisher_key(create=False))
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail="Signing is not available on this installation.") from exc
+        raise HTTPException(status_code=409, detail="No unambiguous signing key has been provisioned yet. Turn on tamper-evident records before sharing its existing public key.") from exc
     return {"key_name": key_id, "key": pub}
 
 
@@ -378,18 +487,21 @@ async def proof_bundle(request: Request) -> StreamingResponse:
     from maverick.attestation import export
 
     def _build() -> bytes:
-        with tempfile.TemporaryDirectory(prefix="lw-attest-") as tmp:
-            path = export(Path(tmp) / "proof.json")
-            return path.read_bytes()
+        from maverick.authority_effects import authority_effect_fence
+        with authority_effect_fence():
+            require_permission(request, "admin")
+            with tempfile.TemporaryDirectory(prefix="lw-attest-") as tmp:
+                path = export(Path(tmp) / "proof.json")
+                return path.read_bytes()
     try:
         data = await run_in_threadpool(_build)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=(
-            "A proof bundle needs signing turned on for the activity log.")) from exc
+            "The signed bundle could not be created. Check signing and key access on the Compliance page.")) from exc
     return StreamingResponse(iter([data]), media_type="application/json",
                              headers={"Content-Disposition": 'attachment; filename="lightwork-proof.json"',
                                       "Cache-Control": "no-store"})
 
 
-__all__ = ["KIND_LABELS", "event_details", "event_person", "event_who", "kind_label",
+__all__ = ["KIND_LABELS", "event_details", "event_label", "event_person", "event_who", "kind_label",
            "page_helpers", "router"]

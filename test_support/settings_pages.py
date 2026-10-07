@@ -8,6 +8,22 @@ returns each group's page joined, for a test that reads every setting's row.
 from __future__ import annotations
 
 
+def save_catalog(client, path, *, json, **kwargs):
+    """Read the same authenticated catalog revision before an ordinary save.
+
+    Explicit revisions are preserved so conflict/invalid-review tests still
+    exercise their selected value. A denied read gets a syntactically valid
+    sentinel; the subsequent write must still enforce its own authorization.
+    """
+    body = dict(json)
+    if "expected_revision" not in body:
+        read_args = {key: value for key, value in kwargs.items() if key in {"headers", "cookies", "auth"}}
+        review = client.get(path, params={"q": "__fixture_revision_snapshot__"}, **read_args)
+        assert review.status_code in {200, 401, 403}, review.text
+        body["expected_revision"] = review.json()["revision"] if review.status_code == 200 else "0" * 64
+    return client.post(path, json=body, **kwargs)
+
+
 def every_group(client, **kwargs) -> str:
     from maverick_dashboard import settings_catalog
     from maverick_dashboard.settings_all_page import _slug

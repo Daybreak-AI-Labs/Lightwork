@@ -9,6 +9,15 @@ const markup = `<form id="tenant-add"><input name="display_name" value="Acme Fin
 <td><form class="tenant-quota" data-tenant="acme"><input type="checkbox" name="no_limit" data-limit-toggle><input name="max_daily_dollars" data-limit-amount value="25"><button>Save</button></form></td>
 <td><button data-tenant-action="suspend">Pause</button><button data-tenant-action="delete">Remove</button></td></tr></table>`;
 
+// The shell's shared helpers (mvFetchJSON) load before page scripts, as in
+// base.html; this fixture's own stand-ins for the other helpers are kept.
+function withShell(window) {
+  const kept = Object.fromEntries(Object.keys(window).filter((k) => k.startsWith('mv')).map((k) => [k, window[k]]));
+  if (!window.matchMedia) window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-ui.js'), 'utf8'));
+  Object.assign(window, kept);
+}
+
 async function fixture(answer = true, status = 201) {
   const dom = new JSDOM(markup, {url: 'https://lightwork.example/tenants', runScripts: 'outside-only'});
   const {window} = dom, calls = [], asked = [];
@@ -16,6 +25,7 @@ async function fixture(answer = true, status = 201) {
   window.mvConfirm = async (message) => { asked.push(message); return answer; };
   window.mvErrorText = (_f, action) => 'Could not ' + action + '.';
   window.setTimeout = () => 0;
+  withShell(window);
   window.eval(script);
   const settle = async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r)); };
   return {window, doc: window.document, calls, asked, settle};
@@ -29,6 +39,16 @@ test('creating sends a name and no typed id', async (t) => {
   const body = JSON.parse(ui.calls[0].options.body);
   assert.deepEqual(body, {display_name: 'Acme Finance', plan: 'pro', max_daily_dollars: 0});
   assert.match(ui.doc.getElementById('tenant-add-msg').textContent, /created/);
+});
+
+test('duplicate workspace names show the server explanation', async (t) => {
+  const ui = await fixture();
+  t.after(() => ui.window.close());
+  ui.window.mvPlainDetail = (detail) => detail;
+  ui.window.fetch = async () => new Response(JSON.stringify({detail: 'A workspace with that name already exists. Choose another name.'}), {status: 409});
+  ui.doc.getElementById('tenant-add').dispatchEvent(new ui.window.Event('submit', {cancelable: true}));
+  await ui.settle();
+  assert.equal(ui.doc.getElementById('tenant-add-msg').textContent, 'A workspace with that name already exists. Choose another name.');
 });
 
 test('pausing and removing ask first and do nothing when cancelled', async (t) => {

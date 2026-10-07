@@ -32,6 +32,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .paths import data_dir
 from .tax_prep import (
@@ -47,6 +48,8 @@ SCHEMA_VERSION = 1
 _LEGACY_DIR = data_dir()
 _BUNDLE_NAME = "tax-constants.json"
 _STAMP_NAME = ".tax-constants-check"
+_MAX_BUNDLE_BYTES = 1024 * 1024
+_UPDATE_TIMEOUT_SECONDS = 15.0
 
 
 def _store_dir() -> Path:
@@ -222,14 +225,11 @@ def _to_runtime(payload: dict) -> tuple[dict, dict]:
 
 def active_constants() -> tuple[dict, dict, str]:
     """``(federal, state, provenance)`` — the applied bundle when one is
-    present and still sane, else the built-in tables. Never raises: the
+    present, currently trusted and signature-verified, else the built-in tables. Never raises: the
     shipped tables are the known-good floor."""
     p = bundle_path()
     try:
-        env = json.loads(p.read_text(encoding="utf-8"))
-        payload = env["payload"]
-        if validate_payload(payload):
-            raise ValueError("stored bundle no longer validates")
+        env, payload = _read_verified_bundle(p)
         federal, state = _to_runtime(payload)
         prov = (f"bundle v{int(payload['version'])} "
                 f"published {payload.get('published', '?')} "
@@ -243,10 +243,10 @@ def active_constants() -> tuple[dict, dict, str]:
 
 
 def active_version() -> int:
-    """The applied bundle's version (0 = built-ins only)."""
+    """The currently trusted applied bundle's version (0 = built-ins only)."""
     try:
-        env = json.loads(bundle_path().read_text(encoding="utf-8"))
-        return int(env["payload"]["version"])
+        _, payload = _read_verified_bundle(bundle_path())
+        return int(payload["version"])
     except Exception:
         return 0
 
@@ -275,6 +275,40 @@ def export_bundle(out_path: Path | str, payload: dict) -> Path:
     return out
 
 
+def _verified_payload(envelope: dict, trusted: list[str] | None = None) -> dict:
+    """Verify retained bytes against today's anchors, before trusting any field."""
+    trusted = trusted if trusted is not None else trusted_pubkeys()
+    if not trusted:
+        raise ValueError("no trusted publisher keys are configured")
+    if not isinstance(envelope, dict):
+        raise ValueError("malformed envelope")
+    key = str(envelope.get("publisher_key", "") or "")
+    sig = str(envelope.get("sig", "") or "")
+    payload = envelope.get("payload")
+    if not key or not sig or not isinstance(payload, dict):
+        raise ValueError("malformed envelope: missing publisher_key/sig/payload")
+    if key not in trusted:
+        raise ValueError("the publisher key is not currently trusted")
+    from .audit.signing import _have_crypto, verify_ed25519
+    if not _have_crypto():
+        raise ValueError("cryptography not installed: cannot verify the bundle")
+    if not verify_ed25519(key, sig, _canonical_bytes(payload)):
+        raise ValueError("signature verification FAILED: bundle rejected")
+    problems = validate_payload(payload)
+    if problems:
+        raise ValueError("bundle failed sanity validation: " + "; ".join(problems))
+    return payload
+
+
+def _read_verified_bundle(p: Path, trusted: list[str] | None = None) -> tuple[dict, dict]:
+    with p.open("rb") as stream:
+        raw = stream.read(_MAX_BUNDLE_BYTES + 1)
+    if len(raw) > _MAX_BUNDLE_BYTES:
+        raise ValueError("the constants bundle exceeds the size limit")
+    envelope = json.loads(raw)
+    return envelope, _verified_payload(envelope, trusted)
+
+
 def apply_bundle(envelope: dict, *, trusted: list[str] | None = None,
                  path: Path | None = None) -> tuple[bool, str]:
     """Verify + validate + atomically apply one constants envelope.
@@ -283,27 +317,14 @@ def apply_bundle(envelope: dict, *, trusted: list[str] | None = None,
     sanity-gated, and downgrade-protected (a bundle version <= the applied
     one is refused). The previous bundle is kept for ``rollback``.
     """
-    trusted = trusted if trusted is not None else trusted_pubkeys()
-    if not trusted:
-        return False, ("no trust anchors: configure [tax] "
-                       "trusted_constants_pubkeys with the publisher's key")
-    if not isinstance(envelope, dict):
-        return False, "malformed envelope"
-    key = str(envelope.get("publisher_key", "") or "")
-    sig = str(envelope.get("sig", "") or "")
-    payload = envelope.get("payload")
-    if not key or not sig or not isinstance(payload, dict):
-        return False, "malformed envelope: missing publisher_key/sig/payload"
-    if key not in trusted:
-        return False, f"untrusted publisher key {key[:16]!r}: refusing"
-    from .audit.signing import _have_crypto, verify_ed25519
-    if not _have_crypto():
-        return False, "cryptography not installed: cannot verify the bundle"
-    if not verify_ed25519(key, sig, _canonical_bytes(payload)):
-        return False, "signature verification FAILED: bundle rejected"
-    problems = validate_payload(payload)
-    if problems:
-        return False, "bundle failed sanity validation: " + "; ".join(problems)
+    try:
+        serialized = json.dumps(envelope, indent=2, default=str)
+        if len(serialized.encode("utf-8")) > _MAX_BUNDLE_BYTES:
+            return False, "the constants bundle exceeds the size limit"
+        payload = _verified_payload(envelope, trusted)
+    except (ValueError, TypeError, AttributeError, OverflowError, RecursionError) as exc:
+        return False, str(exc)
+    key = envelope["publisher_key"]
     new_version = int(payload["version"])
     p = path if path is not None else bundle_path()
     # Serialize the downgrade-check + .prev backup + write across processes:
@@ -312,17 +333,17 @@ def apply_bundle(envelope: dict, *, trusted: list[str] | None = None,
     # rollback copy. The fixed ".tmp" likewise collides between two writers.
     from .file_lock import atomic_write_text, cross_process_lock
     with cross_process_lock(p):
-        current = active_version() if path is None else _file_version(p)
+        current = _file_version(p, trusted=trusted)
         if new_version <= current:
             return False, (f"bundle v{new_version} is not newer than the applied "
                            f"v{current} (downgrades are refused)")
         p.parent.mkdir(parents=True, exist_ok=True)
         if p.exists():
             p.replace(p.with_suffix(p.suffix + ".prev"))
-        atomic_write_text(p, json.dumps(envelope, indent=2, default=str))
+        atomic_write_text(p, serialized, mode=0o600)
     try:
         from .audit import EventKind, record
-        record(EventKind.LEARNING_UPDATE, agent="tax_constants",
+        record(EventKind.CONTENT_UPDATE, agent="tax_constants",
                content="tax_constants", version=new_version,
                year=int(payload["year"]), publisher=key[:16])
     except Exception:  # pragma: no cover -- audit never blocks the update
@@ -330,18 +351,37 @@ def apply_bundle(envelope: dict, *, trusted: list[str] | None = None,
     return True, f"applied tax constants v{new_version} (TY{payload['year']})"
 
 
-def _file_version(p: Path) -> int:
+def _file_version(p: Path, *, trusted: list[str] | None = None) -> int:
+    """The downgrade floor: the applied bundle's version.
+
+    A bundle verified with the caller's keys is authoritative. Otherwise the
+    retained bundle still pins the floor (by today's configured keys, or by its
+    recorded version), so a key list that cannot verify the applied bundle
+    never reopens a downgrade to an older version.
+    """
     try:
-        return int(json.loads(p.read_text(encoding="utf-8"))
-                   ["payload"]["version"])
+        _, payload = _read_verified_bundle(p, trusted)
+        return int(payload["version"])
+    except Exception:
+        pass
+    try:
+        _, payload = _read_verified_bundle(p)
+        return int(payload["version"])
+    except Exception:
+        pass
+    try:
+        with p.open("rb") as stream:
+            raw = stream.read(_MAX_BUNDLE_BYTES + 1)
+        version = json.loads(raw)["payload"]["version"]
+        return version if isinstance(version, int) and not isinstance(version, bool) and version > 0 else 0
     except Exception:
         return 0
 
 
 def apply_bundle_file(bundle: Path | str, **kw) -> tuple[bool, str]:
     try:
-        env = json.loads(Path(bundle).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
+        env, _ = _read_verified_bundle(Path(bundle), kw.get("trusted"))
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError) as e:
         return False, f"unreadable bundle: {e}"
     return apply_bundle(env, **kw)
 
@@ -349,10 +389,20 @@ def apply_bundle_file(bundle: Path | str, **kw) -> tuple[bool, str]:
 def rollback() -> tuple[bool, str]:
     p = bundle_path()
     prev = p.with_suffix(p.suffix + ".prev")
-    if not prev.exists():
-        return False, "no previous constants bundle to roll back to"
-    prev.replace(p)
-    return True, f"rolled back to tax constants v{_file_version(p) or '?'}"
+    from .file_lock import atomic_write_text, cross_process_lock
+    with cross_process_lock(p):
+        if not prev.exists():
+            return False, "no previous constants bundle to roll back to"
+        try:
+            envelope, payload = _read_verified_bundle(prev)
+        except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+            return False, "the previous bundle is no longer trusted or could not be verified; nothing changed"
+        atomic_write_text(p, json.dumps(envelope, indent=2, default=str), mode=0o600)
+        try:
+            prev.unlink()
+        except OSError:
+            log.warning("verified tax rollback applied; the previous copy could not be removed")
+    return True, f"rolled back to tax constants v{payload['version']}"
 
 
 def check_for_update(*, url: str | None = None, force: bool = False,
@@ -388,14 +438,30 @@ def check_for_update(*, url: str | None = None, force: bool = False,
         deny = enterprise_egress_denial(url, tool="tax_constants_update")
         if deny:
             return "error", deny
-        import httpx
-        r = httpx.get(url, timeout=15.0,
-                      headers={"Accept": "application/json"})
-        if r.status_code >= 400:
-            return "error", f"update channel returned {r.status_code}"
-        env = r.json()
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            return "error", "the tax update address must use HTTPS without sign-in details"
+        from .tools._ssrf import safe_client
+        deadline = time.monotonic() + _UPDATE_TIMEOUT_SECONDS
+        with safe_client(url, require_public=True, timeout=_UPDATE_TIMEOUT_SECONDS,
+                         follow_redirects=False) as client:
+            with client.stream("GET", url, headers={"Accept": "application/json",
+                                                    "Accept-Encoding": "identity"}) as response:
+                if response.status_code != 200:
+                    return "error", f"update channel returned {response.status_code}; no bundle was applied"
+                if response.headers.get("content-encoding", "identity").strip().lower() not in ("", "identity"):
+                    return "error", "the update channel returned a compressed bundle; no bundle was applied"
+                body = bytearray()
+                for chunk in response.iter_raw():
+                    if time.monotonic() >= deadline:
+                        return "error", "the update check took too long; no bundle was applied"
+                    if len(body) + len(chunk) > _MAX_BUNDLE_BYTES:
+                        return "error", "the update bundle exceeds the size limit; no bundle was applied"
+                    body.extend(chunk)
+                env = json.loads(body)
     except Exception as e:  # noqa: BLE001 -- the channel must never wedge prep
-        return "error", f"update check failed: {type(e).__name__}: {e}"
+        log.warning("tax constants update check refused (%s)", type(e).__name__)
+        return "error", "the tax update could not be read or verified; no bundle was applied"
     ok, reason = apply_bundle(env)
     if ok:
         return "applied", reason

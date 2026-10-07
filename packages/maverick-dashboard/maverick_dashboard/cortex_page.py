@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import re
 import secrets
-import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from maverick.cortex import SOURCES
 from starlette.concurrency import run_in_threadpool
@@ -179,14 +178,14 @@ def _audit_tail(n: int) -> list[dict[str, Any]]:
     """The day's audit tail, exactly as the ``/audit`` page reads it."""
     from maverick.audit import default_audit_log
 
-    return default_audit_log().tail(n)
+    from .content_access import audit_metadata
+    return [audit_metadata(event) for event in default_audit_log().tail(n)]
 
 
 def _when(ts: Any) -> str:
-    try:
-        return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(float(ts)))
-    except (TypeError, ValueError, OverflowError, OSError):
-        return "—"
+    from .plain_labels import datetime_text
+
+    return datetime_text(ts) or "—"
 
 
 def _row(event: dict[str, Any]) -> dict[str, Any]:
@@ -230,38 +229,52 @@ def _recent(n: int = _RECENT_N) -> list[dict[str, Any]]:
     return [_row(e) for e in reversed(rows[-n:])]
 
 
+async def console_context(request: Request) -> dict[str, Any]:
+    """Everything the diagnostics show: what each source holds, the
+    encryption and isolation posture, the search and add forms, and (for
+    people who can see the activity log) recent reads and writes. Used by
+    /cortex and by the Knowledge page's Diagnostics tab."""
+    can_audit = has_permission(request, "audit")
+    status = await run_in_threadpool(_safe_status)
+    recent = await run_in_threadpool(_recent) if can_audit else []
+    cards = _cards(status)
+    return {
+        "api_base": API_BASE, "page_path": PAGE_PATH,
+        "status": status, "cards": cards, "sources": list(SOURCES),
+        "source_labels": {name: _label(name) for name in SOURCES},
+        "departments": await run_in_threadpool(_departments),
+        "deposit_collections": _deposit_collections(status),
+        "can_switch": has_global_permission(request, "admin"),
+        "answering": sum(1 for c in cards if c["available"]), "total": len(cards),
+        "can_audit": can_audit, "recent": recent, "recent_n": _RECENT_N,
+        "max_query": MAX_QUERY, "max_k": MAX_K, "default_k": DEFAULT_K,
+    }
+
+
 def create_cortex_page_router(templates: Jinja2Templates) -> APIRouter:
     if not isinstance(templates, Jinja2Templates):
         raise TypeError("cortex page requires a Jinja template authority")
     router = APIRouter(tags=["cortex-console"])
 
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
-    async def console(request: Request) -> HTMLResponse:
+    async def console(request: Request) -> Response:
         # This compatibility console can return the same governed document
         # projection as Knowledge, so it must share that surface's operate
         # floor. The audit tail remains a separate grant.
         require_permission(request, "view")
         if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
             raise HTTPException(status_code=404, detail="cortex unavailable")
-        can_audit = has_permission(request, "audit")
-        status = await run_in_threadpool(_safe_status)
-        recent = await run_in_threadpool(_recent) if can_audit else []
-        cards = _cards(status)
+        # In areas navigation the diagnostics live on the Knowledge page.
+        from .navigation_api import areas_redirect
+
+        moved = areas_redirect(request)
+        if moved is not None:
+            return moved
         nonce = secrets.token_urlsafe(18)
         response = templates.TemplateResponse(
             request,
             "cortex.html",
-            {
-                "api_base": API_BASE, "page_path": PAGE_PATH, "csp_style_nonce": nonce,
-                "status": status, "cards": cards, "sources": list(SOURCES),
-                "source_labels": {name: _label(name) for name in SOURCES},
-                "departments": await run_in_threadpool(_departments),
-                "deposit_collections": _deposit_collections(status),
-                "can_switch": has_global_permission(request, "admin"),
-                "answering": sum(1 for c in cards if c["available"]), "total": len(cards),
-                "can_audit": can_audit, "recent": recent, "recent_n": _RECENT_N,
-                "max_query": MAX_QUERY, "max_k": MAX_K, "default_k": DEFAULT_K,
-            },
+            {**await console_context(request), "csp_style_nonce": nonce},
         )
         for name, value in _HEADERS.items():
             if name == "Content-Security-Policy":
@@ -272,4 +285,4 @@ def create_cortex_page_router(templates: Jinja2Templates) -> APIRouter:
     return router
 
 
-__all__ = ["API_BASE", "ASSET_PATH", "PAGE_PATH", "create_cortex_page_router"]
+__all__ = ["API_BASE", "ASSET_PATH", "PAGE_PATH", "console_context", "create_cortex_page_router"]

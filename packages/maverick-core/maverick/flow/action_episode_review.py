@@ -42,7 +42,7 @@ _RECORDS = GovernedRecordStore("flow_action_episodes", "LAE", "flow_action_episo
 _CALL_ID = re.compile(r"[0-9a-f]{24}\Z")
 _META = ("schema", "id", "binding", "contract_sha256", "enrollment_sha256", "retain_until",
          "status", "reason", "completed_steps", "planned_steps", "episode_sha256", "payload_revision")
-_META_OPTIONAL = ("review_revision", "review_sha256", "grant_sha256", "bundle_sha256", "withdrawal", "teaching_sha256")
+_META_OPTIONAL = ("review_revision", "review_sha256", "grant_sha256", "bundle_sha256", "withdrawal", "teaching_sha256", "decision_receipts")
 
 
 class ActionEpisodeConflict(RecordConflict):
@@ -373,7 +373,12 @@ class ActionEpisodeReviewService:
             raise ActionEpisodeConflict("retained source binding changed")
         return run, pinned, current
 
-    def _commit(self, ctx, row, payload, *, status, reason, action, capability, episode_sha256=None, metadata=None):
+    def _decision_source(self, ctx, row, capability):
+        if not self._fresh(ctx, row)[2] and capability in {"flow.episode.review", "flow.episode.grant"}:
+            raise ActionEpisodeConflict("reviewed procedure changed before learning decision")
+
+    def _commit(self, ctx, row, payload, *, status, reason, action, capability, episode_sha256=None, metadata=None,
+                decision=None, before_write=None):
         if row.get("_audit_pending"):
             raise ActionEpisodeAuditPending(row["id"])
         # Withdrawing existing authority is maintenance, not permission to learn.
@@ -384,15 +389,25 @@ class ActionEpisodeReviewService:
         def mutate(current):
             _open(ctx, current)
             self._permit(ctx, capability, current["binding"]["flow_id"])
-            self._fresh(ctx, current)
+            self._decision_source(ctx, current, capability)
             if status != "expired":
                 if not withdrawal:
                     _gate()
                 if self.clock() >= current["retain_until"]:
                     raise ActionEpisodeConflict("capture retention expired")
+            if before_write is not None:
+                before_write()
             current.update(status=status, reason=reason)
             if metadata:
                 current.update(metadata)
+            if decision is not None:
+                receipts = copy.deepcopy(current.get("decision_receipts", []))
+                if len(receipts) >= 2 or any(item["operation"] == decision["operation"] for item in receipts):
+                    raise ActionEpisodeConflict("original learning decision identity is unavailable")
+                receipts.append({**decision, "actor": ctx.actor, "action": capability,
+                    "source_revision": row["revision"], "episode_sha256": row["episode_sha256"],
+                    "recorded_at": self.clock(), "accepted": status == "accepted"})
+                current["decision_receipts"] = receipts
             if payload is not None:
                 current["completed_steps"] = sum(slot["status"] == "completed" for slot in payload["slots"])
             if episode_sha256 is not None:
@@ -405,14 +420,18 @@ class ActionEpisodeReviewService:
             # Sealing can be slow: recheck current authority/source after the
             # expensive work, while still inside the guarded CAS mutation.
             self._permit(ctx, capability, current["binding"]["flow_id"])
-            self._fresh(ctx, current)
+            self._decision_source(ctx, current, capability)
             if status != "expired":
                 if not withdrawal:
                     _gate()
                     if capability in {"flow.episode.grant", "flow.episode.export_signed"}:
                         _lineage_gate()
+                    if capability == "flow.episode.grant" and self.clock() >= payload["training_grant"]["use_until"]:
+                        raise ActionEpisodeConflict("training permission expired before admission")
                 if self.clock() >= current["retain_until"]:
                     raise ActionEpisodeConflict("capture retention expired")
+            if before_write is not None:
+                before_write()
 
         saved = self.records.update(row["id"], mutate, expected_revision=row["revision"],
                                     action=action, actor=ctx.actor)
@@ -454,6 +473,11 @@ class ActionEpisodeReviewService:
                    "planned_steps", "episode_sha256", "reason")}
         result.update(status=row["status"], audit_status="delivered", source_current=source_current)
         result.update({key: copy.deepcopy(row[key]) for key in _META_OPTIONAL if key in row})
+        grant = payload.get("training_grant") if type(payload) is dict else None
+        result["training_available"] = bool(
+            row["status"] == "accepted" and not row.get("_audit_pending") and type(grant) is dict
+            and row.get("grant_sha256") == digest(grant)
+            and self.clock() < grant["use_until"] <= row["retain_until"])
         if row.get("_audit_pending"):
             result.update(status="audit_pending", committed_status=row["status"], audit_status="pending")
         elif detail and payload is not None and row["status"] == "withdrawn" and self.clock() < row["retain_until"]:
@@ -559,14 +583,43 @@ class ActionEpisodeReviewService:
             row, payload, current = self._load(ctx, flow_id, run_id, capability)
             return self._present(row, payload, source_current=current, detail=detail)
 
-    def review(self, ctx, flow_id, run_id, *, expected_revision, expected_episode_sha256, accepted, rationale):
+    @staticmethod
+    def _validate_decision(decision):
+        if decision is not None and (type(decision) is not dict
+                or set(decision) != {"operation", "context", "binding"}
+                or any(type(decision[key]) is not str or not re.fullmatch(pattern, decision[key])
+                       for key, pattern in (("operation", r"[a-f0-9]{32}"), ("context", r"[a-f0-9]{64}"), ("binding", r"[a-f0-9]{64}")))):
+            raise ValueError("invalid original learning decision identity")
+
+    def original_decision(self, ctx, flow_id, run_id, *, operation, context):
+        """Read only actual accepted decision metadata; never infer from current status."""
+        with tenant_scope(tenant=ctx.tenant), store.run_lock(run_id):
+            self._permit(ctx, "flow.episode.read", flow_id)
+            row = self.records.get(_identifier(ctx.tenant, flow_id, run_id))
+            if row is None:
+                raise LookupError("original learning decision is unavailable")
+            _open(ctx, row)
+            receipt = next((item for item in row.get("decision_receipts", [])
+                            if item["operation"] == operation and item["actor"] == ctx.actor and item["context"] == context), None)
+            self._permit(ctx, "flow.episode.read", flow_id)
+            return {"receipt": copy.deepcopy(receipt), "audit_pending": bool(row.get("_audit_pending")),
+                    "current_status": row["status"], "current_revision": row["revision"],
+                    "decisions": [copy.deepcopy(item) for item in row.get("decision_receipts", [])
+                                  if item["actor"] == ctx.actor and item["context"] == context]}
+
+    def review(self, ctx, flow_id, run_id, *, expected_revision, expected_episode_sha256, accepted, rationale,
+               decision=None, before_write=None):
         revision = _revision(expected_revision)
         if type(accepted) is not bool:
             raise ValueError("accepted must be a boolean")
         rationale = _snapshot(_text(rationale, "rationale", 2000))
-        request_hash = digest({"episode": expected_episode_sha256, "accepted": accepted,
-                               "rationale": rationale, "reviewer": ctx.actor})
-        with tenant_scope(tenant=ctx.tenant), store.run_lock(run_id):
+        self._validate_decision(decision)
+        request_material = {"episode": expected_episode_sha256, "accepted": accepted,
+                            "rationale": rationale, "reviewer": ctx.actor}
+        if decision is not None:
+            request_material["decision"] = decision
+        request_hash = digest(request_material)
+        with tenant_scope(tenant=ctx.tenant), store.run_lock(run_id), store._definitions_lock():
             _gate()
             row, payload, current = self._load(ctx, flow_id, run_id, "flow.episode.review", human=True)
             if row.get("_audit_pending"):
@@ -586,7 +639,8 @@ class ActionEpisodeReviewService:
             saved = self._commit(ctx, row, payload, status="accepted" if accepted else "rejected",
                                  reason="reviewed_training_evidence", action="action_episode_reviewed",
                                  capability="flow.episode.review", metadata={"review_revision": row["revision"] + 1,
-                                                                            "review_sha256": digest(payload["review"])})
+                                                                            "review_sha256": digest(payload["review"])},
+                                 decision=decision, before_write=before_write)
             return self._present(saved, source_current=current)
 
     def export(self, ctx, flow_id, run_id):
@@ -612,16 +666,17 @@ class ActionEpisodeReviewService:
 
 
     def grant_training(self, ctx, flow_id, run_id, *, expected_revision, expected_episode_sha256,
-                       use_until, retain_derived_copies, rationale):
+                       use_until, retain_derived_copies, rationale, decision=None, before_write=None):
         """Grant bounded reuse/derived-copy retention; never imply automatic erasure."""
         from . import action_provenance as provenance
 
+        self._validate_decision(decision)
         revision = _revision(expected_revision)
         if retain_derived_copies is not True:
             raise ValueError("an explicit derived-copy retention grant is required")
         deadline = _number(use_until, "use_until")
         rationale = _snapshot(_text(rationale, "rationale", 2000))
-        with tenant_scope(tenant=ctx.tenant), store.run_lock(run_id):
+        with tenant_scope(tenant=ctx.tenant), store.run_lock(run_id), store._definitions_lock():
             _lineage_gate()
             row, payload, current = self._load(ctx, flow_id, run_id, "flow.episode.grant", human=True)
             if row.get("_audit_pending"):
@@ -629,12 +684,15 @@ class ActionEpisodeReviewService:
             if row["status"] != "accepted" or payload is None or row["episode_sha256"] != expected_episode_sha256:
                 raise ActionEpisodeConflict("training use requires the exact accepted unexpired episode")
             review_hash = digest(payload["review"])
-            request_hash = digest({"episode": expected_episode_sha256, "review": review_hash, "actor": ctx.actor,
-                "use_until": deadline, "retain_derived_copies": True, "rationale": rationale})
+            # The signed bundle recomputes exactly these fields; the reviewed
+            # decision identity is recorded with the commit, not in this hash.
+            request_material = {"episode": expected_episode_sha256, "review": review_hash, "actor": ctx.actor,
+                "use_until": deadline, "retain_derived_copies": True, "rationale": rationale}
+            request_hash = digest(request_material)
             existing = payload.get("training_grant")
             if existing is not None:
                 if existing["request_sha256"] == request_hash:
-                    return self._present(row, source_current=current)
+                    return self._present(row, payload, source_current=current)
                 raise ActionEpisodeConflict("training grant is immutable; changed scope requires new evidence")
             if row["revision"] != revision or not self.clock() < deadline <= row["retain_until"]:
                 raise ActionEpisodeConflict("training grant revision or retention deadline changed")
@@ -647,8 +705,9 @@ class ActionEpisodeReviewService:
             saved = self._commit(ctx, row, payload, status="accepted", reason="training_use_granted",
                 action="action_episode_training_granted", capability="flow.episode.grant",
                 metadata={"review_revision": row.get("review_revision", row["revision"]),
-                          "review_sha256": review_hash, "grant_sha256": digest(grant)})
-            return self._present(saved, source_current=current)
+                          "review_sha256": review_hash, "grant_sha256": digest(grant)},
+                decision=decision, before_write=before_write)
+            return self._present(saved, payload, source_current=current)
 
     def _signed_body(self, ctx, row, payload, current):
         from ..config import get_flows

@@ -59,6 +59,23 @@ class EnvironmentHMACDeliverySigner:
         return hmac.new(raw, payload, hashlib.sha256).digest()
 
 
+class SavedHMACDeliverySigner(EnvironmentHMACDeliverySigner):
+    """Exact tenant-scoped saved key; existing deployment keys remain supported."""
+
+    def __init__(self, store, tenant_id):
+        super().__init__()
+        self._store, self._tenant = store, tenant_id
+
+    def sign(self, key_id, payload):
+        record = self._store.managed_record(self._tenant, "key", key_id)
+        if record is None:
+            return super().sign(key_id, payload)
+        raw = record["material"]["secret"].encode("utf-8")
+        if not 32 <= len(raw) <= 64:
+            raise ConsentDeliveryConfigError("Saved delivery signing key is unavailable.")
+        return hmac.new(raw, payload, hashlib.sha256).digest()
+
+
 def run_delivery_once(
     tenant_id: str,
     destination_ids: Sequence[str],
@@ -71,6 +88,9 @@ def run_delivery_once(
     delivery_store: ConsentDeliveryStore | None = None,
     signer: DeliverySigner | None = None,
     transport: DeliveryTransport | None = None,
+    after_sequence: int = 0,
+    before_effect=None,
+    hold_unknown: bool = False,
 ) -> dict[str, Any]:
     """Bridge and dispatch one bounded batch for an explicitly selected tenant."""
 
@@ -94,21 +114,29 @@ def run_delivery_once(
             )
         )
     bridge = ConsentDeliveryBridge(preference_store, delivery_store)
+    if before_effect is not None:
+        before_effect(None)
     synchronized = bridge.sync_once(
         tenant_id,
         destination_ids,
         limit=sync_limit,
+        after_sequence=after_sequence,
     )
+    if before_effect is not None:
+        before_effect(None)
     dispatcher = ConsentDeliveryDispatcher(
         delivery_store,
-        signer=signer or EnvironmentHMACDeliverySigner(),
+        signer=signer or SavedHMACDeliverySigner(delivery_store, tenant_id),
         transport=transport,
+        before_effect=before_effect,
+        hold_unknown=hold_unknown,
     )
     dispatched = dispatcher.deliver_once(
         tenant_id,
         worker_id=worker_id,
         limit=delivery_limit,
         lease_seconds=lease_seconds,
+        destination_ids=tuple(destination_ids),
     )
     return {
         "synchronized": synchronized,
@@ -120,6 +148,7 @@ def run_delivery_once(
 
 __all__ = [
     "EnvironmentHMACDeliverySigner",
+    "SavedHMACDeliverySigner",
     "run_delivery_once",
     "signing_secret_environment_name",
 ]

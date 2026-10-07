@@ -117,22 +117,23 @@ class WorkatoImporter:
     source = "workato"
     can_fetch_definitions = True
 
-    def __init__(self, base_url: str | None = None, token: str | None = None):
-        self.base_url = (base_url or os.environ.get("WORKATO_BASE_URL", "https://www.workato.com")).strip().rstrip("/")
-        self.token = (token or os.environ.get("WORKATO_TOKEN", "")).strip()
+    def __init__(self, base_url: str | None = None, token: str | None = None, *, request=None):
+        self.request = request
+        self.base_url = ((base_url or "") if request is not None else (base_url or os.environ.get("WORKATO_BASE_URL", "https://www.workato.com"))).strip().rstrip("/")
+        self.token = "" if request is not None else (token or os.environ.get("WORKATO_TOKEN", "")).strip()
 
     def fetch(self) -> list[dict[str, Any]]:
-        if not self.token:
+        if (self.request is None and not self.token) or not self.base_url:
             raise ImporterError("Workato import requires WORKATO_TOKEN")
         try:
             import httpx
         except ImportError as e:  # pragma: no cover - optional dep
             raise ImporterError("httpx is required for live Workato import") from e
         out: list[dict[str, Any]] = []
-        page = 0
+        page = 1
         with httpx.Client(timeout=30.0) as client:
             for _ in range(100):  # page cap
-                r = client.get(
+                r = (self.request or client.get)(
                     f"{self.base_url}/api/recipes",
                     headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
                     params={"page": page, "per_page": 100},

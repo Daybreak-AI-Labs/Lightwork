@@ -18,29 +18,73 @@ _DAY = 86_400.0
 _MAX_IDS = 50
 
 
-def _incident_section(now: float, due_soon_seconds: float) -> tuple[dict[str, Any], int]:
+def _declaration_inventory(now: float) -> dict[str, Any]:
     try:
         from . import ai_incident_reporting as air
-
         if not air.enabled():
-            return {"enabled": False}, 0
-        rows = air.list_declarations(now=now)
+            return {"enabled": False, "rows": []}
+        rows = air.list_declarations(now=now, limit=5_000)
+        return {"enabled": True, "rows": [{
+            "id": str(row["id"]), "due_at": float(row["report_due_at"]),
+            "running": row["status"] == "declared",
+            "reported": row["status"] in {"initial_reported", "complete_reported"},
+            "withdrawn": row["status"] == "withdrawn",
+        } for row in rows]}
     except Exception:
-        return {"enabled": False, "error": "unavailable"}, 0
-    overdue = [str(row.get("id")) for row in rows if row["clock"]["overdue"]]
-    due_soon = [
-        str(row.get("id"))
-        for row in rows
-        if not row["clock"]["overdue"]
-        and 0.0 < row["clock"]["seconds_remaining"] <= due_soon_seconds
-    ]
-    section = {
-        "enabled": True,
+        return {"enabled": True, "error": "unavailable", "rows": []}
+
+
+def _article_inventory(now: float) -> dict[str, Any]:
+    try:
+        from . import eu_ai_incidents as article
+        if not article.enabled():
+            return {"enabled": False, "rows": []}
+        rows = article.reporting_inventory(now=now)
+        return {"enabled": True, "rows": [{
+            "id": str(row["incident_id"]),
+            "due_at": float(row["clock"]["outer_limit_at"]),
+            "running": row["status"] != "not_reportable"
+            and row["clock"]["first_submission_at"] is None,
+            "reported": row["clock"]["first_submission_at"] is not None,
+            "withdrawn": False,
+        } for row in rows]}
+    except Exception:
+        return {"enabled": True, "error": "unavailable", "rows": []}
+
+
+def incident_reporting_posture(now: float, due_soon_seconds: float = 2 * _DAY) -> dict[str, Any]:
+    """Current complete reporting clocks from both native registers; no filing claim."""
+    registers = {"declarations": _declaration_inventory(now),
+                 "article_73": _article_inventory(now)}
+    unavailable = [name for name, value in registers.items() if value.get("error")]
+    rows = sorted((row for value in registers.values() for row in value["rows"]),
+                  key=lambda row: (row["due_at"], row["id"]))
+    overdue = [row["id"] for row in rows if row["running"] and row["due_at"] < now]
+    due_soon = [row["id"] for row in rows
+                if row["running"] and 0 <= row["due_at"] - now <= due_soon_seconds]
+    return {
+        "enabled": any(value["enabled"] for value in registers.values()),
+        "complete": not unavailable,
         "overdue": overdue[:_MAX_IDS],
         "due_soon": due_soon[:_MAX_IDS],
+        "overdue_count": len(overdue), "due_soon_count": len(due_soon),
+        "listed_ids_truncated": len(overdue) > _MAX_IDS or len(due_soon) > _MAX_IDS,
+        "record_count": len(rows),
+        "reported": sum(row["reported"] for row in rows),
+        "withdrawn": sum(row["withdrawn"] for row in rows),
+        "unavailable_registers": unavailable,
+        "registers": {name: {"enabled": value["enabled"],
+                              "available": not bool(value.get("error")),
+                              "record_count": len(value["rows"])}
+                      for name, value in registers.items()},
+        "notice": "Counts cover records in two reporting registers; the same incident may appear in both. Recorded filings are human assertions, not proof of authority receipt.",
         "citation": "Art. 73",
     }
-    return section, len(overdue) + len(due_soon)
+
+
+def _incident_section(now: float, due_soon_seconds: float) -> tuple[dict[str, Any], int]:
+    section = incident_reporting_posture(now, due_soon_seconds)
+    return section, section["overdue_count"] + section["due_soon_count"]
 
 
 def _literacy_section(now: float, expiring_days: int) -> tuple[dict[str, Any], int]:
@@ -206,4 +250,4 @@ def digest(
     }
 
 
-__all__ = ["digest"]
+__all__ = ["digest", "incident_reporting_posture"]

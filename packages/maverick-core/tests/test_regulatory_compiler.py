@@ -277,7 +277,7 @@ def test_configured_profiles_reach_the_live_policy(monkeypatch):
     import maverick.compliance_profiles as cpmod
     monkeypatch.setattr(cpmod, "configured_profiles", lambda *_a, **_k: ["gdpr"])
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
-    monkeypatch.setattr("maverick.config.config_source_errors", dict)
+    monkeypatch.setattr("maverick.config.config_source_errors", lambda *a, **k: {})
     pol = Policy.from_config()
     assert evaluate("email", policy=pol).decision == Decision.REQUIRE_HUMAN
 
@@ -417,10 +417,10 @@ def test_flow_dispatch_denials_are_tagged_too(monkeypatch):
         deny_actions=frozenset({"ping"}),
         compliance_profiles=("t",),
     ))
-    # The flow gate classifies and shield-scans before governance; clear both
-    # so the test isolates the obligation tag on the governance denial.
+    # The flow gate classifies before governance; clear that (the real shield
+    # allows this benign call) so the test isolates the obligation tag on the
+    # governance denial.
     monkeypatch.setattr("maverick.flow.ir.action_tool_policy_error", lambda t: "")
-    monkeypatch.setattr("maverick.shield_policy.scan_block", lambda text: None)
     seen = _capture(monkeypatch)
     from maverick.tool_authz import authorize
     err = authorize("ping", {}, origin="flow")
@@ -442,7 +442,6 @@ def test_flow_dispatch_success_uses_the_evaluated_profile_snapshot(monkeypatch):
     _activate(monkeypatch, [])
     _gov(monkeypatch, Policy(compliance_profiles=("t",)))
     monkeypatch.setattr("maverick.flow.ir.action_tool_policy_error", lambda t: "")
-    monkeypatch.setattr("maverick.shield_policy.scan_block", lambda text: None)
     seen = _capture(monkeypatch)
 
     from maverick.tool_authz import authorize
@@ -478,6 +477,7 @@ async def test_autonomy_replacement_preserves_governance_profile_snapshot(
             decision="deny",
             reason="restricted rung",
             level=SimpleNamespace(value="restricted"),
+            execute_by="agent",
         ),
     )
     observed = []

@@ -23,6 +23,11 @@ default (``required = 1`` -> the legacy single approver); opt-in per risk band::
 The enforcement lives in ``WorldModel.decide_approval`` (distinctness via the
 ``approval_signoffs`` PK + the self-approval bar); this module only resolves the
 configured quorum at park time.
+
+With one approver, ``[approval] separate_approver`` (see
+:func:`separate_approver_mode`) decides whether the person who asked for a high
+or critical risk action may approve it themselves; the shared decision path
+(``maverick.channel_approvals``) enforces it on every surface.
 """
 from __future__ import annotations
 
@@ -98,4 +103,48 @@ def allow_self_approval() -> bool:
     return bool(v)
 
 
-__all__ = ["required_approvals", "allow_self_approval"]
+SEPARATE_APPROVER_MODES = ("when_available", "always", "never")
+_SEPARATE_APPROVER_RISKS = frozenset({"high", "critical"})
+
+
+def separate_approver_mode() -> str:
+    """Who approves a high or critical risk action the requester asked for.
+
+    ``[approval] separate_approver``:
+
+    * ``"when_available"`` (default) -- someone else, whenever at least one
+      other person could decide the request; where the requester is the only
+      one who can, they may approve it themselves (recorded as a self-approval).
+    * ``"always"`` -- someone else, even if nobody else can: the request then
+      waits and expires, which refuses the action.
+    * ``"never"`` -- the requester may approve it.
+
+    ``MAVERICK_SEPARATE_APPROVER`` wins. A value this module does not know is
+    treated as ``"always"``, so a typo never loosens the rule."""
+    env = os.environ.get("MAVERICK_SEPARATE_APPROVER", "").strip().lower()
+    if env:
+        return env if env in SEPARATE_APPROVER_MODES else "always"
+    try:
+        from ..config import load_config
+
+        raw = ((load_config() or {}).get("approval") or {}).get("separate_approver")
+    except Exception:  # pragma: no cover -- config never blocks a request
+        raw = None
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return "when_available"
+    value = str(raw).strip().lower()
+    return value if value in SEPARATE_APPROVER_MODES else "always"
+
+
+def separate_approver_applies(risk: str | None, approvals_required: object = 1) -> bool:
+    """Whether :func:`separate_approver_mode` governs a request.
+
+    High or critical risk with one approver. With two or more, distinct people
+    approve anyway, and :func:`allow_self_approval` alone decides whether the
+    requester's vote counts as one of them."""
+    return (str(risk or "").strip().lower() in _SEPARATE_APPROVER_RISKS
+            and _coerce_int(approvals_required, 1) <= 1)
+
+
+__all__ = ["SEPARATE_APPROVER_MODES", "allow_self_approval", "required_approvals",
+           "separate_approver_applies", "separate_approver_mode"]

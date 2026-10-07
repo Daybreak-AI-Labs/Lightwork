@@ -253,7 +253,7 @@ def test_http_fetch_allow_private_override(monkeypatch):
         content = b"hello"
 
         def raise_for_status(self): pass
-        def iter_bytes(self): yield self.content
+        def iter_bytes(self, chunk_size=None): yield self.content
         def __enter__(self): return self
         def __exit__(self, *a): return False
 
@@ -284,7 +284,7 @@ def test_http_fetch_markdown_render(monkeypatch):
         content = html.encode()
 
         def raise_for_status(self): pass
-        def iter_bytes(self): yield self.content
+        def iter_bytes(self, chunk_size=None): yield self.content
         def __enter__(self): return self
         def __exit__(self, *a): return False
 

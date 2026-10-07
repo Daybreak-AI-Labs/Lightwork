@@ -16,7 +16,9 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 def _intake_controller(page):
     script = '/static/lightwork-ai-business-intake.js'
-    assert page.count(f'<script src="{script}" defer></script>') == 1
+    # Static tags carry a content-hash cache key (static_asset_versioning).
+    tag = re.compile(rf'<script src="{re.escape(script)}(?:\?v=[0-9a-f]{{8}})?" defer></script>')
+    assert len(tag.findall(page)) == 1
     response = client.get(script)
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
@@ -161,7 +163,7 @@ def test_governance_panels_render_api_values_as_text_only():
     page = response.text
     fragment = page[
         page.index('<section class="panel" id="governance-operations-panel"'):
-        page.index('<p><a class="btn" href="/security">')
+        page.index('<p><a class="back-link" href="/security">')
     ]
     assert "td.textContent = asText(value)" in fragment
     assert "target.textContent = JSON.stringify(value" in fragment
@@ -302,8 +304,6 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
     for path_contract in (
         "/policies/${encodeURIComponent(policyId)}/versions",
         "/policies/${encodeURIComponent(policyId)}/activate",
-        "/exceptions/${encodeURIComponent(key)}/approve",
-        "/exceptions/${encodeURIComponent(key)}/close",
         "/evaluations/${encodeURIComponent(key)}/attest",
         "/dynamic-risk/assets/${encodeURIComponent(assetId)}",
         "/dynamic-risk/assets/${encodeURIComponent(assetId)}/signals",
@@ -330,6 +330,13 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
         "/ai-media-provenance/receipts/${encodeURIComponent(operation)}",
     ):
         assert path_contract in page
+    # Exception request/approve/close moved to their reviewed controller
+    # (b0ffccbb); it still writes only through the native exception routes.
+    exceptions = client.get("/static/lightwork-policy-exceptions.js")
+    assert exceptions.status_code == 200
+    assert "'/ai-policy-management/exceptions/' + encodeURIComponent(previous.exception_key) + '/' + kind" in exceptions.text
+    assert "kind === 'approve'" in exceptions.text and "kind === 'close'" in exceptions.text
+    assert '<script src="/static/lightwork-policy-exceptions.js' in page
 
     # AI systems are picked from the inventory, never typed as MAA- IDs.
     assert 'pattern="MAA-[0-9a-f]{32}"' not in page
@@ -368,7 +375,7 @@ def test_governance_operations_inline_javascript_has_valid_syntax(tmp_path):
     assert response.status_code == 200
     page = response.text
     start = page.index('<section class="panel" id="governance-operations-panel"')
-    end = page.index('<p><a class="btn" href="/security">', start)
+    end = page.index('<p><a class="back-link" href="/security">', start)
     fragment = page[start:end]
     match = re.search(r"<script>(.*?)</script>", fragment, flags=re.DOTALL)
     assert match is not None
@@ -547,7 +554,9 @@ def test_admin_page_explains_trusted_article_73_authority_boundary():
     assert 'id="ai-media-provenance-sign"' in page
     assert 'id="ai-media-provenance-review"' in page
     assert 'sendJson("/ai-policy-management/policies"' in page
-    assert 'sendJson("/ai-policy-management/exceptions"' in page
+    # A new exception is requested through the reviewed controller.
+    assert "kind === 'request' ? '/ai-policy-management/exceptions'" in client.get(
+        "/static/lightwork-policy-exceptions.js").text
     assert 'sendJson("/ai-policy-management/evaluations"' in page
     assert 'sendJson("/dynamic-risk/signals"' in page
     assert "/collect`" in page
@@ -609,7 +618,7 @@ _BANNED = re.compile(
 def _governance_fragment(page: str) -> str:
     return page[
         page.index('<section class="panel" id="governance-operations-panel"'):
-        page.index('<p><a class="btn" href="/security">')
+        page.index('<p><a class="back-link" href="/security">')
     ]
 
 
@@ -647,7 +656,10 @@ def test_governance_tools_offer_forms_and_pickers_in_plain_words(monkeypatch, ad
         "action-details",
     ):
         assert f'data-structured="{slot}"' in fragment
-    assert '<script src="/static/lightwork-assurance-forms.js"></script>' in fragment
+    assert re.search(
+        r'<script src="/static/lightwork-assurance-forms\.js(?:\?v=[0-9a-f]{8})?"></script>',
+        fragment,
+    )
     # Records, versions and outside results are chosen, never typed.
     assert 'name="source_choice" required data-grc-source' in fragment
     assert 'data-version-options="profile"' in fragment
@@ -693,3 +705,24 @@ def test_assurance_forms_script_is_served():
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "window.LWAssuranceForms" in response.text
+
+
+def test_governance_record_fields_are_labelled_in_plain_words():
+    from pathlib import Path
+
+    from maverick_dashboard import app as app_module
+
+    source = (Path(app_module.__file__).parent / "templates" / "_governance_operations.html").read_text()
+    block = source[source.index("const FIELD_LABELS = {"):source.index("const fieldLabel = key =>")]
+    labels = dict(re.findall(r'(\w+): "([^"]+)"', block))
+    # Every record list shows the plain label, not the raw key.
+    assert 'dt.textContent = fieldLabel(key);' in source
+    assert "dt.textContent = words(key);" not in source
+    for key, plain in {"sysparm_query": "ServiceNow search", "four_eyes_approved": "Approved by a second person",
+                       "projection": "Summary", "asset_binding": "Linked AI system",
+                       "media_bytes_persisted": "Media file stored"}.items():
+        assert labels[key] == plain
+    developer = re.compile(r"\b(projection|binding|sysparm|cursor|idempotent|payload|schema|manifest|"
+                           r"canonical|plane|seam|adapter|sink|dispatch|params|uri|hex|arn|"
+                           r"determination|supersession|persisted|truncated|lease)\b", re.IGNORECASE)
+    assert not [label for label in labels.values() if developer.search(label)]

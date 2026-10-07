@@ -104,12 +104,17 @@ def record_outcome(goal_id: int, episode_id: int, value: float, kind: str) -> No
     or a graded result). The flywheel then prefers this over the verifier proxy
     when it next turns, so learning is grounded in what actually happened.
     """
+    from ..consequence import ConsequenceWriteUncertain
     from ..consequence import record_outcome as _rec
-    ok = _rec(goal_id, episode_id, value, kind=kind)
+    try:
+        ok = _rec(goal_id, episode_id, value, kind=kind, source="reported_business")
+    except ConsequenceWriteUncertain as exc:
+        raise click.ClickException("The report may already be saved. Its outcome is unconfirmed; check it before trying again.") from exc
+    if not ok:
+        raise click.ClickException("The outcome report was not saved. Review the learning settings and storage availability.")
     click.echo(
         f"recorded outcome {value:g} for goal {goal_id} episode {episode_id}"
-        f"{(' (' + kind + ')') if kind else ''}" if ok
-        else "failed to record outcome")
+        f"{(' (' + kind + ')') if kind else ''}")
 
 
 

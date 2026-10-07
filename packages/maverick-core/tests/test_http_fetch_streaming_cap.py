@@ -26,7 +26,7 @@ class _StreamResp:
     def __exit__(self, *a):
         return False
 
-    def iter_bytes(self):
+    def iter_bytes(self, chunk_size=None):  # httpx signature
         yield from self._chunks
 
 

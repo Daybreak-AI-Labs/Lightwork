@@ -4,11 +4,20 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-learning-loop.js"), "utf8");
 const jobsSource = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ops-jobs.js"), "utf8");
+const passesSource = fs.readFileSync(
+  path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-learning-passes.js"), "utf8");
+// The reviewed learning pass ("run now") is its own partial on the Learned page.
+const passesMarkup = fs.readFileSync(
+  path.resolve(__dirname, "../../maverick_dashboard/templates/_learning_passes.html"), "utf8")
+  .replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, "");
+const CONTEXT = "c".repeat(64);
+const PASS = "0123456789abcdef0123456789abcdef";  // pragma: allowlist secret
 
 function page(admin) {
   return `<div id="llp-root" data-admin="${admin ? 1 : 0}">
@@ -22,11 +31,8 @@ ${admin ? `<details id="llp-propose-box"><form id="llp-propose">
 <table><tbody id="llp-eff-rows"></tbody></table><ul id="llp-conf"></ul>
 <select id="llp-support"><option value="3">3</option><option value="5">5</option></select><button id="llp-preview-btn">Show</button><div id="llp-preview"></div>
 <ol id="llp-log"></ol><button id="llp-holdout-btn">Check</button><div id="llp-holdout"></div>
-${admin ? `<select id="llp-scope"><option value="main">Main</option><option value="all">All</option><option value="chosen">Chosen</option></select>
-<input type="checkbox" id="llp-trial"><input type="checkbox" id="llp-retire" checked>
-<input type="file" id="llp-instructions"><input type="checkbox" id="llp-quality-remove">
-<button id="llp-run">Run</button><button id="llp-quality-btn">Quality</button>
-<p id="llp-cost">Both use the evaluation spending limit.</p><p id="llp-run-status"></p>` : ""}
+${admin ? `<input type="checkbox" id="llp-quality-remove"><button id="llp-quality-btn">Quality</button>
+<p id="llp-cost">Both use the evaluation spending limit.</p><p id="llp-run-status"></p>${passesMarkup}` : ""}
 <div id="llp-run-result"></div><p id="llp-harness-msg"></p></div>`;
 }
 
@@ -34,34 +40,47 @@ const PENDING = { id: "0123456789abcdef", status: "pending", target: "Standing i
   failure: "Emailed too early", change: "Confirm the quote first", rationale: "Three blocked tasks",
   approval: "Approved", can_apply: true, can_revert: false, proposed_at: 1700000000,
   technical: { reference: "0123456789abcdef", approval_number: 7, fingerprint: "abcdef0123456789" } };
+const PASS_DONE = { context: CONTEXT, operation: PASS, message: "The original learning pass finished. Nothing was repeated.",
+  job: { state: "done", worker_available: false }, result: { spent: 0.4, reports: [{ Model: "Claude X", "New lessons adopted": 1 }] } };
 const APPLIED = Object.assign({}, PENDING, { id: "fedcba9876543210", status: "applied", can_apply: false, can_revert: true, applied_at: 1700000100 });
 
 function defaults() {
   return {
-    "/refinements": { enabled: true, require_approval: true, proposals: [PENDING, APPLIED],
+    "/refinements": { context: CONTEXT, can_manage: true, decisions: [], holds: [],
+      enabled: true, require_approval: true, proposals: [PENDING, APPLIED],
       in_force: [{ target: "Standing instructions", title: "Check quote approval", change: "Confirm the quote first", applied_at: 1700000100 }] },
     "/models": { enabled: true, models: [{ value: "claude-x", label: "Claude X" }] },
-    "/efficacy": { lessons: [{ text: "always cite", department: "", went_well: 3, did_not: 1, rate: 0.75, recent_rate: null }] },
+    "/efficacy": { lessons: [{ text: "always cite", department: "", scope_label: "All work",
+      token: "a".repeat(64), went_well: 3, did_not: 1, rate: 0.75, recent_rate: null }] },
     "/conflicts": { pairs: [{ model: "claude-x", first: "always cite", second: "never cite" }] },
     "/log": { events: [{ when: 1700000000, what: "Learned a new lesson", model: "claude-x", lesson: "always cite" }] },
     "/preview": { enabled: true, weaknesses: [{ pattern: "forgot totals", times: 4, kind: "wrong answer", would_add: "check totals" }], scanned: 9, eligible: 5 },
     "/holdout": { configured: true, verified: true, events: 12, checks_used: 3, technical: { ledger: "L1", latest_fingerprint: "ab" } },
-    "/run": { job: { id: "0123456789abcdef", state: "done", can_stop: false, result: { reports: [{  // pragma: allowlist secret
-      patterns_found: 2, ideas_tried: 1, passed_testing: 1, adopted: 1, retired: 0,
-      paused_for_calibration: false, promotion_gate_off: false, new_lessons: ["check totals"] }] } } },
-    "/corpus-quality": { job: { id: "1123456789abcdef", state: "done", can_stop: false, result: {  // pragma: allowlist secret
+    "/passes/current": { context: CONTEXT, revision: "p".repeat(64), requests: [],
+      models: [{ value: "claude-x", label: "Claude X" }, { value: "worker-y", label: "Worker Y" }] },
+    "/passes/review": { context: CONTEXT, operation: PASS, token: "sealed:pass",
+      review: [{ label: "Models", after: "Claude X" }, { label: "Spending limit", after: "$5.00 for testing" }] },
+    "/passes/start": PASS_DONE,
+    ["/passes/requests/" + PASS]: PASS_DONE,
+    "/corpus-quality": { job: { id: "1123456789abcdef", kind: "corpus_quality", state: "done", can_stop: false, result: {  // pragma: allowlist secret
       configured: true, removed: 1, cases: [{ task: "easy task", useful: false, baseline_rate: 1 }] } } },
     "/api/v1/learning-ops/self-harness/plan": { spending_limit: 5, checker: "Claude Checker", careful_testing: true },
-    "/api/v1/learning-ops/refinements/0123456789abcdef/preview": { title: "Check quote approval",  // pragma: allowlist secret
-      now: "", after: "Confirm the quote first", undo_also_removes: [] },
-    "/api/v1/learning-ops/refinements/fedcba9876543210/preview": { title: "Check quote approval",  // pragma: allowlist secret
-      now: "Confirm the quote first", after: "Confirm the quote first", undo_also_removes: ["Later change"] },
+    "/refinements/0123456789abcdef/review": { context: CONTEXT, title: "Check quote approval",  // pragma: allowlist secret
+      revision: "a".repeat(64), source_revision: "s".repeat(64), review_expires_at: 1700000600,
+      changes: [{title: "Check quote approval", before: "", after: "Confirm the quote first"}] },
+    "/refinements/fedcba9876543210/review": { context: CONTEXT, title: "Check quote approval",  // pragma: allowlist secret
+      revision: "b".repeat(64), source_revision: "s".repeat(64), review_expires_at: 1700000600,
+      changes: [{title: "Check quote approval", before: "Confirm the quote first", after: ""},
+                {title: "Later change", before: "Check deadlines", after: ""}] },
+    "/refinements/0123456789abcdef/apply": { receipt: { status: "confirmed",  // pragma: allowlist secret
+      message: "Change applied. Agents follow it on new tasks." } },
   };
 }
 
 async function fixture({ admin = true, answers = {}, confirm = true } = {}) {
   const dom = new JSDOM(page(admin), { url: "https://lightwork.example/learned", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   const table = Object.assign(defaults(), answers);
   window.mvErrorText = (failure, action) => `Could not ${action}.`;
@@ -82,6 +101,7 @@ async function fixture({ admin = true, answers = {}, confirm = true } = {}) {
   const settle = async () => { for (let i = 0; i < 40; i++) await new Promise((done) => setImmediate(done)); };
   window.eval(jobsSource);
   window.eval(source);
+  if (admin) window.eval(passesSource);
   await settle();
   return { window, doc: window.document, calls, settle };
 }
@@ -112,7 +132,7 @@ test("apply shows the before and after while asking", async (t) => {
   t.after(() => ui.window.close());
   ui.doc.querySelector("#llp-ref-rows button").click();
   await ui.settle();
-  assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Now it says: \(nothing yet for this\)/);
+  assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Current instructions: \(nothing for this\)/);
   assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /After applying: Confirm the quote first/);
   assert.equal(ui.calls.filter((c) => c.method === "POST").length, 0);
 });
@@ -122,10 +142,14 @@ test("apply previews, confirms, then calls the apply route", async (t) => {
   t.after(() => ui.window.close());
   ui.doc.querySelector("#llp-ref-rows button").click();
   await ui.settle();
-  const previewAt = ui.calls.findIndex((c) => c.url === "/api/v1/learning-ops/refinements/0123456789abcdef/preview");  // pragma: allowlist secret
+  const previewAt = ui.calls.findIndex((c) => c.url === "/api/v1/learning-loop/refinements/0123456789abcdef/review?context=" + CONTEXT);  // pragma: allowlist secret
   const confirmAt = ui.calls.findIndex((c) => c.confirm && /restore point/.test(c.confirm));
   assert.ok(previewAt >= 0 && confirmAt > previewAt);
   assert.ok(ui.calls.some((c) => c.method === "POST" && c.url === "/api/v1/learning-loop/refinements/0123456789abcdef/apply"));  // pragma: allowlist secret
+  const sent = ui.calls.find((c) => c.method === "POST").body;
+  assert.match(sent.operation_id, /^[a-f0-9]{32}$/, "the original request carries its own id, so it is never repeated");
+  assert.deepEqual(Object.assign({}, sent, { operation_id: "x" }), { revision: "a".repeat(64), confirm: true, context: CONTEXT,
+    source_revision: "s".repeat(64), operation_id: "x", review_expires_at: 1700000600 });
   assert.match(ui.doc.getElementById("llp-ref-msg").textContent, /Change applied/);
 });
 
@@ -171,6 +195,33 @@ test("read-outs render lesson results, clashes and the activity timeline", async
   assert.match(ui.doc.getElementById("llp-log").textContent, /14 Nov 2023: Learned a new lesson/);
 });
 
+test("an administrator can withdraw the exact reviewed lesson from Learned", async (t) => {
+  const ui = await fixture();
+  t.after(() => ui.window.close());
+  const action = ui.doc.querySelector("#llp-eff-rows details");
+  assert.ok(action);
+  action.querySelector("textarea").value = "It conflicts with our current policy.";
+  action.querySelector("button").click();
+  await ui.settle();
+  const sent = ui.calls.find((c) => c.url === "/api/v1/learning-loop/lessons/withdraw");
+  assert.deepEqual(sent.body, { model_id: "claude-x", token: "a".repeat(64),
+    reason: "It conflicts with our current policy.", confirm: true });
+  assert.match(ui.doc.getElementById("llp-harness-msg").textContent, /Lesson removed/);
+});
+
+test("a viewer has no withdrawal control and a declined confirmation sends nothing", async (t) => {
+  const viewer = await fixture({ admin: false });
+  t.after(() => viewer.window.close());
+  assert.equal(viewer.doc.querySelector("#llp-eff-rows details"), null);
+  const admin = await fixture({ confirm: false });
+  t.after(() => admin.window.close());
+  const action = admin.doc.querySelector("#llp-eff-rows details");
+  action.querySelector("textarea").value = "It conflicts with our current policy.";
+  action.querySelector("button").click();
+  await admin.settle();
+  assert.equal(admin.calls.filter((c) => c.url === "/api/v1/learning-loop/lessons/withdraw").length, 0);
+});
+
 test("preview and hold-out check explain results in sentences", async (t) => {
   const ui = await fixture();
   t.after(() => ui.window.close());
@@ -179,7 +230,8 @@ test("preview and hold-out check explain results in sentences", async (t) => {
   await ui.settle();
   assert.match(ui.doc.getElementById("llp-preview").textContent, /Seen 4 times: forgot totals/);
   assert.match(ui.doc.getElementById("llp-preview").textContent, /Nothing was changed/);
-  assert.match(ui.doc.getElementById("llp-holdout").textContent, /complete and untouched: 12 entries/);
+  assert.match(ui.doc.getElementById("llp-holdout").textContent, /The stored history checks match: 12 entries, 3 test uses recorded\./);
+  assert.match(ui.doc.getElementById("llp-holdout").textContent, /does not establish independent custody/);
 });
 
 test("an auditor-only read-out explains who can see it", async (t) => {
@@ -188,17 +240,29 @@ test("an auditor-only read-out explains who can see it", async (t) => {
   assert.equal(ui.doc.getElementById("llp-log").textContent, "Only administrators and auditors can see the learning activity.");
 });
 
-test("run now confirms, starts a background job and summarises the pass", async (t) => {
+test("a learning pass is reviewed in full, started once and summarised", async (t) => {
   const ui = await fixture();
   t.after(() => ui.window.close());
   assert.match(ui.doc.getElementById("llp-cost").textContent, /up to \$5\.00/);
   assert.match(ui.doc.getElementById("llp-cost").textContent, /Claude Checker/);
-  ui.doc.getElementById("llp-run").click();
+  ui.doc.getElementById("lp-review").click();
   await ui.settle();
-  const run = ui.calls.find((c) => c.method === "POST");
-  assert.deepEqual(run.body, { scope: "main", trial: false, retire: true, instructions: null });
-  assert.match(ui.doc.getElementById("llp-run-result").textContent, /1 new lesson adopted/);
-  assert.equal(ui.doc.getElementById("llp-run-status").textContent, "Finished.");
+  const reviewed = ui.calls.find((c) => c.url === "/api/v1/learning-loop/passes/review");
+  assert.deepEqual(reviewed.body, { context: CONTEXT, revision: "p".repeat(64), scope: "main", model_id: "", trial: false, retire: true, instructions: "" });
+  const preview = ui.doc.getElementById("lp-preview");
+  assert.match(preview.textContent, /Review this learning pass.*Spending limit\$5\.00 for testing/s);
+  const run = Array.from(preview.querySelectorAll("button")).find((b) => /Run reviewed learning pass/.test(b.textContent));
+  assert.equal(run.disabled, true, "nothing starts before the review is ticked");
+  const tick = preview.querySelector('input[type="checkbox"]');
+  tick.checked = true;
+  tick.dispatchEvent(new ui.window.Event("change"));
+  run.click();
+  await ui.settle();
+  const starts = ui.calls.filter((c) => c.url === "/api/v1/learning-loop/passes/start");
+  assert.equal(starts.length, 1);
+  assert.deepEqual(starts[0].body, { token: "sealed:pass", confirm: true });
+  assert.match(ui.doc.getElementById("lp-result").textContent, /New lessons adopted: 1/);
+  assert.match(ui.doc.getElementById("lp-status").textContent, /No automatic retry is made/);
 });
 
 test("undo lists the later changes it also removes", async (t) => {
@@ -207,8 +271,9 @@ test("undo lists the later changes it also removes", async (t) => {
   ui.doc.querySelectorAll("#llp-ref-rows button")[1].click();
   await ui.settle();
   const confirm = ui.calls.find((c) => c.confirm);
-  assert.match(confirm.confirm, /also undoes 1 change applied after it/);
+  assert.match(confirm.confirm, /earlier instructions may return and later changes may be removed/);
   assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Later change/);
+  assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Current instructions: Check deadlines.*After restoring: \(removed\)/);
 });
 
 test("removing weak test cases asks first and sends the confirmation", async (t) => {
@@ -229,11 +294,13 @@ test("a pass for the chosen model sends that model; the preview sends the thresh
   t.after(() => ui.window.close());
   ui.doc.getElementById("llp-support").value = "5";
   ui.doc.getElementById("llp-preview-btn").click();
-  ui.doc.getElementById("llp-scope").value = "chosen";
-  ui.doc.getElementById("llp-run").click();
+  ui.doc.getElementById("lp-scope").value = "chosen";
+  ui.doc.getElementById("lp-scope").dispatchEvent(new ui.window.Event("input"));
+  ui.doc.getElementById("lp-model").value = "worker-y";
+  ui.doc.getElementById("lp-review").click();
   await ui.settle();
   assert.ok(ui.calls.some((c) => c.url === "/api/v1/learning-loop/preview?min_support=5&model_id=claude-x"));
-  const run = ui.calls.find((c) => c.method === "POST");
-  assert.deepEqual(run.body, { scope: "chosen", trial: false, retire: true, instructions: null, model_id: "claude-x" });
-  assert.match(ui.calls.find((c) => c.confirm).confirm, /the model chosen above/);
+  const reviewed = ui.calls.find((c) => c.url === "/api/v1/learning-loop/passes/review");
+  assert.equal(reviewed.body.scope, "chosen");
+  assert.equal(reviewed.body.model_id, "worker-y");
 });

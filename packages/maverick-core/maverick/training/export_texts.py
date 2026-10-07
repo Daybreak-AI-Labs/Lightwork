@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # pragma: no cover -- world optional; no world -> no text
         world = None
     try:
-        records = list(load_donations(args.in_dir))
+        records = list(load_donations(args.in_dir, world=world))
         if world is not None:
             def fetch(rec):
                 return fetch_steps_for_goal(world, rec.get("goal_id", 0))

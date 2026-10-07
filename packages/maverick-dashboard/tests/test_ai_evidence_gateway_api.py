@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 import types
 
@@ -585,7 +586,7 @@ def test_assurance_cockpit_disabled_state_is_product_copy(monkeypatch):
 
     assert response.status_code == 200, response.text
     assert "Evidence recording is off" in response.text
-    assert "Ask an administrator to turn on" in response.text
+    assert "Ask an administrator to turn this on." in response.text
     # The cockpit is a product surface: no CLI invocations on the page.
     assert "maverick preflight" not in response.text
 
@@ -720,7 +721,7 @@ def test_assurance_cockpit_renders_gateway_evidence_without_raw_content(
     assert 'id="gateway-demo-seed"' not in response.text
     assert "Governance benchmarks" in response.text
     assert "AER-page-1" in response.text
-    assert "2025-07-24 12:00:00 UTC" in response.text
+    assert re.search(r"24 Jul 2025, 12:00(:00)? UTC", response.text)
     assert "Complete:" in response.text
     assert "Incomplete:" in response.text
     assert "AI-DISCLOSURE-01" in response.text

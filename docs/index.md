@@ -1,30 +1,29 @@
 # Lightwork
 
-> Enterprise recursive multi-agent swarm. One kernel, every model.
+> AI workers, company knowledge and repeatable workflows — under your control.
 
-Lightwork is an **agentic enterprise platform**: a governed AI workforce of
-2,031 prebuilt specialists across 53 business suites that provably improves
-with use — deployed in your own environment. It drives any
-LLM (Claude, GPT, Kimi, Grok, Gemini, DeepSeek, Ollama, OpenRouter), and
+Lightwork brings AI workers, company knowledge, repeatable workflows and
+governed learning together, with operating controls for your team —
+deployed in your own environment. It supports
+configured model providers including Claude, GPT, Gemini, DeepSeek, Ollama, and OpenRouter, and
 ships a governed, auditable safety surface built for regulated teams.
 Lightwork is proprietary, commercially licensed software (see
-[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).
+[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
 
 ## What you can do with it
 
 - **Long-horizon software work**: recursive agent-spawns-agent
   orchestration with shared world model, budgets, and audit log.
-- **Use your existing chat subscriptions**: ChatGPT Plus, Claude Pro,
-  Kimi, X Premium, Gemini Advanced — drive them from the agent via
-  captured browser sessions, no extra API spend. Note: session providers
-  have no native function-calling, so Lightwork gives them tools through a
-  **simulated** markdown tool-call protocol — it works for tool-using
-  roles, but reliability is model-dependent and weaker than an API-key
-  provider's native tool use.
+- **Choose an AI connection**: connect a supported API provider or a
+  self-hosted model from the product, then test the connection before work
+  starts. Provider charges and task limits depend on the connection and
+  settings you choose.
 - **Computer use & web browser**: Anthropic-spec computer-use tool +
   Playwright-driven browser tool, with kill switches and an audit
   trail for every action.
-- **Multi-channel deployment**: Telegram, Discord, Slack, Signal,
+- **Messaging channels**: connect supported services such as Telegram,
+  Discord, Slack, Signal, and email in the Channels page, then send a test
+  message to confirm delivery.
 - **Primary-source data grounding**: analyst packs are auto-granted 37
   read-only public-data connectors (SEC EDGAR, FRED, Treasury, World Bank,
   FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending,
@@ -40,7 +39,6 @@ Lightwork is proprietary, commercially licensed software (see
   caps) across all 2,031 packs with a non-vacuous fault-injection control
   (property-fuzzed up to 5,000 iterations),
   plus hostile-argument fuzzing of every connector and tool.
-  Email, Matrix, WhatsApp, SMS, iMessage — one config, all channels.
 - **Build an agent from a demonstration**: record a reviewed example of the job,
   then synthesize the agent that does it — `maverick learn-demo <file>`
   ingests that transcript, induces a profile through the same
@@ -51,35 +49,24 @@ Lightwork is proprietary, commercially licensed software (see
 
 ## Quick start
 
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-pip install -e ./packages/maverick-core
-pip install -e ./apps/installer-cli
-maverick init                # interactive wizard (3 minutes)
-maverick start "review my latest commit"
-```
-
-Or skip the prompts:
-
-```bash
-maverick init --fast         # defaults: Anthropic + local sandbox; no generated task cap
-```
+Request the customer package for your operating system from
+[Daybreak Labs](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package),
+verify its checksum and exact-tag signature, then run its `dashboard` command.
+Complete the owner and provider setup in the application. A repository clone
+copies internal research, audit and patent documents; source installation is
+for authorized engineering.
 
 ## Watch it work
 
-```bash
-maverick monitor             # live plan-tree TUI in another terminal
-maverick logs                # audit log
-maverick cost                # spend summary
-```
+Open the dashboard to review running work, its activity log and cost. Some
+in-product controls still need implementation and customer acceptance.
 
 ## Licensing & access
 
 Lightwork is **proprietary, commercially licensed** software (see
-[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)). It is self-hostable — the runtime executes entirely
+[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)). It is self-hostable — the runtime executes entirely
 in your own environment — and use requires a license. Pricing is handled
-per engagement; [contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for
+per engagement; [contact us](mailto:chris@daybreakailabs.com?subject=Lightwork%20inquiry) for
 evaluation or enterprise access.
 
 A deliberately stripped-down **open-source "lite" edition** may be released

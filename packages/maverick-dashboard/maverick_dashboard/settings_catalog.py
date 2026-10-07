@@ -44,7 +44,7 @@ Deliberately NOT in the catalog:
   their own module's names (settings_catalog_privacy).
 * Settings that already have a dedicated control elsewhere: provider keys,
   models, installing and issuing licenses (Settings > License), the per-task
-  spending cap, capabilities, features, the chat
+  spending cap, capabilities, the chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
   connections (the account-connection and desktop-return switches are on
   the Connections page, vendor onboarding's connections and owner on its
@@ -91,7 +91,10 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from maverick.persona import STYLES, style_choices
+
 GROUPS: tuple[str, ...] = (
+    "Work",
     "Safety",
     "Security",
     "AI models",
@@ -111,6 +114,7 @@ GROUPS: tuple[str, ...] = (
 )
 
 GROUP_INTROS: dict[str, str] = {
+    "Work": "The business details your team keeps alongside tasks and records.",
     "Safety": "How carefully agents are checked before and while they act.",
     "Security": "Protections for records, approvals and outside agents.",
     "AI models": "How agents plan, check their answers and pick models.",
@@ -286,7 +290,10 @@ class Setting:
     # the fingerprint out from what is installed here (settings_fingerprints).
     fingerprint_of: str = ""
     # A preview the page shows before saving (``governance_level``: the
-    # settings a governance level changes; settings_governance_level).
+    # settings a governance level changes; settings_governance_level.
+    # ``approval_checks``: what the recorded approval checks would have
+    # needed at the chosen level; approval_threshold_preview. ``retention``:
+    # what the next clean-up would delete for a keep period; policy_preview).
     preview: str = ""
 
     @property
@@ -348,6 +355,17 @@ SETTINGS: tuple[Setting, ...] = (
       "Screen agent answers for leaked secrets or harmful content.",
       "toggle", "Safety", True, "maverick.config", weaker=False,
       warning="Answers will be shown without being checked for leaked secrets or harmful content."),
+    S("practice", "enable", "Offer practice mode",
+      "Let people switch to a separate practice workspace to try tasks, specialists and approvals. In "
+      "practice nothing is sent, paid or changed outside practice, and nothing counts as real work. AI "
+      "answers still cost real money, counted apart from spending limits.", "toggle", "Safety", True,
+      "maverick.practice", aliases="practice sandbox try test drive safe mode training demo"),
+    S("practice", "daily_spend_cap", "Practice spending cap per person",
+      "AI answers in practice come from the real AI service and cost real money. That spending is counted "
+      "apart from real spending limits and stops at this amount per person each day (never more than a "
+      "real limit that applies). Each task's own budget still applies.", "number", "Safety", 1.0,
+      "maverick.practice", minimum=0, maximum=1000, unit="dollars per day", weaker="higher",
+      aliases="practice budget practice spending sandbox cost"),
     S("safety", "compartments", "Share blocked threats across a team of agents",
       "When one agent's check blocks a threat, the other agents on the same task are protected from it too.",
       "toggle", "Safety", False, "maverick.config"),
@@ -419,6 +437,12 @@ SETTINGS: tuple[Setting, ...] = (
     S("autonomy", "enable", "Extra checks on uncertain work",
       "When agents disagree or are unsure, double-check the answer and tighten what risky tools may do.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMY_GATE",)),
+    S("autonomy", "confirm_plan", "Show the plan before acting",
+      "Before a task's first action that could reach outside Lightwork (a message, a payment, a change in a "
+      "connected system or a command), show its plan, first action and spending cap in Approvals and wait. "
+      "Approve to carry on, reject to stop before anything runs, or send it back with what to change.",
+      "toggle", "Safety", False, "maverick.autonomy",
+      aliases="plan before acting confirm plan review plan approve plan"),
     S("autonomy", "headless_assume", "Carry on when nobody can answer",
       "When no person is available to answer a question, let the agent make a reasonable assumption instead of waiting.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMOUS",), weaker=True,
@@ -514,15 +538,19 @@ SETTINGS: tuple[Setting, ...] = (
       env=("MAVERICK_SECURE_DEFAULT",),
       warning="Record signing, encryption and other protections that rely on this will turn off."),
     S("security", "approvals_required", "People needed to approve risky actions",
-      "How many different people must approve a high-risk action. One means a single approver.",
+      "How many different people must approve a high-risk action. One means a single approver; "
+      "whether that may be the person who asked is set by Who approves a risky action someone "
+      "asked for. With two or more, the person who asked doesn't count unless people may approve "
+      "their own requests.",
       "number", "Security", 1, "maverick.safety.dual_control", minimum=1, maximum=5, integer=True,
       unit="people", weaker="lower", env=("MAVERICK_APPROVALS_REQUIRED",),
       warning="Fewer people will need to approve risky actions."),
     S("security", "allow_self_approval", "Let people approve their own requests",
-      "Allow the person who asked for an action to approve it too.",
+      "When two or more people must approve, let the person who asked count as one of them. "
+      "With a single approver, Who approves a risky action someone asked for decides instead.",
       "toggle", "Security", False, "maverick.safety.dual_control", weaker=True,
       env=("MAVERICK_ALLOW_SELF_APPROVAL",),
-      warning="People will be able to approve their own requests."),
+      warning="The person who asked will count as one of the approvers."),
     S("security", "auto_fix", "Fix unsafe settings automatically",
       "When the security check finds a risky setting, correct it automatically.",
       "toggle", "Security", False, "maverick.remediation", env=("MAVERICK_SECURITY_AUTOFIX",)),
@@ -563,19 +591,19 @@ SETTINGS: tuple[Setting, ...] = (
       env=("MAVERICK_RESIDENCY_STRICT",),
       warning="Data may be stored outside the declared region."),
     S("a2a", "enabled", "Let other agents send tasks here",
-      "Other agents you give a password to may hand tasks to Lightwork. The password is set on the server.",
-      "toggle", "Security", False, "maverick.a2a", weaker=True, env=("MAVERICK_A2A_ENABLED",),
+      "Other agents you approve may hand tasks to Lightwork. Set their password and limits under Requests from other agents, or issue an individual key in External agents. Restart the service after changing this switch.",
+      "toggle", "Security", False, "maverick.a2a", weaker=True, restart=True, env=("MAVERICK_A2A_ENABLED",),
       warning="Other agents on the network will be able to send tasks that spend your budget."),
 
     # --------------------------------------------------------------- AI models
     S("routing", "cost_aware", "Pick the cheapest capable model",
-      "Use the least expensive model that can do each job well.",
+      "Use the least expensive model that can do each task well.",
       "toggle", "AI models", False, "maverick.cost.router"),
     S("routing", "verify_ensemble", "Double-check with a second AI service",
       "Confirm important answers with models from more than one provider.",
       "toggle", "AI models", False, "maverick.verifier"),
     S("routing", "energy_aware", "Prefer lower-energy models",
-      "Favour models that use less energy when they can do the job.",
+      "Favour models that use less energy when they can do the task.",
       "toggle", "AI models", False, "maverick.energy_aware_router"),
     S("routing", "allowed_providers", "AI services agents may use for these choices",
       "Limit automatic model choices to these AI services. Leave empty to allow any service you have connected.",
@@ -614,10 +642,14 @@ SETTINGS: tuple[Setting, ...] = (
       "Let Lightwork choose how much reasoning effort each task needs.",
       "toggle", "AI models", False, "maverick.effort", env=("MAVERICK_EFFORT_ENABLED",)),
     S("context", "compaction_strategy", "How long conversations are shortened",
-      "The method used to shorten long conversations so they fit.",
+      "The method used to shorten long conversations so they fit. Written summaries use "
+      "extra AI calls within the task's spending limit, reuse the earlier summary in the same "
+      "run, and add older turns at the configured summary interval. Their style learns from "
+      "agents that returned a complete answer and continued turns; this does not measure "
+      "answer accuracy or whether the team's final review accepted it.",
       "select", "AI models", "", "maverick.compaction.strategies",
       choices=(("", "Keep recent turns and trim long tool results (default)"),
-               ("learned", "Written summary that improves over time"),
+               ("learned", "Written summary that learns from completed answers"),
                ("multimodal", "Replace large images and audio with short notes"),
                ("streaming", "Running summary for very long chats"),
                ("graph", "Summary of people, things and how they relate")),
@@ -636,15 +668,15 @@ SETTINGS: tuple[Setting, ...] = (
       "text", "AI models", "", "maverick.persona", max_length=60,
       pattern=r"[^\n\r<>{}]{0,60}"),
     S("persona", "style", "Writing style",
-      "How much detail agents put in their replies.",
+      "Voice and detail in replies. " + " ".join(f"{label}: {STYLES[key]}"
+          for key, label in style_choices() if key),
       "select", "AI models", "", "maverick.persona",
-      choices=(("", "Balanced (default)"), ("concise", "Short and direct"),
-               ("verbose", "Explains its reasoning"))),
+      choices=style_choices(), aliases="writing tone personality voice"),
     S("voice", "dashboard_commands", "Voice input in chat",
       "Show a microphone button in Chat that turns spoken requests into text.",
       "toggle", "AI models", True, "maverick_dashboard.api", env=("MAVERICK_VOICE_COMMANDS",)),
     S("domains", "discipline", "Department working rules",
-      "Give each department's specialists their department's working rules.",
+      "Give each department's agents and specialists their department's working rules.",
       "toggle", "AI models", True, "maverick.config"),
 
     # ------------------------------------------------------- Spending & limits
@@ -661,6 +693,10 @@ SETTINGS: tuple[Setting, ...] = (
       "The most text, in tokens (about three quarters of a word each), agents may write in one task.",
       "number", "Spending & limits", None, "maverick.budget", minimum=1000,
       maximum=100000000, integer=True, unit="tokens"),
+    S("budget", "self_tuning", "Suggest a spending limit from past tasks",
+      "Let Lightwork use past costs for similar tasks to set a task spending limit when you have not set one. Turn this on only if you want a learned limit; your own limit always wins.",
+      "toggle", "Spending & limits", False, "maverick.self_tuning_budget",
+      env=("MAVERICK_BUDGET_SELF_TUNING",)),
     S("budget", "strict_pricing", "Require known prices",
       "Stop a task when a model's price is unknown instead of guessing its cost.",
       "toggle", "Spending & limits", True, "maverick.budget", weaker=False,
@@ -679,6 +715,19 @@ SETTINGS: tuple[Setting, ...] = (
       "The most text, in tokens, one person's tasks may use in a day. Zero means no limit.",
       "number", "Spending & limits", 0, "maverick.quotas", minimum=0, maximum=10000000000,
       integer=True, unit="tokens per day", env=("MAVERICK_QUOTA_MAX_TOKENS_PER_DAY",)),
+    S("spending_limits", "alert_at", "Spending limit alerts",
+      "Percentages of a workspace or per-person spending limit at which administrators, and the "
+      "person for their own limit, get an in-app alert. Each one alerts once per day or month. "
+      "Leave the list empty for no alerts; the limits still stop paid work at 100 percent.",
+      "list", "Spending & limits", [50, 75, 100], "maverick.spending_alerts",
+      max_items=10, max_length=4, item_label="Percent", item_hint="75",
+      item_error="a whole number from 1 to 100"),
+    S("spending_limits", "typical_cost_min_runs", "Past tasks needed for a typical cost",
+      "How many finished tasks an agent or specialist needs in this workspace before Lightwork "
+      "shows what its past tasks usually cost beside the task form. Below this, it says there "
+      "are not enough past tasks yet. The range is recorded history, never a prediction.",
+      "number", "Spending & limits", 10, "maverick.typical_cost", minimum=2, maximum=1000,
+      integer=True, unit="finished tasks"),
     S("swarm", "max_total_spawns", "Helper agents per task",
       "The most helper agents one task may create.",
       "number", "Spending & limits", 64, "maverick.config", minimum=1, maximum=1000,
@@ -719,6 +768,9 @@ SETTINGS: tuple[Setting, ...] = (
       pattern=r"[A-Za-z]{3}"),
 
     # ------------------------------------------------------- Memory & learning
+    S("memory", "fact_tags", "Organize shared facts with tags",
+      "Let operators add metadata tags to shared facts and filter by those tags. Tags never grant access.",
+      "toggle", "Memory & learning", False, "maverick.fact_revision"),
     S("memory", "temporal", "Keep the history of every fact",
       "Remember what was believed on each date instead of only the latest value.",
       "toggle", "Memory & learning", False, "maverick.config", env=("MAVERICK_TEMPORAL_MEMORY",)),
@@ -735,11 +787,21 @@ SETTINGS: tuple[Setting, ...] = (
       weaker=True, order=("3", "2", "1", "0"),
       warning="Agents will rely on less trusted memory, including content from outside sources."),
     S("domains", "memory", "Share department lessons",
-      "Give specialists the lessons their department has learned.",
+      "Give agents and specialists the lessons their department has learned.",
       "toggle", "Memory & learning", True, "maverick.config"),
     S("cortex", "enable", "Company memory",
       "One governed place to look up knowledge, skills, lessons and past decisions, with every look-up recorded.",
       "toggle", "Memory & learning", True, "maverick.cortex"),
+    S("knowledge", "reindex_jobs", "Bounded search index rebuilds",
+      "Review collection size and limits, track rebuild progress, and cancel before publication. Paid adapters require verified cost admission.",
+      "toggle", "Memory & learning", False, "maverick.knowledge_reindex_jobs"),
+    S("knowledge", "reindex_max_chunks", "Maximum passages in a rebuild",
+      "Refuse a rebuild above this collection size.", "number", "Memory & learning", 10000, "maverick.knowledge_reindex_jobs", minimum=1, maximum=100000, integer=True),
+    S("knowledge", "reindex_max_wall_seconds", "Rebuild time limit in seconds",
+      "Stop at a safe boundary after reaching this elapsed time; a batch already running finishes first.", "number", "Memory & learning", 300, "maverick.knowledge_reindex_jobs", minimum=1, maximum=3600, integer=True),
+    S("knowledge", "reindex_max_dollars", "Rebuild provider cost limit",
+      "Maximum USD reservation at reviewed standard embedding rates. Each batch is admitted before sending; uncertain paid requests are never retried automatically. Provider invoices remain authoritative.",
+      "number", "Memory & learning", 5.0, "maverick.knowledge_reindex_jobs", minimum=0, maximum=1000, unit="USD"),
     S("knowledge", "enable", "Document search for agents",
       "Let agents search your uploaded documents by meaning and cite them.",
       "toggle", "Memory & learning", False, "maverick.config"),
@@ -783,6 +845,27 @@ SETTINGS: tuple[Setting, ...] = (
     S("analytics", "mcp_client_language", "Count which programming languages connect",
       "Keep a local count of the programming languages used by connected tools. Nothing leaves this computer.",
       "toggle", "Privacy", False, "maverick.mcp_analytics", env=("MAVERICK_MCP_ANALYTICS",)),
+    S("analytics", "usability_survey", "Ask people how easy Lightwork is to use",
+      "Offer each signed-in person a 10-question ease-of-use survey at most once a quarter, and one "
+      "question after a few common tasks. One click hides it for the quarter. Answers stay on this "
+      "server, are reported by the role people choose, never by name, and are never sent anywhere. "
+      "Results are on People > Ease-of-use results.",
+      "toggle", "Privacy", False, "maverick.usability_survey"),
+    S("analytics", "web_vitals", "Measure page speed for real visitors",
+      "Time how fast pages load, respond and stay steady (LCP, INP and CLS) in a sample of real visits, "
+      "and show the 75th percentile for each page on phones and computers over the last 28 days. "
+      "Only counts per page are kept: no names, addresses or browsing history. Nothing is sent anywhere. "
+      "Results are on Settings > Page speed.",
+      "toggle", "Privacy", False, "maverick.web_vitals"),
+    S("analytics", "web_vitals_sample_rate", "Share of visits measured for page speed",
+      "How many visits are measured when page speed measurement is on, from 0 (none) to 1 (every visit). "
+      "0.5 measures about every other visit. More visits give results sooner; each one measured sends three numbers.",
+      "number", "Privacy", 0.5, "maverick.web_vitals", minimum=0, maximum=1, step=0.05, unit="share"),
+    S("analytics", "usage_measures", "Count first results and AI suggestions, without names",
+      "Count whether new people see a finished result of their own task in their first session, and how often "
+      "AI suggestions are shown, used or dismissed. People and suggestions are kept only as one-way codes, and "
+      "nothing is sent anywhere. Results are on People > Ease-of-use results.",
+      "toggle", "Privacy", False, "maverick.usage_measures"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,
@@ -830,27 +913,36 @@ SETTINGS: tuple[Setting, ...] = (
       "Activity record days older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older activity records will be permanently deleted at the next clean-up."),
+      warning="Older activity records will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "episodes_days", "Keep finished work records for",
       "Records of finished work older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older work records will be permanently deleted at the next clean-up."),
+      warning="Older work records will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "events_days", "Keep task progress updates for",
       "Task progress updates older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older progress updates will be permanently deleted at the next clean-up."),
+      warning="Older progress updates will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "messages_days", "Keep messages for",
       "Messages older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older messages will be permanently deleted at the next clean-up."),
+      warning="Older messages will be permanently deleted at the next clean-up.",
+      preview="retention"),
     S("retention", "usage_days", "Keep usage tallies for",
       "Daily usage tallies older than this are removed. Leave unset to keep them forever.",
       "number", "Data retention", None, "maverick.audit.retention", minimum=1, maximum=3650,
       integer=True, unit="days", weaker="lower",
-      warning="Older usage tallies will be permanently deleted at the next clean-up."),
+      warning="Older usage tallies will be permanently deleted at the next clean-up.",
+      preview="retention"),
+    S("work_details", "enable", "Business fields and stages",
+      "Let your team set up named business fields and stages for tasks and security records. "
+      "Every save is reviewed; these labels do not change execution or approval. Original results are retained for the latest 20 saves per record.",
+      "toggle", "Work", True, "maverick.work_record_details"),
     S("durable", "enabled", "Resume tasks after a crash",
       "Save progress as tasks run so they can continue from the last step after an interruption.",
       "toggle", "Data retention", False, "maverick.config"),
@@ -863,12 +955,104 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Data retention", False, "maverick.workspace_journal"),
 
     # ------------------------------------------------------------ Integrations
-    S("notifications", "backend", "Send finished-task alerts with",
-      "Where to send a message when a long task finishes.",
+    S("mobile_offline", "enabled", "Allow offline copies on mobile devices",
+      "Let current policy-aware companions keep a bounded offline task copy. People can turn saving off; workspace policy can only narrow this installation ceiling.",
+      "toggle", "Data retention", True, "maverick.mobile_offline_policy"),
+    S("mobile_offline", "max_age_seconds", "Keep mobile offline copies for at most",
+      "A cached copy expires after this time, even while the device is offline. Shorter workspace limits take precedence.",
+      "number", "Data retention", 86400, "maverick.mobile_offline_policy", minimum=1, maximum=1440,
+      scale=60, integer=True, unit="minutes"),
+    S("mobile_offline", "max_bytes", "Largest mobile offline copy",
+      "Refuse larger offline copies instead of silently dropping parts of them.",
+      "number", "Data retention", 2097152, "maverick.mobile_offline_policy", minimum=1, maximum=2048,
+      scale=1024, integer=True, unit="KB"),
+    S("device_pairing", "enabled", "Allow personal companion pairing",
+      "Let named members pair devices through an expiring code and explicit browser confirmation. Each credential is limited to its member's own tasks in one workspace. Disabling this denies existing devices on their next request.",
+      "toggle", "People & access", False, "maverick_dashboard.device_pairing"),
+    S("device_pairing", "credential_hours", "Paired-device credential lifetime",
+      "Require protected renewal within this interval. All enrollments expire after 30 days and require new browser approval. Workspace policy can only shorten the organization lifetime.",
+      "number", "People & access", 24, "maverick_dashboard.device_pairing", minimum=1, maximum=168, integer=True, unit="hours"),
+    S("device_pairing", "allow_actions", "Allow reviewed own-task actions on companions",
+      "Permit a separately opted-in device to submit a reviewed answer or Stop on its own tasks. Current role, current task state and explicit review still apply. Approvals and general administrative operations stay on the dashboard.",
+      "toggle", "People & access", False, "maverick_dashboard.device_pairing"),
+    S("notifications", "personal_alerts", "Show personal task alerts",
+      "Let signed-in people see in the app (the bell) when their tasks finish, need an answer, or wait for their approval. On by default; email, Slack and Teams stay off until you set them up. Each person can choose alerts, quiet hours, daily digests and task mutes in Your notifications. Requires personal preferences.",
+      "toggle", "Integrations", True, "maverick.personal_notifications"),
+    S("notifications", "personal_critical_bypass", "Allow personal approval and deadline exceptions",
+      "Let people explicitly allow approval and deadline alerts to bypass their personal quiet hours and summary timing. Organization operational alerts are unchanged.",
+      "toggle", "Integrations", False, "maverick_dashboard.personal_notifications_api"),
+    S("notifications", "metric_alerts", "Task performance and usage alerts",
+      "Show each signed-in person an in-app alert when their recorded runs reach the thresholds below. "
+      "Uses up to 5,000 of their latest runs completed in the last seven days that they can still open; "
+      "older history is explicitly excluded. Finish rate measures completion, not answer accuracy. "
+      "Recorded usage is not a complete provider invoice. Follows personal Needs attention alert choices, "
+      "quiet hours and delivery settings; never changes spending limits. Off by default.",
+      "toggle", "Integrations", False, "maverick.task_metric_alerts",
+      subgroup="Task performance alerts", aliases="metric quality performance usage threshold alerts"),
+    S("notifications", "metric_min_runs", "Runs needed before a finish-rate alert",
+      "Require this many included completed runs before checking the finish-rate threshold. Usage alerts do not need this minimum.",
+      "number", "Integrations", 10, "maverick.task_metric_alerts", minimum=1, maximum=1000,
+      integer=True, unit="recorded runs", subgroup="Task performance alerts"),
+    S("notifications", "metric_finish_below", "Alert below this finish rate",
+      "Alert when fewer than this percentage of included runs finished successfully. Zero turns off this check. "
+      "Stopped and failed completed runs lower the rate; this does not judge whether answers are correct.",
+      "number", "Integrations", 80, "maverick.task_metric_alerts", minimum=0, maximum=100,
+      integer=True, unit="percent", subgroup="Task performance alerts"),
+    S("notifications", "metric_spend_above", "Alert at this recorded weekly spending",
+      "Alert when included runs record at least this many US dollars. Zero turns off this check. "
+      "Uses recorded usage, which may not include every provider charge; does not stop or authorize spending.",
+      "number", "Integrations", 0.0, "maverick.task_metric_alerts", minimum=0, maximum=1000000,
+      unit="US dollars", subgroup="Task performance alerts"),
+    S("notifications", "metric_tokens_above", "Alert at this recorded weekly text usage",
+      "Alert when included runs record at least this many text units (tokens) read and written. "
+      "Zero turns off this check. This is recorded usage, not a complete invoice or a new spending limit.",
+      "number", "Integrations", 0, "maverick.task_metric_alerts", minimum=0, maximum=10000000000,
+      integer=True, unit="text units", subgroup="Task performance alerts"),
+    S("notifications", "personal_background", "Refresh personal alerts while pages are closed",
+      "Run a bounded dashboard observer for explicitly enrolled named accounts. It rechecks current identity and owned work, observes changes about every 30 seconds, and releases eligible digests while the dashboard is running.",
+      "toggle", "Integrations", False, "maverick_dashboard.personal_notification_scheduler"),
+    S("notifications", "personal_external", "Allow personal alerts to verified private conversations",
+      "Let people opt into Slack or Telegram private delivery using their explicitly verified My data identities. Requires background observation, current membership and channel allowlists; organization webhook destinations are never reused.",
+      "toggle", "Integrations", False, "maverick.personal_notification_delivery"),
+    S("notifications", "personal_dashboard_url", "Dashboard address for personal notification links",
+      "The HTTPS origin people use to sign in, without a path, query or credentials. Messages say why each alert was sent, what it needs and by when, with authenticated links, and never include task text.",
+      "text", "Integrations", "", "maverick.personal_notification_delivery"),
+    S("collaboration", "comments", "Comments and mentions",
+      "Let people comment on tasks, workflow runs, approval requests and policy pages, and mention a "
+      "colleague to notify them in their own notifications. Only people who can open the item can read "
+      "its comments or be mentioned. On by default.",
+      "toggle", "People & access", True, "maverick.comments",
+      aliases="comment comments mention mentions discuss discussion thread collaborate"),
+    S("collaboration", "suggestions", "Suggested edits to rules",
+      "Let agents and colleagues suggest changes to AI use rules, data use rules and privacy notices. "
+      "A suggestion shows exactly what it changes, who or what proposed it and why. Accepting it creates "
+      "a draft that still goes through that document's own approval. On by default.",
+      "toggle", "People & access", True, "maverick.policy_suggestions",
+      aliases="suggest suggestion suggestions edit review accept reject tracked changes rules policy"),
+    S("collaboration", "ai_suggestions", "AI-drafted suggestions",
+      "Let the AI assistant draft a suggested edit to AI use rules when a person asks. Each draft "
+      "uses the AI service within the spending cap for one task and is only a suggestion until a "
+      "person accepts it. On by default.",
+      "toggle", "People & access", True, "maverick.policy_suggestions",
+      aliases="ai suggest draft assistant rules policy wording"),
+    S("support", "status_page_url", "Service status page",
+      "A public page that shows whether your Lightwork service is up and its incident history. When set, the Help menu on every page links to it, and so does the notice shown while an AI service is paused. Leave empty to show no link.",
+      "text", "Integrations", "", "maverick.config", pattern=r"(" + _HTTPS + r")?",
+      subgroup="Help and support", aliases="status page incident outage help menu"),
+    S("support", "contact_email", "Support contact email",
+      "Where \"Get help from a person\" requests go: your vendor's or help desk's address. People review the request and send it from their own email app; nothing is sent automatically. Leave empty to have people send requests to their Lightwork administrator.",
+      "text", "Integrations", "", "maverick.config",
+      pattern=r"([^@\s\"'<>,;]{1,64}@[^@\s\"'<>,;]{1,190}\.[A-Za-z]{2,24})?",
+      subgroup="Help and support", aliases="help desk vendor support person contact"),
+    S("notifications", "delivery_receipts", "Keep notification delivery history",
+      "Keep content-free delivery results for seven days, up to 1,000 attempts. View history and send a test on Notification delivery in Settings.",
+      "toggle", "Integrations", True, "maverick.notifications"),
+    S("notifications", "backend", "Send organization alerts with",
+      "Choose the shared channel for organization operational alerts. Personal task updates appear in Your notifications and can use separately verified private conversations.",
       "select", "Integrations", "ntfy", "maverick.notifications",
       choices=(("none", "Do not send alerts"), ("ntfy", "ntfy phone alerts"),
                ("slack", "Slack"), ("discord", "Discord"),
-               ("pushover", "Pushover"))),
+               ("pushover", "Pushover"), ("email", "Email"))),
     S("notifications", "ntfy_topic", "ntfy topic",
       "Your private ntfy topic name. Treat it like a password.",
       "secret", "Integrations", "", "maverick.notifications"),
@@ -895,7 +1079,8 @@ SETTINGS: tuple[Setting, ...] = (
       "Bring in existing automations from tools such as n8n, Make, Workato, Power Automate or UiPath.",
       "toggle", "Integrations", False, "maverick.config", env=("MAVERICK_AUTOMATION_IMPORT",)),
     S("automation_import", "create_schedules", "Recreate imported schedules",
-      "When an imported automation ran on a schedule, create the matching schedule here.",
+      "When an imported automation ran on a schedule, offer to recreate that schedule here, "
+      "reviewed once its draft is published.",
       "toggle", "Integrations", False, "maverick.config"),
     S("event_triggers", "enable", "Start workflows from events",
       "Watch connected services and start the chosen workflow when something new arrives.",
@@ -936,8 +1121,8 @@ SETTINGS: tuple[Setting, ...] = (
       "number", "Performance", 3, "maverick.connector_attempts", minimum=1, maximum=5,
       integer=True, unit="attempts"),
     S("flows", "max_node_retries", "Retries for each workflow step",
-      "How many times a failed workflow step is retried.",
-      "number", "Performance", 5, "maverick.config", minimum=1, maximum=20, integer=True,
+      "The most retries allowed for a failed step. Zero disables retries; steps configured above this limit must be adjusted before they can run.",
+      "number", "Performance", 5, "maverick.config", minimum=0, maximum=10, integer=True,
       unit="retries", env=("MAVERICK_FLOW_MAX_NODE_RETRIES",)),
     S("cache", "prewarm", "Warm up AI connections",
       "Open connections to AI services early so the first reply is faster.",
@@ -946,9 +1131,6 @@ SETTINGS: tuple[Setting, ...] = (
       "If an AI service has not answered after this long, send the same request again and use the first reply. Leave unset to never do this.",
       "number", "Performance", None, "maverick.llm", minimum=100, maximum=60000,
       integer=True, unit="milliseconds"),
-    S("tools", "deferred_loading", "Load tools only when needed",
-      "Describe rarely used tools to agents only when they need them, to save time and cost.",
-      "toggle", "Performance", False, "maverick.tools"),
     S("tools", "output_cache", "Reuse recent tool results",
       "Reuse the result of an identical recent tool call instead of repeating it.",
       "toggle", "Performance", False, "maverick.cache.tool"),
@@ -1024,9 +1206,12 @@ CHANNEL_ALLOWLISTS: dict[str, tuple[str, bool, str, str, str, str, str]] = {
     "irc": ("IRC", False, "allowed_user_ids", "Account", "nickname",
             r"[^\s,]{1,64}", "a signed-in IRC account name"),
     "voice": ("Phone calls", False, "allowed_callers", "Number", "+14155551234",
-              _PHONE, "a phone number starting with + and the country code"),
+              r"\+[1-9][0-9]{5,14}", "a full phone number starting with + and a country code"),
     "mattermost": ("Mattermost", True, "allowed_user_ids", "Person", "alice",
                    r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", "a Mattermost username or user id"),
+    "teams": ("Microsoft Teams", True, "allowed_users", "Person",
+              "12345678-abcd-abcd-abcd-1234567890ab", r"[0-9a-fA-F-]{36}",
+              "a Microsoft Entra object ID (36 characters, from the person's Entra profile)"),
 }
 
 
@@ -1043,15 +1228,42 @@ def _channel_settings() -> tuple[Setting, ...]:
                          warning=f"People on the {label} list will be able to give agents work.",
                          aliases=f"{name} channel chat", **common))
         noun = "callers" if key == "allowed_callers" else "people"
+        access_help = (
+            "Only numbers in the effective caller list can start work through calls. "
+            "Enter each number with + and its country code. Saving a blank list "
+            "denies everyone; use the inherited-value control to restore an inherited list. With no permitted callers, incoming calls "
+            "cannot start work. Caller ID alone does not verify a person; sensitive "
+            "actions still need approval."
+            if name == "voice" else
+            f"Only {noun} listed here can give agents work through {label}. When the "
+            "list is empty and saved here, nobody can. Use the inherited-value control to restore an "
+            "inherited installer or server list instead."
+        )
         out.append(S(section, key, f"Who may use {label}",
-                     f"Only {noun} listed here can give agents work through {label}. When the "
-                     "list is empty, the list set on your server applies; with no list at all, "
-                     "nobody can.",
+                     access_help,
                      "list", default=[], weaker="grow", item_label=item, item_hint=hint,
-                     pattern=pattern, item_error=error, empty_unset=True, max_items=200,
+                     pattern=pattern, item_error=error, empty_unset=False, max_items=200,
                      max_length=300,
                      warning=f"More people will be able to give agents work through {label}.",
                      aliases=f"{name} allow list allowed senders", **common))
+        if name == "teams":
+            out.append(S(section, "approvals_enabled", "Decide approvals in Microsoft Teams",
+                         "Send approval requests to linked approvers as cards in Teams, where "
+                         "they can approve, reject or send them back. Decisions use the same "
+                         "record as the Approvals page.",
+                         "toggle", default=False, weaker=True,
+                         warning="People linked as approvers will be able to approve agent "
+                                 "actions from Teams.",
+                         aliases="teams approvals adaptive card", **common))
+            out.append(S(section, "allowed_tenants", "Microsoft 365 organisations that may use Lightwork",
+                         "Only messages from these organisation directory IDs reach the agent. "
+                         "When empty, the directory ID on the Channels page is the only one allowed.",
+                         "list", default=[], weaker="grow", item_label="Organisation",
+                         item_hint="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", pattern=r"[0-9a-fA-F-]{36}",
+                         item_error="a Microsoft Entra directory ID (36 characters)", empty_unset=True,
+                         max_items=50,
+                         warning="More organisations will be able to give agents work through Teams.",
+                         **common))
         if name == "telegram":
             out.append(S(section, "allowed_chat_ids", "Telegram chats that may use Lightwork",
                          "Private chats listed here may also give agents work.",
@@ -1184,9 +1396,9 @@ _CHANNEL_FIELDS: tuple[Setting, ...] = (
       max_length=200),
     # Phone calls
     S("channels.voice", "provider", "Phone call service",
-      "The service that answers calls for Lightwork. Its key is added below.", "select",
+      "Vapi and Retell can ask Lightwork for an answer during a call. Bland supports outgoing calls only. Follow the Phone call setup guide above.", "select",
       "Chat channels", "vapi", "maverick.server", subgroup="Phone calls", restart=True,
-      choices=(("vapi", "Vapi"), ("retell", "Retell"), ("bland", "Bland"))),
+      choices=(("vapi", "Vapi"), ("retell", "Retell"), ("bland", "Bland — outgoing calls only"))),
     S("channels.voice", "api_key", "Phone call service key",
       "The key for the service above. It is stored sealed and never shown again.", "secret",
       "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
@@ -1195,12 +1407,12 @@ _CHANNEL_FIELDS: tuple[Setting, ...] = (
       "The number people call, starting with + and the country code.", "text",
       "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
       pattern=r"(" + _PHONE + r")?", max_length=16),
-    S("channels.voice", "assistant_id", "Call assistant name",
-      "The assistant set up in the call service, if it asks for one.", "text",
+    S("channels.voice", "assistant_id", "Saved call assistant",
+      "Copy the saved assistant's ID from Vapi, or the saved agent's ID from Retell. Incoming calls must use this exact assistant.", "text",
       "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
       pattern=r"[A-Za-z0-9._:-]{0,128}", max_length=128),
     S("channels.voice", "webhook_token", "Call check key",
-      "The shared key that proves incoming calls are genuine. It is stored sealed.", "secret",
+      "Set the same private key in the phone service's Authorization header. It checks the service connection, not the caller's identity. It is stored sealed.", "secret",
       "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
       max_length=300),
     S("channels.voice", "port", "Port for incoming calls",
@@ -1856,39 +2068,43 @@ _INTEGRATIONS_MORE: tuple[Setting, ...] = (
       "maverick.provider_local_first", subgroup="Local AI models", choices_from="local_models"),
     S("local_runtime", "enabled", "Run a local model server",
       "Let Lightwork start and manage a model server on this computer.", "toggle",
-      "Integrations", False, "maverick.local_runtime", subgroup="Local AI models"),
+      "Integrations", False, "maverick.local_runtime", subgroup="Local AI models", env=("MAVERICK_LOCAL_RUNTIME_ENABLED",)),
     S("local_runtime", "engine", "Model server program",
       "The program that serves the local model.", "select", "Integrations", "vllm",
       "maverick.local_runtime", subgroup="Local AI models",
-      choices=(("vllm", "vLLM"), ("tgi", "Text Generation Inference"), ("llamacpp", "llama.cpp"))),
+      choices=(("vllm", "vLLM"), ("tgi", "Text Generation Inference"), ("llamacpp", "llama.cpp")), env=("MAVERICK_LOCAL_RUNTIME_ENGINE",)),
     S("local_runtime", "model", "Model to serve",
-      "The model the server loads, as the model's publisher names it.", "text", "Integrations",
+      "The model name or existing local model file or folder the server loads.", "text", "Integrations",
       "", "maverick.local_runtime", subgroup="Local AI models",
-      pattern=r"[A-Za-z0-9._:/-]{0,200}", max_length=200),
+      pattern=r"[^\x00-\x1f\x7f]{0,1024}", max_length=1024, env=("MAVERICK_LOCAL_RUNTIME_MODEL",)),
+    S("local_runtime", "port", "Local connection number",
+      "Choose an unused connection number if another program is already using this one. Zero uses the model program's usual choice.",
+      "number", "Integrations", 0, "maverick.local_runtime", subgroup="Local AI models",
+      minimum=0, maximum=65535, integer=True, env=("MAVERICK_LOCAL_RUNTIME_PORT",)),
     S("local_runtime", "precision", "Model precision",
       "Lower precision uses less memory and may lower answer quality.", "select",
       "Integrations", "auto", "maverick.local_runtime", subgroup="Local AI models",
       choices=(("auto", "Automatic (default)"), ("bf16", "High (bf16)"), ("fp16", "High (fp16)"),
-               ("int8", "Medium (8-bit)"), ("int4", "Low (4-bit)"))),
+               ("int8", "Medium (8-bit)"), ("int4", "Low (4-bit)")), env=("MAVERICK_LOCAL_RUNTIME_PRECISION",)),
     S("local_runtime", "max_concurrent", "Requests served at once",
       "How many requests the server answers at the same time. Zero uses the program's choice.",
       "number", "Integrations", 0, "maverick.local_runtime", subgroup="Local AI models",
-      minimum=0, maximum=4096, integer=True, unit="requests"),
+      minimum=0, maximum=4096, integer=True, unit="requests", env=("MAVERICK_LOCAL_RUNTIME_MAX_CONCURRENT",)),
     S("local_runtime", "kv_cache", "Reuse work between similar requests",
       "Keep the start of recent requests so similar ones answer faster.", "select",
       "Integrations", "", "maverick.local_runtime", subgroup="Local AI models",
-      choices=(("", "Off (default)"), ("persistent", "On"))),
+      choices=(("", "Off (default)"), ("persistent", "On")), env=("MAVERICK_LOCAL_RUNTIME_KV_CACHE",)),
     S("local_runtime", "autoscale", "Add servers when busy",
       "Start more copies of the server when requests queue up.", "toggle", "Integrations",
-      False, "maverick.local_runtime", subgroup="Local AI models"),
+      False, "maverick.local_runtime", subgroup="Local AI models", env=("MAVERICK_LOCAL_RUNTIME_AUTOSCALE",)),
     S("local_runtime", "min_replicas", "Fewest server copies",
       "The fewest copies of the model server kept running.", "number", "Integrations", 1,
       "maverick.local_runtime", subgroup="Local AI models", minimum=1, maximum=64,
-      integer=True, unit="copies"),
+      integer=True, unit="copies", env=("MAVERICK_LOCAL_RUNTIME_MIN_REPLICAS",)),
     S("local_runtime", "max_replicas", "Most server copies",
       "The most copies of the model server started when it is busy.", "number", "Integrations", 1,
       "maverick.local_runtime", subgroup="Local AI models", minimum=1, maximum=64,
-      integer=True, unit="copies"),
+      integer=True, unit="copies", env=("MAVERICK_LOCAL_RUNTIME_MAX_REPLICAS",)),
 
     # ------------------------------------------------------ plugin permissions
     S("plugins", "grant", "What plugins may do",
@@ -2055,13 +2271,22 @@ _POLICY: tuple[Setting, ...] = (
       minimum=2, maximum=30, integer=True, unit="days"),
 
     # ------------------------------------ self-improving instructions (learning)
+    S("approval_challenges", "enable", "Check fictional approval races locally",
+      "Allow fictional approval practices and isolated checks of this installation’s safeguards. "
+      "No customer work, credentials or AI calls are used. Each check and exact file export needs separate review; no live guard is activated.",
+      "toggle", "Memory & learning", False, "maverick.approval_challenges", subgroup="Shareable approval practices"),
+    S("instruction_capture", "enable", "Record instructions from authorized tasks",
+      "Allow a person to record the instructions Lightwork gives the AI connection on one task's next successful call started after consent. "
+      "Each task needs separate consent. This local installation keeps private instruction text; recording does not start work or enable learning.",
+      "toggle", "Memory & learning", False, "maverick.instruction_capture", subgroup="Recorded instructions"),
     S("self_harness", "risk_limited", "Use the careful improvement profile",
       "Improvements to agent instructions must pass unseen tests, repeated checks and a trial "
       "on a small share of work before they are used.", "toggle", "Memory & learning", True,
       "maverick.config", subgroup="Self-improving instructions", partial_default=False,
       weaker=False, warning="Improvements to agent instructions could be adopted on weaker evidence."),
     S("self_harness", "auto_run", "Look for improvements every night",
-      "Each night, look for recurring mistakes and test a fix for them.", "toggle",
+      "Review recurring mistakes on the overnight learning schedule. Improvements are "
+      "adopted only when the configured checks pass. See the last review on Learning.", "toggle",
       "Memory & learning", True, "maverick.config", subgroup="Self-improving instructions",
       partial_default=False),
     S("self_harness", "eval_budget_dollars", "Most to spend testing improvements",
@@ -2086,6 +2311,12 @@ _POLICY: tuple[Setting, ...] = (
       "Show your organisation's approved knowledge inside Lightwork, with correction, "
       "exclusion and deletion.", "toggle", "Memory & learning", True, "maverick.config",
       subgroup="Knowledge library", env=("MAVERICK_KNOWLEDGE_ACCESS",)),
+
+    S("knowledge_access", "task_context", "Tasks that analyze selected approved sources",
+      "Allow named workspace members to select exact source versions for tool-free AI analysis. "
+      "Source permission is checked again before AI use, publication and opening the result.",
+      "toggle", "Memory & learning", False, "maverick.knowledge_task_context",
+      subgroup="Knowledge library"),
 
     # ----------------------------------------------------- AI governance
     S("eu_ai_incidents", "authorities", "People who decide serious AI incident reports",
@@ -2170,8 +2401,8 @@ _POLICY: tuple[Setting, ...] = (
       warning="Supplier files will no longer be previewed and reviewed before use."),
 
     # ------------------------------------------------------ integrations
-    S("template_registries", "indexes", "Where to find goal templates",
-      "Web addresses of the catalogs goal templates can be installed from. With none listed, "
+    S("template_registries", "indexes", "Where to find task templates",
+      "Web addresses of the catalogs task templates can be installed from. With none listed, "
       "the built-in catalog is used.", "list", "Integrations", [], "maverick.templates",
       subgroup="Template and tool server catalogs", pattern=_HTTPS_PLAIN, max_length=300,
       item_error="a secure web address without a question mark", empty_unset=True,
@@ -2211,7 +2442,7 @@ _POLICY: tuple[Setting, ...] = (
     # ------------------------------------------------------ people & access
     S("dashboard", "default_suites", "Departments a person may use by default",
       "People with no departments of their own can use only these. With none ticked, they "
-      "can use every department.", "multiselect", "People & access", [], "maverick.suite_grants",
+      "can use no departments. Removing the setting entirely restores every department.", "multiselect", "People & access", [], "maverick.suite_grants",
       subgroup="Departments", choices_from="suites", weaker="widen",
       warning="People with no departments of their own will be able to use more departments, "
               "or all of them."),
@@ -2250,17 +2481,20 @@ SETTINGS = (SETTINGS + _channel_settings() + _CHANNEL_FIELDS + _MORE + _env_hunt
 # Rows kept in per-group modules (one module per group of settings).
 from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_access,
+    settings_catalog_budget_guidance,
+    settings_catalog_features,
     settings_catalog_governance,
     settings_catalog_integrations,
     settings_catalog_learning,
+    settings_catalog_personalization,
     settings_catalog_privacy,
     settings_catalog_runtime,
     settings_catalog_structured,
 )
 
-_GROUP_MODULES = (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
+_GROUP_MODULES = (settings_catalog_access, settings_catalog_features, settings_catalog_runtime, settings_catalog_learning,
                   settings_catalog_privacy, settings_catalog_governance,
-                  settings_catalog_integrations, settings_catalog_structured)
+                  settings_catalog_integrations, settings_catalog_structured, settings_catalog_personalization, settings_catalog_budget_guidance)
 for _group in _GROUP_MODULES:
     SETTINGS += tuple(_group.entries(S, C, Column))
 
@@ -2342,7 +2576,24 @@ def coerce(setting: Setting, value: object) -> object:
     ``None`` is only accepted for numbers without a default (meaning "no
     limit"), which callers treat as removing the dashboard value.
     """
+    if setting.id == "spending_limits.alert_at":
+        from maverick.spending_alerts import validate_alert_at
+        try:
+            return validate_alert_at(value)
+        except ValueError as exc:
+            raise SettingError(str(exc)) from exc
+    if setting.id == "budget.warning_thresholds":
+        try:
+            return settings_catalog_budget_guidance.thresholds(value)
+        except ValueError as exc:
+            raise SettingError(str(exc)) from exc
     result = _coerce_value(setting, value)
+    if setting.id == "plugins.workbench_image":
+        from maverick.sandbox.local_images import LocalImageUnavailable, validate_choice
+        try:
+            result = validate_choice(result)
+        except LocalImageUnavailable as exc:
+            raise SettingError(str(exc)) from exc
     if not _storable(result):
         raise SettingError(
             f"{setting.label}: remove the hidden or unusual characters from this value."
@@ -2563,6 +2814,16 @@ def _coerce_path(setting: Setting, value: object) -> str | None:
         raise SettingError(f"{setting.label}: use at most {setting.max_length} characters.")
     if not text:
         return None  # an emptied box means "stop setting this here"
+    if setting.id == "auth.saml.idp_metadata_file" and text.startswith("managed-saml:"):
+        from fastapi import HTTPException
+
+        from .company_saml_materials import resolve
+
+        try:
+            resolve(text)
+        except (HTTPException, ValueError, OSError) as exc:
+            raise SettingError("The protected uploaded provider files are unavailable. Review guided single sign-on setup.") from exc
+        return text
     from . import settings_paths
 
     try:
@@ -2988,8 +3249,42 @@ def _fmt(number: float) -> str:
     return str(number)
 
 
+def valid_number(setting: Setting, value: object) -> bool:
+    """Whether an effective numeric source meets this control's existing bounds."""
+    if value is None or value == "":
+        return setting.default is None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return False
+    try:
+        number = float(value)
+        if not math.isfinite(number):
+            return False
+        _coerce_value(setting, number / setting.scale)
+    except (SettingError, ValueError, TypeError, OverflowError):
+        return False
+    return True
+
+
+def _number_weakens(setting: Setting, old: object, new: object) -> bool:
+    old = None if old == "" else old
+    new = None if new == "" else new
+    if not valid_number(setting, new):
+        raise SettingError(f"{setting.label}: choose a valid number or its product default before continuing.")
+    if not valid_number(setting, old):
+        return bool(setting.warning)  # An unknown prior limit cannot establish a safe relaxation.
+    if not setting.warning or old == new:
+        return False
+    if setting.weaker == "lower":
+        return new is not None and (old is None or float(new) < float(old))
+    if setting.weaker == "higher":
+        return old is not None and (new is None or float(new) > float(old))
+    return setting.weaker == "change" and old != new
+
+
 def weakens(setting: Setting, old: object, new: object) -> bool:
     """True when moving from the effective ``old`` to ``new`` lowers a protection."""
+    if setting.control == "number":
+        return _number_weakens(setting, old, new)
     if not setting.warning or old == new:
         return False
     if setting.control == "toggle":
@@ -3010,15 +3305,6 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
         if was is None:
             return False  # there was no limit to loosen
         return now is None or now[0] / now[1] > was[0] / was[1]
-    if setting.control == "number":
-        if setting.weaker == "lower":
-            if new is None:
-                return False
-            return old is None or float(new) < float(old)
-        if setting.weaker == "higher":
-            if new is None:
-                return old is not None
-            return old is not None and float(new) > float(old)
     if setting.control in {"list", "multiselect", "keys", "picks"}:
         return _list_loosens(setting, old, new)
     if setting.control == "document":
@@ -3136,6 +3422,11 @@ def lookup(tree: object, path: tuple[str, ...]) -> tuple[bool, object]:
 
 def _structured_display(setting: Setting, value: object) -> str | None:
     """Plain words for the picks, fingerprint, document and address controls."""
+    if setting.id == "auth.saml.idp_metadata_file" and str(value).startswith("managed-saml:"):
+        return "Protected uploaded provider files"
+    if setting.id == "plugins.workbench_image":
+        from maverick.sandbox.local_images import cached_label
+        return cached_label(value)
     if setting.control == "picks" and isinstance(value, list):
         labels = dict(setting.choices)
         shown = [labels.get(str(v), str(v)) for v in value[:3]]
@@ -3157,6 +3448,8 @@ def display_value(setting: Setting, value: object) -> str:
     """Plain words for a value (never a secret's content)."""
     if setting.secret:
         return "Set" if value else "Not set"
+    if setting.control == "number" and not valid_number(setting, value):
+        return "The current number is invalid. Review a replacement or its product default."
     if (value is None or value == "" or value == []) and setting.none_text:
         return setting.none_text
     if value is None or value == "" or value == []:
@@ -3233,7 +3526,8 @@ def _assert_consistent() -> None:
         assert (s.control == "document") == bool(s.document), s.id
         assert not s.workspace_segment or s.control == "text", s.id
         assert not s.fingerprint_of or s.control == "fingerprint", s.id
-        assert not s.preview or s.control == "select", s.id
+        # A keep period previews its clean-up from the number box.
+        assert not s.preview or s.control == "select" or (s.preview == "retention" and s.control == "number"), s.id
         if s.key_kind == "entries":
             assert s.control == "table", s.id
         assert s.scale > 0, s.id

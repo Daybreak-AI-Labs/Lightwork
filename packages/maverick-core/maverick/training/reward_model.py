@@ -68,6 +68,56 @@ def _sigmoid(z: float) -> float:
     return ez / (1.0 + ez)
 
 
+def has_recorded_steps(row: dict | None) -> bool:
+    """Whether structural scoring has any recorded steps to inspect."""
+    return (isinstance(row, dict) and isinstance(row.get("messages"), list)
+            and bool(row["messages"]) and all(isinstance(m, dict) for m in row["messages"]))
+
+
+def structural_comparisons(
+    pairs: list[dict], rows_by_id: dict[str, dict],
+) -> tuple[list[dict], dict[str, int]]:
+    """Select comparisons supported by recorded steps on BOTH attempts.
+
+    Empty steps mean unavailable evidence, not an attempt with no errors or
+    effort. Native rejected drafts and scored answer candidates intentionally
+    have no steps: keep their DPO answer pairs intact, but do not train this
+    structural model from them. Identical features cannot establish an order.
+    """
+    counts = dict.fromkeys(("candidates", "eligible", "skipped", "unresolved",
+                            "missing_steps", "indistinguishable", "no_confidence"), 0)
+    counts["candidates"] = len(pairs)
+    eligible = []
+    for pair in pairs:
+        chosen = rows_by_id.get(pair.get("chosen_id"))
+        rejected = rows_by_id.get(pair.get("rejected_id"))
+        if not has_recorded_steps(chosen) or not has_recorded_steps(rejected):
+            counts["missing_steps"] += 1
+            counts["skipped"] += 1
+            continue
+        weight = pair.get("weight", 1.0)
+        if type(weight) not in {float, int} or not math.isfinite(weight) or weight <= 0:
+            counts["no_confidence"] += 1
+            counts["skipped"] += 1
+            continue
+        if featurize(chosen) == featurize(rejected):
+            counts["indistinguishable"] += 1
+            counts["unresolved"] += 1
+            continue
+        eligible.append(pair)
+    counts["eligible"] = len(eligible)
+    return eligible, counts
+
+
+def training_comparisons(
+    rows: list[dict], *, min_margin: float = 0.5, max_pairs_per_group: int = 64,
+) -> tuple[list[dict], dict[str, int]]:
+    """Use the unchanged bounded DPO selector, then assess structural evidence."""
+    pairs = build_preference_pairs(rows, min_margin=min_margin,
+                                   max_pairs_per_group=max_pairs_per_group)
+    return structural_comparisons(pairs, {row.get("id"): row for row in rows})
+
+
 class PreferenceRewardModel:
     """A linear reward model: ``score(row) = Σ weights[f] * feature[f]``.
 
@@ -103,16 +153,18 @@ class PreferenceRewardModel:
         # Precompute each pair's feature DIFFERENCE (chosen - rejected) + weight;
         # missing/unknown ids are skipped so a partial corpus still trains.
         diffs: list[tuple[dict[str, float], float]] = []
-        for p in pairs:
+        eligible, counts = structural_comparisons(pairs, rows_by_id)
+        for p in eligible:
             c = rows_by_id.get(p.get("chosen_id"))
             r = rows_by_id.get(p.get("rejected_id"))
             if c is None or r is None:
                 continue
             fc, fr = featurize(c), featurize(r)
             d = {f: fc.get(f, 0.0) - fr.get(f, 0.0) for f in FEATURES}
-            diffs.append((d, float(p.get("weight", 1.0) or 1.0)))
+            diffs.append((d, float(p.get("weight", 1.0))))
 
-        report = {"pairs": len(diffs), "epochs": 0, "loss": 0.0, "accuracy": 0.0}
+        report = {"pairs": len(diffs), "epochs": 0, "loss": 0.0, "accuracy": 0.0,
+                  **counts}
         if not diffs:
             return report
 
@@ -185,27 +237,36 @@ def reweight_pairs_with_model(
     """Cross-check verifier preference labels with a learned reward model.
 
     The verifier produced each ``(chosen, rejected)`` pair; a cheap learned
-    reward model is an independent second opinion. Where the model AGREES
+    structural model supplies an additional ranking signal. It is trained on
+    verifier labels, so it is not independent evidence of answer quality.
+    Where the model AGREES
     (``score(chosen) > score(rejected)``) the pair's ``weight`` is kept; where it
-    DISAGREES the weight is scaled by ``disagree_penalty`` -- so a DPO trainer
-    leans less on preferences that two independent signals don't corroborate
-    (label-noise mitigation). Mutates ``pairs`` in place and returns a report
+    DISAGREES the weight is scaled by ``disagree_penalty``. Missing steps,
+    indistinguishable features and tied model scores abstain: the original DPO
+    weight stays unchanged. Mutates ``pairs`` in place and returns a report
     ``{"pairs", "agree", "agreement_rate"}``. Pairs whose ids aren't resolvable
     are left unchanged and excluded from the rate."""
-    agree = 0
-    scored = 0
-    for p in pairs:
+    agree = disagree = tied = 0
+    eligible, counts = structural_comparisons(pairs, rows_by_id)
+    for p in eligible:
         c = rows_by_id.get(p.get("chosen_id"))
         r = rows_by_id.get(p.get("rejected_id"))
         if c is None or r is None:
             continue
-        scored += 1
-        if model.score(c) > model.score(r):
+        chosen_score, rejected_score = model.score(c), model.score(r)
+        if (not math.isfinite(chosen_score) or not math.isfinite(rejected_score)
+                or math.isclose(chosen_score, rejected_score, rel_tol=1e-12, abs_tol=1e-12)):
+            tied += 1
+        elif chosen_score > rejected_score:
             agree += 1
         else:
-            p["weight"] = float(p.get("weight", 1.0) or 1.0) * float(disagree_penalty)
+            disagree += 1
+            p["weight"] = float(p.get("weight", 1.0)) * float(disagree_penalty)
+    scored = agree + disagree
     return {"pairs": len(pairs), "agree": agree,
-            "agreement_rate": (agree / scored) if scored else 0.0}
+            "agreement_rate": (agree / scored) if scored else 0.0,
+            **counts, "scored": scored, "disagree": disagree, "tied": tied,
+            "abstained": len(pairs) - scored}
 
 
 # ---------------------------------------------------------------------------

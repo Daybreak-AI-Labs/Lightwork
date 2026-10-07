@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Finance · Lightwork{% endblock %}
+{% block title %}Financial risk · Lightwork{% endblock %}
 {% block content %}
   <style>
     .fin-links { display:flex; gap:var(--space-2); flex-wrap:wrap; margin:var(--space-3) 0 var(--space-5); }
@@ -15,13 +15,13 @@
        live board below the hero carries those numbers, so hide the tiles. */
   </style>
   {% from "_hero.html" import hero, state %}
-  {% call hero('Governed workspaces', 'Finance',
+  {% call hero('Governed workspaces', 'Financial risk',
                subtitle='Program of record',
                lede='The finance team\'s workspace: every control and risk
                      assessment Lightwork has run (financial reporting controls
                      under SOX, fraud risk, IT controls, credit risk and close
                      readiness) with risk ratings, age and open follow-ups.
-                     <a href="/finance/board">Open the finance overview</a>') %}
+                     <a href="/finance/board">Open the finance overview</a>' | safe) %}
     {{ state('Current state',
              stats.total ~ ' assessment' ~ ('' if stats.total == 1 else 's') ~ ' on record',
              badge=(stats.pending ~ ' to review') if stats.pending else 'clear',
@@ -350,7 +350,7 @@
       <p class="fin-caveat">These guides point to each regulator's official source. Always confirm
         details, fees and deadlines with the regulator or your lawyer.</p>
       <div class="fin-scroll"><table aria-label="State licensing guides">
-        <thead><tr><th scope="col">Licence Type</th><th scope="col">Last Updated</th><th scope="col">States Covered</th></tr></thead>
+        <thead><tr><th scope="col">Licence type</th><th scope="col">Last updated</th><th scope="col">States covered</th></tr></thead>
         <tbody>{% for pack in operations.licensing_packs %}
           <tr><td>{{ pack.title }}</td><td>{{ pack.as_of }}</td>
             <td>{{ pack.jurisdictions }} states ({{ pack.source_check_required }} to confirm with the regulator)</td></tr>
@@ -363,7 +363,7 @@
       <p class="muted">Duplicate payments, unusual number patterns, payments just under approval
         limits, split payments and out-of-hours postings, each explained for a person to decide.</p>
       <div class="fin-scroll"><table aria-label="Unusual payments">
-        <thead><tr><th scope="col">What Was Found</th><th scope="col">Severity</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+        <thead><tr><th scope="col">What was found</th><th scope="col">Severity</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
         <tbody>{% for row in operations.anomaly_cases %}<tr>
           <td>{{ (row.rule_id or '')|replace('finance.','')|humanize }}</td>
           <td><span class="badge {{ 'danger' if row.severity in ('high','critical') else 'warn' }}">{{ row.severity|humanize }}</span></td>
@@ -379,7 +379,7 @@
       <p class="muted">{{ operations.aml_list_versions }} watch list{{ '' if operations.aml_list_versions == 1 else 's' }} loaded.
         Names are hidden here. A case is only cleared or escalated when two different reviewers agree.</p>
       <div class="fin-scroll"><table aria-label="Screening cases">
-        <thead><tr><th scope="col">Case</th><th scope="col">Possible Matches</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+        <thead><tr><th scope="col">Case</th><th scope="col">Possible matches</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
         <tbody>{% for row in operations.aml_cases %}<tr>
           <td>Case {{ loop.index }}</td><td>{{ row.hit_count }}</td>
           <td><span class="badge {{ row.status }}">{{ row.status|humanize }}</span></td>

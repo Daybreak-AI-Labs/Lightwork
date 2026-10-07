@@ -9,7 +9,7 @@ import json
 from typing import Literal
 
 from maverick.tenant.registry import DEFAULT_TENANT_DAILY_DOLLARS
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 _HUNTER_BATCH_BYTES = 16 * 1024 * 1024
 _HUNTER_EVENT_BYTES = 256 * 1024
@@ -65,6 +65,16 @@ class WorkflowStepIn(BaseModel):
     gate: str | None = None
 
 
+class AgentAutonomyIn(BaseModel):
+    """The specialist's explicit authority dial in a tenant pack override."""
+
+    default: Literal["observe", "suggest", "request", "auto"]
+    low: Literal["observe", "suggest", "request", "auto"] | None = None
+    medium: Literal["observe", "suggest", "request", "auto"] | None = None
+    high: Literal["observe", "suggest", "request", "auto"] | None = None
+    onboarding: StrictBool = True
+
+
 class AgentOverrideIn(BaseModel):
     """A tenant override patch for a domain pack (agent). Every field is
     optional: only the ones the client actually sets are persisted, so the
@@ -78,9 +88,23 @@ class AgentOverrideIn(BaseModel):
     max_risk: str | None = None
     knowledge_sources: list[str] | None = None
     models: dict[str, str] | None = None
+    mcp_servers: list[str] | None = Field(default=None, max_length=5000)
     workflow: list[WorkflowStepIn] | None = None
     compartment: str | None = None
     extends: str | None = None
+    autonomy: AgentAutonomyIn | None = None
+    # Publishing changed instructions without a passing test run is allowed
+    # only with a reason, which goes to the activity record. Never saved.
+    publish_without_passing_tests: bool = False
+    override_reason: str | None = Field(None, max_length=300)
+
+
+# Request-only fields that are never part of the saved agent.
+AGENT_PUBLISH_FIELDS = frozenset({"publish_without_passing_tests", "override_reason"})
+
+
+class AgentGraduationIn(BaseModel):
+    expected_generation: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class JDMatchIn(BaseModel):
@@ -129,6 +153,15 @@ class AssessmentEvidenceIn(BaseModel):
     evidence: str = Field(..., max_length=2000)
 
 
+class ShareLinkIn(BaseModel):
+    """Informed confirmation of the exact current public release preview."""
+    confirm: bool = False
+    scope: Literal["result", "conversation"] = "result"
+    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    lifetime_seconds: int = Field(86400, ge=3600, le=604800)
+    label: str = Field("Read-only deliverable", min_length=1, max_length=120)
+
+
 class SignoffIn(BaseModel):
     """A human's sign-off on a finished, gated deliverable -- the certify/reject
     decision the pack's output gate calls for, bound to the version the client
@@ -136,6 +169,8 @@ class SignoffIn(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected)$")
     expected_updated_at: float = Field(..., gt=0)
     note: str | None = Field(default=None, max_length=2000)
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    expected_context: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class RoleOverrideIn(BaseModel):
@@ -149,9 +184,29 @@ class RoleOverrideIn(BaseModel):
 
 
 class GoalResumeIn(BaseModel):
-    """Optional spending limit for a resumed attempt; deployment caps still apply."""
+    """Optional spending limit plus exact reviewed restart receipt binding."""
 
+    expected_context: str | None = Field(default=None, max_length=256)
+    expected_updated_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    expected_owner: str | None = Field(default=None, max_length=256)
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     max_dollars: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class TaskSourceReference(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["dataset"]
+    asset_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reference_schema: Literal["lightwork.research-registry-ref.v1"] = Field(default="lightwork.research-registry-ref.v1", alias="schema")
+
+
+class KnowledgeContextIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    purpose: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+    references: list[TaskSourceReference] = Field(min_length=1, max_length=5)
 
 
 class GoalIn(BaseModel):
@@ -163,7 +218,7 @@ class GoalIn(BaseModel):
     description: str = Field("", max_length=GOAL_DESCRIPTION_MAX_LENGTH)
     max_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     max_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
-    max_depth: int = Field(3, ge=1, le=5)
+    max_depth: int | None = Field(None, ge=1, le=10)
     template: str | None = None
     params: dict[str, str] | None = None
     # Run the goal AS a specialist pack: the orchestrator inherits a domain
@@ -172,6 +227,11 @@ class GoalIn(BaseModel):
     # Director mode: an autonomy level from [director] profiles. It can only
     # tighten consent and review checkpoints and lower the spending cap.
     director_profile: str | None = Field(None, max_length=40)
+    knowledge_context: KnowledgeContextIn | None = None
+    connection_references: list[dict[str, str]] = Field(default_factory=list, max_length=100)
+    task_model: str = Field(default="", max_length=128)
+    task_effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
+    task_model_context: str = Field(default="", max_length=64)
 
 
 class GoalOut(BaseModel):
@@ -180,10 +240,27 @@ class GoalOut(BaseModel):
     title: str
     description: str | None = None
     result: str | None = None
+    # Present on REST admission; the exact limits passed to the runner.
+    # A plain goal read has no durable cap record unless submitted with an
+    # Idempotency-Key (whose receipt retains the dispatch intent).
+    limits: dict[str, float | int] | None = None
+    # Stable machine-readable cause for a stopped run. ``awaiting_input``
+    # takes priority over a generic blocked status; absent while work is
+    # running or finished successfully.
+    reason_code: str | None = None
     # How risky the task's wording looks ("medium"/"high"; absent when low),
     # and why in plain words. A reading of the words, not of the actions.
     risk_tier: str | None = None
     risk_reasons: str | None = None
+    # ``blocked`` also covers a task parked on a question. ``needs_input`` is
+    # true when it is waiting for a person's answer (not finished: answering
+    # lets it carry on); ``open_question_ids`` are the questions to answer via
+    # POST /goals/{id}/answer. Both are empty for every other state.
+    needs_input: bool = False
+    open_question_ids: list[int] = Field(default_factory=list)
+    # Seconds since the epoch. ``updated_at`` moves on every status change.
+    created_at: float | None = None
+    updated_at: float | None = None
 
 
 class ScheduleIn(BaseModel):
@@ -310,6 +387,26 @@ class EventTriggerOut(BaseModel):
     params: dict[str, str] = Field(default_factory=dict)
     cursor: str = ""
     interval_seconds: int = 0
+    binding_revision: str = ""
+
+
+class FormLinkRotationIn(BaseModel):
+    """The binding observed before a form owner replaces its public link."""
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class FormAbandonIn(BaseModel):
+    """An explicit, reviewable decision for one still-pending form submission."""
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_fields_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reason: str = Field(min_length=10, max_length=500)
+
+
+class FormDecisionRecoveryIn(BaseModel):
+    """The exact interrupted decision and received row reviewed by its owner."""
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_fields_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_decision_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class LearningToggleIn(BaseModel):
@@ -349,15 +446,24 @@ class GoalEventOut(BaseModel):
 class GoalEventsResponse(BaseModel):
     status: str
     result: str | None
+    reason_code: str | None = None
+    # Plain-language stop reason (message, action, link) for a stopped goal.
+    stop: dict | None = None
     next_id: int
     events: list[GoalEventOut]
     has_more: bool = False
+    # False while the goal is waiting for an answer, even though its status is
+    # ``blocked``: a client that stops at ``terminal`` must keep watching.
     terminal: bool = False
+    needs_input: bool = False
+    open_question_ids: list[int] = Field(default_factory=list)
 
 
 class FactIn(BaseModel):
-    key: str
-    value: str
+    key: str = Field(max_length=200)
+    value: str = Field(max_length=20000)
+    expected_revision: int = Field(default=0, ge=0, strict=True)
+    context: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class OutcomeIn(BaseModel):
@@ -373,6 +479,8 @@ class FeedbackIn(BaseModel):
     (unlike the gated sign-off). Grounds a real outcome into the learning loop."""
     rating: str = Field(..., pattern="^(up|down)$")
     note: str | None = Field(default=None, max_length=2000)
+    # Optional reason chip on a thumbs-down (goal_feedback_store.REASONS).
+    reason: str | None = Field(default=None, pattern="^(wrong|incomplete|not_asked|unclear|too_long|other)$")
 
 
 class DeliverableEditIn(BaseModel):
@@ -380,6 +488,8 @@ class DeliverableEditIn(BaseModel):
     (vs. the agent's draft) grounds a graded outcome -- a verbatim keep is a strong
     positive, a heavy rewrite is graded-negative ground truth."""
     text: str = Field(..., max_length=200_000)
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str = Field(..., min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class OutcomeLinkIn(BaseModel):
@@ -486,11 +596,15 @@ class ConnectionIn(BaseModel):
     access: str | None = Field(None, pattern="^(owner|tenant)$")
     allowed_principals: list[str] | None = Field(None, max_length=100)
     expected_revision: str | None = Field(None, min_length=1, max_length=128)
+    impact_version: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
+    context: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
 
 
 class FlowSaveIn(BaseModel):
     """A draft flow definition (a graph of typed nodes) to create or replace."""
     flow: dict
+    acquisition: str | None = Field(None, pattern=r"^OAC-[a-f0-9]{32}$")
+    acquisition_acceptance: bool = Field(False, strict=True)
 
 
 class FlowDryRunIn(BaseModel):
@@ -508,6 +622,13 @@ class FlowPublishIn(BaseModel):
     """Activate the exact draft revision the operator reviewed."""
     version: int = Field(..., ge=1)
     revision: str = Field(..., min_length=1, max_length=128)
+
+
+class FlowRetireIn(BaseModel):
+    """Revoke the reviewed release, including older saved flow formats."""
+    version: int = Field(..., ge=0)
+    revision: str = Field(..., max_length=128)
+    expected_release_id: str | None = Field(default=None, max_length=128)
 
 
 class FlowRunIn(BaseModel):
@@ -575,7 +696,7 @@ class FlowApplyIn(BaseModel):
 
     Hardening to an action needs ``tool`` and an explicit reviewed ``params``
     binding (including ``{}`` for a genuinely no-argument action); softening to
-    an agent needs ``brief`` (else the existing brief/label is used)."""
+    an agent needs explicitly reviewed replacement instructions."""
     node_id: str = Field(..., min_length=1, max_length=120)
     to_kind: str = Field(..., pattern="^(agent|action)$")
     tool: str = Field(default="", max_length=120)
@@ -583,6 +704,9 @@ class FlowApplyIn(BaseModel):
     # reviewed no-argument binding and remains distinguishable from omission.
     params: dict | None = None
     brief: str = Field(default="", max_length=4000)
+    replacement_reviewed: StrictBool = False
+    review_binding: str = Field(default="", max_length=64)
+    review_context: str = Field(default="", max_length=64)
     version: int | None = Field(default=None, ge=1)
     revision: str = Field(default="", max_length=128)
 
@@ -667,14 +791,19 @@ class CachePurgeIn(BaseModel):
 
 
 class RetitleIn(BaseModel):
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str | None = Field(None, min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(..., max_length=200)
 
 
 class ReparentIn(BaseModel):
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str | None = Field(None, min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     parent_id: int | None = None
 
 
 class ChildIn(BaseModel):
+    operation_id: str = Field(..., min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(..., max_length=200)
     description: str = ""
 
@@ -692,6 +821,7 @@ class WorkflowDraftIn(BaseModel):
     artifact — a reusable ``"template"`` (default) or an agent ``"playbook"``."""
     description: str = Field("", max_length=8000)
     form: str = Field("template", max_length=16)
+    source_text: str = Field("", max_length=8000)
 
 
 class WorkflowRefineIn(BaseModel):
@@ -712,6 +842,7 @@ class WorkflowSaveIn(BaseModel):
     title: str = Field(..., max_length=200)
     body: str = Field(..., max_length=20000)
     params: list[str] = Field(default_factory=list)
+    parameter_schema: dict = Field(default_factory=dict)
     budget_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     budget_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     overwrite: bool = False
@@ -731,6 +862,11 @@ class SandboxBackendIn(BaseModel):
     # "local" runs model-driven shell on the host, so it never happens on a
     # bare click.
     acknowledge_local_risk: bool = False
+
+
+class FileWorkEnableIn(BaseModel):
+    """Explicit administrator confirmation for container file work."""
+    confirm: bool = False
 
 
 class ActiveTenantIn(BaseModel):
@@ -892,6 +1028,11 @@ class VendorQuestionnaireIn(BaseModel):
     revision: int = Field(..., ge=1)
 
 
+class VendorQuestionnaireReplaceIn(BaseModel):
+    """Replace one link against the vendor version currently on screen."""
+    revision: int = Field(..., ge=1)
+
+
 class VendorNoteIn(BaseModel):
     """Record one monitoring note against a vendor."""
     note: str = Field(..., min_length=1, max_length=2000)
@@ -974,19 +1115,45 @@ class SharePointSyncIn(BaseModel):
 class DsarIn(BaseModel):
     """Open a data-subject request with its statutory due date."""
     subject_id: str = Field(..., min_length=1, max_length=200)
-    kind: str = Field(..., pattern="^(access|portability|erasure)$")
+    kind: str = Field(..., pattern="^(access|portability|erasure|correction|opt_out|"
+                                   "limit_sensitive|objection|restriction|withdraw_consent)$")
     channel: str = Field("", max_length=64)
+    # A verified regime id from maverick.rights_deadlines; empty keeps the
+    # 30-day fallback clock.
+    jurisdiction: str = Field("", max_length=32)
+
+
+class DsarCloseIn(BaseModel):
+    """What happened to a request, recorded when it is closed. ``answered``
+    and ``refused`` need the date the answer was sent and where the proof is
+    kept; a refusal (or keeping a person's data after a deletion request)
+    needs its lawful reason; a deletion request needs its erasure result."""
+    kind: str = Field(..., pattern="^(answered|refused|withdrawn|no_response)$")
+    answered_on: str = Field("", max_length=10)
+    reference: str = Field("", max_length=512)
+    erasure: str = Field("", pattern="^(|erased|not_erased)$")
+    lawful_basis: str = Field("", max_length=2000)
+    note: str = Field("", max_length=2000)
+    review_token: str = Field("", max_length=2097152)
 
 
 class IncidentIn(BaseModel):
-    """Open a privacy-incident record; the Art. 33 72-hour clock starts at
-    discovery. Whether it is a notifiable breach stays a separate, human
-    decision."""
+    """Open a privacy-incident record; the Art. 33 72-hour clock runs from
+    when the organisation became aware (``aware_at``, epoch seconds; now
+    when omitted). Whether it is a notifiable breach stays a separate,
+    human decision."""
     title: str = Field(..., min_length=1, max_length=200)
     severity: str = Field("medium", pattern="^(low|medium|high)$")
     description: str = Field("", max_length=4000)
     categories: str = Field("", max_length=500)
     affected_estimate: str = Field("", max_length=100)
+    affected_people: int | None = Field(None, ge=0)
+    aware_at: float | None = Field(None, gt=0)
+
+
+class IncidentAffectedPeopleIn(BaseModel):
+    """A revised best estimate; null means the count is unknown."""
+    affected_people: int | None = Field(..., ge=0)
 
 
 class IncidentNotifyIn(BaseModel):
@@ -1621,7 +1788,7 @@ class FeatureSwitchIn(BaseModel):
 
 
 class CopilotHistoryItem(BaseModel):
-    """One bounded prior turn accepted by the read-only platform Copilot."""
+    """Legacy browser history; the server never treats it as assistant context."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -1636,13 +1803,15 @@ class CopilotIn(BaseModel):
 
     message: str = Field(min_length=1, max_length=2_000)
     page: str = Field(default="", max_length=200)
+    selected_goal_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     history: list[CopilotHistoryItem] = Field(default_factory=list, max_length=6)
+    conversation_token: str | None = Field(default=None, min_length=10, max_length=24_000)
 
 
 class BreachPlanIn(BaseModel):
     """Facts for a per-regime breach-notification plan."""
     jurisdictions: list[str] = Field(..., min_length=1, max_length=32)
-    subjects_affected: int = Field(0, ge=0)
+    subjects_affected: int | None = Field(None, ge=0)
     sensitive: bool = False
     malicious: bool = False
     discovered_at: float | None = Field(None, gt=0)

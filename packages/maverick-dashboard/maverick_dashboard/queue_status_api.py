@@ -5,8 +5,8 @@ how much background work is waiting, running, finished or failed, and the
 failed items with a plain description. The queue spans everyone's scheduled
 and automatic work in this workspace, so it needs the ``admin`` permission.
 
-Recovering a parked recurring schedule stays a local operator decision
-(``maverick queue reconcile``); it is deliberately not offered here.
+Parked recurring schedules are reviewed from Automations using the exact
+queue reconciliation transaction; this summary itself remains read-only.
 """
 
 from __future__ import annotations

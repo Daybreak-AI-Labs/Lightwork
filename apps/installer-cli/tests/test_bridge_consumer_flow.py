@@ -49,7 +49,7 @@ def test_bridge_asks_five_questions_in_order(monkeypatch, tmp_path):
 
 
 def test_bridge_writes_consumer_safe_defaults(monkeypatch, tmp_path):
-    _drive(monkeypatch, tmp_path, [
+    sent = _drive(monkeypatch, tmp_path, [
         "", "Alex", "essentials", "sk-ant-xyz", str(tmp_path / "ws"), "$5",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
@@ -61,9 +61,11 @@ def test_bridge_writes_consumer_safe_defaults(monkeypatch, tmp_path):
     assert config["retention"]["audit_days"] == 30
     assert config["persona"]["user_name"] == "Alex"
     assert config["budget"]["max_dollars"] == 5.0
+    assert config["budget"]["max_wall_seconds"] == 1800.0
     # No channels / mcp / plugins.
     assert "channels" not in config
     assert "mcp_servers" not in config
+    assert "file changes and program execution are off" in sent[-1]["question"]
 
 
 def test_bridge_api_key_written_to_env(monkeypatch, tmp_path):
@@ -97,11 +99,21 @@ def test_bridge_budget_rejects_garbage_before_writing_config(monkeypatch, tmp_pa
     assert not (tmp_path / ".maverick" / "config.toml").exists()
 
 
-def test_bridge_budget_blank_means_no_generated_task_limit(monkeypatch, tmp_path):
+def test_bridge_budget_blank_uses_visible_standard_limit(monkeypatch, tmp_path):
     _drive(monkeypatch, tmp_path, [
         "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["budget"]["max_dollars"] == 2.0
+    assert config["budget"]["max_wall_seconds"] == 1800.0
+
+
+def test_bridge_explicit_no_task_limit_is_saved(monkeypatch, tmp_path):
+    _drive(monkeypatch, tmp_path, [
+        "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "No task limit",
+    ])
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["budget"]["task_limits_enabled"] is False
     assert "max_dollars" not in config["budget"]
     assert "max_wall_seconds" not in config["budget"]
 

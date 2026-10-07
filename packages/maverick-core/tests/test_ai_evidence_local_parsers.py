@@ -131,7 +131,12 @@ def test_workers_launch_through_a_linked_interpreter_and_refuse_a_repointed_link
     pytest.importorskip("olefile")
     real = Path(sys.executable).resolve()
     link = tmp_path / "venv-python"
-    link.symlink_to(real)
+    try:
+        link.symlink_to(real)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink creation privilege is unavailable")
+        raise
     monkeypatch.setattr(local.sys, "executable", str(link))
     launched: list[str] = []
 

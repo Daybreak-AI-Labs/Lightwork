@@ -1,9 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Find Personal Data · Lightwork{% endblock %}
+{% block title %}Find personal data · Lightwork{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="/static/lightwork-privacy-data-discovery.css">
+<style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
+@media (max-width: 540px) {
+  .pdd-shell table { display: block; }
+  .pdd-shell thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .pdd-shell tbody { display: grid; gap: var(--space-3); }
+  .pdd-shell tbody tr { display: grid; min-width: 0; padding: var(--space-3); border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--glass-soft); }
+  .pdd-shell td { display: grid; grid-template-columns: minmax(4.5rem, .65fr) minmax(0, 1.35fr); gap: var(--space-2); min-width: 0; padding: var(--space-2) 0; border: 0; }
+  .pdd-shell td::before { content: attr(data-label); color: var(--muted); font-weight: var(--font-semibold); }
+  .pdd-shell td[data-label="Actions"] { display: block; }
+  .pdd-shell td[data-label="Actions"]::before { display: block; margin-bottom: var(--space-2); }
+  .pdd-shell td .btn { min-height: 44px; }
+  .pdd-fields { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
 {% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <div class="pdd-shell" id="pdd-root"
      data-api-base="{{ privacy_data_discovery_api_base }}"
      data-copilot-page="{{ privacy_data_discovery_page_path }}"
@@ -16,7 +31,7 @@
           subtitle='Scan your storage and systems for personal data',
           lede='Connect a storage service or system, scan it, and check what was found. A second
                 person approves each finding before it is added to your data map.') }}
-  <p><a class="btn btn--ghost" href="/privacy">Back to Privacy</a></p>
+  <p>{{ back_link('/privacy', 'Privacy') }}</p>
 
   <details class="panel">
     <summary>About this page&rsquo;s safeguards</summary>
@@ -25,7 +40,7 @@
       <li>A scan only covers the source and limits you set. Finding nothing does not prove there is no personal data.</li>
       <li>Text, web pages, spreadsheets saved as text and similar files are read. PDFs, Office files, images, archives, audio and video are listed as not read, never treated as checked.</li>
       <li>Lightwork keeps only fingerprints and counts of what it finds, never the personal data itself.</li>
-      <li>Approved findings only update Lightwork&rsquo;s own data map. Nothing is changed in the scanned systems.</li>
+      <li>Approved findings update Lightwork&rsquo;s own data map. You can separately review and confirm their use in a saved Data Use dataset. Nothing is changed in the scanned systems.</li>
     </ul>
   </details>
 
@@ -97,6 +112,8 @@
   <div class="panel" id="pdd-work"><p class="muted">Loading…</p></div>
   {% endif %}
 
+  {% include "_privacy_discovery_data_use.html" %}
+
   <div class="panel pdd-actions">
     {% if privacy_data_discovery_can_audit %}
     <button type="button" class="btn btn--ghost" id="pdd-verify">Check the activity history is intact</button>
@@ -114,4 +131,5 @@
 {% block scripts_extra %}
 <script src="/static/lightwork-record-workflows.js" defer></script>
 <script src="/static/lightwork-privacy-data-discovery.js" defer></script>
+<script src="/static/lightwork-privacy-discovery-data-use.js" defer></script>
 {% endblock %}

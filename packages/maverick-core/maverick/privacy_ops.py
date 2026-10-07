@@ -497,6 +497,7 @@ class _RecordStore:
         previous: dict | None,
         *,
         bump_revision: bool = True,
+        effect_guard=None,
     ) -> dict:
         from .file_lock import atomic_write_text
 
@@ -549,14 +550,20 @@ class _RecordStore:
                 sealed = reseal(previous.original_envelope, rendered.encode("utf-8"))
             except EncryptionUnavailable as exc:
                 raise PrivacyStateError("privacy record encryption did not authenticate") from exc
-            atomic_write_bytes(path, sealed, mode=0o600)
+            if effect_guard is None:
+                atomic_write_bytes(path, sealed, mode=0o600)
+            else:
+                atomic_write_bytes(path, sealed, mode=0o600, effect_guard=effect_guard)
         else:
             # Existing local JSON policy remains unchanged: this is encrypted
             # record compatibility, not a migration of all legacy plaintext.
-            atomic_write_text(path, rendered, mode=0o600)
+            if effect_guard is None:
+                atomic_write_text(path, rendered, mode=0o600)
+            else:
+                atomic_write_text(path, rendered, mode=0o600, effect_guard=effect_guard)
         return saved
 
-    def save(self, record: dict, *, expected_revision: int | None = None) -> dict:
+    def save(self, record: dict, *, expected_revision: int | None = None, effect_guard=None) -> dict:
         """Atomically create/replace a record, optionally with CAS."""
         from .file_lock import cross_process_lock, ensure_private_directory
 
@@ -574,7 +581,7 @@ class _RecordStore:
                     f"privacy record changed (expected revision "
                     f"{expected_revision}, found {current_revision})"
                 )
-            return self._write_path(path, record, current)
+            return self._write_path(path, record, current, effect_guard=effect_guard)
 
     def load(self, record_id: str) -> dict | None:
         from .file_lock import cross_process_lock
@@ -748,6 +755,7 @@ class _RecordStore:
         *,
         expected_revision: int | None = None,
         metadata_only: bool = False,
+        effect_guard=None,
     ) -> dict | None:
         """Run ``mutate`` under the per-record lock and publish if changed.
 
@@ -782,6 +790,7 @@ class _RecordStore:
                 updated,
                 record,
                 bump_revision=not metadata_only,
+                effect_guard=effect_guard,
             )
 
 
@@ -2552,8 +2561,18 @@ def export_ropa_art30() -> list[dict]:
 # DSAR request tracker -- over the real fulfillment machinery
 # --------------------------------------------------------------------------- #
 
-DSAR_KINDS = ("access", "portability", "erasure")
+#: Tracker kinds. The first three run through the real fulfillment
+#: machinery; the rest are handled by an operator and marked answered.
+DSAR_KINDS = (
+    "access", "portability", "erasure", "correction", "opt_out",
+    "limit_sensitive", "objection", "restriction", "withdraw_consent",
+)
+#: Fallback clock when a request carries no jurisdiction (the legacy
+#: dashboard form). Every request with a jurisdiction uses the verified
+#: regime table in :mod:`maverick.rights_deadlines` instead.
 DSAR_DUE_DAYS = 30  # GDPR Art. 12(3): one month
+DSAR_SOURCES = ("dashboard", "message", "public_form")
+DSAR_DUE_SOON_DAYS = 7
 _DSAR_EXPORT_SCHEMA = 1
 _DSAR_EXPORT_META = "_lightwork_export"
 _ERASURE_OPERATOR_INSTRUCTION = (
@@ -2666,21 +2685,230 @@ def _write_dsar_export_artifact(path: Path, intent: dict, bundle: dict) -> str:
     return digest
 
 
+def _remove_closed_dsar_export(record: dict) -> bool:
+    """Remove only this request's authentic local export after durable close.
+
+    The path in a record is untrusted: derive the destination from the current
+    tenant and request ID, then require any stored path and digest to agree.
+    A missing file is a successful retry; a changed, linked, or unreadable
+    artifact is left in place for an administrator to investigate.
+    """
+    from .paths import data_dir
+
+    export_dir = data_dir("dsar_requests") / "exports"
+    path = Path(os.path.abspath(os.fspath(export_dir / f"{record['id']}-export.json")))
+    fulfillment = record.get("fulfillment")
+    if fulfillment is not None and not isinstance(fulfillment, dict):
+        return False
+    if fulfillment:
+        recorded_path = fulfillment.get("export_path")
+        recorded_digest = fulfillment.get("artifact_sha256")
+        try:
+            path_matches = (
+                isinstance(recorded_path, str)
+                and Path(os.path.abspath(recorded_path)) == path
+            )
+        except (OSError, ValueError):
+            path_matches = False
+        if (
+            not path_matches
+            or fulfillment.get("export_schema") != _DSAR_EXPORT_SCHEMA
+            or not isinstance(recorded_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", recorded_digest) is None
+        ):
+            return False
+    try:
+        _validated_private_directory(path.parent, must_exist=True)
+        before = path.lstat()
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    if _unsafe_path_alias(path, before) or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        return False
+    recovered = _load_dsar_export_artifact(path, intent=_dsar_export_intent(record))
+    if recovered is None or (fulfillment and recovered[1] != fulfillment["artifact_sha256"]):
+        return False
+    try:
+        # Recheck the directory and leaf after parsing, immediately before
+        # unlinking. Normal app writers are serialized by the request record;
+        # the private directory excludes other users' filesystem writes.
+        _validated_private_directory(path.parent, must_exist=True)
+        after = path.lstat()
+        if _unsafe_path_alias(path, after) or _file_identity(after) != _file_identity(before):
+            return False
+        path.unlink()
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def read_dsar_export(request_id: str) -> tuple[dict, str] | None:
+    """Read one collected export through its recorded intent and digest.
+
+    The record's path is never used as the read target. A closed request has
+    no downloadable export, even if its cleanup needs another attempt.
+    """
+    from .paths import data_dir
+
+    record = get_dsar(request_id)
+    if record is None or record.get("status") != "fulfilled" or record.get("kind") not in (
+        "access", "portability",
+    ):
+        return None
+    fulfillment = record.get("fulfillment")
+    if not isinstance(fulfillment, dict):
+        raise PrivacyStateError("saved data export could not be verified")
+    path = Path(os.path.abspath(os.fspath(
+        data_dir("dsar_requests") / "exports" / f"{record['id']}-export.json"
+    )))
+    try:
+        path_matches = (isinstance(fulfillment.get("export_path"), str)
+                        and Path(os.path.abspath(fulfillment["export_path"])) == path)
+    except (OSError, ValueError):
+        path_matches = False
+    digest = fulfillment.get("artifact_sha256")
+    if (not path_matches or fulfillment.get("export_schema") != _DSAR_EXPORT_SCHEMA
+            or not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+        raise PrivacyStateError("saved data export could not be verified")
+    recovered = _load_dsar_export_artifact(path, intent=_dsar_export_intent(record))
+    if recovered is None or not hmac.compare_digest(recovered[1], digest):
+        raise PrivacyStateError("saved data export could not be verified")
+    return recovered
+
+
+def dsar_response_pending(record: dict) -> bool:
+    """Collected data remains response work until an answer is actually recorded."""
+    status = record.get("status")
+    active = status in ("open", "unverified", "awaiting_erasure", "fulfilled")
+    return active and dsar_answer(record) is None
+
+
+def dsar_clock(record: dict, *, now: float | None = None) -> dict:
+    """The live clock fields for one request, computed from the stored
+    deadlines so the list, the detail page and the alerting (work package
+    I2) all read the same numbers.
+
+    ``effective_due_at`` is ``extended_until`` when an extension was recorded,
+    else ``due_at``; ``days_left`` counts UTC calendar dates, matching the
+    displayed deadline; ``overdue`` and ``due_soon`` use the actual timestamp
+    while a response is pending, including access/portability data
+    collected without an answer; ``acknowledge_overdue`` fires when
+    a regime fixes an acknowledgement deadline that passed unacknowledged."""
+    import datetime
+
+    moment = time.time() if now is None else float(now)
+    due = float(record.get("extended_until") or record.get("due_at") or moment)
+    due_day = datetime.datetime.fromtimestamp(due, tz=datetime.timezone.utc).date()
+    today = datetime.datetime.fromtimestamp(moment, tz=datetime.timezone.utc).date()
+    days_left = (due_day - today).days
+    remaining_days = int((due - moment) // 86400)
+    active = dsar_response_pending(record)
+    ack_by = record.get("acknowledge_by")
+    return {
+        "effective_due_at": due,
+        "days_left": days_left,
+        "response_pending": active,
+        "overdue": active and moment > due,
+        "due_soon": active and 0 <= remaining_days <= DSAR_DUE_SOON_DAYS,
+        "acknowledge_overdue": (
+            active and ack_by is not None and moment > float(ack_by)
+            and not record.get("acknowledged_at")
+        ),
+    }
+
+
+def _dsar_deadlines(
+    kind: str, jurisdiction: str, received_at: float, internal_target_days: int,
+) -> dict:
+    """``due_at`` and friends for a new request; the regime table when a
+    jurisdiction is recorded, else the legacy 30-day fallback."""
+    if not jurisdiction:
+        return {
+            "jurisdiction": "",
+            "due_at": received_at + DSAR_DUE_DAYS * 86400,
+            "due_basis": "fallback_30_days",
+            "acknowledge_by": None,
+            "extension_notice_by": None,
+        }
+    from . import rights_deadlines
+
+    clock = rights_deadlines.compute_clock(
+        jurisdiction, rights_deadlines.PUBLIC_TYPE.get(kind, kind), received_at,
+        internal_target_days=internal_target_days,
+    )
+    return {
+        "jurisdiction": jurisdiction,
+        "due_at": clock["due_at"],
+        "due_basis": clock["due_basis"],
+        "acknowledge_by": clock["acknowledge_by"],
+        "extension_notice_by": clock["extension_notice_by"],
+    }
+
+
+def _emit_record_event(event: str, record_type: str, record: dict | None) -> None:
+    """Tell webhook subscribers about a request or incident change. Never
+    raises; nothing is sent when nobody is subscribed."""
+    if not isinstance(record, dict) or not record.get("id"):
+        return
+    try:
+        from .webhook_events import emit, record_link
+
+        rid = str(record.get("id"))
+        if record_type == "dsar":
+            title = f"{record.get('kind') or 'access'} request from {record.get('subject_id') or 'a person'}"
+            link = record_link(f"/privacy/dsar/{rid}")
+            summary = {"status": record.get("status"), "kind": record.get("kind"),
+                       "due_at": record.get("due_at"), "jurisdiction": record.get("jurisdiction")}
+        else:
+            title = str(record.get("title") or "privacy incident")
+            link = record_link("/privacy#incidents")
+            summary = {"status": record.get("status"), "severity": record.get("severity"),
+                       "notify_deadline_at": record.get("notify_deadline_at")}
+        emit(event, record_type=record_type, record_id=rid, title=title, summary=summary, link=link)
+    except Exception:  # pragma: no cover - webhooks never block a record change
+        log.debug("privacy_ops: webhook event %s not sent", event, exc_info=True)
+
+
 def open_dsar(
     subject_id: str,
     kind: str,
     *,
     channel: str = "",
     opened_by: str = "",
+    jurisdiction: str = "",
+    source: str = "dashboard",
+    status: str = "open",
+    requester: dict | None = None,
+    received_at: float | None = None,
+    internal_target_days: int = DSAR_DUE_DAYS,
     _intake: dict | None = None,
 ) -> dict:
+    """Open a tracked request.
+
+    ``jurisdiction`` selects the verified regime clock (``due_at``,
+    ``acknowledge_by`` and the allowed extension); without one the legacy
+    30-day fallback applies and ``due_basis`` says so. ``status`` may be
+    ``unverified`` for a request whose requester has not yet proved they
+    control the address (the public form); it becomes ``open`` through
+    :func:`verify_dsar`. ``requester`` carries what the requester typed
+    (name, relationship, message, authorised-agent flag), bounded here."""
     kind = (kind or "").strip().lower()
     if kind not in DSAR_KINDS:
         raise ValueError(f"kind must be one of {DSAR_KINDS}")
+    if source not in DSAR_SOURCES:
+        raise ValueError(f"source must be one of {DSAR_SOURCES}")
+    if status not in ("open", "unverified"):
+        raise ValueError("status must be open or unverified")
+    jurisdiction = (jurisdiction or "").strip().lower()[:32]
     now = time.time()
+    received = now if received_at is None else float(received_at)
     subject = (subject_id or "").strip()[:200]
     if not subject:
         raise ValueError("subject_id is required")
+    deadlines = _dsar_deadlines(kind, jurisdiction, received, internal_target_days)
     record = {
         "id": _DSAR.new_id(),
         "subject_id": subject,
@@ -2688,10 +2916,27 @@ def open_dsar(
         "kind": kind,
         "opened_by": _actor_label(opened_by),
         "created_at": now,
-        "due_at": now + DSAR_DUE_DAYS * 86400,
-        "status": "open",
+        "received_at": received,
+        **deadlines,
+        "extended_until": None,
+        "extension_reason": "",
+        "acknowledged_at": None,
+        "source": source,
+        "verification": (
+            {"status": "unverified"} if status == "unverified"
+            else {"status": "not_required"}
+        ),
+        "status": status,
         "fulfillment": None,
     }
+    if requester:
+        record["requester"] = {
+            "name": str(requester.get("name") or "")[:200],
+            "relationship": str(requester.get("relationship") or "")[:32],
+            "authorised_agent": bool(requester.get("authorised_agent")),
+            "message": str(requester.get("message") or "")[:4000],
+            "property": str(requester.get("property") or "")[:64],
+        }
     if _intake is not None:
         signals = _intake.get("signals") if isinstance(_intake, dict) else None
         excerpt = _intake.get("excerpt") if isinstance(_intake, dict) else None
@@ -2708,7 +2953,9 @@ def open_dsar(
         }
     _queue_audit(record, "open", opened_by)
     saved = _DSAR.save(record, expected_revision=0)
-    return _audit_mutation(_DSAR, "dsar", saved)
+    saved = _audit_mutation(_DSAR, "dsar", saved)
+    _emit_record_event("dsar.opened", "dsar", saved)
+    return saved
 
 
 # What an inbound data-subject request sounds like. Deterministic and
@@ -2776,6 +3023,7 @@ def open_dsar_from_message(text: str, *, channel: str = "",
         hit["kind"],
         channel=channel,
         opened_by=opened_by,
+        source="message",
         _intake={
             "signals": hit["signals"],
             "excerpt": (text or "").strip()[:300],
@@ -2813,10 +3061,151 @@ def list_dsars() -> list[dict]:
         if "status" not in r:  # not a request record (defensive)
             continue
         r = dict(r)
-        r["days_left"] = int((float(r.get("due_at", now)) - now) // 86400)
-        r["overdue"] = r["status"] == "open" and r["days_left"] < 0
+        r.update(dsar_clock(r, now=now))
         out.append(r)
     return out
+
+
+def _dsar_mutation(
+    request_id: str, mutate, *, action: str, actor: str, event: str = "",
+) -> dict | None:
+    """Run one audited mutation on a request; ``None`` when it does not
+    exist. ``mutate`` returns True when it changed the record; ``event`` is
+    the webhook event sent to subscribers when it did."""
+    changed = False
+
+    def _mut(record: dict) -> None:
+        nonlocal changed
+        if mutate(record):
+            _queue_audit(record, action, actor)
+            changed = True
+
+    saved = _DSAR.update(str(request_id or "")[:64], _mut)
+    if saved is not None and (
+        changed or isinstance(saved.get("_audit_pending"), (dict, list))
+    ):
+        saved = _audit_mutation(_DSAR, "dsar", saved)
+    if changed and event:
+        _emit_record_event(event, "dsar", saved)
+    return saved
+
+
+def verify_dsar(
+    request_id: str, *, method: str, reference: str, verified_by: str = "",
+) -> dict | None:
+    """Mark the requester verified and move an ``unverified`` request to
+    ``open``. ``method`` is the fulfillment vocabulary (``email_challenge``
+    when the requester used the single-use link the platform sent them --
+    the one method this platform performs itself)."""
+    from .dsar_fulfillment import IDENTITY_METHODS
+
+    if method not in IDENTITY_METHODS:
+        raise ValueError(f"method must be one of {IDENTITY_METHODS}")
+    note = (reference or "").strip()[:512]
+
+    def _verify(record: dict) -> bool:
+        if record.get("verification", {}).get("status") == "verified":
+            return False
+        record["verification"] = {
+            "status": "verified", "method": method, "reference": note,
+            "verified_at": time.time(), "verified_by": _actor_label(verified_by),
+        }
+        if record.get("status") == "unverified":
+            record["status"] = "open"
+        return True
+
+    return _dsar_mutation(request_id, _verify, action="verify", actor=verified_by,
+                          event="dsar.verified")
+
+
+def acknowledge_dsar(request_id: str, *, acknowledged_by: str = "") -> dict | None:
+    """Record that receipt was confirmed to the requester (the CCPA's
+    10-business-day step; a courtesy elsewhere)."""
+
+    def _ack(record: dict) -> bool:
+        if record.get("acknowledged_at"):
+            return False
+        record["acknowledged_at"] = time.time()
+        record["acknowledged_by"] = _actor_label(acknowledged_by)
+        return True
+
+    return _dsar_mutation(request_id, _ack, action="acknowledge", actor=acknowledged_by,
+                          event="dsar.acknowledged")
+
+
+def assign_dsar(request_id: str, assignee: str, *, assigned_by: str = "") -> dict | None:
+    """Name the person who works a request (``""`` leaves it unassigned).
+
+    The caller checks that the assignee may work privacy requests; this
+    records the change and keeps the previous assignee on the record so the
+    change can be undone exactly."""
+    who = str(assignee or "").strip()[:200]
+    if who and not who.startswith("user:"):
+        raise ValueError("Choose a person to assign the request to.")
+
+    def _assign(record: dict) -> bool:
+        if (record.get("assignee") or "") == who:
+            return False
+        record["previous_assignee"] = record.get("assignee") or ""
+        record["assignee"] = who
+        record["assigned_at"] = time.time()
+        record["assigned_by"] = _actor_label(assigned_by)
+        return True
+
+    return _dsar_mutation(request_id, _assign, action="assign", actor=assigned_by)
+
+
+def extend_dsar(
+    request_id: str, *, reason: str, days: int | None = None,
+    extended_by: str = "",
+) -> dict | None:
+    """Record a response-period extension with its reason, validated against
+    the request's regime (length cap; notice before the first period ends).
+    A request without a jurisdiction may be extended by up to 60 days."""
+    why = (reason or "").strip()[:2000]
+    if not why:
+        raise ValueError("extension reason is required")
+    now = time.time()
+
+    def _extend(record: dict) -> bool:
+        if not dsar_response_pending(record):
+            raise ValueError("only a request still being worked can be extended")
+        if record.get("extended_until"):
+            raise ValueError("this request was already extended once")
+        if record.get("jurisdiction"):
+            from . import rights_deadlines
+
+            clock = rights_deadlines.compute_clock(
+                record["jurisdiction"],
+                rights_deadlines.PUBLIC_TYPE.get(record["kind"], record["kind"]),
+                float(record.get("received_at") or record.get("created_at")),
+            )
+            clock["due_at"] = float(record["due_at"])
+            until = rights_deadlines.extension_for(clock, days=days, now=now)["extended_until"]
+        else:
+            if days is None or not 1 <= int(days) <= 60:
+                raise ValueError("extension days must be 1-60")
+            until = float(record["due_at"]) + int(days) * 86400
+        record["extended_until"] = until
+        record["extension_reason"] = why
+        record["extended_at"] = now
+        record["extended_by"] = _actor_label(extended_by)
+        return True
+
+    return _dsar_mutation(request_id, _extend, action="extend", actor=extended_by,
+                          event="dsar.extended")
+
+
+def annotate_dsar(request_id: str, mutate, *, action: str, actor: str = "") -> dict | None:
+    """Audited free-form annotation for sibling modules (the public form
+    stores its token digests and email log this way). ``mutate`` returns
+    True when it changed the record."""
+    return _dsar_mutation(request_id, mutate, action=action, actor=actor)
+
+
+def iter_dsar_records() -> list[dict]:
+    """Raw stored requests (no clock fields), for digest lookups."""
+    return [r for r in _DSAR.list() if "status" in r]
 
 
 def dsar_estate_worksheet(request_id: str) -> dict:
@@ -2824,8 +3213,9 @@ def dsar_estate_worksheet(request_id: str) -> dict:
 
     The fulfillment machinery exports what Lightwork itself holds; this
     worksheet is the human search plan for the rest of the estate: the
-    data-map assets whose flagged columns identify people, the active
-    vendors who process on the organization's behalf, and (when document
+    data-map assets whose flagged columns identify people, every vendor
+    that is not offboarded (a vendor still under review may already hold
+    the subject's data, so it stays on the search plan), and (when document
     sources are connected) a bounded document search for the subject.
     Every section degrades to ``enabled: false`` when its module is off —
     the worksheet never fails because part of the estate is unmapped.
@@ -2836,16 +3226,8 @@ def dsar_estate_worksheet(request_id: str) -> dict:
         raise KeyError(f"no such request: {request_id}")
     subject = str(record.get("subject_id") or "")
 
-    platform: dict = {"enabled": True}
     try:
-        from . import dsar as dsar_export
-
-        bundle = dsar_export.export_subject_data(subject)
-        platform["sections"] = {
-            key: len(value)
-            for key, value in bundle.items()
-            if isinstance(value, list)
-        }
+        platform = _dsar_platform_holdings(record)
     except Exception:
         platform = {"enabled": False, "error": "unavailable"}
 
@@ -2881,8 +3263,10 @@ def dsar_estate_worksheet(request_id: str) -> dict:
             processors = {
                 "enabled": True,
                 "vendors": [
-                    {"id": row.get("id"), "name": row.get("name")}
-                    for row in vm.list_vendors(status="active")
+                    {"id": row.get("id"), "name": row.get("name"),
+                     "status": row.get("status")}
+                    for row in vm.list_vendors()
+                    if row.get("status") != "offboarded"
                 ][:100],
             }
     except Exception:
@@ -2915,19 +3299,56 @@ def dsar_estate_worksheet(request_id: str) -> dict:
     }
 
 
+def _dsar_platform_holdings(record: dict) -> dict:
+    """Count what Lightwork itself holds for the request's subject, by area.
+
+    Reads exactly as :func:`fulfill_dsar` does -- the request's own channel and
+    the current tenant -- so the plan matches what the export would deliver.
+    ``resolved`` is False when the account could not be pinned to one channel:
+    nothing is read then, and a zero must not be mistaken for "holds nothing".
+    """
+    from . import dsar as dsar_export
+    from .paths import current_tenant_id
+
+    bundle = dsar_export.export_subject_data(
+        str(record.get("subject_id") or ""),
+        channel=record.get("channel") or None,
+        tenant=current_tenant_id() or None,
+    )
+    # Use the export's canonical row counts. Counting top-level containers
+    # misses nested turns/episodes and counts history subjects instead of the
+    # actual number of fact revisions.
+    counts = bundle["counts"]
+    sections = {
+        "conversations": counts["conversations"],
+        "turns": counts["turns"],
+        "goals": counts["goals"],
+        "episodes": counts["episodes"],
+        "facts": counts["facts"],
+        "fact_history": counts["fact_history"],
+        "audit": counts["audit_events"],
+    }
+    subject = bundle.get("subject")
+    resolved = bool(isinstance(subject, dict) and subject.get("channel"))
+    return {"enabled": True, "sections": sections, "resolved": resolved}
+
+
 def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
     """Fulfill an open request through the REAL machinery.
 
     ``access`` / ``portability``: runs :func:`maverick.dsar.export_subject_data`
     and stores the bundle (counts recorded on the request). ``erasure``: never
     destructive from here -- returns structured arguments for an authenticated
-    operator workflow (the CLI carries the confirmation flow, knowledge-plane
-    scrub, and audit trail). No shell command is constructed or executed."""
+    operator workflow. Other rights require the action, answer date and proof
+    to be recorded through :func:`close_dsar`; no action is inferred from a
+    button click. No shell command is constructed or executed."""
     changed = False
     invalid = False
 
     def _fulfill(record: dict) -> None:
         nonlocal changed, invalid
+        if record.get("kind") not in ("access", "portability", "erasure"):
+            raise ValueError("Record what was changed or stopped, when the answer was sent, and where its proof is kept before closing this request.")
         if _secure_erasure_handoff(record):
             _queue_audit(record, "secure_erasure_handoff", fulfilled_by)
             changed = True
@@ -2996,28 +3417,208 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
         return None
     if changed or isinstance(saved.get("_audit_pending"), (dict, list)):
         saved = _audit_mutation(_DSAR, "dsar", saved)
+    if changed:
+        _emit_record_event("dsar.closed", "dsar", saved)
     return saved
 
 
-def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
-    changed = False
+#: How a request ended. ``answered`` and ``refused`` mean the requester was
+#: told (the date and where the proof is kept are required); ``withdrawn``
+#: and ``no_response`` close a request without an answer.
+DSAR_OUTCOMES = ("answered", "refused", "withdrawn", "no_response")
+#: For a deletion request: what happened to the data.
+DSAR_ERASURE_RESULTS = ("erased", "not_erased")
+_DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+
+
+def _utc_day(stamp: object) -> str:
+    """The UTC calendar day (YYYY-MM-DD) of an epoch stamp; "" when unset."""
+    import datetime
+
+    try:
+        value = float(stamp or 0)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(value) or value <= 0:
+        return ""
+    return datetime.datetime.fromtimestamp(value, tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+
+
+def _dsar_outcome(record: dict, outcome: object, *, actor: str, now: float) -> dict:
+    """Check what the person closing a request says happened, so a closed
+    request never reads as answered without the facts that make it true."""
+    import datetime
+
+    if not isinstance(outcome, dict) or outcome.get("kind") not in DSAR_OUTCOMES:
+        raise ValueError("Choose what happened to the request.")
+
+    def text(key: str, limit: int) -> str:
+        return str(outcome.get(key) or "").strip()[:limit]
+
+    result = {"kind": outcome["kind"], "recorded_by": _actor_label(actor), "recorded_at": now}
+    if result["kind"] in ("withdrawn", "no_response"):
+        result["note"] = text("note", 2000)
+        return result
+    day = text("answered_on", 10)
+    try:
+        datetime.date.fromisoformat(day if _DAY_RE.fullmatch(day) else "")
+    except ValueError:
+        raise ValueError("Enter the date the answer was sent.") from None
+    # A person's local "today" can be a day ahead of UTC (up to UTC+14).
+    if day > _utc_day(now + 14 * 3600):
+        raise ValueError("The answer date cannot be in the future.")
+    if day < _utc_day(record.get("received_at") or record.get("created_at")):
+        raise ValueError("The answer date cannot be before the request arrived.")
+    reference = text("reference", 512)
+    if not reference:
+        raise ValueError("Say where the proof of the answer is kept.")
+    result.update(answered_on=day, reference=reference)
+    if result["kind"] == "answered" and record.get("kind") not in {"access", "portability", "erasure"}:
+        action = text("note", 2000)
+        if not action:
+            raise ValueError("Describe what was changed or stopped and which systems were covered.")
+        result["note"] = action
+    lawful_basis = text("lawful_basis", 2000)
+    if result["kind"] == "refused" and not lawful_basis:
+        raise ValueError("Give the lawful reason for refusing.")
+    if result["kind"] == "answered" and record.get("kind") == "erasure":
+        erasure = text("erasure", 32)
+        if erasure not in DSAR_ERASURE_RESULTS:
+            raise ValueError("Say whether their data was erased.")
+        if erasure == "not_erased" and not lawful_basis:
+            raise ValueError("Give the lawful reason for keeping their data.")
+        result["erasure"] = erasure
+    if lawful_basis:
+        result["lawful_basis"] = lawful_basis
+    return result
+
+
+def dsar_answer(record: dict) -> dict | None:
+    """The answer on record for a request, or ``None`` when there is none.
+
+    Counted: an outcome recorded when closing (``answered`` or ``refused``),
+    (data collection, deletion preparation and an old manual-fulfillment marker
+    are not answers), and a
+    refusal or completion notice that was actually sent (a completion for a
+    deletion request still needs its erasure result). Returns
+    ``{"kind", "on"}`` with the UTC day of the answer."""
+    outcome = record.get("outcome")
+    if isinstance(outcome, dict):
+        if outcome.get("kind") in ("answered", "refused") and outcome.get("answered_on"):
+            return {"kind": outcome["kind"], "on": str(outcome["answered_on"])}
+        return None
+    erasure = record.get("kind") == "erasure"
+    emails = (record.get("public_form") or {}).get("emails") or []
+    for entry in emails if isinstance(emails, list) else ():
+        if not isinstance(entry, dict) or entry.get("sent") is not True:
+            continue
+        if entry.get("kind") == "refusal" or (entry.get("kind") == "completion" and not erasure):
+            day = _utc_day(entry.get("at"))
+            if day:
+                return {"kind": "answered" if entry["kind"] == "completion" else "refused", "on": day}
+    return None
+
+
+def dsar_close_original(record: dict, *, operation_id: str, reviewed_revision: int,
+                        actor: str, outcome: dict) -> dict | None:
+    """Read one exact immutable outcome receipt, without changing anything."""
+    saved = record.get("outcome")
+    if (not isinstance(saved, dict) or saved.get("operation_id") != operation_id
+            or saved.get("reviewed_revision") != reviewed_revision
+            or saved.get("recorded_by") != _actor_label(actor)):
+        return None
+    fields = {key: value for key, value in saved.items()
+              if key not in {"operation_id", "reviewed_revision", "recorded_by", "recorded_at"}}
+    return dict(saved) if fields == outcome else None
+
+
+def _dsar_close_review_revision(operation_id, expected_revision, outcome):
+    if operation_id and (re.fullmatch(r"[a-f0-9]{32}", operation_id) is None or outcome is None or expected_revision is None):
+        raise ValueError("Keep the complete reviewed outcome before closing this request.")
+    return _DSAR._expected_revision(expected_revision)
+
+
+def close_dsar(request_id: str, *, closed_by: str = "", outcome: dict | None = None,
+               operation_id: str = "", expected_revision: int | None = None,
+               effect_guard=None) -> dict | None:
+    """Close a request, recording what happened when ``outcome`` is given.
+
+    A request closed without an outcome can have it recorded later, once;
+    a recorded outcome is never rewritten."""
+    changed = closed = False
+    expected_revision = _dsar_close_review_revision(operation_id, expected_revision, outcome)
 
     def _close(r: dict) -> None:
-        nonlocal changed
+        nonlocal changed, closed
+        now = time.time()
+        recorded = None if outcome is None else _dsar_outcome(r, outcome, actor=closed_by, now=now)
+        if operation_id:
+            fields = {key: value for key, value in recorded.items() if key not in {"recorded_by", "recorded_at"}}
+            if (r.get("outcome") or {}).get("operation_id") == operation_id:
+                if dsar_close_original(r, operation_id=operation_id, reviewed_revision=expected_revision,
+                                       actor=closed_by, outcome=fields) is None:
+                    raise RecordConflict("This original outcome belongs to different reviewed details.")
+                return
+            recorded.update(operation_id=operation_id, reviewed_revision=expected_revision)
+        if expected_revision is not None and r.get("revision", 0) != expected_revision:
+            raise RecordConflict("This privacy request changed. Read it again before reviewing its outcome.")
+        if effect_guard is not None:
+            effect_guard()
         if r.get("status") == "closed":
+            if outcome is None:
+                return
+            if r.get("outcome"):
+                raise RecordConflict("the outcome of this request is already on record")
+            r["outcome"] = recorded
+            _queue_audit(r, "record_outcome", closed_by)
+            changed = True
             return
         _secure_erasure_handoff(r)
         r["status"] = "closed"
-        r["closed_at"] = time.time()
+        r["closed_at"] = now
         r["closed_by"] = _actor_label(closed_by)
+        if recorded is not None:
+            r["outcome"] = recorded
+        if r.get("kind") in ("access", "portability"):
+            # Publish the close before touching its export. A crash now leaves
+            # a durable pending marker that a repeated close can finish.
+            r["export_cleanup"] = {"status": "pending"}
         _queue_audit(r, "close", closed_by)
-        changed = True
+        changed = closed = True
 
-    saved = _DSAR.update(request_id, _close)
+    saved = _DSAR.update(request_id, _close, effect_guard=effect_guard)
     if saved is not None and (
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_DSAR, "dsar", saved)
+    if closed:
+        _emit_record_event("dsar.closed", "dsar", saved)
+    if saved is not None and saved.get("kind") in ("access", "portability"):
+        removed = _remove_closed_dsar_export(saved)
+        outcome = {
+            "status": "removed" if removed else "failed",
+            "message": (
+                "No export file remains for this request."
+                if removed else
+                "The request is closed, but its export file could not be safely removed. "
+                "Retry export cleanup or ask an administrator for help."
+            ),
+        }
+
+        def _record_cleanup(r: dict) -> None:
+            # A concurrent retry that succeeded must not be overwritten by a
+            # slower failed attempt. Success may always replace a failure.
+            if r.get("status") != "closed":
+                return
+            if not removed and (r.get("export_cleanup") or {}).get("status") == "removed":
+                return
+            if r.get("export_cleanup") != outcome:
+                r["export_cleanup"] = outcome
+                _queue_audit(r, "export_cleanup", closed_by)
+
+        saved = _DSAR.update(request_id, _record_cleanup)
+        if saved is not None and isinstance(saved.get("_audit_pending"), (dict, list)):
+            saved = _audit_mutation(_DSAR, "dsar", saved)
     return saved
 
 
@@ -3029,27 +3630,51 @@ INCIDENT_SEVERITIES = ("low", "medium", "high")
 BREACH_NOTIFY_HOURS = 72  # Art. 33(1): without undue delay, within 72h
 
 
+#: Clocks on two machines differ a little; a time this far ahead is a typo.
+_AWARE_SKEW_SECONDS = 5 * 60
+
+
 def open_incident(title: str, *, severity: str = "medium",
                   description: str = "", categories: str = "",
-                  affected_estimate: str = "", reported_by: str = "") -> dict:
-    """Open a privacy-incident record; the Art. 33 clock starts at discovery
-    (= now). Whether the incident is a notifiable breach stays a HUMAN
-    decision recorded via :func:`decide_incident_notification` -- the
-    register tracks the clock, it never notifies anyone itself."""
+                  affected_estimate: str = "", affected_people: int | None = None,
+                  aware_at: float | None = None, reported_by: str = "") -> dict:
+    """Open a privacy-incident record. The Art. 33 clock runs from when the
+    organisation became aware of the breach (``aware_at``; now when not
+    given), not from when the record was opened. Whether the incident is a
+    notifiable breach stays a HUMAN decision recorded via
+    :func:`decide_incident_notification` -- the register tracks the clock,
+    it never notifies anyone itself."""
     severity = (severity or "medium").strip().lower()
     if severity not in INCIDENT_SEVERITIES:
         raise ValueError(f"severity must be one of {INCIDENT_SEVERITIES}")
+    if affected_people is not None and (
+        not isinstance(affected_people, int) or isinstance(affected_people, bool)
+        or affected_people < 0
+    ):
+        raise ValueError("affected_people must be a non-negative integer or None")
     now = time.time()
+    aware = now
+    if aware_at is not None:
+        try:
+            aware = float(aware_at)
+        except (TypeError, ValueError):
+            aware = math.nan
+        if isinstance(aware_at, bool) or not math.isfinite(aware) or aware <= 0:
+            raise ValueError("Enter when you became aware of the breach.")
+        if aware > now + _AWARE_SKEW_SECONDS:
+            raise ValueError("The time you became aware cannot be in the future.")
     record = {
         "id": _INCIDENT.new_id(),
         "title": (title or "").strip()[:200],
         "description": (description or "").strip()[:4000],
         "categories": (categories or "").strip()[:500],
         "affected_estimate": (affected_estimate or "").strip()[:100],
+        "affected_people": affected_people,
         "severity": severity,
         "reported_by": _actor_label(reported_by),
         "created_at": now,
-        "notify_deadline_at": now + BREACH_NOTIFY_HOURS * 3600,
+        "aware_at": aware,
+        "notify_deadline_at": aware + BREACH_NOTIFY_HOURS * 3600,
         "status": "open",
         "notification": None,
     }
@@ -3057,7 +3682,31 @@ def open_incident(title: str, *, severity: str = "medium",
         raise ValueError("title is required")
     _queue_audit(record, "open", reported_by)
     saved = _INCIDENT.save(record, expected_revision=0)
-    return _audit_mutation(_INCIDENT, "incident", saved)
+    saved = _audit_mutation(_INCIDENT, "incident", saved)
+    _emit_record_event("incident.opened", "incident", saved)
+    return saved
+
+
+def set_incident_affected_people(incident_id: str, affected_people: int | None,
+                                 *, updated_by: str = "") -> dict | None:
+    """Record a revised best estimate without erasing the reporter's context."""
+    if affected_people is not None and (
+        not isinstance(affected_people, int) or isinstance(affected_people, bool)
+        or affected_people < 0
+    ):
+        raise ValueError("affected_people must be a non-negative integer or None")
+
+    def _mut(r: dict) -> None:
+        if r.get("status") == "closed":
+            raise RecordConflict("closed privacy incident cannot be changed")
+        r["affected_people"] = affected_people
+        _queue_audit(r, "affected_people_updated", updated_by)
+
+    saved = _INCIDENT.update(incident_id, _mut)
+    if saved is not None:
+        saved = _audit_mutation(_INCIDENT, "incident", saved)
+        _emit_record_event("incident.affected_people_updated", "incident", saved)
+    return saved
 
 
 def decide_incident_notification(incident_id: str, notifiable: bool, *,
@@ -3093,6 +3742,8 @@ def decide_incident_notification(incident_id: str, notifiable: bool, *,
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_INCIDENT, "incident", saved)
+    if changed:
+        _emit_record_event("incident.notifiable_decided", "incident", saved)
     return saved
 
 
@@ -3114,6 +3765,8 @@ def close_incident(incident_id: str, *, closed_by: str = "") -> dict | None:
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_INCIDENT, "incident", saved)
+    if changed:
+        _emit_record_event("incident.closed", "incident", saved)
     return saved
 
 
@@ -3218,20 +3871,27 @@ def program_report(assessment_types: set | None = None) -> dict:
     }
 
     dsars = list_dsars()
-    closed_like = [d for d in dsars if d["status"] in ("fulfilled", "closed",
-                                                       "awaiting_erasure")]
-    on_time = sum(1 for d in closed_like
-                  if float(d.get("fulfilled_at")
-                           or d.get("closed_at")
-                           or d.get("created_at") or 0)
-                  <= float(d.get("due_at") or 0))
+    # Handled = closed or marked answered. A deletion waiting for its erasure
+    # is still open work. "On time" needs an answer on record by the
+    # deadline in force (an extension included); a request closed without
+    # one is counted as exactly that.
+    handled = [d for d in dsars if d["status"] == "closed" or dsar_answer(d) is not None]
+    answers = [(d, dsar_answer(d)) for d in handled]
+    answered = [(d, a) for d, a in answers if a is not None]
+    on_time = sum(1 for d, a in answered if a["on"] <= _utc_day(d.get("effective_due_at")))
+    withdrawn = sum(1 for d, a in answers
+                    if a is None and (d.get("outcome") or {}).get("kind") == "withdrawn")
     dsar = {
         "total": len(dsars),
-        "open": sum(1 for d in dsars if d["status"] == "open"),
+        "open": sum(1 for d in dsars if dsar_response_pending(d)),
         "overdue": sum(1 for d in dsars if d.get("overdue")),
         "by_kind": dict(Counter(d["kind"] for d in dsars)),
-        "handled": len(closed_like),
+        "handled": len(handled),
+        "answered": len(answered),
         "handled_on_time": on_time,
+        "answered_late": len(answered) - on_time,
+        "withdrawn": withdrawn,
+        "closed_without_response": len(handled) - len(answered) - withdrawn,
     }
 
     incidents = list_incidents()
@@ -3292,8 +3952,11 @@ def program_report(assessment_types: set | None = None) -> dict:
 
 __all__ = [
     "AI_ACT_NOTE", "BREACH_NOTIFY_HOURS", "DPA_CHECKLIST", "DSAR_DUE_DAYS",
-    "DSAR_KINDS", "close_incident", "decide_incident_notification",
-    "list_incidents", "open_incident", "privacy_program_context_heads", "program_report",
+    "DSAR_DUE_SOON_DAYS", "DSAR_ERASURE_RESULTS", "DSAR_KINDS", "DSAR_OUTCOMES",
+    "DSAR_SOURCES", "acknowledge_dsar", "dsar_answer",
+    "annotate_dsar", "dsar_clock", "extend_dsar", "iter_dsar_records",
+    "verify_dsar", "close_incident", "decide_incident_notification",
+    "list_incidents", "open_incident", "privacy_program_context_heads", "program_report", "dsar_response_pending",
     "ROPA_FIELDS", "RecordConflict", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
     "detect_dsar", "dsar_estate_worksheet", "fulfill_dsar",

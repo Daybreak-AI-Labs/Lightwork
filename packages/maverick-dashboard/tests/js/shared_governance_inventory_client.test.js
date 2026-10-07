@@ -43,6 +43,7 @@ test("mutations carry closed fields and exact compare-and-swap authority", () =>
 
 // ---- behaviour in a page -------------------------------------------------
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require("./_shell");
 const REF_A = "a".repeat(64);
 const REF_B = "b".repeat(64);
 
@@ -83,6 +84,7 @@ async function inventoryFixture(intercept = () => undefined) {
     }
     return new Response(JSON.stringify(reply), { status: reply.__status || 200, headers: { "Content-Type": "application/json" } });
   };
+  loadShell(window);
   window.eval(source());
   async function settle() { for (let i = 0; i < 40; i++) await new Promise((d) => setImmediate(d)); }
   await settle();

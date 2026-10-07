@@ -195,6 +195,102 @@ def _principal(request: Request, tenant_id: str) -> str:
 _ID_RE = re.compile(_ID_PATTERN)
 _DIGEST_RE = re.compile(_DIGEST_PATTERN)
 _MAX_SOURCES = 500
+_EVIDENCE_OUTPUTS = (
+    {"path": ["status"], "label": "Check result", "type": "text_ref"},
+    {"path": ["reason_code"], "label": "Result explanation", "type": "text_ref"},
+    {"path": ["evidence_sha256"], "label": "Evidence file reference", "type": "digest"},
+    {"path": ["source_revision_sha256"], "label": "Source edition reference", "type": "digest"},
+)
+_LOCAL_CONTROL_LABELS = {
+    "audit_log": "Activity log",
+    "audit_signing_key": "Activity log signing",
+    "capability_enforcement": "Approved action permissions",
+    "data_subject_export": "Personal data exports",
+    "encryption_at_rest": "Stored data protection",
+    "oidc_auth": "Company sign-in",
+    "tenant_isolation": "Workspace separation",
+    "usage_quotas": "Usage limits",
+}
+
+
+def _approved_collectors(request: Request, tenant: str) -> list[dict[str, object]]:
+    """Current installed, approved definitions; no credentials or provider data."""
+    from maverick import trc_continuous_evidence as evidence
+
+    from . import auth, grc_draft_changes, trc_setup_api
+    from .app import require_page_visible
+
+    authority = grc_draft_changes.authority(request)
+    auth.require_page_permission(request, "/compliance/continuous-evidence")
+    require_page_visible(request, "/compliance/continuous-evidence")
+    if authority[0] != tenant or not auth.suite_allowed(request, "it_grc"):
+        raise HTTPException(403, "Your current access does not permit these evidence sources.")
+    try:
+        _, selected_tenant, store = trc_setup_api._store(request)
+        plans = trc_setup_api._manifests(request, tenant)
+        if selected_tenant != tenant or len(plans) > _MAX_SOURCES:
+            raise HTTPException(503, "The complete approved evidence source list is unavailable. Your entered work is kept.")
+        labels = trc_setup_api._source_controls()
+        result = []
+        for plan in plans.values():
+            try:
+                definition = store.get_definition(plan["definition_id"], plan["definition_version"])
+            except evidence.ContinuousEvidenceNotFound:
+                continue  # Configured but not yet saved and independently approved.
+            if definition.state != "approved" or plan["credential_ready"] is False:
+                continue
+            controls = sorted(set(definition.allowed_control_refs) & set(plan["controls"]))
+            # Blueprint control references use a narrower declared identifier grammar.
+            controls = [identifier for identifier in controls if _ID_RE.fullmatch(identifier)]
+            retained_labels = (definition.source_manifest or {}).get("control_labels", {})
+            result.append({
+                "collector_id": definition.collector_id,
+                "collector_version": definition.version,
+                "collector_integrity_sha256": definition.integrity_sha256,
+                "label": plan["label"], "definition_id": definition.definition_id,
+                "outputs": list(_EVIDENCE_OUTPUTS),
+                "controls": [{"value": identifier, "label": retained_labels.get(identifier) or labels.get(identifier) or _LOCAL_CONTROL_LABELS.get(identifier) or
+                              identifier.replace("_", " ").replace("-", " ")} for identifier in controls],
+            })
+    except (evidence.ContinuousEvidenceError, OSError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(503, "Current evidence sources could not be verified. Your entered work is kept.") from exc
+    if grc_draft_changes.authority(request) != authority:
+        raise HTTPException(409, "Your account, workspace or access changed. Read the current evidence choices again.")
+    return result
+
+
+def validate_collector_bindings(request: Request, blueprint: Mapping, previous: Mapping | None = None) -> list:
+    """Pin supported native sources through the existing final writer guard.
+
+    Custom-adapter declarations keep their existing native contract; this does
+    not invent verified choices for an uninstalled custom collector.
+    """
+    from maverick.trc_evidence_collectors import LocalSoc2Collector
+    from maverick.trc_stock_evidence_collectors import STOCK_COLLECTOR_IDS
+
+    bindings = blueprint.get("collector_bindings", ())
+    if not bindings:
+        return []
+    known = {*STOCK_COLLECTOR_IDS, LocalSoc2Collector.collector_id}
+    prior = (previous or {}).get("collector_bindings", ())
+    current = None
+    for binding in bindings:
+        if binding["collector_id"] not in known:
+            continue  # Preserve native custom-adapter declarations; the guided picker does not claim them.
+        if current is None:
+            current = _approved_collectors(request, _tenant_id())
+        source = next((row for row in current if
+                       row["collector_id"] == binding["collector_id"] and
+                       row["collector_version"] == binding["collector_version"] and
+                       row["collector_integrity_sha256"] == binding["collector_integrity_sha256"]), None)
+        if source is None:
+            raise HTTPException(409, "An evidence source changed or is no longer approved and available. Your draft is kept; choose its current setup before saving.")
+        if not set(binding["control_refs"]) <= {row["value"] for row in source["controls"]}:
+            raise HTTPException(409, "A selected control is no longer supported by this evidence source. Your entered work is kept.")
+        if binding not in prior and any(mapping["source_path"] not in [row["path"] for row in source["outputs"]]
+                                        for mapping in binding["field_mappings"]):
+            raise HTTPException(422, "Choose a named result field from this evidence source. Custom provider-data locations are not supported here.")
+    return current or []
 
 
 def _linked_collectors(rows: object) -> list[dict[str, object]]:
@@ -348,6 +444,8 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
     async def call(ops, function, *args, **kwargs):
         try:
             return await run_in_threadpool(function, *args, **kwargs)
+        except HTTPException:
+            raise
         except ops.GRCStudioNotFound as exc:
             raise HTTPException(
                 status_code=404, detail="GRC studio resource was not found"
@@ -472,12 +570,22 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
 
     @router.get("/sources")
     async def list_sources(request: Request, response: Response) -> dict[str, object]:
-        """Read-only choices for the page: collectors already linked in this
-        workspace and, when the deployment's adapter lists them, destinations."""
+        """Current approved native evidence sources and listed destinations."""
         require_permission(request, "view")
         ops, tenant, store = await composition(request)
-        rows = await call(ops, store.list_versions, tenant, limit=1_000)
-        collectors = _linked_collectors(rows)
+        from maverick.config import config_source_errors, load_config
+
+        from . import grc_draft_changes as guarded
+
+        context = guarded.authority(request)[2]
+        if config_source_errors(include_tenant=True):
+            raise HTTPException(503, "Current evidence settings could not be read. Your entered work is kept.")
+        cfg = load_config()
+        parent = cfg.get("tech_risk_compliance") or {}
+        if not isinstance(parent, Mapping) or not isinstance(parent.get("continuous_evidence") or {}, Mapping):
+            raise HTTPException(503, "Current evidence settings could not be verified. Your entered work is kept.")
+        evidence_enabled = parent.get("enable") is True and (parent.get("continuous_evidence") or {}).get("enable") is True
+        collectors = await run_in_threadpool(_approved_collectors, request, tenant) if evidence_enabled else []
         targets: list[dict[str, object]] = []
         listed = False
         resolver_factory = _dependency(
@@ -496,9 +604,12 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
             except Exception:  # noqa: BLE001 - a listing failure leaves the typed fallback
                 targets, listed = [], False
         _secure(response)
+        guarded.authority(request, context)
         return {
             "schema": "lightwork.no-code-grc-sources.v1",
+            "context": context,
             "collectors": collectors,
+            "collectors_notice": "Continuous evidence is turned off. Other blueprint choices remain available." if not evidence_enabled else "",
             "destinations": targets,
             "destinations_listed": listed,
         }
@@ -508,9 +619,11 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
         request: Request, response: Response, studio_id: ObjectPath, body: CreateVersionIn
     ) -> dict[str, object]:
         require_permission(request, "operate")
+        from . import grc_draft_changes as guarded
+        expected_context = guarded.context(request)
         ops, tenant, store = await composition(request)
         result = await call(
-            ops, store.create_version, tenant, studio_id, **body.model_dump(mode="python")
+            ops, guarded.legacy_save, request, store, "create", tenant, studio_id, body.model_dump(mode="python"), expected_context
         )
         _secure(response)
         return _jsonable(result)  # type: ignore[return-value]
@@ -524,9 +637,11 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
         body: ReplaceDraftIn,
     ) -> dict[str, object]:
         require_permission(request, "operate")
+        from . import grc_draft_changes as guarded
+        expected_context = guarded.context(request)
         ops, tenant, store = await composition(request)
         result = await call(
-            ops, store.replace_draft, tenant, studio_id, version, **body.model_dump(mode="python")
+            ops, guarded.legacy_save, request, store, "replace", tenant, studio_id, body.model_dump(mode="python"), expected_context, version=version
         )
         _secure(response)
         return _jsonable(result)  # type: ignore[return-value]

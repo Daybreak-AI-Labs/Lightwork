@@ -28,11 +28,11 @@ Not given a row, with the reason:
   nothing in the product generates or starts such a job yet
   (``generate_prime_rl_run_spec`` has no caller), so there is nothing to wire.
 * ``tech_risk_compliance.continuous_evidence.stock_collectors.sources``: each
-  source must match a signed collector definition and an enrollment held in
-  each workspace's continuous-evidence store (definition id, version,
-  fingerprint, collector key, capability revision), plus provider-specific
-  rule bindings read from the provider itself; the form needs an enrollment
-  picker from that store first.
+  source belongs to the workspace's signed continuous-evidence definition,
+  rather than this installation-wide overlay. Continuous evidence supplies
+  the named account, provider check and control form; independent approval
+  and enrollment use the same exact retained definition. Credentials remain
+  in sealed Connections. Older deployment source manifests remain separate.
 """
 from __future__ import annotations
 
@@ -237,10 +237,10 @@ def _plugins(S, C) -> tuple:  # noqa: N803
 def _workforce(S, C) -> tuple:  # noqa: N803
     return (
         S("workforce", "agents", "Independence of each agent",
-          "Choose how much a hired agent may do by itself at each risk level. Needs "
-          "per-agent independence levels on. An agent that is still being supervised acts "
+          "Choose how much an agent or specialist may do by itself at each risk level. Needs "
+          "per-agent independence levels on. One that is still being supervised acts "
           "one step more carefully.", "rules", "Safety", [], "maverick.config",
-          columns=(C("name", "Agent", "pick", choices_from="specialists", required=True,
+          columns=(C("name", "Agent or specialist", "pick", choices_from="specialists", required=True,
                      unique=True),
                    C("default", "Usually", "select", choices=_LEVEL, default=""),
                    C("low", "Low risk", "select", choices=_LEVEL, default=""),

@@ -282,7 +282,7 @@ def remove(key: str, tenant: str | None = None) -> bool:
 # SLA + status computation (pure, read-only over an injected world)
 # --------------------------------------------------------------------------- #
 def _measure(department: str, world: Any, *, window_days: int,
-             now: float | None = None) -> dict:
+             now: float | None = None, owner: str | None = None) -> dict:
     """Department totals; old embedders retain a visibly bounded fallback."""
     if not isinstance(window_days, int) or isinstance(window_days, bool) or window_days < 1:
         raise ValueError("window_days must be a positive integer")
@@ -293,7 +293,7 @@ def _measure(department: str, world: Any, *, window_days: int,
     aggregate = getattr(world, "shoring_measurements", None)
     if callable(aggregate):
         try:
-            m = aggregate(department, since=cutoff, until=evaluated_at)
+            m = aggregate(department, since=cutoff, until=evaluated_at, **({"owner": owner} if owner is not None else {}))
         except Exception as exc:
             raise RuntimeError("shoring measurements are unavailable; retry after restoring the work store") from exc
         completed = m["delivered"] + m["blocked"]
@@ -304,7 +304,7 @@ def _measure(department: str, world: Any, *, window_days: int,
         }
     delivered = blocked = in_flight = 0
     try:
-        goals = world.list_goals(domain=department, limit=2001, order="desc")
+        goals = world.list_goals(domain=department, limit=2001, order="desc", **({"owner": owner} if owner is not None else {}))
     except Exception as exc:
         raise RuntimeError("shoring measurements are unavailable; retry after restoring the work store") from exc
     complete = len(goals) <= 2000
@@ -433,14 +433,17 @@ def exceptions_for(function: Function, approvals: list) -> list[dict]:
 
 def function_status(function: Function, world: Any, *,
                     window_days: int = _DEFAULT_WINDOW_DAYS,
-                    now: float | None = None) -> dict:
+                    now: float | None = None, owner: str | None = None) -> dict:
     """One function's full status card: measured throughput, per-SLA
     indicators, the exception-desk count, and a rolled-up overall indicator
     (the worst SLA band)."""
-    m = _measure(function.department, world, window_days=window_days, now=now)
+    m = _measure(function.department, world, window_days=window_days, now=now, owner=owner)
     slas = _sla_rows(function, m)
     try:
         pending = list(world.pending_approvals())
+        if owner is not None:
+            pending = [a for a in pending if (a.requested_by or "") == owner
+                       and (not a.goal_id or getattr(world.get_goal(a.goal_id), "owner", None) == owner)]
     except Exception as exc:
         raise RuntimeError("shoring exception desk is unavailable; retry after restoring the work store") from exc
     exceptions = exceptions_for(function, pending)
@@ -474,10 +477,10 @@ def function_status(function: Function, world: Any, *,
 
 def book_status(world: Any, *, tenant: str | None = None,
                 window_days: int = _DEFAULT_WINDOW_DAYS,
-                now: float | None = None) -> list[dict]:
+                now: float | None = None, owner: str | None = None) -> list[dict]:
     """Every function in the book with its computed status (the page/API feed)."""
     return [
-        function_status(fn, world, window_days=window_days, now=now)
+        function_status(fn, world, window_days=window_days, now=now, owner=owner)
         for fn in load(tenant, strict=True)
     ]
 

@@ -74,8 +74,8 @@
       <h3>How to install this update</h3>
       <ol>
         <li>Finish what you are doing and save your changes.</li>
-        <li>From the Lightwork menu, open <strong>Workspace recovery mode</strong>. Approve the update there and copy the <strong>private approval code</strong> it shows.</li>
-        <li>Come back here (Lightwork menu, then <strong>Install &amp; updates</strong>) and select <strong>Paste code</strong> below.</li>
+        <li>From the Lightwork menu, open <strong>Workspace recovery mode</strong>. Review the exact release and approve its protected desktop handoff.</li>
+        <li>Come back here (Lightwork menu, then <strong>Install &amp; updates</strong>) and select <strong>Load protected approval</strong> below.</li>
         <li>Select <strong>Install and restart</strong>. Lightwork checks the installer and saves a restore point of your work before anything changes.</li>
       </ol>
     </div>
@@ -84,7 +84,9 @@
   </section>
 
   <section aria-labelledby="approval-title">
-    <h2 id="approval-title">Private approval code</h2>
+    <h2 id="approval-title">Administrator approval</h2>
+    <button id="load-handoff" type="button">Load protected approval</button>
+    <p class="muted">The protected handoff stays in private local storage. Review the administrator, action, scope and expiry below. Manual codes remain available when needed.</p>
     <p class="muted">Updates and going back to a previous version need a one-time code from <strong>Workspace recovery mode</strong>. The code works for 15 minutes, only on this computer and only for the action it was made for. Don&rsquo;t share it.</p>
     <label for="maintenance-authorization">Approval code</label>
     <div class="code-row">
@@ -102,6 +104,22 @@
     <h3>Finish an interrupted update or repair</h3>
     <label for="maintenance-incomplete">Interrupted update or repair</label><select id="maintenance-incomplete" style="max-width:100%"><option value="">None</option></select><button id="resume-maintenance" type="button" disabled>Finish it</button>
     <p id="maintenance-recovery-result" role="status" aria-live="polite"></p>
+  </section>
+
+  <section aria-labelledby="offline-title">
+    <h2 id="offline-title">Repair without a network connection</h2>
+    <p class="muted">Use an administrator-provided folder containing <strong>new.msi</strong> and <strong>downloads.json</strong> for this exact release. Lightwork checks its pinned update signature, Windows publisher, product, package and installed version before offering repair. A working bundled recovery copy can repair a missing primary application.</p>
+    <label for="offline-folder">Offline package folder</label><input id="offline-folder" type="text" autocomplete="off" spellcheck="false" style="width:100%">
+    <div class="actions"><button id="offline-review" type="button">Verify offline package</button><button id="offline-install" type="button" disabled>Repair this exact version and restart</button></div>
+    <p id="offline-details" role="status" aria-live="polite"></p>
+  </section>
+  <section aria-labelledby="planner-title">
+    <h2 id="planner-title">Choose a supported recovery</h2>
+    <label for="planner-point">Saved installation point</label><select id="planner-point"><option value="">Choose a point</option></select>
+    <div class="actions"><button id="planner-load" type="button">Review current blockers</button><button id="planner-next" type="button" disabled>More affected files</button><button id="planner-save" type="button" disabled>Save coordination plan</button></div>
+    <pre id="planner-details" role="status" aria-live="polite"></pre>
+    <div class="actions"><button id="planner-repair" type="button">Review current-version repair</button><button id="planner-workspace" type="button">Open workspace recovery confirmation</button></div>
+    <p class="muted">New spending, reservations, database or action history cannot be erased to enable rollback. Workspace recovery offers export and restore drills for the selected workspace. External services need their owners' coordinated recovery.</p>
   </section>
 
   <section aria-labelledby="recovery-title">

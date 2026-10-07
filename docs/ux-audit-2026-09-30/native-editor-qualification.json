@@ -1,0 +1,472 @@
+{
+  "review_date": "2026-10-01",
+  "audit_id": "LW-191",
+  "qualified_source": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+  "coverage": {
+    "native_ert_tests": 2,
+    "native_lua_existing_mock_fixtures": 1,
+    "lua_result_variants": [
+      "missing",
+      "nonzero",
+      "signal",
+      "malformed",
+      "wrong-state",
+      "halt",
+      "unhalt",
+      "timeout",
+      "cancel"
+    ],
+    "lua_additional_assertions": "Cancelled old request cannot overwrite a newer unhalt result; late output/exit callbacks cannot publish twice; timers removed",
+    "native_real_cli_or_interactive_ui": false,
+    "repeated_secure_flag_run": false
+  },
+  "assets": {
+    "action": "download",
+    "helper_sha256": "b84caed40033e17aedefe08234dc71d0709f4db47a638d62a0fcb21041211452",
+    "artifacts": [
+      {
+        "name": "emacs-30.2.zip",
+        "version": "30.2",
+        "url": "https://ftp.gnu.org/gnu/emacs/windows/emacs-30/emacs-30.2.zip",
+        "bytes": 166905014,
+        "sha256": "414d3a1a21147af257ebd98bdd15976fdcb5ed0563f6de89f76d4a4b5dad9c72",
+        "checksum_source": "https://ftp.gnu.org/gnu/emacs/windows/emacs-30/emacs-30.2-sha256sum.txt",
+        "license": "GNU GPL 3 or later; bundled third-party DLL notices retained in full archive",
+        "signature_verified": false,
+        "status": "verified",
+        "received_bytes": 166905014,
+        "actual_sha256": "414d3a1a21147af257ebd98bdd15976fdcb5ed0563f6de89f76d4a4b5dad9c72",
+        "seconds": 17.295
+      },
+      {
+        "name": "nvim-win64.zip",
+        "version": "0.12.5",
+        "url": "https://github.com/neovim/neovim/releases/download/v0.12.5/nvim-win64.zip",
+        "bytes": 12623588,
+        "sha256": "de8625ba8cf65ebf40eb80a388ba1ec8e9c15b30218821e2c639119b05920de1",
+        "checksum_source": "https://api.github.com/repos/neovim/neovim/releases/tags/v0.12.5",
+        "tag_commit": "5885a30e1e1225349079e7a1c4a3848aa8e43e42",
+        "license": "Apache 2.0; inherited Vim license and bundled dependency notices retained",
+        "signature_verified": false,
+        "status": "verified",
+        "received_bytes": 12623588,
+        "actual_sha256": "de8625ba8cf65ebf40eb80a388ba1ec8e9c15b30218821e2c639119b05920de1",
+        "seconds": 0.908
+      }
+    ]
+  },
+  "extraction": {
+    "action": "extract",
+    "helper_sha256": "b84caed40033e17aedefe08234dc71d0709f4db47a638d62a0fcb21041211452",
+    "artifacts": [
+      {
+        "name": "emacs-30.2.zip",
+        "sha256": "414d3a1a21147af257ebd98bdd15976fdcb5ed0563f6de89f76d4a4b5dad9c72",
+        "destination": "<task-root>\\editor-qualification-assets\\emacs-30.2",
+        "files": 6096,
+        "uncompressed_bytes": 523988915,
+        "status": "extracted_not_executed"
+      },
+      {
+        "name": "nvim-win64.zip",
+        "sha256": "de8625ba8cf65ebf40eb80a388ba1ec8e9c15b30218821e2c639119b05920de1",
+        "destination": "<task-root>\\editor-qualification-assets\\nvim-win64",
+        "files": 2235,
+        "uncompressed_bytes": 36524384,
+        "status": "extracted_not_executed"
+      }
+    ]
+  },
+  "helper_files": {
+    "editor_qualification_setup.py": "b84caed40033e17aedefe08234dc71d0709f4db47a638d62a0fcb21041211452",
+    "run_editor_qualification.py": "9bb581b3734978558a47612517694864490d298ce6169db6e25224561c2c4a8d",
+    "probe_editor_qualification.py": "3f72067e80c57236bf4a58088fc6b06ea407768690ccea164036851af4c452cb"
+  },
+  "attempts": [
+    {
+      "receipt": "audit/editor-native-ordinary-01/result.json",
+      "receipt_sha256": "d27e472a52e58d2277bc8bef4151a17f17ef4384afb096cb06d1714529a2d1f2",
+      "logs": [
+        {
+          "path": "audit/editor-native-ordinary-01/emacs.log",
+          "sha256": "e1e158f9bf34f4c6b4ae101d8b514511948f00d307c162b3f216528c713003b7"
+        }
+      ],
+      "result": {
+        "label": "editor-native-ordinary-01",
+        "source": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "helper_sha256": "9bb581b3734978558a47612517694864490d298ce6169db6e25224561c2c4a8d",
+        "secure_default": false,
+        "per_editor_cap_seconds": 120,
+        "coverage": "Existing ERT and Lua mock assertions in native hosts; no real CLI, provider, or installed-editor UX qualification",
+        "processes": [
+          {
+            "name": "emacs",
+            "command": [
+              "<task-root>\\editor-qualification-assets\\emacs-30.2\\bin\\emacs.exe",
+              "-Q",
+              "--batch",
+              "--eval",
+              "(progn (dolist (fn '(make-network-process open-network-stream url-retrieve url-retrieve-synchronously call-process start-process start-process-shell-command call-process-shell-command make-process)) (fset fn (lambda (&rest _) (error \"Native qualification forbids real network or CLI processes\")))) (princ (concat \"LIGHTWORK_EMACS_VERSION \" emacs-version \"\\n\")))",
+              "-l",
+              "<task-root>\\slice-editor-qualification-final\\apps\\emacs\\tests\\maverick-control-tests.el",
+              "-f",
+              "ert-run-tests-batch-and-exit"
+            ],
+            "cap_seconds": 120,
+            "pid": 45032,
+            "exception_type": "TimeoutExpired",
+            "exception": "Command '['C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\editor-qualification-assets\\\\emacs-30.2\\\\bin\\\\emacs.exe', '-Q', '--batch', '--eval', '(progn (dolist (fn \\'(make-network-process open-network-stream url-retrieve url-retrieve-synchronously call-process start-process start-process-shell-command call-process-shell-command make-process)) (fset fn (lambda (&rest _) (error \"Native qualification forbids real network or CLI processes\")))) (princ (concat \"LIGHTWORK_EMACS_VERSION \" emacs-version \"\\\\n\")))', '-l', 'C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\slice-editor-qualification-final\\\\apps\\\\emacs\\\\tests\\\\maverick-control-tests.el', '-f', 'ert-run-tests-batch-and-exit']' timed out after 120 seconds",
+            "exit_code": 124,
+            "cleanup": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "ERROR: Access denied\n\n"
+            },
+            "cleanup_wait_exception": {
+              "type": "TimeoutExpired",
+              "message": "Command '['C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\editor-qualification-assets\\\\emacs-30.2\\\\bin\\\\emacs.exe', '-Q', '--batch', '--eval', '(progn (dolist (fn \\'(make-network-process open-network-stream url-retrieve url-retrieve-synchronously call-process start-process start-process-shell-command call-process-shell-command make-process)) (fset fn (lambda (&rest _) (error \"Native qualification forbids real network or CLI processes\")))) (princ (concat \"LIGHTWORK_EMACS_VERSION \" emacs-version \"\\\\n\")))', '-l', 'C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\slice-editor-qualification-final\\\\apps\\\\emacs\\\\tests\\\\maverick-control-tests.el', '-f', 'ert-run-tests-batch-and-exit']' timed out after 10 seconds"
+            },
+            "seconds": 130.375,
+            "owned_process_stopped": false
+          }
+        ],
+        "environment_policy": "Allowlisted Windows runtime variables and isolated task-local home/caches; no inherited provider, GitHub, or cloud credentials",
+        "native_lua_fixture_sha256": "04eab88cdcf4f713e9b617c07c3af2e803e14ee1a8296dbae7b2fc96a3bbd158",
+        "executables": {
+          "emacs": {
+            "path": "<task-root>\\editor-qualification-assets\\emacs-30.2\\bin\\emacs.exe",
+            "sha256": "24848ae901463e3c56dac17031ddd45d58220723aa35102fc778458d17ff2f0b"
+          },
+          "nvim": {
+            "path": "<task-root>\\editor-qualification-assets\\nvim-win64\\nvim-win64\\bin\\nvim.exe",
+            "sha256": "6f1fd849f6be3d0bff7bcf433ca91e0ba7481d3cc31b34601e4a29d8fad5bbdd"
+          }
+        },
+        "controller_exception": "Traceback (most recent call last):\n  File \"<task-root>\\run_editor_qualification.py\", line 128, in main\n    row[\"exit_code\"] = child.wait(timeout=120)\n                       ~~~~~~~~~~^^^^^^^^^^^^^\n  File \"C:\\Python313\\Lib\\subprocess.py\", line 1280, in wait\n    return self._wait(timeout=timeout)\n           ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"C:\\Python313\\Lib\\subprocess.py\", line 1609, in _wait\n    raise TimeoutExpired(self.args, timeout)\nsubprocess.TimeoutExpired: Command '['C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\editor-qualification-assets\\\\emacs-30.2\\\\bin\\\\emacs.exe', '-Q', '--batch', '--eval', '(progn (dolist (fn \\'(make-network-process open-network-stream url-retrieve url-retrieve-synchronously call-process start-process start-process-shell-command call-process-shell-command make-process)) (fset fn (lambda (&rest _) (error \"Native qualification forbids real network or CLI processes\")))) (princ (concat \"LIGHTWORK_EMACS_VERSION \" emacs-version \"\\\\n\")))', '-l', 'C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\slice-editor-qualification-final\\\\apps\\\\emacs\\\\tests\\\\maverick-control-tests.el', '-f', 'ert-run-tests-batch-and-exit']' timed out after 120 seconds\n",
+        "source_after": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "source_unchanged": true,
+        "exit_code": 124
+      }
+    },
+    {
+      "receipt": "audit/editor-startup-native-01/result.json",
+      "receipt_sha256": "bb8f52fcc7cbe5dff5b14e26a2c9d0c9c72536a0aad4fa8da3e6520f0381c75b",
+      "logs": [
+        {
+          "path": "audit/editor-startup-native-01/output.log",
+          "sha256": "c383a42432b585aac2c7ac51034732984df9226732db460cdb9a3d9ca10e9782"
+        }
+      ],
+      "result": {
+        "mode": "startup",
+        "command": [
+          "<task-root>\\editor-qualification-assets\\emacs-30.2\\bin\\emacs.exe",
+          "-Q",
+          "--batch",
+          "--eval",
+          "(progn (princ \"LIGHTWORK_NATIVE_EMACS_STARTUP\\n\"))"
+        ],
+        "cap_seconds": 30,
+        "source": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "helper_sha256": "3f72067e80c57236bf4a58088fc6b06ea407768690ccea164036851af4c452cb",
+        "base_helper_sha256": "9bb581b3734978558a47612517694864490d298ce6169db6e25224561c2c4a8d",
+        "original_attempt": "audit/editor-native-ordinary-01/result.json",
+        "extra_guard": false,
+        "native_execution_context": "authorized native execution outside restricted sandbox",
+        "process_error_mode": "Controller-local SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX inherited by child; no registry/host configuration changes",
+        "previous_process_error_mode": 3,
+        "pid": 33496,
+        "expected_assertions_seen": true,
+        "owned_process_stopped": true,
+        "seconds": 0.136,
+        "exit_code": 0,
+        "source_after": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "source_unchanged": true
+      }
+    },
+    {
+      "receipt": "audit/editor-ert-import-native-01/result.json",
+      "receipt_sha256": "4b91407cbc9f6b5aee2aabd6647e50638c587a7f54e75221fe9c0e3dc9e34f69",
+      "logs": [
+        {
+          "path": "audit/editor-ert-import-native-01/output.log",
+          "sha256": "88049052a1d7c61388550b58caa387970379e6846b40500f244b2a281ddba83f"
+        }
+      ],
+      "result": {
+        "mode": "ert-import",
+        "command": [
+          "<task-root>\\editor-qualification-assets\\emacs-30.2\\bin\\emacs.exe",
+          "-Q",
+          "--batch",
+          "--eval",
+          "(progn (require 'ert) (princ \"LIGHTWORK_NATIVE_EMACS_ERT-IMPORT\\n\"))"
+        ],
+        "cap_seconds": 30,
+        "source": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "helper_sha256": "3f72067e80c57236bf4a58088fc6b06ea407768690ccea164036851af4c452cb",
+        "base_helper_sha256": "9bb581b3734978558a47612517694864490d298ce6169db6e25224561c2c4a8d",
+        "original_attempt": "audit/editor-native-ordinary-01/result.json",
+        "extra_guard": false,
+        "native_execution_context": "authorized native execution outside restricted sandbox",
+        "process_error_mode": "Controller-local SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX inherited by child; no registry/host configuration changes",
+        "previous_process_error_mode": 3,
+        "pid": 36532,
+        "expected_assertions_seen": true,
+        "owned_process_stopped": true,
+        "seconds": 0.837,
+        "exit_code": 0,
+        "source_after": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "source_unchanged": true
+      }
+    },
+    {
+      "receipt": "audit/editor-emacs-original-native-01/result.json",
+      "receipt_sha256": "936d54a97996fc74cae37c8a9320885b33bf7af8ba9d3aa1eb06beb076ce6090",
+      "logs": [
+        {
+          "path": "audit/editor-emacs-original-native-01/output.log",
+          "sha256": "c33504d0f43e78d09af53d8f8486f710b64150dbaa4196032be1f17293f995a2"
+        }
+      ],
+      "result": {
+        "mode": "emacs-original",
+        "command": [
+          "<task-root>\\editor-qualification-assets\\emacs-30.2\\bin\\emacs.exe",
+          "-Q",
+          "--batch",
+          "--eval",
+          "(progn (dolist (fn '(make-network-process open-network-stream url-retrieve url-retrieve-synchronously call-process start-process start-process-shell-command call-process-shell-command make-process)) (fset fn (lambda (&rest _) (error \"Native qualification forbids real network or CLI processes\")))) (princ (concat \"LIGHTWORK_EMACS_VERSION \" emacs-version \"\\n\")))",
+          "-l",
+          "<task-root>\\slice-editor-qualification-final\\apps\\emacs\\tests\\maverick-control-tests.el",
+          "-f",
+          "ert-run-tests-batch-and-exit"
+        ],
+        "cap_seconds": 120,
+        "source": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "helper_sha256": "3f72067e80c57236bf4a58088fc6b06ea407768690ccea164036851af4c452cb",
+        "base_helper_sha256": "9bb581b3734978558a47612517694864490d298ce6169db6e25224561c2c4a8d",
+        "original_attempt": "audit/editor-native-ordinary-01/result.json",
+        "extra_guard": true,
+        "native_execution_context": "authorized native execution outside restricted sandbox",
+        "process_error_mode": "Controller-local SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX inherited by child; no registry/host configuration changes",
+        "previous_process_error_mode": 3,
+        "pid": 38344,
+        "expected_assertions_seen": true,
+        "owned_process_stopped": true,
+        "seconds": 0.438,
+        "exit_code": 0,
+        "source_after": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "source_unchanged": true
+      }
+    },
+    {
+      "receipt": "audit/editor-nvim-native-01/result.json",
+      "receipt_sha256": "904a2a033d8494175b1073fcc8b857a6a16cc0479957364f6418df22c8cfb80b",
+      "logs": [
+        {
+          "path": "audit/editor-nvim-native-01/output.log",
+          "sha256": "ff44ff27559476facc42071acde27ee164f54e242facecb0ac232b397ad0411e"
+        }
+      ],
+      "result": {
+        "mode": "nvim",
+        "command": [
+          "<task-root>\\editor-qualification-assets\\nvim-win64\\nvim-win64\\bin\\nvim.exe",
+          "--headless",
+          "-u",
+          "NONE",
+          "-U",
+          "NONE",
+          "-i",
+          "NONE",
+          "--noplugin",
+          "-n",
+          "-l",
+          "<task-root>\\audit\\editor-nvim-native-01\\existing-nvim-fixture.lua"
+        ],
+        "cap_seconds": 120,
+        "source": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "helper_sha256": "3f72067e80c57236bf4a58088fc6b06ea407768690ccea164036851af4c452cb",
+        "base_helper_sha256": "9bb581b3734978558a47612517694864490d298ce6169db6e25224561c2c4a8d",
+        "original_attempt": "audit/editor-native-ordinary-01/result.json",
+        "extra_guard": false,
+        "native_execution_context": "authorized native execution outside restricted sandbox",
+        "process_error_mode": "Controller-local SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX inherited by child; no registry/host configuration changes",
+        "previous_process_error_mode": 3,
+        "pid": 48392,
+        "expected_assertions_seen": true,
+        "owned_process_stopped": true,
+        "seconds": 0.154,
+        "exit_code": 0,
+        "source_after": {
+          "commit": "7db4b18e0d8113baa68b48c0ba811ef579022b9e",
+          "tracked_status": "",
+          "files": {
+            "apps/emacs/maverick.el": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+            "apps/emacs/tests/maverick-control-tests.el": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+            "apps/client-contract-tests/nvim-command.test.cjs": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+            "apps/nvim/lua/maverick/init.lua": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a"
+          }
+        },
+        "source_unchanged": true
+      }
+    }
+  ],
+  "cleanup_receipts": [
+    {
+      "path": "audit/editor-native-ordinary-01/native-cleanup.json",
+      "sha256": "406c79e4d068a8a1011064b8e81b2041160b1117fcd7ec27d1d7ae8691dbc458",
+      "content": {
+        "present_after": false,
+        "taskkill_exit_code": 255,
+        "pid": 45032
+      }
+    },
+    {
+      "path": "audit/editor-native-ordinary-01/native-process-after-cleanup.json",
+      "sha256": "4345e0a9137de6a0f87663ae4f9c300e95354717d182885b7569281e1cdc398e",
+      "content": {
+        "checked_ids": [
+          45032,
+          52952,
+          52972
+        ],
+        "present_ids": []
+      }
+    },
+    {
+      "path": "audit/editor-native-runtime-release.json",
+      "sha256": "31378e8e8c649445f806dfe4901f33a64c67d4f8168186dc5e233e45f0ee06d3",
+      "content": {
+        "owned_ids": [
+          45032,
+          52952,
+          52972,
+          33496,
+          36532,
+          38344,
+          48392
+        ],
+        "remaining": [],
+        "all_stopped": true
+      }
+    }
+  ],
+  "integrated_source_comparison": {
+    "commit": "9ff7557a378149a5ed0b9be101fe4301f13e4fc4",
+    "files": {
+      "apps/emacs/maverick.el": {
+        "sha256": "28ea986b2c0ddcf4d0070310e4b5abcd8177fd91a890ef13c36a885ce6218b48",
+        "identical": true
+      },
+      "apps/emacs/tests/maverick-control-tests.el": {
+        "sha256": "9ebdc15346dbfd42c9abadb07679ac75c99262e39edcf19f7d323dc5c01548c1",
+        "identical": true
+      },
+      "apps/client-contract-tests/nvim-command.test.cjs": {
+        "sha256": "be7f2f6db4bdad6f8408e22ee9612ee53e8583d8223540cb8c028a348ba22d2f",
+        "identical": true
+      },
+      "apps/nvim/lua/maverick/init.lua": {
+        "sha256": "35fe4d6b63c01b7d699e60948185e4477853898eb566a88551e22ce2bacdde7a",
+        "identical": true
+      }
+    }
+  },
+  "limits": [
+    "Process/timer APIs are mocks in the existing assertions; native hosts execute the actual unchanged product source.",
+    "No actual maverick CLI, provider, deployment, personal editor config, or credential used.",
+    "UI responsiveness, focus, real process cancellation, editor shutdown and supported-OS/version matrices require interactive installed-host qualification.",
+    "Initial restricted-sandbox crash remains recorded; native startup/import and exact original guarded ERT command pass. Internal crash cause is not established.",
+    "Process-local Windows crash-dialog suppression differs in native diagnostics; no host ACL, registry, or installation changes.",
+    "Archive official HTTPS length/hash pins were verified; detached signature verification is not claimed."
+  ],
+  "initial_crash_artifact": {
+    "path": "audit/editor-native-ordinary-01/emacs_backtrace.txt",
+    "sha256": "ad6b1bf65e712ca601cc3f20c7849da3a237020889d77c25af97b6ff04a3c551",
+    "origin": "Untracked emacs_backtrace.txt produced in frozen checkout by initial native crash; moved without edits to original failed-attempt artifact directory after qualification."
+  }
+}

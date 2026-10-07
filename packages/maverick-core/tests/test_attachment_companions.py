@@ -72,19 +72,22 @@ class TestGenerateCompanions:
         document.save(buffer)
         wm = WorldModel(path=tmp_path / "w.db")
         try:
+            from pathlib import Path
+
             gid = wm.create_goal("document", "")
             original = _add(wm, gid, "plan.docx",
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             buffer.getvalue(), tmp_path / "attachments")
+            stored_original = Path(original.path).read_bytes()
             assert generate_companions(wm, gid, root=tmp_path / "attachments") == 1
             attachments = wm.list_attachments(gid)
             companion = next(a for a in attachments if a.filename.endswith(".extracted.txt"))
-            from pathlib import Path
-            text = Path(companion.path).read_text(encoding="utf-8")
+            text = att.read_bytes(companion.path).decode("utf-8")
             metadata = json.loads(text.splitlines()[1])
             assert metadata["source_sha256"] == original.sha256
             assert metadata["locations"][2]["kind"] == "table_cell"
-            assert "120000" in text and Path(original.path).read_bytes() == buffer.getvalue()
+            assert "120000" in text and att.read_bytes(original.path) == buffer.getvalue()
+            assert Path(original.path).read_bytes() == stored_original
             blocks = content_blocks_for_goal(wm, gid, model="claude-opus-4-8")
             assert "untrusted attachment companion data" in blocks[0]["text"]
             assert "not factual verification" in blocks[0]["text"]

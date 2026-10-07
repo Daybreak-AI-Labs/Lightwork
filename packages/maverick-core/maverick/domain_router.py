@@ -174,7 +174,13 @@ _KEY: tuple | None = None
 def _indexes(domains: dict[str, DomainProfile]):
     """Build (and process-cache) the lexical + embedding indexes for a roster."""
     global _LEX, _EMB, _KEY
-    key = tuple(sorted(domains))
+    # A workspace can edit a custom pack without changing its ID. Keying only
+    # on names kept the previous tenant's text in the process-wide index and
+    # made JD matches stale until restart.
+    key = tuple(
+        (name, profile.description, profile.persona)
+        for name, profile in sorted(domains.items())
+    )
     if _LEX is None or key != _KEY:
         _LEX = DomainRouter(domains)
         try:

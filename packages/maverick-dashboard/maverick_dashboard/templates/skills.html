@@ -16,10 +16,11 @@
              copy='Create one here, or add one from a web address you trust.
                    It is used from the next task.') }}
   {% endcall %}
+  {% if can_open_page('/store') %}<p><a href="/store">Browse ready-made skills</a> that other people have written and checked.</p>{% endif %}
 
   <div class="sk-grid">
     <section class="panel" aria-labelledby="sk-create-title">
-      <h2 id="sk-create-title" class="sk-flush">Create a Skill</h2>
+      <h2 id="sk-create-title" class="sk-flush">Create a skill</h2>
       {% if not is_admin %}
         <p class="muted">Only administrators can add skills. Ask an administrator to add the one you need.</p>
       {% elif not install_allowed %}
@@ -49,14 +50,19 @@
           </label>
           <fieldset class="sk-tools">
             <legend>Tools it needs (optional)</legend>
+            {% if can_author %}
             <label class="sk-field">
               <span class="sr-only">Find a tool</span>
               <input class="input" type="search" id="sc-tool-filter" placeholder="Find a tool…"
                      aria-label="Find a tool" autocomplete="off" />
             </label>
-            <div id="sc-tool-list" class="sk-tool-list" aria-live="polite">
-              <p class="muted sk-small">Loading tools…</p>
-            </div>
+            {# A scroll box a keyboard can reach. Not a live region: reading every
+               tool aloud when the list loads was noise. #}
+            <div id="sc-tool-list" class="sk-tool-list" role="region" tabindex="0" aria-label="Tools to choose from"></div>
+            {% else %}
+            {# A form that cannot be used has no tool list to scroll through. #}
+            <p class="muted sk-small">The tools a skill may use are chosen here when adding skills is allowed.</p>
+            {% endif %}
           </fieldset>
           <div class="sk-actions">
             <button type="submit" class="btn btn--primary">Create skill</button>
@@ -108,7 +114,7 @@
     </section>
 
     <section aria-labelledby="sk-list-title">
-      <div class="section-head"><h2 id="sk-list-title">Your Skills</h2></div>
+      <div class="section-head"><h2 id="sk-list-title">Your skills</h2></div>
       <div id="installed-skills">
         {% for s in skills %}
           {% set label = s.name | humanize %}
@@ -117,7 +123,7 @@
               <strong>{{ label }}</strong>
               {% if is_admin %}
               <button type="button" class="btn btn--danger" data-skill-remove="{{ s.name }}"
-                      data-skill-label="{{ label }}" aria-label="Remove {{ label }}">Remove</button>
+                      data-skill-label="{{ label }}" aria-label="Remove skill {{ label }}">Remove skill</button>
               {% endif %}
             </div>
             {% if s.triggers %}
@@ -137,11 +143,40 @@
           </div>
         {% endif %}
       </div>
+      {% if is_admin %}
+      <section id="manual-skill-removal" class="stack" aria-labelledby="manual-skill-removal-title">
+        <h3 id="manual-skill-removal-title">Remove a saved skill</h3>
+        <p class="muted sk-small">Review its exact current instructions before removing it. Nothing changes until you confirm; a lost reply can be checked here without removing it again.</p>
+        <div class="sk-actions">
+          <label for="manual-skill-original">Original removal</label>
+          <select id="manual-skill-original" class="select"><option value="">Choose an original removal</option></select>
+          <button type="button" class="btn btn--ghost" id="manual-skill-read" disabled>Read original result</button>
+          <button type="button" class="btn btn--ghost" id="manual-skill-refresh">Refresh original removals</button>
+        </div>
+        <p id="manual-skill-status" role="status" aria-live="polite" class="muted sk-small"></p>
+        <div id="manual-skill-review" class="stack" style="overflow-wrap:anywhere"></div>
+        <div id="manual-skill-result" class="stack" style="overflow-wrap:anywhere"></div>
+      </section>
+      {% endif %}
     </section>
   </div>
 
+  {% if is_admin %}
+  <section class="panel sk-section" aria-labelledby="to-learned-title" id="to-learned-skills">
+    <div class="section-head"><h2 id="to-learned-title">Suggestions from completed work</h2></div>
+    <p class="muted sk-small">Lightwork drafts these from repeated completed tasks. No suggestion guides an agent until you read its full instructions and choose to add it. You can remove an added suggestion here at any time.</p>
+    <p id="to-learned-status" role="status" aria-live="polite" class="muted">Checking suggestions…</p>
+    <div class="sk-actions"><button type="button" class="btn" id="to-learned-refresh">Refresh suggestions</button><button type="button" class="btn" id="to-learned-original" disabled>Check original result</button></div>
+    <div id="to-learned-list"></div>
+    <div id="to-learned-added"></div>
+    <div id="to-learned-review" class="stack" aria-live="polite"></div>
+    <div id="to-learned-result" class="stack" aria-live="polite"></div>
+    <div id="to-learned-history" class="stack"></div>
+  </section>
+  {% endif %}
+
   <section class="panel sk-section" aria-labelledby="to-skill-usage-title">
-    <div class="section-head"><h2 id="to-skill-usage-title">How Your Skills Are Doing</h2></div>
+    <div class="section-head"><h2 id="to-skill-usage-title">How your skills are doing</h2></div>
     <p class="muted sk-small">Each time agents use a skill, Lightwork notes whether the task went well.</p>
     <p id="to-skill-usage-status" class="muted" role="status" aria-live="polite">Loading…</p>
     <div id="to-skill-usage"></div>
@@ -149,7 +184,7 @@
 
   {% if is_admin %}
   <section class="panel sk-section" aria-labelledby="to-tidy-title">
-    <div class="section-head"><h2 id="to-tidy-title">Tidy Up Skills That Rarely Help</h2></div>
+    <div class="section-head"><h2 id="to-tidy-title">Tidy up skills that rarely help</h2></div>
     <p class="muted sk-small">Find skills that have had a fair trial and still rarely help, then remove them.
       Lightwork allows for chance, so a skill is only listed when the evidence is clear.</p>
     <div class="sk-row">
@@ -172,7 +207,7 @@
 
   <style>
     .sk-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: var(--space-5); align-items: start; }
-    @media (max-width: 900px) { .sk-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 880px) { .sk-grid { grid-template-columns: 1fr; } }
     .sk-flush { margin-top: 0; }
     .sk-small { font-size: var(--text-sm); }
     .sk-form, .sk-fieldset { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -222,10 +257,10 @@
       head.appendChild(nm);
       if (canRemove) {
         var rm = document.createElement('button');
-        rm.type = 'button'; rm.className = 'btn btn--danger'; rm.textContent = 'Remove';
+        rm.type = 'button'; rm.className = 'btn btn--danger'; rm.textContent = 'Remove skill';
         rm.setAttribute('data-skill-remove', s.name);
         rm.setAttribute('data-skill-label', human(s.name));
-        rm.setAttribute('aria-label', 'Remove ' + human(s.name));
+        rm.setAttribute('aria-label', 'Remove skill ' + human(s.name));
         head.appendChild(rm);
       }
       card.appendChild(head);
@@ -251,22 +286,14 @@
     }
     window.lwAppendSkill = appendSkill;
 
-    // Remove a skill (administrators): confirm, then delete and drop the card.
-    installedEl.addEventListener('click', async function (event) {
+    // Review the current version first. The card stays until the native
+    // original receipt confirms removal; a lost reply never means success.
+    installedEl.addEventListener('click', function (event) {
       var btn = event.target.closest('[data-skill-remove]');
       if (!btn) return;
       var name = btn.getAttribute('data-skill-remove');
-      var label = btn.getAttribute('data-skill-label') || human(name);
-      var ok = await window.mvConfirm('Remove the skill “' + label + '”? Agents stop using it from the next task.', {okText: 'Remove'});
-      if (!ok) return;
-      btn.disabled = true;
-      try {
-        var r = await fetch('/api/v1/skills/' + encodeURIComponent(name), {method: 'DELETE', credentials: 'same-origin'});
-        if (!r.ok && r.status !== 404) { window.mvFail(r, 'remove the skill'); btn.disabled = false; return; }
-        var card = btn.closest('.skill-card');
-        if (card) card.remove();
-        if (window.mvToast) window.mvToast('Removed ' + label + '.');
-      } catch (e) { window.mvFail(e, 'remove the skill'); btn.disabled = false; }
+      if (window.LightworkManualSkillRemoval) window.LightworkManualSkillRemoval.review(name);
+      else window.mvToast('Removal controls are still loading. Nothing was removed.');
     });
 
     // Tools picker: a filterable checklist of the tools agents can use.
@@ -289,17 +316,20 @@
         label.appendChild(box); label.appendChild(text); toolList.appendChild(label);
       });
     }
-    if (toolList) {
-      fetch('/api/v1/tools', {credentials: 'same-origin'}).then(function (r) {
-        if (!r.ok) throw r;
-        return r.json();
-      }).then(function (data) { renderTools((data && data.tools) || []); }).catch(function (e) {
+    function loadTools() {
+      // The shared loading state (lightwork-ui.js, loaded at the end of the page).
+      var toolWait = window.mvLoading(toolList, {text: 'Loading tools…'});
+      window.mvFetchJSON('/api/v1/tools', {}, 'load the list of tools').then(async function (data) { await toolWait.done(); renderTools((data && data.tools) || []); }).catch(async function (e) {
+        await toolWait.done();
         toolList.textContent = '';
         var p = document.createElement('p');
         p.className = 'muted sk-small';
         p.textContent = window.mvErrorText(e, 'load the list of tools') + ' You can still create the skill without choosing tools.';
         toolList.appendChild(p);
       });
+    }
+    if (toolList) {
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadTools); else loadTools();
       toolFilter.addEventListener('input', function () {
         var q = toolFilter.value.trim().toLowerCase();
         toolList.querySelectorAll('label[data-search]').forEach(function (l) {
@@ -356,4 +386,5 @@
   </script>
   <script src="/static/lightwork-feature-actions.js" defer></script>
   <script src="/static/lightwork-tool-ops.js" defer></script>
+  <script src="/static/lightwork-manual-skill-removal.js" defer></script>
 {% endblock %}

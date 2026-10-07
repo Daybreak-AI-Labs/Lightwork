@@ -21,12 +21,13 @@ import json
 import logging
 import math
 import os
+import re
 from collections.abc import Callable
 from typing import Any
 
 from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
-from ..retry import async_retry, sync_retry
+from ..retry import async_physical_attempt, async_retry, sync_physical_attempt, sync_retry
 from ..secrets import scrub
 
 log = logging.getLogger(__name__)
@@ -48,6 +49,13 @@ _OPENAI_MAX_TOOLS = _max_tools_setting()
 _MODELS_WANTING_MAX_COMPLETION_TOKENS = (
     "gpt-4o", "gpt-4.1", "o1", "o3", "o4", "gpt-5",
 )
+
+# Every GPT generation from 5 on rejects ``max_tokens`` with a 400
+# ("Unsupported parameter ... Use 'max_completion_tokens' instead"), so match
+# the generation number rather than listing each release: a new family
+# (gpt-6-astra, gpt-6.1-sol, ...) must not break every call on day one.
+_GPT_GENERATION = re.compile(r"gpt-(\d+)")
+_FIRST_MAX_COMPLETION_GPT = 5
 
 # Models with OpenAI automatic prompt caching (gpt-4.1 / o-series / gpt-5).
 # The read side already credits usage.prompt_tokens_details.cached_tokens;
@@ -298,7 +306,10 @@ class OpenAIClient:
 
     @staticmethod
     def _wants_max_completion(model: str) -> bool:
-        return any(model.startswith(prefix) for prefix in _MODELS_WANTING_MAX_COMPLETION_TOKENS)
+        if any(model.startswith(prefix) for prefix in _MODELS_WANTING_MAX_COMPLETION_TOKENS):
+            return True
+        generation = _GPT_GENERATION.match(model)
+        return bool(generation) and int(generation.group(1)) >= _FIRST_MAX_COMPLETION_GPT
 
     @staticmethod
     def _is_reasoning_model(model: str) -> bool:
@@ -607,17 +618,14 @@ class OpenAIClient:
         if oai_tools and len(oai_tools) > _OPENAI_MAX_TOOLS:
             # OpenAI's Chat Completions API hard-caps `tools` at 128 and 400s the
             # whole request otherwise ("array too long"). A goal that assembles
-            # more (many MCP servers / enabled capabilities) would fail entirely.
-            # base_registry registers core/orchestration tools BEFORE MCP and
-            # extension tools, so keeping the first _OPENAI_MAX_TOOLS preserves the
-            # essential ones and drops the excess tail. An explicitly selected
-            # function takes precedence over the last retained tool. Operators who need the
-            # dropped tools should reduce enabled MCP servers/capabilities or run
-            # the orchestrator on a provider with a higher tool ceiling.
+            # more would fail entirely. Agent catalogs route overflow through
+            # find_tools before reaching this boundary; this last-resort cap is
+            # for direct provider callers. An explicitly selected function
+            # takes precedence over the last retained tool.
             log.warning(
                 "openai: %d tools exceed the API's %d-tool limit; sending the "
                 "first %d, retaining any explicitly selected function. "
-                "Trim enabled MCP servers/capabilities to expose the rest.",
+                "The caller must route overflow through tool discovery.",
                 len(oai_tools), _OPENAI_MAX_TOOLS, _OPENAI_MAX_TOOLS,
             )
             retained = oai_tools[:_OPENAI_MAX_TOOLS]
@@ -710,13 +718,13 @@ class OpenAIClient:
         )
         def request():
             try:
-                return self._sync.chat.completions.create(**kwargs)
+                return sync_physical_attempt(lambda: self._sync.chat.completions.create(**kwargs))
             except Exception as exc:
                 if not self._disable_rejected_tool_reasoning(kwargs, exc):
                     raise
-                return self._sync.chat.completions.create(**kwargs)
+                return sync_physical_attempt(lambda: self._sync.chat.completions.create(**kwargs))
 
-        resp = sync_retry(request)
+        resp = sync_retry(request, observe_attempts=False)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,
@@ -740,13 +748,13 @@ class OpenAIClient:
         )
         async def request():
             try:
-                return await self._async.chat.completions.create(**kwargs)
+                return await async_physical_attempt(lambda: self._async.chat.completions.create(**kwargs))
             except Exception as exc:
                 if not self._disable_rejected_tool_reasoning(kwargs, exc):
                     raise
-                return await self._async.chat.completions.create(**kwargs)
+                return await async_physical_attempt(lambda: self._async.chat.completions.create(**kwargs))
 
-        resp = await async_retry(request)
+        resp = await async_retry(request, observe_attempts=False)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,

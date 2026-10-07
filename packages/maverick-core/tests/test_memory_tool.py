@@ -76,7 +76,7 @@ def test_insert_normalizes_crlf_before_writing(mem, tmp_path, monkeypatch):
     """A Windows rewrite must not double the CR before an inserted line."""
     import maverick.tools.memory as memory_mod
 
-    path = tmp_path / "mem" / "a"
+    path = memory_mod.memory_root_for("") / "a"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"one\r\nthree")
 

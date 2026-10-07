@@ -62,6 +62,12 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
         re.DOTALL,
     )
     raw_body_fallback = re.compile(r"\{\s*detail\s*:\s*(?:text|responseText)\s*\}")
+    # The shell's mvFetchJSON rejects a success it cannot read (the JS tests
+    # in lightwork_ui_shared_helpers cover the behaviour), so a page that
+    # reads every reply through it, and never reads one itself, fails closed.
+    shared = (STATIC / "lightwork-ui.js").read_text(encoding="utf-8")
+    assert "Malformed success never counts as success" in shared
+    assert "bad.unreadable = true" in shared
 
     for name in FAIL_CLOSED_TEMPLATES:
         source = (TEMPLATES / name).read_text(encoding="utf-8")
@@ -72,25 +78,33 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
         # Every client fails closed on an unreadable response; the plain
         # wordings keep code words off the page.
         assert (PLAIN_INVALID_JSON.get(
-            name, "Request failed: the server returned an invalid JSON response."
+            name, "The reply from the server could not be read. Try again."
         ) in source
                 or "could not be confirmed" in source
-                or "Could not read the result." in source), name
+                or "Could not read the result." in source
+                or ("mvFetchJSON(" in source and ".json()" not in source)), name
         assert swallowed_json.search(source) is None, name
         assert raw_body_fallback.search(source) is None, name
 
 
 def test_automation_run_queue_requires_a_json_response_before_success() -> None:
     source = (TEMPLATES / "automations.html").read_text(encoding="utf-8")
-    parse = source.index("try { j = await r.json(); }")
-    success = source.index("if (r.ok && j) { flowsMsg.textContent = 'Run started.", parse)
-    assert parse < success
-    assert "The run could not be confirmed." in source[parse:success]
+    # mvFetchJSON reads the reply and rejects one it cannot read (unreadable);
+    # only a readable reply counts as started.
+    parse = source.index("var j = await window.mvFetchJSON('/api/v1/flows/' + encodeURIComponent(id) + '/run'")
+    success = source.index("flowsMsg.textContent = j ? 'Run started.", parse)
+    unreadable = source.index("if (e.unreadable) { flowsMsg.textContent = 'The run could not be confirmed.", success)
+    assert parse < success < unreadable
+    assert "The run could not be confirmed." in source[success:unreadable]
 
 
 def test_agent_department_deploy_does_not_turn_invalid_json_into_success() -> None:
     source = (TEMPLATES / "agents.html").read_text(encoding="utf-8")
     assert ".json().catch(function () { return {}; })" not in source
-    assert source.count(
-        ".json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); })"
-    ) == 2
+    # Both team buttons save through the shared reviewed-team client.
+    assert source.count("await window.LWDepartmentTeamUpdates.open(") == 2
+    client = (STATIC / "lightwork-department-team-updates.js").read_text(encoding="utf-8")
+    # An unreadable reply is never a success: mvFetchJSON rejects it with the page's own sentence.
+    assert "U='The result could not be confirmed. Refresh the page to check whether the team was set up.'" in client
+    assert "window.mvFetchJSON(API+path," in client and "messages:{unreadable:U}" in client
+    assert "return {}" not in client

@@ -27,7 +27,10 @@ fresh owner, workspace and role checks.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import math
 import re
 import secrets
 from typing import Annotated, Any, Literal
@@ -96,16 +99,19 @@ class RemoveIn(_In):
 
 class RecipeLearnIn(_In):
     run_ids: list[str] = Field(min_length=2, max_length=32)
-    tools: list[str] = Field(min_length=1, max_length=64)
+    tools: list[str] = Field(min_length=1, max_length=8)
     style: Literal["plain", "transforms", "choices"] = "plain"
     max_operations: int = Field(default=2, ge=1, le=4)
 
 
-class RecipeRefineIn(ArtifactIn):
+class RecipeRefineIn(_In):
+    package: dict[str, Any]
     run_ids: list[str] = Field(min_length=1, max_length=32)
+    expected_runs: dict[str, dict] | None = Field(default=None, max_length=32)
 
 
-class RecipeDraftIn(ArtifactIn):
+class RecipeDraftIn(_In):
+    package: dict[str, Any]
     name: str = Field(min_length=1, max_length=200)
     teaching: bool = False
 
@@ -118,7 +124,7 @@ class BundleCheckIn(_In):
 class VerifiedLearnIn(_In):
     bundles: list[dict[str, Any]] = Field(min_length=2, max_length=32)
     tools: list[str] = Field(min_length=1, max_length=8)
-    style: Literal["plain", "choices", "workflow", "memory"] = "plain"
+    style: Literal["plain", "transforms", "choices", "workflow", "memory"] = "plain"
     max_operations: int = Field(default=2, ge=1, le=4)
     max_steps: int = Field(default=8, ge=1, le=8)
     trust: dict[str, Any] | None = None
@@ -152,10 +158,21 @@ def _flow(request: Request, flow_id: str):
     from .api import _assert_flow_access
 
     _gate(request)
+    from .draft_api import context_for
+
+    expected_context = request.headers.get("X-Lightwork-Teaching-Context")
+    if expected_context is not None and expected_context != context_for(request):
+        raise HTTPException(409, "The workspace or signed-in account changed. Reopen Teach before continuing.")
     flow = store.load_flow(flow_id[:256])
     if flow is None:
         raise HTTPException(404, "no such flow")
     _assert_flow_access(request, flow)
+    expected_version = request.headers.get("X-Lightwork-Flow-Version")
+    expected_revision = request.headers.get("X-Lightwork-Flow-Revision")
+    if expected_version is not None or expected_revision is not None:
+        if (not expected_version or not expected_version.isdecimal() or len(expected_version) > 10
+                or int(expected_version) != flow.version or expected_revision != flow.revision):
+            raise HTTPException(409, "This flow changed after review. Refresh Teach before continuing; your entered examples are kept.")
     return flow
 
 
@@ -253,6 +270,12 @@ def _draft_out(flow, note: str) -> dict:
     return {"draft": data, "saved": False, "published": False, "note": note}
 
 
+def _signed_ready(flags: dict) -> bool:
+    issuer = flags.get("action_evidence_issuer")
+    return (flags.get("action_recipe_lineage") is True and type(issuer) is str
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", issuer) is not None)
+
+
 # ---- page -------------------------------------------------------------------
 
 @router.get("/flows/{flow_id}/teach", response_class=HTMLResponse)
@@ -266,7 +289,7 @@ def flow_teach_page(request: Request, flow_id: str) -> HTMLResponse:
     return templates.TemplateResponse(request, "flow_teach.html", {
         "flow": flow, "questions_on": flags.get("learned_operator_questions") is True,
         "examples_on": flags.get("action_episode_capture") is True,
-        "lineage_on": flags.get("action_recipe_lineage") is True,
+        "lineage_on": _signed_ready(flags),
     }, headers={"Cache-Control": "private, no-store"})
 
 
@@ -274,6 +297,8 @@ def flow_teach_page(request: Request, flow_id: str) -> HTMLResponse:
 def flow_teach_overview(request: Request, flow_id: str) -> dict:
     """The flow's AI steps a rule can be taught for, and which already have one."""
     from maverick.flow.ir import NODE_ACTION, NODE_AGENT
+
+    from .draft_api import context_for
 
     flow = _flow(request, flow_id)
     tools = sorted({node.tool for node in flow.nodes.values() if node.kind == NODE_ACTION and node.tool})[:64]
@@ -289,7 +314,8 @@ def flow_teach_overview(request: Request, flow_id: str) -> dict:
                 rule = {"rules": 0, "examples": 0, "inputs": [], "output_kind": None, "unreadable": True}
         steps.append({"id": node.id, "label": node.label or node.brief[:80] or node.id,
                       "ready": bool(node.brief and node.output), "rule": rule})
-    return {"flow": {"id": flow.id, "name": flow.name, "version": flow.version, "revision": flow.revision},
+    return {"flow": {"id": flow.id, "name": flow.name, "version": flow.version, "revision": flow.revision,
+                     "context": context_for(request)},
             "steps": steps, "tools": tools}
 
 
@@ -383,10 +409,120 @@ async def remove_rule(request: Request, flow_id: str) -> dict:
 
 # ---- flows from reviewed runs (flow recipe) -----------------------------------
 
-def _episode_service(request: Request, flow_id: str):
+def _episode_service(request: Request, flow_id: str, *, human=False):
     from .api_flow_action_episodes import _call, _service
 
-    return _call(lambda: _service(request, flow_id))
+    return _call(lambda: _service(request, flow_id, human=human))
+
+
+@router.get("/learning/examples", response_class=HTMLResponse)
+def learning_examples_page(request: Request) -> HTMLResponse:
+    """An ordinary, owner-scoped way back to retained learning examples."""
+    from .app import templates
+
+    _gate(request)
+    return templates.TemplateResponse(request, "learning_examples.html", {},
+                                      headers={"Cache-Control": "private, no-store"})
+
+
+def _example_cursor(cursor: str | None):
+    if cursor is None:
+        return None
+    try:
+        if len(cursor) > 768 or re.fullmatch(r"[A-Za-z0-9_-]+", cursor) is None:
+            raise ValueError("invalid cursor")
+        decoded = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+        if (not isinstance(decoded, list) or len(decoded) != 2
+                or type(decoded[0]) not in (int, float) or not math.isfinite(decoded[0])
+                or not isinstance(decoded[1], str) or not 1 <= len(decoded[1]) <= 256):
+            raise ValueError("invalid cursor")
+        return (decoded[0], decoded[1])
+    except (ValueError, TypeError, binascii.Error) as exc:
+        raise HTTPException(422, "Refresh examples and try again.") from exc
+
+
+def _example_status(service, ctx, flow_id: str, run_id: str):
+    try:
+        return service.get(ctx, flow_id, run_id)
+    except LookupError as exc:
+        if str(exc) != "action episode is unavailable":
+            raise HTTPException(503, "Examples could not be checked. Refresh to try again.") from exc
+        return None
+    except PermissionError as exc:
+        raise HTTPException(403, "Your access changed. Refresh examples.") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, "Examples could not be checked. Refresh to try again.") from exc
+
+
+@router.get("/api/v1/learning/examples")
+def learning_examples_inbox(request: Request, cursor: str | None = None) -> dict:
+    """Paged owned examples; detail and every mutation stay on the native run page."""
+    from maverick.config import get_flows
+    from maverick.flow import store
+
+    from .api import _assert_flow_access
+    from .auth import caller_principal, goal_owner_filter
+
+    _gate(request)
+    if get_flows().get("action_episode_capture") is not True:
+        return {"examples": [], "scanned_runs": 0, "recent_only": False,
+                "available": False, "next_cursor": None}
+    position = _example_cursor(cursor)
+    actor, owner = caller_principal(request), goal_owner_filter(request)
+    # The run index is ordered newest first. Bound work even when many runs
+    # have never been selected as examples; never call an unscoped list API.
+    recent = store.list_run_metadata(owner=owner, limit=200, cursor=position)
+    rows, services, scanned, last = [], {}, 0, None
+    for run in recent:
+        scanned += 1
+        last = run
+        if not run.flow_id or not run.run_id:
+            continue
+        if run.flow_id not in services:
+            try:
+                services[run.flow_id] = _episode_service(request, run.flow_id)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                services[run.flow_id] = None
+        current = services[run.flow_id]
+        if current is None:
+            continue
+        service, ctx = current
+        record = _example_status(service, ctx, run.flow_id, run.run_id)
+        if not isinstance(record, dict) or record.get("status") in (None, "none"):
+            continue
+        # Status metadata only: retained input, action and result values remain
+        # behind the exact run's detail authority and review controls.
+        flow = store.load_flow(run.flow_id)
+        if flow is None or flow.owner != ctx.resource_owner:
+            continue
+        try:
+            _assert_flow_access(request, flow)
+        except HTTPException:
+            continue
+        rows.append({"flow_id": run.flow_id, "run_id": run.run_id,
+                     "flow_name": flow.name,
+                     "started": run.created or None, "run_status": run.status,
+                     "status": record.get("status"),
+                     "training_available": record.get("training_available") is True,
+                     "retain_until": record.get("retain_until"),
+                     "audit_status": record.get("audit_status")})
+        if len(rows) == 50:
+            break
+    # If identity changed during this bounded read, do not return rows from
+    # the former account's scope. Each native get also rechecks current access.
+    if caller_principal(request) != actor or goal_owner_filter(request) != owner:
+        raise HTTPException(403, "Your account changed. Refresh examples.")
+    more = scanned == 200 or len(rows) == 50
+    next_cursor = None
+    if more and last is not None:
+        next_cursor = base64.urlsafe_b64encode(json.dumps([last.updated, last.run_id],
+            separators=(",", ":"), allow_nan=False).encode()).decode().rstrip("=")
+    return {"examples": rows, "available": True, "scanned_runs": scanned,
+            "recent_only": more, "next_cursor": next_cursor}
 
 
 @router.get("/api/v1/flows/{flow_id}/teach/examples")
@@ -400,6 +536,8 @@ def reviewed_examples(request: Request, flow_id: str) -> dict:
     try:
         service, ctx = _episode_service(request, flow_id)
     except HTTPException as exc:
+        if exc.status_code not in {403, 404}:
+            raise HTTPException(503, "Reviewed examples could not be checked. Refresh to try again.") from exc
         return {"available": False, "runs": [], "message": "Reviewed examples aren't available for this flow"
                 + (" (an administrator can turn on example collection)." if exc.status_code == 403 else ".")}
     rows = []
@@ -407,54 +545,90 @@ def reviewed_examples(request: Request, flow_id: str) -> dict:
         run_id = str(run.run_id or "")
         if not run_id:
             continue
-        try:
-            record = service.get(ctx, flow_id, run_id)
-        except Exception:
-            record = None
+        record = _example_status(service, ctx, flow_id, run_id)
         status = (record or {}).get("status") or "none"
         rows.append({"run_id": run_id, "started": run.created or None, "run_status": run.status,
-                     "status": status, "can_learn": status == "accepted",
-                     "can_sign": status == "accepted" and bool((record or {}).get("grant_sha256")),
+                     "status": status, "can_learn": (record or {}).get("training_available") is True,
+                     "can_sign": (record or {}).get("training_available") is True,
                      "revision": (record or {}).get("revision"), "episode": (record or {}).get("episode_sha256"),
                      "grant": (record or {}).get("grant_sha256")})
     return {"available": True, "runs": rows}
 
 
-def _gather(request: Request, flow_id: str, run_ids: list[str], *, contract: bool):
-    service, ctx = _episode_service(request, flow_id)
-    episodes, first_contract = [], None
+def _gather_signed(request: Request, flow_id: str, run_ids: list[str], *, expected_runs: dict | None = None) -> list[dict]:
+    """Use the native, atomic grant and signed-issuance checks for every run."""
+    from maverick.config import get_flows
+
+    from .api_flow_action_episodes import _call
+    from .api_flow_recipe_lineage import _service as lineage_service
+
+    if not _signed_ready(get_flows()):
+        raise HTTPException(409, "Signed learning is not ready. An administrator can enable it and set the installation's signing name in Settings.")
+    service, ctx = _episode_service(request, flow_id, human=True)
+    _lineage, lineage_ctx = lineage_service(request)
+    if ctx.resource_owner != lineage_ctx.resource_owner:
+        raise HTTPException(403, "Only the owner can learn from these runs.")
+    bundles = []
     for run_id in run_ids:
-        exported = service.export(ctx, flow_id, run_id[:256])
-        episodes.append(exported["episode"])
-        if contract and first_contract is None:
-            first_contract = (service.get(ctx, flow_id, run_id[:256], detail=True).get("evidence") or {}).get("contract")
-    return episodes, first_contract
+        row = _call(lambda selected=run_id: service.get(ctx, flow_id, selected))
+        if row.get("training_available") is not True:
+            raise HTTPException(409, "A selected run is not currently allowed for learning. Open its Learning example card to check its permission and date.")
+        if expected_runs is not None and expected_runs.get(run_id) != {
+                "revision": row.get("revision"), "episode": row.get("episode_sha256"),
+                "grant": row.get("grant_sha256")}:
+            raise HTTPException(409, "A chosen example changed after review. Refresh the examples and review again.")
+        bundles.append(_call(lambda selected=run_id, current=row: service.export_signed(
+            ctx, flow_id, selected, expected_revision=current["revision"],
+            expected_episode_sha256=current["episode_sha256"],
+            expected_grant_sha256=current["grant_sha256"])))
+    return bundles
+
+
+def _package_from_bundles(bundles: list[dict], tools: list[str], style: str, max_operations: int) -> dict:
+    """The same verified learner serves reviewed runs and uploaded signed copies."""
+    import time
+
+    from maverick.flow import recipe_lineage
+    from maverick.flow.recipe_domain import domain_from_contract
+
+    trust, tenant = _workspace_trust()
+    episodes = [bundle.get("body", {}).get("episode") or {} for bundle in bundles]
+    domain = None
+    if style != "plain":
+        domain = domain_from_contract(style, bundles[0].get("body", {}).get("contract") or {}, episodes)
+    learner = (recipe_lineage.learn_choice_from_verified_bundles if style == "choices"
+               else recipe_lineage.learn_from_verified_bundles)
+    return learner(bundles, trust=trust, expected_tenant=tenant, now=time.time(),
+                   allowed_tools=sorted(set(tools)), domain=domain,
+                   max_operations=max_operations if domain is not None else 2)
+
+
+def _source_flow_only(package: dict, flow_id: str) -> None:
+    if (type(package) is not dict or not isinstance(package.get("bundles"), list)
+            or any(type(bundle) is not dict or type(bundle.get("body")) is not dict
+                   or (bundle["body"].get("source") or {}).get("flow_id") != flow_id
+                   for bundle in package["bundles"])):
+        raise HTTPException(409, "These examples belong to another flow. Open their original flow to continue.")
 
 
 @router.post("/api/v1/flows/{flow_id}/teach/recipe/learn")
 async def learn_recipe(request: Request, flow_id: str) -> dict:
-    """``flow recipe learn`` over reviewed runs, with ``--transforms`` or ``--choices`` as styles."""
-    from maverick.flow.recipe_domain import domain_from_contract
-
+    """Learn a signed package from separately granted, reviewed native runs."""
     _flow(request, flow_id)
     body = await _body(request, RecipeLearnIn)
 
-    def work():
-        episodes, contract = _gather(request, flow_id, body.run_ids, contract=body.style != "plain")
-        tools = sorted(set(body.tools))
-        if body.style == "plain":
-            from maverick.flow.action_recipe import synthesize
+    return await _compute(lambda: learn_reviewed_recipe(request, flow_id, body),
+                          "Lightwork couldn't learn a flow from these runs.")
 
-            return synthesize(episodes, allowed_tools=tools)
-        domain = domain_from_contract(body.style, contract or {}, episodes)
-        if body.style == "choices":
-            from maverick.flow.action_choice import synthesize_choice as learner
-        else:
-            from maverick.flow.action_recipe_transforms import synthesize_transformed as learner
-        return learner(episodes, allowed_tools=tools, domain=domain, max_operations=body.max_operations)
 
-    artifact = await _compute(work, "Lightwork couldn't learn a flow from these runs.")
-    return {"artifact": artifact, "summary": _recipe_summary(artifact)}
+def learn_reviewed_recipe(request: Request, flow_id: str, body: RecipeLearnIn, *, expected_runs=None) -> dict:
+    """Shared native learner; source permission/signing stays in the episode service."""
+    _flow(request, flow_id)
+    if len(set(body.run_ids)) != len(body.run_ids):
+        raise HTTPException(422, "Choose each reviewed run only once.")
+    bundles = _gather_signed(request, flow_id, body.run_ids, expected_runs=expected_runs)
+    package = _package_from_bundles(bundles, body.tools, body.style, body.max_operations)
+    return {"package": package, "summary": _recipe_summary(package["artifact"]), "approved": False}
 
 
 def _recipe_summary(artifact: dict) -> dict:
@@ -468,18 +642,26 @@ def _recipe_summary(artifact: dict) -> dict:
 
 @router.post("/api/v1/flows/{flow_id}/teach/recipe/refine")
 async def refine_recipe(request: Request, flow_id: str) -> dict:
-    """``flow recipe refine``: add more reviewed runs, keeping the earlier ones."""
-    from maverick.flow.action_recipe import refine
+    """Refine the exact signed package with newly granted native runs."""
+    _flow(request, flow_id)
+    body = await _body(request, RecipeRefineIn, MAX_LINEAGE_BODY)
+    return await _compute(lambda: refine_reviewed_recipe(request, flow_id, body),
+                          "These runs couldn't be added.")
+
+
+def refine_reviewed_recipe(request: Request, flow_id: str, body: RecipeRefineIn) -> dict:
+    import time
+
+    from maverick.flow.recipe_lineage import refine_package
 
     _flow(request, flow_id)
-    body = await _body(request, RecipeRefineIn)
-
-    def work():
-        episodes, _ = _gather(request, flow_id, body.run_ids, contract=False)
-        return refine(body.artifact, episodes)
-
-    artifact = await _compute(work, "These runs couldn't be added.")
-    return {"artifact": artifact, "summary": _recipe_summary(artifact)}
+    _source_flow_only(body.package, flow_id)
+    if len(set(body.run_ids)) != len(body.run_ids):
+        raise HTTPException(422, "Choose each additional run only once.")
+    bundles = _gather_signed(request, flow_id, body.run_ids, expected_runs=body.expected_runs)
+    trust, tenant = _workspace_trust()
+    package = refine_package(body.package, bundles, trust=trust, expected_tenant=tenant, now=time.time())
+    return {"package": package, "summary": _recipe_summary(package["artifact"]), "approved": False}
 
 
 def _new_flow_id(name: str) -> str:
@@ -495,26 +677,26 @@ def _new_flow_id(name: str) -> str:
 
 @router.post("/api/v1/flows/{flow_id}/teach/recipe/draft")
 async def draft_recipe(request: Request, flow_id: str) -> dict:
-    """``flow recipe draft``: a new unsaved flow with an approval before every action."""
-    from maverick.flow.ir import partition_draft_validation_errors
-    from maverick.flow.recipe_flow import make_flow
+    """Admit reviewed lineage, then return an unsaved, bound Flow draft."""
+    from .api_flow_recipe_lineage import _call, _service
 
     _flow(request, flow_id)
-    body = await _body(request, RecipeDraftIn)
+    body = await _body(request, RecipeDraftIn, MAX_LINEAGE_BODY)
+    _source_flow_only(body.package, flow_id)
     new_id = _new_flow_id(body.name)
 
     def work():
-        flow = make_flow(body.artifact, flow_id=new_id, name=body.name.strip(), teaching=body.teaching)
-        blocking, unclassified = partition_draft_validation_errors(flow.validate())
-        if blocking:
-            raise ValueError("draft has blocking problems")
-        return flow, unclassified
+        service, ctx = _call(lambda: _service(request))
+        admitted = _call(lambda: service.admit(ctx, body.package))
+        if admitted.get("status") != "admitted":
+            raise HTTPException(503, {"status": "audit_pending", "record_id": admitted.get("id"),
+                                      "message": "Approval is waiting for its activity record. Check again before saving."})
+        return _call(lambda: service.draft(ctx, admitted["id"], flow_id=new_id,
+                                           name=body.name.strip(), teaching=body.teaching))
 
-    flow, unclassified = await _compute(work, "A flow couldn't be made from this recipe.")
-    note = "Every action waits for a person's approval. Save to keep it; publishing and running stay separate."
-    if unclassified:
-        note += " Some actions still need their safety level set before it can run."
-    return _draft_out(flow, note)
+    draft = await _compute(work, "A flow couldn't be made from this recipe.")
+    return {"draft": draft, "saved": False, "published": False,
+            "note": "Approved evidence is bound to this draft. Save it, then publish separately. Future actions recheck its sources."}
 
 
 # ---- signed copies and approved recipes (flow recipe *-verified) -----------------
@@ -625,13 +807,14 @@ async def learn_from_signed(request: Request):
 
         trust, tenant = _workspace_trust()
         domain = None
-        if body.style == "choices":
+        if body.style in {"choices", "transforms"}:
             episodes = [b.get("body", {}).get("episode") or {} for b in body.bundles]
-            domain = domain_from_contract("choices", body.bundles[0].get("body", {}).get("contract") or {}, episodes)
+            domain = domain_from_contract(body.style, body.bundles[0].get("body", {}).get("contract") or {}, episodes)
         learner = (recipe_lineage.learn_choice_from_verified_bundles if body.style == "choices"
                    else recipe_lineage.learn_from_verified_bundles)
         return learner(body.bundles, trust=trust, expected_tenant=tenant, now=time.time(), allowed_tools=tools,
-                       domain=domain, max_operations=body.max_operations, operators=None, constants=None)
+                       domain=domain, max_operations=body.max_operations if domain is not None else 2,
+                       operators=None, constants=None)
 
     package = await _compute(work, "Lightwork couldn't learn from these signed examples. Check they come from "
                                    "this workspace and were approved for learning.")

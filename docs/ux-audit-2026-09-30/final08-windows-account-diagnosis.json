@@ -1,0 +1,563 @@
+{
+  "source_sha": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+  "status": "account-context diagnosis; all ten original failures covered by passing native probe; full native suite pending",
+  "interrupted_attempt": {
+    "label": "qualification-final-08-ordinary",
+    "result": {
+      "source_head": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+      "head_after": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+      "tracked_after": "",
+      "source_unchanged": true,
+      "checkout": "qualification-final-08",
+      "phase": "ordinary",
+      "exit_code": 1,
+      "pytest_exit_code": 1,
+      "phase_timed_out": false,
+      "cleanup_returncode": null,
+      "basetemp": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-iojyl1dj\\t",
+      "cleanup_errors": [],
+      "pytest_pid": 30944,
+      "controller_error": null,
+      "source_verification_error": null,
+      "pytest_still_running": false,
+      "elapsed_seconds": 1255.54,
+      "log": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-08-ordinary.log"
+    },
+    "failure_count": 10,
+    "junit_exists": false,
+    "stop_context": "Operator reported that only owned pytest tree30944 was stopped using native taskkill after default-account cleanup received AccessDenied. This external stop is not represented as a phase timeout in the controller receipt.",
+    "scope": "Incomplete ordinary attempt: exit1, not a full-suite result or a product waiver."
+  },
+  "native_probe": {
+    "label": "qualification-final-08-probe-native-context",
+    "result": {
+      "source_head": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+      "head_after": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+      "tracked_after": "",
+      "source_unchanged": true,
+      "checkout": "qualification-final-08",
+      "phase": "probe",
+      "exit_code": 0,
+      "pytest_exit_code": 0,
+      "phase_timed_out": false,
+      "cleanup_returncode": null,
+      "basetemp": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-vliw_ggs\\t",
+      "cleanup_errors": [],
+      "pytest_pid": 45436,
+      "controller_error": null,
+      "source_verification_error": null,
+      "pytest_still_running": false,
+      "elapsed_seconds": 8.66,
+      "log": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-08-probe-native-context.log"
+    },
+    "source": {
+      "source_head": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+      "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-08",
+      "phase": "probe",
+      "runner_pid": 57640,
+      "attempt": "native-context",
+      "artifact_label": "qualification-final-08-probe-native-context",
+      "faulthandler_timeout": 0,
+      "fatal_tracebacks": true,
+      "started_at": 1790842674.5683625,
+      "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-08\\Scripts\\python.exe",
+      "tracked_before": "",
+      "runner_sha256": "6e8f57ce3eff57232a5222ea90c44b9f15a620e386d5d07481bea31dcfd07047",
+      "inherited_environment_allowlist": [
+        "APPDATA",
+        "COMMONPROGRAMFILES",
+        "COMMONPROGRAMFILES(X86)",
+        "COMSPEC",
+        "LOCALAPPDATA",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "PATH",
+        "PATHEXT",
+        "PROCESSOR_ARCHITECTURE",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "SYSTEMROOT",
+        "USERPROFILE",
+        "WINDIR"
+      ],
+      "secure_flags": {
+        "MAVERICK_TEST_SECURE_DEFAULT": null,
+        "MAVERICK_SECURE_DEFAULT": null
+      },
+      "node_dependency_receipt": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\final-node-qualification-final-08-02.json",
+      "node_dependency_receipt_sha256": "4d5e76d81c0a561f9c95465f1d35e7b610c5967ce068e8d9e98669745e7dd95b",
+      "node_resolution_status": "passed_checkout_only_temp_shadowing",
+      "node_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-08\\node_modules",
+      "reporter_sha256": "9d673f64873a2638139b46929136cd1faa4888ec74ef750abbefcb02203427a1",
+      "installed_reporter_sha256": "9d673f64873a2638139b46929136cd1faa4888ec74ef750abbefcb02203427a1",
+      "command": [
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-08\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-p",
+        "audit_local_failure_reporter",
+        "-q",
+        "--tb=short",
+        "--durations=40",
+        "--timeout-method=thread",
+        "--basetemp",
+        "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-vliw_ggs\\t",
+        "--junitxml",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-08-probe-native-context.xml",
+        "-o",
+        "faulthandler_timeout=0",
+        "packages/maverick-core/tests/test_client_reliability.py",
+        "packages/maverick-core/tests/test_q3_2026_batch9.py",
+        "packages/maverick-core/tests/test_q3_2026_batch4.py",
+        "packages/maverick-core/tests/test_customer_deployment_paths.py",
+        "-x",
+        "--timeout=90"
+      ],
+      "phase_timeout_seconds": 7200,
+      "pytest_pid": 45436
+    },
+    "pytest_summary_seconds": 7.71,
+    "xml_seconds": "7.707",
+    "passed": 156,
+    "failed": 0,
+    "skipped": 0,
+    "modules": {
+      "packages/maverick-core/tests/test_client_reliability.py": 51,
+      "packages/maverick-core/tests/test_customer_deployment_paths.py": 32,
+      "packages/maverick-core/tests/test_q3_2026_batch4.py": 33,
+      "packages/maverick-core/tests/test_q3_2026_batch9.py": 40
+    },
+    "report_phase_counts": {
+      "setup": 156,
+      "call": 156,
+      "teardown": 156
+    },
+    "case_ids": [
+      "packages/maverick-core/tests/test_client_reliability.py::test_graphql_large_result_is_explicitly_incomplete",
+      "packages/maverick-core/tests/test_client_reliability.py::test_kubernetes_additive_allow_policy_refuses_execution",
+      "packages/maverick-core/tests/test_client_reliability.py::test_kubernetes_changed_policy_is_rechecked",
+      "packages/maverick-core/tests/test_client_reliability.py::test_kubernetes_copy_uses_unambiguous_local_operands",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_blank_selected_page_requests_ocr",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_corrupt_input_is_a_tool_error_when_isolation_is_off",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_local_size_limit_is_enforced_before_parser",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_malformed_arguments_do_not_escape_tool[arguments0]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_malformed_arguments_do_not_escape_tool[arguments1]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_requested_tables_are_not_silently_downgraded_to_plain_text",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_table_preserves_zero_false_and_cell_boundaries",
+      "packages/maverick-core/tests/test_client_reliability.py::test_pdf_uses_assigned_workspace_instead_of_server_cwd",
+      "packages/maverick-core/tests/test_client_reliability.py::test_response_encoding_bound_is_valid_with_escaped_content[ascii]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_response_encoding_bound_is_valid_with_escaped_content[escaping]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_response_encoding_bound_is_valid_with_escaped_content[unicode]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_response_non_ascii_headers_cannot_exhaust_the_envelope",
+      "packages/maverick-core/tests/test_client_reliability.py::test_rest_accepted_job_remains_visibly_pending",
+      "packages/maverick-core/tests/test_client_reliability.py::test_rest_large_response_is_valid_json_with_explicit_incompleteness",
+      "packages/maverick-core/tests/test_client_reliability.py::test_rest_malformed_write_body_refuses_before_network[None]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_rest_malformed_write_body_refuses_before_network[body0]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_rest_malformed_write_body_refuses_before_network[{bad]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_rest_metadata_exposes_revision_without_cookies_or_arbitrary_headers",
+      "packages/maverick-core/tests/test_client_reliability.py::test_rest_redirect_is_not_reported_as_completed_work",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_capacity_refuses_new_function_without_silent_data_loss",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_corrupt_book_cannot_be_overwritten_by_an_edit",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_empty_throughput_is_unmeasured",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_measurements_cannot_be_displaced_by_other_departments",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_nested_record_damage_refuses_edits_without_data_loss[sla_count]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_nested_record_damage_refuses_edits_without_data_loss[sla_metric]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_nested_record_damage_refuses_edits_without_data_loss[status]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_nested_record_damage_refuses_edits_without_data_loss[timestamp]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_partial_sample_never_claims_sla_is_met",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_unreadable_world_and_book_do_not_look_empty",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_writer_waits_for_shared_book_lock",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_zero_exception_target_is_measurable[0-met]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_shoring_zero_exception_target_is_measurable[1-breached]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_csv_bom_does_not_change_first_column_name",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_failed_write_preserves_original",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_info_does_not_report_a_truncated_count_as_exact",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_invalid_limit_is_a_tool_error[-1]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_invalid_limit_is_a_tool_error[10001]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_invalid_limit_is_a_tool_error[True]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_invalid_limit_is_a_tool_error[garbage]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_invalid_limit_is_a_tool_error[limit1]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_invalid_limit_is_a_tool_error[limit2]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_macro_enabled_edits_are_refused_before_loading",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_mutations_wait_for_shared_file_lock[orders.csv-write]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_mutations_wait_for_shared_file_lock[orders.xlsx-set_cell]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_mutations_wait_for_shared_file_lock[orders.xlsx-write]",
+      "packages/maverick-core/tests/test_client_reliability.py::test_spreadsheet_rejects_row_strings_without_changing_existing_file",
+      "packages/maverick-core/tests/test_client_reliability.py::test_xlsx_replace_failure_preserves_original_and_cleans_temporary",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_container_default_matches_state_mount_and_explicit_config_wins",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_container_entrypoint_provisions_workspace_and_preserves_files_across_processes",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_demo_launcher_has_bounded_honest_readiness[hung]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_demo_launcher_has_bounded_honest_readiness[never]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_demo_launcher_has_bounded_honest_readiness[ready]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_reference_recipes_provision_the_dashboard_credentials_they_require",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[[]-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{\"title\":\"\\xff\"}-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{\"title\":\"fixture\"}-invalid-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{\"title\":42}-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{\"title\":[]}-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{\"title\":null}-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{\"title\":true}-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{\"title\":{}}-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{bad-None-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{}--1-413]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{}-0-413]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{}-3-400]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_invalid_request_has_structured_error_and_never_forwards[{}-65537-413]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_relay_valid_string_title_still_forwards",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_ssh_uses_explicit_posix_workspace_in_actual_command[/requested/task-b-/configured/task-a-/requested/task-b]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_ssh_uses_explicit_posix_workspace_in_actual_command[None-/configured/task-a-/configured/task-a]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_ssh_uses_explicit_posix_workspace_in_actual_command[None-None-~/maverick-workspace]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_ssh_uses_explicit_posix_workspace_in_actual_command[override1-/configured/task-a-/requested/space name]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_renderer_provisions_saved_workspace_and_quotes_both_unit_paths[Documents/Maverick]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_renderer_provisions_saved_workspace_and_quotes_both_unit_paths[custom workspace/with%sign]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_service_uses_application_python_and_preserves_unit_on_failure[missing]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_service_uses_application_python_and_preserves_unit_on_failure[ready]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_service_uses_application_python_and_preserves_unit_on_failure[render-failed]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_ssh_workspace_stays_remote_despite_local_collision[/remote/customer/workspace]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_ssh_workspace_stays_remote_despite_local_collision[~/remote-only]",
+      "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_workspace_failure_precedes_any_completed_unit",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_build_sandbox_constructs_k8s",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_compactor_drops_least_relevant_when_over_budget",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_compactor_empty_history",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_compactor_estimate_tokens_increases_with_text",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_compactor_keeps_most_relevant_older_turn",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_compactor_passes_through_under_budget",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_image_classify_blocks_private_ip",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_image_classify_rejects_redirects",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_image_classify_requires_url",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_infer_calls_api",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_infer_error_propagates",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_missing_httpx",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_requires_model",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_requires_op",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_hf_summarize_requires_text",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_huggingface_registers",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_copies_pod_workspace_back_out_after_running",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_copies_workspace_into_pod_before_running",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_copy_out_failure_does_not_claim_workspace_delivery",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_deletes_pod_on_nonzero_exit",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_deletes_pod_on_success",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_deletes_pod_on_timeout",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_deletes_pod_on_unexpected_error",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_disallow_network_emits_networkpolicy_hint",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_disallow_network_fails_closed",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_exec_pipeline_order_and_no_rm",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_missing_kubectl",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_passes_context",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_pod_not_ready_fails_without_running_command",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_pod_overrides_non_root_and_limits",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_llm_complete_opens_span",
+      "packages/maverick-core/tests/test_q3_2026_batch4.py::test_tool_dispatch_opens_span",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_llm_cache_clear",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_llm_cache_enabled_via_env",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_llm_cache_key_stable",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_llm_cache_lookup_miss_then_hit",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_llm_cache_purge_expired",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_llm_cache_stats",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_llm_cache_ttl_expires",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_new_tools_register",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_extract_blocks_path_escape",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_extract_runs_tesseract",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_extract_url_blocks_private",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_extract_url_uses_workspace_tempfile",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_extract_validates_path",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_hf_backend_requires_token",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_hf_cannot_borrow_operator_token_in_authenticated_enterprise",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_missing_tesseract",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_requires_op",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_blocks_absolute_etc_passwd",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_blocks_spec_path_escape",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_cache_is_scoped_to_resolved_local_path",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_call_blocks_private_base_url",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_call_missing_required_path_param",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_call_sends_body",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_call_substitutes_path_param",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_describe",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_describe_unknown",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_http_failure_is_error_and_secret_scrubbed",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_openapi_list_ops",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_posthog_capture_honours_explicit_ingestion_host",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_posthog_capture_missing_key",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_posthog_capture_posts",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_posthog_capture_selfhosted_uses_same_host",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_posthog_capture_uses_eu_ingestion_host",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_posthog_insights_requires_keys",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_posthog_requires_op",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_shopify_missing_config",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_shopify_orders_follows_link_header",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_shopify_orders_renders",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_shopify_refund_dry_run",
+      "packages/maverick-core/tests/test_q3_2026_batch9.py::test_shopify_requires_op"
+    ],
+    "all_original_failure_ids_passed": true
+  },
+  "original_failure_to_native_pass": [
+    {
+      "nodeid": "packages/maverick-core/tests/test_client_reliability.py::test_kubernetes_copy_uses_unambiguous_local_operands",
+      "original_worker": "gw0",
+      "original_category": "Kubernetes/OCR parent-guard path",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.04553309999755584
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_missing_tesseract",
+      "original_worker": "gw1",
+      "original_category": "Kubernetes/OCR parent-guard path",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.07348970000748523
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_q3_2026_batch9.py::test_ocr_extract_runs_tesseract",
+      "original_worker": "gw1",
+      "original_category": "Kubernetes/OCR parent-guard path",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.10795499999949243
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_exec_pipeline_order_and_no_rm",
+      "original_worker": "gw1",
+      "original_category": "Kubernetes/OCR parent-guard path",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.0789199999999255
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_copies_workspace_into_pod_before_running",
+      "original_worker": "gw1",
+      "original_category": "Kubernetes/OCR parent-guard path",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.07730969999101944
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_q3_2026_batch4.py::test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod",
+      "original_worker": "gw1",
+      "original_category": "Kubernetes/OCR parent-guard path",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.02870009999605827
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_service_uses_application_python_and_preserves_unit_on_failure[ready]",
+      "original_worker": "gw3",
+      "original_category": "Bash permission denial or dependent missing file",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.18543320000753738
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_service_uses_application_python_and_preserves_unit_on_failure[missing]",
+      "original_worker": "gw3",
+      "original_category": "Bash permission denial or dependent missing file",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.07688070001313463
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_customer_deployment_paths.py::test_vps_service_uses_application_python_and_preserves_unit_on_failure[render-failed]",
+      "original_worker": "gw3",
+      "original_category": "Bash permission denial or dependent missing file",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.12882579999859445
+    },
+    {
+      "nodeid": "packages/maverick-core/tests/test_customer_deployment_paths.py::test_container_entrypoint_provisions_workspace_and_preserves_files_across_processes",
+      "original_worker": "gw3",
+      "original_category": "Bash permission denial or dependent missing file",
+      "native_call_outcome": "passed",
+      "native_call_seconds": 0.23392149999563117
+    }
+  ],
+  "receipt_owners_observed_read_only": [
+    {
+      "paths": [
+        "audit/qualification-final-07-ordinary.source.json",
+        "audit/qualification-final-07-ordinary.log"
+      ],
+      "owner": "The_Firm\\Cstep"
+    },
+    {
+      "paths": [
+        "audit/qualification-final-08-ordinary.source.json",
+        "audit/qualification-final-08-ordinary.log"
+      ],
+      "owner": "The_Firm\\CodexSandboxOffline"
+    },
+    {
+      "paths": [
+        "audit/qualification-final-08-probe-native-context.source.json",
+        "audit/qualification-final-08-probe-native-context.log"
+      ],
+      "owner": "The_Firm\\Cstep"
+    }
+  ],
+  "read_only_parent_handle_probes": {
+    "helper": "probe_windows_parent_handles.py",
+    "helper_sha256": "dabb37762575ab96a6f5330e222b354db7d8e46cb347eb20a8904312eef20739",
+    "observation_basis": "Captured tool stdout from the separately authorized read-only probes; these observations are summarized here, not represented as the original pytest exception's missing Win32 diagnostic.",
+    "target": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-iojyl1dj\\t\\popen-gw0\\test_kubernetes_copy_uses_unam0\\workspace\\input.txt",
+    "original_flags": {
+      "access": 128,
+      "share_mode": 3,
+      "creation": 3,
+      "flags": 35651584
+    },
+    "default_account": {
+      "account": "CodexSandboxOffline",
+      "failed_parent": "C:\\Users\\Cstep",
+      "winerror": 5,
+      "message": "Access is denied.",
+      "closed_handles": 2,
+      "elapsed_seconds": 0.000465
+    },
+    "native_account_same_retained_fixture": {
+      "account": "Cstep",
+      "failed_parent": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-iojyl1dj",
+      "winerror": 5,
+      "message": "Access is denied.",
+      "closed_handles": 6,
+      "elapsed_seconds": 0.000816
+    },
+    "interpretation": "Each account was denied at a different ancestor. Native probing of the sandbox-owned retained fixture was not a pass; the passing pytest probe used fresh native-owned directories. No sharing-violation retry, ACL change or guard weakening was made."
+  },
+  "retained_kubernetes_fixture": {
+    "root": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-iojyl1dj\\t\\popen-gw0\\test_kubernetes_copy_uses_unam0",
+    "recovery_directory": ".maverick\\sandbox-recovery\\k8s-9a839311188043d3a929e20145fe1b4e",
+    "input_txt": {
+      "bytes": 5,
+      "sha256": "c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20"
+    },
+    "export_tar": {
+      "bytes": 10240,
+      "sha256": "84ff92691f909a05b224e1c56abb4864f01b4f8e3c854e4bb4c7baf1d3f6d652"
+    },
+    "export_complete": "Present, zero bytes",
+    "exported": "Present and empty",
+    "originals": "Absent",
+    "source_inference": "The first current-workspace snapshot failed while reading input.txt: kubernetes.py414 -> workspace_transfer.py232/184/129 -> task_file_recovery.py379-381; export completed and backup/publication had not begun."
+  },
+  "source_equivalence": {
+    "final07_source": "2a765aa3e93cc7775090f574f027bd855b33aef5",
+    "final08_source": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+    "files": [
+      {
+        "path": "conftest.py",
+        "final07_blob": "0b81c6036e540d5ecb6604875834f2deef4d060d",
+        "final08_blob": "0b81c6036e540d5ecb6604875834f2deef4d060d",
+        "equal": true
+      },
+      {
+        "path": "packages/maverick-core/tests/conftest.py",
+        "final07_blob": "88252643fb6cf06f91b9739929620a39e5989c39",
+        "final08_blob": "88252643fb6cf06f91b9739929620a39e5989c39",
+        "equal": true
+      },
+      {
+        "path": "packages/maverick-core/tests/test_client_reliability.py",
+        "final07_blob": "1704c9057ec0ff95f14b1f7a6a5b40cf8f8bf5ac",
+        "final08_blob": "1704c9057ec0ff95f14b1f7a6a5b40cf8f8bf5ac",
+        "equal": true
+      },
+      {
+        "path": "packages/maverick-core/tests/test_kubernetes_workspace_transfer.py",
+        "final07_blob": "7750850863fe80d68926863f777900ca7fc3d671",
+        "final08_blob": "7750850863fe80d68926863f777900ca7fc3d671",
+        "equal": true
+      },
+      {
+        "path": "packages/maverick-core/maverick/task_file_recovery.py",
+        "final07_blob": "4eb090f49acc67e0012ecab42edc6288b37c9216",
+        "final08_blob": "4eb090f49acc67e0012ecab42edc6288b37c9216",
+        "equal": true
+      },
+      {
+        "path": "packages/maverick-core/maverick/sandbox/workspace_transfer.py",
+        "final07_blob": "bbb80e6c54223b95b3c9aeb60c3605fc41786213",
+        "final08_blob": "bbb80e6c54223b95b3c9aeb60c3605fc41786213",
+        "equal": true
+      },
+      {
+        "path": "packages/maverick-core/maverick/sandbox/kubernetes.py",
+        "final07_blob": "8107d24017c5a39d896d8d91fd34ebd2e7d2246e",
+        "final08_blob": "8107d24017c5a39d896d8d91fd34ebd2e7d2246e",
+        "equal": true
+      },
+      {
+        "path": "packages/maverick-core/maverick/file_lock.py",
+        "final07_blob": "48e482d459f5f7ce7b369c364cde87cc049679e5",
+        "final08_blob": "48e482d459f5f7ce7b369c364cde87cc049679e5",
+        "equal": true
+      }
+    ],
+    "prior_exact_kubernetes_test": {
+      "artifact": "audit/qualification-final-07-ordinary.xml",
+      "outcome": "passed",
+      "seconds": "0.104"
+    }
+  },
+  "limits": [
+    "The original pytest exception omitted the failing parent and ctypes.get_last_error. The later handle probes identify a reproducible execution-context access denial, not the unavailable original error value.",
+    "The 156-case probe is serial (-x,90s per case); the interrupted ordinary run used four workers with180s caps. This scoped probe does not establish a complete parallel-suite pass.",
+    "The separate full ordinary native-02 attempt was running when this note was prepared and has no result claimed here.",
+    "All original failures remain preserved; no source, assertions, parent-handle flags, ACLs or platform guards were changed to obtain the native probe pass."
+  ],
+  "artifacts": [
+    {
+      "task_relative_path": "audit/qualification-final-08-ordinary.source.json",
+      "sha256": "051a476378c36380cbf7b43f57773952c4d50f7a319c55bb08682cf9566440fb",
+      "bytes": 2393
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-ordinary.result.json",
+      "sha256": "71d32e5c059ba8709550065baf5efa58cad8f76c79e61cfe053cf8774113c440",
+      "bytes": 715
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-ordinary.log",
+      "sha256": "e474b33bd5f505b18466af2d442fb0979b21570490894bafb5256b9f51b7d486",
+      "bytes": 20331
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-ordinary.failures.jsonl",
+      "sha256": "24814612929a07669aec2502bb7892fab00b714a942d7cdd410c9745809c3a0c",
+      "bytes": 9402
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-ordinary.failures.jsonl.reports",
+      "sha256": "7dbb51fe4f31ae7c98438b3f957a5221014aa09b6f20e9fc826da80a7851d950",
+      "bytes": 14357888
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-probe-native-context.source.json",
+      "sha256": "d993278990908e6b7987d0203967569076b20c9d424eccba6e677cd9e05e1983",
+      "bytes": 2642
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-probe-native-context.result.json",
+      "sha256": "37247bfe0fa625ca9c1f5869d2a9784dafbb4b0d703df3ee6051570b56d58491",
+      "bytes": 721
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-probe-native-context.log",
+      "sha256": "0578070ec28c0116a5f3800fa5e57a47f48e8859f2bb9b512786271240f93815",
+      "bytes": 5357
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-probe-native-context.failures.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-probe-native-context.failures.jsonl.reports",
+      "sha256": "ce95b5fb2971d657e4abd0d93eefd90787aa996c49c1a4ce3c2c209f2b792e69",
+      "bytes": 119424
+    },
+    {
+      "task_relative_path": "audit/qualification-final-08-probe-native-context.xml",
+      "sha256": "9289639c7faecbf0d0c7ab5ed8a332d84835d6756da38bf174e10192f85dbc9f",
+      "bytes": 23722
+    },
+    {
+      "task_relative_path": "audit/qualification-final-07-ordinary.xml",
+      "sha256": "85560c11f7f23fd24ea8e39c4b006cf81e14e840d45a90960b7753182c7311c5",
+      "bytes": 6646418
+    }
+  ]
+}

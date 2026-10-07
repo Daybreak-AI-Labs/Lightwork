@@ -28,8 +28,8 @@ def test_trailing_space_subjects_stay_distinct_for_ownership_and_execution(
     monkeypatch.setattr(auth, "is_dashboard_admin", lambda _principal: False)
     alice = _request_for("alice")
     alice_space = _request_for("alice ")
-    plain_goal = SimpleNamespace(owner="user:alice")
-    spaced_goal = SimpleNamespace(owner="user:alice ")
+    plain_goal = SimpleNamespace(id=1, owner="user:alice")
+    spaced_goal = SimpleNamespace(id=2, owner="user:alice ")
 
     assert auth.caller_principal(alice) == "user:alice"
     assert auth.caller_principal(alice_space) == "user:alice "

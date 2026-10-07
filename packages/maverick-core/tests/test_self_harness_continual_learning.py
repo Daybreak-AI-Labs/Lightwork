@@ -49,7 +49,7 @@ def _cue(c):
 
 def _learn(store, cls):
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False, ledger=si.PromotionLedger())
-    recs = [{"model_id": "M", "failure_class": cls, "goal_text": f"{cls} variant {i}",
+    recs = [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": cls, "goal_text": f"{cls} variant {i}",
              "failure_msg": f"{cls} precondition missed", "channel": None, "user_id": None}
             for i in range(4)]
     return sh.run_self_harness(

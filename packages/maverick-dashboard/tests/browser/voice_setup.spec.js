@@ -31,3 +31,14 @@ test('voice setup requires consent, survives reload, cancels and retries synthet
   await expect(start).toBeDisabled();await expect(page.locator('#voice-setup-refresh')).toBeDisabled();
   expect(errors).toEqual([]);expect(audio).toBe(0);
 });
+
+test('voice recovery link opens the right settings section without overriding an active control',async({page})=>{
+  await page.goto('/settings?focus=voice-model-setup');
+  await expect(page.locator('[data-settings-tab="models"]')).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('#voice-model-setup')).toBeFocused();
+  await expect(page.locator('.voice-setup')).toBeVisible();
+
+  await page.addInitScript(()=>window.addEventListener('load',()=>document.getElementById('settings-search').focus()));
+  await page.goto('/settings?focus=voice-model-setup');
+  await expect(page.locator('#settings-search')).toBeFocused();
+});

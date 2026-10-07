@@ -49,6 +49,12 @@ _UPLOAD = "https://www.googleapis.com/upload/drive/v3"
 
 
 def _token() -> str:
+    from .. import connections
+    from ..template_connections import active, selected
+    if active():
+        ref = selected("gdrive", connections.current_principal())
+        return connections.resolve_named(ref["name"], expected_revision=ref["revision"],
+            connector="gdrive", origin="https://www.googleapis.com")["token"]
     t = os.environ.get("GDRIVE_ACCESS_TOKEN", "").strip()
     if not t:
         raise RuntimeError("Google Drive requires GDRIVE_ACCESS_TOKEN.")
@@ -229,6 +235,9 @@ def _run(args: dict[str, Any]) -> str:
     op = args.get("op")
     if not op:
         return "ERROR: op is required"
+    from ..template_connections import active
+    if active() and op in {"create", "delete"}:
+        return "REFUSED: selected Google Drive accounts allow read operations only."
     try:
         import httpx  # noqa: F401
     except ImportError:

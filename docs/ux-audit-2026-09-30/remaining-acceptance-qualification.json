@@ -1,0 +1,115 @@
+{
+  "source_base": "7798b3db81c5ec4f718eeeeefefdafc6cb7cf8a7",
+  "interpreter": "Python3.10.19 native AMD64, private .venv-compat310",
+  "product_changes": false,
+  "retention_runs": [
+    {
+      "mode": "ordinary",
+      "passed": 18,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "test_sha256": "9cdb0d49b5c169faec7186e4fafcb226fc77f6c95569ca94380c05fd1a54c46c",
+      "source_head": "7798b3db81c5ec4f718eeeeefefdafc6cb7cf8a7",
+      "case_ids": [
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_viewer_cannot_use_any_mutating_button",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_switch_writes_only_a_strengthening_setting",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_retention_periods_save_and_apply",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_keep_one_retention_period_preserves_omitted_fields_and_records_change",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_keep_all_retention_periods_survives_reload_and_native_enforcement",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_keep_retention_refuses_effective_installation_override",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_people_list_export_and_erase_are_workspace_scoped",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_erase_does_not_claim_everything_when_a_clean_up_step_failed",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_erase_reports_a_refused_erasure_record_as_uncertified",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_protection_and_retention_changes_are_recorded_with_who_made_them",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_a_refused_record_undoes_the_change_and_removes_nothing",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_a_person_data_download_is_recorded_without_the_person",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_ai_act_self_check_and_control_finder_are_plain",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_assessment_downloads_reject_typed_references",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_compliance_page_offers_buttons_not_config_keys",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_compliance_template_passes_a11y_audit",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_strict_mode_is_refused_until_sign_in_exists",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_fingerprint_is_computed_on_the_server_and_needs_operate"
+      ],
+      "artifacts": {
+        "audit/acceptance-retention-ordinary-02.log": "6618b7889aaf903c0b20e712f7cc896db7b7d8fd061ee236351a205be433edea",
+        "audit/acceptance-retention-ordinary-02.xml": "07cb3299b1339272ed9c0de9ef2e9ea2eaa523ca404c4e8be0496310e9de5842",
+        "audit/acceptance-retention-ordinary-02.source.json": "473a3db7049151f4a1bff23268906595a29145accb522f12a5693cc7d952e4ce"
+      }
+    },
+    {
+      "mode": "secure",
+      "passed": 18,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "test_sha256": "9cdb0d49b5c169faec7186e4fafcb226fc77f6c95569ca94380c05fd1a54c46c",
+      "source_head": "7798b3db81c5ec4f718eeeeefefdafc6cb7cf8a7",
+      "case_ids": [
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_viewer_cannot_use_any_mutating_button",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_switch_writes_only_a_strengthening_setting",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_retention_periods_save_and_apply",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_keep_one_retention_period_preserves_omitted_fields_and_records_change",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_keep_all_retention_periods_survives_reload_and_native_enforcement",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_keep_retention_refuses_effective_installation_override",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_people_list_export_and_erase_are_workspace_scoped",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_erase_does_not_claim_everything_when_a_clean_up_step_failed",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_erase_reports_a_refused_erasure_record_as_uncertified",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_protection_and_retention_changes_are_recorded_with_who_made_them",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_a_refused_record_undoes_the_change_and_removes_nothing",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_a_person_data_download_is_recorded_without_the_person",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_ai_act_self_check_and_control_finder_are_plain",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_assessment_downloads_reject_typed_references",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_compliance_page_offers_buttons_not_config_keys",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_compliance_template_passes_a11y_audit",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_strict_mode_is_refused_until_sign_in_exists",
+        "packages.maverick-dashboard.tests.test_compliance_controls_api::test_fingerprint_is_computed_on_the_server_and_needs_operate"
+      ],
+      "artifacts": {
+        "audit/acceptance-retention-secure-02.log": "e0605d1b1e2bc7bfaac28d208315cc6e51faef247f5e70063cb5f665e4f1f117",
+        "audit/acceptance-retention-secure-02.xml": "24efb762f61cf485926923568745668630f0f5dd1f1f8f0427086006ab0b1cc9",
+        "audit/acceptance-retention-secure-02.source.json": "6a3c1d81a513861fc79264e8a29404539362b78993bd058695795602ece4f057"
+      }
+    }
+  ],
+  "browser_status": "authored; Chromium runtime held; not passing evidence",
+  "browser_case_count": 7,
+  "browser_files": {
+    "archive_fixture.py": "47c1afa46beccc1de57c2ba41ae44178e53f1761c15c31b11e377cb15ea4f459",
+    "archive_receiving.spec.js": "69193d360e9e289d777f117373c67d0c0ca4818a130fb8bb79bbf3183b74bf0b",
+    "acceptance-server.js": "e421a32651a881fd3480143b40c0099f97e5b0eb4fca04b7be513e5719d7ad21",
+    "workspace_switch_server.py": "76fb1b7919fdb0b7c3a2411a860d333a47758720b5684d76a193c267f4206467",
+    "workspace_switch_acceptance.spec.js": "96660abdefd3bfffdc13ccfc3166e5ce045ad1b302a48dfd1805dddc977912bd",
+    "role_grant_acceptance.spec.js": "dc39f2171c96bf0c2cd0b5ad0e6ca0dd451163cc2fab630cef42b63029e04387",
+    "retention_acceptance.spec.js": "5c32d84031180096ce88db04f27cac9ad75a0889d8ec0496ec80fa21484147ae"
+  },
+  "limits": [
+    "Focused source-path run, not final immutable wheel qualification",
+    "No live providers or production changes",
+    "Real installed devices and human accessibility not qualified"
+  ],
+  "prior_attempts_retained": [
+    "audit/acceptance-retention-ordinary-01.*",
+    "audit/acceptance-retention-secure-01.*",
+    "audit/archive-fixture-preflight-01.log",
+    "audit/remaining-acceptance-browser-collection-01.log (before local TEMP override; permission failure)",
+    "audit/remaining-acceptance-browser-collection-02.log (ancestor host Playwright shadowed NODE_PATH; resolved with private copied pinned dependencies)"
+  ],
+  "browser_collection": {
+    "count": 7,
+    "files": 4,
+    "runtime": false,
+    "artifact": "audit/remaining-acceptance-browser-collection-03.log",
+    "sha256": "2c4822328b4bae8d3a72d4ba1ffeb7272a444f3d7d31946081b8c256481d47d9"
+  },
+  "execution_followup": {
+    "source_sha": "1719f2fc0e01216e8daea5f77228da9835409657",
+    "document": "browser-final-1719f2f.md",
+    "receipt": "browser-final-1719f2f.json",
+    "browser_distinct_passed": 108,
+    "new_original_criteria_passed": 18,
+    "dashboard_js_passed": 1711,
+    "product_repairs_since_original_authored_checkpoint": true,
+    "prior_results_retained": true
+  }
+}

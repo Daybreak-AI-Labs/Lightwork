@@ -88,7 +88,7 @@ def test_million_trial_efficacy_soak(tmp_path):
         for cls in taught:
             ctrl = si.SelfImprovementController(frozen_fn=lambda: False,
                                                 ledger=si.PromotionLedger())
-            recs = [{"model_id": "M", "failure_class": cls, "goal_text": f"{cls} variant",
+            recs = [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": cls, "goal_text": f"{cls} variant",
                      "failure_msg": f"{cls} precondition missed",
                      "channel": None, "user_id": None}
                     for _ in range(rng.randint(3, 7))]

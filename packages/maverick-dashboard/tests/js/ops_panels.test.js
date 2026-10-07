@@ -3,6 +3,7 @@
 // terminal. Each panel is loaded from its real partial template.
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const script = fs.readFileSync(path.join(folder, 'static/lightwork-ops-panels.js'), 'utf8');
 
@@ -23,6 +24,7 @@ const ME = {can: {view: true, operate: true, audit: true, admin: true, installat
 async function fixture(markup, route, {confirm = true, form = null} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [], forms = [];
+  shell(window);
   window.fetch = async (url, options = {}) => {
     calls.push({url, options, body: options.body ? JSON.parse(options.body) : null});
     if (url === '/api/v1/account/me') return response(ME);
@@ -56,14 +58,16 @@ test('checkpoints list days to choose, offer a receipt per row and publish after
   t.after(() => ui.window.close());
   const days = [...ui.document.querySelectorAll('#ops-ckpt-day option')].map((o) => o.value);
   assert.deepEqual(days, ['2026-01-02', '2026-01-01']);
+  // Each day reads in the shared date format; the value stays the calendar day.
+  assert.equal(ui.document.querySelector('#ops-ckpt-day option').textContent, 'Jan 2, 2026');
   const receipt = ui.document.querySelector('#ops-ckpt-rows a');
   assert.equal(receipt.getAttribute('href'), '/api/v1/audit/checkpoints/1/receipt');
-  assert.match(ui.document.getElementById('ops-ckpt-rows').textContent, /2026-01-01.*Checkpoint.*3/);
+  assert.match(ui.document.getElementById('ops-ckpt-rows').textContent, /Jan 1, 2026.*Checkpoint.*3/);
   ui.document.getElementById('ops-ckpt-publish').click();
   await ui.settle();
-  assert.match(ui.confirms[0], /Publish the checkpoint of 2026-01-02/);
+  assert.match(ui.confirms[0], /Publish the checkpoint of Jan 2, 2026/);
   assert.deepEqual(posts(ui, '/publish')[0].body, {day: '2026-01-02', after_erasure: false});
-  assert.match(ui.document.getElementById('ops-ckpt-result').textContent, /Published checkpoint 2 for 2026-01-02/);
+  assert.match(ui.document.getElementById('ops-ckpt-result').textContent, /Published checkpoint 2 for Jan 2, 2026/);
 });
 
 test('retiring a checkpoint asks first and sends only the row it showed', async (t) => {
@@ -173,6 +177,18 @@ test('the breach planner asks in a form and shows who to tell', async (t) => {
   assert.equal(body.sensitive, true);
   assert.ok(body.discovered_at > 0);
   assert.match(ui.document.getElementById('ops-breach-out').textContent, /Supervisory authority/);
+});
+
+test('the breach planner leaves an omitted count unknown', async (t) => {
+  const ui = await fixture(partial('_ops_privacy.html'), (url) => {
+    if (url.endsWith('/regimes')) return response({regimes: [{regime: 'us_ca', name: 'California'}]});
+    return response({subjects_affected: null, obligations: [], notice: 'Not legal advice.'});
+  }, {form: () => ({'law:us_ca': true})});
+  t.after(() => ui.window.close());
+  ui.document.getElementById('ops-breach-plan').click();
+  await ui.settle();
+  assert.equal(posts(ui, '/breach/plan')[0].body.subjects_affected, null);
+  assert.match(ui.document.getElementById('ops-breach-out').textContent, /count not provided/);
 });
 
 test('a bucket scan asks for the bucket and sends the row\'s version', async (t) => {

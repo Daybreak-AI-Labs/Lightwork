@@ -22,6 +22,11 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     from maverick.config import get_features
     assert get_features() == {
+        "personal_preferences": True, "configuration_profiles": True,
+        "employee_task_diagnostics": True, "employee_activation": True,
+        "deliverable_bundles": False, "project_workspaces": False, "task_handoffs": False,
+        "employee_companions": False, "employee_content_access_requests": False,
+        "permission_access_requests": False, "employee_departures": False, "personal_data_controls": False,
         "skills": True, "world_model": True, "streaming": True,
         "pack_editing": True, "role_editing": True, "scheduling": True,
         "triggers": True, "action_center": True, "draft_recovery": True,
@@ -29,6 +34,21 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
         "guided_onboarding": True, "record_search": True, "workspace_recovery": False,
         "workflow_readiness": True, "project_reviews": False, "outcome_measurement": False,
         "signing_identity_transition": False, "copilot_operations": False,
+        "commitment_viability": False, "shared_decision_evidence": False,
+        "commitment_capability_learning": False,
+        "semantic_rule_reuse": False,
+        "procedure_interactions": False,
+        "operational_competence_acquisition": False,
+        "request_program": False,
+        "commitment_economic_alternatives": False,
+        "workflow_step_checks": False,
+        "applicability_regions": False,
+        "governed_rule_evolution": False,
+        "recovery_visibility": False,
+        "private_task_computation": False,
+        "portable_competence": False,
+        "work_restructuring": False,
+        "human_conversation_handoffs": False,
     }
 
 
@@ -46,6 +66,11 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     from maverick.config import get_features
     assert get_features() == {
+        "personal_preferences": True, "configuration_profiles": True,
+        "employee_task_diagnostics": True, "employee_activation": True,
+        "deliverable_bundles": False, "project_workspaces": False, "task_handoffs": False,
+        "employee_companions": False, "employee_content_access_requests": False,
+        "permission_access_requests": False, "employee_departures": False, "personal_data_controls": False,
         "skills": False, "world_model": False, "streaming": False,
         "pack_editing": False, "role_editing": False, "scheduling": False,
         "triggers": False, "action_center": False, "draft_recovery": False,
@@ -53,6 +78,21 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "guided_onboarding": False, "record_search": False, "workspace_recovery": False,
         "workflow_readiness": False, "project_reviews": True, "outcome_measurement": True,
         "signing_identity_transition": False, "copilot_operations": True,
+        "commitment_viability": False, "shared_decision_evidence": False,
+        "commitment_capability_learning": False,
+        "semantic_rule_reuse": False,
+        "procedure_interactions": False,
+        "operational_competence_acquisition": False,
+        "request_program": False,
+        "commitment_economic_alternatives": False,
+        "workflow_step_checks": False,
+        "applicability_regions": False,
+        "governed_rule_evolution": False,
+        "recovery_visibility": False,
+        "private_task_computation": False,
+        "portable_competence": False,
+        "work_restructuring": False,
+        "human_conversation_handoffs": False,
     }
 
 

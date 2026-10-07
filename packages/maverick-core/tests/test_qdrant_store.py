@@ -64,6 +64,19 @@ def test_qdrant_local_path_init(monkeypatch, tmp_path):
     assert fake_client is not None  # client constructed
 
 
+def test_qdrant_explicit_legacy_model_failure_does_not_fall_back(monkeypatch, tmp_path):
+    fake_client = _install_fake_qdrant(monkeypatch)
+    monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
+    fake_client.set_model.side_effect = ValueError("unsupported selected model")
+    from maverick.vector_store.qdrant_store import QdrantStore
+
+    with pytest.raises(ValueError, match="unsupported selected model"):
+        QdrantStore(path=tmp_path / "qd", embedding_model="synthetic/selected")
+    fake_client.set_model.assert_called_once_with("synthetic/selected")
+    fake_client.close.assert_called_once()
+    fake_client.add.assert_not_called()
+
+
 def test_qdrant_url_init_skips_path(monkeypatch, tmp_path):
     _install_fake_qdrant(monkeypatch)
     monkeypatch.setenv("MAVERICK_QDRANT_URL", "http://example:6333")

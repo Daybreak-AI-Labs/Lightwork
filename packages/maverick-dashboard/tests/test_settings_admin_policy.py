@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -71,7 +71,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -184,7 +184,7 @@ def test_tools_per_chat_app_are_validated(audit_rows):
         [{"name": "slack", "denied_tools": ["sh\ud800"], "allowed_tools": [], "max_risk": ""}],
     ):
         # Sent as escaped JSON, the way any script can send it.
-        body = json.dumps({"changes": [{"id": "security.channels", "value": bad}],
+        body = json.dumps({"expected_revision": client.get(API, params={"q":"__revision__"}).json()["revision"], "changes": [{"id": "security.channels", "value": bad}],
                            "confirm": True})
         r = client.post(API, content=body, headers={"Content-Type": "application/json"})
         assert r.status_code == 400, bad

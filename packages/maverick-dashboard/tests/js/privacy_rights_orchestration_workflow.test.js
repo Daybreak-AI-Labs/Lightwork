@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const dir = path.resolve(__dirname, "../../maverick_dashboard");
 const helpers = fs.readFileSync(path.join(dir, "static/lightwork-record-workflows.js"), "utf8");
@@ -15,7 +16,7 @@ const json = (v, status = 200) => new Response(JSON.stringify(v), { status, head
 const kase = { case_id: "request-1", rights: ["access", "erasure"], identity_status: "verified", status: "open", revision: 5,
   legal_hold: false, retention_blocks_deletion: false, closure_approved_by: null, created_at: 1.9e9, retained_until: 2e9 };
 
-async function fixture(forms = []) {
+async function fixture(forms = [], deadLetters = []) {
   const dom = new JSDOM(`<main>${app}</main>`, { url: "https://lightwork.example/privacy/rights-orchestration", runScripts: "outside-only" });
   const { window } = dom;
   const calls = [], confirms = [];
@@ -27,8 +28,10 @@ async function fixture(forms = []) {
     if (url.endsWith("/cases")) return json({ items: [kase] });
     if (url.endsWith("/sources")) return json({ items: [{ source_id: "company-m365", adapter_ref: "microsoft_graph_users", capabilities: ["discover"], state: "active", revision: 1 }] });
     if (url.endsWith("/work")) return json({ tasks: [{ task_id: "t1", source_id: "company-m365", phase: "delete", state: "planned", destructive: true, approved_by: null, revision: 2 }], evidence: [], manifests: [], packages: [], exports: [] });
+    if (url.includes("/callbacks?state=dead_letter")) return json({ items: deadLetters, count: deadLetters.length });
     return json({});
   };
+  shell(window);
   window.eval(helpers);
   window.eval(source);
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise((d) => setImmediate(d)); };
@@ -69,4 +72,19 @@ test("approving a deletion asks for confirmation and carries the task version", 
   assert.equal(ui.confirms.length, 1);
   const post = ui.calls.find((c) => c.url.endsWith("/tasks/t1/approve-destructive"));
   assert.equal(JSON.parse(post.body).expected_revision, 2);
+});
+
+test("failed provider work shows a recovery action with the current callback version", async (t) => {
+  const ui = await fixture([], [{ callback_id: "callback-1", task_id: "t1", case_id: "request-1", state: "dead_letter", revision: 9 }]);
+  t.after(() => ui.window.close());
+  ui.doc.querySelector("#pro-cases button").click(); await ui.settle();
+  const tasks = ui.doc.getElementById("pro-case-tasks");
+  assert.match(tasks.textContent, /Needs attention.*Try again/);
+  assert.doesNotMatch(tasks.textContent, /Record result/);
+  [...tasks.querySelectorAll("button")].find((b) => b.textContent === "Try again").click();
+  await ui.settle();
+  const post = ui.calls.find((c) => c.url.endsWith("/callbacks/callback-1/requeue"));
+  assert.equal(JSON.parse(post.body).expected_revision, 9);
+  assert.match(ui.doc.getElementById("pro-status").textContent, /may be checked again automatically/);
+  assert.doesNotMatch(tasks.textContent, /callback-1|t1/);
 });

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Privacy Requests · Lightwork{% endblock %}
+{% block title %}Privacy requests · Lightwork{% endblock %}
 {% block content %}
 <style>
   .pro-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -10,9 +10,9 @@
   .pro-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
                 word-break:break-word; }
   .pro-warning { border:2px solid var(--danger); padding:var(--space-3);
-                 border-radius:8px; background:var(--surface-2); }
+                 border-radius: var(--radius-md); background:var(--surface-2); }
   .pro-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
-  @media (max-width:900px) { .pro-grid { grid-template-columns:1fr; } }
+  @media (max-width:880px) { .pro-grid { grid-template-columns:1fr; } }
 </style>
 
 {% from "_hero.html" import hero %}
@@ -28,6 +28,7 @@
     <li>Deleting data in another system needs approval from a second administrator first.</li>
     <li>Closing a request needs approval from someone other than the person who opened it.</li>
     <li>Connected systems (Microsoft 365, Google Workspace, Salesforce, ServiceNow) are only contacted once your administrator has set them up.</li>
+    <li>A manually recorded result is your statement. A document fingerprint does not independently verify its contents. A completed request does not certify permanent deletion from retained copies or backups.</li>
   </ul>
 </details>
 
@@ -41,7 +42,7 @@
   <p id="pro-status" class="muted" role="status" aria-live="polite">Loading requests…</p>
 
   <div class="section-head"><h2>Requests</h2>
-    <button type="button" class="btn btn--primary" id="pro-new-case">New request</button></div>
+    <button type="button" class="btn btn--primary" id="pro-new-case">Create request</button></div>
   <div class="panel" id="pro-cases"><p class="muted">Loading…</p></div>
 
   <section class="panel" id="pro-case" hidden aria-labelledby="pro-case-title">
@@ -50,6 +51,10 @@
     <div id="pro-case-steps" style="display:flex; gap:.5rem; flex-wrap:wrap; margin:.75rem 0;"></div>
     <h3>Work in each system</h3>
     <div id="pro-case-tasks"></div>
+    <section id="pro-evidence-review" class="panel" hidden aria-labelledby="pro-evidence-title">
+      <h3 id="pro-evidence-title">Original result evidence</h3>
+      <div id="pro-evidence-details"></div>
+    </section>
     <h3>Completeness checks</h3>
     <div id="pro-case-manifests"></div>
   </section>
@@ -76,7 +81,7 @@
 <div class="pro-grid">
   <section class="panel pro-stack">
     <h2>Choose an action</h2>
-    <p>Tenant and actor come only from the authenticated request. Unknown fields
+    <p>The workspace and the person acting come only from your sign-in. Unknown fields
       are rejected. After case opening, the browser clears the raw intake body.</p>
     <label>Operation
       <select id="pro-operation" data-guided-api="/api/v1/privacy/rights-orchestration">
@@ -90,14 +95,14 @@
         <option value="retention-gate" data-method="POST" data-path="/cases/{case_id}/retention-gate">Case: retention gate</option>
         <option value="task-plan" data-method="POST" data-path="/cases/{case_id}/sources/{source_id}/plan">Source work: plan tasks</option>
         <option value="destructive-approve" data-method="POST" data-path="/tasks/{task_id}/approve-destructive">Deletion: independent approval</option>
-        <option value="callback-claim" data-method="POST" data-path="/callbacks/claim">Callback: claim worker lease</option>
+        <option value="callback-claim" data-method="POST" data-path="/callbacks/claim">Callback: take the next one</option>
         <option value="callback-list" data-method="GET" data-path="/callbacks">Callback: list governed queue</option>
         <option value="callback-fail" data-method="POST" data-path="/callbacks/{callback_id}/fail">Callback: record failure</option>
         <option value="callback-ack" data-method="POST" data-path="/callbacks/{callback_id}/acknowledge">Callback: acknowledge worker evidence</option>
         <option value="callback-requeue" data-method="POST" data-path="/callbacks/{callback_id}/requeue">Callback: requeue dead letter</option>
         <option value="source-runtime-run" data-method="POST" data-path="/source-runtime/run">Provider runtime: execute bounded batch</option>
         <option value="source-runtime-reconcile" data-method="POST" data-path="/source-runtime/reconcile">Provider runtime: reconcile ambiguous deletes</option>
-        <option value="source-evidence" data-method="PUT" data-path="/cases/{case_id}/sources/{source_id}/phases/{phase}/evidence/{evidence_id}">Source work: record evidence</option>
+        <option value="source-evidence" data-method="PUT" data-path="/cases/{case_id}/sources/{source_id}/phases/{phase}/evidence/{evidence_id}">Source work: record a manual attestation</option>
         <option value="manifest-build" data-method="PUT" data-path="/cases/{case_id}/manifests/{manifest_id}">Case: build completeness manifest</option>
         <option value="package-create" data-method="PUT" data-path="/cases/{case_id}/packages/{package_id}">Response package: record metadata</option>
         <option value="package-get" data-method="GET" data-path="/packages/{package_id}">Response package: get metadata</option>
@@ -105,7 +110,7 @@
         <option value="case-close" data-method="POST" data-path="/cases/{case_id}/close">Case: close as opener</option>
         <option value="case-export" data-method="PUT" data-path="/cases/{case_id}/exports/{export_id}">Case: create local export</option>
         <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: check this workspace’s records</option>
       </select>
     </label>
     <label>Record references (JSON)
@@ -116,7 +121,7 @@
     </label>
     <div class="pro-warning" id="pro-confirm-panel">
       <label class="pro-confirm"><input id="pro-confirm" type="checkbox">
-        <span>I reviewed the exact tenant, principal, revision, evidence, hold,
+        <span>I reviewed the exact workspace, person, version, evidence, hold,
           retention, destructive-work, callback, or closure consequences.</span>
       </label>
     </div>
@@ -142,11 +147,25 @@
     "identity-evidence", "legal-hold", "retention-gate",
     "destructive-approve", "callback-claim", "callback-fail", "callback-ack",
     "callback-requeue", "source-runtime-run", "source-runtime-reconcile",
-    "closure-approve", "case-close", "retention-purge"
+    "closure-approve", "case-close", "retention-purge", "source-evidence"
   ]);
 
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  // Failures read as plain sentences: never "HTTP 403", "Error:" or raw server text.
+  function requestProblem(status, detail) {
+    return window.mvPlainDetail(detail) || window.mvErrorText({status: status, detail: detail}, "complete the request");
+  }
+  function problemText(error) {
+    var kind = error && error.name;
+    if (kind === "SyntaxError") {
+      return "Record references and Action details must be valid JSON. Check the quotes, commas and brackets, then try again.";
+    }
+    if (kind === "TypeError" || kind === "AbortError") {
+      return window.mvErrorText(error, "complete the request");
+    }
+    return error && error.message ? error.message : window.mvErrorText(error, "complete the request");
   }
   function selectedRoute() {
     return operation.options[operation.selectedIndex];
@@ -158,7 +177,7 @@
   function buildPath(template, values) {
     return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
       if (typeof values[key] !== "string" || !values[key]) {
-        throw new Error("Missing string path value: " + key);
+        throw new Error("Add \"" + key + "\" to Record references, then try again.");
       }
       return encodeURIComponent(values[key]);
     });
@@ -176,16 +195,16 @@
       if (!responseText) { throw new Error("empty response"); }
       result = JSON.parse(responseText);
     } catch (_error) {
-      throw new Error("Request failed: the server returned an invalid JSON response.");
+      throw new Error("Lightwork's reply could not be read. Refresh the page and try again.");
     }
     if (!response.ok) {
-      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+      throw new Error(requestProblem(response.status, result && result.detail));
     }
     show({status: response.status, ok: response.ok, result: result});
   }
 
   document.getElementById("pro-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+    run("GET", "/status", {}).catch(function (error) { show(problemText(error)); });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("pro-submit").addEventListener("click", async function () {
@@ -197,15 +216,18 @@
       var route = selectedRoute();
       var pathValues = JSON.parse(paths.value || "{}");
       var payload = JSON.parse(body.value || "{}");
+      if (operation.value === "source-evidence" && payload.manual_attestation !== true) {
+        throw new Error("Recording evidence here saves your manual statement. Confirm manual_attestation as true after reviewing the document. Lightwork will not independently verify deletion.");
+      }
       if (Object.prototype.hasOwnProperty.call(payload, "tenant") ||
           Object.prototype.hasOwnProperty.call(payload, "tenant_id") ||
           Object.prototype.hasOwnProperty.call(payload, "actor") ||
           Object.prototype.hasOwnProperty.call(payload, "actor_ref")) {
-        throw new Error("Tenant and actor fields are never accepted.");
+        throw new Error("Workspace and person-acting fields are never accepted. Remove them from Action details, then try again.");
       }
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);
-    } catch (error) { show(String(error)); }
+    } catch (error) { show(problemText(error)); }
     finally { if (clearRawIntake) { body.value = "{}"; } }
   });
   updateConfirmation();

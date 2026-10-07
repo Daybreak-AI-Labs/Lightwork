@@ -1,8 +1,8 @@
-"""Python sidecar for the Tauri desktop installer.
+"""Optional JSON setup sidecar for clients that explicitly invoke it.
 
 Reads wizard steps from stdin, writes JSON-formatted next-step
-descriptors to stdout. The Tauri Rust shell drives this process and
-the Svelte UI sends user answers via Tauri invoke calls.
+descriptors to stdout. The shipped desktop installer instead bootstraps
+headlessly and opens dashboard onboarding; it does not invoke this sidecar.
 
 Protocol (line-delimited JSON):
 
@@ -28,9 +28,13 @@ from pathlib import Path
 from typing import Any
 
 from .wizard import (
+    CONFIG_FILE,
     DEFAULT_GOVERNANCE_PROFILE,
+    ENV_FILE,
     GOVERNANCE_CHOICES,
     GOVERNANCE_PROFILES,
+    _existing_setup,
+    recover_pending_setup,
     write_consumer_config,
 )
 
@@ -61,6 +65,25 @@ def run() -> None:
 
     # The first invoke carries no answer; consume it and ask Q1.
     _recv()
+    try:
+        if recover_pending_setup():
+            _send(_step("__done__", "Lightwork finished the interrupted setup. Open Lightwork.", []))
+            return
+    except (OSError, RuntimeError) as exc:
+        raise RuntimeError(
+            "Interrupted Lightwork setup needs assistance; saved files were not changed."
+        ) from exc
+    if _existing_setup():
+        if not CONFIG_FILE.exists() and ENV_FILE.exists():
+            raise FileExistsError(
+                "Lightwork found saved keys but no completed setup. Nothing was changed. "
+                "Ask your Lightwork administrator or support to recover this installation."
+            )
+        raise FileExistsError(
+            "Lightwork found saved setup files. Nothing was changed. "
+            "Open Lightwork Settings to change provider keys, task spending, "
+            "and other available controls. Some installation choices are not there yet."
+        )
 
     # Q1: name
     _send(_step(
@@ -124,27 +147,32 @@ def run() -> None:
     # Q5: budget
     _send(_step(
         "budget",
-        "Add an optional spending limit to each task?",
-        ["No task limit", "$1", "$5", "$20"],
+        "Task limits for each goal? Standard is $2 and 30 minutes.",
+        ["Standard ($2, 30 minutes)", "No task limit", "$1", "$5", "$20"],
     ))
-    budget_ans = _recv().strip() or "No task limit"
-    if budget_ans not in {"No task limit", "$1", "$5", "$20"}:
-        raise ValueError("Choose no task limit or one of the offered spending limits")
-    budget = ({"max_dollars": float(budget_ans[1:])}
-              if budget_ans in {"$1", "$5", "$20"} else {})
+    budget_ans = _recv().strip() or "Standard ($2, 30 minutes)"
+    if budget_ans not in {"Standard ($2, 30 minutes)", "No task limit", "$1", "$5", "$20"}:
+        raise ValueError("Choose standard limits, no task limit, or one of the offered spending limits")
+    if budget_ans == "No task limit":
+        budget = {"task_limits_enabled": False}
+    else:
+        budget = {"max_dollars": (float(budget_ans[1:]) if budget_ans.startswith("$") else 2.0),
+                  "max_wall_seconds": 1800.0}
 
-    write_consumer_config(
+    backend = write_consumer_config(
         user_name=user_name, keys=keys, workdir=workdir, budget=budget,
         profile=profile,
+        protect_existing=True,
     )
 
     if keys:
-        msg = f"Setup complete, {user_name}. Lightwork is ready."
+        msg = f"Setup saved, {user_name}. Lightwork is ready to answer questions."
     else:
         msg = (
-            f"Setup saved, {user_name}. Add an API key later from Settings "
-            "or by running 'maverick init' again."
+            f"Setup saved, {user_name}. Add an API key later in Lightwork Settings."
         )
+    if backend == "local":
+        msg += " An isolated work area could not be connected, so file changes and program execution are off until you connect one in Permissions."
     _send(_step("__done__", msg, []))
 
 

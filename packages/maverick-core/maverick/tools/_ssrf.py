@@ -137,12 +137,13 @@ def _allow_private() -> bool:
     return allow_private()
 
 
-def resolve_pinned_ip(host: str) -> str:
+def resolve_pinned_ip(host: str, *, require_public: bool = False) -> str:
     """Resolve ``host`` once and return a single IP to connect to.
 
     Requires *every* resolved address to be public (so a resolver can't
     smuggle a private IP alongside a public one). Raises ``BlockedHost`` on
-    a resolution failure or any non-public address.
+    a resolution failure or any non-public address. ``require_public`` ignores
+    private-network overrides for callers that must never reach an internal IP.
     """
     if not host:
         raise BlockedHost("missing host")
@@ -155,7 +156,13 @@ def resolve_pinned_ip(host: str) -> str:
         raise BlockedHost(f"no addresses for {host!r}")
     normalized_host = _normalized_host(host)
     scoped_private = normalized_host in _scoped_private_hosts.get()
-    if scoped_private:
+    if require_public or (not scoped_private and not _allow_private()):
+        for ip in ips:
+            if _ip_is_blocked(ip):
+                raise BlockedHost(
+                    f"{host!r} resolves to non-public address {ip}"
+                )
+    elif scoped_private:
         expected = ipaddress.ip_address(normalized_host)
         for ip in ips:
             try:
@@ -165,12 +172,6 @@ def resolve_pinned_ip(host: str) -> str:
             if actual != expected or not actual.is_loopback:
                 raise BlockedHost(
                     f"scoped host {host!r} resolved outside its exact loopback literal"
-                )
-    elif not _allow_private():
-        for ip in ips:
-            if _ip_is_blocked(ip):
-                raise BlockedHost(
-                    f"{host!r} resolves to non-public address {ip}"
                 )
     return ips[0]
 
@@ -228,12 +229,15 @@ class _PinnedTransport:
         self.close()
 
 
-def safe_client(url: str, *, attempt_deadline=None, **client_kwargs: Any) -> httpx.Client:
+def safe_client(
+    url: str, *, attempt_deadline=None, require_public: bool = False,
+    **client_kwargs: Any,
+) -> httpx.Client:
     """Return an ``httpx.Client`` pinned to a validated public IP for ``url``.
 
     Raises ``BlockedHost`` if the scheme is not http/https or the host
-    resolves to a non-public address. ``follow_redirects`` defaults to
-    ``False`` (see module docstring); callers re-validate redirects.
+    resolves to a non-public address. ``require_public`` keeps that rule even
+    if private-network fetching is enabled. Redirects remain disabled.
     """
     import httpx
 
@@ -241,7 +245,7 @@ def safe_client(url: str, *, attempt_deadline=None, **client_kwargs: Any) -> htt
     if parsed.scheme not in ("http", "https"):
         raise BlockedHost(f"scheme {parsed.scheme!r} not allowed")
     host = parsed.hostname or ""
-    ip = resolve_pinned_ip(host)
+    ip = resolve_pinned_ip(host, require_public=require_public)
     host_header = host if not parsed.port else f"{host}:{parsed.port}"
     if attempt_deadline is None:
         inner = httpx.HTTPTransport()

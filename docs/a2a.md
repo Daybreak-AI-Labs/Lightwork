@@ -1,6 +1,6 @@
 # A2A (Agent2Agent)
 
-Lightwork speaks [A2A](https://a2a-protocol.org) v1.0, so other agents can
+Lightwork uses the [A2A 0.3 JSON-RPC contract](https://a2a-protocol.org/v0.3.0/specification/), so other agents can
 **discover** this instance and **delegate** long-horizon goals to it. Two
 halves:
 
@@ -13,30 +13,22 @@ Both mount on the dashboard server (`maverick dashboard`, default
 
 ## Enabling
 
-A2A is **off by default** — it's an outward-facing surface. Turn it on in
-the installer wizard (the **A2A** step) or directly:
-
-```toml
-# ~/.maverick/config.toml
-[a2a]
-enabled = true
-```
-
-or `MAVERICK_A2A_ENABLED=1`. When off, neither the card nor the task
-endpoint is registered.
+A2A is **off by default**. An administrator can enable **Let other agents send
+tasks here** in **All settings > Security**, then restart the service through
+the product's service controls. When off, neither the discovery card nor the
+task endpoint is registered. The installer also offers this choice.
 
 ## Auth
 
-The task endpoint spends real provider budget, so it **requires a bearer
-token by default**:
+The task endpoint spends real provider budget and **requires an access key by
+default**. Prefer an individual key issued through **External agents**. A
+shared key can be saved, sealed, in **All settings > Security > Requests from
+other agents > Password other agents must send**. Existing deployment
+overrides are shown on that page and take precedence.
 
-```bash
-export MAVERICK_A2A_TOKEN=$(openssl rand -hex 32)
-```
-
-Callers then send `Authorization: Bearer <token>`. For a trusted
-localhost you can run it open with `MAVERICK_A2A_ALLOW_UNAUTHENTICATED=1`
-(no token) — don't do that on a public bind.
+Callers send `Authorization: Bearer <key>`. The discovery card describes
+current native authentication, including explicitly configured anonymous
+admission; it never publishes a key. Anonymous admission is off by default.
 
 The Agent Card itself (discovery) is public, like any A2A card.
 
@@ -80,12 +72,11 @@ silently turn an old request into a second execution.
 
 ## Base URL
 
-The card advertises `…/a2a/v1` as the task URL. Behind a reverse proxy,
-set the public address so clients reach the right place:
-
-```bash
-export MAVERICK_A2A_BASE_URL=https://agent.example.com
-```
+The card advertises `…/a2a/v1` as the task URL. Set **Address other agents use**
+in **All settings > Security > Requests from other agents** to the public
+address of this installation, including its path prefix if applicable. This
+changes the advertised address; it does not create external hosting or prove
+that another company can reach it.
 
 ## Methods
 

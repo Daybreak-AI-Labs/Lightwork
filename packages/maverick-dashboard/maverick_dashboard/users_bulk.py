@@ -1,0 +1,99 @@
+"""Change many people's roles at once on the Users page, and undo it.
+
+Filter the people list, select people (or every person matching the filter),
+choose a role, confirm a count, and get a change report that can be undone.
+Every change goes through :func:`rbac.set_role` / :func:`rbac.remove_user`,
+the same calls the one-person controls use, so their audit records, their
+recovery-administrator protection and their validation all apply per person.
+Pending invitations can be cancelled in bulk the same way (that one cannot be
+undone, and the confirmation says so).
+"""
+from __future__ import annotations
+
+_SEP = "\x1f"
+MAX_PEOPLE = 500
+
+
+def matches(principal: str, role: str, label: str, query: str, role_filter: str) -> bool:
+    """Whether one row passes the People filter (text in the name, email or
+    sign-in, and an exact role)."""
+    if role_filter and role != role_filter:
+        return False
+    text = (query or "").strip().lower()
+    return not text or text in principal.lower() or text in (label or "").lower()
+
+
+def matching(role_map: dict[str, str], labels: dict[str, str], query: str, role_filter: str) -> list[str]:
+    return [p for p, r in sorted(role_map.items()) if matches(p, r, labels.get(p, ""), query, role_filter)]
+
+
+def targets(role_map: dict[str, str], labels: dict[str, str], *, scope: str, chosen: list[str],
+            query: str, role_filter: str) -> list[str]:
+    """The people a bulk change applies to: everyone matching the filter, or
+    the selected people who still hold an explicit role."""
+    if scope == "matching":
+        found = matching(role_map, labels, query, role_filter)
+    else:
+        picked = {p.strip() for p in chosen if p and p.strip()}
+        found = [p for p in sorted(role_map) if p in picked]
+    return found[:MAX_PEOPLE + 1]
+
+
+def apply(people: list[str], role: str, *, actor: str) -> list[dict]:
+    """Give each person ``role``; one refusal never stops the others."""
+    from . import rbac
+
+    current = rbac.list_users()
+    report = []
+    for principal in people:
+        before = current.get(principal, "")
+        row = {"principal": principal, "before": before, "after": role, "outcome": "changed", "reason": ""}
+        if before == role:
+            row["outcome"] = "unchanged"
+        else:
+            try:
+                rbac.set_role(principal, role, actor=actor)
+            except rbac.RecoveryAuthorityError as exc:
+                row.update(outcome="refused", after=before, reason=str(exc))
+            except ValueError:
+                row.update(outcome="refused", after=before, reason="That role or person is not valid.")
+        report.append(row)
+    return report
+
+
+def undo_tokens(report: list[dict]) -> list[str]:
+    """What the Undo button posts back: each changed person and their role before."""
+    return [f"{row['principal']}{_SEP}{row['before']}" for row in report if row["outcome"] == "changed"]
+
+
+def undo(tokens: list[str], *, actor: str) -> list[dict]:
+    """Put each person back on the role they had before a bulk change. An
+    empty earlier role clears the explicit role again (the standard role then
+    applies), exactly as "Use standard role" does."""
+    from . import rbac
+
+    current = rbac.list_users()
+    report = []
+    for token in tokens[:MAX_PEOPLE]:
+        principal, _, before = str(token).partition(_SEP)
+        principal = principal.strip()
+        if not principal:
+            continue
+        now = current.get(principal, "")
+        row = {"principal": principal, "before": now, "after": before, "outcome": "changed", "reason": ""}
+        try:
+            if now == before:
+                row["outcome"] = "unchanged"
+            elif before:
+                rbac.set_role(principal, before, actor=actor)
+            else:
+                rbac.remove_user(principal, actor=actor)
+        except rbac.RecoveryAuthorityError as exc:
+            row.update(outcome="refused", after=now, reason=str(exc))
+        except ValueError:
+            row.update(outcome="refused", after=now, reason="That role or person is not valid.")
+        report.append(row)
+    return report
+
+
+__all__ = ["MAX_PEOPLE", "apply", "matches", "matching", "targets", "undo", "undo_tokens"]

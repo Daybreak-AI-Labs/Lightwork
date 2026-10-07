@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Test a Safety Rule · Lightwork{% endblock %}
+{% block title %}Test a safety rule · Lightwork{% endblock %}
 {% block head_extra %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .research-simulation-table { table-layout: fixed; }
@@ -14,7 +14,7 @@
 </style>
 {% endblock %}
 {% block content %}
-  {{ hero('Safety', 'Test a Safety Rule',
+  {{ hero('Safety', 'Test a safety rule',
           lede='See whether Lightwork would allow an action, block it, or ask a person first. Nothing actually runs.') }}
 
   <div class="panel">
@@ -99,7 +99,7 @@
         <tr><th scope="row">Result checked</th><td>{{ 'Passed' if research_result.oracle_passed else 'Did not pass' }}</td></tr>
         <tr><th scope="row">Approved by</th><td>{{ research_result.approver_principal | identity }} (a named person must approve)</td></tr>
         <tr><th scope="row">Step history</th><td>{{ 'Complete' if research_result.action_lineage_valid else 'Incomplete' }}</td></tr>
-        <tr><th scope="row">Cost</th><td>$0 (practice run)</td></tr>
+        <tr><th scope="row">Cost</th><td>$0 (practice only)</td></tr>
         <tr><th scope="row">Live effect</th><td>No</td></tr>
         <tr><th scope="row">Business outcome</th><td>Not eligible for acceptance</td></tr>
       </tbody>

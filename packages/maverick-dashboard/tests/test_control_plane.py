@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,7 +47,29 @@ def _seed_run() -> int:
 
 # ---- replay / flight recorder ----------------------------------------------
 
-def test_build_replay_timeline_and_chain():
+@pytest.fixture
+def replay_signing_key(monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from maverick.audit import signing
+
+    private = hashlib.sha256(b"control-plane-replay-synthetic-test-key").digest()
+    public = Ed25519PrivateKey.from_private_bytes(private).public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw,
+    )
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", private.hex())
+    monkeypatch.setattr(signing, "_INJECTED_KEYPAIR_CACHE", signing._INJECTED_KEYPAIR_UNREAD)
+    return public.hex()
+
+
+@pytest.mark.parametrize("signing_enabled", [False, True], ids=["unsigned", "signed"])
+def test_build_replay_timeline_and_chain(monkeypatch, replay_signing_key, signing_enabled):
+    from maverick.audit import verify_chain
+    from maverick.audit.writer import default_audit_log
+
+    # Deleting the override inherits secure defaults; explicitly test both
+    # supported policies without disabling the surrounding secure posture.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1" if signing_enabled else "0")
     gid = _seed_run()
     rep = build_replay(gid)
     kinds = [e["kind"] for e in rep["entries"]]
@@ -56,11 +79,57 @@ def test_build_replay_timeline_and_chain():
     assert rep["summary"]["tool_calls"] == 2
     assert rep["summary"]["approvals"] == 1
     assert rep["summary"]["approved"] == 1
-    # Default deployment has signing off -> reported honestly as 'unsigned',
-    # never silently 'verified'.
-    assert rep["chain"]["status"] in ("unsigned", "no_log")
+    assert rep["chain"]["status"] == ("verified" if signing_enabled else "unsigned")
+    assert rep["chain"]["signed"] is signing_enabled
+    assert rep["chain"]["break_count"] == 0
+    assert rep["chain"]["breaks"] == []
+    writer = default_audit_log()
+    assert writer.signing_enabled is signing_enabled
+    paths = list(writer.audit_dir.glob("*.ndjson"))
+    assert len(paths) == 1
+    rows = [json.loads(line) for line in paths[0].read_text(encoding="utf-8").splitlines()]
+    assert len(rows) >= 6
+    signing_fields = {"prev_hash", "hash", "sig", "key_id"}
+    if signing_enabled:
+        assert all(signing_fields <= row.keys() for row in rows)
+        # Verify actual signatures against the fixture's independently held
+        # public key, not just the replay status or a co-located key lookup.
+        assert verify_chain(paths[0], pubkey_hex=replay_signing_key) == []
+    else:
+        assert all(not signing_fields.intersection(row) for row in rows)
+        breaks = verify_chain(paths[0])
+        assert len(breaks) == len(rows)
+        assert all(item.reason == "unsigned" for item in breaks)
     prompts = [e for e in rep["entries"] if e["kind"] == "consent_prompt"]
     assert prompts and prompts[0]["risk"] == "high"
+
+
+@pytest.mark.parametrize("tamper", ["payload", "signature"])
+def test_signed_replay_rejects_modified_event(monkeypatch, replay_signing_key, tamper):
+    from maverick.audit import verify_chain
+    from maverick.audit.writer import default_audit_log
+
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    gid = _seed_run()
+    assert build_replay(gid)["chain"]["status"] == "verified"
+    path = next(default_audit_log().audit_dir.glob("*.ndjson"))
+    assert verify_chain(path, pubkey_hex=replay_signing_key) == []
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    row = next(item for item in rows if item["kind"] == "consent_result")
+    if tamper == "payload":
+        row["decision"] = "deny"
+    else:
+        signature = bytes.fromhex(row["sig"])
+        row["sig"] = bytes([signature[0] ^ 1]).hex() + signature[1:].hex()
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    reason = "bad_hash" if tamper == "payload" else "bad_signature"
+    assert reason in {item.reason for item in verify_chain(path, pubkey_hex=replay_signing_key)}
+    replay = build_replay(gid)
+    assert replay["chain"]["status"] == "broken"
+    assert replay["chain"]["break_count"] >= 1
+    assert reason in {item["reason"] for item in replay["chain"]["breaks"]}
+    assert replay["read_report"]["verification"] == "failed"
 
 
 def test_replay_chain_includes_anchor_ledger_breaks(monkeypatch):

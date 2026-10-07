@@ -58,6 +58,24 @@ def test_edit_turn_applies_patches_and_returns_new_flow():
     assert res.applied == ["add approval node ap after n0"]
 
 
+def test_edit_turn_changes_workflow_run_settings_from_copilot():
+    _, complete = _fake({"reply": "I added the question and limited runs.", "patches": [
+        {"op": "set_flow_field", "field": "inputs", "value": [
+            {"key": "issue", "label": "Which issue?", "type": "text", "required": True},
+        ]},
+        {"op": "set_flow_field", "field": "max_concurrent", "value": 1},
+    ]})
+    draft = Flow.from_dict({
+        "id": "f2", "name": "Triage", "start": "n0",
+        "nodes": [{"id": "n0", "kind": "agent", "brief": "Triage the issue"}],
+    })
+    res = chat_flow("ask which issue and run one at a time", flow=draft, complete=complete)
+    assert res.flow is not None
+    assert res.flow.inputs[0]["label"] == "Which issue?"
+    assert res.flow.max_concurrent == 1
+    assert "max_concurrent|inputs" in FLOW_CHAT_SYSTEM
+
+
 def test_bad_patch_degrades_to_reply_with_note():
     _, complete = _fake({"reply": "ok", "patches": [
         {"op": "remove_node", "id": "nope"},
@@ -222,7 +240,9 @@ def test_model_output_with_raw_credential_is_not_rendered_or_applied():
 
     assert result.flow is None
     assert "sk-proj" not in result.reply
-    assert any("safety check" in note for note in result.notes)
+    # Refused at the provider boundary, in plain words, with nothing prepared.
+    assert "could not prepare a safe reply" in result.reply
+    assert "No workflow change was prepared" in result.reply
 
 
 def test_system_prompt_documents_ops_and_schema():

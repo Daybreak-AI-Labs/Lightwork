@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero, state %}
-{% block title %}Agent Trust · Lightwork{% endblock %}
+{% block title %}{{ 'Access · Outside agents' if tab_host else 'Agent trust' }} · Lightwork{% endblock %}
 {% block head_extra %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .tr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-3); }
@@ -14,13 +14,21 @@
 {% block content %}
 {% set risk_word = {'low': 'Low-risk only', 'medium': 'Up to medium risk', 'high': 'Any risk', 'unbounded': 'Any risk'} %}
 {% set direction_word = {'inbound': 'It may contact us', 'outbound': 'We may contact it', 'both': 'Both ways'} %}
-{% call hero('Security', 'Agent Trust',
+{% if tab_host %}
+{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+<div {{ panel_attrs(tab_host.selected) }}>
+<h2>Agent trust</h2>
+<p><strong>Blocking unlisted agents: {{ 'On' if enforced else 'Off' }}.</strong>
+  <span class="badge {{ 'ok' if enforced else 'warn' }}">{{ 'Agents not on the list are turned away' if enforced else 'The list is kept but not enforced' }}</span></p>
+{% else %}
+{% call hero('Security', 'Agent trust',
              lede='Choose which outside AI agents may work with Lightwork, and what each one may do, see and spend.') %}
   {{ state('Blocking unlisted agents',
            'On' if enforced else 'Off',
            badge='Agents not on the list are turned away' if enforced else 'The list is kept but not enforced',
            badge_class='ok' if enforced else 'warn') }}
 {% endcall %}
+{% endif %}
 
 <div class="panel" aria-labelledby="tr-enforce-title">
   <h2 id="tr-enforce-title" style="margin-top:0">Blocking</h2>
@@ -36,7 +44,7 @@
 
 {% if graph and graph.nodes %}
 <div class="panel">
-  <h2 style="margin-top:0">Who Can Talk to Whom</h2>
+  <h2 style="margin-top:0">Who can talk to whom</h2>
   <svg viewBox="0 0 {{ graph.width }} {{ graph.height }}" width="100%"
        style="max-width:{{ graph.width }}px" role="img"
        aria-label="Map of outside agents and which way each may connect">
@@ -71,7 +79,7 @@
 </div>
 {% endif %}
 
-<div class="section-head"><h2>Outside Agents</h2>
+<div class="section-head"><h2>Outside agents</h2>
   {% if can_admin %}<button type="button" class="btn btn--primary" data-tr-new>Add an agent</button>{% endif %}
 </div>
 <div class="panel">
@@ -91,7 +99,7 @@
         <td>{% for t in a.deny_tools %}{{ t | humanize }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
         <td><span class="badge {{ 'failure' if a.max_risk in ('high', 'unbounded') else '' }}">{{ risk_word.get(a.max_risk, a.max_risk | humanize) }}</span></td>
         <td>
-          {% if a.max_dollars is not none %}${{ '%.2f' | format(a.max_dollars) }} per run{% else %}No limit{% endif %}
+          {% if a.max_dollars is not none %}{{ a.max_dollars | money }} per task{% else %}No limit{% endif %}
           {% if a.max_wall_seconds is not none %} · {{ ((a.max_wall_seconds / 60) | round(1)) | string | replace('.0', '') }} min{% endif %}
         </td>
         <td>{% for s in a.data_scopes %}{{ s | humanize }}{% if not loop.last %}, {% endif %}{% else %}None{% endfor %}</td>
@@ -112,7 +120,7 @@
                     aria-label="Unblock {{ label }}">Unblock</button>
             {% else %}
             <button type="button" class="btn btn--danger" data-trust-revoke="{{ a.id }}" data-name="{{ label }}"
-                    aria-label="Block {{ label }}">Block</button>
+                    aria-label="Block agent {{ label }}">Block agent</button>
             {% endif %}
             {% if a.managed %}<button type="button" class="btn btn--ghost" data-trust-remove="{{ a.id }}" data-name="{{ label }}"
                     aria-label="Remove {{ label }}">Remove</button>{% endif %}
@@ -135,7 +143,7 @@
 </div>
 
 {% if can_admin %}
-<div class="section-head"><h2 id="tr-form-title">Add an Outside Agent</h2></div>
+<div class="section-head"><h2 id="tr-form-title">Add an outside agent</h2></div>
 <div class="panel">
   <form id="trust-add" aria-labelledby="tr-form-title">
     <input type="hidden" name="id" value="">
@@ -157,10 +165,10 @@
           <option value="high">Any risk</option>
         </select>
       </label>
-      <label>Spending limit per run in dollars (optional)
+      <label>Spending limit per task in dollars (optional)
         <input class="input" name="max_dollars" type="number" min="0" step="0.01" placeholder="2.00">
       </label>
-      <label>Time limit per run in minutes (optional)
+      <label>Time limit per task in minutes (optional)
         <input class="input" name="max_minutes" type="number" min="0" step="1" placeholder="10">
       </label>
       <div class="tr-field">
@@ -199,11 +207,11 @@
     </div>
     <p class="muted" id="tr-form-msg" role="status" aria-live="polite"></p>
   </form>
-  <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">Changes take effect on each agent's next run.</p>
+  <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">Changes take effect on each agent's next task.</p>
 </div>
 {% endif %}
 
-<div class="section-head"><h2>Our Security Key</h2></div>
+<div class="section-head"><h2>Our security key</h2></div>
 <div class="panel">
   <p>Share this key with partners whose agents work with yours, so they can confirm messages really come from this Lightwork installation.</p>
   <div class="tr-actions">
@@ -212,6 +220,7 @@
   </div>
   <details style="margin-top:var(--space-2)"><summary>Show the key</summary><p class="tr-key" id="tr-key-text">Open to load the key.</p></details>
 </div>
+{% if tab_host %}</div>{% endif %}
 
 <script>
 (function () {
@@ -305,17 +314,23 @@
   document.querySelectorAll("[data-trust-remove]").forEach(function (b) {
     b.addEventListener("click", async function () {
       var id = b.getAttribute("data-trust-remove");
-      if (!(await window.mvConfirm("Remove " + b.getAttribute("data-name") + " from the list? If blocking is on, it will be turned away.", { okText: "Remove" }))) return;
-      send("/api/v1/trust/agents/" + encodeURIComponent(id), { method: "DELETE" }, "Agent removed.", "remove this agent");
+      // One action with a way back (CTL-1): the row leaves at once and the
+      // removal is sent when the Undo time is up.
+      var row = b.closest("tr, li, article");
+      if (row) row.hidden = true;
+      window.mvUndo("{name} removed from the list. If blocking is on, it will be turned away.", { values: {name: b.getAttribute("data-name")},
+        action: "remove this agent",
+        run: function (keepalive) { return fetch("/api/v1/trust/agents/" + encodeURIComponent(id), { method: "DELETE", keepalive: keepalive, headers: { Accept: "application/json" } }); },
+        undo: function () { if (row) row.hidden = false; b.focus(); },
+        done: function () { reloadSoon("Agent removed."); }
+      });
     });
   });
 
   var keyText = null;
   async function loadKey() {
     if (keyText) return keyText;
-    var r = await fetch("/api/v1/trust/pubkey", { headers: { Accept: "application/json" } });
-    if (!r.ok) throw r;
-    keyText = (await r.json()).key;
+    keyText = (await window.mvFetchJSON("/api/v1/trust/pubkey")).key;
     document.getElementById("tr-key-text").textContent = keyText;
     return keyText;
   }

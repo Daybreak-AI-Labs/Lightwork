@@ -1,10 +1,8 @@
 """Run an Ekko recorder from the app (``maverick ekko run``).
 
-Two recorders, both the command's own: an uploaded guided activity file read
-through :class:`maverick.ekko_daemon.GuidedJsonlObserver` (``--events``), and,
-only when Lightwork itself runs on Windows, the active-app recorder
-:class:`maverick.ekko_daemon.WindowsForegroundObserver` (``--observer
-windows``). Either feeds :class:`maverick.ekko_daemon.EkkoDaemon`, which keeps
+Two recorders: an optional uploaded guided activity file, and the explicit
+content-free desktop recorder for Windows, Mac or local Linux X11 (not
+Wayland). Either feeds :class:`maverick.ekko_daemon.EkkoDaemon`, which keeps
 every existing check: the device's current enrollment, the administrator's
 limits, the exclusive recorder lease and the emergency stop.
 
@@ -16,9 +14,9 @@ background job; the page's Pause and Stop buttons end it.
 """
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, HTTPException, Request
+from maverick import config
+from maverick.governed_operations import digest
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import auth
@@ -40,8 +38,34 @@ class WatchIn(BaseModel):
     acknowledge_capture_scope: bool = False
 
 
-def _windows() -> bool:
-    return os.name == "nt"
+def _access(request: Request) -> str:
+    from maverick.paths import current_tenant_id_strict
+
+    from .api_flow_operator_review import _workspace_authority
+    from .app import require_page_visible
+    from .draft_api import context_for
+
+    with auth.fresh_configuration():
+        principal = getattr(request.state, "principal", None)
+        via = (getattr(principal, "claims", None) or {}).get("via")
+        refresh = {"session": auth._session_principal, "invite": auth._invite_session_principal,
+                   "proxy": auth._proxy_principal}.get(via)
+        if refresh is not None:
+            fresh = refresh(request)
+            if fresh is None or fresh.principal != principal.principal:
+                raise HTTPException(401, "Sign in again before opening the activity recorder.")
+            request.state.principal = principal = fresh
+        if principal is not None:
+            auth._enforce_scim_active(principal)
+            auth._enforce_workspace_policies(request, principal)
+        auth.require_page_permission(request, "/ekko")
+        require_page_visible(request, "/ekko")
+        auth.require_permission(request, "operate")
+        workspace = _workspace_authority(request, auth.caller_principal(request) or "", current_tenant_id_strict() or "")
+        if config.config_source_errors(include_tenant=True):
+            raise HTTPException(503, "Recording settings could not be read. Your choices are kept.")
+        return digest([context_for(request), workspace, auth.caller_role(request),
+                       auth.has_global_permission(request, "admin"), config.get_ekko()])
 
 
 def _prepare(request: Request, device_id: str, acknowledged: bool, observer: str):
@@ -50,7 +74,7 @@ def _prepare(request: Request, device_id: str, acknowledged: bool, observer: str
     from . import ekko_routes as ekko
 
     ekko._app()._require_same_origin(request)
-    auth.require_permission(request, "operate")
+    _access(request)
     if not acknowledged:
         raise HTTPException(400, "Confirm that you have read what Ekko may and may not record.")
     ekko._require_enabled_policy()
@@ -66,6 +90,7 @@ def _prepare(request: Request, device_id: str, acknowledged: bool, observer: str
 
 def _record(store, policy, observer) -> dict:
     from maverick.ekko_daemon import EkkoDaemon
+    from maverick.ekko_foreground import ForegroundUnavailable
 
     daemon = EkkoDaemon(store=store, observer=observer, policy=policy)
     try:
@@ -77,6 +102,9 @@ def _record(store, policy, observer) -> dict:
         if "exceeds" in str(exc):
             message = f"Line {line} of the file is too long. Activities recorded before it were kept."
         return {"recorded": daemon.accepted_events, "skipped": daemon.blocked_events, "message": message}
+    except ForegroundUnavailable:
+        return {"recorded": daemon.accepted_events, "skipped": daemon.blocked_events,
+                "message": "Desktop access ended or stopped responding. Recording has stopped. Activities already recorded were kept."}
     except RuntimeError:
         return {"recorded": daemon.accepted_events, "skipped": daemon.blocked_events,
                 "message": "Recording stopped because this device's enrollment or limits changed."}
@@ -93,13 +121,27 @@ def _record(store, policy, observer) -> dict:
 @router.get("/api/v1/ekko/recording/options")
 def recording_options(request: Request) -> dict:
     """Which recorders this installation can run."""
-    auth.require_permission(request, "operate")
-    return {"activity_file": True, "windows_active_app": _windows(), "max_file_chars": MAX_FILE_CHARS}
+    from maverick.ekko_foreground import foreground_options
+
+    authority = _access(request)
+    options = foreground_options()
+    if _access(request) != authority or foreground_options() != options:
+        raise HTTPException(409, "Your account, workspace or recording settings changed. Open the current recording controls again.")
+    return {"activity_file": True, "windows_active_app": options["observer"] == "windows_foreground",
+            "max_file_chars": MAX_FILE_CHARS, **options, "context": digest([authority, options])}
 
 
 @router.post("/api/v1/ekko/recording/import", status_code=202)
 def import_activity_file(request: Request, body: ImportIn) -> dict:
     """Record the activities in an uploaded guided activity file."""
+    try:
+        return _import_activity_file(request, body)
+    except HTTPException as exc:
+        raise HTTPException(exc.status_code, detail={"message": exc.detail, "not_started": True},
+                            headers=exc.headers) from exc
+
+
+def _import_activity_file(request: Request, body: ImportIn) -> dict:
     from maverick.ekko_daemon import GuidedJsonlObserver
 
     from .ops_jobs import JOBS, Busy, identity
@@ -118,24 +160,50 @@ def import_activity_file(request: Request, body: ImportIn) -> dict:
 
 @router.post("/api/v1/ekko/recording/watch", status_code=202)
 def watch_active_app(request: Request, body: WatchIn) -> dict:
-    """Record which allowed app is in front, until Pause or Stop (Windows only)."""
+    """Record recognized desktop apps until the native device's Pause or Stop."""
+    try:
+        return _watch_active_app(request, body)
+    except HTTPException as exc:
+        # This helper returns immediately after JOBS admission. Its explicit
+        # refusals are pre-admission; middleware/lost replies/500s are not.
+        raise HTTPException(exc.status_code, detail={"message": exc.detail, "not_started": True},
+                            headers=exc.headers) from exc
+
+
+def _watch_active_app(request: Request, body: WatchIn) -> dict:
+    from maverick.ekko_foreground import foreground_observer
+
+    from . import ekko_routes as ekko
     from .ops_jobs import JOBS, Busy, identity
 
-    if not _windows():
-        raise HTTPException(409, "Recording the app in front is only available when Lightwork runs on Windows.")
-    store, policy = _prepare(request, body.device_id, body.acknowledge_capture_scope, "windows_foreground")
+    options = recording_options(request)
+    if not options["active_app"]:
+        raise HTTPException(409, options["availability_message"])
+    store, policy = _prepare(request, body.device_id, body.acknowledge_capture_scope, options["observer"])
+    enrollment = digest(ekko._active_enrollment(store).to_dict())
     try:
-        from maverick.ekko_daemon import WindowsForegroundObserver
-
-        observer = WindowsForegroundObserver()
+        observer = foreground_observer()
     except (ImportError, OSError, RuntimeError) as exc:
         raise HTTPException(409, "The app recorder isn't available on this computer.") from exc
-    owner, tenant = identity(request)
+    admitted = False
     try:
+        current = recording_options(request)
+        ekko._require_enabled_policy()
+        enrolled = ekko._validated_enrolled_policy(store)
+        if (current["context"] != options["context"] or enrolled.fingerprint() != policy.fingerprint()
+                or digest(ekko._active_enrollment(store).to_dict()) != enrollment):
+            raise HTTPException(409, "Your recording permissions or this computer changed. Review the current controls before starting.")
+        owner, tenant = identity(request)
         job = JOBS.start(owner=owner, tenant=tenant, kind="ekko-recording",
                          work=lambda: _record(store, policy, observer))
+        admitted = True
     except Busy as exc:
         raise HTTPException(429, "A recording is already running. Stop it first.") from exc
+    finally:
+        if not admitted:
+            close = getattr(observer, "close", None)
+            if callable(close):
+                close()
     return {"job": job}
 
 
@@ -143,7 +211,7 @@ def watch_active_app(request: Request, body: WatchIn) -> dict:
 def recording_status(request: Request, job_id: str) -> dict:
     from .ops_jobs import JOBS, identity
 
-    auth.require_permission(request, "operate")
+    _access(request)
     owner, tenant = identity(request)
     job = JOBS.get(job_id[:64], owner=owner, tenant=tenant, kind="ekko-recording")
     if job is None:

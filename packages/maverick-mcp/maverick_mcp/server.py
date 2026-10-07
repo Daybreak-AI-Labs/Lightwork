@@ -890,7 +890,10 @@ class MCPServer:
 
     def handle_resources_unsubscribe(self, params: dict) -> dict:
         """Stop notifying a client about a resource. Idempotent."""
-        self._resource_subscriptions().discard(params.get("uri", ""))
+        uri = params.get("uri")
+        if not isinstance(uri, str):
+            raise _ProtocolError(-32602, "uri must be a string")
+        self._resource_subscriptions().discard(uri)
         return {}
 
     def _queue_resource_update(self, tool_name: str) -> None:
@@ -962,7 +965,13 @@ class MCPServer:
 
     def handle_prompts_get(self, params: dict) -> dict:
         name = params.get("name", "")
-        args = params.get("arguments", {}) or {}
+        if not isinstance(name, str):
+            raise _ProtocolError(-32602, "name must be a string")
+        args = params.get("arguments", {})
+        if not isinstance(args, dict):
+            raise _ProtocolError(-32602, "arguments must be an object")
+        if not all(isinstance(key, str) and isinstance(value, str) for key, value in args.items()):
+            raise _ProtocolError(-32602, "prompt arguments must have string names and values")
         templates = {
             "research_topic": (
                 "Spawn a research swarm to investigate: {topic}. "

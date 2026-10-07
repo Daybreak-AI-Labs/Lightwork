@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 
 import pytest
 from maverick import catalog
@@ -63,6 +65,19 @@ def test_entry_round_trips():
     assert d["name"] == "summarize-url"
     assert d["sha256"] == _SKILL_SHA
     assert d["verified"] is True
+
+
+def test_malformed_statistics_and_entries_do_not_hide_valid_catalog(monkeypatch):
+    indexes = {
+        "https://broken.example/skills/index.json": ["invalid index"],
+        "https://valid.example/skills/index.json": _index([
+            None, _entry(install_count="1.2k"), _entry(name="second-skill", install_count=float("inf")),
+        ]),
+    }
+    monkeypatch.setattr(catalog, "_fetch_index_raw", indexes.get)
+    entries = catalog.load_catalog("skills", indexes=["https://broken.example", "https://valid.example"])
+    assert {entry.name for entry in entries} == {"summarize-url", "second-skill"}
+    assert all(entry.install_count == 0 for entry in entries)
 
 
 # ---------- load_catalog ----------
@@ -154,3 +169,96 @@ def test_fetch_index_caches(monkeypatch, tmp_path):
 
 def test_fetch_index_refuses_non_https(monkeypatch):
     assert catalog._fetch_index_raw("http://insecure/skills/index.json") is None
+
+
+# ---------- negative cache + page timeout ----------
+
+@pytest.fixture(autouse=True)
+def _fresh_negative_cache(monkeypatch):
+    monkeypatch.setattr(catalog, "_NEGATIVE", {})
+
+
+def _patch_failing_opener(monkeypatch, calls: dict):
+    import urllib.request
+
+    from maverick.tools import http_fetch
+
+    def _open(self, url, timeout=0):
+        calls["n"] += 1
+        calls["timeout"] = timeout
+        raise OSError("offline")
+
+    monkeypatch.setattr(http_fetch, "is_blocked_host", lambda _h: False)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", _open)
+
+
+def test_failed_fetch_is_not_retried_within_negative_ttl(monkeypatch):
+    calls = {"n": 0}
+    _patch_failing_opener(monkeypatch, calls)
+    url = "https://down/skills/index.json"
+    assert catalog._fetch_index_raw(url) is None
+    assert catalog._fetch_index_raw(url) is None
+    assert catalog._fetch_index_raw(url) is None
+    assert calls["n"] == 1  # the two later calls never touched the network
+
+
+def test_negative_cache_expires(monkeypatch):
+    calls = {"n": 0}
+    _patch_failing_opener(monkeypatch, calls)
+    url = "https://down/skills/index.json"
+    now = [1000.0]
+    monkeypatch.setattr(catalog.time, "monotonic", lambda: now[0])
+    catalog._fetch_index_raw(url)
+    now[0] += catalog.NEGATIVE_CACHE_TTL - 1
+    catalog._fetch_index_raw(url)
+    assert calls["n"] == 1
+    now[0] += 2
+    catalog._fetch_index_raw(url)
+    assert calls["n"] == 2
+
+
+def test_negative_cache_serves_stale_disk_cache(monkeypatch, tmp_path):
+    calls = {"n": 0}
+    _patch_failing_opener(monkeypatch, calls)
+    url = "https://down/skills/index.json"
+    cache = catalog._cache_path(url)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(_index([_entry(name="stale")])))
+    old = time.time() - catalog._CACHE_TTL - 10
+    os.utime(cache, (old, old))
+    first = catalog._fetch_index_raw(url)
+    second = catalog._fetch_index_raw(url)
+    assert first["entries"][0]["name"] == "stale"
+    assert second == first
+    assert calls["n"] == 1
+
+
+def test_successful_fetch_clears_negative_cache(monkeypatch):
+    calls = {"n": 0}
+    _patch_failing_opener(monkeypatch, calls)
+    url = "https://flaky/skills/index.json"
+    catalog._fetch_index_raw(url)
+    assert url in catalog._NEGATIVE
+    catalog._NEGATIVE.clear()  # TTL elapsed
+
+    class _Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, _n=-1): return json.dumps(_index([_entry()])).encode()
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", lambda self, url, timeout=0: _Resp())
+    assert catalog._fetch_index_raw(url)["entries"]
+    assert url not in catalog._NEGATIVE
+
+
+def test_load_catalog_timeout_bounds_the_fetch(monkeypatch):
+    calls = {"n": 0}
+    _patch_failing_opener(monkeypatch, calls)
+    catalog.load_catalog("skills", indexes=["https://down"], timeout=catalog.PAGE_FETCH_TIMEOUT)
+    assert calls["timeout"] == catalog.PAGE_FETCH_TIMEOUT
+    catalog._NEGATIVE.clear()
+    catalog.load_catalog("skills", indexes=["https://down"])
+    assert calls["timeout"] == catalog.FETCH_TIMEOUT
+    assert catalog._FETCH_TIMEOUT.get() is None  # reset after the call

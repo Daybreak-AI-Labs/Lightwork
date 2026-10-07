@@ -704,7 +704,7 @@ def draft_bundle(opportunity: WorkOpportunity, *, owner: str = "") -> DraftBundl
     nodes: dict[str, FlowNode] = {}
     for index, step in enumerate(opportunity.pattern, 1):
         node_id = f"observed-{index}"
-        next_id = f"observed-{index + 1}" if index < len(opportunity.pattern) else "human-review"
+        next_id = f"observed-{index + 1}" if index < len(opportunity.pattern) else None
         nodes[node_id] = FlowNode(
             id=node_id,
             kind=NODE_AGENT,
@@ -714,24 +714,25 @@ def draft_bundle(opportunity: WorkOpportunity, *, owner: str = "") -> DraftBundl
                 "Use only approved sources and tools; do not perform irreversible actions."
             ),
             label=_step_label(step),
-            x=120.0 + (index - 1) * 260.0,
+            x=120.0 + index * 260.0,
             y=140.0,
         )
     nodes["human-review"] = FlowNode(
         id="human-review",
         kind=NODE_APPROVAL,
+        next="observed-1",
         prompt=(
-            "Review Ekko's first-pass workflow, verify its inputs and outputs, "
-            "and approve it before any automation is saved or run."
+            "Review this run's inputs, planned steps, and intended outputs. "
+            "Approve before the workflow does any work."
         ),
         label="Human review",
-        x=120.0 + len(opportunity.pattern) * 260.0,
+        x=120.0,
         y=140.0,
     )
     flow = Flow(
         id=f"ekko-draft-{opportunity.opportunity_id}",
         name=opportunity.title,
-        start="observed-1",
+        start="human-review",
         nodes=nodes,
         owner=owner,
         schedule="",

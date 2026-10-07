@@ -22,10 +22,10 @@
   var KIND = { collect: 'Collect', refresh: 'Refresh', review: 'Review' };
   var ROLE = { first_line: 'Business owner', second_line: 'Risk and compliance owner', control_owner: 'Control owner', evidence_owner: 'Evidence owner' };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function label(ref) {
-    return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap|evidence|catalog|mapping)[-_]/, ''));
+    return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap|evidence|catalog|mapping)[-_]/, '').replace(/-[a-f0-9]{12}$/, ''));
   }
   function badge(value) { var s = STATUS[value] || [R.human(value), 'info']; return R.badge(s[0], s[1]); }
   function find(list, key, value) { return list.filter(function (r) { return r[key] === value; })[0]; }
@@ -204,28 +204,7 @@
   }
 
   document.getElementById('csa-add-catalog').addEventListener('click', function () {
-    R.form('Add a mapping', [
-      { key: 'name', label: 'Mapping name', type: 'text', required: true, placeholder: 'For example: Privacy controls' },
-    ], 'Choose file').then(function (values) {
-      if (!values) return null;
-      return R.pickFile('.json,application/json').then(function (file) {
-        if (!file) return null;
-        return file.text().then(function (text) {
-          var parsed;
-          try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
-          var entries = parsed && (Array.isArray(parsed) ? parsed : parsed.entries);
-          if (!Array.isArray(entries) || !entries.length) { say('That file is not a mapping file. Ask your compliance team for the mapping file.'); return null; }
-          var id = R.slug(values.name, 'mapping');
-          var latest = data.catalogs.filter(function (c) { return c.catalog_id === id; }).reduce(function (n, c) { return Math.max(n, c.version); }, 0);
-          return R.call('PUT', API + '/catalogs/' + encodeURIComponent(id) + '/versions', {
-            entries: entries, expected_latest_version: latest, idempotency_key: R.newKey(),
-          }).then(function () { say('Mapping added. A different administrator must approve it before it can be used.'); return load(); });
-        });
-      });
-    }).catch(function (f) {
-      if (f && f.status === 422) { say('That mapping file has entries Lightwork cannot use. Ask your compliance team to check it.'); return; }
-      fail(f, 'add the mapping');
-    });
+    window.location.assign('/compliance/scope-actions/mapping');
   });
 
   var integrity = document.getElementById('csa-integrity');

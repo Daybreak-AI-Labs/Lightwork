@@ -32,15 +32,15 @@ def test_learning_api_reports_governed_components_on_and_dgm_off_by_default(
     keys = {c["key"] for c in data["components"]}
     assert {"consequence", "reflexion", "dreaming", "capture", "data_engine"} <= keys
     assert data["components_total"] == len(data["components"])
-    assert all(c["on"] is True for c in data["components"])
-    assert data["components_on"] == data["components_total"]
+    assert all(c["on"] is (c["key"] != "budget_tuning") for c in data["components"])
+    assert data["components_on"] == data["components_total"] - 1
     assert data["dgm"]["requested"] is False
     assert data["dgm"]["state"] == "off"
     assert data["dgm"]["research_only"] is True
     assert data["dgm"]["live_adoption"] is False
     assert set(data["accumulated"]) >= {
         "decisions", "human_decisions", "approvals",
-        "grounded_outcomes", "learned_capabilities", "departments",
+        "departments",
     }
 
 
@@ -68,6 +68,37 @@ def test_feature_switches_use_live_subsystem_defaults(tmp_path, monkeypatch):
     assert rows["self_harness"] is self_harness.enabled() is True
     assert rows["rehearsal"] is rehearsal.enabled() is True
     assert rows["fleet_memory"] is fleet_memory.enabled()
+
+
+def test_rehearsal_safety_controls_and_learning_switch_share_live_state(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_REHEARSAL", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    from maverick import rehearsal
+    from maverick.config import reset_config_cache
+    from maverick_dashboard.settings_catalog import BY_ID
+    from maverick_dashboard.settings_store import set_catalog_values
+
+    assert BY_ID["rehearsal.enable"].group == "Safety"
+    assert BY_ID["rehearsal.mode"].default == "observe"
+    reset_config_cache()
+    assert rehearsal.enabled() is True
+    assert rehearsal.enforcing() is False
+
+    set_catalog_values({("rehearsal", "mode"): "hold"})
+    assert rehearsal.enforcing() is True
+    set_catalog_values({("rehearsal", "enable"): False})
+    assert rehearsal.enabled() is False
+    assert rehearsal.enforcing() is False
+    rows = {
+        row["section"]: row["enabled"]
+        for row in client.get("/api/v1/features/switches").json()["switches"]
+    }
+    assert rows["rehearsal"] is False
+
+    set_catalog_values({("rehearsal", "enable"): True,
+                        ("rehearsal", "mode"): "observe"})
+    assert rehearsal.enabled() is True
+    assert rehearsal.enforcing() is False
 
 
 def test_feature_switch_read_after_write_and_environment_pin(tmp_path, monkeypatch):
@@ -117,15 +148,15 @@ def test_consequence_flag_flips_component_on(tmp_path, monkeypatch):
     assert data["components_on"] >= 1
 
 
-def test_signoff_shows_up_as_a_grounded_outcome(tmp_path, monkeypatch):
+def test_signoff_grounds_locally_without_exposing_unscoped_totals(tmp_path, monkeypatch):
     # End-to-end moat proof: a human sign-off becomes a grounded outcome the
     # Learning view counts -- the loop from human judgement to accumulated asset.
     monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
     w = _isolate(tmp_path, monkeypatch)
     gid = w.create_goal("Refresh the cash forecast", "", domain="finance_cash13w")
     w.set_goal_status(gid, "done", result=_TABLE)
-    w.start_episode(gid)
-    assert client.get("/api/v1/learning").json()["accumulated"]["grounded_outcomes"] == 0
+    episode = w.start_episode(gid)
+    assert "grounded_outcomes" not in client.get("/api/v1/learning").json()["accumulated"]
     r = client.post(
         f"/api/v1/goals/{gid}/signoff",
         json={
@@ -134,7 +165,9 @@ def test_signoff_shows_up_as_a_grounded_outcome(tmp_path, monkeypatch):
         },
     )
     assert r.status_code == 200
-    assert client.get("/api/v1/learning").json()["accumulated"]["grounded_outcomes"] == 1
+    from maverick import consequence
+    assert consequence.resolve(gid, episode) is not None
+    assert "grounded_outcomes" not in client.get("/api/v1/learning").json()["accumulated"]
 
 
 def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
@@ -147,7 +180,7 @@ def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
     self = _isolate(tmp_path, monkeypatch)  # noqa: F841 (world not needed here)
     reset_config_cache()
     total = client.get("/api/v1/learning").json()["components_total"]
-    assert client.get("/api/v1/learning").json()["components_on"] == total
+    assert client.get("/api/v1/learning").json()["components_on"] == total - 1
     r = client.post("/api/v1/learning", json={"enabled": False})
     assert r.status_code == 200 and r.json()["components_on"] == 0
     assert client.get("/api/v1/learning").json()["components_on"] == 0
@@ -155,7 +188,7 @@ def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
     assert client.get("/api/v1/learning").json()["components_on"] == total
 
 
-def test_flow_self_improvements_surface_in_the_moat(tmp_path, monkeypatch):
+def test_flow_improvements_do_not_expose_unscoped_workspace_totals(tmp_path, monkeypatch):
     # A forward flow self-rewrite (the loop enacting a proposal) shows up as a
     # counted moat number for an admin caller; auto-reverts don't inflate it.
     _isolate(tmp_path, monkeypatch)
@@ -165,7 +198,8 @@ def test_flow_self_improvements_surface_in_the_moat(tmp_path, monkeypatch):
     evolution_log.record_apply("f", "b", "action", "agent", 2, source="auto-apply")   # then undone
     evolution_log.record_apply("f", "b", "agent", "action", 3, source="auto-revert")
     acc = client.get("/api/v1/learning").json()["accumulated"]
-    assert acc["flow_self_improvements"] == 1   # only the rewrite that stuck is counted
+    assert evolution_log.improvement_count() == 1
+    assert "flow_self_improvements" not in acc
 
 
 def test_flow_autonomy_is_its_own_opt_in_not_the_blanket_button(tmp_path, monkeypatch):
@@ -238,8 +272,10 @@ def test_learning_page_renders_flow_autonomy_toggles_when_engine_on(tmp_path, mo
     _isolate(tmp_path, monkeypatch)
     reset_config_cache()
     t = client.get("/learning").text
-    assert 'id="lrn-auto-evolve"' in t and 'id="lrn-auto-apply"' in t
-    assert "Autonomous workflow self-improvement" in t
+    # Automatic undo is the only automatic control; suggestions wait for a
+    # complete human review, so there is no automatic-apply switch.
+    assert 'id="lrn-auto-evolve"' in t and 'id="lrn-auto-apply"' not in t
+    assert "Workflow improvements" in t and "Suggestions wait for complete review" in t
 
 
 def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch):
@@ -252,6 +288,9 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
     # (the `flows` feature switch), not the live toggles and no config-file copy.
     assert "Turn on workflows first" in t
     assert 'id="lrn-flows-on"' in t
+    assert 'scroll-margin-top: var(--space-7)' in t
+    assert "/learning#lrn-flows-on" in client.get("/flows/designer").text
+    assert "/learning#lrn-flows-on" in client.get("/flows/analytics").text
     assert "[flows]" not in t
     assert 'id="lrn-auto-evolve"' not in t
 
@@ -259,7 +298,7 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
 def test_learning_page_has_enable_button(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
-    assert 'id="lrn-enable"' in t and "Turn core learning off" in t
+    assert 'id="lrn-enable"' in t and "Turn core learning on" in t
 
 
 def test_dgm_is_a_separate_acknowledged_research_toggle(tmp_path, monkeypatch):
@@ -426,12 +465,12 @@ def test_learning_page_renders_the_moat(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
     assert "core learning components are on" in t
-    assert "Individual controls appear below" in t
+    assert "Review each feature below to decide which ones to use" in t
     # The static tiles became a live board: the accumulated-judgement card
     # and its container render client-side from /api/v1/learning.
     assert "Accumulated judgement" in t
     assert 'id="bd-acc"' in t
-    assert "grounded outcomes" in t
+    assert "recorded outcomes of its own work" in t
 
 
 def test_learning_page_is_configured_in_app_not_in_server_files(tmp_path, monkeypatch):
@@ -449,3 +488,16 @@ def test_learning_page_is_configured_in_app_not_in_server_files(tmp_path, monkey
     assert 'id="lrn-switch-members"' in t
     # threat_hunt / env_hunt switches belong to the Security page, not here.
     assert "threat_hunt" in t and "env_hunt" in t    # named only in the exclusion list
+
+
+def test_learning_policy_authority_is_separate_from_owned_content(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    from maverick_dashboard import api, auth
+    monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:admin")
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: True)
+    data = api._learning_snapshot(None)
+    assert data["dgm"] is not None and data["flow_autonomy"] is not None
+    assert "grounded_outcomes" not in data["accumulated"]
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: False)
+    data = api._learning_snapshot(None)
+    assert data["dgm"] is None and data["flow_autonomy"] is None

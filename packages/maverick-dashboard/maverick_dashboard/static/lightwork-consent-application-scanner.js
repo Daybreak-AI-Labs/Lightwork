@@ -159,7 +159,7 @@
 
   async function refreshStatus() {
     if (!/^\/api\/v1\/consent\/application-scans$/.test(apiBase)) {
-      CW.say(runtimeStatus, "App checks are not available on this page right now.", true);
+      CW.say(runtimeStatus, "App checks are not available on this page right now. Try again in a minute.", true);
       operations.disabled = true;
       return;
     }
@@ -364,7 +364,7 @@
         { value: "replaced-by-new-app", label: "Replaced by a new app" },
         { value: "other", label: "Other" }
       ]
-    }], { okText: "Continue" });
+    }], { okText: "Review removal" });
     if (!answers) return;
     var ok = await CW.confirm("Remove " + app.display_name + "? You will no longer be able to check its files. Earlier results stay on record.", "Remove app");
     if (!ok) return;

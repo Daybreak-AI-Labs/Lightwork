@@ -5,9 +5,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
-  <meta name="theme-color" content="#0e1320" />
+  <meta name="theme-color" content="{{ theme_color or '#04050A' }}" />
   <title>{% block title %}Lightwork{% endblock %}</title>
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
 {{ custom_theme_css }}
@@ -34,7 +35,7 @@
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
   <link rel="apple-touch-icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
-<body class="public-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}">
+<body class="public-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}">
   <a class="skip-link" href="#content">Skip to content</a>
   <header class="topbar public-topbar">
     <span class="brand" aria-label="Lightwork">
@@ -43,13 +44,13 @@
       </span>
       <span class="brand__name">Lightwork</span>
     </span>
-    <span class="public-label">Secure questionnaire</span>
+    <span class="public-label">{% block public_label %}Secure questionnaire{% endblock %}</span>
   </header>
   <main id="content" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
   <footer>
-    <span class="muted">Lightwork by Daybreak Labs · Secure vendor response</span>
+    <span class="muted">Lightwork by Daybreak Labs · {% block public_footer %}Secure vendor response{% endblock %}</span>
   </footer>
   {% block scripts_extra %}{% endblock %}
 </body>

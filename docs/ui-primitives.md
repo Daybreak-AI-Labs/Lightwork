@@ -7,12 +7,14 @@ native `confirm()` / `alert()` or hand-rolled toasts** — they are accessible
 (assertive vs. polite live regions; a focus-trapping, focus-returning modal),
 themed (no hard-coded colors), and consistent across the dashboard.
 
-## `window.mvToast(message, { error })`
+## `window.mvToast(message, { error, quiet })`
 
 Transient notification.
 
 - `error: true` → an assertive (`role="alert"`) live region, prefixed `⚠ `.
 - otherwise → a polite (`role="status"`) live region.
+- `quiet: true` → shown but not read out (`aria-hidden`), for when the page
+  already announces the same words, in its own status line or by moving focus.
 - Auto-dismisses (errors linger longer). The two live regions are baked into the
   DOM at load, so announcements are reliable (a `role` injected into an existing
   polite region is not).
@@ -85,6 +87,58 @@ var row = mvEl('li', 'mv-row');
 row.appendChild(mvEl('div', 'mv-row__title', name));
 row.appendChild(mvEl('div', 'mv-row__sub', 'last run ' + mvWhen(ts)));
 ```
+
+## Empty states: `empty_state(...)` / `window.mvEmpty(title, body, action, opts)`
+
+One component for every empty list, panel and page (`.mv-empty`). The wording
+says what will appear and how to add the first one — "[What will appear
+here]. [How to add the first one]." — plus at most one next step. Leave the
+button out when the viewer can't use the destination page. The button is a
+plain `.btn`, never a second primary: the page's main action is in the header.
+
+```html
+{% from "_empty_state.html" import empty_state %}
+{{ empty_state('No results yet',
+               'Finished tasks with a saved answer appear here. Start a task to get the first one.',
+               action_label='Start a task', action_href='/chat') }}
+```
+
+`id`/`hidden` serve empties a script toggles; `compact=true` is the smaller,
+left-aligned version for panels, tiles and charts. Script-rendered lists use
+the same markup:
+
+```js
+list.replaceChildren(mvEmpty('No schedules yet',
+  'Schedules you create appear here. Create one below to run a workflow on a timetable.',
+  { label: 'Create a schedule', onClick: focusForm }));          // or { label, href }
+```
+
+## Page header: `hero(..., actions=..., compact=...)`
+
+`templates/_hero.html` is the one page header. Its `actions` slot holds the
+page's main action (the view's only `btn--primary`) and any secondary buttons
+beside it; build it with `{% set hero_actions %}…{% endset %}` so the markup is
+template-owned while every value inside stays escaped. `compact=true` is the
+shorter header for working pages, with the actions beside the title. The
+macro comment documents the arguments.
+
+## Tabs and filter toggles: `.mv-tabs` / `.mv-tab`
+
+One look for tab strips and list filters. The selected item shows a selected
+state — `aria-selected="true"` (tabs, `role="tab"` in a `role="tablist"`),
+`aria-pressed="true"` (filter toggles in a `role="group"`) or
+`aria-current="page"` (links) — never `btn--primary`, which is kept for the
+view's main action.
+
+```html
+<div class="mv-tabs" role="tablist" aria-label="Record types">
+  <button class="mv-tab" role="tab" aria-selected="true" aria-controls="tab-a" id="tabbtn-a" type="button">Agreements</button>
+  <button class="mv-tab" role="tab" aria-selected="false" aria-controls="tab-b" id="tabbtn-b" tabindex="-1" type="button">AI systems</button>
+</div>
+```
+
+Tabs move with the arrow keys (see the Security and Privacy pages); script
+only toggles the ARIA state, the stylesheet does the rest.
 
 ## `.card` / `.card-grid`
 

@@ -43,7 +43,10 @@ def test_accepted_api_start_reconciles_without_provider_and_without_second_dispa
     monkeypatch.setattr(api, "require_provider_or_400", lambda: pytest.fail("receipt read must not require a provider"))
     receipt = client.get("/api/v1/goal-submissions/receipt", headers=headers)
     assert receipt.status_code == 200 and receipt.headers["cache-control"] == "no-store"
-    assert receipt.json() == {"state": "accepted", "submission_state": "dispatching", "goal": {
+    body = receipt.json()
+    # The receipt also names the limits the accepted task runs under.
+    assert set(body.pop("limits")) == {"max_depth", "max_dollars", "max_wall_seconds"}
+    assert body == {"state": "accepted", "submission_state": "dispatching", "goal": {
         "id": goal_id, "status": "pending"}, "replayed": True, "execution_confirmed": False}
     assert len(runs) == len(world.list_goals()) == 1
 
@@ -81,9 +84,9 @@ def test_request_that_created_the_receipt_answers_when_a_replay_won_the_claim(is
     client, world, _runs = isolated
     real = goal_submission.try_claim_api_dispatch
 
-    def replay_claims_first(w, receipt, intent):
-        assert real(w, receipt, intent)  # the concurrent replay wins
-        return real(w, receipt, intent)  # the creator's own claim then fails
+    def replay_claims_first(w, receipt, intent, **guard):  # guard: the current-authority effect_guard
+        assert real(w, receipt, intent, **guard)  # the concurrent replay wins
+        return real(w, receipt, intent, **guard)  # the creator's own claim then fails
 
     monkeypatch.setattr(goal_submission, "try_claim_api_dispatch", replay_claims_first)
     r = client.post("/api/v1/goals", headers={"Idempotency-Key": "replay-won"}, json={"title": "Review"})
@@ -117,9 +120,12 @@ def test_missing_receipt_stays_unknown_and_denied_owner_cannot_read_private_goal
     store = SubmissionStore(world)
     receipt = store.create(token="private", fingerprint="a" * 64, owner="user:alice", title="Private", description="secret", manifest=[])
     headers = {"Idempotency-Key": "private"}
+    from maverick_dashboard import auth
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:bob")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
     missing = client.get("/api/v1/goal-submissions/receipt?kind=chat", headers=headers)
     assert missing.status_code == 404 and missing.headers["cache-control"] == "no-store"
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     response = client.get("/api/v1/goal-submissions/receipt?kind=chat", headers=headers)
     assert response.status_code == 200 and response.json()["goal"]["id"] == receipt["goal_id"]

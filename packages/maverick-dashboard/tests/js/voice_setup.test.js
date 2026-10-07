@@ -1,6 +1,7 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),{JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const folder=path.resolve(__dirname,'../../maverick_dashboard');
 const markup=fs.readFileSync(path.join(folder,'templates/settings.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'');
 const script=path.join(folder,'static/lightwork-voice-setup.js');
@@ -9,11 +10,11 @@ const model={id:'base',sha256:'c'.repeat(64),size_bytes:147951465,source_url:'ht
 const base={context,enabled:true,model,configuration:{managed_path:false,auto_fetch:false,backend:'local'},model_state:'missing',engine_available:true,can_download:true,reason:null,job:null};
 const job=(state='downloading',received=100)=>({id:'job-0123456789abcdef',state,received_bytes:received,total_bytes:model.size_bytes,error:null});
 function response(value,status=200){return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});}
-async function fixture(intercept=()=>undefined){
+async function fixture(intercept=()=>undefined,setup=()=>{}){
   const dom=new JSDOM(markup,{url:'https://lightwork.example/settings#settings-voice',runScripts:'outside-only'}),{window}=dom,calls=[],timers=[];
   window.setTimeout=fn=>{timers.push(fn);return timers.length;};window.clearTimeout=id=>{timers[id-1]=null;};
   window.fetch=async(url,options={})=>{const call={url,options};calls.push(call);const value=await intercept(call);return value instanceof Response?value:response(value===undefined?base:value);};
-  if(fs.existsSync(script))window.eval(fs.readFileSync(script,'utf8'));
+  shell(window);setup(window);if(fs.existsSync(script))window.eval(fs.readFileSync(script,'utf8'));
   async function settle(){for(let i=0;i<12;i++)await new Promise(done=>setImmediate(done));}
   const el=id=>window.document.getElementById('voice-setup-'+id);
   async function click(id){el(id).click();await settle();}
@@ -101,4 +102,22 @@ test('later file changes invalidate readiness and a network-policy denial explai
   assert.match(ui.el('status').textContent,/changed or was removed/);ui.consent();assert.equal(ui.el('start').disabled,false,'invalidated verification can be explicitly checked without a restart');
   current={...base,can_download:false,reason:'Network policy blocks the model source.'};await ui.click('refresh');
   assert.match(ui.el('status').textContent,/Network policy blocks/);assert.equal(ui.el('confirm').disabled,true);
+});
+
+const installLocale=require('./helpers/recovery_review_i18n');
+test('voice setup localizes progress and model copy but keeps backend errors and provenance opaque',async t=>{
+  const fr=text=>({text,lang:'fr'}),catalog={
+    'Standard multilingual model':fr('Modèle multilingue standard'),
+    'Downloading model…':fr('Téléchargement du modèle.'),
+    'Setup failed. {reason}':fr('Échec de la configuration. {reason}'),
+    '{received} MB of {total} MB ({percent}). Lightwork checks the file before using it.':fr('{received} Mo sur {total} Mo ({percent}). Lightwork vérifie le fichier.'),
+    '{model} · {bytes} bytes · {source} · SHA-256: {hash} · Configured speech backend: {backend}':fr('{model} · {bytes} octets · {source} · SHA-256 : {hash} · Moteur : {backend}'),
+  };
+  let current={...base,job:job('downloading',1500000)};
+  const ui=await fixture(()=>current,w=>installLocale(w,{catalog}));t.after(()=>ui.window.close());
+  assert.equal(ui.el('model').textContent,'Modèle multilingue standard');assert.equal(ui.el('model').lang,'fr');assert.equal(ui.el('status').textContent,'Téléchargement du modèle.');assert.match(ui.el('progress-text').textContent,/1,5 Mo/);
+  const values=Array.from(ui.el('technical').querySelectorAll('bdi'),node=>node.textContent);assert.ok(values.includes(model.source_url));assert.ok(values.includes(model.sha256));assert.ok(values.includes('local'));assert.match(ui.el('technical').textContent,/147.951.465/);
+  current={...base,job:{...job('failed'),error:'Standard multilingual model <img src=x> مرحبا'}};await ui.poll();
+  assert.match(ui.el('status').textContent,/Échec/);assert.equal(ui.el('status').querySelector('bdi').textContent,current.job.error);assert.equal(ui.el('status').querySelector('bdi').lang,'und');assert.equal(ui.el('status').querySelector('img'),null);
+  assert.equal(ui.calls.every(call=>call.options.method==='GET'),true);
 });

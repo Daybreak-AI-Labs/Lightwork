@@ -17,33 +17,24 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(id, text) { var box = $(id); if (box) box.textContent = text || ''; }
+  function say(id, text) { window.mvStatus($(id), text || ''); }
   function when(isoDate) {
     if (!isoDate) return '';
     var parsed = new Date(isoDate + 'T00:00:00');
-    return isNaN(parsed.getTime()) ? isoDate : parsed.toLocaleDateString();
+    return isNaN(parsed.getTime()) ? isoDate : window.mvDateAbsolute ? window.mvDateAbsolute(isoDate) : parsed.toLocaleDateString();
   }
   function installed() { return page.dataset.installed === 'true'; }
 
   async function plainFailure(failure, action) {
     // A server sentence written for people is shown as is; anything else
     // becomes the shared plain message.
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
 
   function postJson(path, body) {
-    return window.fetch(API + path, {
-      method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      body: JSON.stringify(body)
-    });
+    return window.mvFetchJSON(API + path, {method: 'POST', cache: 'no-store', body: body});
   }
 
   // Replacing an installed license always asks first. The server refuses an
@@ -55,13 +46,12 @@
       if (!(await window.mvConfirm(REPLACE, {okText: 'Replace license'}))) return null;
       confirmed = true;
     }
-    var response = await send(confirmed);
-    if (response.status === 409 && !confirmed) {
+    try { return await send(confirmed); }
+    catch (failure) {
+      if (failure.status !== 409 || confirmed) throw failure;
       if (!(await window.mvConfirm(REPLACE, {okText: 'Replace license'}))) return null;
-      response = await send(true);
+      return send(true);
     }
-    if (!response.ok) throw response;
-    return response.json();
   }
 
   function facts(rows) {
@@ -125,10 +115,7 @@
 
   async function refresh() {
     try {
-      var response = await window.fetch(API, {credentials: 'same-origin', cache: 'no-store',
-        headers: {Accept: 'application/json'}});
-      if (!response.ok) throw response;
-      var state = await response.json();
+      var state = await window.mvFetchJSON(API, {cache: 'no-store'});
       page.dataset.installed = state.installed ? 'true' : 'false';
       renderCurrent(state.summary);
       prefill($('license-set-form'), state.current);
@@ -200,13 +187,11 @@
         var data = new FormData();
         data.append('file', file);
         Object.keys(options).forEach(function (key) { data.append(key, options[key] ? 'true' : 'false'); });
-        return window.fetch(API + '/install-file', {method: 'POST', credentials: 'same-origin', body: data});
+        return window.mvFetchJSON(API + '/install-file', {method: 'POST', body: data});
       }
       say('license-file-status', 'Checking the file…');
       try {
-        var response = await send({check_only: true});
-        if (!response.ok) throw response;
-        var check = await response.json();
+        var check = await send({check_only: true});
         var result = el('div', 'license-result');
         result.appendChild(el('p', null, check.status_sentence));
         result.appendChild(licenseFacts(check.license));
@@ -277,9 +262,7 @@
       button.disabled = true;
       say('license-issue-status', 'Signing…');
       try {
-        var response = await postJson('/sign', Object.assign({}, readTerms(issueForm), {install: false}));
-        if (!response.ok) throw response;
-        var result = await response.json();
+        var result = await postJson('/sign', Object.assign({}, readTerms(issueForm), {install: false}));
         var card = el('div', 'license-result');
         card.appendChild(licenseFacts(result.license));
         var note = warningNote(result);
@@ -329,10 +312,7 @@
       keygen.disabled = true;
       say('license-keygen-status', 'Making a key pair…');
       try {
-        var response = await window.fetch(API + '/keygen', {method: 'POST', credentials: 'same-origin',
-          cache: 'no-store', headers: {Accept: 'application/json'}});
-        if (!response.ok) throw response;
-        var pair = await response.json();
+        var pair = await window.mvFetchJSON(API + '/keygen', {method: 'POST', cache: 'no-store'});
         box.appendChild(el('strong', null, 'Your new private key (shown once)'));
         box.appendChild(el('code', null, pair.private_key));
         box.appendChild(el('p', null, 'Store this private key in your secret manager as ' + pair.store_as +

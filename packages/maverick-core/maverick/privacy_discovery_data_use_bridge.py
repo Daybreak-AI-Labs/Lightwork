@@ -1451,6 +1451,7 @@ class PrivacyDiscoveryDataUseBridgeStore:
         expected_proposal_integrity_sha256: str,
         expected_bridge_revision: int,
         idempotency_key: str,
+        before_write: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Revalidate twice, apply once idempotently, and certify the result."""
 
@@ -1534,6 +1535,8 @@ class PrivacyDiscoveryDataUseBridgeStore:
                     "data-use target changed after proposal creation"
                 )
         if proposal["action"] == "no_change":
+            if before_write is not None:
+                before_write()
             if not self._context_matches_desired(target_first["context"], desired):
                 raise DiscoveryDataUseBridgeConflict("no-change target is no longer exact")
             written = target_first["context"]
@@ -1546,6 +1549,9 @@ class PrivacyDiscoveryDataUseBridgeStore:
                 0 if before_context is None else int(before_context["revision"])
             )
             mutation_key = f"pddb-reconcile-{proposal_digest[:32]}"
+            writer_guard = {}
+            if before_write is not None:
+                writer_guard["before_write"] = before_write
             try:
                 value = self._data_use.put_context_authority(
                     tenant,
@@ -1562,6 +1568,7 @@ class PrivacyDiscoveryDataUseBridgeStore:
                     fresh_until=desired["fresh_until"],
                     expected_revision=expected_context_revision,
                     idempotency_key=mutation_key,
+                    **writer_guard,
                 )
             except Exception as exc:
                 raise DiscoveryDataUseBridgeConflict(
@@ -1581,6 +1588,8 @@ class PrivacyDiscoveryDataUseBridgeStore:
         application_id = f"PDDA-{hashlib.sha256(proposal_key.encode()).hexdigest()[:32]}"
         with self._connect() as connection:
             self._begin(connection)
+            if before_write is not None:
+                before_write()
             replay = self._operation(
                 connection,
                 tenant,
@@ -1941,6 +1950,57 @@ class PrivacyDiscoveryDataUseBridgeStore:
             )
             connection.commit()
         return self.get_proposal(tenant, proposal_id)
+
+    def admit_application(
+        self, tenant_id: str, proposal_id: str, *,
+        expected_proposal_integrity_sha256: str, idempotency_key: str,
+    ) -> bool:
+        """Retain one UI application admission before the target writer runs.
+
+        A repeated admission is an original-read opportunity, never permission
+        to repeat an unsettled write. Existing reconciliation remains the only
+        target writer; this marker uses the existing integrity-bound ledger.
+        """
+        tenant, proposal_key = _tenant(tenant_id), _token(proposal_id, "proposal_id")
+        actor = self._actor_sha256(tenant)
+        pin = _digest(expected_proposal_integrity_sha256, "proposal integrity")
+        _, key_sha = self._idempotency(idempotency_key)
+        request_sha = _sha256({"proposal_id": proposal_key, "proposal_sha256": pin, "actor": actor})
+        with self._connect() as connection:
+            self._begin(connection)
+            proposal = self._proposal_by_id(connection, tenant, proposal_key)
+            if not _same(proposal["integrity_sha256"], pin) or proposal["created_by_sha256"] != actor:
+                raise DiscoveryDataUseBridgeConflict("review authority changed")
+            replay = self._operation(connection, tenant, "application.admission", key_sha, request_sha)
+            if replay is not None:
+                if replay != ("proposal", proposal_key):
+                    raise DiscoveryDataUseBridgeIntegrityError("application admission binding is invalid")
+                return False
+            if self._application_admitted_on(connection, tenant, proposal_key):
+                raise DiscoveryDataUseBridgeConflict("this review already has an application attempt; read its original outcome")
+            self._record_operation(connection, tenant, "application.admission", key_sha,
+                                   request_sha, "proposal", proposal_key)
+            self._audit(connection, tenant, proposal["bridge_id"], "application_admitted", proposal_key,
+                        actor, {"proposal_integrity_sha256": pin}, self._now())
+        return True
+
+    def _application_admitted_on(self, connection, tenant: str, proposal_id: str) -> bool:
+        rows = connection.execute(
+            "SELECT * FROM pddb_operations WHERE tenant_id=? AND namespace=? AND result_id=?",
+            (tenant, "application.admission", proposal_id),
+        ).fetchall()
+        for row in rows:
+            payload = self._payload(row, "application admission", table="pddb_operations")
+            if (payload["tenant_id"], payload["namespace"], payload["result_kind"], payload["result_id"]) != (
+                tenant, "application.admission", "proposal", proposal_id,
+            ):
+                raise DiscoveryDataUseBridgeIntegrityError("application admission binding is invalid")
+        return bool(rows)
+
+    def application_admitted(self, tenant_id: str, proposal_id: str) -> bool:
+        tenant, proposal = _tenant(tenant_id), _token(proposal_id, "proposal_id")
+        with self._connect() as connection:
+            return self._application_admitted_on(connection, tenant, proposal)
 
     def get_proposal(self, tenant_id: str, proposal_id: str) -> dict[str, Any]:
         tenant = _tenant(tenant_id)

@@ -6,6 +6,8 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
+from test_support.element_text import element_attributes, element_texts
+
 client = TestClient(app)
 
 _FORECAST_RESULT = """\
@@ -45,9 +47,15 @@ def test_generic_goal_keeps_plain_prose(tmp_path, monkeypatch):
     gid = w.create_goal("Summarize the meeting", "")  # no domain -> no contract
     w.set_goal_status(gid, "done", result="A short prose summary.")
 
-    t = client.get(f"/chat/goal/{gid}").text
-    assert 'id="result" tabindex="0" aria-label="Goal result" class="prose" data-markdown' in t
-    assert "A short prose summary." in t
+    response = client.get(f"/chat/goal/{gid}")
+    assert response.status_code == 200
+    t = response.text
+    result, = element_attributes(t, "div", {"id": "result"})
+    assert result["tabindex"] == "0"
+    assert result["aria-labelledby"] == "answer-result-label"
+    assert element_texts(t, "span", {"id": result["aria-labelledby"]}) == ["Goal result"]
+    assert "prose" in result["class"].split() and "data-markdown" in result
+    assert element_texts(t, "div", {"id": "result"}) == ["A short prose summary."]
     # No deliverable card is rendered (the .deliverable__table *style* is always
     # present in the page's <style> block; assert on the rendered markup).
     assert '<table class="deliverable__table">' not in t

@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const dir = path.resolve(__dirname, "../../maverick_dashboard");
 const template = fs.readFileSync(path.join(dir, "templates/privacy_notice_governance.html"), "utf8");
@@ -38,6 +39,7 @@ async function fixture({ targets = [TARGET], forms = [], confirm = true } = {}) 
     if (opts.method === "DELETE") return json({ detail: "This publishing target was set by your installer, so it can be changed here but not removed." }, 409);
     return json(state);
   };
+  shell(window);
   window.eval(script);
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise((d) => setImmediate(d)); };
   await settle();

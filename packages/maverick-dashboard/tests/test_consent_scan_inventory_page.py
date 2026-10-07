@@ -10,21 +10,14 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def page_client():
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
-    templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
+    templates = Jinja2Templates(
+        directory=str(template_dir),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
 
     @app.get("/consent/scan-inventory")
@@ -44,7 +37,7 @@ def test_scan_inventory_page_renders_safe_operator_contract(page_client: TestCli
     response = page_client.get("/consent/scan-inventory")
     assert response.status_code == 200
     page = response.text
-    assert "Tracker Scans" in page
+    assert "Tracker scans" in page
     assert "cannot prove a tracker is absent" in page
     assert "Only “Scan now” and “Run due scans now” visit your websites" in page
     # Websites, scans and trackers are lists with row buttons; the worker

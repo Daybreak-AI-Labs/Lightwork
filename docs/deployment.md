@@ -4,24 +4,14 @@ Four deployment targets, all driven by the same `maverick init` wizard.
 
 ## Desktop
 
-For most users.
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python -m pip install -c requirements/ci.txt \
-  -e './packages/maverick-core[release-runtime]' \
-  -e ./packages/maverick-shield -e ./packages/maverick-channels \
-  -e ./packages/maverick-evolve -e ./packages/maverick-dashboard \
-  -e ./packages/maverick-mcp -e ./packages/maverick-knowledge \
-  -e ./apps/installer-cli
-maverick init
-```
-
-Do not install the Lightwork distribution names from public PyPI until the
-project has reserved and protected every namespace. The desktop bootstrap
-scripts also require a lowercase, full commit SHA and fail closed.
+For most users, request the signed binary for the target operating system in a
+[customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package).
+Verify its checksum and exact-tag signature, run its `dashboard` command, and
+complete setup in the local application. A tag without that binary is not a
+customer installation path. The eight-package PyPI cohort remains unpublished;
+do not install Lightwork distribution names from a public index. Full-repository
+clones include internal research, audit and patent documents and are restricted
+to authorized engineering source installs.
 
 Runs as your user. Application state defaults to `~/.maverick/`; customer task
 files use the selected sandbox workspace. Guided setup proposes
@@ -31,22 +21,36 @@ files use the selected sandbox workspace. Guided setup proposes
 before reporting success. The dashboard and enabled server/channel adapters
 listen on their configured ports when started.
 
-**Artifact status:** reviewed source is the dependable installation route
-today. A successful tagged release is configured to publish three single-file
-PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the
-[release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) for
-the exact operating-system file before relying on one. The engineering
+Answer-sharing links use **Settings → Lightwork's address for others** (or the
+deployment-owned `MAVERICK_PUBLIC_URL`) when configured. The address must already
+reach this installation; saving it does not publish a local server. Without it,
+links use the address the page was opened at, and Chat explains when that address
+is limited to this computer or a private network.
+
+Named-workspace sharing keeps an opaque token-hash locator in the private,
+deployment-wide `MAVERICK_HOME/dashboard-share-routes` directory. The destination
+world store still checks the token's expiry, revocation and current review gate.
+Dashboard replicas must share this private control-plane state as well as their
+world backend for the same share links to work on every replica; PostgreSQL alone
+does not replicate these locators. Include the directory in application-state
+backups. Expired locators are pruned in bounded batches when new links are made.
+
+**Artifact status:** a successful tagged release is configured to publish three single-file
+PyInstaller binaries, checksums, SBOMs, and Sigstore material; ask for the
+exact operating-system file and verification material before relying on one. The engineering
 bootstrap packages and the Windows customer package candidate
 are separate paths. The customer candidate includes the frozen runtime and
 offline WebView2 installer, but still requires publisher and clean-machine
 acceptance before release. Engineering bootstrap packages are
-not attached to product releases. As checked on September 14, 2026, the repository
-has no published release assets; source installation remains an engineering
-setup, not a qualified customer delivery.
+not attached to product releases. Check the exact release asset inventory and
+its signature before describing a binary as available. Engineering source
+installation is not qualified customer delivery.
 
 ## Docker
 
-Isolated, reproducible, easy to nuke.
+Container deployments require licensed access to the Lightwork image registry.
+Authenticate with the credentials supplied for your deployment and use the
+approved, pinned image version in place of `latest` in this example.
 
 ```bash
 docker run -it --rm \
@@ -86,13 +90,11 @@ The generated service uses the configured sandbox workdir and validates that
 the service account can use it. It does not assume that every setup selected
 `~/maverick-workspace`.
 
-```bash
-LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
-curl -fsSLo /tmp/lightwork-install.sh \
-  "https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
-sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
-sudo systemctl enable --now maverick
-```
+The VPS installer is part of licensed deployment materials, not a public
+download. [Request a customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20VPS%20deployment),
+verify its included artifacts, and follow its version-specific installation
+instructions. Confirm the generated service and reverse proxy before exposing
+the dashboard to users.
 
 ### Security-sensitive world-schema upgrades
 
@@ -108,6 +110,66 @@ Do not treat the SQL migration's online-safe classification as permission to
 run old and new executors concurrently when relying on either property. The
 database remains upgrade-compatible; the security semantics take effect after
 all relevant writers are on the upgraded code.
+
+## Behind a load balancer or reverse proxy
+
+The dashboard's per-address limits (the public phone and TV consent endpoints
+count each caller's address, 120 requests a minute for each of enrolling,
+sending and refreshing) use the address of whoever opened the connection. Behind
+a load balancer that is the balancer, so every phone and TV in the fleet shares
+one allowance and one busy app can lock the rest out. The dashboard only
+believes the `X-Forwarded-For` header from addresses listed in the
+`FORWARDED_ALLOW_IPS` environment variable, which defaults to loopback only. To
+count each device on its own, list your balancer in the environment the
+dashboard starts in:
+
+```bash
+# the balancer's address; current uvicorn also accepts a range such as 10.0.0.0/16
+export FORWARDED_ALLOW_IPS="10.0.1.20"
+```
+
+- List only proxies you run, and make sure they add the address of the
+  connection they received to `X-Forwarded-For` (most load balancers do). Do not
+  use `*` when the dashboard can also be reached directly: any caller could then
+  choose the address it is counted under.
+- The setting changes the caller address for everything in the dashboard that
+  reads it, not just these limits, so keep the list as short as the real
+  proxies.
+- With reverse-proxy sign-in switched on (`[auth.proxy] enabled`), the
+  dashboard turns this handling off so that a forwarded header can never
+  impersonate a trusted proxy. `FORWARDED_ALLOW_IPS` then has no effect and the
+  devices behind the balancer still share one per-address allowance.
+- The per-app limit (Settings, "Requests per minute from each app") is
+  separate and always applies to the whole app, whatever the address.
+- To check, send requests from two devices and look at the dashboard's request
+  log: it should show each device's own address instead of the balancer's.
+
+### Sign-in attempts behind a proxy
+
+Signing in with an email and passphrase allows 10 attempts a minute from each
+address, for the owner and colleagues alike; the 11th gets "Too many sign-in
+attempts. Wait a minute and try again." The address is the connection's, and
+the `X-Forwarded-For` chain counts only when the connection comes from an
+address listed in `[auth.proxy] trusted_proxies`. The public rights-request
+form and the allowed-addresses list (`[auth.ip_allowlist]`) read the address
+the same way. Behind a load balancer or reverse proxy that is not listed,
+everyone signing in shares one allowance, so a few mistyped passphrases can
+lock the whole office out for a minute. List your proxies:
+
+```toml
+[auth.proxy]
+trusted_proxies = ["10.0.1.20"]   # your proxy's address, or a range such as "10.0.0.0/16"
+```
+
+- This works whether or not reverse-proxy sign-in (`[auth.proxy] enabled`) is
+  on. With reverse-proxy sign-in off it only changes which address is counted;
+  it does not let the proxy sign anyone in.
+- The list is exact: only the addresses listed count, so include `127.0.0.1`
+  if a proxy runs on the same computer.
+- List only proxies you run. Lightwork walks the chain from the right and stops
+  at the first address none of your proxies vouched for, so a caller cannot
+  choose the address it is counted under.
+- Settings shows the same setting as "Proxy addresses to trust".
 
 ## Phone (companion mode)
 

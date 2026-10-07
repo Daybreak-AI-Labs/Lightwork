@@ -108,13 +108,11 @@ def test_feeds_propose_with_effect():
     model = TransitionModel().fit(_confounded_corpus())
     est = estimate_effect_via_rollout(
         model, [START], treated_action="A", control_action="B", rollouts=20)
-    # A trustworthy, positive estimate clears the producer's calibration gate and
-    # reaches the default-on controller, which still fails closed because this
-    # estimate represents only one supported starting context (prompt promotion
-    # requires five evidence samples).
+    # A predictive model trained on observed trajectories can motivate a trial,
+    # but its simulation cannot clear the controlled-evidence promotion gate.
     verdict = propose_with_effect("prompt", "rollout win", est, rollback="snap")
     assert not verdict.promote
-    assert "insufficient evidence: 1 < 5 samples" in verdict.blocking_reason
+    assert "effect estimate not trustworthy" in verdict.blocking_reason
 
 
 def test_transitions_from_trajectories():

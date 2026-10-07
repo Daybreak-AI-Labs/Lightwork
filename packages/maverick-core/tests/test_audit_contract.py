@@ -351,3 +351,19 @@ def test_baseline_is_valid_json_with_the_expected_shape() -> None:
     data = json.loads(audit_contract.BASELINE.read_text(encoding="utf-8"))
     assert isinstance(data["known"], list)
     assert all("::" in k for k in data["known"])
+
+
+def test_self_harness_forget_and_relapse_audits_never_swallow_a_refusal(monkeypatch) -> None:
+    """Both non-strict self-harness audit writes re-raise a declined write."""
+    import maverick.audit
+    from maverick import self_harness
+
+    def _refuse(*a, **kw):
+        raise AuditWriteRefused("floor requires signed logs")
+
+    monkeypatch.setattr(maverick.audit, "record", _refuse)
+    with pytest.raises(AuditRefused):
+        self_harness._relapse_audit("model-x", "always cite", {"recent_outcomes": [False, True]})
+    with pytest.raises(AuditRefused):
+        self_harness._forget_finalize("model-x", "always cite", {}, {}, [], path=None,
+                                      strict=False, effect_guard=None)

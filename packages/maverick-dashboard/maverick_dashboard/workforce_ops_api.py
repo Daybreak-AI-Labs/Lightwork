@@ -21,7 +21,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import goal_owner_filter, require_permission
+from .auth import domain_suites_allowed, goal_owner_filter, require_permission
 from .learning_ops_api import _choice, _clip, _world, start_job
 
 router = APIRouter(prefix="/workforce-ops", tags=["workforce-ops"])
@@ -33,7 +33,7 @@ _FINDINGS = (
     ("effort", "Its effort level is not a level Lightwork recognises."),
     ("both allowed and denied", "Some tools are both allowed and blocked. Blocked wins."),
     ("persona under", "Its description of who it is, is very short."),
-    ("description is empty", "It has no description for the list of specialists."),
+    ("description is empty", "It has no description for the list of agents and specialists."),
     ("no knowledge_sources", "It has no reference sources to base its work on."),
     ("no deny_tools", "It does not explicitly block any tools."),
     ("read-only pack", "It only reads, but does not explicitly block tools that change things."),
@@ -52,6 +52,38 @@ class AgentIn(BaseModel):
                     "open-source", "custom"]
     name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
     description: str = Field(default="", max_length=200)
+
+
+class SpecialistCaseIn(BaseModel):
+    specialist: str = Field(min_length=1, max_length=100)
+    task: str = Field(min_length=8, max_length=1000)
+    includes: list[str] = Field(default_factory=list, max_length=8)
+    excludes: list[str] = Field(default_factory=list, max_length=8)
+    refusal: bool = False
+    citation: bool = False
+    identity: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class SpecialistCaseDelete(BaseModel):
+    specialist: str = Field(min_length=1, max_length=100)
+    identity: str = Field(pattern=r"^[a-f0-9]{32}$")
+    expected_revision: int = Field(ge=1)
+
+
+class SpecialistRunIn(BaseModel):
+    specialist: str = Field(min_length=1, max_length=100)
+    operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    # A whole saved test set (up to 20) can run at once before publishing.
+    case_ids: list[str] = Field(default_factory=list, max_length=20)
+    case_revisions: dict[str, int] = Field(min_length=1, max_length=20)
+
+
+class SpecialistCompareIn(SpecialistRunIn):
+    case_ids: list[str] = Field(min_length=1, max_length=20)
+    proposed_instructions: str = Field(min_length=8, max_length=6000)
+    baseline_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_context: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _audit(request: Request, action: str, **detail: Any) -> None:
@@ -90,18 +122,22 @@ def _audits(suite: str | None):
 
 
 def _inventory(suite: str | None) -> dict:
+    from maverick.agent_autonomy import levels_enabled
+    from maverick.departments import department_title
     from maverick.domain_audit import summarize
     audits, suites = _audits(suite)
     s = summarize(audits)
     flagged = [a for a in audits if a.reachable_dangerous and not a.is_builder]
     return {
-        "suites": [{"value": x, "label": x.replace("_", " ").capitalize()} for x in suites],
+        "suites": [{"value": x, "label": department_title(x)}
+                   for x in sorted(suites, key=department_title)],
         "specialists": s["packs"], "departments": s["suites"], "builders": s["builders"],
         "can_change_things_while_drafting": s["drafting_agents_reaching_a_mutator"],
         "sign_off_enforced": s["packs_with_human_gate"],
         "sign_off_only_asked": s["packs_with_unenforced_prompt_gate"],
         "extra_refusals": s["packs_with_refusals_beyond_universal"],
         "with_deliverable": s["packs_with_deliverable"],
+        "levels_enabled": levels_enabled(),
         "independence": s.get("autonomy_posture", {}),
         "still_supervised": s.get("packs_onboarding", 0),
         "flagged": [{"specialist": _name(a.name),
@@ -182,6 +218,381 @@ def _test_suite() -> dict:
 async def test_suite(request: Request) -> dict:
     require_permission(request, "view")
     return await run_in_threadpool(_test_suite)
+
+
+def _test_profile(request: Request, name: str):
+    from maverick.domain import available_domains
+    profile = available_domains().get(name)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Choose an agent or specialist from the list.")
+    if not domain_suites_allowed(request, name):
+        raise HTTPException(status_code=403, detail="You cannot access the department this one belongs to.")
+    return profile
+
+
+@router.get("/test-suite/specialists")
+async def test_specialists(request: Request) -> dict:
+    require_permission(request, "view")
+    from .plain_labels import pack_display_name
+    profiles = _test_profiles(request)
+    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)}
+                           for name, profile in sorted(profiles.items())]}
+
+
+def _test_profiles(request: Request) -> dict:
+    from maverick.domain import available_domains, suites_for_domain
+
+    from .auth import caller_suites
+    profiles = available_domains()
+    allowed = caller_suites(request)
+    return {name: profile for name, profile in profiles.items()
+            if allowed is None or suites_for_domain(name, profile) <= allowed}
+
+
+@router.get("/test-suite/customer")
+async def customer_tests(request: Request, specialist: str = Query(max_length=100)) -> dict:
+    require_permission(request, "view")
+    profile = _test_profile(request, specialist)
+    from maverick.llm import model_for_role
+
+    from . import specialist_test_sets as saved
+    from .draft_api import context_for
+    revision = saved.instruction_digest(saved.answer_system(profile), model_for_role(specialist))
+    cases = await run_in_threadpool(saved.cases_for, specialist)
+    runs = await run_in_threadpool(saved.runs_for, specialist)
+    # Complete private drafts are read only through their owned original route.
+    # The older workspace test history keeps its existing audience and shape.
+    runs = [run for run in runs if not run.get("comparison", {}).get("draft_profile")]
+    require_permission(request, "view")
+    _test_profile(request, specialist)
+    for run in runs:
+        _current_test_result(run, revision, cases)
+    return {"specialist": specialist, "cases": cases,
+            "runs": runs, "current_instructions": profile.persona, "baseline_revision": revision,
+            "context": context_for(request), "live_enabled": _live_tests_enabled()}
+
+
+def _current_test_result(row, current_revision, cases):
+    if row.get("comparison"):
+        current = {case["id"]: case["revision"] for case in cases}
+        row["baseline_current"] = row["instruction_hash"] == current_revision
+        row["questions_current"] = all(current.get(case["id"]) == case["revision"] for case in row["case_revisions"])
+    return row
+
+
+def _match_test_comparison(row, actor, proposed, baseline, revisions):
+    old = row.get("comparison") or {}
+    if (row["actor"] != actor or old.get("proposed_instructions") != proposed
+            or row["instruction_hash"] != baseline
+            or {case["id"]: case["revision"] for case in row["case_revisions"]} != revisions):
+        raise HTTPException(409, "This request no longer matches its original person, questions or instructions. No paid call was repeated.")
+
+
+def _comparison_systems(profile, model, system, proposed, baseline):
+    from dataclasses import replace
+
+    from . import specialist_test_sets as saved
+    if proposed is None:
+        return {"current":system}, None
+    if baseline != saved.instruction_digest(system, model):
+        raise HTTPException(409, "The specialist instructions or model changed. Refresh and review the comparison before spending.")
+    if not 8 <= len(proposed.strip()) <= 6000 or proposed.strip() == profile.persona.strip():
+        raise HTTPException(422, "Write different proposed instructions of between 8 and 6,000 characters.")
+    other = saved.answer_system(replace(profile, persona=proposed))
+    return {"current":system, "proposed":other}, {"current_instructions":profile.persona,
+        "proposed_instructions":proposed, "proposed_instruction_hash":saved.instruction_digest(other, model)}
+
+
+def _perform_answer_tests(job, *, specialist, model, instruction_hash, cases, actor,
+                          operation_id, systems, comparison, budget, guard, instructions_key=None,
+                          tested_instructions=None, draft_mode=False, persistence_guard=None):
+    from maverick.llm import LLM
+
+    from . import specialist_test_sets as saved
+    run, created = saved.begin_run(specialist, model, instruction_hash, cases, actor, identity=operation_id,
+                                   instructions_key=instructions_key, instructions=tested_instructions, effect_guard=persistence_guard)
+    if not created:
+        return {"run": run}
+    llm = LLM(model)
+    final_state, message = "done", ""
+    try:
+        for index, case in enumerate(cases):
+            variants = ["proposed"] if draft_mode else ((["proposed", "current"] if index % 2 else ["current", "proposed"]) if comparison else ["current"])
+            for variant in variants:
+                try:
+                    guard(job)
+                except Exception:  # noqa: BLE001 -- refuse before the next dispatch
+                    final_state, message = "stopped", "The questions, instructions, access or spending allowance changed. No further answers were requested."
+                    break
+                before = budget.dollars
+                answer = llm.complete(systems[variant], [{"role": "user", "content": case["task"]}],
+                                      tools=None, budget=budget, max_tokens=32 if draft_mode else (64 if comparison else 128),
+                                      _no_failover=True, max_physical_attempts=1,
+                                      dispatch_guard=lambda: guard(job))
+                result = saved.grade(case, answer.text, retain_full=draft_mode)
+                if case.get("sample"):
+                    result.update(sample=True, passed=False)
+                if comparison:
+                    result.update(variant=variant, spent_dollars=round(max(0.0, budget.dollars-before), 6))
+                saved.append_result(run["id"], result, budget.dollars, effect_guard=persistence_guard)
+            if final_state == "stopped":
+                break
+    except Exception:  # noqa: BLE001 -- provider dispatch may have been billable
+        final_state = "unknown"
+        message = ("A check could not finish. A provider call may have been billed; "
+                   "no request was replayed. Review the completed answers and provider accounting.")
+    return {"run": saved.finish_run(run["id"], final_state, budget.dollars, message, effect_guard=persistence_guard)}
+
+
+def _live_tests_enabled() -> bool:
+    from maverick import model_tests
+    try:
+        model_tests.policy()
+    except PermissionError:
+        return False
+    return True
+
+
+def _case_fields(body: SpecialistCaseIn) -> dict:
+    def terms(values: list[str]) -> list[str]:
+        cleaned = [" ".join(value.split()) for value in values]
+        if any(not value or len(value) > 100 for value in cleaned):
+            raise HTTPException(status_code=422, detail="Each phrase must be between 1 and 100 characters.")
+        if len({value.casefold() for value in cleaned}) != len(cleaned):
+            raise HTTPException(status_code=422, detail="Remove repeated phrases from this test.")
+        return cleaned
+    includes, excludes = terms(body.includes), terms(body.excludes)
+    if not (includes or excludes or body.refusal or body.citation):
+        raise HTTPException(status_code=422, detail="Say what the answer must or must not contain, or choose a refusal or source check.")
+    if set(map(str.casefold, includes)) & set(map(str.casefold, excludes)):
+        raise HTTPException(status_code=422, detail="The same phrase cannot be both required and forbidden.")
+    task = " ".join(body.task.split())
+    if len(task) < 8:
+        raise HTTPException(status_code=422, detail="Write a question or request of at least 8 characters.")
+    return {"task": task, "includes": includes, "excludes": excludes,
+            "refusal": body.refusal, "citation": body.citation}
+
+
+@router.post("/test-suite/customer")
+async def save_customer_test(request: Request, body: SpecialistCaseIn) -> dict:
+    require_permission(request, "admin")
+    _test_profile(request, body.specialist)
+    fields = _case_fields(body)
+    from . import specialist_test_sets as saved
+    await run_in_threadpool(lambda: _audit(request, "specialist_test_save", specialist=body.specialist,
+                                           test=body.identity or "new"))
+    try:
+        case = await run_in_threadpool(lambda: saved.save_case(
+            body.specialist, fields, identity=body.identity, expected_revision=body.expected_revision))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"case": case}
+
+
+@router.post("/test-suite/customer/remove")
+async def remove_customer_test(request: Request, body: SpecialistCaseDelete) -> dict:
+    require_permission(request, "admin")
+    _test_profile(request, body.specialist)
+    from . import specialist_test_sets as saved
+    await run_in_threadpool(lambda: _audit(request, "specialist_test_remove", specialist=body.specialist,
+                                           test=body.identity))
+    try:
+        await run_in_threadpool(lambda: saved.delete_case(body.specialist, body.identity,
+                                                           body.expected_revision))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"removed": True}
+
+
+def _start_customer_test_job(request: Request, specialist: str, *, operation_id: str | None = None,
+                             case_ids: list[str] | None = None,
+                             case_revisions: dict[str, int] | None = None,
+                             proposed_instructions: str | None = None,
+                             baseline_revision: str | None = None,
+                             expected_context: str | None = None, draft=None, draft_guard=None, draft_started=None) -> dict:
+    if draft is not None:
+        return _start_draft_customer_test_job(request, specialist, operation_id, draft, draft_guard, draft_started)
+    require_permission(request, "admin")
+    profile = _test_profile(request, specialist)
+    from maverick import model_tests
+    from maverick.llm import model_for_role
+
+    from . import learning_jobs
+    from . import specialist_test_sets as saved
+    from .auth import caller_principal
+    from .draft_api import context_for
+    actor = caller_principal(request) or "local administrator"
+    if proposed_instructions is not None and expected_context != context_for(request):
+        raise HTTPException(409, "Your account or workspace changed. Reload and review the comparison before spending.")
+    if operation_id:
+        existing = saved.run_by_id(operation_id)
+        if existing is not None:
+            if existing["specialist"] != specialist:
+                raise HTTPException(status_code=409, detail="That test request belongs to another agent or specialist.")
+            if existing.get("comparison") or proposed_instructions is not None:
+                _match_test_comparison(existing, actor, proposed_instructions, baseline_revision, case_revisions)
+            if existing["state"] != "prepared":
+                return {"run": saved.public_run(existing), "replayed": True}
+    try:
+        model_tests.policy()
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=(
+            "Turn on bounded model tests in Settings before checking live answers.")) from exc
+    try:
+        cases = saved.snapshot(specialist, case_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if case_revisions is not None and {c["id"]: c["revision"] for c in cases} != case_revisions:
+        raise HTTPException(status_code=409, detail="A selected check changed. Refresh and review it before spending.")
+    model = model_for_role(specialist)
+    system = saved.answer_system(profile)
+    instruction_hash = saved.instruction_digest(system, model)
+    systems, comparison = _comparison_systems(profile, model, system, proposed_instructions, baseline_revision)
+    from .agent_publish_gate import instructions_key as _instructions_key
+    from .learning_ops_api import _budget
+    tested_key = None if comparison else _instructions_key(model, profile.persona)
+    budget = _budget("specialist_eval")
+    # Ceilings grow with the questions asked (5 questions keep the original
+    # $0.25 / 640-token run), and still never exceed the configured caps.
+    questions = len(cases)
+    for key, ceiling in (("max_dollars", round(.05 * questions, 2)), ("max_input_tokens", 2000 * questions),
+                         ("max_output_tokens", 128 * questions), ("max_wall_seconds", max(120, 24 * questions)),
+                         ("max_tool_calls", 0)):
+        current = getattr(budget, key)
+        setattr(budget, key, ceiling if current is None else min(current, ceiling))
+    try:
+        budget.check()
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="The current spending limit does not allow this test run.") from exc
+
+    def _guard(job) -> None:
+        require_permission(request, "admin")
+        current = _test_profile(request, specialist)
+        model_tests.policy()
+        if comparison and expected_context != context_for(request):
+            raise ValueError("The reviewed account or workspace changed. No further answers were sent.")
+        if (model_for_role(specialist) != model
+                or saved.instruction_digest(saved.answer_system(current), model) != instruction_hash):
+            raise ValueError("Its instructions or model changed. No further tests were sent.")
+        if comparison and {case["id"]: case["revision"] for case in saved.snapshot(specialist, case_ids)} != case_revisions:
+            raise ValueError("A selected question changed. No further comparison answers were sent.")
+        if job.cancelled:
+            raise ValueError("Stopped before the next answer check.")
+        budget.check()
+
+    def _run(job) -> dict:
+        return _perform_answer_tests(job, specialist=specialist, model=model,
+            instruction_hash=instruction_hash, cases=cases, actor=actor, operation_id=operation_id,
+            systems=systems, comparison=comparison, budget=budget, guard=_guard,
+            instructions_key=tested_key, tested_instructions=None if comparison else profile.persona)
+
+    _audit(request, "specialist_test_run", specialist=specialist,
+           cases=len(cases), model=model, max_dollars=budget.max_dollars, comparison=comparison is not None)
+    if operation_id:
+        saved.reserve_run(specialist, model, instruction_hash, cases,
+                          actor, operation_id, comparison=comparison, instructions_key=tested_key,
+                          instructions=None if comparison else profile.persona)
+    return start_job(request, "specialist_answer_test", "Checking specialist answers", _run,
+                     needs_global=False, cancellable=True, on_cancel=learning_jobs.stop_budget(budget))
+
+
+def _start_draft_customer_test_job(request, specialist, operation, draft, source_guard, started):
+    """Use the unchanged answer runner with one exact, tool-free draft variant."""
+    from maverick import domain, model_tests
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.governed_operations import digest
+
+    from . import learning_jobs
+    from . import specialist_test_sets as saved
+    from .learning_ops_api import _budget
+    from .tools_ops_api import actor as current_actor
+
+    require_permission(request, "admin")
+    if not callable(source_guard) or not callable(started) or draft["name"] != specialist or draft["actor"] != current_actor(request):
+        raise HTTPException(409, "The exact reviewed draft worker could not be admitted.")
+    model_tests.policy()
+    profile = domain._coerce(specialist, draft["profile"])
+    model = draft["connection"]["model"]
+    system = saved.answer_system(profile) + "\nEntered draft settings (instructions only; these grant no tools or connections):\n" + json.dumps(draft["profile"], ensure_ascii=False)
+    cases = draft["cases"] if draft["action"] == "check" else [{"id": digest([operation, "sample"])[:32], "revision": 1,
+        "specialist": specialist, "task": draft["task"], "includes": [], "excludes": [], "refusal": False, "citation": False, "sample": True}]
+    if not 1 <= len(cases) <= saved.MAX_CASES_PER_SPECIALIST:
+        raise HTTPException(409, "The complete chosen draft questions exceed the supported limit.")
+    budget = _budget("specialist_eval")
+    for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000), ("max_output_tokens", 640),
+                         ("max_wall_seconds", 120), ("max_tool_calls", 0)):
+        current = getattr(budget, key)
+        setattr(budget, key, ceiling if current is None else min(current, ceiling))
+    source_guard(budget)
+    comparison = {"draft_profile": draft["profile"], "connection": draft["connection"], "context": draft["context"],
+        "proposed_instructions": profile.persona, "proposed_instruction_hash": saved.instruction_digest(system, model)}
+    existing = saved.run_by_id(operation)
+    if existing is not None:
+        if existing["actor"] != draft["actor"] or existing.get("comparison") != comparison:
+            raise HTTPException(409, "This original answer request belongs to a different complete draft.")
+        raise HTTPException(409, "The original draft check already has a retained admission. Read it; no answer request was repeated.")
+    saved.reserve_run(specialist, model, saved.instruction_digest(system, model), cases, draft["actor"], operation,
+        comparison=comparison, single_variant=True, effect_guard=lambda: source_guard(budget))
+
+    def guard(job):
+        require_permission(request, "admin")
+        model_tests.policy()
+        source_guard(budget)
+        if job.cancelled:
+            raise ValueError("The draft answer check stopped before the next answer.")
+
+    def run(job):
+        with authority_effect_fence():
+            guard(job)
+            started(job, budget)
+        result = _perform_answer_tests(job, specialist=specialist, model=model, instruction_hash=saved.instruction_digest(system, model),
+            cases=cases, actor=draft["actor"], operation_id=operation, systems={"proposed": system}, comparison=comparison,
+            budget=budget, guard=guard, draft_mode=True, persistence_guard=lambda: source_guard())
+        # Private drafts, questions and answers remain in the owned native record,
+        # never in the general background-job result visible to other admins.
+        row = result["run"]
+        return {"answer_check": {"state": row["state"], "received": len(row["results"]), "passed": row["passed"], "total": row["total"]}}
+
+    return start_job(request, "specialist_answer_test", "Checking complete draft answers", run,
+                     needs_global=False, cancellable=True, on_cancel=learning_jobs.stop_budget(budget))
+
+
+@router.post("/test-suite/customer/run")
+def run_customer_tests(request: Request, body: SpecialistRunIn) -> dict:
+    return _start_customer_test_job(request, body.specialist, operation_id=body.operation_id,
+                                    case_ids=body.case_ids, case_revisions=body.case_revisions)
+
+
+@router.post("/test-suite/customer/compare")
+def compare_customer_tests(request: Request, body: SpecialistCompareIn) -> dict:
+    return _start_customer_test_job(request, body.specialist, operation_id=body.operation_id,
+        case_ids=body.case_ids, case_revisions=body.case_revisions,
+        proposed_instructions=body.proposed_instructions, baseline_revision=body.baseline_revision,
+        expected_context=body.expected_context)
+
+
+@router.get("/test-suite/customer/run/{operation_id}")
+def customer_test_run_status(request: Request, operation_id: str) -> dict:
+    require_permission(request, "admin")
+    if len(operation_id) != 32 or any(c not in "0123456789abcdef" for c in operation_id):
+        raise HTTPException(status_code=404, detail="This answer check was not found.")
+    from . import specialist_test_sets as saved
+    row = saved.run_by_id(operation_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No saved answer check has this request reference.")
+    profile = _test_profile(request, row["specialist"])
+    from maverick.llm import model_for_role
+
+    from .auth import caller_principal
+    if row.get("comparison", {}).get("draft_profile"):
+        from .draft_api import context_for
+        from .tools_ops_api import actor
+        if row["actor"] != actor(request) or row["comparison"]["context"] != context_for(request):
+            raise HTTPException(404, "This private draft check is unavailable to this account and workspace.")
+    if row.get("comparison") and row["actor"] != (caller_principal(request) or "local administrator"):
+        raise HTTPException(403, "This comparison belongs to another person. Open Previous checks for workspace history.")
+    revision = saved.instruction_digest(saved.answer_system(profile), model_for_role(row["specialist"]))
+    return {"run": _current_test_result(saved.public_run(row), revision, saved.cases_for(row["specialist"]))}
 
 
 # ---- tasks coming due (forward) -----------------------------------------------------

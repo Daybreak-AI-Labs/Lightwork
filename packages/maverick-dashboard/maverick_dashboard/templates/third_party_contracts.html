@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Contracts and Engagements - Lightwork{% endblock %}
+{% block title %}Contracts and engagements · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .tpc-grid { display:grid; gap:var(--space-3); grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); }
@@ -16,29 +16,30 @@
 {% endblock %}
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
-{% if not contracts_module_enabled %}
-{{ module_gate('third_party_management.contracts', 'Contracts and engagements',
-               detail='Turns on Third-Party Management and contract records together.',
-               can_activate=contracts_can_activate) }}
-{% endif %}
 <div id="third-party-contracts-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
+     data-module-enabled="{{ 'true' if contracts_module_enabled else 'false' }}"
      data-can-operate="{{ 'true' if contracts_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if contracts_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if contracts_can_admin else 'false' }}">
-  {% call hero('Third-party management', 'Contracts and Engagements',
+  {% call hero('Third-party management', 'Contracts and engagements',
                lede='Keep track of vendor agreements and the work each vendor does for you, with a clear history of every change.', title_id='tpc-title') %}
-    <div class="hero-statebox" aria-live="polite">
+    <div class="hero-statebox" aria-live="polite"{% if not contracts_module_enabled %} hidden{% endif %}>
       <div class="hero-statebox__label">Availability</div>
       <div class="hero-statebox__row"><strong id="tpc-readiness">Checking…</strong><span class="badge idle" id="tpc-status-mark">Checking</span></div>
       <p class="hero-statebox__copy" id="tpc-readiness-detail" role="status" aria-live="polite">Checking that contracts are available…</p>
       <p><button class="btn btn--ghost" id="tpc-refresh-status" type="button">Refresh</button></p>
     </div>
   {% endcall %}
+  {% if not contracts_module_enabled %}
+  {{ module_gate('third_party_management.contracts', 'Contracts and engagements',
+                 detail='Turns on Third-Party Management and contract records together.',
+                 can_activate=contracts_can_activate) }}
+  {% endif %}
   <p class="muted">Record the key facts here, not the full contract text.</p>
 
   <fieldset class="tpc-fieldset" id="tpc-operations" disabled>
     <legend class="sr-only">Contracts and engagements</legend>
-    <div class="section-head"><h2>Your Contracts and Engagements</h2>
+    <div class="section-head"><h2>Your contracts and engagements</h2>
       <button class="btn btn--primary" id="tpc-new" type="button"{% if not contracts_can_operate %} disabled{% endif %}>Add a contract or engagement</button></div>
     <section class="panel" aria-label="Filters and records">
       <form id="tpc-filter-form" autocomplete="off">
@@ -50,13 +51,13 @@
           {% if contracts_can_audit %}<label class="tpc-actions"><input name="include_sensitive_fields" type="checkbox"> Show confidential fields (auditors only)</label>{% endif %}
         </div>
       </form>
-      <p class="muted" id="tpc-list-status" role="status" aria-live="polite">Loading…</p>
+      <p class="muted" id="tpc-list-status" role="status" aria-live="polite">{{ 'Loading…' if contracts_module_enabled else 'Contracts and engagements appear here once this is turned on.' }}</p>
       <div id="tpc-record-list"></div>
       <div id="tpc-detail" hidden></div>
     </section>
 
     <section class="panel" id="tpc-editor" hidden aria-labelledby="tpc-editor-title">
-      <h2 id="tpc-editor-title">Add a Contract or Engagement</h2>
+      <h2 id="tpc-editor-title">Add a contract or engagement</h2>
       <form id="tpc-create-form" autocomplete="off">
         <input type="hidden" name="record_id" value="">
         <input type="hidden" name="expected_revision" value="">
@@ -93,13 +94,13 @@
           </div>
           <fieldset class="tpc-checks"><legend>Related contracts</legend><div id="tpc-linked"></div></fieldset>
         </fieldset>
-        <h3>Custom Fields</h3>
+        <h3>Custom fields</h3>
         <div id="tpc-custom-fields"></div>
         <p><button type="button" class="btn btn--ghost" id="tpc-add-field">Add a custom field</button>
            <button type="button" class="btn btn--ghost" id="tpc-add-formula">Add a calculation</button></p>
         <div id="tpc-formulas"></div>
         <div class="tpc-actions">
-          <button class="btn btn--primary" type="submit" id="tpc-save">Save</button>
+          <button class="btn btn--primary" type="submit" id="tpc-save">Save contract</button>
           <button class="btn btn--ghost" type="button" id="tpc-cancel">Cancel</button>
         </div>
         <p class="muted" id="tpc-form-status" role="status" aria-live="polite"></p>

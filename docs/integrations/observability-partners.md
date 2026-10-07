@@ -133,6 +133,14 @@ Two honest constraints:
   supported shape; consult your gateway's docs for its URL format and key
   handling rather than this page.
 
+With the default `Require known prices` setting, Lightwork checks for a
+verified price for the exact `openai_compatible:<model-id>` route before
+contacting the gateway. A vendor's price for the same bare model name does not
+establish the gateway's tariff. Choose a model on a directly priced provider or
+have an administrator add a sourced gateway rate. An administrator can explicitly
+set `[budget] strict_pricing=false` for estimate-only accounting, which is
+warning-labelled and unsuitable for invoices or chargebacks.
+
 ### Verify
 
 ```bash

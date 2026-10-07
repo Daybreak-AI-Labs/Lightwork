@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -47,6 +48,30 @@ def _finish(world, goal_id, text):
     world.set_goal_status(goal_id, "done", result=text)
 
 
+def test_recents_exposes_current_state_without_guessing_why_a_chat_is_paused(chat):
+    client, world, _ = chat
+    ids = {}
+    for status in ("pending", "running", "blocked", "failed", "cancelled", "done"):
+        goal_id = _send(client)
+        world.set_goal_status(goal_id, status)
+        ids[status] = goal_id
+
+    assert not world.open_questions(ids["blocked"])
+    sidebar = client.get("/chat").text.split('id="content"')[0]
+    rows = dict(re.findall(
+        r'<li><a\b[^>]*data-conversation-root="(\d+)"[^>]*>.*?</a>(.*?)</li>',
+        sidebar, re.DOTALL,
+    ))
+    for status, label in (("pending", "Queued"), ("running", "Working"),
+                          ("blocked", "Paused"), ("failed", "Failed"),
+                          ("cancelled", "Stopped"), ("done", "Done")):
+        row = rows[str(ids[status])]
+        assert f'id="chat-status-{ids[status]}"' in row
+        assert f'>{label}</span>' in row
+        assert f'aria-describedby="chat-status-{ids[status]}"' in sidebar
+    assert "Needs your answer" not in rows[str(ids["blocked"])]
+
+
 def test_recents_reopens_latest_actual_turn_and_keeps_old_work_link(chat):
     client, world, _ = chat
     root = _send(client)
@@ -63,7 +88,13 @@ def test_recents_reopens_latest_actual_turn_and_keeps_old_work_link(chat):
     assert "Budget BUDGET-ALPHA-731" in reopened.text
     assert "Original assistant answer" in reopened.text
     assert "Revise that report." in reopened.text and "Latest assistant answer" in reopened.text
-    assert f'href="/chat/goal/{root}">Show the work behind this answer' in reopened.text
+    earlier_answer = re.search(
+        rf'<a\b[^>]*href="/chat/goal/{root}"[^>]*>(.*?)</a>',
+        reopened.text,
+        re.DOTALL,
+    )
+    assert earlier_answer is not None
+    assert "Open answer" in re.sub(r"<[^>]+>", "", earlier_answer.group(1))
     old = client.get(f"/chat/goal/{root}")
     assert "Original assistant answer" in old.text
     assert "Latest assistant answer" not in old.text

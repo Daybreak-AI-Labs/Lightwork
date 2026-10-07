@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from hashlib import sha256
+from pathlib import Path
 
 from .ir import Flow
 
@@ -19,28 +21,35 @@ _MAX_FLOW_DEFINITION_BYTES = 1_000_000
 
 
 def _flows_dir():
-    from ..paths import data_dir
-    return data_dir("flows")
+    return _flow_dir()
 
 
 def _history_dir(flow_id: str):
+    return _flow_dir("history", _safe_id(flow_id))
+
+
+def _flow_dir(*parts: str) -> Path:
+    import os
+
+    from ..file_lock import _windows_extended_path
     from ..paths import data_dir
-    return data_dir("flows", "history", _safe_id(flow_id))
+
+    path = data_dir("flows", *parts)
+    # Keep every derived flow path on one spelling: definitions, history,
+    # snapshots, release pointers, claims, checkpoint rows and SQLite journals.
+    return Path(_windows_extended_path(path)) if os.name == "nt" else path
 
 
 def _runs_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "runs")
+    return _flow_dir("runs")
 
 
 def _objects_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "objects")
+    return _flow_dir("objects")
 
 
 def _published_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "published")
+    return _flow_dir("published")
 
 
 @contextmanager
@@ -60,13 +69,11 @@ def _activation_lock(flow_id: str):
 
 
 def _idempotency_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "idempotency")
+    return _flow_dir("idempotency")
 
 
 def _schema_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "schema")
+    return _flow_dir("schema")
 
 
 def load_flow_schema(flow_id: str) -> dict:
@@ -99,9 +106,13 @@ def record_flow_schema(
         pass
 
 
-def _write_json(path, obj: dict) -> None:
+def _write_json(path, obj: dict, *, effect_guard: Callable[[], None] | None = None) -> None:
     from ..file_lock import atomic_write_text
-    atomic_write_text(path, json.dumps(obj, sort_keys=True))
+    text = json.dumps(obj, sort_keys=True)
+    if effect_guard is None:
+        atomic_write_text(path, text)
+    else:
+        atomic_write_text(path, text, effect_guard=effect_guard)
 
 
 def _read_json(path) -> dict | None:
@@ -173,7 +184,7 @@ def _assert_safe_definition(payload: dict) -> None:
     if contains_secret(payload):
         raise ValueError(
             "flow definitions may not contain raw credentials; "
-            "use {{secret('NAME')}} instead"
+            "review the account in Connections and use its authorized native connector action instead"
         )
 
 
@@ -182,6 +193,7 @@ def save_flow(
     *,
     expected_version: int | None = None,
     expected_revision: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> Flow:
     """Persist ``flow`` as the current definition, snapshotting the prior current
     into version history first so any earlier version can be rolled back to.
@@ -225,8 +237,9 @@ def save_flow(
             _write_json(
                 _history_dir(flow.id) / f"v{int(prior.version)}.json",
                 prior.to_dict(),
+                effect_guard=effect_guard,
             )
-        _write_json(_flows_dir() / f"{_safe_id(flow.id)}.json", payload)
+        _write_json(_flows_dir() / f"{_safe_id(flow.id)}.json", payload, effect_guard=effect_guard)
     return flow
 
 
@@ -303,22 +316,33 @@ def list_flows() -> list[Flow]:
     return out
 
 
-def list_flow_summaries() -> list[dict]:
+def list_flow_summaries(*, owner: str | None = None, after=None, before=None, bounded=False) -> list[dict]:
     """Cheap listing for index pages -- id/name/node count/single-agent flag
     plucked from the raw JSON, WITHOUT building the full recursive Flow IR per
     file (list_flows constructs every nested body just to be counted)."""
+    import time
+
+    from ..metadata_history import check_scan
+    started = time.monotonic()
     d = _flows_dir()
     if not d.exists():
         return []
     out = []
-    for p in sorted(d.glob("*.json")):
+    for count, p in enumerate(sorted(d.glob("*.json")), 1):
+        if bounded:
+            check_scan(count, started)
+        modified = p.stat().st_mtime
+        if (after is not None and modified < after) or (before is not None and modified >= before):
+            continue
         raw = _read_json(p) or {}
-        if not raw.get("id"):
+        if not raw.get("id") or (owner is not None and (raw.get("owner") or "") != owner):
             continue
         nodes = [n for n in (raw.get("nodes") or []) if isinstance(n, dict)]
         out.append({
             "id": str(raw["id"]), "name": str(raw.get("name") or ""),
-            "nodes": len(nodes),
+            "nodes": len(nodes), "owner": str(raw.get("owner") or ""),
+            "version": raw.get("version", 0), "revision": raw.get("revision", ""),
+            "updated_at": modified,
             "single_agent": (len(nodes) == 1 and nodes[0].get("kind") == "agent"
                              and not nodes[0].get("next")),
         })
@@ -330,6 +354,7 @@ def delete_flow(
     *,
     expected_version: int | None = None,
     expected_revision: str | None = None,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Revoke activation and delete one definition under one lock order."""
     with _activation_lock(flow_id):
@@ -337,6 +362,7 @@ def delete_flow(
             flow_id,
             expected_version=expected_version,
             expected_revision=expected_revision,
+            expected_release_id=expected_release_id,
         )
 
 
@@ -345,6 +371,7 @@ def _delete_flow_under_activation(
     *,
     expected_version: int | None = None,
     expected_revision: str | None = None,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Delete one definition, optionally guarded by its exact generation.
 
@@ -364,6 +391,11 @@ def _delete_flow_under_activation(
                 and str(current.revision or "") != str(expected_revision)):
             raise FlowVersionConflict(
                 f"flow {flow_id!r} was replaced or changed generation")
+        if expected_release_id is not None:
+            published = load_published_bundle(flow_id)
+            active_id = str(published[1]["release_id"]) if published else ""
+            if active_id != expected_release_id:
+                raise FlowVersionConflict(f"published flow {flow_id!r} changed since review")
         with _activation_lock(flow_id):
             # Authorization must disappear before the draft does.  Moving the
             # pointer out of the live ``*.json`` namespace is atomic on the
@@ -505,7 +537,9 @@ def _store_flow_object(raw: dict) -> str:
     return digest
 
 
-def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | None]]:
+def _snapshot_flow_bundle_locked(
+    flow: Flow, *, validate_reachability: bool = False,
+) -> tuple[str, int, dict[str, str | None]]:
     """Snapshot a root and its transitive children under ``_definitions_lock``."""
     # Unsaved dry-run drafts reach this boundary without passing save_flow.
     # Apply the same size/secret persistence policy before writing CAS objects.
@@ -547,6 +581,12 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
                 raise FlowSnapshotError(
                     f"subflow {ref!r} is unavailable to this flow owner"
                 )
+            if validate_reachability:
+                errors = child.reachability_errors()
+                if errors:
+                    raise FlowSnapshotError(
+                        f"subflow {ref!r} cannot be published: " + "; ".join(errors[:3])
+                    )
             child_raw = child.to_dict()
             # Mark visited for cycles, but write no objects until the entire
             # selected graph passes persistence and lineage policy.
@@ -608,14 +648,69 @@ def publish_flow(
     *,
     expected_version: int,
     expected_revision: str,
+    expected_release_id: str | None = None,
+    activation_id: str | None = None,
+    expected_bundle_digest: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> dict:
     """Activate a coherent immutable release under the dispatch lock."""
     with _activation_lock(flow_id):
+        if expected_release_id is not None:
+            active = load_published_bundle(flow_id)
+            if active is None or active[1]["release_id"] != expected_release_id:
+                raise FlowSnapshotError("The published workflow changed. Review its current release again.")
         return _publish_flow_under_activation(
             flow_id,
             expected_version=expected_version,
             expected_revision=expected_revision,
+            activation_id=activation_id,
+            expected_bundle_digest=expected_bundle_digest,
+            effect_guard=effect_guard,
         )
+
+
+def restore_published_flow(
+    flow_id: str, retained_release: dict, *, expected_release_id: str,
+    expected_version: int, expected_revision: str,
+    activation_id: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
+) -> dict:
+    """Restore retained content with a fresh activation, without editing the draft.
+
+    Old waiting runs remain revoked: restoration must never revive a previous
+    authorization epoch. The caller owns current permission and evidence checks.
+    """
+    import secrets
+
+    with _activation_lock(flow_id), _definitions_lock():
+        draft = load_flow(flow_id)
+        active = load_published_bundle(flow_id)
+        if (draft is None or draft.version != expected_version
+                or draft.revision != expected_revision):
+            raise FlowVersionConflict("The saved workflow changed. Review restoration again.")
+        if active is None or active[1]["release_id"] != expected_release_id:
+            raise FlowSnapshotError("The published workflow changed. Review restoration again.")
+        prior = load_flow_snapshot(str(retained_release.get("definition_digest") or ""))
+        manifest = retained_release.get("subflow_digests")
+        if (prior.id != flow_id or prior.owner != draft.owner or prior.revision != draft.revision
+                or retained_release.get("flow_id") != flow_id
+                or prior.version != retained_release.get("definition_version")
+                or prior.revision != retained_release.get("definition_revision")
+                or not isinstance(manifest, dict)):
+            raise FlowSnapshotError("The retained release no longer belongs to this workflow.")
+        validate_snapshot_bundle_owners(prior, manifest)
+        digest = release_digest_for(retained_release["definition_digest"], manifest)
+        if digest != retained_release.get("release_digest"):
+            raise FlowSnapshotError("The retained release failed its content check.")
+        from .recipe_flow import check_persisted_lineage
+        check_persisted_lineage(prior)
+        if activation_id is not None and (not _valid_release_token(activation_id)
+                or activation_id in {active[1]["release_id"], retained_release.get("release_id")}):
+            raise FlowSnapshotError("The new activation identity is invalid.")
+        restored = {**retained_release, "release_digest": digest,
+                    "release_id": activation_id or secrets.token_hex(32), "published_at": time.time()}
+        _write_json(_published_pointer_path(flow_id), restored, effect_guard=effect_guard)
+        return restored
 
 
 def save_and_publish_flow(
@@ -680,6 +775,9 @@ def _publish_flow_under_activation(
     *,
     expected_version: int,
     expected_revision: str,
+    activation_id: str | None = None,
+    expected_bundle_digest: str | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> dict:
     """Atomically activate the exact current draft as an immutable release.
 
@@ -701,15 +799,21 @@ def _publish_flow_under_activation(
             raise FlowVersionConflict(
                 f"flow {flow_id!r} was replaced or changed generation"
             )
-        errors = flow.validate()
+        errors = flow.validate() + flow.reachability_errors()
         if errors:
             raise FlowSnapshotError(
                 "flow cannot be published: " + "; ".join(errors[:3])
             )
-        digest, version, subflows = _snapshot_flow_bundle_locked(flow)
+        digest, version, subflows = _snapshot_flow_bundle_locked(
+            flow, validate_reachability=True,
+        )
         import secrets
 
         release_digest = release_digest_for(digest, subflows)
+        if expected_bundle_digest is not None and release_digest != expected_bundle_digest:
+            raise FlowSnapshotError("An included workflow changed after review. Prepare a new release review.")
+        if activation_id is not None and not _valid_release_token(activation_id):
+            raise FlowSnapshotError("The new activation identity is invalid.")
         release = {
             "flow_id": flow.id,
             "definition_digest": digest,
@@ -720,13 +824,13 @@ def _publish_flow_under_activation(
             # identity answers "is this particular authorization still live?".
             # A fresh nonce prevents revoke/republish ABA for identical content.
             "release_digest": release_digest,
-            "release_id": secrets.token_hex(32),
+            "release_id": activation_id or secrets.token_hex(32),
             "published_at": time.time(),
         }
         # The definition lock makes the snapshot coherent; the activation lock
         # makes pointer replacement linearizable with final worker dispatch.
         with _activation_lock(flow.id):
-            _write_json(_published_pointer_path(flow.id), release)
+            _write_json(_published_pointer_path(flow.id), release, effect_guard=effect_guard)
         return release
 
 
@@ -869,6 +973,7 @@ def unpublish_flow(
     *,
     expected_version: int,
     expected_revision: str,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Revoke one active release under the live-dispatch lock."""
     with _activation_lock(flow_id):
@@ -876,6 +981,7 @@ def unpublish_flow(
             flow_id,
             expected_version=expected_version,
             expected_revision=expected_revision,
+            expected_release_id=expected_release_id,
         )
 
 
@@ -884,6 +990,7 @@ def _unpublish_flow_under_activation(
     *,
     expected_version: int,
     expected_revision: str,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Deactivate a release without deleting its draft or immutable objects."""
     with _definitions_lock():
@@ -899,6 +1006,11 @@ def _unpublish_flow_under_activation(
             raise FlowVersionConflict(
                 f"flow {flow_id!r} was replaced or changed generation"
             )
+        if expected_release_id is not None:
+            published = load_published_bundle(flow_id)
+            active_id = str(published[1]["release_id"]) if published else ""
+            if active_id != expected_release_id:
+                raise FlowVersionConflict(f"published flow {flow_id!r} changed since review")
         with _activation_lock(flow_id):
             try:
                 (_published_dir() / f"{_safe_id(flow_id)}.json").unlink()
@@ -1029,7 +1141,8 @@ class FlowRun:
     # Optional idempotency key (flow_id + a stable event id) so a re-delivered
     # trigger event doesn't spawn a duplicate run.
     idem_key: str = ""
-    # What fired this run: "manual" | "cron:<flow>" | "event:<trigger>" |
+    # What fired this run: "manual" | "cron:<flow>" |
+    # "event:v2:<source>:<generation>:<trigger>" |
     # "form:<token>" | "retry:<run>" -- so a viewer can see why it ran and the
     # loop can learn which triggers produce value.
     origin: str = "manual"
@@ -1440,13 +1553,13 @@ def run_lock(run_id: str):
 
 def list_run_metadata(*, flow_id: str | None = None, owner: str | None = None,
                       limit: int | None = 50, statuses=None, due_before=None,
-                      cursor=None, idem_key=None) -> list[FlowRun]:
+                      cursor=None, idem_key=None, release_id: str | None = None) -> list[FlowRun]:
     """Indexed bounded previews; callers must load_run before executing/saving."""
     from . import run_index
 
     rows = run_index.query(_runs_dir(), flow_id=flow_id, owner=owner, limit=limit,
                            statuses=statuses, due_before=due_before, cursor=cursor,
-                           idem_key=idem_key)
+                           idem_key=idem_key, release_id=release_id)
     runs = [FlowRun.from_dict(row) for row in rows]
     for run in runs:
         run.metadata_only = True
@@ -1489,7 +1602,7 @@ __all__: list[str] = [
     "FlowVersionConflict", "FlowSnapshotError", "snapshot_flow_bundle",
     "snapshot_current_flow_bundle", "load_flow_snapshot",
     "definition_cohort", "flow_cohort", "release_digest_for", "release_id_for",
-    "publish_flow", "save_and_publish_flow",
+    "publish_flow", "save_and_publish_flow", "restore_published_flow",
     "unpublish_flow", "load_published_bundle", "list_published_bundles",
     "published_flow_guard", "active_release_guard",
     "FlowRun", "new_run_id", "save_run", "load_run", "delete_run", "run_lock",

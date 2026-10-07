@@ -7,8 +7,10 @@
   const coverage = document.getElementById("ac-coverage"), previous = document.getElementById("ac-previous");
   const next = document.getElementById("ac-next"), page = document.getElementById("ac-page");
   let model = null, offset = 0, busy = false, generation = 0, expired = false;
-  const labels = {approval:"Approvals",signoff:"Sign-offs",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
+  const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",evidence_source_approval:"Evidence source approvals",signoff:"Result approvals",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
   const ACTIONS = {"jira.create":"Create a Jira issue"};
+  Object.assign(labels, {lifecycle_review:"Vendor lifecycle reviews",drop_authority_review:"DROP authority reviews",
+    trust_center_review:"Trust Center access reviews",disclosure_review:"Privacy notice update reviews"});
   const OBSERVATIONS = {
     execution_attempt: { recorded: "Lightwork recorded the attempt" },
     provider_receipt: { recorded: "Jira confirmed it received the request", not_recorded: "No confirmation from Jira was recorded" },
@@ -120,31 +122,33 @@
     pending(false);
   }
   async function request(url, options) {
-    let response;
-    try {
-      response = await fetch(url, {credentials:"same-origin", cache:"no-store", ...options,
-        headers:{"X-Lightwork-Action-Context":root.dataset.context, ...(options && options.headers)}});
-    } catch (_) { throw new Error("Lightwork could not be reached. Check your connection and try again."); }
-    if ([401,403].includes(response.status)) {
-      invalidate(); throw new Error("Your sign-in or access changed. Sign in again and reload Action Center.");
-    }
-    let value;
-    try { value = await response.json(); } catch (_) { throw new Error("The result could not be read. Refresh the list before trying again."); }
-    if (!response.ok) throw new Error(response.status === 409
-      ? "This changed since the list loaded. Refresh the list and try again."
-      : "Could not load your actions. Refresh the list.");
-    return value;
+    const writing = !!(options && options.method);
+    return window.mvFetchJSON(url, {cache:"no-store", ...options,
+      headers:{"X-Lightwork-Action-Context":root.dataset.context, ...(options && options.headers)},
+      onAccess:invalidate, messages:{
+        401:"Your sign-in or access changed. Sign in again and reload Action Center.",
+        403:"Your sign-in or access changed. Sign in again and reload Action Center.",
+        409:"This changed since the list loaded. Refresh the list and try again."}}, writing ? "save your choice" : "load your actions");
   }
   function render() {
     list.replaceChildren(); coverage.replaceChildren();
     summary.textContent = `${model.counts.unread} unread · ${model.counts.overdue} overdue · ${model.counts.snoozed} snoozed`;
     model.coverage.forEach(source => {
-      if (source.status !== "current") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? "include only the most recent 2,000 source records. Open the full module for older records." : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
+      if (source.limit === 99) {
+        const states = {current:"Current available records checked.",disabled:"Turned off in Settings.",
+          denied:"Not available with your current access. Open the full page or ask its administrator.",
+          partial:"At most 99 records in each group were checked. Open the full review page for the remaining records; this list is incomplete.",
+          unavailable:"Could not be checked. Refresh or open the full page; this list is incomplete."};
+        coverage.append(node("li", `${labels[source.kind]}: ${states[source.status] || states.unavailable}`));
+        return;
+      }
+      // A module that is turned off is not a load error.
+      if (source.status !== "current" && source.status !== "disabled") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? (source.kind === "evidence_source_approval" ? "cover only the first 64 saved source setups. Open Continuous evidence to review the current sources." : "include only the most recent 2,000 source records. Open the full module for older records.") : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
     });
     if (!model.items.length) {
-      const partial = model.coverage.some(source=>source.status !== "current");
+      const partial = model.coverage.some(source=>source.status !== "current" && source.status !== "disabled");
       const empty = node("div", undefined, "mv-empty");
-      empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable." : "You're all caught up.", "mv-empty__title"));
+      empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable; refresh the page or choose another filter." : "You're all caught up.", "mv-empty__title"));
       const filtered = form.elements.view.value !== "active" || form.elements.kind.value !== "all" || form.elements.assignment.value !== "all";
       if (filtered) {
         const all = node("button", "Show everything", "btn"); all.type = "button";
@@ -156,7 +160,7 @@
     model.items.forEach(item => {
       const article = node("article", undefined, "panel"); article.dataset.item = item.id; article.style.marginBlock = "var(--space-3)";
       article.append(node("h2", item.title));
-      article.append(node("p", `${labels[item.kind]} · ${item.assignment === "mine" ? "Assigned to you" : "Available to review"} · ${item.read ? "Read" : "Unread"}`));
+      article.append(node("p", `${item.flow_run_id ? "Flow approval" : labels[item.kind]} · ${item.assignment === "mine" ? "Assigned to you" : "Available to review"} · ${item.read ? "Read" : "Unread"}`));
       article.append(node("p", item.reason, "muted"));
       const reconciliation = reconciliationDetails(item);
       if (item.kind === "vendor_reconciliation" && !reconciliation)
@@ -185,8 +189,8 @@
         details.append(node("p", reconciliation.resolution.explanation, "muted"));
         article.append(details);
       }
-      if (item.due_at) article.append(node("p", `${item.overdue ? "Overdue" : "Due"}: ${new Date(item.due_at * 1000).toLocaleString()}`, item.overdue ? "badge warn" : "muted"));
-      if (item.snoozed) article.append(node("p", `Snoozed until ${new Date(item.snoozed_until * 1000).toLocaleString()}`, "muted"));
+      if (item.due_at) article.append(node("p", `${item.overdue ? "Overdue" : "Due"}: ${(window.mvTimeAbsolute ? window.mvTimeAbsolute(item.due_at) : new Date(item.due_at * 1000).toLocaleString())}`, item.overdue ? "badge warn" : "muted"));
+      if (item.snoozed) article.append(node("p", `Snoozed until ${(window.mvTimeAbsolute ? window.mvTimeAbsolute(item.snoozed_until) : new Date(item.snoozed_until * 1000).toLocaleString())}`, "muted"));
       const actions = node("div"); actions.style.cssText = "display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;";
       if (item.assessment_id) {
         const review = node("button", "Review assessment", "btn btn--primary"); review.type="button";
@@ -256,5 +260,17 @@
   previous.addEventListener("click", ()=>{if (!busy) {offset=Math.max(0,offset-50); load();}});
   next.addEventListener("click", ()=>{if (!busy && model && model.has_more) {offset+=50; load();}});
   window.addEventListener("pageshow", event=>{if (event.persisted) {++generation; model=null; list.replaceChildren(); busy=false; load();}});
+  window.LightworkActionCenter = Object.freeze({
+    async open(expectedContext, isCurrent) {
+      const current = () => !expired && typeof isCurrent === "function" && isCurrent() &&
+        /^[a-f0-9]{64}$/.test(expectedContext) && root.dataset.context === expectedContext;
+      if (!current() || busy) throw new Error("Your account or selection changed. Open the current Action Center again.");
+      await load();
+      if (!current() || !model || model.context !== expectedContext)
+        throw new Error("The current list could not be opened. Your filters were kept; refresh Action Center.");
+      root.scrollIntoView({block:"start"}); form.elements.kind.focus();
+      return true;
+    }
+  });
   load();
 })();

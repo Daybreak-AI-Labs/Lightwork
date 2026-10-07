@@ -342,22 +342,77 @@ def test_uncertain_delete_outcome_is_ambiguous_and_bound_to_original_operation(
     assert len(raised.value.operation_sha256) == 64
 
 
-def test_verify_delete_only_completes_when_provider_record_is_absent() -> None:
-    present = _adapter(
-        "microsoft_graph_users",
-        "https://graph.microsoft.com",
-        Transport(_json_response({"id": "graph-user-1"})),
-    )
+@pytest.mark.parametrize(("provider", "origin", "payload", "_delete_path"), PROVIDERS)
+def test_verify_delete_retries_while_provider_record_is_present(
+    provider: str, origin: str, payload: object, _delete_path: str
+) -> None:
+    present = _adapter(provider, origin, Transport(_json_response(payload)))
     with pytest.raises(worker.ProviderRetryableError, match="delete_not_observed"):
         _execute(present, "verify_delete")
 
-    absent = _adapter(
-        "microsoft_graph_users",
-        "https://graph.microsoft.com",
-        Transport(_empty_response(404)),
+
+@pytest.mark.parametrize(
+    ("provider", "origin", "response"),
+    [
+        ("microsoft_graph_users", "https://graph.microsoft.com", _empty_response(404)),
+        ("google_workspace_users", "https://admin.googleapis.com", _empty_response(404)),
+        (
+            "salesforce_contacts",
+            "https://tenant.salesforce.com",
+            _json_response({"done": True, "totalSize": 0, "records": []}),
+        ),
+        ("servicenow_users", "https://tenant.service-now.com", _json_response({"result": []})),
+    ],
+)
+def test_verify_delete_completes_on_validated_zero_result_with_bound_evidence(
+    provider: str, origin: str, response: object
+) -> None:
+    transport = Transport(response)
+    outcome = _execute(_adapter(provider, origin, transport), "verify_delete")
+
+    assert outcome.status == "not_found"
+    assert outcome.record_count == 0
+    assert outcome.external_side_effect is False
+    assert outcome.raw_data_returned is False
+    assert outcome.acknowledgement_sha256 == outcome.provider_evidence_sha256
+    status, body, _, _ = response
+    evidence = {
+        "schema": "lightwork.privacy-rights-lookup-absence.v1",
+        "provider": provider,
+        "operation_id": "operation:123",
+        "lookup_url_sha256": hashlib.sha256(str(transport.calls[0]["url"]).encode()).hexdigest(),
+        "response_status": status,
+        "response_body_sha256": hashlib.sha256(body).hexdigest(),
+        "record_count": 0,
+    }
+    assert outcome.provider_evidence_sha256 == hashlib.sha256(_body(dict(sorted(evidence.items())))).hexdigest()
+    assert "person@example.test" not in repr(outcome)
+    assert [call["method"] for call in transport.calls] == ["GET"]
+
+
+def test_verify_delete_rejects_incomplete_empty_salesforce_page() -> None:
+    adapter = _adapter(
+        "salesforce_contacts",
+        "https://tenant.salesforce.com",
+        Transport(_json_response({"done": False, "totalSize": 1, "records": []})),
     )
-    with pytest.raises(worker.ProviderRetryableError, match="erasure_proof_unavailable"):
-        _execute(absent, "verify_delete")
+    with pytest.raises(worker.ProviderPermanentError, match="response_invalid"):
+        _execute(adapter, "verify_delete")
+
+
+@pytest.mark.parametrize(
+    ("provider", "origin"),
+    [
+        ("salesforce_contacts", "https://tenant.salesforce.com"),
+        ("servicenow_users", "https://tenant.service-now.com"),
+    ],
+)
+def test_verify_delete_does_not_treat_missing_query_endpoint_as_zero_records(
+    provider: str, origin: str
+) -> None:
+    adapter = _adapter(provider, origin, Transport(_empty_response(404)))
+    with pytest.raises(worker.ProviderPermanentError, match="request_rejected"):
+        _execute(adapter, "verify_delete")
 
 
 @pytest.mark.parametrize(

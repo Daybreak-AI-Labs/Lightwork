@@ -9,6 +9,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,11 +83,22 @@ def _as(monkeypatch, role: str, who: str = "user:someone"):
 def _wait(client, started, timeout: float = 15.0) -> dict:
     job = started.json()["job"] if hasattr(started, "json") else started
     deadline = time.time() + timeout
-    while job["state"] in ("running", "stopping"):
+    while job["state"] in ("admitted", "running", "stopping"):  # an admitted job has not started yet
         assert time.time() < deadline, job
         time.sleep(0.05)
         job = client.get(f"{LO}/jobs/{job['id']}").json()["job"]
     return job
+
+
+def _original_job(client, path: str, timeout: float = 15.0) -> dict:
+    """Read a reviewed request's original until its admitted job is named."""
+    deadline = time.time() + timeout
+    result = client.get(path).json()
+    while "job_id" not in result:
+        assert time.time() < deadline, result
+        time.sleep(0.05)
+        result = client.get(path).json()
+    return result
 
 
 def _visible(page: str, marker: str) -> str:
@@ -105,11 +117,14 @@ ADMIN_ONLY = (
     ("get", f"{LO}/self-harness/plan", None),
     ("post", f"{LO}/self-harness/hold-out/set-up", {"confirm": True}),
     ("get", f"{LO}/refinements/0123456789abcdef/preview", None),  # pragma: allowlist secret
-    ("post", f"{LO}/flywheel/turn", {}),
+    ("post", f"{LO}/flywheel/review", {"context": "0" * 64, "revision": "0" * 64}),
+    ("post", f"{LO}/flywheel/turn", {"token": "sealed-review", "confirmed": True}),
     ("get", f"{LO}/factory/preview", None),
     ("get", f"{LO}/self-modify", None),
     ("get", f"{LO}/self-modify/results", None),
-    ("post", f"{LO}/self-modify/run", {"objective": "make summaries faster", "confirm": True}),
+    ("post", f"{LO}/self-modify/review", {"objective": "make summaries faster", "context": "0" * 64, "revision": "0" * 64}),
+    ("post", f"{LO}/self-modify/run", {"objective": "make summaries faster", "context": "0" * 64,
+                                       "revision": "0" * 64, "token": "sealed-review", "confirm": True}),
     ("post", f"{TO}/reward-models/train", {}),
     ("post", f"{TO}/codec/shorthand/learn", {}),
     ("post", f"{TO}/codec/token-codes/learn", {}),
@@ -133,16 +148,22 @@ def test_a_workspace_admin_is_not_a_global_admin(client, monkeypatch):
     from maverick_dashboard import auth
     _as(monkeypatch, "operator", "user:wsadmin")
     monkeypatch.setattr(auth, "has_permission", lambda request, perm: True)
-    assert client.post(f"{LO}/flywheel/turn", json={}).status_code == 403
+    assert client.post(f"{LO}/flywheel/turn", json={"token": "sealed-review", "confirmed": True}).status_code == 403
     assert client.post(f"{LO}/self-modify/run", json={"objective": "make it faster please",
+                                                       "context": "0" * 64, "revision": "0" * 64, "token": "sealed-review",
                                                        "confirm": True}).status_code == 403
 
 
 def test_reads_on_the_learning_page_need_view(client, monkeypatch):
     _as(monkeypatch, "viewer")
-    for path in (f"{TO}/model-improvement", f"{TO}/reward-models", f"{TO}/codec", f"{LO}/donations", f"{LO}/jobs"):
+    for path in (f"{TO}/reward-models", f"{TO}/codec", f"{LO}/donations", f"{LO}/jobs"):
         assert client.get(path).status_code == 200, path
     assert client.post(f"{LO}/donations/clear", json={"confirm": True}).status_code == 403
+    # Model choices are read only by those the Learning page itself admits
+    # (installation administrators); a viewer is refused, an administrator reads.
+    assert client.get(f"{TO}/model-improvement").status_code == 403
+    _as(monkeypatch, "admin")
+    assert client.get(f"{TO}/model-improvement").status_code == 200
 
 
 # ---- background jobs -------------------------------------------------------------
@@ -186,13 +207,15 @@ def test_a_job_that_cannot_stop_refuses_the_stop_button(client):
     gate.set()
 
 
-def test_stop_budget_only_tightens_the_wall_clock():
+@pytest.mark.parametrize("elapsed", [0.0, 0.0001, 12.0])
+@pytest.mark.parametrize("cap", [None, 0.0001, 3600.0])
+def test_stop_budget_only_tightens_the_wall_clock(monkeypatch, elapsed, cap):
     from maverick.budget import Budget, BudgetExceeded
     from maverick_dashboard.learning_jobs import stop_budget
-    budget = Budget(max_wall_seconds=3600.0)
-    time.sleep(0.01)
+    budget = Budget(max_wall_seconds=cap)
+    monkeypatch.setattr(Budget, "elapsed", lambda self: elapsed)
     stop_budget(budget)()
-    assert budget.max_wall_seconds < 3600.0
+    assert budget.max_wall_seconds == (elapsed if cap is None else min(cap, elapsed))
     with pytest.raises(BudgetExceeded):
         budget.check()
 
@@ -212,22 +235,30 @@ def test_failures_become_one_plain_sentence(client):
         raise RuntimeError("secret internals /etc/passwd")
     job = learning_jobs.start("broken", "Broken", broken, started_by="u", problem=job_problem)
     done = _wait(client, job.view())
-    assert done["problem"] == "This job stopped because of a problem. Nothing more was changed."
+    assert done["problem"] == "This task stopped because of a problem. Work completed before the failure may remain. Read its current result before deciding what to do next; do not repeat it automatically."
 
 
 # ---- improvement flywheel ------------------------------------------------------------
 
+def _flywheel_review(client):
+    """A cycle starts only from a complete current review (sealed token)."""
+    current = client.get(f"{LO}/flywheel").json()
+    return current, client.post(f"{LO}/flywheel/review", json={
+        "context": current["context"], "revision": current.get("revision") or "0" * 64})
+
+
 def test_flywheel_needs_its_switch_and_respects_the_learning_stop(client, monkeypatch):
     from maverick import data_engine, learning_guard
     monkeypatch.setattr(data_engine, "enabled", lambda: False)
-    r = client.post(f"{LO}/flywheel/turn", json={})
-    assert r.status_code == 409 and "Improvement flywheel" in r.json()["detail"]
+    current, r = _flywheel_review(client)
+    assert current["ready"] is False and "improvement flywheel" in current["problem"]
+    assert r.status_code == 409 and "improvement flywheel" in r.json()["detail"]
     monkeypatch.setattr(data_engine, "enabled", lambda: True)
 
     def halted(job, phase):
         raise learning_guard.Halted("stop", "operator")
     monkeypatch.setattr(learning_guard, "check_learning_halt", halted)
-    r = client.post(f"{LO}/flywheel/turn", json={})
+    _current, r = _flywheel_review(client)
     assert r.status_code == 409 and "stopped" in r.json()["detail"]
 
 
@@ -242,11 +273,23 @@ def test_flywheel_turn_runs_the_kernel_and_is_recorded_first(client, monkeypatch
                                guardrails=[SimpleNamespace(action="send_invoice_unchecked")],
                                memories=[SimpleNamespace(action="check_totals")],
                                hypotheses=[SimpleNamespace(baseline_action="retry", candidate_action="ask_owner")])
-    monkeypatch.setattr(flywheel, "maybe_run", turn)
-    done = _wait(client, client.post(f"{LO}/flywheel/turn", json={}))
-    assert done["state"] == "done"
-    assert done["result"]["tasks"] == 12 and done["result"]["avoid"] == ["send_invoice_unchecked"]
-    assert done["result"]["ideas"] == [{"instead_of": "retry", "try": "ask_owner"}]
+    monkeypatch.setattr(flywheel, "run_once", lambda steps, **_kwargs: turn())
+    current, review = _flywheel_review(client)
+    assert current["ready"] is True, current
+    assert review.status_code == 200, review.text
+    started = client.post(f"{LO}/flywheel/turn", json={"token": review.json()["token"], "confirmed": True})
+    assert started.status_code == 200, started.text
+    original, deadline = started.json(), time.time() + 15
+    while "task_href" not in original:  # the worker names its task once admitted
+        assert time.time() < deadline, original
+        time.sleep(0.05)
+        original = client.get(f"{LO}/flywheel/original/{review.json()['operation']}").json()
+    job_id = original["task_href"].split("learning_task=", 1)[1].split("#", 1)[0]
+    done = _wait(client, client.get(f"{LO}/jobs/{job_id}").json()["job"])
+    assert done["state"] == "done", done
+    assert done["result"]["complete"] is True
+    assert done["result"]["counts"] == {"avoid": 1, "habits": 1, "ideas": 1}
+    # The activity record row is written before the kernel turns.
     assert [r["action"] for r in audit_rows] == ["flywheel_turn"] and seen == [1]
 
 
@@ -264,6 +307,10 @@ def _harness(monkeypatch, tmp_path, *, corpus: bool = True, ledger: str = ""):
     monkeypatch.setattr(self_harness, "_store_path", lambda: store)
     self_harness._write_addenda({"claude-x": "Operating guidance learned for this model:\n"
                                              "- always cite the source\n- never cite the source"}, store)
+    meta = {}
+    for line in ("always cite the source", "never cite the source"):
+        self_harness._upsert_line_meta(meta, "claude-x", line, {"source_goal_ids": [0]}, now=1)
+    self_harness._write_line_meta(meta, store)
 
 
 def test_clash_check_asks_the_checker_model_within_a_spending_limit(client, monkeypatch, tmp_path, audit_rows):
@@ -279,39 +326,40 @@ def test_clash_check_asks_the_checker_model_within_a_spending_limit(client, monk
         return lambda a, b: True
     monkeypatch.setattr(self_harness, "llm_conflict_classifier", classifier)
     from maverick_dashboard import learning_jobs
-    started = client.post(f"{LO}/self-harness/clash-check", json={"model_id": "claude-x"})
-    assert learning_jobs.get(started.json()["job"]["id"]).cancellable is True
-    done = _wait(client, started)
+    context = client.get(f"{LO}/self-harness/clash-check").json()["context"]
+    review = client.post(f"{LO}/self-harness/clash-check/review", json={"model_id": "claude-x", "context": context})
+    assert review.status_code == 200, review.text
+    started = client.post(f"{LO}/self-harness/clash-check", json={
+        "context": context, "token": review.json()["token"], "confirmed": True})
+    assert started.status_code == 200, started.text
+    original = f"{LO}/self-harness/clash-check/requests/{review.json()['operation']}"
+    result = _original_job(client, original)
+    assert learning_jobs.get(result["job_id"]).cancellable is True
+    done = _wait(client, client.get(f"{LO}/jobs/{result['job_id']}").json()["job"])
     assert done["state"] == "done", done
     assert "verifier" in roles and budgets and budgets[0] is not None
-    assert done["result"]["pairs"][0]["first"] == "always cite the source"
-    assert [r["action"] for r in audit_rows] == ["self_harness_semantic_conflicts"]
-    assert client.post(f"{LO}/self-harness/clash-check", json={"model_id": "made-up"}).status_code == 422
+    result = client.get(original).json()
+    assert result["pairs"][0]["first"] == "always cite the source"
+    assert [r.get("action") for r in audit_rows].count("self_harness_semantic_conflicts") == 1
+    assert client.post(f"{LO}/self-harness/clash-check/review",
+                       json={"model_id": "made-up", "context": context}).status_code == 422
 
 
 def test_transfer_needs_the_switch_and_test_cases(client, monkeypatch, tmp_path, audit_rows):
     from maverick import self_improvement_runner as runner
+    calls: list = []
+    monkeypatch.setattr(runner, "run_self_harness_transfer", lambda *a, **k: calls.append((a, k)))
     _configure("[self_harness]\nenable = false")
-    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
-    assert r.status_code == 409 and "Turn on “Self-harness” under Learning systems" in r.json()["detail"]
-    _harness(monkeypatch, tmp_path, corpus=False)
-    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
-    assert r.status_code == 409 and "test cases" in r.json()["detail"]
+    current = client.get("/api/v1/learning-transfers/current").json()
+    assert current["available"] is False and "Self-coaching is off" in current["problem"]
     _harness(monkeypatch, tmp_path)
     monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["claude-x", "worker-y"])
-    calls: list[dict] = []
-
-    def transfer(source, *, targets, force, raise_errors):
-        calls.append({"source": source, "targets": targets, "force": force, "raise": raise_errors})
-        return {"worker-y": {"attempted": ["always cite the source"], "promoted": ["always cite the source"],
-                             "skipped": []}}
-    monkeypatch.setattr(runner, "run_self_harness_transfer", transfer)
-    assert client.post(f"{LO}/self-harness/transfer", json={"source": "nope"}).status_code == 422
-    done = _wait(client, client.post(f"{LO}/self-harness/transfer",
-                                     json={"source": "claude-x", "retry_judged": True}))
-    assert calls == [{"source": "claude-x", "targets": ["worker-y"], "force": True, "raise": True}]
-    assert done["result"]["targets"][0]["tried"] == 1
-    assert [r["action"] for r in audit_rows] == ["self_harness_transfer"]
+    # Lesson tests start only from the complete reviewed lesson test on Learned
+    # (current lessons, questions, standing instructions and spending); the
+    # old one-click start refuses before anything runs or is recorded.
+    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x", "retry_judged": True})
+    assert r.status_code == 409 and "Test lessons on another model" in r.json()["detail"]
+    assert calls == [] and audit_rows == []
 
 
 def test_test_cases_find_download_preview_and_add(client, monkeypatch, tmp_path, audit_rows):
@@ -346,18 +394,35 @@ def test_test_cases_find_download_preview_and_add(client, monkeypatch, tmp_path,
         "self_harness_corpus_harvest", "self_harness_corpus_export", "self_harness_corpus_import"]
 
 
+HOLD_OUT = "/api/v1/learning-holdout-setup"
+
+
+def _hold_out(client, action: str = "initialize", *, step: str = "save"):
+    """Review and save one hold-out setup step the way the Learned page does."""
+    current = client.get(HOLD_OUT).json()
+    review = client.post(f"{HOLD_OUT}/review", json={
+        "action": action, "context": current["context"], "revision": current["revision"]})
+    if review.status_code != 200 or step == "review":
+        return review
+    return client.post(f"{HOLD_OUT}/save", json={"token": review.json()["token"], "confirmed": True})
+
+
 def test_hold_out_record_is_set_up_once_and_never_replaced(client, monkeypatch, tmp_path, audit_rows):
-    r = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert r.status_code == 409 and "Choose where" in r.json()["detail"]
-    ledger = (tmp_path / "ledger.db").as_posix()
+    r = _hold_out(client)
+    assert r.status_code == 409 and "Choose the managed location first" in r.json()["detail"]
+    # The record must sit inside Lightwork's managed data, as its setting requires.
+    ledger = Path(_data_file("ledger.db")).as_posix()
     _harness(monkeypatch, tmp_path, ledger=ledger)
-    assert client.post(f"{LO}/self-harness/hold-out/set-up", json={}).status_code == 422
-    made = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert made.status_code == 200 and made.json()["record_number"]
+    review = _hold_out(client, step="review")
+    assert review.status_code == 200, review.text
+    assert client.post(f"{HOLD_OUT}/save", json={"token": review.json()["token"]}).status_code == 422
+    made = client.post(f"{HOLD_OUT}/save", json={"token": review.json()["token"], "confirmed": True})
+    assert made.status_code == 200 and made.json()["confirmed"] is True and made.json()["ready"] is True
     assert Path(ledger).exists()
-    again = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert again.status_code == 409 and "never replaced" in again.json()["detail"]
-    assert [r["action"] for r in audit_rows] == ["self_harness_holdout_provision"]
+    again = _hold_out(client)
+    assert again.status_code == 409 and "never initialized again" in again.json()["detail"]
+    assert [r["action"] for r in audit_rows if "action" in r and r["action"].startswith("self_harness")] == [
+        "self_harness_holdout_initialize"]
     plan = client.get(f"{LO}/self-harness/plan").json()
     assert plan["hold_out"] == {"set_up": True, "exists": True}
 
@@ -373,7 +438,8 @@ def test_refinement_preview_shows_before_and_after(client):
     assert pv["now"] == "" and pv["after"] == "Confirm the quote first." and pv["undo_also_removes"] == []
     approval = harness_refine.list_proposals()[0]["approval_id"]
     open_world().decide_approval(approval, "approved", decided_by="security@corp.test")
-    assert client.post(f"/api/v1/learning-loop/refinements/{pid}/apply").status_code == 200
+    assert client.post(f"/api/v1/learning-loop/refinements/{pid}/apply",
+                       json={"revision": pv["revision"], "confirm": True}).status_code == 200
     second = dict(change, change="Confirm the quote and the date first.")
     pid2 = client.post("/api/v1/learning-loop/refinements", json=second).json()["proposal"]["id"]
     assert client.get(f"{LO}/refinements/{pid2}/preview").json()["now"] == "Confirm the quote first."
@@ -393,15 +459,19 @@ def test_factory_learning_preview_and_adopt_with_evidence(client, monkeypatch, a
     pv = client.get(f"{LO}/factory/preview?min_support=5").json()
     assert pv["corrections"] == [{"guidance": "Always add a deny list.", "seen_in": 5, "area": "provisioning"}]
     assert client.get(f"{LO}/factory/preview?min_support=4").status_code == 422
-    assert client.post(f"{LO}/factory/promote", content=b"{}").status_code == 422
-    bad = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 1}')
-    assert bad.status_code == 422 and "version 2" in bad.json()["detail"]
+    # Adoption now goes through Improve how new agents are built (one
+    # suggestion, a complete comparison, then a separate Adopt review). The old
+    # bulk shortcut refuses, even with evidence and a confirmation, and adopts nothing.
     monkeypatch.setattr(factory_learning, "load_measured_evidence", lambda path: "scorer")
-    monkeypatch.setattr(factory_learning, "review_and_promote",
-                        lambda *, min_support, scorer: ["one", "two"] if scorer == "scorer" else [])
-    ok = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 2}')
-    assert ok.json() == {"adopted": 2}
-    assert [r["action"] for r in audit_rows] == ["factory_learning_promote", "factory_learning_promote"]
+
+    def adopt(**_kwargs):
+        raise AssertionError("the retired shortcut must not adopt guidance")
+    monkeypatch.setattr(factory_learning, "review_and_promote", adopt)
+    for query, body in (("", b"{}"), ("?confirm=true", b'{"version": 2}')):
+        refused = client.post(f"{LO}/factory/promote{query}", content=body)
+        assert refused.status_code == 409
+        assert "review a complete comparison" in refused.json()["detail"]
+    assert audit_rows == []
 
 
 # ---- practising changes to its own code -----------------------------------------------------
@@ -420,6 +490,15 @@ def test_self_modify_status_is_plain_and_run_needs_confirmation(client, audit_ro
     assert audit_rows == []
 
 
+def _practice(client, objective="make summaries faster", cycles=1):
+    """Start practice the way the page does: review the exact objective first."""
+    current = client.get(f"{LO}/self-modify").json()
+    body = {"objective": objective, "cycles": cycles, "context": current["context"], "revision": current["revision"]}
+    review = client.post(f"{LO}/self-modify/review", json=body)
+    assert review.status_code == 200, review.text
+    return client.post(f"{LO}/self-modify/run", json={**body, "token": review.json()["token"], "confirm": True})
+
+
 def test_self_modify_run_uses_the_kernel_budget_and_shows_its_refusal(client, monkeypatch, audit_rows):
     from maverick import self_modify_runner
     seen: dict = {}
@@ -428,8 +507,7 @@ def test_self_modify_run_uses_the_kernel_budget_and_shows_its_refusal(client, mo
         seen.update(cycles=cycles, objective=objective, budget=budget)
         return self_modify_runner.RunSummary(False, reason="self-modification disabled ([self_modify] enable)")
     monkeypatch.setattr(self_modify_runner, "run", run)
-    done = _wait(client, client.post(f"{LO}/self-modify/run", json={
-        "objective": "  make   summaries faster  ", "cycles": 2, "confirm": True}))
+    done = _wait(client, _practice(client, "  make   summaries faster  ", cycles=2))
     assert seen["cycles"] == 2 and seen["objective"] == "make summaries faster"
     assert seen["budget"] is not None
     assert done["result"]["ran"] is False and done["result"]["problem"] == (
@@ -447,7 +525,7 @@ def test_an_exhausted_organisation_allowance_refuses_before_anything_starts(clie
         b._tenant_refusal = "organisation allowance exhausted"
         return b
     monkeypatch.setattr(budget_mod, "budget_from_config", refused)
-    r = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "confirm": True})
+    r = _practice(client)
     assert r.status_code == 409 and "allowance is used up" in r.json()["detail"]
     assert audit_rows == []
 
@@ -464,10 +542,20 @@ def test_stopping_self_modify_tightens_its_own_budget(client, monkeypatch):
                 return self_modify_runner.RunSummary(True)
             time.sleep(0.01)
     monkeypatch.setattr(self_modify_runner, "run", run)
-    started = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "confirm": True})
+    started = _practice(client)
     job = started.json()["job"]
+    deadline = time.time() + 15
+    while job["state"] == "admitted":  # the stop button appears once it runs
+        assert time.time() < deadline, job
+        time.sleep(0.05)
+        job = client.get(f"{LO}/jobs/{job['id']}").json()["job"]
     assert job["can_stop"] is True
-    client.post(f"{LO}/jobs/{job['id']}/stop", json={})
+    # A learning task is stopped through its reviewed stop on the Learned page.
+    current = client.get(f"{LO}/job-history/{job['id']}").json()
+    stop = client.post(f"{LO}/job-history/{job['id']}/stop", json={
+        "context": current["context"], "revision": current["revision"],
+        "operation": uuid.uuid4().hex, "confirm": True})
+    assert stop.status_code == 200 and stop.json()["receipt"]["confirmed"] is True, stop.text
     done = _wait(client, started)
     assert done["state"] == "stopped" and done["result"]["ran"] is True
 
@@ -570,7 +658,7 @@ def test_learning_page_has_a_control_next_to_each_system(client):
         assert f'id="{control}"' in page, control
     assert "/static/lightwork-learning-ops.js" in page and "/static/lightwork-ops-jobs.js" in page
     visible = _visible(page, 'id="lo-root"').split("Run learning now", 1)[0]
-    assert "Improvement flywheel" in visible and "Reward model" in visible
+    assert "Improvement flywheel" in visible and "Learn how to rank work" in visible
     assert not _BANNED.search(visible), _BANNED.search(visible)
 
 
@@ -581,8 +669,8 @@ def test_learning_page_stays_closed_to_non_admins(client, monkeypatch):
 
 def test_learned_page_has_the_extra_self_coaching_tools(client, monkeypatch):
     page = client.get("/learned").text
-    for control in ("lpo-clash-run", "lpo-transfer-run", "lpo-harvest", "lpo-export", "lpo-import-check",
-                    "llp-trial", "llp-instructions", "llp-quality-remove"):
+    for control in ("lpo-clash-run", "lt-review", "lpo-harvest", "lpo-export", "lpo-import-check",
+                    "lp-trial", "lp-instructions", "lqc-load"):
         assert f'id="{control}"' in page, control
     visible = _visible(page, 'id="lpo-root"')
     assert "Check lessons for clashes by meaning" in visible
@@ -603,7 +691,7 @@ def test_page_scripts_are_served_and_use_the_shared_confirm(client):
 # ---- every "go here" in a message is a real place, and saving there works ---------
 
 def _save_setting(client, changes):
-    return client.post("/api/v1/settings/catalog", json={"changes": changes, "confirm": True})
+    return client.post("/api/v1/settings/catalog", json={"changes": changes, "confirm": True, "expected_revision": client.get("/api/v1/settings/catalog").json()["revision"]})
 
 
 def _data_file(name: str) -> str:
@@ -634,14 +722,14 @@ def test_every_destination_named_in_a_message_exists(client):
     for key in ("self_improvement", "data_engine", "factory_learning"):
         label = ops.part_place(key).split("”")[0].lstrip("“")
         assert label in learning, key
-    assert ops._DGM_SECTION in open(Path(__file__).parents[1] / "maverick_dashboard/templates/learning.html").read()
+    assert ops._DGM_SECTION in (Path(__file__).parents[1] / "maverick_dashboard/templates/learning.html").read_text(encoding="utf-8")
 
 
 def test_test_case_location_is_checked_on_the_server_and_then_used(client):
     from maverick.paths import maverick_home
     plan = client.get(f"{LO}/self-harness/plan").json()
     assert plan["test_cases_set_up"] is False and "“Test cases for improvements”" in plan["places"]["test_cases"]
-    outside = _save_setting(client, [{"id": "self_harness.eval_corpus", "value": "/etc/test-cases.json"}])
+    outside = _save_setting(client, [{"id": "self_harness.eval_corpus", "value": str(maverick_home().parent / "outside-test-cases.json")}])
     assert outside.status_code == 400 and "data folder" in outside.json()["message"]
     no_folder = _save_setting(client, [{"id": "self_harness.eval_corpus",
                                         "value": str(maverick_home() / "missing" / "c.json")}])
@@ -658,12 +746,12 @@ def test_test_case_location_is_checked_on_the_server_and_then_used(client):
 
 
 def test_hold_out_location_saved_in_all_settings_is_where_the_record_is_set_up(client):
-    refused = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert "“Record of unseen-case checks”" in refused.json()["detail"]
+    refused = _hold_out(client)
+    assert refused.status_code == 409 and "Choose the managed location first" in refused.json()["detail"]
     target = _data_file("hold-out.db")
     assert _save_setting(client, [{"id": "self_harness.holdout_ledger", "value": target}]).status_code == 200
-    made = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
-    assert made.status_code == 200 and Path(target).is_file()
+    made = _hold_out(client)
+    assert made.status_code == 200 and made.json()["confirmed"] is True and Path(target).is_file()
     again = _save_setting(client, [{"id": "self_harness.holdout_ledger", "value": target}])
     assert again.status_code == 200  # an existing record is a valid location too
     verified = client.get("/api/v1/learning-loop/holdout").json()

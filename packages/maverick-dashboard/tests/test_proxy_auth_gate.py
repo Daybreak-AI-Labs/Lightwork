@@ -200,8 +200,9 @@ def test_genuine_auth_off_local_mode_keeps_legacy_permissions(monkeypatch):
     assert auth.has_permission(request, "admin") is True
     assert auth.has_global_permission(request, "admin") is True
     assert auth.caller_suites(request) is None
-    assert auth.goal_owner_filter(request) is None
-    assert auth.can_access_goal(request, SimpleNamespace(owner="anything")) is True
+    assert auth.goal_owner_filter(request) == ""
+    assert auth.can_access_goal(request, SimpleNamespace(id=1, owner="user:employee")) is False
+    assert auth.can_access_goal(request, SimpleNamespace(id=2, owner="")) is True
 
 
 def test_verified_static_token_keeps_authenticated_operator_permissions(monkeypatch):
@@ -211,7 +212,7 @@ def test_verified_static_token_keeps_authenticated_operator_permissions(monkeypa
 
     assert auth.has_permission(request, "admin") is True
     assert auth.has_global_permission(request, "admin") is True
-    assert auth.goal_owner_filter(request) is None
+    assert auth.goal_owner_filter(request) == ""
 
 
 @pytest.mark.parametrize("mode", ["saml", "invites"])
@@ -390,12 +391,22 @@ def test_client_binding_accepts_explicit_static_operator_token(monkeypatch):
 
 def test_self_authenticated_webhook_set_matches_middleware_and_is_exact(monkeypatch):
     from maverick_dashboard import app as app_mod
+    from maverick_dashboard import voice_receiver_api
 
+    # Exactly the reviewed self-authenticating receivers bypass the middleware:
+    # every /webhook/ route, plus the phone receiver, which checks the
+    # provider's own current call key (see voice_receiver_api).
     middleware_webhooks = {
-        path for path in app_mod._AUTH_EXEMPT if path.startswith("/webhook/")
+        path for path in app_mod._AUTH_EXEMPT
+        if path.startswith("/webhook/") or path == voice_receiver_api.RECEIVER_PATH
     }
     assert middleware_webhooks == set(auth.SELF_AUTH_WEBHOOK_PATHS)
+    assert set(auth.SELF_AUTH_WEBHOOK_PATHS) - {voice_receiver_api.RECEIVER_PATH} == {
+        path for path in app_mod._AUTH_EXEMPT if path.startswith("/webhook/")}
     assert all(auth._self_authenticated_path(path) for path in middleware_webhooks)
+    with pytest.raises(auth.HTTPException) as refused:
+        voice_receiver_api._current("Bearer not-the-saved-key")
+    assert refused.value.status_code in {401, 409}  # off, or the wrong key
 
     future_path = "/webhook/future-unaudited-route"
     assert auth._self_authenticated_path(future_path) is False

@@ -4,39 +4,76 @@
     anything (the routes check again). -#}
 <section id="lo-root" class="lo" data-admin="{{ '1' if learning_can_manage else '0' }}" aria-labelledby="lo-h">
   <div class="section-head"><h2 id="lo-h" class="lrn__section-h">Run and check each learning system</h2></div>
-  <p class="lrn__section-sub">Each learning system above can also be run, checked or reviewed here. Long jobs keep
+  <p class="lrn__section-sub">Each learning system above can also be run, checked or reviewed here. Long tasks keep
     running in the background, and you can stop the ones that spend money.
     Self-coaching tools are on the <a href="/learned">Learned</a> page; failure reasons and suggested
     spending limits are on the <a href="/spend">Spend</a> page.</p>
 
   <div class="panel" id="lo-flywheel">
     <h3 class="lrn__section-h" id="lo-fw-h">Improvement flywheel</h3>
-    <p class="lrn__section-sub">Looks over how recent tasks went, learns what to avoid and which habits help, and
-      suggests better steps to test. No AI model is used.</p>
+    <p class="lrn__section-sub">Review currently permitted work, refresh shared safeguards and habits,
+      and suggest changes to test. No AI model is used. A safety copy is required before changes.</p>
     {% if learning_can_manage %}
-    <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fw-run">Turn the flywheel now</button></div>
+    <div class="lrn__actions"><button type="button" class="btn" id="lo-fw-run" disabled>Review an improvement cycle</button>
+      <button type="button" class="btn btn--ghost" id="lo-fw-refresh">Refresh current work</button></div>
+    <div id="lo-fw-review" hidden>
+      <h4>Review this cycle</h4><div id="lo-fw-review-rows"></div>
+      <label><input type="checkbox" id="lo-fw-reviewed"> I reviewed the shared changes, source scope and recovery limits.</label>
+      <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fw-apply" disabled>Start this reviewed cycle</button>
+        <button type="button" class="btn btn--ghost" id="lo-fw-dismiss">Keep current guidance</button></div>
+    </div>
+    <label for="lo-fw-original">Original improvement cycle</label><select id="lo-fw-original" class="select"><option value="">Choose a recorded cycle</option></select>
+    <button type="button" class="btn btn--ghost" id="lo-fw-read" disabled>Read original outcome</button>
     {% endif %}
     <p class="muted" id="lo-fw-status" role="status" aria-live="polite"></p>
     <div id="lo-fw-out"></div>
+    {% if learning_can_manage %}<script src="/static/lightwork-learning-flywheel.js" defer></script>{% endif %}
   </div>
 
   <div class="panel" id="lo-factory">
     <h3 class="lrn__section-h" id="lo-fa-h">Improve how new agents are built</h3>
-    <p class="lrn__section-sub">Finds problems that keep showing up when new specialists are set up, and suggests
-      guidance for building the next ones. Guidance is only adopted with a results file that proves it helps.</p>
+    <p class="lrn__section-sub">Choose a recurring setup problem, compare current and proposed guidance on the same named requests,
+      then separately review whether to adopt it. The check asks whether an expected tool remains allowed after safety checks.
+      It does not prove overall answer quality, business improvement or that a connected action works.</p>
     {% if learning_can_manage %}
     <div class="lrn__actions">
       <label for="lo-fa-support">Only problems seen in at least</label>
       <select id="lo-fa-support" class="select">
-        <option value="2">2 specialists</option><option value="3" selected>3 specialists</option><option value="5">5 specialists</option>
+        <option value="2">2 agents</option><option value="3" selected>3 agents</option><option value="5">5 agents</option>
       </select>
-      <button type="button" class="btn btn--ghost" id="lo-fa-preview">Show what it would change</button>
+      <button type="button" class="btn btn--ghost" id="lo-fa-preview">Refresh current suggestions</button>
     </div>
-    <div class="lrn__actions">
-      <label for="lo-fa-file">Results file that proves the guidance helps</label>
-      <input type="file" id="lo-fa-file" class="input" accept=".json,application/json">
-      <button type="button" class="btn btn--primary" id="lo-fa-adopt">Adopt proven guidance</button>
+    <form id="lo-fa-form" class="lo-form">
+      <label for="lo-fa-suggestion">Suggested change</label><select id="lo-fa-suggestion" class="select"><option value="">Choose current guidance</option></select>
+      <p id="lo-fa-suggestion-help" class="muted"></p>
+      <fieldset class="lo-fa-requests"><legend>Reported agent requests to compare</legend><div id="lo-fa-requests"></div></fieldset>
+      <label for="lo-fa-dollars">Maximum AI spending in dollars</label><input id="lo-fa-dollars" class="input" type="number" min="0" max="5" step="0.01" value="0.50" required>
+      <label for="lo-fa-seconds">Maximum time</label><select id="lo-fa-seconds" class="select"><option value="60">1 minute</option><option value="120" selected>2 minutes</option><option value="300">5 minutes</option></select>
+      <label><input id="lo-fa-consent" type="checkbox"> I allow the complete selected descriptions and goals to be sent to the displayed AI service for this comparison. The expected tool is my reported check.</label>
+      <button type="submit" id="lo-fa-compare" class="btn" disabled>Review this comparison</button>
+    </form>
+    <div id="lo-fa-review" hidden tabindex="-1">
+      <h4>Review the complete decision</h4><div id="lo-fa-review-rows"></div>
+      <label><input type="checkbox" id="lo-fa-reviewed"> I reviewed the complete changes, limits and consequences.</label>
+      <div class="lrn__actions"><button type="button" class="btn btn--primary" id="lo-fa-apply" disabled>Start this reviewed comparison</button><button type="button" class="btn btn--ghost" id="lo-fa-dismiss">Keep current guidance</button></div>
     </div>
+    <div class="lo-form">
+      <label for="lo-fa-original">Original comparison, adoption or restoration</label><select id="lo-fa-original" class="select"><option value="">Choose a recorded decision</option></select>
+      <div class="lrn__actions"><button type="button" class="btn btn--ghost" id="lo-fa-read" disabled>Read original result</button><button type="button" class="btn" id="lo-fa-adopt" disabled>Review adoption of this checked guidance</button></div>
+    </div>
+    <div class="lo-form" id="lo-fa-restore-form">
+      <h4>Restore earlier agent-building guidance</h4>
+      <p class="muted">Restore its exact earlier guidance for future agent building. Saved and running agents keep their own setup. No AI is called. Later guidance cannot be overwritten.</p>
+      <button type="button" class="btn btn--ghost" id="lo-fa-restore-refresh">Read current restoration choices</button>
+      <label for="lo-fa-restore-choice">Your most recent guidance change</label><select id="lo-fa-restore-choice" class="select"><option value="">Choose a guidance change to undo</option></select>
+      <p class="muted" id="lo-fa-restore-notice" role="status"></p>
+      <button type="button" class="btn" id="lo-fa-restore" disabled>Review restoring earlier guidance</button>
+    </div>
+    <details><summary>Inspect an existing comparison report</summary>
+      <p class="muted">An optional imported report keeps its separate source limits. It cannot be treated as a native factory check.</p>
+      <label for="lo-fa-file">Existing paired comparison report</label><input type="file" id="lo-fa-file" class="input" accept=".json,application/json">
+      <button type="button" class="btn btn--ghost" id="lo-fa-import">Inspect existing report</button>
+    </details>
     {% endif %}
     <p class="muted" id="lo-fa-status" role="status" aria-live="polite"></p>
     <div id="lo-fa-out"></div>
@@ -68,7 +105,7 @@
   {% endif %}
 
   <div class="panel" id="lo-models">
-    <h3 class="lrn__section-h" id="lo-mi-h">Plan a specialist model</h3>
+    <h3 class="lrn__section-h" id="lo-mi-h">Plan a smaller model for a role</h3>
     <p class="lrn__section-sub">Which smaller models could take over a role, whether each fits your hardware, and how
       well a model's answers score on fixed task sets. This is planning only; no model is switched.</p>
     <div id="lo-mi-state" role="status" aria-live="polite">Loading…</div>
@@ -83,25 +120,31 @@
     <div id="lo-mi-models" role="status" aria-live="polite"></div>
     {% if learning_can_manage %}
     <h4>Score a model's answers</h4>
+    <p class="muted">Check answers you supply against published example questions. No AI is called, and a passing result does not qualify a model or change its routing.</p>
     <div class="lrn__actions">
       <label for="lo-mi-set">Task set</label><select id="lo-mi-set" class="select"></select>
       <label for="lo-mi-split">Questions</label><select id="lo-mi-split" class="select"></select>
+    </div>
+    {% include '_model_answer_scoring.html' %}
+    <details><summary>Use an existing answers file</summary>
+    <div class="lrn__actions">
       <label for="lo-mi-file">Answers file</label>
       <input type="file" id="lo-mi-file" class="input" accept=".json,application/json">
       <button type="button" class="btn btn--primary" id="lo-mi-score">Score now</button>
     </div>
     <p class="muted" id="lo-mi-status" role="status" aria-live="polite"></p>
     <div id="lo-mi-out"></div>
+    </details>
     {% endif %}
   </div>
 
   <div class="panel" id="lo-reward">
-    <h3 class="lrn__section-h" id="lo-rm-h">Reward model</h3>
+    <h3 class="lrn__section-h" id="lo-rm-h">Learn how to rank work</h3>
     <p class="lrn__section-sub">A small model trained on this server that learns which attempts at a task the answer
       checker preferred, so new attempts can be ranked cheaply. It learns from task outlines, never from task text.</p>
     <div id="lo-rm-list" role="status" aria-live="polite">Loading…</div>
     {% if learning_can_manage %}
-    <h4>Train a new reward model</h4>
+    <h4>Train a local ranking model</h4>
     <fieldset class="lo-fieldset">
       <legend>Learn from</legend>
       <label><input type="radio" name="lo-rm-source" value="outbox" checked> Task outlines waiting on this server</label>
@@ -118,12 +161,14 @@
       <select id="lo-rm-epochs" class="select"><option value="100">100</option><option value="200" selected>200</option><option value="500">500</option></select>
       <label for="lo-rm-lr">Learning speed</label>
       <select id="lo-rm-lr" class="select"><option value="0.05">Slow</option><option value="0.1" selected>Normal</option><option value="0.2">Fast</option></select>
-      <button type="button" class="btn btn--primary" id="lo-rm-train">Train the reward model</button>
+      <button type="button" class="btn btn--primary" id="lo-rm-train">Review local training</button>
+      <button type="button" class="btn btn--ghost" id="lo-rm-file-train" hidden>Train from uploaded outlines</button>
     </div>
+    {% include '_reward_model_training.html' %}
     <h4>Score task outlines</h4>
     <div class="lrn__actions">
-      <label for="lo-rm-model">Reward model</label><select id="lo-rm-model" class="select"></select>
-      <button type="button" class="btn btn--ghost" id="lo-rm-score">Score with the reward model</button>
+      <label for="lo-rm-model">Saved scoring guide</label><select id="lo-rm-model" class="select"></select>
+      <button type="button" class="btn btn--ghost" id="lo-rm-score">Score task approaches</button>
     </div>
     <p class="muted" id="lo-rm-status" role="status" aria-live="polite"></p>
     <div id="lo-rm-out"></div>
@@ -161,7 +206,7 @@
   </div>
 
   <div class="panel" id="lo-jobs-panel">
-    <h3 class="lrn__section-h" id="lo-jobs-h">Recent background jobs</h3>
+    <h3 class="lrn__section-h" id="lo-jobs-h">Recent background tasks</h3>
     <div id="lo-jobs" aria-labelledby="lo-jobs-h">Loading…</div>
     <button type="button" class="btn btn--ghost" id="lo-jobs-refresh">Refresh</button>
   </div>
@@ -172,6 +217,10 @@
   .lo-form { display: grid; gap: var(--space-2); max-width: 42rem; margin-top: var(--space-3); }
   .lo-fieldset { border: 0; padding: 0; margin: 0 0 var(--space-2); display: flex; gap: var(--space-3); flex-wrap: wrap; }
   .lo table { width: 100%; }
+  .lo-fa-requests { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
+  #lo-fa-requests { display: grid; gap: var(--space-2); }
+  #lo-fa-review { margin-top: var(--space-3); }
+  #lo-fa-review-rows section { margin: var(--space-3) 0; overflow-wrap: anywhere; }
 </style>
 <script src="/static/lightwork-ops-jobs.js" defer></script>
 <script src="/static/lightwork-learning-ops.js" defer></script>

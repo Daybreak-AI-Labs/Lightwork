@@ -1,7 +1,8 @@
 """Postgres backend: versioned-migration planner + tenant read-scoping.
 
-These exercise the *pure* logic (no live Postgres, no psycopg) so the upgrade
-ladder and the tenant predicate are covered even when no DB service is present.
+These exercise the *pure* Postgres logic (no live Postgres, no psycopg) plus
+real SQLite upgrades of the two draft histories that used different v42 schemas.
+The upgrade ladder and tenant predicates remain covered without a DB service.
 The full round-trip lives in test_postgres_world.py (skipped without a DSN).
 """
 from __future__ import annotations
@@ -10,6 +11,9 @@ from contextlib import contextmanager
 
 import maverick.world_model_backends.postgres as pg
 import pytest
+from maverick import migration_governance, world_model
+from maverick.deadline_alerts import SQLITE_SCHEMA as DEADLINE_SCHEMA
+from maverick.webhook_subscriptions import SQLITE_SCHEMA as WEBHOOK_SCHEMA
 
 
 def test_pending_from_fresh_db_applies_everything():
@@ -36,60 +40,60 @@ def test_pending_skips_already_applied():
     # digest + sealed contract columns (v41).
     pending = pg.pending_migrations(1)
     assert [v for v, _ in pending] == [
-        10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v10 still needs the remaining upgrades.
     assert [v for v, _ in pg.pending_migrations(10)] == [
-        11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v11 still needs the rest of the ladder.
     assert [v for v, _ in pg.pending_migrations(11)] == [
-        13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v13 still needs goal-domain + projects + artifacts + share/etc.
     assert [v for v, _ in pg.pending_migrations(13)] == [
-        14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v14 still needs projects + artifacts + share/signoff/origin.
     assert [v for v, _ in pg.pending_migrations(14)] == [
-        15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v15 still needs artifacts + share/signoff/origin + fact_history.
     assert [v for v, _ in pg.pending_migrations(15)] == [
-        16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v16 still needs the share/signoff/origin + fact_history migrations.
     assert [v for v, _ in pg.pending_migrations(16)] == [
-        17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v17 still needs fact_history + rate_events.
     assert [v for v, _ in pg.pending_migrations(17)] == [
-        18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v18 still needs the rate_events migration.
     assert [v for v, _ in pg.pending_migrations(18)] == [
-        19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v19 still needs dual-control + halt + provider-spend + facts trust.
     assert [v for v, _ in pg.pending_migrations(19)] == [
-        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v21 still needs halt + provider-spend + facts trust.
     assert [v for v, _ in pg.pending_migrations(21)] == [
-        22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v22 still needs provider-spend + facts trust.
     assert [v for v, _ in pg.pending_migrations(22)] == [
-        23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v23 still needs the facts provenance migration + the store.
     assert [v for v, _ in pg.pending_migrations(23)] == [
-        24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+        24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]
     # A DB at v24 still needs the fleet learning store + corpus family.
-    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]
+    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
     # A DB at v25 still needs the corpus family.
-    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]
+    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
 
 
 def test_pending_is_ordered_with_custom_ladder():
@@ -127,8 +131,106 @@ def test_approval_claims_migration_adds_collaboration_columns():
 
 
 def test_schema_version_is_latest_migration():
-    assert pg._PG_SCHEMA_VERSION == 41
+    # v49 retires the unused message-search index (reviewed in migration
+    # governance); v50 adds the per-task question index.
+    assert pg._PG_SCHEMA_VERSION == 50
     assert max(v for v, _ in pg.MIGRATIONS) == pg._PG_SCHEMA_VERSION
+    ladder = dict(pg.MIGRATIONS)
+    # Only the derived search index is retired; authoritative data is untouched.
+    assert ladder[49] == ["DROP INDEX IF EXISTS idx_pg_messages_fts"]
+    assert ladder[50] == ["CREATE INDEX IF NOT EXISTS idx_pg_questions_goal_id ON questions(goal_id, id)"]
+
+
+@pytest.mark.parametrize("version", [41, 42, 46])
+def test_combined_postgres_migration_reconciles_both_draft_histories(version):
+    pending = pg.pending_migrations(version)
+    # v48 adds approval_checks after the reconciliation; v49/v50 follow.
+    assert [v for v, _ in pending][-4:] == [47, 48, 49, 50]
+    statements = dict(pending)[47]
+    assert len(statements) == 8
+    joined = "\n".join(statements)
+    for table in (
+        "goal_mutation_receipts", "webhook_subscriptions",
+        "webhook_deliveries", "deadline_alerts",
+    ):
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in joined
+    assert all(statement.startswith((
+        "CREATE TABLE IF NOT EXISTS", "CREATE INDEX IF NOT EXISTS",
+        "CREATE UNIQUE INDEX IF NOT EXISTS",
+    )) for statement in statements)
+    assert migration_governance.version_checksum(dict(pg.MIGRATIONS)[42]) == "2c22dea0a5f80cca"
+    assert migration_governance.version_checksum(world_model.MIGRATIONS[42]) == "2c22dea0a5f80cca"
+    assert len({v for v, _ in pg.MIGRATIONS}) == len(pg.MIGRATIONS)
+
+
+@pytest.mark.parametrize("history,version", [
+    ("fresh", None), ("baseline", 41), ("companion", 42),
+    ("teardown", 42), ("companion", 46),
+])
+def test_combined_sqlite_upgrade_preserves_both_draft_histories(
+    tmp_path, monkeypatch, history, version,
+):
+    database = tmp_path / "combined-world.db"
+    prior_goal = None
+    if version is not None:
+        prior_ladder = {
+            number: statements for number, statements in world_model.MIGRATIONS.items()
+            if number <= version
+        }
+        if history == "teardown":
+            prior_ladder[42] = [*WEBHOOK_SCHEMA, *DEADLINE_SCHEMA]
+        with monkeypatch.context() as prior:
+            prior.setattr(world_model, "SCHEMA_VERSION", version)
+            prior.setattr(world_model, "MIGRATIONS", prior_ladder)
+            with world_model.WorldModel(path=database) as old:
+                assert old.schema_version == version
+                cursor = old.conn.execute(
+                    "INSERT INTO goals(title, description, status, created_at, updated_at, owner) "
+                    "VALUES('Retained draft task', '', 'pending', 1800000000, 1800000000, 'operator')"
+                )
+                prior_goal = cursor.lastrowid
+                if history == "teardown":
+                    assert old.conn.execute(
+                        "SELECT name FROM sqlite_master WHERE name='goal_mutation_receipts'"
+                    ).fetchone() is None
+                    old.conn.execute(
+                        "INSERT INTO webhook_subscriptions(id, url, created_at, updated_at) "
+                        "VALUES('retained-subscription', 'https://example.invalid/events', 1800000000, 1800000000)"
+                    )
+                old.conn.commit()
+
+    with world_model.WorldModel(path=database) as upgraded:
+        assert upgraded.schema_version == 50
+        tables = {row[0] for row in upgraded.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        assert {
+            "goal_mutation_receipts", "webhook_subscriptions",
+            "webhook_deliveries", "deadline_alerts", "approval_checks",
+        } <= tables
+        if prior_goal is not None:
+            assert tuple(upgraded.conn.execute(
+                "SELECT title, connection_selection FROM goals WHERE id=?", (prior_goal,),
+            ).fetchone()) == ("Retained draft task", "")
+        else:
+            prior_goal = upgraded.create_goal("Fresh task", owner="operator")
+        if history == "teardown":
+            assert upgraded.conn.execute(
+                "SELECT url FROM webhook_subscriptions WHERE id='retained-subscription'"
+            ).fetchone()[0] == "https://example.invalid/events"
+        upgraded.conn.execute(
+            "INSERT INTO goal_mutation_receipts(goal_id, kind, operation_id, actor, "
+            "request_hash, receipt, created_at) VALUES(?, 'edit', 'upgrade-receipt', "
+            "'operator', 'request-hash', 'retained-receipt', 1800000000)",
+            (prior_goal,),
+        )
+        upgraded.conn.commit()
+
+    with world_model.WorldModel(path=database) as reopened:
+        assert reopened.schema_version == 50
+        assert [tuple(row) for row in reopened.conn.execute(
+            "SELECT receipt FROM goal_mutation_receipts WHERE operation_id='upgrade-receipt'"
+        ).fetchall()] == [("retained-receipt",)]
 
 
 def test_attachment_submission_migration_is_additive_tenant_scoped_and_cascaded():
@@ -150,7 +252,7 @@ def test_goal_owner_migration_is_additive_and_backfills_legacy_rows():
         "ALTER TABLE goals ADD COLUMN IF NOT EXISTS owner "
         "TEXT NOT NULL DEFAULT '';",
     ]
-    assert [v for v, _ in pg.pending_migrations(27)] == [28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]
+    assert [v for v, _ in pg.pending_migrations(27)] == [28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
 
 
 def test_erasure_receipt_migration_is_tenant_scoped_and_immutable():
@@ -159,7 +261,7 @@ def test_erasure_receipt_migration_is_tenant_scoped_and_immutable():
     assert "PRIMARY KEY (tenant_id, receipt_id)" in joined
     assert "erasure_receipts_no_update" in joined
     assert "erasure_receipts_no_early_delete" in joined
-    assert [v for v, _ in pg.pending_migrations(28)] == [29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]
+    assert [v for v, _ in pg.pending_migrations(28)] == [29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
 
 
 def test_goal_execution_principal_migration_is_additive():
@@ -174,13 +276,13 @@ def test_halt_generation_migration_is_additive_and_precedes_attempt_claims():
         "ALTER TABLE halt ADD COLUMN IF NOT EXISTS generation "
         "TEXT NOT NULL DEFAULT '';",
     ]
-    assert [v for v, _ in pg.pending_migrations(32)] == [33, 34, 35, 36, 37, 38, 39, 40, 41]
+    assert [v for v, _ in pg.pending_migrations(32)] == [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
 
 
 def test_event_admission_contract_migration_is_additive():
     statements = dict(pg.MIGRATIONS)[41]
     assert all("ADD COLUMN IF NOT EXISTS" in s or "CREATE INDEX IF NOT EXISTS" in s for s in statements)
-    assert [v for v, _ in pg.pending_migrations(40)] == [41]
+    assert [v for v, _ in pg.pending_migrations(40)] == [41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
 
 
 def test_provider_operation_attempt_migration_is_global_and_additive():
@@ -349,7 +451,8 @@ def test_delete_fact_uses_exact_mutation_scope(
     monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
 
     assert model.delete_fact("shared-key") == 1
-    sql, query_params = cursor.calls[0]
+    assert "pg_advisory_xact_lock" in cursor.calls[0][0]
+    sql, query_params = next(call for call in cursor.calls if call[0].lstrip().startswith("DELETE"))
     assert scope in sql
     assert "OR tenant_id IS NULL" not in sql
     assert query_params == params
@@ -567,7 +670,8 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
     # PLATFORM_IMPROVEMENT_AUDIT.md W1-47: domain/project_id joined the
     # column list (signature parity with the SQLite backend), between
     # execution_principal and tenant_id.
-    assert "owner, execution_principal, domain, project_id, tenant_id" in sql
+    assert "owner, execution_principal, domain, project_id, tenant_id, connection_selection" in sql
+    assert sql.count("%s") == len(params)
     assert params == (
         4,
         "owned goal",
@@ -579,6 +683,7 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
         "",     # domain default
         None,   # project_id default
         "tenant-a",
+        "",     # no selected connection references; no implicit authority
     )
 
 
@@ -631,11 +736,16 @@ def test_owner_aware_claim_uses_exact_tenant_compare_and_swap(monkeypatch):
     monkeypatch.setattr(pg.time, "time", lambda: 123.0)
     cursor = _RetentionCursor()
     cursor.rowcount = 1
+    # This goal has no event origin; the execution guard's SELECT must see no
+    # event row before the owner/tenant compare-and-swap UPDATE.
+    cursor.fetchone = lambda: None
     model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
     monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
 
     assert model.claim_goal_for_run(42, expected_owner="agent:worker") is True
-    sql, params = cursor.calls[0]
+    assert "goal_origins" in cursor.calls[0][0]
+    assert "FOR UPDATE OF g,o" in cursor.calls[1][0]
+    sql, params = cursor.calls[2]
     assert "status='pending' AND owner=%s" in sql
     assert "tenant_id = %s" in sql
     assert "OR tenant_id IS NULL" not in sql

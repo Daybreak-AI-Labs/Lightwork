@@ -31,10 +31,16 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
+# External tool names are the agent's own: unrated in Lightwork, each keeps
+# the high refusal floor unless the operator rates it at enrollment.
+_RATED_TOOLS = ["crm_update:low", "research:low", "send_contract:high",
+                "wire_transfer", "fakecrm.read:low", "fakecrm.write:medium"]
+
+
 def _enroll(**kw):
     args = {"description": "quoting agent", "owner": "jordan@corp.test",
             "department": "sales", "max_risk": "medium", "max_dollars": 5.0,
-            "enrolled_by": "admin@corp.test"}
+            "enrolled_by": "admin@corp.test", "allow_tools": list(_RATED_TOOLS)}
     args.update(kw)
     return xa.enroll("sf-quotebot", "agentforce", **args)
 
@@ -473,6 +479,32 @@ def test_revoked_agent_is_denied_everywhere():
                                       "summary": "y"})
 
 
+def test_reenrollment_preserves_credentials_and_revocation():
+    _enroll(expires_days=2)
+    token = xa.mint_token("sf-quotebot", "rest")
+    before = lookup("sf-quotebot")
+    assert before is not None and before.expires_at is not None
+    _enroll(allow_tools=["crm_read"], expires_days=30)
+    healthy = lookup("sf-quotebot")
+    assert healthy is not None
+    assert healthy.allow_tools == frozenset({"crm_read"})
+    assert healthy.expires_at == before.expires_at
+    assert agent_for_token(token, "rest") is not None
+
+    from maverick.agent_trust import set_revoked
+    assert set_revoked("sf-quotebot", True)
+    _enroll(allow_tools=["crm_read", "crm_update"], expires_days=30)
+    revoked = lookup("sf-quotebot")
+    assert revoked is not None and revoked.revoked is True
+    assert revoked.rest_token == healthy.rest_token
+    assert revoked.expires_at == before.expires_at
+    assert agent_for_token(token, "rest") is None
+    assert xa.roster()[0]["active"] is False
+    from maverick.agent_trust import put_agent
+    assert put_agent({"id": "sf-quotebot", "direction": "inbound",
+                      "revoked": False}).revoked is True
+
+
 def test_disabled_plane_refuses_traffic(monkeypatch):
     _enroll()
     monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)
@@ -570,7 +602,7 @@ def test_operator_tool_risk_floors_the_declared_risk():
     verdict = xa.screen("sf-quotebot", "send_contract", risk="low")
     assert verdict["rule"] == "approval_required"
     assert verdict["requires_approval"] is True
-    # Unrated tools keep the declared risk.
+    # Under this high ceiling, unrated tools keep the declared risk.
     assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
     # A rated tool above the agent's ceiling is denied outright.
     xa.enroll("low-bot", "bedrock", max_risk="low",
@@ -579,6 +611,17 @@ def test_operator_tool_risk_floors_the_declared_risk():
                      risk="low")["rule"] == "capability"
     with pytest.raises(xa.ExternalAgentsError, match="unknown risk"):
         xa.enroll("bad-bot", "bedrock", allow_tools=["x:apocalyptic"])
+
+
+def test_unrated_tools_need_an_operator_rating_under_a_medium_ceiling():
+    _enroll(allow_tools=["crm_update", "shell:low", "salesforce.write:low"])
+    # Unrated in Lightwork and at enrollment: the high floor refuses it even
+    # though the caller declares low risk.
+    assert xa.screen("sf-quotebot", "crm_update", risk="low")["rule"] == "capability"
+    # An enrollment rating never down-rates a name Lightwork already rates,
+    # nor a name whose namespace it rates.
+    assert xa.screen("sf-quotebot", "shell", risk="low")["rule"] == "capability"
+    assert xa.screen("sf-quotebot", "salesforce.write", risk="low")["rule"] == "capability"
 
 
 def test_monthly_budget_rolls_over_and_resets():
@@ -645,6 +688,42 @@ def test_live_run_lifecycle_with_heartbeat_and_reclaim():
                                            "summary": "again"})
 
 
+@pytest.mark.parametrize("window", [30, 60, 120])
+def test_advertised_external_heartbeat_has_room_before_active_reclaim(monkeypatch, window):
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_ORPHAN_RECLAIM_SECONDS", str(window))
+    _enroll(max_wall_seconds=600)
+    out = xa.start_run("sf-quotebot", {"title": "Live quote"})
+    cadence = out["heartbeat_seconds"]
+    assert 0 < cadence <= window / 4
+    world = WorldModel()
+    gid = out["goal_id"]
+    # Normal jitter after the advertised beat still leaves the active run
+    # outside the recurring reclaim cutoff; an interval equal to the window
+    # would already have been blocked before this heartbeat could arrive.
+    with world._writing() as conn:
+        conn.execute(
+            "UPDATE goals SET updated_at = ? WHERE id = ?",
+            (time.time() - cadence - 1, gid),
+        )
+    assert world.reclaim_orphan_goals(
+        statuses=("active",), resolved_window_seconds=window,
+    ) == 0
+    assert xa.heartbeat("sf-quotebot", gid)["continue"] is True
+    assert world.get_goal(gid).status == "active"
+
+
+@pytest.mark.parametrize("window, expected", [("0", 1.0), ("5", 1.25)])
+def test_external_heartbeat_advice_remains_positive_with_disabled_reclaim(
+    monkeypatch, window, expected,
+):
+    monkeypatch.setenv("MAVERICK_ORPHAN_RECLAIM_SECONDS", window)
+    _enroll()
+    out = xa.start_run("sf-quotebot", {"title": "Live quote"})
+    assert out["heartbeat_seconds"] == expected
+
+
 def test_abandoned_live_run_is_reclaimed_and_heartbeat_says_stop():
     from maverick.world_model import WorldModel
     _enroll()
@@ -692,11 +771,15 @@ def test_parked_approval_notifies_and_fires_webhook(monkeypatch, tmp_path):
                         detail="issue contract", risk="high")
     assert verdict["requires_approval"] is True
     assert pushes and pushes[0][0] == "external_approval.pending"
-    assert fired and fired[0][0] == "external_approval.created"
-    payload = fired[0][1]
+    # The world model also announces every parked approval as ``approval.created``
+    # (webhook subscriptions); the external-agent event still carries its own payload.
+    external = [f for f in fired if f[0] == "external_approval.created"]
+    assert external
+    payload = external[0][1]
     assert payload["agent_id"] == "sf-quotebot"
     assert "detail" not in payload  # untrusted text never leaves
-    assert fired[0][2]["urls"] == ["https://hooks.corp.test/lw"]
+    assert all("detail" not in f[1] for f in fired)
+    assert external[0][2]["urls"] == ["https://hooks.corp.test/lw"]
 
 
 def test_status_aggregates_containment_and_wall_violations():
@@ -1307,6 +1390,73 @@ def test_failed_connector_write_reports_failed_status(monkeypatch):
     assert len(conn.writes) == 1
     st = xa.execute_status("sf-quotebot", parked["execution_id"])
     assert st["status"] == "failed"
+
+
+@pytest.mark.parametrize("failure", ["raised", "metadata", "legacy", "accepted"])
+def test_uncertain_connector_change_retains_identity_and_never_refires(monkeypatch, failure):
+    from maverick import governed_actions
+    from maverick.connector_attempts import ConnectorAttempt, ConnectorResult
+    from maverick.world_model import WorldModel
+
+    class UncertainConn(_FakeConn):
+        def write(self, params):
+            self.writes.append(dict(params))
+            if failure == "raised":
+                raise TimeoutError("reply lost after remote write")
+            if failure == "metadata":
+                return ConnectorResult("unconfirmed", ConnectorAttempt(
+                    request_id="attempt-one", attempt=1, operation="mutation",
+                    dispatch_may_have_happened=True, outcome_unknown=True,
+                ))
+            if failure == "accepted":
+                return ConnectorResult('{"pending":true}', ConnectorAttempt(
+                    request_id="attempt-one", attempt=1, operation="mutation",
+                    status_code=202, dispatch_may_have_happened=True,
+                ))
+            return "INDETERMINATE: reconcile the remote record"
+
+    conn = _wire_fakecrm(monkeypatch, UncertainConn())
+    phases, outcomes = [], []
+    real_record, real_audit = governed_actions.record_tool_lineage, xa._audit_execution
+
+    def record(*args, **kwargs):
+        phases.append(kwargs.get("phase"))
+        return real_record(*args, **kwargs)
+
+    def audit(*args, **kwargs):
+        outcomes.append(args[3])
+        return real_audit(*args, **kwargs)
+
+    monkeypatch.setattr(governed_actions, "record_tool_lineage", record)
+    monkeypatch.setattr(xa, "_audit_execution", audit)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    eid = parked["execution_id"]
+    digest = xa._load_sidecar()["sf-quotebot"]["executions"][eid]["digest"]
+    assert WorldModel().decide_approval(
+        parked["approval_id"], "approved", decided_by="admin@corp.test"
+    )
+    committed = xa.execute_commit("sf-quotebot", eid, _write_request())
+    expected = "accepted" if failure == "accepted" else "indeterminate"
+    assert committed["status"] == committed["rule"] == expected
+    assert outcomes == [expected]
+    assert phases == ["prepare", "commit" if failure == "accepted" else "indeterminate"]
+    status = xa.execute_status("sf-quotebot", eid)
+    assert status["status"] == expected
+    assert status["request_sha256"] == digest
+    assert "will not run again" in status["reason"]
+    retained = xa._load_sidecar()["sf-quotebot"]["executions"][eid]
+    assert retained["finished_at"] and retained["digest"] == digest
+    original_bytes = xa.registry_path().read_bytes()
+    detail = xa.agent_detail("sf-quotebot")
+    assert detail["executions"][0]["status"] == expected
+    assert detail["execution_coverage"]["displayed_count"] == 1
+    assert not ({"digest", "path", "body", "request_sha256"} & detail["executions"][0].keys())
+    assert xa.registry_path().read_bytes() == original_bytes
+    replay = xa.execute_commit("sf-quotebot", eid, _write_request())
+    assert replay["status"] == expected
+    assert replay["rule"] == "already_finished"
+    assert len(conn.writes) == 1
 
 
 def test_roster_and_status_surface_execution_counters(monkeypatch):

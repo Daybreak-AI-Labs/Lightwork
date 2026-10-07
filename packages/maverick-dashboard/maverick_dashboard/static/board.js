@@ -31,10 +31,14 @@ window.LWBoard = (function () {
     return n;
   }
   function fmt(n) { return (n == null ? 0 : n).toLocaleString(); }
+  // The shared formats from lightwork-ui.js; the fallbacks only cover a
+  // render that lands before the shell script has loaded.
   function money(n) {
-    return '$' + (n == null ? 0 : n).toLocaleString(undefined,
+    n = n == null ? 0 : n;
+    return window.mvMoney ? window.mvMoney(n) : '$' + n.toLocaleString(undefined,
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function now() { return window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleString(); }
 
   // ---- shared tooltip ------------------------------------------------------
   var tip = null;
@@ -385,9 +389,13 @@ window.LWBoard = (function () {
     box.appendChild(wrap);
   }
 
-  function empty(box, msg) {
+  // An empty chart or list: the shared compact empty state (window.mvEmpty
+  // from lightwork-ui.js) — what will appear here, then (body) how to get the
+  // first one, plus an optional {label, href} next step.
+  function empty(box, msg, body, action) {
     box.textContent = '';
-    box.appendChild(el('p', 'bd-empty muted', msg));
+    if (window.mvEmpty) { box.appendChild(window.mvEmpty(msg, body, action, { compact: true })); return; }
+    box.appendChild(el('p', 'bd-empty muted', body ? msg + '. ' + body : msg));
   }
 
   // Fold a daily series into 7-day buckets (sums) — long windows read as a
@@ -410,7 +418,11 @@ window.LWBoard = (function () {
   // one), stamp, fetch, and the 60s visible-tab refresh. `endpoint` overrides
   // the default board API for pages whose payload already exists elsewhere.
   function attach(cfg) {
-    var days = 90;
+    // The range the tab bar shows as chosen (an address like #range-30 may
+    // have chosen it already); 90 days otherwise.
+    var chosen = document.querySelector('[role="tab"][data-days][aria-selected="true"]');
+    var days = chosen ? (parseInt(chosen.dataset.days, 10) || 90) : 90;
+    var generation = 0, active = null, retired = false, updated = '';
     var stampEl = document.getElementById('bd-stamp');
     function stamp(msg) {
       if (stampEl) stampEl.textContent = msg;
@@ -420,34 +432,52 @@ window.LWBoard = (function () {
       return '/api/v1/dashboards/' + cfg.board + '?days=' + days;
     }
     function load() {
-      fetch(url())
+      if (retired) return;
+      var request = ++generation, selectedDays = days;
+      if (active) active.abort();
+      active = new AbortController();
+      var controller = active;
+      var timeout = setTimeout(function () { controller.abort(); }, 20000);
+      stamp('Loading ' + selectedDays + ' days' + (updated ? ' · previous view: ' + updated : '') + '.');
+      fetch(url(), {signal: controller.signal, credentials: 'same-origin', cache: 'no-store'})
         .then(function (r) {
           if (!r.ok) throw r;
           return r.json();
         })
         .then(function (D) {
+          if (retired || request !== generation || selectedDays !== days) return;
           cfg.render(D);
-          stamp('Updated ' + new Date().toLocaleTimeString() +
-                ' · updates every minute');
+          updated = selectedDays + ' days, checked ' + now();
+          stamp('Showing ' + updated + ' · updates every minute');
         })
         .catch(function (e) {
-          var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board.';
-          stamp(why + ' Trying again in a minute.');
-        });
+          if (retired || request !== generation) return;
+          if (e && e.status === 403) {
+            stamp('These charts can include work from departments you cannot access. Ask an administrator to review your access. Your permitted tasks remain available in Chat.');
+            clearInterval(poll);
+            return;
+          }
+          var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board. Refresh the page and try again.';
+          stamp(why + (updated ? ' Previous view retained: ' + updated + '.' : '') + ' Trying again in a minute.');
+        }).finally(function () { clearTimeout(timeout); if (request === generation) active = null; });
     }
-    document.querySelectorAll('.bd-slicer button').forEach(function (b) {
+    // The time range is a shared tab bar (_tabs.html, lightwork-tabs.js),
+    // which marks the chosen range; the arrow keys only move between ranges
+    // and Enter or Space loads one.
+    document.querySelectorAll('[role="tab"][data-days]').forEach(function (b) {
       b.addEventListener('click', function () {
-        document.querySelectorAll('.bd-slicer button').forEach(function (x) {
-          x.classList.remove('on');
-          x.setAttribute('aria-pressed', 'false');
-        });
-        b.classList.add('on');
-        b.setAttribute('aria-pressed', 'true');
         days = parseInt(b.dataset.days, 10) || 90;
         load();
       });
     });
-    setInterval(function () { if (!document.hidden) load(); }, 60000);
+    var poll = setInterval(function () { if (!document.hidden && !active) load(); }, 60000);
+    window.addEventListener('pagehide', function () { retired = true; ++generation; clearInterval(poll); if (active) active.abort(); });
+    window.addEventListener('pageshow', function (event) {
+      if (!event.persisted || !retired) return;
+      retired = false;
+      poll = setInterval(function () { if (!document.hidden && !active) load(); }, 60000);
+      load();
+    });
     load();
   }
 

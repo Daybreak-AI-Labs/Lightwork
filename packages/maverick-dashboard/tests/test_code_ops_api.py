@@ -103,6 +103,25 @@ def test_download_is_confirmed_recorded_and_contains_the_project(client, monkeyp
     assert seen == ["code_export"]
 
 
+def test_download_removes_the_plaintext_temporary_copy(client, monkeypatch, project):
+    from pathlib import Path
+
+    from maverick_dashboard import code_ops_api
+
+    exported = []
+    original = code_ops_api._export
+
+    def capture(name):
+        path = original(name)
+        exported.append(Path(path))
+        return path
+
+    monkeypatch.setattr(code_ops_api, "_export", capture)
+    response = client.post("/api/v1/code/repos/website/export", json={"confirm": True})
+    assert response.status_code == 200, response.text
+    assert exported and not exported[0].exists() and not exported[0].parent.exists()
+
+
 def test_download_refuses_oversized_projects(client, monkeypatch, project):
     from maverick_dashboard import code_ops_api
     monkeypatch.setattr(code_ops_api, "_MAX_EXPORT_BYTES", 10)
@@ -176,7 +195,8 @@ def test_work_from_a_note_runs_under_the_projects_protection(client, monkeypatch
         seen_policy.append(ifc._RUN_LABELS.get())
         (work / "app.py").write_text("def f(xs):\n    return xs or []\n")
 
-    monkeypatch.setattr(features, "default_runner", lambda max_dollars=None: runner)
+    monkeypatch.setattr(features, "default_runner",
+                        lambda max_dollars=None, user_id=None, allowed_suites=None: runner)
     monkeypatch.setattr(features, "default_reviewer", lambda: None)
     client.post("/api/v1/code/watch/website/start", json={"confirm": True})
     note = _wait(client)["notes"][0]
@@ -204,6 +224,43 @@ def test_watch_is_bounded_and_stops_at_shutdown(client, monkeypatch, project):
     _wait(client)
     code_ops_api.stop_watchers(timeout=5)
     assert not any(t.is_alive() for t in code_ops_api._watch_threads)
+
+
+@pytest.mark.parametrize("revoke_before_dispatch", [False, True])
+def test_named_note_preserves_identity_and_rechecks_dispatch_authority(
+        client, monkeypatch, project, revoke_before_dispatch):
+    from maverick.codebase import features
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import auth, code_actions_api, code_ops_api, rbac
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
+        sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub": token}))
+    rbac.set_role("user:alice", "admin")
+    rbac.set_role("user:recovery", "admin")
+    client.headers["Authorization"] = "Bearer alice"
+    monkeypatch.setattr(code_ops_api, "_INTERVAL", 0.2)
+    monkeypatch.setattr(code_actions_api, "_provider_missing", lambda: False)
+    assert client.post("/api/v1/code/watch/website/start", json={"confirm": True}).status_code == 202
+    note = _wait(client)["notes"][0]
+    queued, admissions, identities = [], [], []
+    native = code_actions_api._run_feature
+    monkeypatch.setattr(code_actions_api, "_run_feature", lambda *args: queued.append(args))
+    response = client.post(f"/api/v1/code/watch/website/notes/{note['id']}/start",
+                           json={"confirm": True})
+    assert response.status_code == 202, response.text
+    assert len(queued) == 1 and queued[0][-2:] == ("user:alice", "alice")
+    monkeypatch.setattr(features, "default_runner", lambda **kwargs: identities.append(kwargs))
+    monkeypatch.setattr(features, "default_reviewer", lambda: None)
+    monkeypatch.setattr(features, "propose", lambda *args, **kwargs: admissions.append(kwargs))
+    if revoke_before_dispatch:
+        rbac.set_role("user:alice", "viewer")
+    native(*queued[0])
+    if revoke_before_dispatch:
+        assert not admissions and not identities
+    else:
+        assert admissions == [{"reviewer": None, "owner": "user:alice"}]
+        assert identities == [{"max_dollars": None, "user_id": "alice", "allowed_suites": None}]
 
 
 def test_watch_stops_itself_after_repeated_read_failures(client, monkeypatch, project):

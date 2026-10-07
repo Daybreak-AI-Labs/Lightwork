@@ -240,6 +240,28 @@ def test_goal_execution_claim_is_atomic(world):
     assert world.claim_goal_for_run(gid) is False
 
 
+def test_legacy_event_goal_is_held_at_both_postgres_start_boundaries(world):
+    from maverick.event_admission import LegacyEventGoalHeld
+
+    local = world.create_goal("old local")
+    world.record_goal_origin(local, "event", "orders")
+    with pytest.raises(LegacyEventGoalHeld):
+        world.set_goal_status(local, "active")
+    assert world.get_goal(local).status == "blocked"
+
+    remote = world.create_goal("old remote", owner="user:alice")
+    world.record_goal_origin(remote, "event", "orders")
+    assert not world.claim_goal_for_run(remote, expected_owner="user:bob")
+    assert world.get_goal(remote).status == "pending"
+    assert not world.claim_goal_for_run(remote, expected_owner="user:alice")
+    assert world.get_goal(remote).status == "blocked"
+
+    current = world.create_goal("missing current receipt")
+    world.record_goal_origin(current, "event_v2", "orders")
+    assert not world.claim_goal_for_run(current)
+    assert world.get_goal(current).status == "blocked"
+
+
 @pytest.mark.parametrize("status", ["pending", "active", "running", "blocked", "done", "cancelled"])
 def test_admission_refusal_preserves_terminal_results_and_tenant_authority(world, status):
     from maverick.paths import tenant_scope
@@ -406,6 +428,30 @@ def test_list_goals_filters_by_domain_and_project_id(world):
     by_domain = world.list_goals(domain="finance")
     assert g_finance in {x.id for x in by_domain}
     assert g_no_domain not in {x.id for x in by_domain}
+
+
+def test_recent_goals_by_domain_matches_one_query_per_domain(world):
+    # The Results page asks for every deliverable pack's latest runs at once;
+    # one grouped query must give the answer the per-pack loop gave.
+    tag = uuid.uuid4().hex[:8]
+    busy, quiet, empty = f"busy_{tag}", f"quiet_{tag}", f"empty_{tag}"
+    busy_ids = [
+        world.create_goal(f"busy {i}", owner="user:alice" if i % 2 else "user:bob", domain=busy)
+        for i in range(7)
+    ]
+    world.create_goal("quiet one", domain=quiet, owner="user:alice")
+    domains = [busy, quiet, empty]
+
+    got = world.recent_goals_by_domain(domains)
+    assert [g.id for g in got[busy]] == busy_ids[::-1][:5]
+    assert [g.title for g in got[quiet]] == ["quiet one"]
+    assert empty not in got
+    for owner in (None, "user:alice", "user:bob", "user:nobody"):
+        looped = {d: world.list_goals(domain=d, owner=owner, limit=5, order="desc") for d in domains}
+        assert world.recent_goals_by_domain(domains, owner=owner) == {
+            d: goals for d, goals in looped.items() if goals
+        }
+    assert world.recent_goals_by_domain([]) == {}
 
 
 def test_active_goal(world):
@@ -898,6 +944,13 @@ def test_erase_conversations_deletes_pg_rows(world, monkeypatch):
     world.create_share_link(grandchild, created_by="reviewer")
     world.record_goal_origin(grandchild, "webhook", "private-origin")
     world.set_goal_status(grandchild, "done", result="private result")
+    # Human-edit receipts are part of the signed erasure scope as well.
+    # Create one through the native transaction, then prove it is removed.
+    from maverick.goal_mutations import edit_result
+
+    edit_result(world, grandchild, text="private revised result",
+                expected_updated_at=world.get_goal(grandchild).updated_at,
+                operation_id=uuid.uuid4().hex, actor="erase-me")
     world.record_signoff(grandchild, "approved", decided_by="reviewer")
 
     plan = world.plan_conversation_erasure([conv.id])

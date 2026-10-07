@@ -49,6 +49,32 @@ def _select(tenant_id, *, expected: str = ""):
     )
 
 
+def test_first_workspace_retry_uses_fresh_identifier_after_audit_refusal(monkeypatch):
+    from maverick import audit
+    from maverick.tenant import registry
+    from maverick_dashboard import auth, tenant_select_page, workspace_tenants
+    from starlette.requests import Request
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:first-admin")
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: True)
+    request = Request({"type": "http", "method": "GET", "path": "/settings",
+                       "query_string": b"", "headers": [], "scheme": "http",
+                       "server": ("testserver", 80)})
+
+    def refused(*args, **kwargs):
+        raise audit.AuditRefused("synthetic custody outage")
+
+    monkeypatch.setattr(audit, "audit_event", refused)
+    assert tenant_select_page.first_workspace_for_admin(request) is None
+    assert registry.list_tenants() == []
+    assert not registry.is_active("local")
+    monkeypatch.setattr(audit, "audit_event", lambda *args, **kwargs: True)
+    redirect = tenant_select_page.first_workspace_for_admin(request)
+    assert redirect.status_code == 303
+    assert [row.id for row in registry.list_tenants()] == ["local-2"]
+    assert workspace_tenants.get_selection("user:first-admin") == "local-2"
+
+
 def test_store_rejects_unknown_and_suspended_tenants():
     from maverick_dashboard import settings_store
 

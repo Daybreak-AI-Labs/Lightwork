@@ -7,8 +7,8 @@ two editable artifacts the operator can save and run:
     ``maverick.templates.save_user_template`` and run from the goal box, and
   * a specialist **agent playbook** (:func:`draft_playbook`) — a domain pack
     with a persona, a tool allowlist, a risk ceiling, and an ordered procedure
-    whose steps can carry human gates; saved via the existing
-    ``/agents/<name>/override`` path (``maverick.domain_edit.write_override``).
+    whose steps can carry human gates; retained through the complete specialist
+    draft review and activated separately through reviewed Publish.
 
 Each is one short structured LLM completion under a hard budget cap; the JSON
 it returns is parsed forgivingly into a normalized draft.
@@ -415,8 +415,8 @@ def parse_playbook(raw: str) -> dict[str, Any]:
     unknown risk defaults to ``"medium"``), keeps only non-empty tool names, and
     derives a starting allowlist from the steps' own tools when the model gave
     none. Raises ``ValueError`` only when there's nothing usable (non-JSON, or
-    no steps). The returned dict matches the shape the ``/agents/<name>/override``
-    save path (``AgentOverrideIn``) accepts — ``workflow`` is the editable
+    no steps). The returned dict matches the editable specialist patch shape
+    retained by the complete draft review — ``workflow`` is the editable
     playbook, each step ``{name, instruction, tools, gate}``."""
     raw = _provider_safe_text(
         raw, label="model output", maximum=_MAX_MODEL_OUTPUT_CHARS,

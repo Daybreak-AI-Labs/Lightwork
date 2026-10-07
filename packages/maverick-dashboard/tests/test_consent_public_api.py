@@ -103,7 +103,7 @@ class _Environment:
     clock_state: dict[str, float]
 
 
-def _seed_authorities(tmp_path: Path) -> _Environment:
+def _seed_authorities(tmp_path: Path, *, mixed_lawful_bases: bool = False) -> _Environment:
     clock_state = {"now": _NOW}
     publishing_ids = itertools.count(1)
     preference_ids = itertools.count(1)
@@ -157,6 +157,19 @@ def _seed_authorities(tmp_path: Path) -> _Environment:
         expected_current_version=0,
         idempotency_key="purpose-v1",
     )
+    if mixed_lawful_bases:
+        publishing.put_purpose_version(
+            tenant,
+            "fulfillment",
+            1,
+            title_key="fulfillment.title",
+            description_key="fulfillment.description",
+            lawful_basis="contract",
+            required=True,
+            default_choice="denied",
+            expected_current_version=0,
+            idempotency_key="fulfillment-purpose-v1",
+        )
     publishing.put_custom_preference_version(
         tenant,
         "required-bool",
@@ -211,6 +224,14 @@ def _seed_authorities(tmp_path: Path) -> _Environment:
         messages={
             "purpose.title": "Analytics",
             "purpose.description": "Measure service performance",
+            **(
+                {
+                    "fulfillment.title": "Order fulfillment",
+                    "fulfillment.description": "Fulfill an order",
+                }
+                if mixed_lawful_bases
+                else {}
+            ),
             "notice.title": "Your privacy choices",
             "notice.body": "Choose whether analytics may be used.",
             "template.title": "Privacy choices",
@@ -254,7 +275,14 @@ def _seed_authorities(tmp_path: Path) -> _Environment:
                 "priority": 1,
                 "locales": ["en-US"],
                 "default_locale": "en-US",
-                "purposes": [{"id": "analytics", "version": 1}],
+                "purposes": [
+                    {"id": "analytics", "version": 1},
+                    *(
+                        [{"id": "fulfillment", "version": 1}]
+                        if mixed_lawful_bases
+                        else []
+                    ),
+                ],
                 "custom_preferences": [
                     {"id": "required-bool", "version": 1},
                     {"id": "locale", "version": 1},
@@ -282,7 +310,10 @@ def _seed_authorities(tmp_path: Path) -> _Environment:
         tenant,
         "public-consent",
         1,
-        {"analytics": "consent"},
+        {
+            "analytics": "consent",
+            **({"fulfillment": "contract"} if mixed_lawful_bases else {}),
+        },
         _NOTICE_SHA256,
         _NOW - 100,
     )
@@ -1225,6 +1256,39 @@ def test_public_roundtrip_is_digest_bound_idempotent_and_private(
     )
     assert after_gpc.json()["preferences"][0]["granted"] is False
     assert after_gpc.json()["preferences"][0]["reason"] == "explicit_deny"
+
+
+def test_browser_privacy_signal_skips_non_consent_purposes(tmp_path: Path) -> None:
+    environment = _seed_authorities(tmp_path, mixed_lawful_bases=True)
+    configuration_response = environment.client.get(
+        "/api/v1/public/consent/configuration", headers=_browser_headers()
+    )
+    assert configuration_response.status_code == 200, configuration_response.text
+    configuration = configuration_response.json()
+    assert {
+        item["id"]: item["lawful_basis"]
+        for item in configuration["configuration"]["purposes"]
+    } == {"analytics": "consent", "fulfillment": "contract"}
+    _bootstrap(environment)
+    signal = environment.client.post(
+        "/api/v1/public/consent/privacy-signals",
+        headers={**_browser_headers(profile=True), "Sec-GPC": "1"},
+        json={
+            **_contract_echo(configuration, environment.policy["policy_sha256"]),
+            "signal": "gpc",
+            "expected_revision": 0,
+            "idempotency_key": "mixed-purpose-gpc",
+        },
+    )
+    assert signal.status_code == 200, signal.text
+    current = environment.client.get(
+        "/api/v1/public/consent/preferences", headers=_browser_headers(profile=True)
+    )
+    assert current.status_code == 200, current.text
+    assert current.json()["profile_revision"] == 1
+    assert next(
+        item for item in current.json()["preferences"] if item["purpose_id"] == "analytics"
+    )["reason"] == "explicit_deny"
 
 
 def test_auth_failures_are_generic_and_authority_cannot_be_client_supplied(

@@ -131,3 +131,17 @@ def test_ensure_dispatch_allowed_gates_domain_bound_agents():
         name="finance_ap", role="finance", domain="finance_ap"))
     ensure_dispatch_allowed("user:fin", generic)   # no domain -> never scoped
     ensure_dispatch_allowed(None, legal)           # host operator -> never scoped
+
+
+def test_ensure_dispatch_allowed_respects_inherited_suite(monkeypatch, tmp_path):
+    from maverick.fleet import FleetAgent, ensure_dispatch_allowed
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    sg.set_suites("user:fin", ["finance"])
+    fork = FleetAgent(name="client_fork", role="custom", domain="client_fork")
+    with pytest.raises(sg.DepartmentAccessError):
+        ensure_dispatch_allowed("user:fin", fork)
+    ensure_dispatch_allowed(None, fork)

@@ -598,7 +598,7 @@ def test_go_java_and_standalone_demo_security_floors_are_explicit():
     assert "\ngo 1.26.6\n" in go_client
     assert "golang.org/x/sys v0.47.0" in go_client
     assert "\ngo 1.26.6\n" in model_proxy
-    assert "<jackson.version>3.1.6</jackson.version>" in java_client
+    assert "<jackson.version>3.1.7</jackson.version>" in java_client
     assert "<artifactId>jackson-bom</artifactId>" in java_client
 
     demo_requirements = (
@@ -711,11 +711,26 @@ def test_active_runtime_guidance_never_resolves_first_party_from_public_index():
         assert unsafe.search(_read(path)) is None, path
 
 
-def test_localized_getting_started_pages_use_reviewed_source_not_public_names():
-    for path in sorted((REPO_ROOT / "docs" / "i18n").glob("*/getting-started.md")):
+def test_customer_install_guides_do_not_direct_customers_to_clone_internal_source():
+    guides = [
+        REPO_ROOT / name
+        for name in (
+            "README.md",
+            "docs/getting-started.md",
+            "docs/deployment.md",
+            "docs/index.md",
+            "docs/handbook.md",
+        )
+    ]
+    guides.extend(sorted((REPO_ROOT / "docs" / "i18n").glob("*/getting-started.md")))
+    for path in guides:
         text = path.read_text(encoding="utf-8")
+        assert "git clone https://github.com/Daybreak-AI-Labs/Lightwork" not in text, path
         assert "pipx install 'maverick-agent[installer]'" not in text
-        assert "git checkout --detach <reviewed-full-40-character-commit-sha>" in text
+        # Each guide points at a verified binary: a release asset or, since
+        # d827a611, a requested (licensed) customer package.
+        assert ("https://github.com/Daybreak-AI-Labs/Lightwork/releases" in text
+                or "customer package" in text), path
 
 
 def _metadata(relative_path: str) -> dict:

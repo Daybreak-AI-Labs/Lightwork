@@ -147,6 +147,28 @@ def _edit_body() -> dict[str, object]:
     }
 
 
+def test_exact_reviewed_part_cannot_advance_another_part_and_run_next_ignores_no_revision(environment):
+    from dataclasses import replace
+
+    client, _state, runtime, preferences = environment
+    bounded = replace(runtime, worker_batch_size=1)
+    client.app.state.consent_bulk_jobs_runtime_factory = lambda **_kwargs: bounded
+    body = _export_body(items=[{"item_id": f"item-{n}", "profile_id": f"profile-{n}"} for n in (1, 2)])
+    job = client.post(BASE + "/exports", json=body).json()
+    run_path = BASE + "/" + job["job_id"] + "/run"
+    reviewed = {"expected_revision":job["revision"]}
+    first = client.post(run_path, json=reviewed)
+    assert first.status_code == 200 and first.json()["processed_items"] == 1
+    assert first.json()["state"] == "running"
+    assert client.post(run_path, json=reviewed).status_code == 409
+    assert client.get(BASE + "/" + job["job_id"]).json()["processed_items"] == 1
+    assert preferences.calls == ["export_profile"]
+    assert client.post(BASE + "/worker/run-next", json=reviewed).status_code == 422
+    second = client.post(run_path, json={"expected_revision":first.json()["revision"]})
+    assert second.status_code == 200 and second.json()["state"] == "succeeded"
+    assert preferences.calls == ["export_profile", "export_profile"]
+
+
 def test_status_is_store_free_bounded_and_reports_partial_executors(environment) -> None:
     client, state, _runtime, _preferences = environment
 
@@ -170,6 +192,13 @@ def test_export_run_progress_download_history_integrity_and_credits(environment)
     created = client.post(f"{BASE}/exports", json=_export_body())
     assert created.status_code == 201
     job = created.json()
+    state.now += 60
+    replay = client.post(f"{BASE}/exports", json=_export_body())
+    assert replay.status_code == 201 and replay.json() == job
+    recovered = client.post(f"{BASE}/requests/check", json={"idempotency_key": "create-export-api-1"})
+    assert recovered.status_code == 200
+    assert recovered.json()["job"]["job_id"] == job["job_id"]
+    assert state.permission_calls[-2:] == [("tenant", "operate"), ("global", "admin")]
 
     listed = client.get(BASE)
     assert listed.status_code == 200
@@ -193,6 +222,11 @@ def test_export_run_progress_download_history_integrity_and_credits(environment)
     history = client.get(f"{BASE}/{job['job_id']}/history")
     assert history.status_code == 200
     assert history.json()["events"]
+    first = client.get(f"{BASE}/{job['job_id']}/history?limit=1").json()
+    next_sequence = first["next_before_sequence"]
+    second = client.get(f"{BASE}/{job['job_id']}/history", params={"limit": 1, "before_sequence": next_sequence}).json()
+    assert second["events"][0]["sequence"] < first["events"][0]["sequence"]
+    assert client.get(f"{BASE}/{job['job_id']}/history?before_sequence=0").status_code == 422
     integrity = client.get(f"{BASE}/operations/integrity")
     assert integrity.status_code == 200
     assert integrity.json()["integrity_valid"] is True
@@ -211,6 +245,15 @@ def test_export_run_progress_download_history_integrity_and_credits(environment)
     assert granted.json()["available"] == credits.json()["available"] + 5
     assert ("global", "admin") in state.permission_calls
     assert ("global", "audit") in state.permission_calls
+
+    later = client.post(f"{BASE}/exports", json={**_export_body(), "idempotency_key": "create-export-api-2"}).json()
+    first_page = client.get(BASE, params={"limit": 1}).json()
+    assert first_page["jobs"][0]["job_id"] == later["job_id"]
+    older_page = client.get(BASE, params={"limit": 1, "before_job_id": first_page["next_before_job_id"]}).json()
+    assert older_page["jobs"][0]["job_id"] == job["job_id"]
+    assert older_page["next_before_job_id"] is None
+    assert client.get(BASE, params={"before_job_id": "other-tenant-or-missing"}).status_code == 404
+    assert client.get(BASE, params={"before_job_id": "../../private"}).status_code == 422
 
 
 def test_edit_action_runs_existing_primitive_and_missing_mutation_fails_closed(environment) -> None:
@@ -298,7 +341,20 @@ def test_strict_schema_rejects_authority_and_operation_shape_injection(environme
             }
         ]
     )
-    assert client.post(f"{BASE}/exports", json=oversized_receipt_page).status_code == 422
+    too_many = client.post(f"{BASE}/exports", json=oversized_receipt_page)
+    assert too_many.status_code == 422
+    assert too_many.json()["detail"][0]["loc"] == ["body", "items", 0, "receipt_limit"]
+    saved_position = client.post(
+        f"{BASE}/exports",
+        json=_export_body(items=[{
+            "item_id": "export-position",
+            "profile_id": "profile-1",
+            "after_sequence": 0,
+        }]),
+    )
+    assert saved_position.status_code == 422
+    assert saved_position.json()["detail"][0]["loc"] == ["body", "items", 0, "after_sequence"]
+
 
     malformed = _edit_body()
     malformed["items"][0]["reason_code"] = "cross-operation-field"
@@ -327,6 +383,33 @@ def test_strict_schema_rejects_authority_and_operation_shape_injection(environme
     assert client.post(f"{BASE}/actions", json=exact_reactivation).status_code == 503
 
     assert client.post(f"{BASE}/worker/run-next", json={"tenant_id": "tenant-b"}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("receipt_limit is outside its bound", "Choose between 1 and 500 records per person."),
+        (
+            "Receipt exports from a saved position are not supported. "
+            "Select up to the latest 500 records per person.",
+            "Starting from a saved position is not available. Choose up to the latest 500 records per person.",
+        ),
+        ("private-subject-value", "consent bulk-job request is invalid"),
+    ],
+)
+def test_store_export_validation_returns_only_safe_detail(
+    environment, monkeypatch, reason: str, expected: str,
+) -> None:
+    client, _state, runtime, _preferences = environment
+
+    def reject(*_args, **_kwargs):
+        raise bulk.ConsentBulkJobValidationError(reason)
+
+    monkeypatch.setattr(runtime.store, "create_job", reject)
+    response = client.post(f"{BASE}/exports", json=_export_body())
+    assert response.status_code == 422
+    assert response.json()["detail"] == expected
+    assert "private-subject-value" not in response.text
 
 
 def test_disabled_unready_and_factory_failure_do_not_leak_details(environment) -> None:

@@ -2,6 +2,8 @@
 and the chat-form prefill it links to."""
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
@@ -31,12 +33,12 @@ def _isolated(tmp_path, monkeypatch):
 @pytest.fixture
 def catalog(_isolated):
     (_isolated / "trip-plan.md").write_text(
-        "---\ntitle: Plan a trip to {{ city }}\nparams:\n  - city\n---\n"
+        "---\nowner: local\ntitle: Plan a trip to {{ city }}\nparams:\n  - city\n---\n"
         "Plan a trip to {{ city }} under budget.",
         encoding="utf-8",
     )
     (_isolated / "research-report.md").write_text(
-        "---\ntitle: Research a topic\n---\nResearch it deeply.",
+        "---\nowner: local\ntitle: Research a topic\n---\nResearch it deeply.",
         encoding="utf-8",
     )
     return _isolated
@@ -103,9 +105,10 @@ def test_chat_prefill_from_query_params(catalog):
     })
     assert r.status_code == 200
     # Prefilled, HTML-escaped, and the details block is opened.
-    assert 'value="Plan a &#34;big&#34; trip"' in r.text
+    # The composer's message box is a textarea: the title is its escaped text.
+    assert '>Plan a &#34;big&#34; trip</textarea>' in r.text
     assert "Use &lt;param&gt; {{ city }}" in r.text
     assert "<details open>" in r.text
     # No prefill -> unchanged empty form.
     r2 = client.get("/chat")
-    assert 'value=""' in r2.text and "<details>" in r2.text
+    assert re.search(r'id="composer-title"[^>]*>\s*</textarea>', r2.text) and "<details>" in r2.text

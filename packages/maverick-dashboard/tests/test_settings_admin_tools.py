@@ -34,17 +34,24 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "mvhome"))
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "maintenance-test")
     for name in ("MAVERICK_WEBHOOK_SECRET", "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_MODEL_DISCOVERY",
                  "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     import maverick.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
+    from maverick import client as bound_client
     from maverick import config
     config.reset_config_cache()
+    bound_client.reset_client_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
     yield TestClient(dash_app.app, headers=ORIGIN)
     config.reset_config_cache()
+    # The process-wide client binding was read under this test's organisation;
+    # forget it so later tests resolve their own (unbound) installation.
+    bound_client.reset_client_cache()
+    dash_app._world_cache.clear()
 
 
 def _as_viewer(monkeypatch):
@@ -184,7 +191,7 @@ def test_health_check_collects_rows_without_printing(client, monkeypatch):
     assert health._row is not None and health._row.__name__ == "_row"
 
 
-def test_queue_lists_stopped_jobs_and_resumes_a_paused_schedule(client, monkeypatch, tmp_path):
+def test_queue_lists_stopped_jobs_and_refuses_the_old_resume_shortcut(client, monkeypatch, tmp_path):
     from maverick import job_queue
     queue = job_queue.JobQueue(tmp_path / "jobs.db")
     monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
@@ -206,8 +213,8 @@ def test_encryption_status_and_new_key_when_off(client, monkeypatch):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     data = client.get("/api/v1/admin/system/encryption").json()
     assert data["enabled"] is False
-    r = client.post("/api/v1/admin/system/encryption/new-key")
-    assert r.status_code in (200, 503)
+    r = client.post("/api/v1/admin/system/encryption/review", json={"action": "rotate"})
+    assert r.status_code == 409
 
 
 def test_diagnostics_shape(client):
@@ -228,23 +235,39 @@ def audit_rows(monkeypatch):
         return True
 
     monkeypatch.setattr(audit, "audit_event", capture)
+    monkeypatch.setattr(audit, "record_global", capture)
     return rows
 
 
-def test_resuming_a_schedule_is_recorded_with_who_did_it(client, monkeypatch, tmp_path, audit_rows):
+def _reviewed_encryption(client, monkeypatch, action):
+    from maverick_dashboard import auth, rbac
+    rbac.set_role("user:ada", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
+    review = client.post("/api/v1/admin/system/encryption/review", json={"action": action})
+    if review.status_code != 200:
+        return review
+    value = review.json()
+    path = "new-key" if action == "rotate" else "protect-older"
+    return client.post("/api/v1/admin/system/encryption/" + path, json={
+        "context": value["context"], "review": value["token"], "operation": "b" * 32, "confirm": True})
+
+
+def test_legacy_resume_cannot_bypass_native_review_or_change_work(client, monkeypatch, tmp_path, audit_rows):
     from maverick import job_queue
     from maverick_dashboard import auth
     monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
-    monkeypatch.setattr(job_queue.JobQueue, "reconcile_recurrence",
-                        lambda self, job_id, **kw: 77)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("The legacy shortcut must not change the native queue")
+
+    monkeypatch.setattr(job_queue.JobQueue, "reconcile_recurrence", forbidden)
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
     from maverick_dashboard import rbac
     rbac.set_role("user:ada", "admin")
     r = client.post("/api/v1/admin/system/queue/5/resume", json={"attempts": 2})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["href"] == "/automations?recover_schedule=5"
     rows = [row for row in audit_rows if row.get("verb") == "queue_resume"]
-    assert len(rows) == 1
-    assert rows[0]["actor"] == "user:ada" and rows[0]["job_id"] == 5
+    assert rows == []
 
 
 def test_stopped_job_errors_are_redacted_like_the_action_center(client, monkeypatch, tmp_path):
@@ -283,11 +306,12 @@ def test_encryption_maintenance_uses_the_workspace_world(client, monkeypatch, tm
     monkeypatch.setattr(sc, "_world_db", lambda: tmp_path / "chosen.db")
     (tmp_path / "chosen.db").write_bytes(b"")
     assert client.get("/api/v1/admin/system/encryption").json()["older_unprotected"] == 3
-    r = client.post("/api/v1/admin/system/encryption/protect-older")
+    r = _reviewed_encryption(client, monkeypatch, "protect")
     assert r.status_code == 200 and r.json()["protected"] == 3
-    assert seen == [str(tmp_path / "chosen.db")] * 2
-    rows = [row for row in audit_rows if row.get("verb") == "encryption_protect_older"]
-    assert len(rows) == 1 and rows[0]["records"] == 3 and rows[0]["actor"]
+    assert seen and all(path == str(tmp_path / "chosen.db") for path in seen)
+    rows = [row for row in audit_rows if row.get("record_type") == "encryption_maintenance"]
+    assert [row["action"] for row in rows] == ["maintenance_authorized", "maintenance_completed"]
+    assert all(row["actor"] == "user:ada" for row in rows)
 
 
 def test_encryption_maintenance_says_plainly_when_the_database_is_shared(
@@ -306,22 +330,59 @@ def test_encryption_maintenance_says_plainly_when_the_database_is_shared(
     data = client.get("/api/v1/admin/system/encryption").json()
     assert data["older_unprotected"] is None
     assert data["older_note"] and "cannot" in data["older_note"]
-    r = client.post("/api/v1/admin/system/encryption/protect-older")
+    r = _reviewed_encryption(client, monkeypatch, "protect")
     assert r.status_code == 409
     assert "protected" not in r.json()
-    assert audit_rows == []
+    assert not [row for row in audit_rows if row.get("record_type") == "encryption_maintenance"]
 
 
 def test_new_encryption_key_is_recorded(client, monkeypatch, audit_rows):
     from maverick import crypto_at_rest
-    monkeypatch.setattr(crypto_at_rest, "rotate_at_rest_key", lambda: None)
-    r = client.post("/api/v1/admin/system/encryption/new-key")
-    assert r.status_code == 200
-    rows = [row for row in audit_rows if row.get("verb") == "encryption_new_key"]
-    assert len(rows) == 1 and rows[0]["actor"]
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setattr(crypto_at_rest, "rotate_at_rest_key", lambda **kwargs: None)
+    r = _reviewed_encryption(client, monkeypatch, "rotate")
+    assert r.status_code == 200, r.text
+    rows = [row for row in audit_rows if row.get("record_type") == "encryption_maintenance"]
+    assert [row["action"] for row in rows] == ["maintenance_authorized", "maintenance_completed"]
+    assert all(row["actor"] == "user:ada" for row in rows)
 
 
 # ---- one-button checks, the organisation's data, tidying up ----------------
+
+
+def test_key_completion_waits_for_original_audit_without_repeating_rotation(client, monkeypatch):
+    import maverick.audit as audit
+    from maverick import crypto_at_rest
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setattr(audit, "record_global", lambda kind, **value: value.get("action") != "maintenance_completed")
+    result = _reviewed_encryption(client, monkeypatch, "rotate")
+    assert result.status_code == 200, result.text
+    assert result.json()["state"] == "receipt_pending"
+    assert "completed" in result.json()["message"]
+    assert len(list(crypto_at_rest._keyring_dir().glob("*.key"))) == 1
+    path = "/api/v1/admin/system/encryption/actions/" + "b" * 32
+    assert client.get(path).json()["receipt"]["state"] == "receipt_pending"
+    monkeypatch.setattr(audit, "record_global", lambda kind, **value: True)
+    assert client.get(path).json()["receipt"]["state"] == "confirmed"
+    assert len(list(crypto_at_rest._keyring_dir().glob("*.key"))) == 1
+
+
+def test_key_review_requires_fresh_authentication_before_rotation(client, monkeypatch):
+    from fastapi import HTTPException
+    from maverick import crypto_at_rest
+    from maverick_dashboard import step_up
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+
+    def refuse(request, operation):
+        assert operation == "rotate_keys"
+        raise HTTPException(403, "Sign in with your authenticator again.")
+
+    monkeypatch.setattr(step_up, "require_recent_mfa", refuse)
+    response = client.post("/api/v1/admin/system/encryption/review", json={"action": "rotate"})
+    assert response.status_code == 403
+    assert not list(crypto_at_rest._keyring_dir().glob("*.key"))
 
 def _as(monkeypatch, role: str, who: str):
     from maverick_dashboard import auth, rbac
@@ -390,16 +451,20 @@ def test_plugin_check_names_each_mismatch(client, monkeypatch):
     assert "acme-tools is a different version" in body["problems"][0]
 
 
-def test_organisation_data_download_and_erase(client, monkeypatch, audit_rows):
+def test_organisation_data_download_and_erase(client, monkeypatch, tmp_path, audit_rows):
     from maverick import client as client_binding
     monkeypatch.setenv("MAVERICK_BACKUP_SIGNING_KEY", "00" * 32)  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
     client_binding.reset_client_cache()
     try:
         from maverick import world_model
-        world_model.open_world().create_goal("Acme task")
+        world = world_model.open_world()
+        world.create_goal("Acme task")
         status = client.get("/api/v1/admin/system/client").json()
         assert status["bound"] is True and status["organisation"] == "acme"
+        assert "Lightwork must be stopped" in status["summary"]
+        assert "Other workspaces" in status["summary"]
         started = client.post("/api/v1/admin/system/client/export")
         assert started.status_code == 202, started.text
         job = started.json()["job"]
@@ -423,12 +488,39 @@ def test_organisation_data_download_and_erase(client, monkeypatch, audit_rows):
         assert client.post(erase, json={"organisation": "acme", "confirm": False}).status_code == 409
         wrong = client.post(erase, json={"organisation": "other", "confirm": True})
         assert wrong.status_code == 409 and "changed" in wrong.json()["detail"]
-        done = client.post(erase, json={"organisation": "acme", "confirm": True, "keep_activity_record": True})
-        assert done.status_code == 200, done.text
-        assert done.json()["erased"] is True and done.json()["kept_activity_record"] is True
+        refused = client.post(erase, json={"organisation": "acme", "confirm": True,
+                                           "keep_activity_record": True})
+        assert refused.status_code == 409 and "Nothing was erased" in refused.json()["detail"]
+        assert world.list_goals()
+        # The kernel offboarding operation is exercised against a quiesced
+        # client store. A live HTTP request must not attempt this.
+        world.close()
+        done = client_binding.erase_client(keep_audit=True, actor="test administrator")
+        assert done["kept_audit"] is True
+        from maverick.audit import verify_chain
+
+        receipt_id = done["audit_event_id"]
+        assert re.fullmatch(r"[0-9a-f]{32}", receipt_id)
+        receipt_dir = tmp_path / "mvhome" / "client-erasure" / receipt_id
+        receipt = receipt_dir / "events.ndjson"
+        assert verify_chain(receipt, (receipt_dir / "verification-key.hex").read_text().strip()) == []
+        import json
+
+        events = [json.loads(line) for line in receipt.read_text().splitlines()]
+        assert events[0]["kind"] == "client_erase_requested"
+        assert events[-1]["kind"] == "client_erased"
+        assert events[-1]["status"] == "completed"
+        downloaded_receipt = client.get(f"/api/v1/admin/system/client/erase/receipt/{receipt_id}")
+        assert downloaded_receipt.status_code == 200
+        assert downloaded_receipt.headers["cache-control"] == "private, no-store"
+        assert "attachment" in downloaded_receipt.headers["content-disposition"]
+        assert downloaded_receipt.json()["events_ndjson"] == receipt.read_text()
+        assert downloaded_receipt.json()["verification_key"] == (receipt_dir / "verification-key.hex").read_text().strip()
+        assert client.get("/api/v1/admin/system/client/erase/receipt/not-a-receipt").status_code == 404
+        receipt.write_text(receipt.read_text() + '{"kind":"forged"}\n')
+        assert client.get(f"/api/v1/admin/system/client/erase/receipt/{receipt_id}").status_code == 503
         verbs = [row.get("verb") for row in audit_rows]
         assert verbs.count("client_export") == 1
-        assert verbs.index("client_erase_requested") < verbs.index("client_erase")
     finally:
         monkeypatch.delenv("MAVERICK_CLIENT_ID")
         client_binding.reset_client_cache()
@@ -437,13 +529,30 @@ def test_organisation_data_download_and_erase(client, monkeypatch, audit_rows):
 def test_erase_is_refused_without_a_named_organisation(client, monkeypatch):
     from maverick import client as client_binding
     client_binding.reset_client_cache()
+    # The fixture binds this installation to another organisation.
     r = client.post("/api/v1/admin/system/client/erase", json={"organisation": "acme", "confirm": True})
-    assert r.status_code == 409 and "nothing was erased" in r.json()["detail"]
+    assert r.status_code == 409 and "nothing was erased" in r.json()["detail"].lower()
     _as_viewer(monkeypatch)
     assert client.post("/api/v1/admin/system/client/erase",
                        json={"organisation": "acme", "confirm": True}).status_code == 403
     assert client.post("/api/v1/admin/system/client/export").status_code == 403
     assert client.get("/api/v1/admin/system/client/erase/preview").status_code == 403
+
+
+def test_live_erase_refuses_before_kernel_mutation(client, monkeypatch):
+    from maverick import client as client_binding
+
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
+    client_binding.reset_client_cache()
+    monkeypatch.setattr(client_binding, "erase_client", lambda **_kwargs: pytest.fail("live erase reached the kernel"))
+    try:
+        response = client.post("/api/v1/admin/system/client/erase", json={
+            "organisation": "acme", "confirm": True, "keep_activity_record": False,
+        })
+        assert response.status_code == 409
+        assert "Nothing was erased" in response.json()["detail"]
+    finally:
+        client_binding.reset_client_cache()
 
 
 def _old_conversation(user: str) -> None:

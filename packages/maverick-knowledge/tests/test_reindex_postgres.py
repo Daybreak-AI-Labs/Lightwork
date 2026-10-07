@@ -21,11 +21,22 @@ class VersionedSpace(DeterministicEmbedder):
 
 @pytest.fixture
 def native_stores():
-    dsn = os.environ.get("MAVERICK_PG_DSN")
+    knowledge_dsn = os.environ.get("MAVERICK_KNOWLEDGE_DSN")
+    dsn = knowledge_dsn or os.environ.get("MAVERICK_PG_DSN")
     if not dsn:
         pytest.skip("MAVERICK_PG_DSN not set (no dedicated pgvector test service)")
     psycopg = pytest.importorskip("psycopg")
     from psycopg import sql
+
+    # A general PostgreSQL fixture may not provide the optional extension.
+    # An explicitly selected knowledge service must meet its vector contract.
+    if not knowledge_dsn:
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            available = connection.execute(
+                "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'",
+            ).fetchone()
+        if available is None:
+            pytest.skip("native pgvector server extension is not available in the general PostgreSQL fixture")
 
     table = "kb_reindex_" + uuid.uuid4().hex
     stores = []

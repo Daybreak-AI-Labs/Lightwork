@@ -125,6 +125,35 @@ def test_permit_is_single_use_and_carries_the_actual_decision(authority):
             pass
 
 
+def test_fresh_person_uses_exact_card_and_never_silent_consent(authority, monkeypatch):
+    from maverick.approval_cards import digest
+
+    state = {
+        "target": {"task": 7, "tool": "write_file"},
+        "parameters": {"path": "result.txt", "content": "approved text"},
+        "inputs": {"revision": "r1"},
+        "credentials": {"generation": "g1"},
+        "budget": {"dollars": 10},
+    }
+    seen = []
+    monkeypatch.setattr(consent, "require_consent", lambda *_a, **_kw: pytest.fail(
+        "a fresh-person gate must not use silent consent"
+    ))
+
+    def person(_action, **kwargs):
+        seen.append(kwargs)
+        return consent.ConsentDecision(True, "dashboard", "high", time.time(), actor="user:reviewer")
+
+    monkeypatch.setattr(consent, "require_person", person)
+    permit = _permit(state, provenance="rehearsal", require_fresh_person=True)
+
+    assert seen[0]["approval_card"]["parameters"]["sha256"] == digest(state["parameters"])
+    assert seen[0]["provenance"] == "rehearsal"
+    assert permit.decision.actor == "user:reviewer"
+    with consent.consume_operation_consent(permit):
+        pass
+
+
 def test_expired_permit_cannot_reach_effect(authority):
     state = {
         "target": {"id": 7},

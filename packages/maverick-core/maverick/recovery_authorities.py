@@ -7,7 +7,15 @@ closed registry to audit.
 """
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
+
+# Installation-wide, append-only identity history. These roots are outside
+# tenants/ so deleting a workspace cannot free its name or erase its retirement.
+TENANT_LIFECYCLE_AUTHORITY_POLICIES = {
+    ".tenant-namespaces": "tenant_namespace_reservation",
+    ".tenant-deletions": "tenant_deletion_tombstone",
+}
 
 # Tenant-local governed record stores whose restored rows require a hold or
 # store-specific authenticated reconciliation.  These rows can feed
@@ -42,6 +50,27 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "channel-deliveries": "channel_execution_delivery_authority",
     "channel-delivery-cursors": "channel_delivery_recovery_cursor_authority",
     "channel-poll-cursors": "channel_provider_poll_cursor_authority",
+    # Customer workflow records can restore older grants, pending intent or
+    # consumed operation receipts. They need current authority reconciliation;
+    # an authenticated old backup is not evidence of current consent.
+    "conversation_inbox": "conversation_intent_authority",
+    "commitment_viability": "commitment_review_authority",
+    "commitment_viability_archive": "commitment_review_authority",
+    "deliverable_bundles": "deliverable_release_authority",
+    "project_workspaces": "project_workspace_membership_authority",
+    "task_handoffs": "task_handoff_authority",
+    "billing_sync_reviews": "billing_sync_review_authority",
+    "budget_accounting_cases": "budget_reconciliation_authority",
+    "employee_content_access": "private_content_grant_authority",
+    "deliverable-share-releases": "public_release_authority",
+    "employee_activation": "employee_activation_authority",
+    "employee_departures": "employee_departure_authority",
+    # Even metadata-only replay receipts prevent previously consumed changes
+    # from executing again. An older restored absence is not fresh admission.
+    "fact_operation_receipts": "fact_operation_receipt_authority",
+    "permission_access_requests": "permission_request_authority",
+    "personal_data_requests": "personal_erasure_request_authority",
+    "owned_task_diagnostics": "private_diagnostic_release_authority",
     "data_map": "privacy_data_map_record_authority",
     "dpa_reviews": "dpa_review_authority",
     "dsar_requests": "dsar_request_authority",
@@ -64,6 +93,49 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "flow_action_episodes": "flow_action_episode_authority",
     "flow_operator_reviews": "flow_operator_review_authority",
     "flow_recipe_lineage": "flow_recipe_lineage_authority",
+    "audit-action-reviews": "audit_maintenance_request_authority",
+    "approval-challenges": "approval_challenge_execution_authority",
+    "approval-challenge-removals": "approval_challenge_removal_authority",
+    "encryption-maintenance": "encryption_maintenance_authority",
+    "installation-security-attempts": "installation_security_request_authority",
+    "instruction-captures": "instruction_capture_permission_authority",
+    "learned-skill-change-requests": "learned_skill_change_authority",
+    "manual-skill-removal-requests": "manual_skill_removal_authority",
+    "learning-conflict-requests": "learning_check_admission_authority",
+    "learning-pass-requests": "learning_pass_admission_authority",
+    "learning-flywheel-requests": "learning_flywheel_admission_authority",
+    "learning-distinction-requests": "learning_distinction_admission_authority",
+    "reward-training-requests": "ranking_training_admission_authority",
+    "shared-decision-evidence": "decision_evidence_permission_authority",
+    "commitment-capability": "commitment_capability_source_authority",
+    "local-work-restructuring": "work_restructuring_source_authority",
+    "portable-competence-requests": "portable_competence_source_authority",
+    "private-task-computation": "private_task_computation_source_authority",
+    "recovery-visibility-practices": "recovery_visibility_source_authority",
+    "procedure-interaction-requests": "procedure_interactions_source_authority",
+    "request-specific-programs": "request_program_source_authority",
+    "operator-acquisition": "operator_acquisition_source_authority",
+    "governed-rule-evolution": "governed_rule_evolution_source_authority",
+    "local-rule-applicability": "applicability_regions_source_authority",
+    "agent-override-removal-requests": "agent_override_change_authority",
+    "automation-import-requests": "automation_import_source_authority",
+    "generated-tool-removals": "generated_tool_removal_authority",
+    "viewpoints-requests": "viewpoints_request_source_authority",
+    "settings-catalog-requests": "settings_catalog_request_authority",
+    "consent-withdrawal-requests": "consent_withdrawal_request_authority",
+    "workflow-step-checks": "workflow_step_check_source_authority",
+    "commitment-economic-alternatives": "commitment_economic_alternatives_source_authority",
+    "local-rule-requalification": "rule_requalification_authority",
+    "learning-case-requests": "learning_case_write_authority",
+    "learning-case-setup-requests": "learning_case_setup_authority",
+    "learning-holdout-initializations": "learning_holdout_initialization_authority",
+    "learning-holdout-requests": "learning_holdout_setup_authority",
+    "learning-pending-requests": "learning_question_decision_authority",
+    "learning_job_observations": "learning_original_observation_authority",
+    "local-flow-comparisons": "local_flow_comparison_authority",
+    "local-flow-release-effects": "local_flow_release_effect_authority",
+    "local-flow-release-targets": "local_flow_release_target_authority",
+    "model-answer-score-requests": "answer_score_admission_authority",
     "imessage-intake-cursors": "imessage_intake_cursor_authority",
     "model_risk_portfolio_snapshots": "model_risk_portfolio_authority",
     "outcome_value_evidence": "outcome_value_evidence_authority",
@@ -82,6 +154,67 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "security_risks": "security_risk_authority",
     "security_vendors": "security_vendor_authority",
     "vendor_renewal_observations": "vendor_renewal_observation_authority",
+    # Company sign-in: uploaded SAML metadata, certificates and keys, the
+    # reviewed setup, provider sign-in checks and local-owner migration.  These
+    # carry credential and identity authority; a restored copy is retained and
+    # blocks start until current custody is reconciled (never replayed or
+    # silently discarded).
+    "company-saml-materials": "company_saml_credential_authority",
+    "company-saml-setups": "company_saml_setup_authority",
+    "company-signin-tests": "company_signin_test_authority",
+    "company-signin-migrations": "company_signin_migration_authority",
+    # Saved remote Knowledge sources pin an account/container, publish
+    # reviewed snapshots for specialist use and journal paid refresh work.
+    "knowledge-remote-sources": "knowledge_remote_source_authority",
+    "knowledge-source-refreshes": "knowledge_source_refresh_execution_authority",
+    "knowledge-source-snapshots": "knowledge_source_snapshot_authority",
+    "knowledge-source-decisions": "knowledge_source_decision_authority",
+    # Reviewed single sends: a restored request must never resend.
+    "channel-test-requests": "channel_test_dispatch_authority",
+    "personal-alert-tests": "personal_alert_test_dispatch_authority",
+    # Reviewed specialist publication and vendor identity decisions.
+    "specialist-drafts": "specialist_draft_publication_authority",
+    "vendor-profile-decisions": "vendor_profile_decision_authority",
+    # Exact retained safety-settings copies and reviewed restore requests are
+    # runtime-override authority: a restored copy must not reapply itself.
+    "runtime-policy-copies": "runtime_policy_copy_authority",
+    "runtime-policy-requests": "runtime_policy_restore_request_authority",
+    # Digest-only evidence of guarded connector attempts, and the retained
+    # native-authority pins the AI governance loop decides against.
+    "runtime-enforcement": "runtime_enforcement_evidence_authority",
+    "ai-governance-source-pins": "ai_governance_source_pin_authority",
+    # Reviewed business fields keep their exact operation outcomes as replay
+    # barriers; independent audit checkpoint copies are second-person approved
+    # uploads whose unknown outcomes are never repeated.
+    "work-record-details": "work_record_detail_authority",
+    "audit-checkpoint-custody": "audit_checkpoint_custody_authority",
+}
+
+# These governed records cannot authorize source work, change budget limits or
+# grant source access. Preserve them as ordinary customer data. The explicit
+# registry distinguishes this reviewed decision from an accidentally unmapped
+# authority. Consumers still validate schema, owner and current source access.
+NON_AUTHORIZING_GOVERNED_NAMESPACES = frozenset({
+    "action_center_preferences", "personal_budget_warnings", "project_workspace_defaults",
+})
+
+# File authorities from customer workflows have the same anti-rollback needs
+# as governed records. None currently has an intrinsic authenticated rebind
+# transformation, so bootstrap retains the bytes and blocks admission.
+CUSTOMER_FILE_AUTHORITY_POLICIES = {
+    "employee_companions": "employee_companion_policy_authority",
+    "personal-data": "personal_identity_link_authority",
+    "personal-memory": "personal_memory_consent_authority",
+    "personal-notifications": "personal_notification_delivery_authority",
+    "device-pairing": "device_credential_authority",
+    "model-tests": "model_test_dispatch_authority",
+    "knowledge-reindex": "knowledge_reindex_execution_authority",
+    "knowledge-task-context": "knowledge_task_binding_authority",
+    "plugin-flow-pins": "plugin_execution_pin_authority",
+    "plugin-task-pins": "plugin_execution_pin_authority",
+    "plugin-workbench": "plugin_qualification_authority",
+    "goal-share-previews": "external_share_dispatch_authority",
+    "retention-runs": "retention_dispatch_authority",
 }
 
 # These customer records are part of the supported application-level restore
@@ -97,6 +230,17 @@ APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES = {
 # than literal namespace declarations.  Both supported sinks are enumerated so
 # restored request/outcome delivery state cannot fall through the literal-store
 # completeness check.
+# Per-person private push (ntfy) stores are named ``<kind>-<32 hex>`` from a
+# digest of the owner. Destinations hold the private topic; results hold
+# send receipts that must never allow a blind resend after a restore.
+PERSONAL_PUSH_AUTHORITY_POLICIES = {
+    "private-push-destinations": "personal_push_destination_authority",
+    "private-push-results": "personal_push_delivery_receipt_authority",
+}
+_PERSONAL_PUSH_NAMESPACE = re.compile(
+    r"(private-push-destinations|private-push-results)-[0-9a-f]{32}"
+)
+
 DYNAMIC_JSON_AUTHORITY_POLICIES = {
     "identity_governance_alert_outcomes": "identity_delivery_outcome_authority",
     "identity_governance_alert_requests": "identity_change_request",
@@ -131,6 +275,9 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
     if not is_sqlite and name.endswith(".lock"):
         return None
 
+    if len(parts) > 1 and parts[0] in TENANT_LIFECYCLE_AUTHORITY_POLICIES:
+        return TENANT_LIFECYCLE_AUTHORITY_POLICIES[parts[0]]
+
     if _contains(parts, "a2a", "tasks.authority.sealed"):
         # This is a database-generation/anti-downgrade receipt, not a credential
         # or a cache. Restoring it requires current shared authority readback;
@@ -162,6 +309,11 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "privacy_identity_key_authority"
     if _contains(parts, "keys", "dek.wrapped"):
         return "wrapped_tenant_dek"
+    if _contains(parts, "privacy_automation", "discovery-data-use-key.sealed"):
+        # Tenant-sealed key for the discovery data-use database (itself an
+        # unknown, blocking SQLite). Retain it with that database; a missing or
+        # rolled-back key must never be silently regenerated over saved data.
+        return "privacy_discovery_data_use_key"
     tenant_scoped_root = len(parts) == 1 or (
         len(parts) >= 3 and parts[-3] == "tenants"
     )
@@ -225,6 +377,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "goal_template_authority"
     if "forms" in parts[:-1]:
         return "form_event_authority"
+    if "form-recovery" in parts[:-1]:
+        # Signed owner decisions and their accepted markers suppress execution.
+        # An older restored absence could revive a deliberately stopped form row.
+        return "form_decision_authority"
     if "repl" in parts[:-1]:
         return "repl_execution_authority"
     if "adapters" in parts[:-1]:
@@ -290,6 +446,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "governance_reference_keyring"
     if _contains(parts, "governance_inventory", "integrity.key"):
         return "governance_inventory_key"
+    if _contains(parts, "notification-links", "signing.key"):
+        # Signs one-action mute/unsubscribe links; a restored or rolled-back
+        # key would let old links act again, so it stays custody authority.
+        return "notification_link_signing_key"
     if _contains(parts, "tech_risk_compliance", "grc-studio", "integrity.key"):
         return "grc_studio_integrity_key"
     if _contains(parts, "harness", "addenda.json"):
@@ -312,18 +472,22 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         "handoff_nonces.json": "handoff_nonce",
         "provider_spend.json": "provider_spend",
         "provider_spend.json.required": "provider_spend_required",
+        "provider_spend.sqlite3.active": "provider_spend_required",
+        "provider_spend.sqlite3.seal": "provider_spend_required",
         "tenant_registry.json": "tenant_registry",
         "dashboard-owner.json": "dashboard_owner",
         "saml-consumed-assertions.json": "saml_replay",
         "session-revocations.json": "session_revocation",
         "oidc-subjects.json": "oidc_subject_directory",
         "oidc-retired-subjects.json": "oidc_subject_tombstone",
+        "channel-oidc-bridge.json": "channel_oidc_identity_link_authority",
         "dashboard-users.json": "dashboard_user_roles",
         "dashboard-custom-roles.json": "dashboard_custom_roles",
         "dashboard-tenant-roles.json": "dashboard_tenant_roles",
         "dashboard-invites.json": "dashboard_invites",
         "dashboard-user-suites.json": "dashboard_suite_grants",
         "dashboard-session.key": "dashboard_session_secret",
+        "dashboard-passphrases.json": "dashboard_local_passphrases",
         "scim_users.json": "scim_user_directory",
         "scim_groups.json": "scim_group_directory",
         "scim_groups.audit-outbox.json": "scim_audit_delivery",
@@ -379,6 +543,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
     exact = exact_names.get(name)
     if exact is not None:
         return exact
+    if name == "notification-deliveries.json":
+        return "notification_dispatch_authority"
+    if name.endswith(".ownership.json"):
+        return "generated_content_owner_authority"
     if name.startswith("budget_receipts."):
         return "budget_receipt"
     if name == "retention.index" and "draft-recovery" in parts[:-1]:
@@ -392,6 +560,7 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         **GLOBAL_START_JSON_AUTHORITY_POLICIES,
         **APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES,
         **DYNAMIC_JSON_AUTHORITY_POLICIES,
+        **CUSTOMER_FILE_AUTHORITY_POLICIES,
         "usage": "usage_ledger",
         "grc_sync_outbound": "grc_delivery",
         "grc_outbound_sync_states": "grc_delivery_state",
@@ -418,6 +587,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         "finance_screening_lists": "finance_screening_list_authority",
         "finance_screening_list_metadata": "finance_screening_metadata_authority",
         "dsar_fulfillment": "dsar_delivery_authority",
+        # Public rights-request form: per-property intake settings and the
+        # correspondence templates sent back to requesters.
+        "rights_form_properties": "dsar_request_authority",
+        "rights_templates": "dsar_delivery_authority",
         "discovery_containment_bindings": "containment_binding",
         "discovery_containment_actions": "containment_action",
         "provider_accounting_reviews": "provider_accounting_review",
@@ -451,6 +624,7 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
             "conditional_access_authority"
         ),
         "knowledge-correction-sources": "knowledge_correction_authority",
+        "knowledge-rights-archive": "knowledge_access_authority",
         "knowledge-rights-requests": "knowledge_access_authority",
         "llm_gateway": "llm_caller_authority",
         "model_risk_decisions": "model_risk_decision_authority",
@@ -475,13 +649,20 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
     for namespace, policy in namespace_policies.items():
         if namespace in parts[:-1]:
             return policy
+    for part in parts[:-1]:
+        matched = _PERSONAL_PUSH_NAMESPACE.fullmatch(part)
+        if matched:
+            return PERSONAL_PUSH_AUTHORITY_POLICIES[matched.group(1)]
 
     if is_sqlite:
+        if name == "provider_spend.sqlite3":
+            return "provider_spend_sqlite"
         normalized = "/".join(parts)
         sqlite_policies = {
             "jobs.db": "jobs",
             "world.db": "world",
             "knowledge.db": "passive_sqlite",
+            "provider_spend.sqlite3": "provider_spend_sqlite",
             "entity_graph/graph.db": "passive_sqlite",
             "privacy_automation/privacy-data-discovery.sqlite3": "privacy_discovery",
             "privacy_automation/privacy-discovery-remediation.sqlite3": "privacy_remediation",
@@ -525,6 +706,13 @@ DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES = {
 # Malformed channel records also block globally; valid records instead enter
 # the channel reconciliation protocol while retaining their exact receipts.
 GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
+    ".tenant-namespaces/aa/" + "a" * 64 + ".json": "tenant_namespace_reservation",
+    ".tenant-deletions/" + "b" * 64 + ".json": "tenant_deletion_tombstone",
+    "notification-deliveries.json": "notification_dispatch_authority",
+    "generated_tools/example.ownership.json": "generated_tool_authority",
+    "custom/example.ownership.json": "generated_content_owner_authority",
+    **{f"{namespace}/record.enc": policy
+       for namespace, policy in CUSTOMER_FILE_AUTHORITY_POLICIES.items()},
     "a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
     "tenants/tenant-a/a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
     "config.toml": "tenant_configuration_authority",
@@ -566,12 +754,16 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "session-revocations.json": "session_revocation",
     "oidc-subjects.json": "oidc_subject_directory",
     "oidc-retired-subjects.json": "oidc_subject_tombstone",
+    "channel-oidc-bridge.json": "channel_oidc_identity_link_authority",
     "dashboard-users.json": "dashboard_user_roles",
     "dashboard-custom-roles.json": "dashboard_custom_roles",
     "dashboard-tenant-roles.json": "dashboard_tenant_roles",
     "dashboard-invites.json": "dashboard_invites",
     "dashboard-user-suites.json": "dashboard_suite_grants",
     "dashboard-session.key": "dashboard_session_secret",
+    "dashboard-passphrases.json": "dashboard_local_passphrases",
+    "notification-links/signing.key": "notification_link_signing_key",
+    "privacy_automation/discovery-data-use-key.sealed": "privacy_discovery_data_use_key",
     "scim_users.json": "scim_user_directory",
     "scim_groups.json": "scim_group_directory",
     "scim_groups.audit-outbox.json": "scim_audit_delivery",
@@ -638,6 +830,8 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "task_graphs/recovered.json": "task_graph_authority",
     "templates/recovered.md": "goal_template_authority",
     "forms/recovered.ndjson": "form_event_authority",
+    "form-recovery/example.ndjson": "form_decision_authority",
+    "form-recovery/example.ndjson.accepted": "form_decision_authority",
     "repl/recovered/session.json": "repl_execution_authority",
     "adapters/active.json": "adapter_runtime_authority",
     "adapters/payloads/adapter-a/weights.gguf": "adapter_runtime_authority",
@@ -696,6 +890,8 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
         "finance_screening_metadata_authority"
     ),
     "dsar_fulfillment/DSF-a.json": "dsar_delivery_authority",
+    "rights_form_properties/RFP-a.json": "dsar_request_authority",
+    "rights_templates/RTPL-a.json": "dsar_delivery_authority",
     "ai_discovery_sensor_identities/SEN-a.json": "sensor_identity_authority",
     "ai_evidence_packet_replays/AIP-a.json": "evidence_packet_replay_authority",
     "ai_evidence_policies/AIP-a.json": "evidence_policy_authority",
@@ -720,6 +916,7 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
         "conditional_access_authority"
     ),
     "knowledge-correction-sources/KCS-a.json": "knowledge_correction_authority",
+    "knowledge-rights-archive/KRA-a.json": "knowledge_access_authority",
     "knowledge-rights-requests/KRR-a.json": "knowledge_access_authority",
     "llm_gateway/LGC-a.json": "llm_caller_authority",
     "model_risk_decisions/MRD-a.json": "model_risk_decision_authority",
@@ -748,6 +945,10 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
         f"{namespace}/recovered.json": policy
         for namespace, policy in DYNAMIC_JSON_AUTHORITY_POLICIES.items()
         if policy != "identity_change_request"
+    },
+    **{
+        f"{kind}-{'c' * 32}/recovered.json": policy
+        for kind, policy in PERSONAL_PUSH_AUTHORITY_POLICIES.items()
     },
 }
 
@@ -793,6 +994,9 @@ AUTHORITY_SAMPLES = {
     "budget_receipts.jsonl": "budget_receipt",
     "provider_spend.json": "provider_spend",
     "provider_spend.json.required": "provider_spend_required",
+    "provider_spend.sqlite3": "provider_spend_sqlite",
+    "provider_spend.sqlite3.active": "provider_spend_required",
+    "provider_spend.sqlite3.seal": "provider_spend_required",
     "tenant_registry.json": "tenant_registry",
     "dashboard-owner.json": "dashboard_owner",
     "privacy_automation/privacy-data-discovery.sqlite3": "privacy_discovery",
@@ -809,10 +1013,14 @@ AUTHORITY_SAMPLES = {
 
 
 __all__ = [
+    "TENANT_LIFECYCLE_AUTHORITY_POLICIES",
     "APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES",
+    "CUSTOMER_FILE_AUTHORITY_POLICIES",
+    "NON_AUTHORIZING_GOVERNED_NAMESPACES",
     "AUTHORITY_SAMPLES",
     "DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES",
     "DYNAMIC_JSON_AUTHORITY_POLICIES",
+    "PERSONAL_PUSH_AUTHORITY_POLICIES",
     "GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES",
     "GLOBAL_START_JSON_AUTHORITY_POLICIES",
     "authority_policy",

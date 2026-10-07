@@ -2,7 +2,7 @@
 
 Enable **Project team reviews** in Settings. The capability is off by default
 and requires a named signed-in human and an active workspace. An administrator
-can add a colleague's workspace role from **Users & roles → Members of this
+can add a colleague's workspace role from **Users → Members of this
 workspace**, using the existing tenant role authority. Assigning an operator
 role does not grant every department: the colleague's current department grants
 still apply. Per-user isolated tenancy refuses tenant role assignments through

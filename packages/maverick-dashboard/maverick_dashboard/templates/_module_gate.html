@@ -19,11 +19,18 @@
   `status` (optional): the module's shipped / preview / external status from
   maverick.compliance_catalog. When set, the banner also shows the matching
   status badge, so a gated module carries the same honest label as the
-  Autonomous Compliance product page. The class/label map below mirrors
+  Autonomous compliance product page. The class/label map below mirrors
   compliance_catalog.STATUS_BADGE_CLASS / STATUS_LABELS -- keep them in step.
   An empty or unknown status is fully backward-compatible: it renders nothing.
 #}
 {% macro module_gate(section, label, detail='', can_activate=true, status='') %}
+{#- Mid-sentence, an ordinary phrase starts lower-case ("Turn on consent
+    delivery"), but acronyms keep their capitals ("AI system tasks", "DSAR
+    fulfillment", "No-code GRC studio" -> "no-code GRC studio") and so do
+    names: a single word ("Databricks") or a phrase with a later capitalised
+    word ("Consumer Trust Center"). -#}
+{% set _name = namespace(keep=not label[1:2].islower() or ' ' not in label) %}
+{% for _word in label.split(' ')[1:] %}{% if _word[:1].isupper() and _word[1:2].islower() %}{% set _name.keep = true %}{% endif %}{% endfor %}
 {% set _status_badges = {
   'shipped': ('ok', 'Shipped'),
   'preview': ('warn', 'Preview'),
@@ -38,7 +45,7 @@
   {# The shell marks whether this viewer can turn modules on; a viewer who
      cannot sees who can instead of a button that would fail. #}
   <span class="mg-actions mg-admin-only">
-    <button type="button" class="btn btn--primary mg-on">Turn on {{ label|lower }}</button>
+    <button type="button" class="btn btn--primary mg-on">Turn on {{ label if _name.keep else label[:1]|lower ~ label[1:] }}</button>
   </span>
   <span class="mg-actions muted mg-nonadmin-note" role="note">Ask an administrator to turn this on.</span>
   {% else %}

@@ -19,6 +19,7 @@ decision (an invite that can't be emailed still shows its copyable link).
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,18 @@ SMTP_TIMEOUT = 30.0
 
 class MailerError(RuntimeError):
     """A send failed (bad config, refused headers, SMTP error)."""
+
+
+class MailerNotSent(MailerError):
+    """The effect was not started, or the single recipient was explicitly refused."""
+
+
+def sending_scope() -> dict[str, str]:
+    """Private current account pin; never return this mapping in a product response."""
+    return {key: _cfg(key, env, default) for key, env, default in (
+        ("provider", "EMAIL_PROVIDER", "smtp"), ("user", "EMAIL_USER", ""),
+        ("app_password", "EMAIL_APP_PASSWORD", ""), ("from", "EMAIL_FROM", ""),
+        ("smtp_host", "EMAIL_SMTP_HOST", "smtp.gmail.com"), ("smtp_port", "EMAIL_SMTP_PORT", "465"))}
 
 
 def _cfg(key: str, env: str, default: str = "") -> str:
@@ -78,60 +91,73 @@ def configured() -> bool:
     return bool(_cfg("user", "EMAIL_USER") and _cfg("app_password", "EMAIL_APP_PASSWORD"))
 
 
-def send(to: str, subject: str, body: str, *, transport=None) -> None:
+def send(to: str, subject: str, body: str, *, transport=None, before_effect=None) -> None:
     """Send a plain-text platform email. Raises :class:`MailerError` on any
     problem; never returns partial success. ``transport`` is injectable for
     tests: a callable ``(host, port, user, password, msg) -> None``."""
     if sending_disabled():
-        raise MailerError("email send disabled (MAVERICK_EMAIL_DISABLE=1 or [email] disable)")
+        raise MailerNotSent("Email sending is disabled.")
 
     to = (to or "").strip()
     subject = (subject or "").strip()
     if not to or not subject:
-        raise MailerError("send requires a recipient and a subject")
+        raise MailerNotSent("Send requires a recipient and a subject.")
     # Reject CR/LF in header fields: a newline smuggles extra headers (e.g. a
     # hidden Bcc:) into the message. Same guard as the email tool.
     for field, val in (("to", to), ("subject", subject)):
         if "\r" in val or "\n" in val:
-            raise MailerError(f"newline in email `{field}` (header injection blocked)")
+            raise MailerNotSent(f"Invalid email {field}.")
 
-    provider = _cfg("provider", "EMAIL_PROVIDER", "smtp").lower()
+    original_scope = sending_scope()
+    provider = original_scope["provider"].lower()
+
+    def check_effect():
+        if sending_disabled() or sending_scope() != original_scope:
+            raise MailerNotSent("The sending account changed or sending was disabled. Review the current setup.")
+        if before_effect:
+            before_effect()
 
     # Amazon SES API path: sends with the ambient AWS role (the ECS task role) —
     # no stored SMTP credential. The From must be a verified SES identity.
     if provider == "ses":
-        from_addr = _cfg("from", "EMAIL_FROM")
+        from_addr = original_scope["from"]
         if not from_addr:
-            raise MailerError("EMAIL_PROVIDER=ses requires EMAIL_FROM (a verified SES identity)")
+            raise MailerNotSent("Choose a verified sending address in Email settings.")
         if "\r" in from_addr or "\n" in from_addr:
-            raise MailerError("newline in email `from` (header injection blocked)")
+            raise MailerNotSent("Invalid sending address.")
         try:
-            (transport or _ses_send)(from_addr, to, subject, body)
+            if transport:
+                from .authority_effects import authority_effect_fence
+                with authority_effect_fence() if before_effect else nullcontext():
+                    check_effect()
+                    transport(from_addr, to, subject, body)
+            else:
+                _ses_send(from_addr, to, subject, body, before_effect=check_effect if before_effect else None)
         except MailerError:
             raise
         except Exception as e:  # noqa: BLE001 - surface a compact, typed failure
-            raise MailerError(f"ses send failed: {type(e).__name__}: {e}") from e
-        log.info("mailer.send(ses): %s subject=%r", to, subject)
+            raise MailerError(f"Email sending failed ({type(e).__name__}).") from e
+        log.info("Platform email accepted by the sending service.")
         return
 
     # SMTP path (Gmail-style accounts, or any SMTP relay).
-    user = _cfg("user", "EMAIL_USER")
-    pw = _cfg("app_password", "EMAIL_APP_PASSWORD")
+    user = original_scope["user"]
+    pw = original_scope["app_password"]
     if not user or not pw:
-        raise MailerError("no sending account configured "
+        raise MailerNotSent("no sending account configured "
                           "(EMAIL_USER + EMAIL_APP_PASSWORD / [email])")
-    host = _cfg("smtp_host", "EMAIL_SMTP_HOST", "smtp.gmail.com")
-    port_raw = _cfg("smtp_port", "EMAIL_SMTP_PORT", "465")
+    host = original_scope["smtp_host"]
+    port_raw = original_scope["smtp_port"]
     try:
         port = int(port_raw)
     except ValueError as e:
-        raise MailerError(f"bad smtp_port: {port_raw!r}") from e
+        raise MailerNotSent("Choose a valid email server port in Settings.") from e
 
     # From: an explicit EMAIL_FROM when set, else the SMTP user (which is the
     # address itself for Gmail-style accounts, so existing setups are unchanged).
-    from_addr = _cfg("from", "EMAIL_FROM") or user
+    from_addr = original_scope["from"] or user
     if "\r" in from_addr or "\n" in from_addr:
-        raise MailerError("newline in email `from` (header injection blocked)")
+        raise MailerNotSent("Invalid sending address.")
 
     from email.message import EmailMessage
     msg = EmailMessage()
@@ -140,17 +166,22 @@ def send(to: str, subject: str, body: str, *, transport=None) -> None:
     msg["Subject"] = subject
     msg.set_content(body)
 
-    sender = transport or _smtp_transport
     try:
-        sender(host, port, user, pw, msg)
+        if transport:
+            from .authority_effects import authority_effect_fence
+            with authority_effect_fence() if before_effect else nullcontext():
+                check_effect()
+                transport(host, port, user, pw, msg)
+        else:
+            _smtp_transport(host, port, user, pw, msg, before_effect=check_effect if before_effect else None)
     except MailerError:
         raise
     except Exception as e:  # noqa: BLE001 - surface a compact, typed failure
-        raise MailerError(f"smtp send failed: {type(e).__name__}: {e}") from e
-    log.info("mailer.send: %s subject=%r", to, subject)
+        raise MailerError(f"Email sending failed ({type(e).__name__}).") from e
+    log.info("Platform email accepted by the sending service.")
 
 
-def _ses_send(from_addr: str, to: str, subject: str, body: str) -> None:
+def _ses_send(from_addr: str, to: str, subject: str, body: str, *, before_effect=None) -> None:
     """Send one plain-text email via the Amazon SES API using the ambient AWS
     credential chain (on ECS, the task role). Region from ``AWS_REGION``. Needs
     the optional ``boto3`` dependency (the ``[s3]`` extra), imported lazily so the
@@ -159,29 +190,47 @@ def _ses_send(from_addr: str, to: str, subject: str, body: str) -> None:
     try:
         import boto3
     except ModuleNotFoundError as e:  # pragma: no cover - depends on install extra
-        raise MailerError(
+        raise MailerNotSent(
             "EMAIL_PROVIDER=ses needs boto3 (install the maverick-core [s3] extra)"
         ) from e
+    from botocore.config import Config
+
+    from .authority_effects import authority_effect_fence
     client = boto3.client(
         "ses",
         region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or None,
         endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None,
+        config=Config(connect_timeout=SMTP_TIMEOUT, read_timeout=SMTP_TIMEOUT, retries={"max_attempts": 0}),
     )
-    client.send_email(
-        Source=from_addr,
-        Destination={"ToAddresses": [to]},
-        Message={"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}},
-    )
+    with authority_effect_fence() if before_effect else nullcontext():
+        if before_effect:
+            try:
+                before_effect()
+            except Exception as exc:
+                raise MailerNotSent("The reviewed email permission changed before sending.") from exc
+        client.send_email(Source=from_addr, Destination={"ToAddresses": [to]},
+                          Message={"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}})
 
 
-def _smtp_transport(host: str, port: int, user: str, pw: str, msg) -> None:
+def _smtp_transport(host: str, port: int, user: str, pw: str, msg, *, before_effect=None) -> None:
     import smtplib
-    if port == 465:
-        with smtplib.SMTP_SSL(host, port, timeout=SMTP_TIMEOUT) as s:
+
+    from .authority_effects import authority_effect_fence
+    started = False
+    try:
+        constructor = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
+        with constructor(host, port, timeout=SMTP_TIMEOUT) as s:
+            if port != 465:
+                s.starttls()
             s.login(user, pw)
-            s.send_message(msg)
-    else:
-        with smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT) as s:
-            s.starttls()
-            s.login(user, pw)
-            s.send_message(msg)
+            with authority_effect_fence() if before_effect else nullcontext():
+                if before_effect:
+                    before_effect()
+                started = True
+                refused = s.send_message(msg)
+                if refused:
+                    raise smtplib.SMTPRecipientsRefused(refused)
+    except Exception as exc:
+        if not started or isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError)):
+            raise MailerNotSent("Email was not sent. Check the account, recipient and current permission.") from exc
+        raise

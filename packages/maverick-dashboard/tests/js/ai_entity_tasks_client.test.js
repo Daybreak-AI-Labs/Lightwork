@@ -172,6 +172,7 @@ test("empty update and malformed collaborator references fail before transport",
 
 // ---- page behaviour (jsdom) -------------------------------------------
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require("./_shell");
 const pageTemplate = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/ai_entity_tasks.html"), "utf8");
 const pageSource = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ai-entity-tasks.js"), "utf8");
 const pageBody = pageTemplate.slice(pageTemplate.indexOf('<div class="aet-shell"'), pageTemplate.lastIndexOf("{% endblock %}", pageTemplate.indexOf("{% block scripts_extra %}")))
@@ -206,6 +207,7 @@ function page(t) {
     if (key.startsWith("POST /api/v1/ai-entity-tasks") && !key.includes("operations")) return streamed({ ...TASK, task_id: "task-2" }, 201);
     return streamed({ count: 0, items: [] });
   };
+  loadShell(w);
   w.eval(pageSource);
   const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
   return { w, calls, settle, $: (id) => w.document.getElementById(id) };
@@ -251,4 +253,50 @@ test("creating a task pins the AI system version from the picker", async (t) => 
   assert.equal(post.body.entity_id, "asset-7");
   assert.equal(post.body.entity_revision, 8);
   assert.equal(post.body.assignee_ref, "person:abc");
+});
+
+// ---- no loader keeps saying "Loading" ---------------------------------------
+function settledPage(t, answer, moduleEnabled = "") {
+  const dom = new JSDOM(`<main>${pageBody}</main>`, { url: "https://lightwork.test/ai-entity-tasks", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  w.TextDecoder = TextDecoder;
+  w.document.getElementById("ai-entity-task-shell").dataset.moduleEnabled = moduleEnabled;
+  w.mvErrorText = (failure, action) => "Could not " + action + ". Try again in a few minutes.";
+  const calls = [];
+  w.fetch = async (url) => { calls.push(String(url)); return answer(String(url)); };
+  loadShell(w);
+  w.eval(pageSource);
+  const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
+  return { w, calls, settle, text: (id) => w.document.getElementById(id).textContent };
+}
+
+test("a failed availability check leaves no task loader spinning", async (t) => {
+  const h = settledPage(t, () => streamed({ detail: "unavailable" }, 503));
+  await h.settle();
+  assert.equal(h.text("aet-readiness"), "Unavailable");
+  assert.equal(h.text("aet-list-status"), "Could not load the tasks. Try again in a few minutes.");
+  assert.doesNotMatch(h.text("aet-list-status") + h.text("aet-readiness-detail") + h.text("aet-inventory-status"), /Loading|Checking/);
+});
+
+test("unfinished setup says when tasks will appear instead of loading forever", async (t) => {
+  const h = settledPage(t, () => streamed({ enabled: true, configured: false, ready: false }));
+  await h.settle();
+  assert.equal(h.text("aet-readiness"), "Setup not finished");
+  assert.equal(h.text("aet-list-status"), "Tasks appear here once an administrator finishes the setup.");
+  assert.equal(h.text("aet-inventory-status"), "AI systems can be chosen once an administrator finishes the setup.");
+});
+
+test("a server that reports the module off says so without pointing at a missing gate", async (t) => {
+  const h = settledPage(t, () => streamed({ enabled: false, configured: false, ready: false }));
+  await h.settle();
+  assert.equal(h.text("aet-readiness-detail"), "AI system tasks are turned off. Ask an administrator to turn them on.");
+  assert.equal(h.text("aet-list-status"), "Tasks appear here once AI system tasks are turned on.");
+  assert.equal(h.text("aet-inventory-status"), "AI systems can be chosen once AI system tasks are turned on.");
+});
+
+test("a turned-off module starts no checks or loads behind its gate", async (t) => {
+  const h = settledPage(t, () => { throw new Error("no request expected"); }, "false");
+  await h.settle();
+  assert.deepEqual(h.calls, []);
 });

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Consent & Preferences · Lightwork{% endblock %}
+{% block title %}Consent and preferences · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set cp_on = consent_preferences_enabled %}
 {% set cp_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set cr_on = consent_registry_enabled if consent_registry_enabled is defined else true %}
 <div class="governance-workbench" id="cp-root" data-can-admin="{{ 'true' if cp_admin else 'false' }}" data-feature-enabled="{{ 'true' if cp_on else 'false' }}" data-registry-enabled="{{ 'true' if cr_on else 'false' }}">
-  {{ hero('Consent management', 'Consent & Preferences',
+  {{ hero('Consent management', 'Consent and preferences',
           lede='Set the consent policies people agree to, record and check each person’s choices, and control which trackers may run.') }}
   {% include "_consent_nav.html" %}
   {% if not cp_on %}
@@ -40,7 +40,7 @@
   <section class="panel" aria-labelledby="cp-policy-heading">
     <div class="section-head">
       <h2 id="cp-policy-heading">Consent policies</h2>
-      <button class="btn btn--primary" id="cp-policy-new" type="button"{% if not cp_on or not cp_admin %} disabled{% endif %}>New policy</button>
+      <button class="btn btn--primary" id="cp-policy-new" type="button"{% if not cp_on or not cp_admin %} disabled{% endif %}>Create policy</button>
     </div>
     <p class="muted">A policy lists what you use personal data for and the legal reason for each use. Publishing creates a new version; earlier versions are kept.</p>
     {% if not cp_admin %}<p class="muted">Only an administrator can publish policies.</p>{% endif %}
@@ -148,7 +148,7 @@
         <label>Partner<select class="select" name="vendor_id"></select></label>
         <label>Policy<select class="select" name="policy_key"></select></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Check</button>
+          <button class="btn btn--primary" type="submit">Check consent</button>
           <button class="btn btn--ghost" type="button" data-cp-close="cp-decision-form">Close</button>
         </div>
         <div id="cp-decision" class="cw-wide cw-result" role="status" aria-live="polite"></div>
@@ -242,22 +242,17 @@
   "use strict";
   var API="/api/v1/consent";
   var CW=window.LightworkConsentWorkbench;
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path,options){
-    var opts=Object.assign({cache:"no-store"},options||{});
-    if(opts.json!==undefined){opts.body=JSON.stringify(opts.json);opts.headers={"Content-Type":"application/json"};delete opts.json;}
-    var response=await fetch(API+path,opts);
-    var body;try{body=await response.json();}catch(_error){var bad=new Error("Request failed: the server returned an invalid JSON response.");bad.status=response.ok?0:response.status;throw bad;}
-    if(!response.ok){var failure=new Error(body&&typeof body.detail==="string"?body.detail:"Request failed.");failure.status=response.status;throw failure;}
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
-  if(CW)start();
+  if(CW){if(window.mvFetchJSON)start();else document.addEventListener("DOMContentLoaded",start);}
   function start(){
     var $=function(id){return document.getElementById(id);};
     var status=$("cp-status"),root=$("cp-root"),canAdmin=root.dataset.canAdmin==="true";
     var state={policies:[],profiles:[],trackers:[],notices:[]};
     var BASES={consent:"Consent",contract:"Needed for a contract",legal_obligation:"Required by law",vital_interests:"Protects someone’s life",public_task:"Public task",legitimate_interests:"Legitimate business interest"};
-    var REASONS={explicit_grant:"They said yes.",explicit_deny:"They said no.",explicit_revoke:"They took back an earlier yes.",explicit_withdraw:"They withdrew their consent.",unknown_profile:"This person was not found.",subject_deleted:"This person’s data has been deleted.",policy_context_required:"Choose a policy and try again.",no_current_policy:"There is no policy in effect for this use.",stale_policy:"Their choice was made under an older policy, so it no longer counts.",unknown_purpose:"This use is not in the policy.",external_lawful_basis_required:"This use relies on a legal reason other than consent, so it must be approved outside this check.",tracker_not_approved:"The tracker is not approved.",tracker_scope_mismatch:"The tracker is not approved for this use.",identity_linkage_unavailable:"Their linked account could not be checked.",linked_subject_deleted:"Their linked account has been deleted.",receipt_history_bound_exceeded:"This person has too many records to check here.",no_current_explicit_grant:"They have not said yes to this.",authority_unavailable:"Consent records could not be read, so the answer is no.",untrusted_receipt:"A consent record failed its integrity check, so the answer is no.",invalid_request:"Some details were missing."};
+    var REASONS={explicit_grant:"They said yes.",explicit_deny:"They said no.",explicit_revoke:"They took back an earlier yes.",explicit_withdraw:"They withdrew their consent.",unknown_profile:"This person was not found. Check the identifier and try again.",subject_deleted:"This person’s data has been deleted.",policy_context_required:"Choose a policy and try again.",no_current_policy:"There is no policy in effect for this use.",stale_policy:"Their choice was made under an older policy, so it no longer counts.",unknown_purpose:"This use is not in the policy.",external_lawful_basis_required:"This use relies on a legal reason other than consent, so it must be approved outside this check.",tracker_not_approved:"The tracker is not approved.",tracker_scope_mismatch:"The tracker is not approved for this use.",identity_linkage_unavailable:"Their linked account could not be checked. Refresh the page and try again.",linked_subject_deleted:"Their linked account has been deleted.",receipt_history_bound_exceeded:"This person has too many records to check here.",no_current_explicit_grant:"They have not said yes to this.",authority_unavailable:"Consent records could not be read, so the answer is no.",untrusted_receipt:"A consent record failed its integrity check, so the answer is no.",invalid_request:"Some details were missing."};
     var policyEditor=null;
     try{
       if(!window.LightworkConsentPolicyEditor||typeof window.LightworkConsentPolicyEditor.mount!=="function")throw new Error("missing");
@@ -335,7 +330,7 @@
       if(root.dataset.registryEnabled==="false")return;
       try{
         var posture=await call("/posture"),rows=Object.keys(posture.by_purpose||{}).map(function(k){return {purpose:k,granted:posture.by_purpose[k].granted,withdrawn:posture.by_purpose[k].withdrawn};});
-        CW.table($("cp-posture-table"),rows,{label:"Consent register",columns:[{label:"Use of data",value:function(r){return CW.human(r.purpose);}},{label:"Agreed",value:function(r){return r.granted;}},{label:"Withdrawn",value:function(r){return r.withdrawn;}}],empty:{title:"No choices in the register yet."}});
+        CW.table($("cp-posture-table"),rows,{label:"Consent register",columns:[{label:"Use of data",value:function(r){return CW.human(r.purpose);}},{label:"Agreed",value:function(r){return r.granted;}},{label:"Withdrawn",value:function(r){return r.withdrawn;}}],empty:{title:"No choices in the register yet. Choices appear here as people answer your consent requests."}});
         $("cp-posture").hidden=false;
       }catch(_error){$("cp-posture").hidden=true;}
     }

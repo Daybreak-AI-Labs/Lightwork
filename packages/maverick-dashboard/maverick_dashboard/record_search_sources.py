@@ -5,21 +5,37 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
-from .auth import goal_owner_filter, require_permission, require_suite, suite_allowed
-from .record_search import SOURCE_LIMIT, Source, item, link
+from .auth import (
+    domain_suites_allowed,
+    goal_owner_filter,
+    require_permission,
+    require_suite,
+    suite_allowed,
+)
+from .record_search import SOURCE_LIMIT, Source, SourceOff, item, link
+
+
+def _workspace(tenant_id):
+    """The selected workspace; a workspace-bound source with none selected is
+    off rather than failed (its own check answers 409)."""
+    try:
+        return tenant_id()
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise SourceOff("no workspace selected") from exc
+        raise
 
 
 def _tasks(request):
-    from maverick.domain import suite_for
-
     from .app import _deliverable_specs, _world
 
     require_permission(request, "view")
     rows = _world().list_goals(owner=goal_owner_filter(request), limit=SOURCE_LIMIT + 1, order="desc")
-    specs = {spec["domain"] for spec in _deliverable_specs()}
+    specs = ({spec["domain"] for spec in _deliverable_specs()}
+             if any(row.status == "done" and row.domain for row in rows[:SOURCE_LIMIT]) else set())
     out = []
     for row in rows[:SOURCE_LIMIT]:
-        if not suite_allowed(request, suite_for(row.domain) if row.domain else None):
+        if not domain_suites_allowed(request, row.domain):
             continue
         kind = "report" if row.status == "done" and row.domain in specs else "task"
         out.append(item(kind, row.id, row.title, href=f"/chat/goal/{row.id}", state=row.status, source="tasks"))
@@ -31,7 +47,10 @@ def _vendors(request):
 
     require_permission(request, "operate")
     require_suite(request, "privacy")
-    rows = vendor_management.list_vendors()
+    try:
+        rows = vendor_management.list_vendors()
+    except vendor_management.VendorManagementConfigError as exc:
+        raise SourceOff("vendor management is off") from exc
     return Source([item("vendor", row["id"], row.get("name"),
                         href="/privacy/vendors/" + quote(row["id"], safe=""),
                         state=row.get("status"), revision=row.get("revision"), source="vendor register")
@@ -39,8 +58,13 @@ def _vendors(request):
 
 
 def _onboarding(request):
-    from .vendor_onboarding_api import _binding, _call
+    from maverick.paths import current_tenant_id_strict
 
+    from .vendor_onboarding_api import _binding, _call
+    from .vendor_onboarding_composition import settings
+
+    if not current_tenant_id_strict() or not settings().enable:
+        raise SourceOff("vendor onboarding is off in this workspace")
     rows = _call(_binding(request), "list")
     out = []
     for row in rows[:SOURCE_LIMIT]:
@@ -90,7 +114,7 @@ def _vault(request):
     from .governed_document_vault_composition import governed_document_vault_enabled
 
     require_permission(request, "view")
-    tenant = _tenant_id()
+    tenant = _workspace(_tenant_id)
     probe = getattr(request.app.state, "governed_document_vault_enabled_probe", None)
     if (probe if callable(probe) else governed_document_vault_enabled)(tenant) is not True:
         raise HTTPException(403, "disabled")
@@ -103,11 +127,18 @@ def _vault(request):
 
 
 def _reports(request):
+    from maverick.third_party_executive_reports import ThirdPartyExecutiveReportConfigError
+
     from .third_party_executive_reports_api import _require_report_permission, _tenant_id
 
     _require_report_permission(request, "view")
-    tenant = _tenant_id()
-    selected = request.app.state.third_party_executive_reports_runtime_factory(tenant_id=tenant, request=request)
+    tenant = _workspace(_tenant_id)
+    try:
+        selected = request.app.state.third_party_executive_reports_runtime_factory(tenant_id=tenant, request=request)
+    except ThirdPartyExecutiveReportConfigError as exc:
+        if exc.error_code == "executive_report_disabled":
+            raise SourceOff("executive reports are off in this workspace") from exc
+        raise
     rows = selected.store.list_reports(caller_role=selected.role_view, limit=500)
     return Source([item("report", row.report_id, getattr(getattr(row, "brand", None), "report_title", "Executive report"),
                         href=link("/third-party/executive-reports", "report", row.report_id),
@@ -129,6 +160,17 @@ def _project_reviews(request):
                    for row in rows[:SOURCE_LIMIT]], len(rows) <= SOURCE_LIMIT)
 
 
+def _additional(request, source):
+    from maverick.metadata_history import HistoryNarrowing
+
+    from .record_history import load_window
+    try:
+        value = load_window(request, source, offset=0, after=None, before=None, oldest=False)
+    except HistoryNarrowing:
+        return Source([], False)
+    return Source(value.rows, value.next_offset is None)
+
+
 def sources_for(request, kind):
     sources = {
         "tasks": ({"task", "report"}, _tasks),
@@ -138,6 +180,9 @@ def sources_for(request, kind):
         "document vault": ({"evidence"}, _vault),
         "executive reports": ({"report"}, _reports),
         "project reviews": ({"decision"}, _project_reviews),
+        **{source: ({kind}, lambda request, source=source: _additional(request, source))
+           for source, kind in (("projects", "project"), ("workflows", "workflow"),
+                                ("automations", "automation"), ("connections", "connection"), ("facts", "fact"))},
     }
     return {name: (lambda load=load: load(request)) for name, (kinds, load) in sources.items()
             if kind == "all" or kind in kinds}

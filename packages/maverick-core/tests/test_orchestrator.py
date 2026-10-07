@@ -144,12 +144,37 @@ async def test_domain_build_failure_blocks_instead_of_falling_back(
         domain="broken",
     )
 
-    assert "agent build failed" in out
-    assert "Refusing to run without the requested domain capability envelope" in out
+    assert "setup needs review" in out
+    assert "No work was started" in out
     assert fake_llm.calls == []
     goal = world.get_goal(gid)
     assert goal.status == "blocked"
-    assert "agent build failed" in (goal.result or "")
+    assert "setup needs review" in (goal.result or "")
+
+
+@pytest.mark.asyncio
+async def test_inherited_suite_fork_refuses_ungranted_root_goal(
+    tmp_path: Path, monkeypatch, fake_llm,
+):
+    domains_dir = tmp_path / "domains"
+    domains_dir.mkdir()
+    (domains_dir / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(domains_dir))
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal("run in inherited specialist", "")
+
+    out = await run_goal(
+        llm=fake_llm, world=world, budget=Budget(max_dollars=1.0),
+        goal_id=gid, sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
+        domain="client_fork", allowed_suites=frozenset({"finance"}),
+    )
+
+    assert "outside your department access" in out
+    assert "No work was started" in out
+    assert fake_llm.calls == []
+    assert world.get_goal(gid).status == "blocked"
 
 
 @pytest.mark.asyncio

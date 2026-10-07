@@ -42,7 +42,7 @@ def _hashable_dist_path(path: str) -> bool:
     )
 
 
-def _dist_content_hash(dist_name: str) -> str | None:
+def _dist_content_hash(dist_name: str, *, portable_paths: bool = False) -> str | None:
     """SHA-256 over a distribution's installed load-affecting files.
 
     The lockfile is meant to detect a same-version plugin whose installed bytes
@@ -65,7 +65,7 @@ def _dist_content_hash(dist_name: str) -> str | None:
     candidates: dict[str, Path] = {}
     roots: set[tuple[str, Path]] = set()
     for f in pkg_files:
-        rel = str(f)
+        rel = str(f).replace("\\", "/") if portable_paths else str(f)
         if not _hashable_dist_path(rel):
             continue
         try:
@@ -75,14 +75,16 @@ def _dist_content_hash(dist_name: str) -> str | None:
         candidates[rel] = path
         first = Path(rel).parts[0]
         if first.endswith((".dist-info", ".egg-info")) or "." not in first:
-            roots.add((first, path.parents[len(Path(rel).parts) - 1]))
+            root_index = len(Path(rel).parts) - (2 if portable_paths else 1)
+            roots.add((first, path if root_index < 0 else path.parents[root_index]))
 
     for root_name, root_path in roots:
         try:
             if root_path.is_dir():
                 for child in root_path.rglob("*"):
                     if child.is_file():
-                        rel = str(Path(root_name, child.relative_to(root_path)))
+                        relative = Path(root_name, child.relative_to(root_path))
+                        rel = relative.as_posix() if portable_paths else str(relative)
                         if _hashable_dist_path(rel):
                             candidates.setdefault(rel, child)
         except Exception:

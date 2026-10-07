@@ -62,9 +62,9 @@
     chunks.forEach(function (chunk) { bytes.set(chunk, offset); offset += chunk.byteLength; });
     var text;
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Try again."); }
     try { return text ? JSON.parse(text) : {}; }
-    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw fail("Lightwork sent an answer this page could not read. Try again."); }
   }
 
   async function request(path, options) {
@@ -83,20 +83,20 @@
   function when(ts) {
     var n = Number(ts);
     if (!isFinite(n) || n <= 0) { return "—"; }
-    return new Date(n * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(n) : new Date(n * 1000).toLocaleString());
   }
   function errorText(failure, action) {
     if (failure && failure.plain) { return failure.message; }
-    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
+    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Try again.";
   }
 
   // The raw answer is kept only inside the collapsed "Technical details".
   function show(message, payload) {
-    operationState.textContent = message;
+    window.mvStatus(operationState, message);
     output.textContent = JSON.stringify(payload === undefined ? {} : payload, null, 2);
   }
   function showError(action) {
-    return function (failure) { operationState.textContent = errorText(failure, action); };
+    return function (failure) { window.mvStatus(operationState, errorText(failure, action), {error: true}); };
   }
 
   function newOperationId() {
@@ -259,7 +259,7 @@
       button.addEventListener("click", function () {
         current.focus = item.entity_ref_sha256;
         loadLinks(false).then(function () {
-          document.getElementById("sgi-links-title").scrollIntoView({ behavior: "smooth", block: "start" });
+          window.mvReveal(document.getElementById("sgi-links-title"));
         }).catch(showError("load the links"));
       });
       tr.appendChild(cell(button));

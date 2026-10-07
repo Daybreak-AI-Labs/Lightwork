@@ -76,7 +76,7 @@
         result.push({ jurisdiction: left, reconsent_after_days: integer(right, "Reconsent days", 1, 3650) });
       } else {
         if (!commonTrackers.has(left) || !analyticsCategories.has(right) || seen.has(left)) {
-          throw failure("field_invalid", "Analytics category assignments are invalid or duplicated.");
+          throw failure("field_invalid", "Some trackers have no category or more than one. Give each tracker one category, then save again.");
         }
         seen.add(left);
         result.push({ tracker: left, category: right });
@@ -90,7 +90,7 @@
     if (!Array.isArray(value)) throw failure("field_invalid", "Common trackers must be a list.");
     const result = [...new Set(value)];
     if (result.length !== value.length || result.length > commonTrackers.size || result.some((item) => !commonTrackers.has(item))) {
-      throw failure("field_invalid", "Common trackers are invalid or duplicated.");
+      throw failure("field_invalid", "Some common trackers are listed twice or not recognized. Remove the repeated trackers, then save again.");
     }
     return result.sort();
   }
@@ -104,10 +104,10 @@
       throw failure("field_invalid", "Every category assignment must name an enabled common tracker.");
     }
     if (!new Set(["strict", "lax", "none"]).has(value.cookie_same_site)) {
-      throw failure("field_invalid", "Cookie SameSite policy is invalid.");
+      throw failure("field_invalid", "That cookie SameSite setting is not one of the choices. Choose Lax, Strict or None.");
     }
     if (!new Set(["host_only", "property_domain"]).has(value.cookie_domain_separation)) {
-      throw failure("field_invalid", "Cookie domain separation is invalid.");
+      throw failure("field_invalid", "That cookie domain choice is not one of the options. Choose an option from the list.");
     }
     const refresh = value.automatic_refresh_seconds === "" || value.automatic_refresh_seconds === null || value.automatic_refresh_seconds === undefined
       ? null : integer(value.automatic_refresh_seconds, "Automatic refresh seconds", 30, 86400);
@@ -183,14 +183,14 @@
     try {
       return JSON.parse(text);
     } catch (_error) {
-      throw failure("response_invalid_json", "The server returned invalid JSON.", response.status);
+      throw failure("response_invalid_json", "The reply from the server could not be read. Try again.", response.status);
     }
   }
 
   async function parseResponse(response) {
     const payload = await readBoundedJson(response);
     if (!response.ok) {
-      const message = payload && typeof payload.detail === "string" ? payload.detail : "The operation failed.";
+      const message = payload && typeof payload.detail === "string" ? payload.detail : "That didn't work. Refresh the page and try again.";
       throw failure("request_failed", message, response.status);
     }
     return payload;
@@ -428,7 +428,7 @@
           { label: "When", value: (e) => when(e.occurred_at) },
           { label: "What happened", value: (e) => EVENTS[e.event_type] || human(e.event_type) },
         ],
-        empty: { title: "No changes recorded yet." },
+        empty: { title: "No changes recorded yet.", body: "Each saved change to these settings appears here." },
       });
     } catch (error) { explain(operationStatus, error, "load the history"); }
   }

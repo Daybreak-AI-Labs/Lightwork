@@ -7,6 +7,7 @@ credentials or a remote database. Live account acceptance remains separate.
 from __future__ import annotations
 
 import importlib
+import sys
 import xml.etree.ElementTree as ET
 
 _LIBPQ_SECURITY_FLOORS = {
@@ -95,7 +96,7 @@ def verify_full_release_runtime() -> int:
     """Run every packaged-feature check ``maverick release-runtime-check`` runs.
 
     Providers, document parsers and worker source, offline SQL with the bundled
-    PostgreSQL driver, MathML and metrics. Returns the bundled libpq version
+    PostgreSQL driver, MathML, metrics and offline token estimates. Returns the bundled libpq version
     number; raises the first failing check's exception unchanged.
     """
     from . import providers
@@ -106,7 +107,78 @@ def verify_full_release_runtime() -> int:
     libpq_version = verify_release_database_runtime()
     verify_release_mathml_runtime()
     verify_release_metrics_runtime()
+    verify_release_plugin_runtime()
+    verify_release_token_counter_runtime()
+    verify_release_checkpoint_storage_runtime()
+    verify_release_desktop_recording_runtime()
     return libpq_version
+
+
+def verify_release_desktop_recording_runtime() -> None:
+    """Require installed platform bindings without opening or reading a desktop."""
+    if sys.platform == "darwin":
+        importlib.import_module("AppKit")
+        importlib.import_module("objc")
+    elif sys.platform.startswith("linux"):
+        importlib.import_module("Xlib.display")
+        importlib.import_module("Xlib.Xatom")
+
+
+def verify_release_checkpoint_storage_runtime() -> None:
+    """Load packaged S3 request models with explicit fictional keys; no request."""
+    import json
+
+    from .audit.checkpoint_custody import _client
+
+    client = _client({"token": json.dumps({"access_key_id": "AKIA" + "0" * 16,
+        "secret_access_key": "fictional-release-key" * 2, "region": "us-east-1"})}, "us-east-1")
+    try:
+        models = client.meta.service_model
+        required = {"PutObject": {"IfNoneMatch", "ObjectLockMode", "ObjectLockRetainUntilDate"},
+                    "ListObjectVersions": {"KeyMarker", "VersionIdMarker", "MaxKeys"},
+                    "GetObjectRetention": {"Key", "VersionId"}, "GetObject": {"Key", "VersionId"}}
+        for name, members in required.items():
+            if not members <= models.operation_model(name).input_shape.members.keys():
+                raise RuntimeError("Release checkpoint storage request data is incomplete.")
+        if client.meta.config.retries.get("total_max_attempts") != 1:
+            raise RuntimeError("Release checkpoint storage must not replay an uncertain request.")
+    finally:
+        client.close()
+
+
+def verify_release_plugin_runtime() -> None:
+    """Check the guided form validator and retained offline worker sources."""
+    from pathlib import Path
+
+    from jsonschema import ValidationError
+
+    from .sandbox.plugin_contracts import validate
+
+    schema = {"type": "object", "properties": {"count": {"type": "integer", "minimum": 1}},
+              "required": ["count"], "additionalProperties": False}
+    validate(schema, {"count": 2})
+    try:
+        validate(schema, {"count": "two"})
+    except ValidationError:
+        pass
+    else:
+        raise RuntimeError("Packaged plugin questions accepted an invalid answer")
+    for name in ("plugin_probe.py", "plugin_contracts.py"):
+        source = Path(__file__).parent / "sandbox" / name
+        compile(source.read_bytes(), str(source), "exec")
+
+
+def verify_release_token_counter_runtime() -> None:
+    """Exercise the bundled vocabulary and native tokenizer without networking."""
+    from .local_token_counter import counter
+
+    count = counter()
+    if count("") != 0 or count("hello world") != 2:
+        raise RuntimeError("Packaged token estimates returned an unexpected result")
+    # Reserved-looking customer content remains ordinary text. Include real
+    # Unicode so this exercises the native wheel, not a character approximation.
+    if count("<|endoftext|>") <= 1 or count("你好 👋") <= 0:
+        raise RuntimeError("Packaged token estimates could not count ordinary text")
 
 
 def libpq_label(libpq_version: int) -> str:

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Performance · Lightwork{% endblock %}
+{% block title %}Performance diagnostics · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Performance</h1>
+  <h1 class="page-title">Performance diagnostics</h1>
   <p class="page-subtitle">Speed checks measured live on this server, plus the history of past speed tests.</p>
 
   <div class="panel">
@@ -23,7 +23,7 @@
       <thead><tr><th scope="col">Test</th><th scope="col">Times run</th><th scope="col">Latest</th><th scope="col">Best</th><th scope="col">Trend</th><th scope="col">Got slower?</th></tr></thead>
       <tbody></tbody>
     </table>
-    <p id="perf-empty" class="muted" hidden>No past speed tests recorded yet.</p>
+    <p id="perf-empty" class="muted" hidden>No past speed tests recorded yet. They appear here each time a speed test runs on this server.</p>
   </div>
 
   <style>

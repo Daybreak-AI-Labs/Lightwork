@@ -10,6 +10,15 @@ function response(value, status = 200) {
   return new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json'}});
 }
 
+// The shell's shared helpers (mvFetchJSON, mvStatus) load before page
+// scripts, as in base.html; this fixture's own stand-ins are kept.
+function withShell(window) {
+  const kept = Object.fromEntries(Object.keys(window).filter((k) => k.startsWith('mv')).map((k) => [k, window[k]]));
+  if (!window.matchMedia) window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  window.eval(fs.readFileSync(path.join(folder, 'static/lightwork-ui.js'), 'utf8'));
+  Object.assign(window, kept);
+}
+
 async function fixture(route, {confirm = true, typed = 'acme'} = {}) {
   const dom = new JSDOM(markup, {url: 'https://lightwork.example/settings', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [], copies = [], forms = [];
@@ -19,6 +28,7 @@ async function fixture(route, {confirm = true, typed = 'acme'} = {}) {
   window.mvCopy = (text) => copies.push(text);
   window.mvErrorText = (failure, action) => 'Could not ' + action + '.';
   window.mvWhen = () => 'today';
+  withShell(window);
   window.eval(script);
   const settle = async () => { for (let i = 0; i < 12; i++) await new Promise((done) => setImmediate(done)); };
   return {window, document: window.document, calls, confirms, copies, forms, settle};
@@ -55,7 +65,7 @@ test('readiness check lists each switch with a fix button', async (t) => {
   assert.match(ui.document.querySelector('[data-maintenance-status="readiness"]').textContent, /need attention/);
 });
 
-test('resuming a paused schedule confirms and sends the attempt count it showed', async (t) => {
+test('a paused schedule is resumed only from its full review on Automations', async (t) => {
   const ui = await fixture((url, options) => {
     if (url.endsWith('/resume')) return response({resumed: true, next: 9});
     return response({counts: [{state: 'Stopped', count: 1}], stopped: [
@@ -64,14 +74,14 @@ test('resuming a paused schedule confirms and sends the attempt count it showed'
   t.after(() => ui.window.close());
   ui.document.querySelector('[data-maintenance-run="queue"]').click();
   await ui.settle();
-  const button = [...ui.document.querySelectorAll('[data-maintenance-out="queue"] button')]
-    .find((b) => b.textContent === 'Resume schedule');
-  assert.ok(button);
-  button.click();
-  await ui.settle();
-  assert.match(ui.confirms[0], /will not be repeated/);
-  const resume = ui.calls.find((c) => c.url.endsWith('/queue/7/resume'));
-  assert.deepEqual(JSON.parse(resume.options.body), {attempts: 3});
+  const out = ui.document.querySelector('[data-maintenance-out="queue"]');
+  // Settings no longer resumes in place: it links to the schedule's review,
+  // which shows the attempt count and confirms before anything runs again.
+  assert.equal([...out.querySelectorAll('button')].some((b) => b.textContent === 'Resume schedule'), false);
+  const review = [...out.querySelectorAll('a')].find((a) => a.textContent === 'Review this schedule');
+  assert.ok(review);
+  assert.equal(review.getAttribute('href'), '/automations?recover_schedule=7');
+  assert.equal(ui.calls.some((c) => c.url.endsWith('/resume')), false);
 });
 
 test('forms marked for confirmation do not submit when cancelled', async (t) => {
@@ -118,54 +128,40 @@ test('a one-button check shows plain rows and keeps kernel wording in technical 
 const PREVIEW = {organisation: 'acme', files: 7, keeps_activity_record: true,
   areas: [{label: 'Tasks and conversations', files: 4}, {label: 'Saved memory', files: 3}]};
 
-test('erasing the organisation previews what goes, confirms, and needs the typed name', async (t) => {
+test('local data review explains the offline boundary and never sends an erase', async (t) => {
   const ui = await fixture((url) => {
-    if (url.endsWith('/client/erase')) return response({erased: true, files_removed: 4, kept_activity_record: true});
     if (url.includes('/client/erase/preview')) return response(PREVIEW);
     return response({bound: true, organisation: 'acme', enforced: false, summary: 'This installation holds data for one organisation: acme.', technical: []});
   });
   t.after(() => ui.window.close());
   ui.document.querySelector('[data-maintenance-run="client"]').click();
   await ui.settle();
-  const erase = [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')].find((b) => b.textContent === 'Erase all data');
-  assert.ok(erase);
-  erase.click();
+  const review = [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')].find((b) => b.textContent === 'Review local data');
+  assert.ok(review);
+  review.click();
   await ui.settle();
   const preview = ui.calls.find((c) => c.url.includes('/client/erase/preview'));
   assert.match(preview.url, /keep_activity_record=true/);
   assert.match(ui.document.querySelector('[data-maintenance-out="client"]').textContent, /Tasks and conversations.*4 files.*Saved memory.*3 files/);
-  assert.match(ui.confirms[0], /deleted for good and cannot be brought back/);
-  assert.match(ui.forms[0].title, /Type the organisation name/);
-  const call = ui.calls.find((c) => c.url.endsWith('/client/erase'));
-  assert.deepEqual(JSON.parse(call.options.body), {organisation: 'acme', keep_activity_record: true, confirm: true});
-  assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /4 files removed/);
+  assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /cannot safely erase local data/);
+  assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /Connected services and exported copies/);
+  assert.equal(ui.calls.filter((c) => c.url.endsWith('/client/erase')).length, 0);
 });
 
-test('a mistyped organisation name erases nothing', async (t) => {
+test('a failed local data preview does not offer a destructive action', async (t) => {
   const ui = await fixture((url) => {
-    if (url.includes('/client/erase/preview')) return response(PREVIEW);
+    if (url.includes('/client/erase/preview')) return response({detail: 'The local file inventory is unavailable.'}, 503);
     return response({bound: true, organisation: 'acme', summary: 'ok', technical: []});
-  }, {typed: 'acne'});
+  });
   t.after(() => ui.window.close());
+  ui.window.mvPlainDetail = (detail) => detail;
   ui.document.querySelector('[data-maintenance-run="client"]').click();
   await ui.settle();
-  [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')].find((b) => b.textContent === 'Erase all data').click();
+  [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')]
+    .find((b) => b.textContent === 'Review local data').click();
   await ui.settle();
   assert.equal(ui.calls.filter((c) => c.url.endsWith('/client/erase')).length, 0);
-  assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /does not match/);
-});
-
-test('a cancelled erase sends nothing', async (t) => {
-  const ui = await fixture((url) => {
-    if (url.includes('/client/erase/preview')) return response(PREVIEW);
-    return response({bound: true, organisation: 'acme', summary: 'ok', technical: []});
-  }, {confirm: false});
-  t.after(() => ui.window.close());
-  ui.document.querySelector('[data-maintenance-run="client"]').click();
-  await ui.settle();
-  [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')].find((b) => b.textContent === 'Erase all data').click();
-  await ui.settle();
-  assert.equal(ui.calls.filter((c) => c.url.endsWith('/client/erase')).length, 0);
+  assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /inventory is unavailable/);
 });
 
 test('the organisation download is prepared in the background, then offered as a link', async (t) => {

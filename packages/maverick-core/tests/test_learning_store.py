@@ -32,7 +32,7 @@ def _ctrl(monkeypatch, ledger_path):
 
 def _promote(model, line, ctrl, path=None):
     return sh.run_self_harness(
-        [{"model_id": model, "failure_class": "timeout",
+        [{"owner": "", "goal_id": 0, "model_id": model, "failure_class": "timeout",
           "goal_text": f"task {i}", "failure_msg": "x"} for i in range(3)],
         model_id=model, controller=ctrl, min_support=3, path=path,
         held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
@@ -138,7 +138,8 @@ def test_migrate_store_imports_and_backs_up(world_home, monkeypatch):
     r = CliRunner().invoke(main, ["self-harness", "migrate-store"])
     assert r.exit_code == 0, r.output
     assert "imported 1 addenda key(s)" in r.output
-    assert "from the file era" in sh.recall_addendum("M")
+    assert "from the file era" not in sh.recall_addendum("M")
+    assert "from the file era" in sh.load_addenda()["M"]  # retained without invented lineage
     assert ls.load_transfer_tried_db() == {"abc123": 1700000000.0}
     assert not src.exists()                     # renamed to backups
     assert src.with_name(src.name + ".migrated").exists()
@@ -158,7 +159,8 @@ def test_migrate_store_merges_conflicting_blocks(world_home, monkeypatch):
     r = CliRunner().invoke(main, ["self-harness", "migrate-store"])
     assert r.exit_code == 0, r.output
     block = sh.recall_addendum("M")
-    assert "db-era line" in block and "file-era line" in block
+    assert "db-era line" in block and "file-era line" not in block
+    assert "file-era line" in sh.load_addenda()["M"]  # unknown legacy content retained, never silently published
 
 
 @pytest.fixture()
@@ -181,7 +183,7 @@ def test_corpus_lifecycle_through_the_world_store(world_corpus):
     from maverick import self_harness_eval as ev
     cpath = world_corpus
     assert ev.stage_candidates(cpath, "M", [
-        {"goal": "g1", "expected": "e1"}, {"goal": "g2", "expected": "e2"}]) == 2
+        {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g1", "expected": "e1"}, {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g2", "expected": "e2"}]) == 2
     assert not cpath.exists()
     assert not ev.pending_corpus_path(cpath).exists()
     assert [c["goal"] for c in ev.load_pending(cpath)["M"]] == ["g1", "g2"]
@@ -190,7 +192,7 @@ def test_corpus_lifecycle_through_the_world_store(world_corpus):
     assert [c["goal"] for c in ev.load_eval_corpus(cpath)["M"]] == ["g1"]
     assert ev.load_rejected(cpath) == {"M": ["g2"]}
     # rejection stays durable through the DB path
-    assert ev.stage_candidates(cpath, "M", [{"goal": "g2", "expected": "x"}]) == 0
+    assert ev.stage_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g2", "expected": "x"}]) == 0
     assert ls.load_corpus_db("live")            # rows really live in the DB
 
 
@@ -199,7 +201,7 @@ def test_explicit_other_corpus_path_stays_on_files(world_corpus, tmp_path):
     from maverick import self_harness_eval as ev
     other = tmp_path / "other.json"
     other.write_text("{}")
-    assert ev.stage_candidates(other, "M", [{"goal": "g", "expected": "e"}]) == 1
+    assert ev.stage_candidates(other, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g", "expected": "e"}]) == 1
     assert ev.pending_corpus_path(other).exists()      # file sidecar written
     assert ev.load_pending(world_corpus) == {}         # world store untouched
 
@@ -212,7 +214,7 @@ def test_corpus_export_import_round_trip(world_corpus, tmp_path):
     from maverick.cli import main
     cpath = world_corpus
     ev.import_corpus(cpath, {
-        "M": [{"goal": "live", "expected": "x", "notes": "keep me"}],
+        "M": [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "live", "expected": "x", "notes": "keep me"}],
         "_meta": {"owner": "ops"},
     })
     out = tmp_path / "export.json"
@@ -222,7 +224,7 @@ def test_corpus_export_import_round_trip(world_corpus, tmp_path):
     data = json.loads(out.read_text())
     assert data["M"][0]["notes"] == "keep me" and data["_meta"] == {"owner": "ops"}
     # edit: add a case, then import (merge)
-    data["M"].append({"goal": "new", "expected": "y", "reviewed": True})
+    data["M"].append({"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "new", "expected": "y", "reviewed": True})
     out.write_text(json.dumps(data))
     r = _CR().invoke(main, ["self-harness", "corpus", "import", str(out)])
     assert r.exit_code == 0, r.output
@@ -230,7 +232,7 @@ def test_corpus_export_import_round_trip(world_corpus, tmp_path):
     assert [c["goal"] for c in raw["M"]] == ["live", "new"]
     assert raw["M"][1]["reviewed"] is True and raw["_meta"] == {"owner": "ops"}
     # --replace overwrites wholesale
-    out.write_text(json.dumps({"M": [{"goal": "only", "expected": "z"}]}))
+    out.write_text(json.dumps({"M": [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "only", "expected": "z"}]}))
     r = _CR().invoke(main, ["self-harness", "corpus", "import", str(out),
                             "--replace"])
     assert r.exit_code == 0, r.output
@@ -242,9 +244,9 @@ def test_migrate_store_carries_the_corpus_family(world_corpus, monkeypatch):
     from maverick.cli import main
     cpath = world_corpus
     cpath.write_text(json.dumps(
-        {"M": [{"goal": "old live", "expected": "x", "notes": "n"}]}))
+        {"M": [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "old live", "expected": "x", "notes": "n"}]}))
     ev.pending_corpus_path(cpath).write_text(json.dumps(
-        {"M": [{"goal": "old pending", "expected": "y"}]}))
+        {"M": [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "old pending", "expected": "y"}]}))
     ev.rejected_corpus_path(cpath).write_text(json.dumps({"M": ["old reject"]}))
     r = CliRunner().invoke(main, ["self-harness", "migrate-store"])
     assert r.exit_code == 0, r.output
@@ -271,7 +273,7 @@ def test_world_corpus_seals_machine_owned_rows(world_corpus, monkeypatch):
     cpath = world_corpus
 
     assert ev.stage_candidates(cpath, "M", [
-        {"goal": "SECRET_CORPUS_GOAL", "expected": "SECRET_EXPECTED_HINT"},
+        {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "SECRET_CORPUS_GOAL", "expected": "SECRET_EXPECTED_HINT"},
     ]) == 1
     assert ev.load_pending(cpath)["M"][0]["goal"] == "SECRET_CORPUS_GOAL"
 

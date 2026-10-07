@@ -6,6 +6,20 @@ import importlib
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _restore_dashboard_module():
+    import maverick_dashboard.app as dashboard_app
+
+    # Reloading replaces the module's app and template globals. Other test
+    # modules keep references collected before this file runs.
+    previous = vars(dashboard_app).copy()
+    try:
+        yield
+    finally:
+        vars(dashboard_app).clear()
+        vars(dashboard_app).update(previous)
+
+
 def _reload_dashboard_app(monkeypatch):
     monkeypatch.setenv("HOME", "/nonexistent-a2a-dashboard-test")
     import maverick_dashboard.app as dashboard_app
@@ -29,7 +43,7 @@ def test_dashboard_serves_a2a_agent_card_when_enabled(monkeypatch, path):
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "Lightwork"
-    assert body["protocolVersion"] == "1.0"
+    assert body["protocolVersion"] == "0.3.0"
 
 
 def test_dashboard_omits_a2a_agent_card_when_disabled(monkeypatch):

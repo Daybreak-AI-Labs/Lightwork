@@ -3,6 +3,7 @@
   "use strict";
   const root = document.getElementById("vendor-onboarding");
   if (!root) return;
+  if (root.dataset.namedSignin === "false" && root.dataset.offlineDemo !== "true") return;
   const byId = id => document.getElementById(`vo-${id}`);
   const base = root.dataset.apiBase;
   let selected = null;
@@ -47,7 +48,7 @@
     byId("message").setAttribute("role", error ? "alert" : "status");
     show("message", text);
   };
-  const date = value => value ? new Date(value * 1000).toLocaleString() : "Not recorded";
+  const date = value => value ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString()) : "Not recorded";
   const dateInput = value => value ? new Date(value * 1000).toISOString().slice(0, 10) : "";
   function dueTimestamp(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) throw new Error("Choose a requested completion date.");
@@ -68,9 +69,7 @@
   };
   async function loadPeople() {
     try {
-      const result = await fetch("/api/v1/choices/people", {method: "GET", credentials: "same-origin", headers: {"Accept": "application/json"}});
-      if (!result.ok) return;
-      const data = await result.json();
+      const data = await window.mvFetchJSON("/api/v1/choices/people");
       for (const row of data?.people || []) if (typeof row?.value === "string" && typeof row?.label === "string") people.set(row.value, row.label);
     } catch (_) { /* names fall back to sign-in handles */ }
   }
@@ -521,8 +520,10 @@
     const policy = {forbiddenScope: body === undefined, contextMessage: /active workspace changed/i};
     const early = access.observe(response, null, policy);
     if (early.kind === "conflict") { reviewRefreshRequired = true; approvalCardCurrent = false; reviewedAt = null; }
-    if (["session", "scope"].includes(early.kind))
-      throw new Error("Your sign-in or workspace access changed. Sign in again and reload this page.");
+    if (early.kind === "session")
+      throw new Error("Your sign-in ended. Sign in again and reload this page.");
+    if (early.kind === "scope")
+      throw new Error("This account cannot open this vendor request. Ask an administrator to check your workspace access, then reload this page.");
     if (early.kind === "capability" && actionKey) deniedActions.add(actionKey);
     let data;
     try { data = await response.json(); } catch (_) {
@@ -603,7 +604,7 @@
             no_match: "No matching ticket was found in Jira.",
             multiple_matches: `More than one matching ticket was found in Jira (${Number.isInteger(item.match_count) ? item.match_count : `at least ${item.match_count_lower_bound}`} matches).`,
             readback_mismatch: "A ticket was found in Jira but its content doesn't match what you approved.",
-            readback_unavailable: "Jira couldn't be checked.",
+            readback_unavailable: "Jira couldn't be checked. Try again in a minute.",
             exact_match_verified: "The exact ticket was found in Jira.",
           })[item.state] || "Jira's result is unknown.",
         };
@@ -666,10 +667,14 @@
     const evidence = record.evidence;
     byId("evidence").replaceChildren();
     if (evidence) {
-      element("p", `Overall: ${friendly(evidence.status)}`, byId("evidence"));
+      element("p", evidence.status === "available" ? "Overall: Available" : `Evidence is incomplete: ${friendly(evidence.status)}. Obtain current evidence before relying on it.`, byId("evidence"));
       const list = document.createElement("ul"); byId("evidence").append(list);
-      for (const item of evidenceDocuments(record))
-        element("li", `${item.name || documentName(record, item.document_id || record.document_id)} (${item.source === "upload" ? "uploaded" : "Google Drive"}) · ${friendly(item.status || evidence.status)} · dated ${date(item.modified_at)} (${item.source === "upload" ? "uploader asserted" : "last changed in Drive"}) · valid until ${date(item.fresh_until)}`, list);
+      for (const item of evidenceDocuments(record)) {
+        const freshness = item.status === "available" && Number.isFinite(item.fresh_until) && item.fresh_until > 0
+          ? `dated ${date(item.modified_at)} (${item.source === "upload" ? "uploader asserted" : "last changed in Drive"}) · valid until ${date(item.fresh_until)}`
+          : "Freshness could not be confirmed";
+        element("li", `${item.name || documentName(record, item.document_id || record.document_id)} (${item.source === "upload" ? "uploaded" : "Google Drive"}) · ${friendly(item.status || evidence.status)} · ${freshness}`, list);
+      }
     } else show("evidence", "No evidence yet. Add documents, then choose Obtain current evidence.");
     if (byId("uploaded-documents")) {
       byId("uploaded-documents").replaceChildren();
@@ -746,7 +751,7 @@
       ...(record.reconciliation_history || []).map(item => `${date(item.checked_at)} · Read-only Jira check: ${friendly(item.outcome)}.`),
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : "An exception was recorded (see Technical details)."),
     ];
-    show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet.");
+    show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet. They appear here when a reviewer decides.");
     reviewRefreshRequired = false;
     buttons();
     if (sameCase && !sameReview)
@@ -1144,9 +1149,16 @@
         throw new Error("The saved return to this request expired. Select the request again from this workspace.");
     }
     await loadPeople();
-    await refresh();
+    try { await refresh(); }
+    catch (error) {
+      // No list arrived: replace the queue's "Loading…" lines; the message at
+      // the top of the page says what went wrong.
+      show("attention-summary", "");
+      if (byId("page-status")) show("page-status", "Requests could not be loaded. See the message above, then choose Refresh requests.");
+      throw error;
+    }
     if (requested) {
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link is invalid. Select a request from this workspace.");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link does not work. Select a request from this workspace.");
       render(await api("/cases/" + encodeURIComponent(requested)));
       try { window.sessionStorage.removeItem(connectionTaskKey); } catch (_) {}
       return "Linked request loaded. Review its evidence and current status.";

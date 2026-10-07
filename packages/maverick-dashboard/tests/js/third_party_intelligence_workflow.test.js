@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
 const markup = fs.readFileSync(path.join(folder, "templates/third_party_intelligence.html"), "utf8")
@@ -56,6 +57,7 @@ async function fixture({ admin = true } = {}) {
     else reply = { ok: true };
     return new Response(JSON.stringify(reply), { status: 200, headers: { "Content-Type": "application/json" } });
   };
+  shell(window);
   window.eval(helpers);
   window.eval(source);
   async function settle() { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); }
@@ -95,11 +97,13 @@ test("screening binds the current approved data automatically", async (t) => {
 
 test("adding a vendor uses a server fingerprint of its name, never a typed digest", async (t) => {
   const ui = await fixture(); t.after(() => ui.window.close());
-  ui.formValues.push({ pick: "Acme Corp", category: "software", inherent: "2", critical: "3", access: "limited", r0: true });
+  // The vendor is picked from the Privacy register by its record, not typed.
+  ui.formValues.push({ pick: "vend-1", category: "software", inherent: "2", critical: "3", access: "limited", r0: true });
   ui.el("tpi-add-vendor").click();
   await ui.settle();
   const put = ui.calls.find((c) => c.method === "PUT" && c.url.pathname.includes("/vendors/"));
   assert.equal(put.body.display_label, "Acme Corp");
+  assert.equal(put.body.register_vendor_id, "vend-1");
   assert.equal(put.body.entity_identity_sha256, "f".repeat(64));
   assert.deepEqual(put.body.territories, ["GLOBAL"]);
   assert.ok(ui.calls.some((c) => c.url.pathname === "/api/v1/compliance/fingerprint"));

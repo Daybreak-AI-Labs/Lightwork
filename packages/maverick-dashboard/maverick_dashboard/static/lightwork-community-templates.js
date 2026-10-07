@@ -13,9 +13,9 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(text) { $('status').textContent = text; }
+  function say(text) { window.mvStatus($('status'), text); }
   function failText(failure, what) {
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
   }
   function label(name) { return typeof window.mvHuman === 'function' ? window.mvHuman(name) : name.replace(/[-_]+/g, ' '); }
   async function add(row, button) {
@@ -26,12 +26,8 @@
     button.disabled = true;
     say('Adding…');
     try {
-      const response = await fetch('/api/v1/templates/community/add', {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: row.name, confirm: true })
-      });
-      if (!response.ok) { say(failText(response, 'add the template')); button.disabled = false; return; }
-      const data = await response.json();
+      const data = await window.mvFetchJSON('/api/v1/templates/community/add',
+        { method: 'POST', cache: 'no-store', body: { name: row.name, confirm: true } }, 'add the template');
       if (!data || data.added !== true) { say((data && data.message) || 'The template wasn’t added.'); button.disabled = false; return; }
       button.textContent = 'Added';
       say('Added “' + label(row.name) + '”. Reload the page to use it.');
@@ -41,9 +37,7 @@
     if (busy) return;
     busy = true; $('load').disabled = true; say('Loading the library…');
     try {
-      const response = await fetch('/api/v1/templates/community', { credentials: 'same-origin', cache: 'no-store' });
-      if (!response.ok) { say(failText(response, 'load the library')); return; }
-      const data = await response.json();
+      const data = await window.mvFetchJSON('/api/v1/templates/community', { cache: 'no-store' }, 'load the library');
       const list = $('list');
       list.replaceChildren();
       if (!data || data.available === false) { say((data && data.message) || 'The library can’t be reached right now.'); return; }

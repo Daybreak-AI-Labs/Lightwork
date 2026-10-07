@@ -5,9 +5,8 @@
    with _workspace_memory_catalog.html, which carries the bottom half + JS. #}
 <style>
   /* Department workspace — the module view over assessment records. */
-  .pw-filters { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
   .pw-risk { white-space: nowrap; }
-  .pw-risk .badge + .badge { margin-inline-start: 4px; }
+  .pw-risk .badge + .badge { margin-inline-start: var(--space-1); }
   .pw-age-warn { color: var(--warn); font-weight: var(--font-medium); }
   .pw-cat { display: flex; gap: var(--space-2); flex-wrap: wrap; }
   .pw-cat .chip { border: 1px solid var(--border); border-radius: var(--radius-pill);
@@ -16,6 +15,7 @@
   .pw-owner { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
   .pw-assign-btn { padding: 0.2rem 0.6rem; font-size: var(--text-xs); }
 </style>
+{% from "_empty_state.html" import empty_state %}
 
 
   <div class="section-head"><h2>Worklist</h2></div>
@@ -35,20 +35,20 @@
           <label for="pw-start-subject">What are you assessing?</label>
           <input id="pw-start-subject" class="input" required maxlength="300" placeholder="A vendor, system, process, or project" style="min-width:0; max-width:100%;">
         </div>
-        <button id="pw-start-submit" class="btn btn--primary" type="submit">Start assessment</button>
+        <button id="pw-start-submit" class="btn" type="submit">Start assessment</button>
       </form>
     </details>
     <p id="pw-start-msg" class="muted" role="status" aria-live="polite"></p>
     <button id="pw-start-open" class="btn" type="button" hidden>Open new assessment</button>
-    <div class="pw-filters" role="group" aria-label="Filter worklist">
-      <button class="btn btn--primary" data-filter="all" type="button">All ({{ stats.total }})</button>
-      <button class="btn" data-filter="pending_review" type="button">Needs review ({{ stats.pending }})</button>
-      <button class="btn" data-filter="needs_more" type="button">Awaiting answers ({{ stats.needs_more }})</button>
-      <button class="btn" data-filter="high" type="button">High risk after safeguards ({{ stats.high_residual }})</button>
-      <button class="btn" data-filter="due" type="button">Due for re-review ({{ stats.review_due }})</button>
-      <button class="btn" data-filter="mine" type="button">Mine ({{ stats.mine }})</button>
-      <button class="btn" data-filter="unassigned" type="button">Unassigned ({{ stats.unassigned }})</button>
-    </div>
+    {% from "_tabs.html" import panel_tabs %}
+    {{ panel_tabs('Filter worklist', [
+         ('all', 'All (' ~ stats.total ~ ')'), ('pending_review', 'Needs review (' ~ stats.pending ~ ')'),
+         ('needs_more', 'Awaiting answers (' ~ stats.needs_more ~ ')'),
+         ('high', 'High risk after safeguards (' ~ stats.high_residual ~ ')'),
+         ('due', 'Due for re-review (' ~ stats.review_due ~ ')'), ('mine', 'Mine (' ~ stats.mine ~ ')'),
+         ('unassigned', 'Unassigned (' ~ stats.unassigned ~ ')')], 'all',
+       id='pw-filter', data='filter', controls='pw-worklist', cls='pw-filters') }}
+    <div id="pw-worklist" role="tabpanel" aria-labelledby="pw-filter-tab-all">
     {% if sessions %}
     <table id="pw-table">
       <thead>
@@ -107,7 +107,7 @@
             {% else %}
               {{ (s.age_days ~ (' day old' if s.age_days == 1 else ' days old')) if s.age_days is not none else '—' }}
             {% endif %}</td>
-          <td><button class="btn btn--primary pw-review-btn" data-assessment="{{ s.id }}" type="button"
+          <td><button class="btn pw-review-btn" data-assessment="{{ s.id }}" type="button"
                       aria-label="Review the {{ s.subject }} assessment">Review</button></td>
         </tr>
         {% endfor %}
@@ -119,9 +119,12 @@
         re-review first. The stats above count everything.</p>
     {% endif %}
     {% else %}
-      <p class="muted">No assessments yet. Start one to see it here.</p>
-      <button class="btn btn--primary" type="button" id="pw-start-empty">Start an assessment</button>
+      {% call empty_state('No assessments yet',
+                          'Assessments you start appear here with their risk before and after safeguards, status and reviewer. Choose a questionnaire and a subject to start the first one.') %}
+        <button class="btn mv-empty__action" type="button" id="pw-start-empty">Start an assessment</button>
+      {% endcall %}
     {% endif %}
+    </div>
   </div>
   <script>
   (function assessmentIntake() {
@@ -132,9 +135,14 @@
     let busy = false, createdId = null;
     function openCreated() { if (createdId && window.mvAssessmentReview) window.mvAssessmentReview.open(createdId); }
     openButton.addEventListener('click', openCreated);
+    function openStart() { const box = document.getElementById('pw-start'); box.open = true; type.focus(); }
     const startEmpty = document.getElementById('pw-start-empty');
-    if (startEmpty) startEmpty.addEventListener('click', function () {
-      const box = document.getElementById('pw-start'); box.open = true; type.focus();
+    if (startEmpty) startEmpty.addEventListener('click', openStart);
+    // The page header's "Start an assessment" (href="#pw-start") opens the form too.
+    document.addEventListener('click', function (event) {
+      const link = event.target.closest && event.target.closest('a[href="#pw-start"]');
+      if (!link) return;
+      event.preventDefault(); openStart();
     });
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
@@ -150,7 +158,7 @@
         const response = await fetch('/api/v1/assess/bulk-import', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ csv: csv })
         });
-        if (!response.ok) throw new Error(window.mvErrorText ? window.mvErrorText(response, 'start the assessment') : 'Could not start the assessment.');
+        if (!response.ok) throw new Error(window.mvErrorText ? window.mvErrorText(response, 'start the assessment') : 'Could not start the assessment. Try again.');
         const data = await response.json(), row = data && data.created && data.created[0];
         if (!data || data.created_count !== 1 || data.error_count !== 0 || !Array.isArray(data.created) || data.created.length !== 1 || !row || typeof row.id !== 'string' || !row.id || row.subject !== name || row.type !== kind) {
           throw new Error('The assessment could not be confirmed. Refresh the worklist before trying again.');

@@ -60,6 +60,19 @@ def _cli_model(ctx: click.Context, role: str) -> str:
     return (ctx.obj or {}).get("model") or _default_model(role)
 
 
+def _cli_task_budget(title: str, max_dollars: float | None, default_dollars: float):
+    """Apply task budget precedence with a command's historical dollar fallback."""
+    import types
+
+    from ..budget import budget_from_config
+    from ..orchestrator import _budget_task_class
+    return budget_from_config(
+        defaults={"max_dollars": default_dollars},
+        task_class=_budget_task_class(types.SimpleNamespace(title=title)),
+        max_dollars=max_dollars,
+    )
+
+
 def _fact_subject_token(channel: str, user: str) -> str:
     """Stable, delimiter-safe token for explicitly user-scoped facts."""
     return f"{quote(channel, safe='')}:{quote(user, safe='')}"
@@ -117,6 +130,15 @@ def _require_llm_key(model_spec: str | None = None) -> str:
         err=True,
     )
     sys.exit(2)
+
+
+def _warn_file_work_before_start(config: dict, backend: str | None) -> None:
+    """Explain first-run file limits before a task can incur provider cost."""
+    from ..health import file_work_notice
+
+    notice = file_work_notice(config, backend=backend)
+    if notice:
+        click.echo(f"Before starting: {notice}\n  Check again with: lightwork doctor", err=True)
 
 
 def _humanize_run_error(e: Exception) -> str:
@@ -445,6 +467,7 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     type=click.Choice([
         "status", "repair-capability", "authorize-repair", "inspect", "prepare",
         "execute", "resume", "logs",
+        "save-native-review", "inspect-handoff", "offline-review", "offline-authorize", "recovery-plan",
     ]),
 )
 def installation_maintenance_cmd(step: str) -> None:
@@ -459,6 +482,21 @@ def installation_maintenance_cmd(step: str) -> None:
         request = json.loads(raw)
         if step == "status":
             result = recovery.status()
+        elif step == "save-native-review":
+            from ..installation_handoff import save_review
+            result = save_review(request.get("release"))
+        elif step == "inspect-handoff":
+            from ..installation_handoff import inspect_handoff
+            result = inspect_handoff()
+        elif step == "offline-review":
+            from ..installation_offline import review
+            result = review(request.get("folder"), public_key=request.get("public_key", ""))
+        elif step == "offline-authorize":
+            from ..installation_offline import authorize
+            result = authorize(request.get("review"), confirm=request.get("confirm") is True)
+        elif step == "recovery-plan":
+            from ..installation_planner import plan
+            result = plan(request.get("id"), offset=request.get("offset", 0))
         elif step == "repair-capability":
             result = recovery.repair_capability(
                 expected_runtime_sha256=request.get("runtime_sha256"),
@@ -555,6 +593,7 @@ def _install_config_from_file(src: str) -> None:
 
     from ..config_install import (
         ConfigInstallError,
+        blocking_config_findings,
         config_findings,
         install_config_bytes,
         parse_config_bytes,
@@ -567,17 +606,30 @@ def _install_config_from_file(src: str) -> None:
         cfg = parse_config_bytes(data)
     except (ConfigInstallError, OSError) as e:
         raise click.ClickException(f"invalid TOML in {src}: {e}") from e
-    # Surface unknown-section / type problems, but don't block (operators may use
-    # newer keys than this build knows).
-    for finding in config_findings(cfg):
+    try:
+        findings = config_findings(cfg)
+    except Exception as exc:  # noqa: BLE001 -- never install when validation is unavailable
+        raise click.ClickException(f"could not check settings; no changes made: {exc}") from exc
+    blocking = blocking_config_findings(findings)
+    for finding in findings:
         click.echo(click.style(f"  ! {finding.section}: {finding.message}",
-                               fg="yellow"), err=True)
-    result = install_config_bytes(data)
+                               fg="red" if finding in blocking else "yellow"), err=True)
+    if blocking:
+        raise click.ClickException(
+            f"{len(blocking)} setting(s) cannot be used by this version of Lightwork. "
+            "Correct them and try again; no changes were made."
+        )
+    try:
+        result = install_config_bytes(data, backup=True)
+    except OSError as exc:
+        raise click.ClickException(f"could not install settings; the previous file remains: {exc}") from exc
     dst = result["path"]
     if result["unchanged"]:
         click.echo(click.style(f"config unchanged -> {dst} (0600)", fg="green"))
         return
     click.echo(click.style(f"installed config -> {dst} (0600)", fg="green"))
+    if result["backup"]:
+        click.echo(f"previous settings saved -> {result['backup']}")
 
 
 @main.command()
@@ -594,17 +646,23 @@ def init(fast: bool, resume: bool, from_file: str | None) -> None:
         return
     try:
         from maverick_installer.wizard import run as run_wizard
-    except ImportError:
-        # The wizard must come from the same reviewed source checkout as the
-        # kernel. The first-party public namespaces are not yet reserved, so
-        # suggesting an index lookup here would create a dependency-confusion
-        # path from an otherwise trusted local install.
-        click.echo(
-            "Install the installer component from the same reviewed Lightwork "
-            "checkout; public-index lookup is disabled. See "
-            "docs/getting-started.md.",
-            err=True,
-        )
+    except ImportError as exc:
+        if isinstance(exc, ModuleNotFoundError) and exc.name == "maverick_installer":
+            # First-party public namespaces are not yet reserved; never send
+            # an operator to an unreviewed package index for the installer.
+            click.echo(
+                "Install the installer component from the same reviewed Lightwork "
+                "checkout; public-index lookup is disabled. See "
+                "docs/getting-started.md.",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"Lightwork setup could not load: {_strip_terminal_control(str(exc))}. "
+                "Run `maverick doctor` "
+                "to check the installation before retrying.",
+                err=True,
+            )
         sys.exit(2)
     sys.exit(run_wizard(fast=fast, resume=resume))
 
@@ -842,6 +900,20 @@ def release_runtime_check() -> None:
     )
 
 
+def _reporting_world(ctx: click.Context):
+    from ..world_model import open_world
+
+    if ctx.parent is not None and ctx.parent.params.get("db") is not None:
+        from ..world_model_backends import is_postgres_configured
+
+        if is_postgres_configured():
+            raise click.UsageError(
+                "--db selects a local database file and cannot select a Postgres database. "
+                "Omit --db to report on the configured Postgres workspace."
+            )
+    return open_world(ctx.obj["db"])
+
+
 @main.command()
 @click.option("--json", "as_json", is_flag=True,
               help="Machine-readable output for FinOps/BI scripts.")
@@ -851,7 +923,8 @@ def release_runtime_check() -> None:
               help="Max recent priced episodes to scan.")
 @click.option("--top", default=15, show_default=True,
               help="Show the top N goals by cost.")
-def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
+@click.pass_context
+def spend(ctx: click.Context, as_json: bool, tag_field: str, limit: int, top: int) -> None:
     """Print spend — total, per-goal, and per-tag run costs.
 
     The CLI face of the /spend dashboard: pull FinOps data into scripts and
@@ -860,8 +933,8 @@ def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
     import json as _json
 
     from ..cost.by_tag import gather, render, split_by_tag
-    from ..world_model import close_world_if_owned, open_world
-    w = open_world()
+    from ..world_model import close_world_if_owned
+    w = _reporting_world(ctx)
     total = w.total_spend()
 
     by_goal: dict[int, dict] = {}
@@ -2896,14 +2969,21 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
         sys.exit(2)
     try:
         from maverick_dashboard.app import app as fastapi_app
-    except ImportError:
-        click.echo(
-            "Install the dashboard from the same reviewed Lightwork checkout; "
-            "public-index lookup is disabled.",
-            err=True,
-        )
+    except ImportError as exc:
+        if isinstance(exc, ModuleNotFoundError) and exc.name == "maverick_dashboard":
+            click.echo(
+                "Install the dashboard from the same reviewed Lightwork checkout; "
+                "public-index lookup is disabled.",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"Lightwork dashboard could not load: {_strip_terminal_control(str(exc))}. "
+                "Run `maverick doctor` "
+                "to check the installation before retrying.",
+                err=True,
+            )
         sys.exit(2)
-    import uvicorn
     if recovery_mode:
         from maverick_dashboard.recovery_mode import configure
         configure(fastapi_app, host=host)
@@ -2914,26 +2994,8 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
         proxy_kwargs = uvicorn_launch_kwargs()
     except Exception:  # pragma: no cover - never block startup on a config read
         proxy_kwargs = {}
-    config = uvicorn.Config(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
-    if config.reload or config.workers > 1:
-        # uvicorn.run's own refusal for an app object (one control plane per data root).
-        logging.getLogger("uvicorn.error").warning(
-            "You must pass the application as an import string to enable 'reload' or 'workers'.")
-        sys.exit(3)
-    server = uvicorn.Server(config)
-    from maverick_dashboard.dashboard_restart import RESTART_EXIT_CODE, register_server, requested
-    # Settings > Maintenance can ask a supervised copy (systemd, a container
-    # engine, Kubernetes) to restart: the server stops gracefully and this
-    # command exits with a failure code so the supervisor starts it again.
-    register_server(fastapi_app, server)
-    try:
-        server.run()
-    except KeyboardInterrupt:
-        pass
-    if not server.started:
-        sys.exit(3)
-    if requested():
-        sys.exit(RESTART_EXIT_CODE)
+    from maverick_dashboard._server import run_dashboard_server
+    run_dashboard_server(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
 
 
 @main.command()
@@ -3730,7 +3792,7 @@ def _apply_director(profile: str, outcome: str, description: str,
     profile can never raise spending past what the deployment allows.
     """
     from ..director_mode import UnknownProfileError, direct
-    from ..runner import clamp_task_limit, configured_max_dollars
+    from ..runner import requested_goal_dollars
 
     try:
         run = direct(outcome, profile=profile, base_max_dollars=max_dollars)
@@ -3741,7 +3803,7 @@ def _apply_director(profile: str, outcome: str, description: str,
         if value:
             os.environ[name] = value
     extra = f"\n\n{description}" if description else ""
-    capped = clamp_task_limit(run.max_dollars, configured_max_dollars())
+    capped = requested_goal_dollars(run.max_dollars)
     click.echo(f"[director {profile}] consent={run.consent_mode} "
                f"checkpoint={run.checkpoint} max_dollars={capped}")
     return run.goal_title, run.goal_description + extra, capped
@@ -3802,15 +3864,22 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
               help="Director mode: TITLE is an outcome, run plan-first under this "
                    "autonomy profile (consent, review checkpoints and budget from "
                    "[director.profiles], clamped to the configured spend cap).")
+@click.option("--result-file", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Write a private native single-run result for automation to a new file. Existing files are never replaced.")
+@click.option("--result-key-file", type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="Bind --result-file to an automation-owned private 32-byte key. The key is never emitted.")
 @click.pass_context
 @_humane_errors
 def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat, director_profile,
+    repeat, director_profile, result_file=None, result_key_file=None,
 ) -> None:
     """Start a new goal and run the swarm."""
+    from .run_result import prepare_result_target, read_result_key, write_if_requested
+    result_file = prepare_result_target(result_file, repeat=repeat, dry_cost=dry_cost, key_file=result_key_file)
+    result_key = read_result_key(result_key_file)
     # Coding-mode flags propagate via env so coding_mode.from_env()
     # picks them up everywhere (agent prompt, patch validator,
     # test-driven verifier, best-of-N candidate eval).
@@ -3896,12 +3965,17 @@ def start(
     # config values plus DEFAULT_MODEL ignored tenant role edits, dashboard
     # pins, the admin allow-list, and could demand an Anthropic SDK even when
     # every executable route was local.
-    _specs = _model_specs(_load_config())
+    _start_config = _load_config()
+    _specs = _model_specs(_start_config)
     _sdk_msgs = _providers.missing_sdks(sorted(_specs))
     if _sdk_msgs:
         for m in _sdk_msgs:
             click.echo(f"ERROR: {m}", err=True)
         sys.exit(2)
+
+    # A default first-run install without a container allows answer work, but
+    # cannot write files or run programs. Say so before creating a paid task.
+    _warn_file_work_before_start(_start_config, sandbox_backend)
 
     k = _kernel()
     llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
@@ -3911,6 +3985,7 @@ def start(
 
     from ..budget import budget_from_config
     from ..orchestrator import _budget_task_class
+    from ..runner import goal_budget_defaults
 
     # --repeat N runs the SAME task N times so its attempts share a task_family
     # and form DPO preference pairs. A fresh goal row + budget per run.
@@ -3924,6 +3999,7 @@ def start(
         # so config caps were silently ignored). Precedence: built-in defaults
         # < config < explicit CLI flags. A None flag passes through as "unset".
         bud = budget_from_config(
+            defaults=goal_budget_defaults(),
             # Learned per-class default cap (default-on, lowest precedence; via
             # [budget] self_tuning). Department runs use their own class so
             # finance runs are sized by finance history.
@@ -3965,7 +4041,10 @@ def start(
                 poller.join(timeout=2.0)
             # Close so WorldModel.close()'s WAL TRUNCATE checkpoint runs; the
             # poller thread (already joined) used its own connection.
-            world.close()
+            try:
+                write_if_requested(result_file, world, goal_id, bud, domain=domain, key=result_key)
+            finally:
+                world.close()
         click.echo("")
         click.echo(result)
         # Single-run keeps the exit-2-on-blocked contract (scripts/CI rely on
@@ -4159,7 +4238,9 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
         world.append_turn(conversation.id, "user", full, goal_id=goal_id)
         click.echo(click.style(f"  ... goal #{goal_id}", fg="bright_black"))
         from ..budget import budget_from_config
-        bud = budget_from_config(max_dollars=max_dollars)
+        from ..runner import goal_budget_defaults
+
+        bud = budget_from_config(defaults=goal_budget_defaults(), max_dollars=max_dollars)
         try:
             result = k.run_goal_sync(llm, world, bud, goal_id,
                                    sandbox=sandbox, max_depth=max_depth,
@@ -4270,14 +4351,14 @@ def template_add(name: str) -> None:
 @click.argument("question")
 @click.option("--rounds", default=2, show_default=True, type=int,
               help="Number of debate rounds before the judge decides.")
-@click.option("--max-dollars", default=1.0, show_default=True, type=float,
-              help="Spend cap for the whole debate.")
+@click.option("--max-dollars", default=None, type=float,
+              help="Override the configured spend cap (fallback: $1 per debate).")
 @click.option("--for", "for_stance", default=None,
               help="Stance the proponent defends (default: 'yes / sound').")
 @click.option("--against", "against_stance", default=None,
               help="Stance the skeptic defends (default: 'no / flawed').")
 @click.pass_context
-def debate(ctx, question: str, rounds: int, max_dollars: float,
+def debate(ctx, question: str, rounds: int, max_dollars: float | None,
            for_stance: str | None, against_stance: str | None) -> None:
     """Run a two-sided debate on QUESTION and print the judged verdict.
 
@@ -4285,7 +4366,6 @@ def debate(ctx, question: str, rounds: int, max_dollars: float,
     then an impartial judge declares a winner. Useful for pressure-testing a
     decision before you commit to it.
     """
-    from ..budget import Budget
     from ..debate import DebateParticipant, run_debate
     from ..llm import model_for_role
 
@@ -4311,7 +4391,7 @@ def debate(ctx, question: str, rounds: int, max_dollars: float,
     ]
     result = run_debate(
         question, participants, judge_complete=llm.complete,
-        rounds=rounds, budget=Budget(max_dollars=max_dollars),
+        rounds=rounds, budget=_cli_task_budget(question, max_dollars, 1.0),
     )
     for t in result.transcript:
         click.echo(f"\n[{t.speaker}]\n{t.text}")
@@ -4377,7 +4457,7 @@ def config_lint_cmd() -> None:
             f"error: {p} is not valid TOML -- every setting in it is being "
             f"IGNORED ({type(e).__name__}: {e})", err=True,
         )
-        click.echo("fix the syntax above, or back it up and re-run `maverick init`.")
+        click.echo("ask an installation administrator to repair the saved settings or restore a known-good backup; setup will not replace them.")
         sys.exit(1)
     try:
         cfg = load_config() or {}
@@ -4392,13 +4472,14 @@ def config_lint_cmd() -> None:
 
 @main.command("costs")
 @click.option("--limit", default=30, show_default=True, help="Rows to show.")
-def costs_cmd(limit: int) -> None:
+@click.pass_context
+def costs_cmd(ctx: click.Context, limit: int) -> None:
     """Cross-run spend, by day, from recorded episodes (the persisted ledger)."""
     from datetime import datetime, timezone
 
     from ..cost.report import format_report
-    from ..world_model import close_world_if_owned, open_world
-    w = open_world()
+    from ..world_model import close_world_if_owned
+    w = _reporting_world(ctx)
     rows: list[dict] = []
     try:
         for ep in w.list_episodes(limit=1_000_000):
@@ -4434,17 +4515,16 @@ def migrate_cmd(do_apply: bool, config_path: str | None) -> None:
 @click.argument("goal")
 @click.option("--max-iterations", default=3, show_default=True, type=int,
               help="Max plan->execute->reflect passes before stopping.")
-@click.option("--max-dollars", default=2.0, show_default=True, type=float,
-              help="Spend cap for the whole loop.")
+@click.option("--max-dollars", default=None, type=float,
+              help="Override the configured spend cap (fallback: $2 per loop).")
 @click.pass_context
-def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float) -> None:
+def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float | None) -> None:
     """Run the plan-execute-reflect loop on GOAL and print the trace.
 
     A planner breaks GOAL into steps, an executor runs each, and a reflector
     decides DONE / REVISE / CONTINUE -- looping until the goal is met, the
     iteration cap is reached, or the budget runs out.
     """
-    from ..budget import Budget
     from ..llm import model_for_role
     from ..plan_execute_reflect import run_plan_execute_reflect
 
@@ -4461,7 +4541,7 @@ def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float) -> Non
         executor_complete=llm.complete,
         reflector_complete=llm.complete,
         max_iterations=max_iterations,
-        budget=Budget(max_dollars=max_dollars),
+        budget=_cli_task_budget(goal, max_dollars, 2.0),
     )
     click.echo(f"Plan ({len(result.plan)} steps): {', '.join(result.plan) or '(empty)'}")
     for r in result.results:
@@ -4681,7 +4761,8 @@ def schedule_goal(cron_expr: str, text: str, title: str | None) -> None:
 @main.command()
 @click.option("--max-depth", default=3, type=int)
 @click.option("--verbose", "-v", is_flag=True)
-def serve(max_depth: int, verbose: bool) -> None:
+@click.pass_context
+def serve(ctx: click.Context, max_depth: int, verbose: bool) -> None:
     """Start the channel server."""
     # Use Lightwork's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
     # correlation-id context filter, secret scrubbing) for parity with the
@@ -4727,7 +4808,9 @@ def serve(max_depth: int, verbose: bool) -> None:
         click.echo(f"ERROR: {e}", err=True)
         sys.exit(2)
     try:
-        server = build_from_config()
+        server = (build_from_config(db=ctx.obj["db"])
+                  if ctx.parent is not None and ctx.parent.params.get("db") is not None
+                  else build_from_config())
     except RuntimeError as e:
         click.echo(f"ERROR: {e}", err=True)
         sys.exit(2)
@@ -4937,7 +5020,10 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
     # Honor [budget] config, and let --max-dollars/--max-wall-seconds raise
     # the cap on resume (the budget-halt message tells users to do this).
     from ..budget import budget_from_config
+    from ..runner import goal_budget_defaults
+
     bud = budget_from_config(
+        defaults=goal_budget_defaults(),
         max_dollars=max_dollars,
         max_wall_seconds=max_wall_seconds,
     )
@@ -6083,10 +6169,36 @@ def record_export(ctx, out: str, limit: int) -> None:
 
 @record_grp.command("verify")
 @click.argument("capsule", type=click.Path(exists=True))
-def record_verify(capsule: str) -> None:
-    """Verify a capsule's signature + integrity offline."""
+@click.option("--pubkey", "pubkeys", multiple=True,
+              help="Trusted Ed25519 public key (hex) the capsule must be signed "
+                   "with, e.g. the firm's published key. Repeatable. Default: "
+                   "this installation's own audit keys.")
+@click.option("--trusted-keys", "trusted_file", default=None,
+              type=click.Path(exists=True, dir_okay=False),
+              help="File of trusted public keys (hex), one per line; blank "
+                   "lines and # comments are ignored.")
+def record_verify(capsule: str, pubkeys: tuple[str, ...], trusted_file: str | None) -> None:
+    """Verify a capsule's integrity AND that it was signed by a trusted key.
+
+    A capsule carries its own public key, so a signature alone proves only that
+    the file is unedited, not who made it. Without --pubkey/--trusted-keys the
+    signer must be one of this installation's audit keys; to check a capsule
+    from another installation, pass that publisher's key.
+    """
     from .. import operating_record as orec
-    ok, reason = orec.verify_capsule(capsule)
+    trusted: list[str] | None = None
+    if pubkeys or trusted_file:
+        trusted = list(pubkeys)
+        if trusted_file:
+            try:
+                with open(trusted_file, encoding="utf-8") as handle:
+                    lines = (ln.split("#", 1)[0].strip() for ln in handle)
+                    trusted += [ln for ln in lines if ln]
+            except (OSError, UnicodeDecodeError) as e:
+                raise click.ClickException(
+                    "cannot read the trusted keys file: it must be a text file "
+                    "with one public key per line") from e
+    ok, reason = orec.verify_capsule(capsule, trusted_pubkeys=trusted)
     click.echo(reason)
     if not ok:
         raise click.ClickException("verification failed")
@@ -6307,10 +6419,11 @@ def _watch_goal_allowed(goal_text: str) -> tuple[bool, str | None]:
 @main.command()
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--run", is_flag=True, help="Spawn a goal per match (default: print only).")
-@click.option("--max-dollars", default=2.0, type=float)
+@click.option("--max-dollars", default=None, type=float,
+              help="Override the configured spend cap (fallback: $2 per matched task).")
 @click.pass_context
 @_humane_errors
-def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
+def watch(ctx, path: str, run: bool, max_dollars: float | None) -> None:
     """Scan a file or directory for `# AI: <task>` markers and (optionally)
     run each as a goal. One-shot scan; for a long-running watcher use
     `entr` / `watchman` / `fswatch` and pipe to this command."""
@@ -6366,11 +6479,12 @@ def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
             if not allowed:
                 click.echo(click.style(f"  skipped: {reason}", fg="yellow"), err=True)
                 continue
+            budget = _cli_task_budget(title, max_dollars, 2.0)
             goal_id = world.create_goal(title or "watch-mode goal", goal_text)
             click.echo(click.style(f"  -> goal #{goal_id}", fg="bright_black"))
             try:
                 result = k.run_goal_sync(
-                    llm, world, k.Budget(max_dollars=max_dollars),
+                    llm, world, budget,
                     goal_id, sandbox=sandbox, max_depth=2,
                 )
                 click.echo(result)
@@ -7121,41 +7235,57 @@ def audit_worm_verify() -> None:
 @click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
 def halt(reason: str, json_output: bool = False) -> None:
     """Request a local halt at upcoming execution checkpoints."""
-    import json
-
-    from ..killswitch import _halt_file_generation, _halt_file_path
-    p = _halt_file_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(reason + "\n")
-    if _halt_file_generation(p) is None:
-        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
-    if json_output:
-        click.echo(json.dumps({"command": "halt", "acknowledged": True,
-                               "halt_file_present": True, "scope": "local", "work_stopped": False}))
-    else:
-        click.echo(f"halt set: {p}")
+    _local_halt_command("halt", reason, json_output)
 
 
 @main.command("unhalt")
+@click.option("--reason", default="manual clear", help="Why you're clearing the local halt.")
 @click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
-def unhalt(json_output: bool = False) -> None:
-    """Remove the HALT file to allow goals to run again."""
+def unhalt(reason: str, json_output: bool = False) -> None:
+    """Clear the local HALT authority after verifying its generation."""
+    _local_halt_command("unhalt", reason, json_output)
+
+
+def _local_halt_command(command: str, reason: str, json_output: bool) -> None:
+    """Share the audited local authority while preserving the CLI wire shape."""
     import json
 
-    from ..killswitch import _halt_file_generation, _halt_file_path
-    p = _halt_file_path()
-    if p.exists():
-        p.unlink()
-        message = f"cleared: {p}"
-    else:
-        message = f"no halt file at {p}"
-    if _halt_file_generation(p) is not None:
+    from .. import agent_control_plane as acp
+    from .. import killswitch
+    from ..audit import AuditRefused
+    from ._agent_control_plane_groups import _actor
+
+    try:
+        result = (
+            acp.halt_local(reason, actor=_actor())
+            if command == "halt"
+            else acp.clear_local_halt(actor=_actor(), reason=reason)
+        )
+    except AuditRefused as exc:
+        raise click.ClickException(
+            "Halt audit was refused; local state may have changed. Check status before retrying."
+        ) from exc
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not result.ok:
+        raise click.ClickException(
+            f"Local halt-file state was not confirmed ({result.detail}); review before retrying."
+        )
+    p = killswitch._halt_file_path()
+    try:
+        present = killswitch._halt_file_generation(p) is not None
+    except OSError as exc:
+        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.") from exc
+    if present != (command == "halt"):
         raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
     if json_output:
-        click.echo(json.dumps({"command": "unhalt", "acknowledged": True,
-                               "halt_file_present": False, "scope": "local", "work_stopped": False}))
+        click.echo(json.dumps({"command": command, "acknowledged": True,
+                               "halt_file_present": present, "scope": "local", "work_stopped": False,
+                               "audit_written": result.audit_written}))
     else:
-        click.echo(message)
+        click.echo(f"{'halt set' if present else 'local halt cleared'}: {p}")
+        if not result.audit_written:
+            click.echo("warning: halt audit result was not written", err=True)
 
 
 # ----- Cost / export / logs --------------------------------------------
@@ -7317,6 +7447,7 @@ def _soc2_posture_ready(evidence) -> bool:
 from . import (  # noqa: E402,F401
     _a2a_groups,
     _agent_control_plane_groups,
+    _budget_preview,
     _code_groups,
     _codec_groups,
     _compliance_groups,

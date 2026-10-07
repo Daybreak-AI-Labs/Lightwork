@@ -54,6 +54,7 @@ import logging
 import math
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -244,12 +245,47 @@ def _ledger_path() -> Path:
     return data_dir("provider_spend.json")
 
 
+def recorded_at() -> float | None:
+    """When provider spending last reached this installation's ledger (epoch
+    seconds), for a page's "Spending updated" label. None when nothing is
+    recorded here, and None for a shared database ledger, whose rows carry no
+    time this module can read: no label beats a made-up one."""
+    try:
+        if _shared_world() is not None:
+            return None
+    except ProviderAccountingUnavailable:
+        return None
+    from . import provider_spend_sqlite
+
+    legacy = _ledger_path()
+    database = provider_spend_sqlite.database_path(legacy)
+    stamps = []
+    for path in (legacy, database, database.with_name(database.name + "-wal")):
+        try:
+            stamps.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    return max(stamps) if stamps else None
+
+
+def _use_indexed_ledger(path: Path) -> bool:
+    """Migrate healthy local accounting before the legacy file size ceiling."""
+    if path.absolute() != _ledger_path().absolute():
+        return False
+    from . import provider_spend_sqlite
+    if provider_spend_sqlite.is_active(path):
+        return True
+    try:
+        return path.stat().st_size >= _INDEXED_MIGRATION_BYTES
+    except FileNotFoundError:
+        return False
+
+
 _RECEIPTS = "__provider_reservations_v1__"
 _ATTEMPT_INDEX = "__provider_attempt_index_v1__"
 _REFERENCE_PREFIX = "provider-cap:v1:"
 _MAX_LEDGER_BYTES = 16 * 1024 * 1024
-_MAX_RECEIPTS = 100_000
-_MAX_ATTEMPT_INDEX = 200_000
+_INDEXED_MIGRATION_BYTES = 512 * 1024
 _MAX_DISCOVERY_PAGE = 200
 _MAX_CATALOGUE_RECEIPTS = 2000
 _PERIOD = re.compile(r"[0-9]{4}-[0-9]{2}(?:-[0-9]{2})?\Z")
@@ -335,7 +371,7 @@ def _validate_operation_metadata(value: object) -> dict[str, object] | None:
 
 def _validate_receipts(total, receipts):
     total = _amount(total)
-    if not isinstance(receipts, dict) or len(receipts) > _MAX_RECEIPTS:
+    if not isinstance(receipts, dict):
         raise ProviderAccountingUnavailable
     charged = 0.0
     for identity, row in receipts.items():
@@ -448,7 +484,7 @@ def _operation_attempt_claim(
 
 
 def _validate_attempt_index_rows(value: object) -> dict[str, dict[str, str]]:
-    if not isinstance(value, dict) or len(value) > _MAX_ATTEMPT_INDEX:
+    if not isinstance(value, dict):
         raise ProviderAccountingUnavailable
     validated: dict[str, dict[str, str]] = {}
     for attempt_key, row in value.items():
@@ -522,8 +558,6 @@ def _complete_attempt_index(data: dict) -> dict[str, dict[str, str]]:
                 if prior is not None and prior != row:
                     raise ProviderAccountingUnavailable
                 index[attempt_key] = row
-    if len(index) > _MAX_ATTEMPT_INDEX:
-        raise ProviderAccountingUnavailable
     return index
 
 
@@ -558,7 +592,35 @@ def _admit_attempt_index(
     }
 
 
-def _load(path: Path) -> dict:
+def _validate_ledger(raw: dict) -> None:
+    if not isinstance(raw, dict):
+        raise ProviderAccountingUnavailable
+    metadata = raw.get(_RECEIPTS, {})
+    if not isinstance(metadata, dict):
+        raise ProviderAccountingUnavailable
+    for period, bucket in raw.items():
+        if period in {_RECEIPTS, _ATTEMPT_INDEX}:
+            continue
+        if not _PERIOD.fullmatch(period) or not isinstance(bucket, dict):
+            raise ProviderAccountingUnavailable
+        for name, total in bucket.items():
+            if not isinstance(name, str) or not name or name != _canon(name):
+                raise ProviderAccountingUnavailable
+            _validate_receipts(total, metadata.get(period, {}).get(name, {}))
+    for period, providers in metadata.items():
+        if not isinstance(providers, dict) or period not in raw:
+            raise ProviderAccountingUnavailable
+        for name, receipts in providers.items():
+            if name not in raw[period]:
+                raise ProviderAccountingUnavailable
+            _validate_receipts(raw[period][name], receipts)
+    if _ATTEMPT_INDEX in raw:
+        index = _validate_attempt_index_rows(raw[_ATTEMPT_INDEX])
+        if _complete_attempt_index(raw) != index:
+            raise ProviderAccountingUnavailable
+
+
+def _load_json(path: Path) -> dict:
     try:
         ensure_private_directory(path.parent)
         ensure_private_file(path, 0o600)
@@ -568,31 +630,7 @@ def _load(path: Path) -> dict:
         if len(raw_text.encode("utf-8")) > _MAX_LEDGER_BYTES:
             raise ProviderAccountingUnavailable
         raw = json.loads(raw_text)
-        if not isinstance(raw, dict):
-            raise ProviderAccountingUnavailable
-        metadata = raw.get(_RECEIPTS, {})
-        if not isinstance(metadata, dict):
-            raise ProviderAccountingUnavailable
-        for period, bucket in raw.items():
-            if period in {_RECEIPTS, _ATTEMPT_INDEX}:
-                continue
-            if not _PERIOD.fullmatch(period) or not isinstance(bucket, dict):
-                raise ProviderAccountingUnavailable
-            for name, total in bucket.items():
-                if not isinstance(name, str) or not name or name != _canon(name):
-                    raise ProviderAccountingUnavailable
-                _validate_receipts(total, metadata.get(period, {}).get(name, {}))
-        for period, providers in metadata.items():
-            if not isinstance(providers, dict) or period not in raw:
-                raise ProviderAccountingUnavailable
-            for name, receipts in providers.items():
-                if name not in raw[period]:
-                    raise ProviderAccountingUnavailable
-                _validate_receipts(raw[period][name], receipts)
-        if _ATTEMPT_INDEX in raw:
-            index = _validate_attempt_index_rows(raw[_ATTEMPT_INDEX])
-            if _complete_attempt_index(raw) != index:
-                raise ProviderAccountingUnavailable
+        _validate_ledger(raw)
         return raw
     except FileNotFoundError as exc:
         if path.with_suffix(path.suffix + ".required").exists():
@@ -602,7 +640,17 @@ def _load(path: Path) -> dict:
         raise ProviderAccountingUnavailable from exc
 
 
-def _save(path: Path, data: dict) -> None:
+def _load(path: Path) -> dict:
+    if _use_indexed_ledger(path):
+        from . import provider_spend_sqlite
+        try:
+            return provider_spend_sqlite.load(path, sys.modules[__name__])
+        except Exception as exc:
+            raise ProviderAccountingUnavailable from exc
+    return _load_json(path)
+
+
+def _save_json(path: Path, data: dict) -> None:
     ensure_private_directory(path.parent)
     encoded = json.dumps(data, allow_nan=False)
     if len(encoded.encode("utf-8")) > _MAX_LEDGER_BYTES:
@@ -615,6 +663,17 @@ def _save(path: Path, data: dict) -> None:
     except FileExistsError:
         ensure_private_file(marker, 0o600)
     atomic_write_text(path, encoded, mode=0o600)
+
+
+def _save(path: Path, data: dict) -> None:
+    if _use_indexed_ledger(path):
+        from . import provider_spend_sqlite
+        try:
+            provider_spend_sqlite.replace(path, data, sys.modules[__name__])
+        except Exception as exc:
+            raise ProviderAccountingUnavailable from exc
+        return
+    _save_json(path, data)
 
 
 @dataclass(frozen=True)
@@ -648,6 +707,7 @@ class ReservationSnapshot:
     outcome_claim_state: str | None
     outcome_claim_event: str | None
     operation: dict[str, object] | None
+    reconciliation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -864,6 +924,7 @@ def _snapshot(
         ),
         outcome_claim_event=row.get("outcome_claim_event"),
         operation=_validate_operation_metadata(row.get("operation")),
+        reconciliation=row.get("reconciliation"),
     )
 
 
@@ -906,6 +967,9 @@ def _mutate(
     path=None,
     shared=None,
     attempt_claim=None,
+    new_request_id=None,
+    target_request_id=None,
+    numeric_only=False,
 ):
     def validated(total, receipts):
         total, receipts, result = operation(total, receipts)
@@ -918,7 +982,20 @@ def _mutate(
         if shared is not None:
             return shared.mutate_provider_cap(period, name, validated)
         with _LEDGER_LOCK, cross_process_lock(path, strict=True):
-            data = _load(path)
+            # Select the authority only after acquiring the same lock used by
+            # migration. A writer that queued against a growing JSON file
+            # must re-check rather than update the stale source after another
+            # process published the indexed database.
+            if _use_indexed_ledger(path):
+                from . import provider_spend_sqlite
+                return provider_spend_sqlite.mutate(
+                    path, period, name, operation, sys.modules[__name__],
+                    attempt_claim=attempt_claim,
+                    new_request_id=new_request_id,
+                    target_request_id=target_request_id,
+                    numeric_only=numeric_only,
+                )
+            data = _load_json(path)
             attempt_index = None
             if attempt_claim is not None:
                 attempt_index = _complete_attempt_index(data)
@@ -936,7 +1013,7 @@ def _mutate(
                 data.setdefault(_RECEIPTS, {}).setdefault(period, {})[name] = receipts
             if attempt_index is not None:
                 data[_ATTEMPT_INDEX] = attempt_index
-            _save(path, data)
+            _save_json(path, data)
             return result
     except (ProviderCapExceeded, ProviderAccountingUnavailable):
         raise
@@ -969,7 +1046,8 @@ def record(provider: str, dollars: float, *, now: float | None = None,
                 shared=shared,
             )
         else:
-            _mutate(name, period_key(now), add, path=path or _ledger_path())
+            _mutate(name, period_key(now), add, path=path or _ledger_path(),
+                    numeric_only=True)
     except (OSError, ProviderAccountingUnavailable):
         log.warning("Provider spend could not be recorded; accounting requires reconciliation.")
 
@@ -1005,10 +1083,23 @@ def check(provider: str, *, now: float | None = None,
             if not isinstance(period, str) or not _PERIOD.fullmatch(period):
                 raise ProviderAccountingUnavailable
         else:
-            data = _load(path or _ledger_path())
             period = period_key(now)
-            total = data.get(period, {}).get(name, 0.0)
-            receipts = data.get(_RECEIPTS, {}).get(period, {}).get(name, {})
+            ledger = path or _ledger_path()
+            if _use_indexed_ledger(ledger):
+                from . import provider_spend_sqlite
+                total, held, unresolved = provider_spend_sqlite.read_status(
+                    ledger, period, name, sys.modules[__name__],
+                )
+                return CapStatus(
+                    cap is None or (total < cap and not unresolved),
+                    max(0.0, total - held), cap,
+                    None if cap is None else max(0.0, cap - total),
+                    held, unresolved,
+                )
+            else:
+                data = _load(ledger)
+                total = data.get(period, {}).get(name, 0.0)
+                receipts = data.get(_RECEIPTS, {}).get(period, {}).get(name, {})
         return _status(total, receipts, cap)
     except Exception as exc:
         if cap is None:
@@ -1092,8 +1183,6 @@ def _reserve_provider(
             raise ProviderAccountingUnavailable
         if cap is not None and (total >= cap or total + projected > cap):
             raise ProviderCapExceeded(name, total, cap, period)
-        if len(receipts) >= _MAX_RECEIPTS:
-            raise ProviderAccountingUnavailable
         receipts[identity] = {
             "projected": projected, "state": "held", "actual": None,
             **({"work_item_sha256": work_item_sha256} if work_item_sha256 else {}),
@@ -1119,6 +1208,7 @@ def _reserve_provider(
             lambda total, receipts: admit(period, total, receipts),
             path=ledger,
             attempt_claim=attempt_claim,
+            new_request_id=identity,
         )
     return Reservation(name, period, identity, projected, ledger, shared)
 
@@ -1267,6 +1357,7 @@ def _settle_provider(
     row = _mutate(
         reservation.provider, reservation.period, finish,
         path=reservation.path, shared=reservation.shared,
+        target_request_id=reservation.request_id,
     )
     return _snapshot(
         reservation.provider, reservation.period, reservation.request_id, row,
@@ -1406,6 +1497,15 @@ def inspect_reservation(
     try:
         if shared is not None:
             total, receipts = shared.read_provider_cap(period, provider)
+        elif _use_indexed_ledger(ledger):
+            from . import provider_spend_sqlite
+            row = provider_spend_sqlite.read_receipt(
+                ledger, period, provider, request_id, sys.modules[__name__],
+            )
+            if expected_work_item_id is not None:
+                if row.get("work_item_sha256") != _work_item_hash(expected_work_item_id):
+                    raise ProviderAccountingUnavailable
+            return _snapshot(provider, period, request_id, row)
         else:
             with _LEDGER_LOCK, cross_process_lock(ledger, strict=True):
                 data = _load(ledger)
@@ -1499,6 +1599,7 @@ def reservations_for_work_item(
     shared = _shared_world() if path is None else None
     ledger = None if shared is not None else (path or _ledger_path()).absolute()
     data = None
+    indexed_rows = None
     try:
         if shared is not None:
             keys = shared.find_provider_cap_reservations(
@@ -1506,6 +1607,14 @@ def reservations_for_work_item(
                 limit=limit + 1,
                 after=after,
             )
+        elif _use_indexed_ledger(ledger):
+            from . import provider_spend_sqlite
+            rows = provider_spend_sqlite.find_receipts(
+                ledger, work_item_sha256, limit=limit + 1, after=after,
+                cap=sys.modules[__name__],
+            )
+            keys = [row[:3] for row in rows]
+            indexed_rows = {row[:3]: row[4] for row in rows}
         else:
             with _LEDGER_LOCK, cross_process_lock(ledger, strict=True):
                 data = _load(ledger)
@@ -1544,6 +1653,12 @@ def reservations_for_work_item(
         snapshots: list[ReservationSnapshot] = []
         buckets: dict[tuple[str, str], dict] = {}
         for period, provider, request_id in selected:
+            if indexed_rows is not None:
+                snapshots.append(_snapshot(
+                    provider, period, request_id,
+                    indexed_rows[(period, provider, request_id)],
+                ))
+                continue
             bucket_key = (period, provider)
             if bucket_key not in buckets:
                 if shared is not None:
@@ -1630,6 +1745,13 @@ def reservation_catalogue_for_work_item(
                     raise ProviderAccountingUnavailable
                 receipts = json.loads(encoded)
                 collect(period, provider, total, receipts)
+        elif _use_indexed_ledger(ledger):
+            from . import provider_spend_sqlite
+            for period, provider, request_id, total, row in provider_spend_sqlite.find_receipts(
+                ledger, work_item_sha256, limit=limit + 1, after=None,
+                cap=sys.modules[__name__],
+            ):
+                collect(period, provider, total, {request_id: row})
         else:
             with _LEDGER_LOCK, cross_process_lock(ledger, strict=True):
                 data = _load(ledger)
@@ -1690,7 +1812,8 @@ def claim_reservation(
         row.setdefault("outcome_claim_state", "prepared")
         return total, receipts, dict(row)
 
-    row = _mutate(provider, period, claim, path=ledger, shared=shared)
+    row = _mutate(provider, period, claim, path=ledger, shared=shared,
+                  target_request_id=request_id)
     return _snapshot(provider, period, request_id, row)
 
 
@@ -1746,7 +1869,8 @@ def commit_reservation_claim(
         row["outcome_claim_event"] = event_id
         return total, receipts, dict(row)
 
-    row = _mutate(provider, period, commit, path=ledger, shared=shared)
+    row = _mutate(provider, period, commit, path=ledger, shared=shared,
+                  target_request_id=request_id)
     return _snapshot(provider, period, request_id, row)
 
 
@@ -1813,6 +1937,11 @@ def prune(*, now: float | None = None, path: Path | None = None) -> int:
     from a period-knob change would otherwise linger forever). Call it
     opportunistically — e.g. after recording at period rollover.
     """
+    # The indexed authority keeps historical receipts available for exact
+    # outcome attribution and replay prevention. Its rows are never silently
+    # dropped as a latency remedy.
+    if _use_indexed_ledger(path or _ledger_path()):
+        return 0
     current = period_key(now)
     ledger = path if path is not None else _ledger_path()
     with _LEDGER_LOCK, cross_process_lock(ledger):
@@ -1864,6 +1993,7 @@ __all__ = [
     "metered_provider_call",
     "claim_reservation",
     "commit_reservation_claim",
+    "recorded_at",
     "reserve",
     "settle",
     "CapStatus",

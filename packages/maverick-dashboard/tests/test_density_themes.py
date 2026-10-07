@@ -83,7 +83,8 @@ def test_custom_themes_validation(monkeypatch):
 def test_theme_css_renders_validated_variables():
     css = themes_mod.theme_css({"midnight": _GOOD})
     assert css == ("body.theme-midnight { --bg: #101020; --panel: #181830; "
-                   "--text: #e0e0f0; --accent: #7aa2f7; }")
+                   "--text: #e0e0f0; --accent: #7aa2f7; --border: #e0e0f0; "
+                   "--muted: #e0e0f0; --warn: #e0e0f0; --danger: #e0e0f0; }")
 
 
 def test_custom_theme_selectable_like_builtins(monkeypatch):

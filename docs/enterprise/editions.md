@@ -1,8 +1,8 @@
 # Editions
 
 Lightwork is **proprietary, commercially licensed** software
-([`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).
-Production use requires a license — [contact us](https://github.com/Daybreak-AI-Labs/Lightwork).
+([`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
+Production use requires a license — [contact us](mailto:chris@daybreakailabs.com?subject=Lightwork%20inquiry).
 
 > Editions are the **distribution** split (open-core). The commercial **pricing
 > tiers** within Enterprise — Basic / Gold / Platinum — and the canonical SKU list

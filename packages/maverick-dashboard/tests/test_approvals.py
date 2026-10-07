@@ -75,7 +75,7 @@ def test_pending_approval_shows_on_page(monkeypatch, tmp_path):
     assert "saved but not in effect yet" in text
     assert "This older request is missing the details needed to approve it safely" in text
     assert 'data-action="approve" disabled' in text
-    assert 'data-action="deny">Reject</button>' in text
+    assert 'data-action="deny">Reject &#34;Rm rf&#34;</button>' in text
     assert 'data-action="revise">Send back for changes</button>' in text
     assert "window.prompt" not in text
     assert "'Failed: '" not in text and "String(e)" not in text
@@ -112,6 +112,7 @@ def test_legacy_approve_is_blocked_but_deny_remains_available(monkeypatch, tmp_p
 
     r = client.post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={"Origin": "http://testserver"},
     )
     assert r.status_code == 409
@@ -156,7 +157,7 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
         risk="high",
         detail=encode_approval_detail(old_card),
         provenance="browser",
-        requested_by="user:alice",
+        requested_by="",  # This protocol test exercises genuinely unowned local work.
     )
     client = _client()
 
@@ -184,12 +185,17 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
 
     old_replay = client.post(
         f"/api/v1/approvals/{old_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={
             "Origin": "http://testserver",
             "X-Lightwork-Approval-Binding": old_card["binding_sha256"],
         },
     )
-    assert old_replay.status_code == 404
+    # The reviewed vote path refuses a decided round as stale (409) and says to
+    # read its current status; the superseded request stays denied.
+    assert old_replay.status_code == 409, old_replay.text
+    assert "Read its current status" in old_replay.text
+    assert w.get_approval(old_id).status == "denied"
 
     fresh_card = _structured_card(
         action="browser.click", expires_at=old_card["expires_at"] + 60,
@@ -199,12 +205,13 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
         risk="high",
         detail=encode_approval_detail(fresh_card),
         provenance="browser",
-        requested_by="user:alice",
+        requested_by="",
     )
     assert fresh_id != old_id
     assert fresh_card["binding_sha256"] != old_card["binding_sha256"]
     fresh = client.post(
         f"/api/v1/approvals/{fresh_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={
             "Origin": "http://testserver",
             "X-Lightwork-Approval-Binding": fresh_card["binding_sha256"],
@@ -218,6 +225,7 @@ def test_approve_unknown_is_404(monkeypatch, tmp_path):
     client = _client()
     r = client.post(
         "/api/v1/approvals/9999/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={"Origin": "http://testserver"},
     )
     assert r.status_code == 404
@@ -258,6 +266,7 @@ def test_decision_is_anchored_in_audit_chain(monkeypatch, tmp_path):
     client = _client()
     r = client.post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={
             "Origin": "http://testserver",
             "X-Lightwork-Approval-Binding": card["binding_sha256"],
@@ -265,9 +274,11 @@ def test_decision_is_anchored_in_audit_chain(monkeypatch, tmp_path):
     )
     assert r.status_code == 204
 
-    assert len(recorded) == 1
-    kind, payload = recorded[0]
-    assert kind == audit.EventKind.APPROVAL_DECISION
+    # The high-risk confirmation is its own plain-language event; the
+    # decision itself is anchored exactly once.
+    decisions = [(k, p) for k, p in recorded if k == audit.EventKind.APPROVAL_DECISION]
+    assert len(decisions) == 1
+    kind, payload = decisions[0]
     assert payload["approval_id"] == aid
     assert payload["status"] == "approved"
     assert payload["decided_by"]  # the supervisor identity is attributed
@@ -313,12 +324,14 @@ def test_structured_card_is_visible_escaped_and_requires_exact_binding(
 
     missing = client.post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={"Origin": "http://testserver"},
     )
     assert missing.status_code == 409
     assert w.get_approval(aid).status == "pending"
     stale = client.post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={
             "Origin": "http://testserver",
             "X-Lightwork-Approval-Binding": "b" * 64,
@@ -328,6 +341,7 @@ def test_structured_card_is_visible_escaped_and_requires_exact_binding(
     assert w.get_approval(aid).status == "pending"
     current = client.post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={
             "Origin": "http://testserver",
             "X-Lightwork-Approval-Binding": card["binding_sha256"],
@@ -357,7 +371,7 @@ def test_untrusted_assessment_text_cannot_replace_structured_approval_card(
     assert 'class="approval-card"' in page.text
     assert "data-assessment-id=" not in page.text
     assert "detail.innerHTML = ''" not in page.text
-    assert "tr.dataset.assessmentId" in page.text
+    assert "item.dataset.assessmentId" in page.text
 
 
 def test_explicit_assessment_provenance_enables_review_without_removing_card_markup(
@@ -389,6 +403,7 @@ def test_expired_structured_card_never_mutates_approval(monkeypatch, tmp_path):
     )
     response = _client().post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={
             "Origin": "http://testserver",
             "X-Lightwork-Approval-Binding": card["binding_sha256"],
@@ -420,6 +435,7 @@ def test_view_only_approval_submission_is_audited_without_sensitive_content(
 
     response = _client().post(
         f"/api/v1/approvals/{aid}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={"Origin": "http://testserver"},
     )
 
@@ -449,6 +465,7 @@ def test_view_only_submission_stays_pending_when_denial_audit_is_unavailable(
 
     response = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers={"Origin": "http://testserver"},
     )
 
@@ -472,7 +489,7 @@ def test_approval_card_reads_plainly_with_fingerprints_tucked_away(monkeypatch, 
     assert "This is Lightwork's suggestion — the decision is yours." in text
     assert "Up to $0.25" in text
     assert "Technical details (for auditors)" in text
-    assert 'data-action="approve">Approve</button>' in text or '>Approve</button>' in text
+    assert '>Approve &#34;Send email&#34;</button>' in text
     # Fingerprints only appear inside the collapsed auditor section.
     before_tech = text.split("Technical details (for auditors)")[0]
     assert card["target"]["sha256"] not in before_tech
@@ -480,8 +497,10 @@ def test_approval_card_reads_plainly_with_fingerprints_tucked_away(monkeypatch, 
     assert developer_terms(text.replace("tenant-a", "workspace-a")) == []
 
 
-def test_empty_queue_offers_past_decisions(monkeypatch, tmp_path):
+def test_empty_queue_offers_owned_decisions(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/approvals").text
-    assert "Nothing needs your decision right now." in text
-    assert 'href="/audit">See past decisions</a>' in text
+    assert '<p class="mv-empty__title">Nothing needs your decision right now</p>' in text
+    assert 'class="btn mv-empty__action" href="#request-decision-history"' in text
+    assert 'id="request-decision-history"' in text and "Decisions on your requests" in text
+    assert 'id="request-decision-more"' in text and "/static/lightwork-approval-history.js" in text

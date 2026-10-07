@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 import threading
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from maverick import postgres_transactions as pt
@@ -163,6 +163,13 @@ class Pool:
 def fake_pool(monkeypatch):
     Pool.instances = []
     monkeypatch.setitem(sys.modules, "psycopg_pool", SimpleNamespace(ConnectionPool=Pool))
+    # These tests exercise pool ownership without opening a libpq socket. Keep
+    # the optional driver out of this fixture instead of relying on another
+    # test having imported (or faked) psycopg first.
+    fake_io = ModuleType("maverick.postgres_io")
+    fake_io.BoundedConnection = type("BoundedConnection", (), {})
+    fake_io.postgres_io_timeout_seconds = lambda: 35.0
+    monkeypatch.setitem(sys.modules, "maverick.postgres_io", fake_io)
     monkeypatch.setattr(pt, "postgres_connection_kwargs", lambda _: {
         "autocommit": False, "connect_timeout": 3, "options": "-c statement_timeout=50",
     })
@@ -180,7 +187,7 @@ def test_pool_shared_across_namespaces_but_not_credentials_or_options(fake_pool)
     pool = fake_pool.instances[0]
     assert pool.timeouts == [.2, .2]
     assert pool.kwargs["kwargs"]["connect_timeout"] == 3
-    assert pool.kwargs["max_waiting"] == 64 and pool.kwargs["min_size"] == 0
+    assert pool.kwargs["max_waiting"] == 64 and pool.kwargs["min_size"] == 1
     assert "dsn-one" not in repr(pt._POOLS.keys())
     assert pool.connection.statements[-1][0] == "SELECT set_config('maverick.tenant', '', false)"
 
@@ -300,3 +307,24 @@ def test_a_block_that_swallowed_a_database_error_is_not_reported_as_committed():
         # holds an aborted transaction that COMMIT would silently roll back
         connection.info.transaction_status = SimpleNamespace(name="INERROR")
     assert connection.commits == 0 and connection.rollbacks == 1
+
+
+def test_pool_keeps_one_idle_connection_by_default_and_the_floor_is_configurable(fake_pool):
+    default = pt.PostgresTransactions("dsn-min", pool_size=4, pool_timeout_seconds=.2)
+    with default.transaction():
+        pass
+    assert fake_pool.instances[-1].kwargs["min_size"] == 1
+    cold = pt.PostgresTransactions("dsn-min", pool_size=4, pool_timeout_seconds=.2, pool_min_size=0)
+    with cold.transaction():
+        pass
+    assert fake_pool.instances[-1].kwargs["min_size"] == 0  # a different pool identity
+    capped = pt.PostgresTransactions("dsn-min", pool_size=2, pool_timeout_seconds=.2, pool_min_size=9)
+    with capped.transaction():
+        pass
+    assert fake_pool.instances[-1].kwargs["min_size"] == 2  # never above max_size
+
+
+@pytest.mark.parametrize("min_size", [True, -1, 1.5, "1"])
+def test_invalid_pool_min_size_refuses(min_size):
+    with pytest.raises(ValueError, match="pool_min_size"):
+        pt.PostgresTransactions("unused", pool_size=2, pool_min_size=min_size)

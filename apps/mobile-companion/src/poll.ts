@@ -5,6 +5,7 @@
  * model. The fetcher's failures are surfaced, not swallowed, so screens can
  * fall back to the offline cache. */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { NETWORK_TROUBLE, isAccessDenied } from "./api";
 
 export type Polled<T> = {
@@ -13,6 +14,7 @@ export type Polled<T> = {
   accessDenied: boolean;
   unsupported: boolean;
   refresh: () => void;
+  updatedAt: number | null;
 };
 
 export function usePolling<T>(
@@ -26,7 +28,8 @@ export function usePolling<T>(
     error: string | null;
     accessDenied: boolean;
     unsupported: boolean;
-  }>({ fetcher, data: null, error: null, accessDenied: false, unsupported: false });
+    updatedAt: number | null;
+  }>({ fetcher, data: null, error: null, accessDenied: false, unsupported: false, updatedAt: null });
   const refreshCurrent = useRef<() => void>(() => {});
   const refresh = useCallback(() => refreshCurrent.current(), []);
 
@@ -39,9 +42,9 @@ export function usePolling<T>(
     let stopped = false;
     let activeController: AbortController | null = null;
     let deadline: ReturnType<typeof setTimeout> | undefined;
-    setSnapshot({ fetcher, data: null, error: null, accessDenied: false, unsupported: false });
+    setSnapshot({ fetcher, data: null, error: null, accessDenied: false, unsupported: false, updatedAt: null });
     const tick = () => {
-      if (!current) return;
+      if (!current || AppState.currentState === "background" || AppState.currentState === "inactive") return;
       const request = ++latestRequest;
       activeController?.abort();
       clearTimeout(deadline);
@@ -55,7 +58,7 @@ export function usePolling<T>(
         (data) => {
           if (!current || request !== latestRequest) return;
           stopped = !continuePolling(data);
-          setSnapshot({ fetcher, data, error: null, accessDenied: false, unsupported: false });
+          setSnapshot({ fetcher, data, error: null, accessDenied: false, unsupported: false, updatedAt: Date.now() });
         },
         (e: unknown) => {
           if (!current || request !== latestRequest) return;
@@ -68,19 +71,27 @@ export function usePolling<T>(
             error: plainError(e),
             accessDenied: denied,
             unsupported,
+            updatedAt: !denied && !unsupported ? previous.updatedAt : null,
           }));
         },
       ).finally(() => {
         if (request === latestRequest) { pending = false; clearTimeout(deadline); activeController = null; }
       });
     };
+    const lifecycle = AppState.addEventListener('change', state => {
+      if (state === 'active') { tick(); }
+      else {
+        latestRequest += 1; activeController?.abort(); activeController = null;
+        clearTimeout(deadline); pending = false;
+      }
+    });
     refreshCurrent.current = tick;
     tick();
     // Slow automatic polls must be allowed to finish instead of being made
     // obsolete on every interval. Explicit refresh may still supersede one.
     const id = setInterval(() => { if (!pending && !stopped) tick(); }, intervalMs);
     return () => {
-      current = false;
+      current = false; lifecycle.remove();
       refreshCurrent.current = () => {};
       clearInterval(id);
       clearTimeout(deadline);
@@ -96,6 +107,7 @@ export function usePolling<T>(
     accessDenied: matches ? snapshot.accessDenied : false,
     unsupported: matches ? snapshot.unsupported : false,
     refresh,
+    updatedAt: matches ? snapshot.updatedAt : null,
   };
 }
 

@@ -7,6 +7,7 @@ import re
 
 import pytest
 from fastapi.testclient import TestClient
+from maverick_dashboard.app import static_url
 
 ORIGIN = {"Origin": "http://testserver"}
 CHECK = "/api/v1/finance/sod-check"
@@ -95,7 +96,7 @@ def test_finance_command_center_offers_the_button(client):
     assert page.status_code == 200
     assert 'id="fb-sod-check"' in page.text
     assert "Check separation of duties" in visible_text(page.text)
-    assert '<script src="/static/lightwork-finance-sod-check.js"></script>' in page.text
+    assert f'<script src="{static_url("lightwork-finance-sod-check.js")}"></script>' in page.text
     script = client.get("/static/lightwork-finance-sod-check.js")
     assert script.status_code == 200
     assert script.headers["content-type"].startswith("application/javascript")

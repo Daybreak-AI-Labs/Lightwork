@@ -11,11 +11,19 @@ Requires::
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 
 from .base import Channel, IncomingMessage, normalize_allowlist
-from .delivery import DeliveryNotSent, DeliveryUnknown, delivery_active, send_chunk
+from .delivery import (
+    DeliveryNotSent,
+    DeliveryUnknown,
+    delivery_active,
+    read_reply_file,
+    saved_reply_files,
+    send_chunk,
+)
 
 log = logging.getLogger(__name__)
 
@@ -112,8 +120,35 @@ class TelegramChannel(Channel):
         return msg
 
     async def _send_saved(self, msg, reply, route):
+        files = await saved_reply_files(reply)
+        thread = reply.thread_ref or route["reply_to"]
         if reply.text:
-            return await self.send_threaded(msg.user_id, reply.text, reply_to=route["reply_to"])
+            await self.send_threaded(msg.user_id, reply.text, reply_to=thread)
+        receipt = None
+        for index, item in enumerate(files):
+            async def upload(item=item):
+                data = await read_reply_file(item)
+                kwargs = {"chat_id": int(msg.user_id), "filename": item["filename"]}
+                if thread:
+                    kwargs["reply_to_message_id"] = int(thread)
+                try:
+                    with io.BytesIO(data) as document:
+                        result = await self._app.bot.send_document(document=document, **kwargs)
+                except Exception as exc:
+                    try:
+                        from telegram.error import BadRequest, Forbidden, RetryAfter
+                    except ImportError:
+                        raise exc from None
+                    if isinstance(exc, (BadRequest, Forbidden, RetryAfter)):
+                        raise DeliveryNotSent("Telegram rejected the file attachment") from exc
+                    raise
+                identity = getattr(result, "message_id", None)
+                if type(identity) is not int:
+                    raise DeliveryUnknown("Telegram file attachment has no confirmed receipt")
+                return str(identity)
+            receipt = await send_chunk("file-" + str(index), {"recipient": msg.user_id,
+                "thread": thread, **{key: item[key] for key in ("filename", "mime", "size_bytes", "sha256")}}, upload)
+        return receipt
 
     async def _recover(self):
         account = self._account()
@@ -225,6 +260,8 @@ class TelegramChannel(Channel):
             raw=update,
             sender_id=str(update.effective_user.id) if update.effective_user else None,
             message_id=str(update.message.message_id),
+            conversation_ref=(str(update.message.message_thread_id)
+                              if getattr(update.message, "message_thread_id", None) else None),
         )
         account = self._account()
         route = {"reply_to": msg.message_id, "files": files}

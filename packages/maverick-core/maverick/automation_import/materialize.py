@@ -11,6 +11,7 @@ imported automations appear in the Automations history automatically.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,20 +40,23 @@ def materialize(
     owner: str | None = None,
     channel: str | None = None,
     user_id: str | None = None,
+    expected_generation: int | None = None,
+    effect_guard: Callable[[], None] | None = None,
+    complete: bool = False,
 ) -> MaterializeResult:
     """Create the Template (and optionally a cron schedule) for one automation.
 
     ``queue`` (a ``maverick.job_queue.JobQueue``) enables auto-creating a cron
     schedule for ``schedule``-triggered automations whose cron we recovered.
-    ``owner``/``channel``/``user_id`` are copied into activated schedule payloads
-    so worker-created goals and runs preserve the caller's authenticated identity.
+    ``owner`` is retained on the imported template and activated schedule;
+    ``channel``/``user_id`` carry the authenticated identity into scheduled runs.
     Webhook/event triggers are returned as ``suggested_trigger`` for the caller
     to wire (the webhook trigger store is a dashboard concern).
     """
     from ..catalog_trust import shield_scan
     from ..templates import save_user_template
 
-    title, body = automation.render()
+    title, body = automation.render(complete=True) if complete else automation.render()
     tname = automation.template_name()
     notes: list[str] = []
 
@@ -79,6 +83,9 @@ def materialize(
             budget_dollars=budget_dollars,
             budget_wall_seconds=budget_wall_seconds,
             overwrite=overwrite,
+            owner=owner,
+            expected_generation=expected_generation,
+            effect_guard=effect_guard,
         )
         created = True
 

@@ -630,8 +630,12 @@ def test_source_updated_during_scan_cannot_publish_report_under_current_source(s
                        idempotency_key="scan-current-source", max_attempts=3, retention_seconds=3600)
     coordinator = discovery.PrivacyDataDiscoveryCoordinator(store, structured_sources={"fixture": ChangedScope()},
         clock=store._clock, credential_ref_present=lambda _name: True)
-    with pytest.raises(discovery.PrivacyDataDiscoveryConflict, match="source changed during scan"):
-        coordinator.run_once("tenant-a", worker_id="worker")
+    # The commit-time source check refuses the report; run_once records that
+    # as a sanitized "source_changed" failure (so independent jobs in the batch
+    # still run) instead of raising out of the worker loop.
+    result = coordinator.run_once("tenant-a", worker_id="worker")
+    assert result.completed_reports == ()
+    assert [job.last_error_code for job in result.failed_jobs] == ["source_changed"]
     assert store.list_reports("tenant-a") == ()
 
 

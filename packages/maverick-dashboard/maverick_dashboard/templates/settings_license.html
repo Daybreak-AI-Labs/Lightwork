@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}License · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
   {% from "_hero.html" import hero, state as statebox %}
   {% set summary = state.summary %}
   {% set signing = state.signing %}
@@ -99,7 +100,7 @@
                 copy=summary.summary) }}
   {% endcall %}
 
-  <p><a class="btn btn--ghost" href="/settings">Back to Settings</a></p>
+  <p>{{ back_link('/settings', 'Settings') }}</p>
 
   <section class="panel" aria-labelledby="license-current-title">
     <div class="section-head"><h2 id="license-current-title">Your license</h2></div>
@@ -132,8 +133,7 @@
     <p class="muted">Choose the plan, add-ons and paid features. Lightwork signs a new license with this server's
       signing key and installs it here. The choices below start from the license installed now.</p>
     {% if not signing.trusted %}
-    <p class="muted" id="license-set-untrusted">This server does not trust its own signing key yet, so a license it
-      signs will not turn on paid features here until whoever runs your server adds the key's public key to the
+    <p class="muted" id="license-set-untrusted">This server does not trust its own signing key yet. A license it signs will not turn on paid features here until your server's operator adds its public key to the
       trusted license keys.</p>
     {% endif %}
     <form id="license-set-form" class="license-form">
@@ -209,5 +209,5 @@
     .license-secret code, .license-result code { overflow-wrap: anywhere; }
     .license-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
   </style>
-  <script src="/static/lightwork-license.js"></script>
+  <script src="/static/lightwork-license.js" defer></script>
 {% endblock %}

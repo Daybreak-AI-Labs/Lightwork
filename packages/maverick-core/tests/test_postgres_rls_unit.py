@@ -30,6 +30,11 @@ class RetentionCursor(RecordingCursor):
         return (2,)
 
 
+class FactWriteCursor(RecordingCursor):
+    def fetchone(self):
+        return (7,) if "RETURNING write_seq" in self.calls[-1][0] else None
+
+
 class TemporalDeleteCursor(RecordingCursor):
     rowcount = 1
 
@@ -159,7 +164,7 @@ def test_fact_upsert_advances_write_order_sequence(monkeypatch):
         "maverick.world_model._temporal_memory_enabled", lambda: False
     )
     world = PostgresWorldModel.__new__(PostgresWorldModel)
-    cur = RecordingCursor()
+    cur = FactWriteCursor()
 
     @contextmanager
     def tx():
@@ -176,6 +181,50 @@ def test_fact_upsert_advances_write_order_sequence(monkeypatch):
     assert "fact-write-order:" not in source
     recall_source = inspect.getsource(PostgresWorldModel.get_facts)
     assert "ORDER BY write_seq DESC" in recall_source
+
+
+def test_fact_revision_conflict_does_not_write_or_touch_history(monkeypatch):
+    from maverick.fact_revision import FactConflict
+
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr("maverick.world_model._temporal_memory_enabled", lambda: True)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+
+    class CurrentCursor(RecordingCursor):
+        def fetchone(self):
+            return (9,)
+
+    cur = CurrentCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    with pytest.raises(FactConflict):
+        world.upsert_fact("hours", "stale", expected_revision=8)
+    assert len(cur.calls) == 2
+    assert "pg_advisory_xact_lock" in cur.calls[0][0]
+    assert cur.calls[0][1] == ("fact:acme:hours",)
+    assert "tenant_id = %s" in cur.calls[1][0]
+    assert cur.calls[1][1] == ("hours", "acme")
+
+
+def test_shared_fact_history_uses_exact_ownership_even_in_compatibility_mode(monkeypatch):
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = EmptyFactCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    assert world.fact_history("hours", owned_only=True) == []
+    [(sql, params)] = cur.calls
+    assert "tenant_id = %s" in sql and "tenant_id IS NULL" not in sql
+    assert params == ("hours", "acme", 50)
 
 
 def test_fact_value_and_trust_share_one_snapshot(monkeypatch):
@@ -436,6 +485,59 @@ def test_rls_covers_tables_added_after_the_v10_tenant_migration():
     assert set(postgres._TENANT_TABLES).issubset(set(postgres._RLS_TABLES))
 
 
+def test_rls_covers_the_workspace_scoped_webhook_and_alert_tables():
+    # v42's webhook_subscriptions / webhook_deliveries / deadline_alerts carry
+    # the active tenant id in a column called ``workspace``; they are
+    # RLS-scoped on that column with the same fail-closed policy.
+    for table in ("webhook_subscriptions", "webhook_deliveries", "deadline_alerts"):
+        assert table in postgres._RLS_TABLES
+        assert table not in postgres._TENANT_TABLES
+        sql = PostgresWorldModel._rls_policy_sql(table).lower()
+        assert f"policy mvk_tenant_isolation on {table}" in sql
+        assert "workspace = nullif(current_setting('maverick.tenant', true), '')" in sql
+        assert "tenant_id" not in sql
+        assert sql.count("nullif(current_setting('maverick.tenant', true), '')") == 2
+    # Every other RLS table still keys on tenant_id.
+    assert "tenant_id = nullif" in PostgresWorldModel._rls_policy_sql("approvals")
+
+
+def test_rls_policy_verification_reads_the_table_specific_column(monkeypatch):
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    # pg_get_expr's own rendering of the stock policy for webhook_deliveries.
+    workspace = "(workspace = NULLIF(current_setting('maverick.tenant'::text, true), ''::text))"
+    tenant_id = "(tenant_id = NULLIF(current_setting('maverick.tenant'::text, true), ''::text))"
+
+    def policy(expression, name="mvk_tenant_isolation", permissive=True):
+        # relrowsecurity, relforcerowsecurity, polname, polcmd, polpermissive,
+        # polroles (0 = PUBLIC), USING, WITH CHECK
+        return (True, True, name, "*", permissive, [0], expression, expression)
+
+    def verify(rows):
+        class _Cur:
+            def execute(self, *_a, **_k):
+                pass
+
+            def fetchall(self):
+                return rows
+
+        @contextmanager
+        def tx():
+            yield _Cur()
+
+        monkeypatch.setattr(world, "_tx", tx)
+        return world._rls_policy_is_active("webhook_deliveries")
+
+    assert verify([policy(workspace)]) is True
+    # The generic tenant_id column is not this table's isolation column.
+    assert verify([policy(tenant_id)]) is False
+    # Another permissive policy could OR around isolation.
+    assert verify([policy(workspace), policy("true", name="extra")]) is False
+    # An additional restrictive policy only narrows access.
+    assert verify([policy(workspace), policy("true", name="extra", permissive=False)]) is True
+    # Without FORCE the table owner bypasses the policy.
+    assert verify([(True, False, *policy(workspace)[2:])]) is False
+
+
 # --- #51/#57: enterprise auto-on for strict isolation + RLS ----------------
 
 @pytest.fixture
@@ -640,6 +742,7 @@ class TestReconnectOnBrokenConnection:
         world._pool = None
         world._rls = False
         world._lock = threading.RLock()
+        world._tx_depth = threading.local()
         world._dsn = "postgresql://fake"
         world._connect_kwargs = {"autocommit": False}
         world._io_timeout_seconds = 0.25
@@ -719,3 +822,40 @@ class TestReconnectOnBrokenConnection:
             ("SELECT set_config('maverick.tenant', %s, true)", ("acme",)),
             ("SELECT 1", None),
         ]
+
+
+def test_create_approval_notifies_with_the_committing_world(monkeypatch):
+    # The kernel notifier takes the world that committed the row first
+    # (``_notify_approval_created(world, approval_id, provenance)``); the
+    # Postgres backend must call it with the same shape, or every live
+    # create_approval dies with a TypeError after the row is durable.
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    rows = iter([None, (42,)])  # no context goal, then RETURNING id
+
+    class _Cur(RecordingCursor):
+        def fetchone(self):
+            return next(rows)
+
+    cur = _Cur()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    seen: list[tuple[int, str | None, object]] = []
+
+    def fake_created(approval_id, *, provenance=None, world=None):
+        seen.append((approval_id, provenance, world))
+
+    import maverick.approval_notify as approval_notify
+
+    monkeypatch.setattr(approval_notify, "approval_created", fake_created)
+
+    assert world.create_approval("payment", detail="support", provenance="slack") == 42
+    assert seen == [(42, "slack", world)]
+    insert_sql, insert_params = cur.calls[-1]
+    assert insert_sql.startswith("INSERT INTO approvals(")
+    assert insert_params[4] == "slack"

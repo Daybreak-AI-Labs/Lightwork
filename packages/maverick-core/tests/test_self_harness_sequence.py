@@ -68,7 +68,7 @@ class Ref:
 
 def _pass(store, model, line, *, promote=True):
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False, ledger=si.PromotionLedger())
-    recs = [{"model_id": model, "failure_class": "timeout",
+    recs = [{"owner": "", "goal_id": 0, "model_id": model, "failure_class": "timeout",
              "goal_text": "export the ledger", "failure_msg": "timed out",
              "channel": None, "user_id": None} for _ in range(3)]
     # promote=True -> A/B clears the gate; promote=False -> a flat no-op (rejected),

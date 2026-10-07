@@ -42,7 +42,9 @@ class _Store:
             for job in done[: len(self._jobs) - MAX_JOBS]:
                 self._jobs.pop(job["id"], None)
 
-    def start(self, *, owner: str, tenant: str, kind: str, work: Callable[[], dict]) -> str:
+    def start(self, *, owner: str, tenant: str, kind: str, work: Callable[[], dict], job_id: str | None = None) -> str:
+        if job_id is not None and (len(job_id) != 32 or any(c not in "0123456789abcdef" for c in job_id)):
+            raise ValueError("invalid operation job identity")
         now = time.time()
         with self._lock:
             self._prune(now)
@@ -50,7 +52,9 @@ class _Store:
                           if j["state"] == "running" and j["owner"] == owner and j["tenant"] == tenant)
             if running >= MAX_RUNNING_PER_PERSON or len(self._jobs) >= MAX_JOBS:
                 raise Busy
-            job_id = secrets.token_hex(16)
+            job_id = job_id or secrets.token_hex(16)
+            if job_id in self._jobs:
+                raise Busy
             self._jobs[job_id] = {"id": job_id, "kind": kind, "owner": owner, "tenant": tenant,
                                   "state": "running", "started": now, "finished": 0.0, "result": None}
 

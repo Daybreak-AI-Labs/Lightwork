@@ -63,6 +63,19 @@ def test_dispatch_forwards_base_url_to_ollama(monkeypatch):
     assert _Recorder.last_kwargs["base_url"] == "http://h:2/v1"
 
 
+@pytest.mark.parametrize("address", ["http://localhost:11434", "http://localhost:11434/v1/"])
+def test_ollama_root_and_api_addresses_point_chat_at_the_same_endpoint(address):
+    pytest.importorskip("openai")
+    from maverick.providers.ollama_provider import OllamaClient
+
+    client = OllamaClient(base_url=address)
+    try:
+        assert client.base_url == "http://localhost:11434/v1"
+        assert str(client._sync.base_url) == "http://localhost:11434/v1/"
+    finally:
+        client._sync.close()
+
+
 @pytest.mark.parametrize("provider, module, cls", [
     ("deepseek", "deepseek_provider", "DeepSeekClient"),
     ("gemini", "gemini_provider", "GeminiClient"),

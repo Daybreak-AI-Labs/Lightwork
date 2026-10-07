@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from maverick import privacy_notice_governance as notice
 from maverick_dashboard import privacy_notice_governance_api as api
+from maverick_dashboard import privacy_notice_proposals as proposals
 
 API = "/api/v1/privacy/notices"
 NOW = 2_200_000_000.0
@@ -566,10 +568,46 @@ def test_four_eyes_publication_intent_recovery_effective_export_and_integrity(
     assert ("tenant", "view") in calls
 
 
+class _ResearchCorpus:
+    """Stands in for the installed regulatory research store (its own lock only)."""
+
+    def _connect(self):
+        return sqlite3.connect(":memory:")
+
+    def _begin(self, connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+
+
+def _approved_reference(_tenant, document, source, evidence) -> bool:
+    return document.startswith("regdoc:") and source.startswith("regsource:") and len(evidence) == 64
+
+
+@pytest.fixture()
+def proposal_sources(environment, monkeypatch: pytest.MonkeyPatch):
+    """The proposal save checks the current consent publication and approved
+    research references through the installed stores; stand those in, with
+    the same permission recorder and the same approved-reference rule."""
+    _client, _database, state = environment
+
+    def permission(_request, value):
+        state["permission_calls"].append(("tenant", value))
+
+    monkeypatch.setattr(proposals.auth, "require_permission", permission)
+    monkeypatch.setattr(proposals, "context_for", lambda _request: "context-a")
+    monkeypatch.setattr(proposals, "corpus", lambda _tenant: _ResearchCorpus())
+    monkeypatch.setattr(proposals.regulatory, "_ops", lambda: None)
+    monkeypatch.setattr(proposals.consent, "_ops", lambda: None)
+    monkeypatch.setattr(proposals.consent, "_store", lambda _ops, _tenant: _ResearchCorpus())
+    monkeypatch.setattr(proposals, "publications", lambda _tenant, _store: [
+        {"property_id": "property-main", "publication_id": "consent-publication:2"}])
+    monkeypatch.setattr(proposals, "reference_allowed", _approved_reference)
+    return environment
+
+
 def test_update_proposal_requires_independent_review_and_approved_citations(
-    environment,
+    proposal_sources,
 ) -> None:
-    client, _database, _state = environment
+    client, _database, _state = proposal_sources
     _create_policy(client)
     _create_release(client)
     created = client.put(
@@ -657,7 +695,9 @@ def test_all_core_operations_are_mounted_and_adapter_has_no_network_client(
     }
     assert expected <= paths
 
-    source = Path(api.__file__).read_text(encoding="utf-8")
+    # A proposal is saved through the reviewed proposal module, under its
+    # current-source fence; every other operation reaches the store here.
+    source = Path(api.__file__).read_text(encoding="utf-8") + Path(proposals.__file__).read_text(encoding="utf-8")
     for method in (
         "set_approval_policy",
         "get_approval_policy",

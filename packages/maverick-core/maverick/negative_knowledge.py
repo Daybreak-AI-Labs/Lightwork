@@ -82,22 +82,41 @@ class GuardrailRegistry:
         if self.path is not None:
             self._load()
 
-    def update(self, guardrails) -> None:
+    def update(self, guardrails, *, strict: bool = False, before_write=None) -> None:
         """Replace the learned set with a freshly-mined one (re-triage drops the
         rules whose harm is gone -- guardrails don't accumulate forever)."""
-        with self._lock:
+        from .learning_store import derived_guidance_fence
+
+        with derived_guidance_fence(), self._lock:
+            if before_write is not None:
+                before_write()
+            previous = self._rails
             self._rails = {g.action: g for g in guardrails}
-            self._save()
+            try:
+                self._save(strict=strict, before_write=before_write)
+            except Exception:
+                self._rails = previous
+                raise
 
     def consult(self, action: str) -> Guardrail | None:
         """The guardrail flagging ``action``, or None. The read side for an agent
         / the rehearsal gate; None on an empty registry (no behaviour change)."""
         with self._lock:
+            self._refresh()
             return self._rails.get(action)
 
     def all(self) -> list[Guardrail]:
         with self._lock:
+            self._refresh()
             return sorted(self._rails.values(), key=lambda g: g.severity, reverse=True)
+
+    def _refresh(self) -> None:
+        # A rollback can come from another process. Existing objects must read
+        # current retained guidance, including a restored empty boundary.
+        if self.path is not None:
+            self._rails.clear()
+            if Path(self.path).exists():
+                self._load()
 
     def _load(self) -> None:
         try:
@@ -115,7 +134,7 @@ class GuardrailRegistry:
             except (KeyError, TypeError, ValueError):
                 continue
 
-    def _save(self) -> None:
+    def _save(self, *, strict: bool = False, before_write=None) -> None:
         if self.path is None:
             return
         try:
@@ -124,8 +143,11 @@ class GuardrailRegistry:
                 json.dumps(
                     [g.to_dict() for g in self._rails.values()], sort_keys=True,
                 ),
+                **({"effect_guard": before_write} if before_write is not None else {}),
             )
         except Exception:  # pragma: no cover -- persistence is best-effort
+            if strict:
+                raise
             log.debug("guardrail registry save failed", exc_info=True)
 
 
@@ -152,6 +174,17 @@ def shared() -> GuardrailRegistry:
 def reset_shared() -> None:
     with _shared_lock:
         _shared.clear()
+
+
+def refresh_shared() -> None:
+    """Refresh the active tenant's existing objects after native restoration."""
+    from .paths import data_dir
+
+    with _shared_lock:
+        reg = _shared.get(data_dir("guardrails.json"))
+        if reg is not None:
+            with reg._lock:
+                reg._refresh()
 
 
 __all__ = ["Guardrail", "mine", "GuardrailRegistry", "shared", "reset_shared"]

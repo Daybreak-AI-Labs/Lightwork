@@ -9,12 +9,14 @@ control-plane state, not any one tenant's data.
 Lifecycle: ``create`` → ``suspend`` / ``resume`` → ``delete`` (optionally
 purging the tenant's data dir). :func:`assert_tenant_active` is the enforcement
 hook a request path calls before doing work for a tenant, so a suspended tenant
-is refused. The registry is opt-in: with no tenants provisioned the file does
-not exist and :func:`assert_tenant_active` is a no-op, so single-tenant and
-unprovisioned deployments are unchanged.
+is refused. Identifiers are never recycled: namespace reservations and
+deletion history outlive the roster and optional data purge. Before any
+registry or deletion history exists, single-tenant and unprovisioned deployments
+retain their existing behavior.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -31,9 +33,11 @@ from ..file_lock import (
 )
 from ..paths import (
     _tenant_namespace_key,
+    _tenant_segment,
     bind_tenant_namespace,
     canonical_tenant_id,
     maverick_home,
+    tenant_namespace_reserved,
 )
 
 log = logging.getLogger(__name__)
@@ -110,8 +114,94 @@ class TenantRegistryError(RuntimeError):
     """Tenant control-plane state exists but cannot be trusted."""
 
 
+class DuplicateWorkspaceName(ValueError):
+    """The requested visible name was refused before tenant publication."""
+
+
 def _registry_path():
     return maverick_home() / "tenant_registry.json"
+
+
+def _retirement_path(tenant_id: str):
+    key = _tenant_namespace_key(tenant_id)
+    return maverick_home() / ".tenant-deletions" / (hashlib.sha256(key.encode("ascii")).hexdigest() + ".json")
+
+
+def _retirement(tenant_id: str) -> dict | None:
+    from ..file_lock import ensure_private_file
+    path = _retirement_path(tenant_id)
+    if not path.exists():
+        return None
+    try:
+        ensure_private_file(path)
+        value = _decode_json(atomic_read_text(path), label="tenant deletion tombstone")
+        if (not isinstance(value, dict) or value.get("version") not in (1, 2)
+                or not isinstance(value.get("id"), str)
+                or _tenant_namespace_key(value["id"]) != _tenant_namespace_key(tenant_id)
+                or value["id"] != canonical_tenant_id(value["id"])):
+            raise ValueError("invalid deletion identity")
+        when = value.get("deleted_at")
+        if not isinstance(when, (int, float)) or not math.isfinite(when) or when < 0:
+            raise ValueError("invalid deletion time")
+        if value["version"] == 2:
+            saved = TenantRecord.from_dict(value.get("record"))
+            if (saved.id != value["id"] or value.get("state") not in ("removed", "restored")
+                    or type(value.get("purged")) is not bool):
+                raise ValueError("invalid deletion record")
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise TenantRegistryError("Tenant deletion history is unavailable; provisioning and admission are refused.") from exc
+    return value
+
+
+def _retired(tenant_id: str) -> bool:
+    value = _retirement(tenant_id)
+    return value is not None and value.get("state", "removed") == "removed"
+
+
+def tenant_retired(tenant_id: str) -> bool:
+    """Public read gate for role stores outside the core package."""
+    return _retired(_lookup_id(tenant_id))
+
+
+def _retire(tenant_id: str, record: TenantRecord, *, purge: bool) -> None:
+    from ..file_lock import atomic_create_text
+    path = _retirement_path(tenant_id)
+    previous = _retirement(tenant_id)
+    if previous is not None and previous.get("state", "removed") == "removed":
+        return
+    ensure_private_directory(path.parent)
+    value = {
+        "version": 2, "id": tenant_id, "deleted_at": time.time(),
+        "state": "removed", "purged": purge, "record": record.to_dict(),
+    }
+    payload = json.dumps(value, sort_keys=True)
+    if previous is not None:
+        atomic_write_text(path, payload)
+    else:
+        try:
+            atomic_create_text(path, payload)
+        except FileExistsError:
+            _retirement(tenant_id)  # validate the concurrent winner
+
+
+def _legacy_role_names() -> set[str]:
+    """Orphan global membership keys are history, never fresh ownership proof.
+
+    Kept in core so CLI and SCIM cannot bypass the dashboard migration boundary;
+    no dashboard package dependency or membership mutation is introduced.
+    """
+    from ..file_lock import ensure_private_file
+    path = maverick_home() / "dashboard-tenant-roles.json"
+    if not path.exists():
+        return set()
+    try:
+        ensure_private_file(path)
+        value = _decode_json(atomic_read_text(path), label="legacy tenant memberships")
+        if not isinstance(value, dict) or any(not isinstance(members, dict) for members in value.values()):
+            raise ValueError("invalid membership inventory")
+        return {_tenant_namespace_key(name) for name in value}
+    except (OSError, ValueError, TypeError) as exc:
+        raise TenantRegistryError("Legacy workspace membership history is unavailable; new provisioning is refused.") from exc
 
 
 @dataclass(frozen=True)
@@ -396,27 +486,48 @@ def _locked(*, strict: bool = False):
         stack.enter_context(authority_effect_fence())
         stack.enter_context(_REGISTRY_LOCK)
         stack.enter_context(cross_process_lock(_registry_path(), strict=strict))
+        # Admission paths that already hold the roster (provider_admission)
+        # must be able to repair the default tenant without re-locking: the
+        # lock is not re-entrant and the flock would block the same process.
+        _LOCK_STATE.held = True
+        stack.callback(setattr, _LOCK_STATE, "held", False)
         return stack.pop_all()
+
+
+_LOCK_STATE = threading.local()
+
+
+def _roster_locked_by_this_thread() -> bool:
+    return bool(getattr(_LOCK_STATE, "held", False))
 
 
 def list_tenants() -> list[TenantRecord]:
     records = _load()
-    return [records[k] for k in sorted(records)]
+    return [records[k] for k in sorted(records) if not _retired(k)]
 
 
 def get_tenant(tenant_id: str) -> TenantRecord | None:
-    return _load().get(_lookup_id(tenant_id))
+    tid = _lookup_id(tenant_id)
+    return None if tid and _retired(tid) else _load().get(tid)
+
+
+def workspace_display_key(name: str) -> str:
+    """Compare names as people see them: case-insensitive with collapsed space."""
+    return " ".join(name.split()).casefold()
 
 
 def create_tenant(
     tenant_id: str, *, plan: str = "free", display_name: str = "",
     max_daily_dollars: float = DEFAULT_TENANT_DAILY_DOLLARS,
+    allocate_suffix: bool = False,
 ) -> TenantRecord:
     """Provision a tenant + its workspace. No daily spend cap by default;
-    pass ``max_daily_dollars`` to set one. Raises :class:`ValueError` if the tenant already exists.
+    pass ``max_daily_dollars`` to set one. Refuses an existing identifier or
+    visible workspace name.
     """
     tid = _validate_id(tenant_id)
     quota = _quota_value(max_daily_dollars)
+    display_name = display_name.strip()
     # Provisioning a named tenant IS multi-tenant mode — a paid (Platinum)
     # capability. Fail-open: a no-op unless license enforcement is on and the
     # deployment isn't entitled (a genuine single-tenant box never calls this —
@@ -431,8 +542,21 @@ def create_tenant(
             "multi-tenant provisioning requires a Platinum license "
             "(license enforcement is on and this deployment is not entitled)")
     _warn_if_unknown_plan(plan)
-    with _locked():
+    with _locked(strict=True):
         records = _load()
+        legacy_roles = _legacy_role_names()
+        if allocate_suffix:
+            base = tid
+            occupied = {_tenant_namespace_key(existing) for existing in records}
+            for suffix in range(1000):
+                candidate = base if suffix == 0 else f"{base}-{suffix + 1}"
+                if (_tenant_namespace_key(candidate) not in occupied and not _retired(candidate)
+                        and _tenant_namespace_key(candidate) not in legacy_roles
+                        and not tenant_namespace_reserved(candidate)):
+                    tid = candidate
+                    break
+            else:
+                raise ValueError("Choose a different workspace name; the available identifiers are reserved.")
         if tid in records:
             raise ValueError(f"tenant already exists: {tid!r}")
         namespace_key = _tenant_namespace_key(tid)
@@ -441,11 +565,26 @@ def create_tenant(
                 raise ValueError(
                     f"tenant id {tid!r} aliases existing tenant {existing!r}"
                 )
+        # Use the final allocated identifier when there is no display name.
+        # Check under the roster lock, including paused workspaces, so two
+        # concurrent creations cannot publish indistinguishable choices.
+        name_key = workspace_display_key(display_name or tid)
+        if any(workspace_display_key(rec.display_name or rec.id) == name_key
+               for rec in records.values()):
+            raise DuplicateWorkspaceName("A workspace with that name already exists. Choose another name.")
+        if name_key == workspace_display_key(DEFAULT_WORKSPACE_DISPLAY_NAME) and not _registry_path().exists():
+            from ..paths import implicit_tenant_id
+
+            implicit = implicit_tenant_id()
+            if implicit and _lookup_id(implicit) != tid:
+                raise DuplicateWorkspaceName("A workspace with that name already exists. Choose another name.")
         # Reserve the portable name and provision the confidentiality boundary
         # BEFORE publishing an active roster entry. The registry lock keeps the
         # admission check, claim, directory creation, and publication atomic to
         # other provisioning processes.
-        bind_tenant_namespace(tid)
+        if _retired(tid) or namespace_key in legacy_roles:
+            raise ValueError("Workspace identifier has retained lifecycle or membership history; choose a new identifier. Use recovery for retained data.")
+        bind_tenant_namespace(tid, require_new=True)
         from ..workspace import Workspace
         ensure_private_directory(Workspace(tid).root)
         now = time.time()
@@ -455,8 +594,102 @@ def create_tenant(
             created_at=now, updated_at=now,
         )
         records[tid] = rec
+        # The first roster publication turns admission from "open" to "listed
+        # tenants only". The deployment's implicit default tenant has been
+        # running every task until now; list it too, or the next task is
+        # refused as an unknown tenant.
+        default = _default_record(records) if not _registry_path().exists() else None
+        if default is not None:
+            records[default.id] = default
         _save(records)
+    if default is not None:
+        _audit_default_registered(default.id, trigger="first_workspace")
     return rec
+
+
+#: Roster label for the tenant a deployment ran in before it had workspaces.
+DEFAULT_WORKSPACE_DISPLAY_NAME = "Default workspace"
+
+
+def _default_record(records: dict[str, TenantRecord]) -> TenantRecord | None:
+    """A fresh active row for the implicit default tenant, or ``None`` when the
+    deployment has no binding or the roster already lists it. Caller holds the
+    registry lock."""
+    from ..paths import implicit_tenant_id
+
+    try:
+        tid = _lookup_id(implicit_tenant_id())
+    except Exception:
+        return None
+    if not tid or tid in records:
+        return None
+    namespace_key = _tenant_namespace_key(tid)
+    if any(_tenant_namespace_key(existing) == namespace_key for existing in records):
+        return None
+    try:
+        bind_tenant_namespace(tid)
+        from ..workspace import Workspace
+        ensure_private_directory(Workspace(tid).root)
+    except Exception as exc:
+        log.error("default tenant %r could not be provisioned: %s", tid, exc)
+        return None
+    now = time.time()
+    return TenantRecord(
+        id=tid, status=ACTIVE, plan="free",
+        display_name=DEFAULT_WORKSPACE_DISPLAY_NAME,
+        max_daily_dollars=DEFAULT_TENANT_DAILY_DOLLARS,
+        created_at=now, updated_at=now,
+    )
+
+
+def _audit_default_registered(tenant_id: str, *, trigger: str, actor: str = "system") -> None:
+    from ..audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.TENANT_DEFAULT_REGISTERED, agent="system", _global=True,
+        actor=actor, tenant=tenant_id, trigger=trigger,
+    )
+
+
+def ensure_default_tenant_registered(*, actor: str = "system") -> TenantRecord | None:
+    """Repair an install whose roster predates the default-tenant rule.
+
+    When a roster exists but lacks the deployment's implicit default tenant,
+    add it as active and write an audit event. Returns the new record, or
+    ``None`` when nothing needed doing (no roster, no binding, already
+    listed, or paused on purpose). Safe to call on every startup or admission.
+    """
+    if not _registry_path().exists():
+        return None
+
+    def _register() -> TenantRecord | None:
+        records = _load()
+        default = _default_record(records)
+        if default is not None:
+            records[default.id] = default
+            _save(records)
+        return default
+
+    if _roster_locked_by_this_thread():
+        default = _register()
+    else:
+        with _locked():
+            default = _register()
+    if default is None:
+        return None
+    _audit_default_registered(default.id, trigger="repair", actor=actor)
+    log.warning("tenant registry: registered the default workspace %r so it "
+                "keeps running alongside the named workspaces", default.id)
+    return default
+
+
+def _is_implicit_default(tid: str) -> bool:
+    from ..paths import implicit_tenant_id
+
+    try:
+        return bool(tid) and _lookup_id(implicit_tenant_id()) == tid
+    except Exception:
+        return False
 
 
 def _mutate(tenant_id: str, **changes) -> TenantRecord:
@@ -464,7 +697,7 @@ def _mutate(tenant_id: str, **changes) -> TenantRecord:
     with _locked():
         records = _load()
         rec = records.get(tid)
-        if rec is None:
+        if rec is None or _retired(tid):
             raise UnknownTenant(tid)
         rec = replace(rec, updated_at=time.time(), **changes)
         records[tid] = rec
@@ -546,7 +779,7 @@ def get_tenant_by_stripe_customer(customer_id: str) -> TenantRecord | None:
     cid = (customer_id or "").strip()
     if not cid:
         return None
-    for rec in _load().values():
+    for rec in list_tenants():
         if rec.stripe_customer_id == cid:
             return rec
     return None
@@ -580,7 +813,7 @@ def _mutate_billing(tenant_id: str, field: str, value: object) -> TenantRecord:
     with _locked():
         records = _load()
         old_rec = records.get(tid)
-        if old_rec is None:
+        if old_rec is None or _retired(tid):
             raise UnknownTenant(tid)
         prior = dict(records)
         old = getattr(old_rec, attr)
@@ -619,12 +852,17 @@ def set_plan(tenant_id: str, plan: str) -> TenantRecord:
 
 def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
     """Remove a tenant from the registry. With ``purge=True`` also delete its
-    data directory (irreversible). Returns False if the tenant was unknown."""
+    data directory (irreversible). Its identifier remains permanently reserved.
+    Returns False if the tenant was unknown."""
     tid = _lookup_id(tenant_id)
-    with _locked():
+    with _locked(strict=True):
         records = _load()
         if tid not in records:
             return False
+        # Durable before roster removal or optional purge. A crash here leaves
+        # an unavailable tenant, never a reusable incarnation or active row.
+        bind_tenant_namespace(tid)
+        _retire(tid, records[tid], purge=purge)
         del records[tid]
         _save(records)
     if purge:
@@ -638,10 +876,297 @@ def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
     return True
 
 
+def list_removed_tenants() -> list[dict[str, object]]:
+    """Admin-facing removal history; records stay private and unselectable."""
+    from ..file_lock import ensure_private_file
+
+    root = maverick_home() / ".tenant-deletions"
+    if not root.exists():
+        return []
+    ensure_private_directory(root)
+    rows: list[dict[str, object]] = []
+    for path in root.glob("*.json"):
+        ensure_private_file(path)
+        value = _decode_json(atomic_read_text(path), label="tenant deletion tombstone")
+        if not isinstance(value, dict) or not isinstance(value.get("id"), str):
+            raise TenantRegistryError("Tenant deletion history is unavailable.")
+        tid = _validate_id(value["id"])
+        if path != _retirement_path(tid):
+            raise TenantRegistryError("Tenant deletion history has an invalid identity.")
+        saved = _retirement(tid)
+        if saved is None or saved.get("state", "removed") != "removed":
+            continue
+        record = saved.get("record") or {}
+        retained = (maverick_home() / "tenants" / _tenant_segment(tid)).is_dir()
+        rows.append({
+            "id": tid,
+            "display_name": str(record.get("display_name") or tid),
+            "removed_at": saved["deleted_at"],
+            "restorable": saved["version"] == 2 and not saved["purged"] and retained,
+        })
+    return sorted(rows, key=lambda row: float(row["removed_at"]), reverse=True)
+
+
+def _erasure_root(tid):
+    """An exact retired namespace, never the shared home or a linked folder."""
+    from pathlib import Path
+    root = maverick_home() / "tenants" / _tenant_segment(tid)
+    parent = root.parent
+    if parent.is_symlink() or root.is_symlink():
+        raise ValueError("Linked workspace folders cannot be erased here.")
+    if root.resolve().parent != parent.resolve() or root == Path(maverick_home()):
+        raise ValueError("Workspace storage is outside its reserved folder.")
+    return root
+
+
+def _erasure_stamp(path):
+    import stat
+    value = path.lstat()
+    if stat.S_ISLNK(value.st_mode) or not (stat.S_ISREG(value.st_mode) or stat.S_ISDIR(value.st_mode)):
+        raise ValueError("Workspace storage includes a linked or unsupported item.")
+    return [value.st_dev, value.st_ino, value.st_mode, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns]
+
+
+def _erasure_tree(root, check):
+    """Full local metadata selection. Private file bodies never enter reviews."""
+    entries, pending, total = [], [root], 0
+    if not root.exists():
+        return entries, total
+    while pending:
+        check()
+        path = pending.pop()
+        stamp = _erasure_stamp(path)
+        relative = path.relative_to(root).as_posix()
+        directory = path.is_dir()
+        entries.append({"path": relative, "directory": directory, "stamp": stamp})
+        if len(entries) > 50000:
+            raise ValueError("This workspace has more than 50,000 local items. Its complete erasure review is unavailable; nothing was erased.")
+        if directory:
+            pending.extend(sorted(path.iterdir(), reverse=True))
+        else:
+            total += stamp[3]
+    return entries, total
+
+
+def _erasure_attempts(saved):
+    rows = saved.get("erasures", [])
+    if not isinstance(rows, list) or len(rows) > 1000:
+        raise TenantRegistryError("Workspace erasure history is unavailable.")
+    seen = set()
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("operation"), str)
+                or row["operation"] in seen or row.get("result") not in {"unconfirmed", "confirmed"}
+                or not isinstance(row.get("actor"), str) or not isinstance(row.get("context"), str)):
+            raise TenantRegistryError("Workspace erasure history is unavailable.")
+        seen.add(row["operation"])
+    return rows
+
+
+def _erasure_snapshot_unlocked(tid, check):
+    check()
+    saved = _retirement(tid)
+    if saved is None or saved.get("state", "removed") != "removed" or tid in _load():
+        raise ValueError("Choose a workspace that is still removed.")
+    root = _erasure_root(tid)
+    entries, total = _erasure_tree(root, check)
+    rows = _erasure_attempts(saved)
+    pending = rows[-1]["operation"] if rows and rows[-1]["result"] == "unconfirmed" else ""
+    material = {"home": str(maverick_home().resolve()), "removed": saved, "entries": entries}
+    revision = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    record = saved.get("record") or {}
+    check()
+    return {"workspace": tid, "name": str(record.get("display_name") or tid),
+            "removed_at": saved["deleted_at"], "files": sum(not e["directory"] for e in entries),
+            "folders": sum(e["directory"] for e in entries), "bytes": total,
+            "previous_attempt": pending, "revision": revision}, saved, entries
+
+
+def erasure_review(tenant_id: str, *, effect_guard=None) -> dict:
+    """Read the complete exact local selection for a removed workspace."""
+    from ..budget import Budget
+    budget = Budget(max_wall_seconds=15, max_dollars=0, max_tool_calls=0)
+    def check():
+        budget.check()
+        if effect_guard is not None:
+            effect_guard()
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        value, _saved, _entries = _erasure_snapshot_unlocked(tid, check)
+        return value
+
+
+def erasure_original(tenant_id: str, operation: str, *, actor: str, context: str, effect_guard=None):
+    """Pure original lookup; never infer an earlier outcome from current absence."""
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        if effect_guard is not None:
+            effect_guard()
+        saved = _retirement(tid)
+        rows = _erasure_attempts(saved) if saved is not None else []
+        for row in rows:
+            if row["operation"] == operation and row["actor"] == actor and row["context"] == context:
+                if effect_guard is not None:
+                    effect_guard()
+                return dict(row)
+        return None
+
+
+def erasure_history(tenant_id: str, *, actor: str, context: str, effect_guard=None) -> list[dict]:
+    """Complete metadata history for this exact original actor/context."""
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        if effect_guard is not None:
+            effect_guard()
+        saved = _retirement(tid)
+        rows = _erasure_attempts(saved) if saved is not None else []
+        values = [dict(row) for row in rows if row["actor"] == actor and row["context"] == context]
+        if effect_guard is not None:
+            effect_guard()
+        return values
+
+
+def _erasure_save(tid, saved, check):
+    atomic_write_text(_retirement_path(tid), json.dumps(saved, sort_keys=True), effect_guard=check)
+
+
+def _erasure_unlink(root, entries, check):
+    """Guard every actual unlink, keeping any interrupted attempt unknown."""
+    for entry in sorted(entries, key=lambda e: (e["path"].count("/"), len(e["path"])), reverse=True):
+        check()
+        path = root if entry["path"] == "." else root / entry["path"]
+        # Check every parent again: no link introduced after the reviewed walk
+        # may redirect an unlink outside this exact reserved namespace.
+        for parent in (path, *path.parents):
+            if parent.is_symlink():
+                raise ValueError("Workspace storage changed during erasure. Check the original result.")
+            if parent == root:
+                break
+        actual = _erasure_stamp(path)
+        expected = entry["stamp"]
+        # Our own child removals change directory dates/size, not its identity.
+        if actual[:3] != expected[:3] or (not entry["directory"] and actual != expected):
+            raise ValueError("Workspace storage changed during erasure. Check the original result.")
+        check()
+        path.rmdir() if entry["directory"] else path.unlink()
+
+
+def erase_removed_tenant(tenant_id: str, *, revision: str, operation: str, actor: str,
+                        context: str, previous_attempt: str = "", effect_guard=None) -> dict:
+    """Reviewed retired-only purge using the native deletion history.
+
+    Existing delete/purge callers are unchanged. A durable unknown original is
+    reserved before any unlink; only a separate reviewed current intention can
+    continue cleanup. Namespace/deletion evidence remains after local erasure.
+    """
+    from ..audit import audit_event
+    from ..budget import Budget
+    budget = Budget(max_wall_seconds=15, max_dollars=0, max_tool_calls=0)
+    def check():
+        budget.check()
+        if effect_guard is not None:
+            effect_guard()
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        check()
+        saved = _retirement(tid)
+        rows = _erasure_attempts(saved) if saved is not None else []
+        original = next((r for r in rows if r["operation"] == operation), None)
+        if original is not None:
+            if original["actor"] != actor or original["context"] != context:
+                raise PermissionError("This original erasure belongs to another account or workspace.")
+            return dict(original)
+        value, saved, entries = _erasure_snapshot_unlocked(tid, check)
+        if value["revision"] != revision or value["previous_attempt"] != previous_attempt:
+            raise ValueError("The removed workspace changed. Review its remaining records again.")
+        if len(rows) >= 1000:
+            raise ValueError("The retained erasure history is full. Nothing was erased.")
+        row = {"operation": operation, "actor": actor, "context": context, "result": "unconfirmed",
+               "started_at": time.time(), "reviewed_revision": revision, "previous_attempt": previous_attempt,
+               "files": value["files"], "folders": value["folders"], "bytes": value["bytes"]}
+        saved["erasures"] = [*rows, row]
+        # Once physical erasure may start, restoration must remain closed even
+        # if a reply/audit/final save is interrupted.
+        saved["purged"] = True
+        _erasure_save(tid, saved, check)
+        if not audit_event("workspace_erasure_started", agent=actor, _global=True,
+                           tenant=tid, operation=operation, files=row["files"], previous_attempt=previous_attempt):
+            raise TenantRegistryError("Erasure admission could not be recorded. The original remains unconfirmed.")
+        check()
+        root = _erasure_root(tid)
+        current_entries, _total = _erasure_tree(root, check)
+        if current_entries != entries:
+            raise ValueError("The local records changed after admission. This original remains unconfirmed; review the remaining records separately.")
+        _erasure_unlink(root, entries, check)
+        check()
+        if _erasure_root(tid).exists():
+            raise TenantRegistryError("Local erasure could not be confirmed. Check the original result.")
+        if not audit_event("workspace_erasure_completed", agent=actor, _global=True,
+                           tenant=tid, operation=operation, files=row["files"]):
+            raise TenantRegistryError("The records may be erased, but completion could not be recorded. Check the original result.")
+        row["result"] = "confirmed"
+        row["finished_at"] = time.time()
+        _erasure_save(tid, saved, check)
+        return dict(row)
+
+
+def restore_tenant(tenant_id: str) -> TenantRecord:
+    """Restore one retained workspace as paused, without restoring old access.
+
+    The namespace claim remains permanent; this is an explicit recovery of the
+    *same* archived workspace, not provisioning a fresh tenant under its id.
+    """
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        saved = _retirement(tid)
+        if saved is None or saved.get("state", "removed") != "removed":
+            raise ValueError("Workspace is not removed.")
+        if saved["version"] != 2 or saved["purged"]:
+            raise ValueError("This workspace has no recoverable saved record.")
+        root = maverick_home() / "tenants" / _tenant_segment(tid)
+        if not root.is_dir():
+            raise ValueError("The workspace records are missing; restore them from a backup first.")
+        if _tenant_namespace_key(tid) in _legacy_role_names():
+            raise ValueError("Old member access must be cleared before recovery.")
+        records = _load()
+        rec = TenantRecord.from_dict(saved["record"])
+        existing = records.get(tid)
+        if existing is not None and existing != replace(
+            rec, display_name=existing.display_name, status=SUSPENDED,
+            updated_at=existing.updated_at,
+        ):
+            raise ValueError("Workspace recovery conflicts with an existing roster record.")
+        if existing is None:
+            if any(_tenant_namespace_key(other.id) == _tenant_namespace_key(tid)
+                   for other in records.values()):
+                raise ValueError("Workspace recovery conflicts with an existing identifier.")
+            names = {workspace_display_key(other.display_name or other.id)
+                     for other in records.values()}
+            original_name = rec.display_name or rec.id
+            if workspace_display_key(original_name) in names:
+                for suffix in range(1, 1001):
+                    label = "recovered" if suffix == 1 else f"recovered {suffix}"
+                    candidate = f"{original_name} ({label})"
+                    if workspace_display_key(candidate) not in names:
+                        rec = replace(rec, display_name=candidate)
+                        break
+                else:
+                    raise DuplicateWorkspaceName("No available recovery name; rename the newer workspace first.")
+            rec = replace(rec, status=SUSPENDED, updated_at=time.time())
+            records[tid] = rec
+            _save(records)
+        else:
+            rec = existing
+        saved["state"] = "restored"
+        saved["restored_at"] = time.time()
+        atomic_write_text(_retirement_path(tid), json.dumps(saved, sort_keys=True))
+        return rec
+
+
 def is_active(tenant_id: str | None) -> bool:
     """Whether a tenant may do work.
 
-    The registry is opt-in: before any roster file exists, named tenants are
+    The registry is opt-in: before any roster or deletion history exists, named tenants are
     accepted for single-tenant and unprovisioned deployments. Once a roster
     exists, only provisioned active tenants may do work; unknown tenant IDs
     include deleted tenants and are refused.
@@ -650,22 +1175,34 @@ def is_active(tenant_id: str | None) -> bool:
     if not tid:
         return True
     try:
+        if _retired(tid):
+            return False
         rec = _load().get(tid)
     except TenantRegistryError:
         return False
     if rec is None:
-        return not _registry_path().exists()
+        if not _registry_path().exists():
+            return True
+        if _is_implicit_default(tid):
+            try:
+                rec = ensure_default_tenant_registered()
+            except Exception:
+                return False
+            return rec is not None and rec.active
+        return False
     return rec.active
 
 
 def assert_tenant_active(tenant_id: str | None) -> None:
     """Enforcement hook: raise :class:`TenantSuspended` for inactive tenants.
-    No-op for None / deployments without a registry, so existing flows are
-    unchanged until tenant provisioning is enabled.
+    No-op for None / deployments without a registry or deletion history, so
+    existing flows are unchanged until tenant provisioning is enabled.
     """
     tid = _lookup_id(tenant_id)
     if not tid:
         return
+    if _retired(tid):
+        raise TenantSuspended("Workspace was deleted; its identifier cannot be reused.")
     path = _registry_path()
     if not path.exists():
         return
@@ -674,6 +1211,10 @@ def assert_tenant_active(tenant_id: str | None) -> None:
     # control-plane state.  Let TenantRegistryError propagate so callers can
     # emit an operator-visible policy outage and, critically, still deny work.
     rec = _load().get(tid)
+    if rec is None and _is_implicit_default(tid):
+        # An install whose roster was written before the default-tenant rule:
+        # the deployment's own tenant is never "unknown", so list it now.
+        rec = ensure_default_tenant_registered()
     if rec is None or not rec.active:
         raise TenantSuspended(f"tenant is suspended or unknown: {tenant_id!r}")
 
@@ -1046,9 +1587,9 @@ __all__ = [
     "MAX_FEATURE_OVERRIDES", "TenantRecord",
     "BILLING_CURRENT", "BILLING_PAST_DUE",
     "TenantSuspended", "UnknownTenant",
-    "TenantRegistryError",
-    "list_tenants", "get_tenant", "create_tenant", "suspend_tenant",
-    "resume_tenant", "delete_tenant", "set_quota", "set_plan",
+    "TenantRegistryError", "DuplicateWorkspaceName",
+    "list_tenants", "get_tenant", "workspace_display_key", "create_tenant", "suspend_tenant",
+    "resume_tenant", "delete_tenant", "list_removed_tenants", "restore_tenant", "tenant_retired", "set_quota", "set_plan",
     "set_stripe_customer_id", "set_billing_status", "set_byok",
     "set_feature_overrides",
     "get_tenant_by_stripe_customer",

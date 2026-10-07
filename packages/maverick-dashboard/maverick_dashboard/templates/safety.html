@@ -16,6 +16,8 @@
                   by_stage.get('output', 0) ~ ' — every stop is sealed in the
                   activity record.') }}
   {% endcall %}
+  <p class="muted">This page shows audit metadata. Employee prompts, what was sent to tools and detailed reasons remain private.</p>
+  {% if can_open_page('/simulate') %}<p>Want to know whether an action would be stopped? <a href="/simulate">Test a safety rule</a> before anyone runs it.</p>{% endif %}
 
   <div class="section-head"><h2>Which day</h2></div>
   <div class="panel">
@@ -94,7 +96,7 @@
 
   <div class="section-head"><h2 id="fa-calibration-title">How well screening is tuned</h2></div>
   <section class="panel" aria-labelledby="fa-calibration-title">
-    <p class="muted">Tests the screening against a set of known attacks and ordinary messages, so you can see how many attacks each level catches and how often it stops something harmless. Nothing is changed.</p>
+    <p class="muted">Tests the screening against a set of known attacks and ordinary messages. See how many attacks each level catches and how often it stops something harmless. Nothing is changed.</p>
     <p class="fa-row"><button type="button" class="btn btn--primary" id="fa-calibration-run">Test the screening</button></p>
     <p class="muted" id="fa-calibration-status" role="status" aria-live="polite"></p>
     <div id="fa-calibration-out"></div>

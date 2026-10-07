@@ -37,7 +37,7 @@ def test_page_exposes_full_publishing_lifecycle_and_default_off_boundary() -> No
     response = client.get("/consent/publishing")
     assert response.status_code == 200
     page = response.text
-    assert "Banner and Preference Center" in page
+    assert "Banner and preference center" in page
     assert 'data-module-gate="consent_preferences.publishing"' in page
     assert "Consent publishing is turned off." in page
     assert "[consent_preferences.publishing] enable = true" not in page
@@ -60,9 +60,11 @@ def test_page_exposes_full_publishing_lifecycle_and_default_off_boundary() -> No
     script = client.get("/static/lightwork-consent-publishing.js").text
     assert "innerHTML" not in script
     # Destructive and public actions confirm with a plain consequence.
-    for phrase in ("Publish to ", "Stop showing the banner on ", "Restore version "):
+    for phrase in ("Publish to ", "Restore version "):
         assert phrase in script
     assert script.count("CW.confirm(") >= 3
+    # Withdrawing a banner is a separate review of every address it shows on.
+    assert "Review every current address and the exact banner. Keep the banner to cancel." in script
     assert "window.confirm" not in script
 
 

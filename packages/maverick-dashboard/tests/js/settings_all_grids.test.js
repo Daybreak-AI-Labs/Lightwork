@@ -5,6 +5,7 @@ const {test}=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {JSDOM}=require("jsdom");
+const {shell} = require('./_shell');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<20;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -47,16 +48,30 @@ ${gridRow("budget.provider_caps",CAPS,"No AI service has a spending limit yet.")
 ${gridRow("approval.delegation",RULES,"No rules yet.")}
 </section></div><p id="settings-all-empty" hidden></p></main>`;
 
-async function page(handler){
+// Saving goes through the complete protected review (lightwork-settings-review.js
+// and lightwork-settings-catalog-requests.js). The stand-ins show the person the
+// review's warnings (recorded in ``confirms``), accept it, and save the reviewed
+// plan with its sealed token, as the real pair does.
+async function page(handler,warnings){
   const dom=new JSDOM(HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[],confirms=[];
   w.mvConfirm=async message=>{confirms.push(message);return true;};
+  w.mvReviewSettings=async(changes,revision)=>{
+    (warnings?warnings(changes):[]).forEach(item=>confirms.push(item.label+": "+item.warning));
+    return {changes,revision,token:"sealed-review",operation:"0".repeat(32),context:"c".repeat(64)};
+  };
+  w.LightworkSettingsCatalog={save:async plan=>{
+    const response=await w.fetch("/api/v1/settings/catalog",{method:"POST",body:JSON.stringify({changes:plan.changes,
+      expected_revision:plan.revision,reviewed_token:plan.token,confirm:true})});
+    return {response,data:await response.json()};
+  }};
   w.mvErrorText=(failure,action)=>"Could not "+action+".";
   w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{
     const body=init.body?JSON.parse(init.body):null;calls.push({url,method:init.method||"GET",body});
     return handler(url,body,calls.length);
   };
+  shell(w);
   w.eval(read("static/lightwork-settings-all.js"));
   await flush();
   return {dom,w,d,calls,confirms};
@@ -101,12 +116,14 @@ test("tools per chat app: saved rows are drawn, and the page sends every column"
   }finally{ui.dom.window.close();}
 });
 
-test("unblocking a tool asks first, then resends with the confirmation",async()=>{
-  const ui=await page((url,body)=>body&&body.confirm
+test("unblocking a tool shows its warning in the review, then saves the reviewed change once",async()=>{
+  const ui=await page((url,body)=>body&&body.confirm&&body.reviewed_token==="sealed-review"
     ?reply(200,{changed:["security.channels"],groups:[{settings:[{id:"security.channels",value:null,
       value_text:"1 chat app",source:"here",source_text:"Set here",
       grid:Object.assign({},ACL,{rows:[{name:"slack",label:"Slack",cells:{denied_tools:[],allowed_tools:[],max_risk:{value:"",label:"No extra limit"}}}]})}]}]})
-    :reply(409,{detail:"confirmation required",confirm:[{id:"security.channels",label:"Tools allowed in each chat app",warning:"Agents will be able to use more tools."}]}));
+    :reply(409,{detail:"confirmation required"}),
+  changes=>changes.some(c=>c.id==="security.channels")
+    ?[{label:"Tools allowed in each chat app",warning:"Agents will be able to use more tools."}]:[]);
   try{
     const r=row(ui,"security.channels");
     await click(r.querySelector('[data-cell="denied_tools"] [data-pick-remove]'));
@@ -114,7 +131,9 @@ test("unblocking a tool asks first, then resends with the confirmation",async()=
     assert.equal(ui.confirms.length,1);
     assert.match(ui.confirms[0],/Tools allowed in each chat app: Agents will be able to use more tools/);
     const posts=ui.calls.filter(c=>c.method==="POST");
-    assert.equal(posts.length,2);assert.equal(posts[1].body.confirm,true);
+    assert.equal(posts.length,1);assert.equal(posts[0].body.confirm,true);
+    assert.deepEqual(posts[0].body.changes,[{id:"security.channels",value:[
+      {name:"slack",denied_tools:[],allowed_tools:[],max_risk:""}]}]);
     // The server's answer redraws the rows.
     assert.equal(r.querySelectorAll("[data-pick-item]").length,0);
     assert.equal(r.querySelector("[data-value-text]").textContent,"1 chat app");

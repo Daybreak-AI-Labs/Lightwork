@@ -173,7 +173,9 @@ def test_goal_source_discovers_sync_and_hedged_physical_calls(
     monkeypatch,
 ):
     world = WorldModel(tmp_path / "world.db")
-    dispatcher = LLM(model="openai:synthetic-receipt-model")
+    # Exercise receipt wiring through a provider route with verified pricing.
+    # A synthetic, unpriced route must stop before a paid call is dispatched.
+    dispatcher = LLM(model="openai:gpt-5.5")
 
     class SyncClient:
         def complete(self, **_kwargs):

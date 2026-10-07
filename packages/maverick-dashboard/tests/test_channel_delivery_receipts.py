@@ -45,6 +45,25 @@ def test_receipt_visibility_requires_global_admin_before_store_access(monkeypatc
     assert error.value.status_code == 403
 
 
+def test_intake_capacity_is_admin_only_and_excludes_message_content(monkeypatch, tmp_path):
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr(api, "require_global_permission", lambda *args: None)
+    DeliveryJournal().admit(IncomingMessage(user_id="private-person", text="private-message", channel="email"),
+                            external_id="private-id", account="private-account")
+    status = asyncio.run(api.channel_intake_capacity(_request()))
+    assert status["used"] == 1 and status["count_exact"] and status["limit"] >= 1
+    assert "private" not in str(status)
+
+    def deny(*args):
+        raise HTTPException(status_code=403, detail="admin required")
+
+    monkeypatch.setattr(api, "require_global_permission", deny)
+    monkeypatch.setattr(DeliveryJournal, "__init__", lambda *args: pytest.fail("Capacity read before authorization"))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(api.channel_intake_capacity(_request()))
+    assert error.value.status_code == 403
+
+
 def test_poll_checkpoint_visibility_excludes_provider_cursor_and_history_floor(monkeypatch):
     from maverick_channels.polling import PollCheckpoint
 

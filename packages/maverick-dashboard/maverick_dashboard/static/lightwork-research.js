@@ -93,22 +93,10 @@
   }
 
   async function api(path, method, body) {
-    const options = {method: method || 'GET', cache: 'no-store', headers: {'Accept': 'application/json'}};
-    if (body !== undefined) {
-      options.headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(body);
-    }
-    const response = await fetch('/api/v1/research' + path, options);
-    let value = null;
-    try { value = await response.json(); } catch (_) { value = null; }
-    if (!response.ok) {
-      const error = new Error(response.status === 409 ? 'This research record changed. Refresh and review it again.' :
-        response.status === 403 ? 'Your current account cannot perform that research action.' :
-        response.status === 422 ? 'Some details need fixing. Check the highlighted fields and try again.' :
-        'The research lab is not available right now. Refresh and try again.');
-      error.status = response.status;
-      throw error;
-    }
+    const value = await window.mvFetchJSON('/api/v1/research' + path, {method: method || 'GET', cache: 'no-store', body, messages: {
+      409: 'This research record changed. Refresh and review it again.',
+      403: 'Your current account cannot perform that research action.',
+      422: 'Some details need fixing. Check the highlighted fields and try again.'}});
     if (value && value.context && value.context !== context) {
       throw new Error('You switched account or workspace. Reload this page.');
     }
@@ -162,15 +150,13 @@
       if (!chosen) return;
       state.textContent = `Reading ${chosen.name}…`;
       try {
-        const response = await fetch('/api/v1/research-files/fingerprint', {method:'POST', credentials:'same-origin',
-          headers:{'Content-Type':'application/octet-stream'}, body:chosen});
-        if (!response.ok) throw response;
-        expected.value = (await response.json()).fingerprint;
+        expected.value = (await window.mvFetchJSON('/api/v1/research-files/fingerprint', {method:'POST',
+          headers:{'Content-Type':'application/octet-stream'}, body:chosen}, 'read the file')).fingerprint;
         state.textContent = `Ready: ${chosen.name}`;
         settingsDirty = true;
         syncControls();
       } catch (error) {
-        state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.';
+        state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.';
       }
     });
     fileLabel.append(file, state);
@@ -192,7 +178,7 @@
     if (!settings) return;
     const available = settings.writable === true && sha(settings.settings_sha256);
     byId('research-settings-readiness').textContent = settings.source === 'operator_overlay' ?
-      'This setup is managed by your IT team and cannot be changed here.' : available ?
+      'This setup is managed by your IT team and cannot be changed here. Ask your IT team to change it.' : available ?
       (settings.valid ? 'The saved setup is complete.' :
         'The saved setup is incomplete. Fill in every field, or turn experiments off.') :
       'The setup cannot be saved right now. Ask your IT team to check the installation settings.';
@@ -220,7 +206,7 @@
   function renderJobs(rows) {
     const list = byId('research-jobs');
     list.replaceChildren();
-    if (!rows.length) list.appendChild(element('li', 'No research submissions yet.'));
+    if (!rows.length) list.appendChild(element('li', 'No research submissions yet. Submissions appear here once someone sends one.'));
     rows.forEach(row => {
       const item = element('li', undefined, 'research-item');
       item.appendChild(element('strong', `Submission ${row.id}`));
@@ -319,7 +305,7 @@
     try {
       await work();
     } catch (error) {
-      message(error.message || 'Something went wrong. Please try again.', true);
+      message(error.message || 'Something went wrong. Try again.', true);
     } finally {
       setBusy(false);
     }
@@ -474,7 +460,7 @@
     try {
       await refresh();
     } catch (_) {
-      throw new Error('The program finished, but the list could not be refreshed. Its result is shown below.');
+      throw new Error('The program finished, but the list could not be refreshed. Its result is shown below; refresh the page to update the list.');
     }
     selectedReview = completedReview;
     renderReviewDetail(completedReview);
@@ -492,5 +478,18 @@
     message('Research submission cancelled.');
     await refresh();
   }));
-  act(refresh);
+  // A failed first load leaves nothing to show: say so where the page said
+  // "Checking…" and "Loading…" (the reason is also shown in the status line).
+  async function firstLoad() {
+    try {
+      await refresh();
+    } catch (error) {
+      const why = action => (typeof window.mvErrorText === 'function' ? window.mvErrorText(error, action)
+        : `Could not ${action}. Refresh the page to try again.`);
+      byId('research-readiness').textContent = why('check whether experiments can run');
+      byId('research-jobs').replaceChildren(element('li', why('load your experiments')));
+      throw error;
+    }
+  }
+  act(firstLoad);
 })();

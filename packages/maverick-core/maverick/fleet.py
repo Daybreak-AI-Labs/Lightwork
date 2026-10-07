@@ -20,7 +20,7 @@ import json
 import re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 # Concurrent runs of the same fleet append to one ``<name>.runs.json`` index.
@@ -73,18 +73,30 @@ class Fleet:
     owner: str
     agents: tuple[FleetAgent, ...] = ()
     created_at: float = field(default_factory=lambda: time.time())
+    # Catalog specialists this department deployment already offered. Keeping
+    # the names after an admin removes an agent prevents a later sync from
+    # silently undoing that choice. Generic fleets leave this empty.
+    department_members_added: tuple[str, ...] = ()
+    # Original accepted update metadata shares the roster's atomic replacement.
+    # Ordinary roster edits retain the bounded history; it contains no prompts.
+    department_update_receipts: tuple[dict, ...] = ()
 
     def principal_for(self, agent_name: str) -> str:
         """The audit/capability principal for one of this fleet's agents."""
         return f"agent:{self.name}.{agent_name}"
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "name": self.name,
             "owner": self.owner,
             "agents": [a.to_dict() for a in self.agents],
             "created_at": self.created_at,
         }
+        if self.department_members_added:
+            result["department_members_added"] = list(self.department_members_added)
+        if self.department_update_receipts:
+            result["department_update_receipts"] = list(self.department_update_receipts)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict) -> Fleet:
@@ -93,6 +105,13 @@ class Fleet:
         agents = d.get("agents", []) or []
         if not isinstance(agents, list | tuple):
             raise ValueError("fleet agents must be a list")
+        added = d.get("department_members_added", []) or []
+        if (not isinstance(added, list | tuple)
+                or any(not isinstance(name, str) or not valid_name(name) for name in added)):
+            raise ValueError("department members must be valid names")
+        receipts = d.get("department_update_receipts", []) or []
+        if not isinstance(receipts, list | tuple) or len(receipts) > 32 or any(not isinstance(row, dict) for row in receipts):
+            raise ValueError("department update receipts must be a bounded list")
         try:
             created_at = float(d.get("created_at", 0.0) or 0.0)
         except (TypeError, ValueError) as exc:
@@ -102,6 +121,8 @@ class Fleet:
             owner=str(d.get("owner", "")),
             agents=tuple(FleetAgent.from_dict(a) for a in agents),
             created_at=created_at,
+            department_members_added=tuple(added),
+            department_update_receipts=tuple(receipts),
         )
 
 
@@ -122,24 +143,30 @@ def ensure_dispatch_allowed(principal: str | None, agent: FleetAgent) -> None:
     fail-open invariant as :func:`maverick.departments.deploy_department`."""
     if not agent.domain:
         return
-    from .domain import suite_for
+    from .domain import suites_for_domain
     from .suite_grants import ensure_suite_allowed
-    ensure_suite_allowed(principal, suite_for(agent.domain))
+    for suite in suites_for_domain(agent.domain):
+        ensure_suite_allowed(principal, suite)
 
 
 def save_fleet(fleet: Fleet, *, tenant: str | None = "__active__") -> Path:
     """Persist a fleet (0600). Raises ValueError on an invalid name."""
     if not valid_name(fleet.name):
         raise ValueError(f"invalid fleet name: {fleet.name!r}")
-    from .file_lock import atomic_write_text, ensure_private_directory
+    from .file_lock import atomic_write_text, cross_process_lock, ensure_private_directory
 
     d = fleets_dir(tenant=tenant)
     ensure_private_directory(d)
     path = d / f"{fleet.name}.json"
-    atomic_write_text(
-        path,
-        json.dumps(fleet.to_dict(), indent=2, sort_keys=True),
-    )
+    with cross_process_lock(path):
+        # The ordinary fleet editor and specialist-hiring paths rebuild Fleet
+        # objects. Preserve the department marker across those edits.
+        prior = load_fleet(fleet.name, tenant=tenant)
+        if prior is not None and prior.owner == fleet.owner:
+            fleet = replace(fleet,
+                department_members_added=fleet.department_members_added or prior.department_members_added,
+                department_update_receipts=fleet.department_update_receipts or prior.department_update_receipts)
+        atomic_write_text(path, json.dumps(fleet.to_dict(), indent=2, sort_keys=True))
     return path
 
 
@@ -173,14 +200,16 @@ def remove_fleet(name: str, *, tenant: str | None = "__active__") -> bool:
     if not valid_name(name):
         return False
     path = fleets_dir(tenant=tenant) / f"{name}.json"
-    try:
-        path.unlink()
-    except OSError:
-        return False
-    try:
-        runs_path(name, tenant=tenant).unlink()
-    except OSError:
-        pass
+    from .file_lock import cross_process_lock
+    with cross_process_lock(path):
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        try:
+            runs_path(name, tenant=tenant).unlink()
+        except OSError:
+            pass
     return True
 
 

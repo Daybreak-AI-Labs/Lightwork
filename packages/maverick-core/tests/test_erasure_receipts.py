@@ -34,6 +34,7 @@ from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 def _seed_complete_graph(world: WorldModel, attachment_path: Path) -> dict:
     from maverick.attachment_submissions import SubmissionStore
+    from maverick.goal_mutations import edit_result
 
     conv = world.get_or_create_conversation("telegram", "alice")
     root = SubmissionStore(world).create(
@@ -73,6 +74,11 @@ def _seed_complete_graph(world: WorldModel, attachment_path: Path) -> dict:
     world.ask("private question", goal_id=child)
     world.create_share_link(grandchild, created_by="reviewer")
     world.set_goal_status(grandchild, "done", result="private result")
+    # Populate the human-edit receipt store through its real transaction so
+    # complete-scope checks prove the private receipt is erased as well.
+    edit_result(world, grandchild, text="private revised result",
+                expected_updated_at=world.get_goal(grandchild).updated_at,
+                operation_id="e" * 32, actor="alice")
     assert world.record_signoff(
         grandchild,
         "approved",

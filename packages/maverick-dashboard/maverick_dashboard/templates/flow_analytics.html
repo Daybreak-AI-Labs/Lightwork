@@ -13,8 +13,8 @@
   .fa__rate.bad { color: var(--danger, #dc2626); }
   .fa__err { color: var(--muted); font-size: 12px; }
   .fa__msg { color: var(--muted); font-size: var(--text-sm); }
-  .fa__bar { display: inline-block; height: 8px; background: var(--success, #16a34a); border-radius: 4px; vertical-align: middle; }
-  .fa__bar-bg { display: inline-block; width: 60px; height: 8px; background: var(--surface-sunken); border-radius: 4px; overflow: hidden; }
+  .fa__bar { display: inline-block; height: 8px; background: var(--success, #16a34a); border-radius: var(--radius-xs); vertical-align: middle; }
+  .fa__bar-bg { display: inline-block; width: 60px; height: 8px; background: var(--surface-sunken); border-radius: var(--radius-xs); overflow: hidden; }
 </style>
 
 <div class="fa">
@@ -39,6 +39,8 @@
 (function () {
   'use strict';
   var msg = document.getElementById('fa-msg');
+  var flowsEnabled = {{ 'true' if flows_enabled else 'false' }};
+  var canManageFlows = {{ 'true' if can_manage_flows else 'false' }};
   {% include "_dash_helpers.js" %}
   function pct(x) { return x == null ? '—' : Math.round(x * 100) + '%'; }
   function secs(x) {
@@ -65,16 +67,19 @@
     (pair[0].flows || []).forEach(function (f) { names[f.id] = f.name; });
     var r = pair[1];
     if (r.status === 403) {
-      msg.textContent = 'Workflows are turned off, or you don’t have access to them.';
-      var on = document.createElement('a'); on.href = '/learning'; on.textContent = ' Turn on workflows';
-      msg.appendChild(on);
+      msg.textContent = flowsEnabled ? 'You do not have access to workflow results. Ask an administrator.'
+        : 'Workflows are turned off. Ask an administrator to turn them on.';
+      if (!flowsEnabled && canManageFlows) {
+        var on = document.createElement('a'); on.href = '/learning#lrn-flows-on'; on.textContent = ' Turn on workflows';
+        msg.appendChild(on);
+      }
       return { off: true };
     }
-    if (!r.ok) { msg.textContent = window.mvErrorText ? window.mvErrorText(r, 'load flow results') : 'Could not load flow results.'; return { off: true }; }
+    if (!r.ok) { msg.textContent = window.mvErrorText ? window.mvErrorText(r, 'load flow results') : 'Could not load flow results. Refresh the page and try again.'; return { off: true }; }
     return r.json();
   }).then(function (j) {
     if (j && j.off) { return; }
-    if (!j) { msg.textContent = 'Could not load flow results.'; return; }
+    if (!j) { msg.textContent = 'Could not load flow results. Refresh the page and try again.'; return; }
     var flows = j.flows || [];
     if (!flows.length) { msg.textContent = 'No flow runs yet. Design a flow and run it to see results here.'; document.getElementById('fa-empty').hidden = false; return; }
     msg.textContent = flows.length + ' flow' + (flows.length === 1 ? '' : 's') + ' · based on the last ' + j.run_window + ' runs';
@@ -104,7 +109,7 @@
       body.appendChild(tr);
     });
     document.getElementById('fa-table').hidden = false;
-  }).catch(function (e) { msg.textContent = window.mvErrorText ? window.mvErrorText(e, 'load flow results') : 'Could not load flow results.'; });
+  }).catch(function (e) { msg.textContent = window.mvErrorText ? window.mvErrorText(e, 'load flow results') : 'Could not load flow results. Refresh the page and try again.'; });
 })();
 </script>
 {% endblock %}

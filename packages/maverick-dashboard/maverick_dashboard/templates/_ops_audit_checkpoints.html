@@ -2,9 +2,10 @@
     verify / retire). Filled by lightwork-ops-panels.js. -#}
 {% include "_ops_styles.html" %}
 <section class="panel" id="ops-ckpt" aria-labelledby="ops-ckpt-title" data-can-admin="{{ 'true' if can_admin else 'false' }}">
-  <h2 id="ops-ckpt-title">Independent checkpoints</h2>
+  <h2 id="ops-ckpt-title">History checkpoints</h2>
   <p class="muted">A checkpoint is a signed note of how long one day of the log was and how it ended, kept in a
-    separate folder. If anyone later changes or removes entries from that day, the check below finds it.</p>
+    separate folder. Checking it can detect changes to its retained prefix. Later entries after the checkpoint are outside that commitment. Keep its receipt outside this installation
+    to check whether the checkpoint history was replaced or rolled back.</p>
   {% if can_admin %}
   <div class="ops-row">
     <label for="ops-ckpt-day">Day
@@ -56,3 +57,4 @@
   {% endif %}
 </section>
 <script src="/static/lightwork-ops-panels.js" defer></script>
+{% if can_global_admin %}{% include "_audit_checkpoint_custody.html" %}{% endif %}

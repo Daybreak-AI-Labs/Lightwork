@@ -24,6 +24,16 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tmp_path / ".maverick" / "templates")
 
 
+def _retire(client, job_id, *, headers=None):
+    listing = client.get("/api/v1/schedules", headers=headers).json()["schedules"]
+    selected = next(row for row in listing if row["id"] == job_id)
+    response = client.post(f"/api/v1/schedules/definitions/{selected['definition_id']}",
+                           headers=headers, json={"expected_revision": selected["revision"],
+                                                  "state": "retired", "confirm": True})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def test_create_list_cancel_text_schedule(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
@@ -37,10 +47,14 @@ def test_create_list_cancel_text_schedule(monkeypatch, tmp_path):
     # it appears in the list
     listed = c.get("/api/v1/schedules").json()["schedules"]
     assert any(s["id"] == sid and s["cron"] == "0 9 * * 1-5" for s in listed)
-    # cancel; a second cancel is a 404, and it leaves the list
-    assert c.delete(f"/api/v1/schedules/{sid}").status_code == 200
-    assert c.delete(f"/api/v1/schedules/{sid}").status_code == 404
-    assert all(s["id"] != sid for s in c.get("/api/v1/schedules").json()["schedules"])
+    # Durable definitions retire through a reviewed revision and retain history.
+    assert c.delete(f"/api/v1/schedules/{sid}").status_code == 409
+    retired = _retire(c, sid)
+    assert retired["state"] == "retired" and retired["next_run"] == 0
+    assert retired["owner"] == ""
+    assert retired["history"][0]["status"] == "cancelled"
+    assert any(row["definition_id"] == retired["definition_id"]
+               for row in c.get("/api/v1/schedules").json()["schedules"])
 
 
 def test_create_schedule_preserves_proxy_identity(monkeypatch, tmp_path):
@@ -89,7 +103,7 @@ def test_create_schedule_from_template_renders_params(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly {{topic}} report\nparams:\n  - topic\n---\n"
+        "---\nowner: local\ntitle: Weekly {{topic}} report\nparams:\n  - topic\n---\n"
         "Research {{topic}} and email the team.\n", encoding="utf-8")
     c = _client()
     r = c.post("/api/v1/schedules", json={
@@ -157,13 +171,14 @@ def test_delete_schedule_cross_user_404(monkeypatch, tmp_path):
     assert c.delete(f"/api/v1/schedules/{legacy}",
                     headers={"Authorization": "Bearer mallory"}).status_code == 404
     assert jq.JobQueue().get(legacy).status == "pending"
-    # the owner can cancel their own
+    # The owner retires their own reviewed definition; history remains intact.
     assert c.delete(f"/api/v1/schedules/{sid}",
-                    headers={"Authorization": "Bearer alice"}).status_code == 200
-    assert jq.JobQueue().get(sid) is None
+                    headers={"Authorization": "Bearer alice"}).status_code == 409
+    assert _retire(c, sid, headers={"Authorization": "Bearer alice"})["state"] == "retired"
+    assert jq.JobQueue().get(sid).status == "cancelled"
 
 
-def test_delete_schedule_admin_can_cancel_any(monkeypatch, tmp_path):
+def test_delete_schedule_admin_has_no_employee_content_authority(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick.job_queue as jq
     monkeypatch.setattr(jq, "DEFAULT_DB", tmp_path / "jobs.db")
@@ -176,8 +191,9 @@ def test_delete_schedule_admin_can_cancel_any(monkeypatch, tmp_path):
     assert r.status_code == 201, r.text
     sid = r.json()["id"]
     assert c.delete(f"/api/v1/schedules/{sid}",
-                    headers={"Authorization": "Bearer root"}).status_code == 200
-    assert jq.JobQueue().get(sid) is None
+                    headers={"Authorization": "Bearer root"}).status_code == 404
+    assert jq.JobQueue().get(sid).status == "pending"
+    assert c.get("/api/v1/schedules", headers={"Authorization": "Bearer root"}).json()["schedules"] == []
 
 
 def test_scheduling_feature_off_403(monkeypatch, tmp_path):
@@ -190,3 +206,24 @@ def test_scheduling_feature_off_403(monkeypatch, tmp_path):
     assert c.post("/api/v1/schedules",
                   json={"cron": "0 9 * * *", "text": "x"}).status_code == 403
     assert c.get("/api/v1/schedules").status_code == 200
+
+
+def test_legacy_missing_owner_schedule_is_visible_only_to_local_caller(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.job_queue import JobQueue
+    from maverick.scheduler import schedule_cron
+    job_id, _ = schedule_cron(JobQueue(), "0 9 * * *", "start_goal", {"text": "legacy local", "__cron__": "0 9 * * *"})
+    client = _client()
+    own = client.get("/api/v1/schedules").json()["schedules"]
+    assert [row["id"] for row in own] == [job_id]
+    assert own[0]["owner"] == ""
+    retired = _retire(client, job_id)
+    assert retired["state"] == "retired"
+    _enable_oidc_principal_map(monkeypatch)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    headers = {"Authorization": "Bearer root"}
+    assert client.get("/api/v1/schedules", headers=headers).json()["schedules"] == []
+    refused = client.post(f"/api/v1/schedules/definitions/{retired['definition_id']}",
+                          headers=headers, json={"expected_revision": retired["revision"],
+                                                 "state": "retired", "confirm": True})
+    assert refused.status_code == 404

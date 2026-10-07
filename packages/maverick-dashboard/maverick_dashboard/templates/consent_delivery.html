@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Send Choices to Other Systems · Lightwork{% endblock %}
+{% block title %}Send choices to other systems · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set cd_on = consent_delivery_enabled %}
@@ -9,7 +9,7 @@
 {% set cd_audit = consent_can_audit if consent_can_audit is defined else true %}
 {% set cd_operate = consent_can_operate if consent_can_operate is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Consent delivery', 'Send Choices to Other Systems',
+  {{ hero('Consent delivery', 'Send choices to other systems',
           lede='Send people’s consent choices to your other systems, such as your CRM, email platform or data warehouse, so every system respects them.') }}
   {% include "_consent_nav.html" %}
   {% if not cd_on %}
@@ -29,6 +29,24 @@
     </section>
 
     <section class="panel" aria-labelledby="cd-destinations-heading">
+      <div id="cd-managed" tabindex="-1">
+        <h2>Signing keys and automatic delivery</h2>
+        <p class="muted">Save the shared secret supplied by the receiving system. Lightwork protects it; the receiver must use the same secret. Lightwork sends each signed update to /v1/consent-preference-events at the receiving system’s address.</p>
+        <form id="cd-key-form" class="cw-form" novalidate>
+          <label>Name for this signing key<input class="input" name="label" required maxlength="100" autocomplete="off"></label>
+          <label>Shared signing secret<input class="input" name="secret" type="password" required maxlength="200" autocomplete="new-password"><span class="muted">32 to 64 bytes. It is never shown again after saving.</span></label>
+          <div class="cw-actions"><button class="btn" type="submit"{% if not cd_admin %} disabled{% endif %}>Review signing key</button></div>
+        </form>
+        <label>Automatic delivery name<input class="input" id="cd-subscription-name" maxlength="100" placeholder="For example: CRM consent updates"></label>
+        <p class="muted">Choose destinations in Send updates below, then review an ongoing subscription. It includes choices recorded after your review. Saving a destination alone authorizes no automatic send.</p>
+        <div class="cw-actions">
+          <button class="btn" type="button" id="cd-subscribe"{% if not cd_admin %} disabled{% endif %}>Review automatic delivery</button>
+          <button class="btn" type="button" id="cd-subscription-pause" hidden>Pause automatic delivery</button>
+          <button class="btn" type="button" id="cd-managed-refresh">Refresh setup</button>
+          <a class="btn btn--ghost" href="/settings/all?q=automatic%20consent%20delivery">Automatic delivery settings</a>
+        </div>
+        <p id="cd-managed-status" class="muted" role="status" aria-live="polite"></p>
+      </div>
       <div class="section-head">
         <h2 id="cd-destinations-heading">Destinations</h2>
         <button class="btn btn--primary" type="button" id="cd-destination-new"{% if not cd_admin %} disabled{% endif %}>Add a destination</button>
@@ -43,7 +61,7 @@
           <label>Web address<input class="input" name="origin" type="url" required maxlength="2048" autocomplete="off" placeholder="https://crm.example.com"></label>
           <label class="cw-wide">Signing key
             <select class="select" name="signing_key_id"></select>
-            <span class="muted">Updates are signed so the receiving system can trust them. Your IT administrator installs the matching secret for this key on the Lightwork server.</span>
+            <span class="muted">Choose a saved signing key above. The receiving system must already use its matching shared secret. Existing deployment-managed keys remain available.</span>
           </label>
           <label>If a delivery fails<select class="select" name="max_attempts">
             <option value="3">Try up to 3 times</option><option value="6" selected>Try up to 6 times</option>
@@ -70,7 +88,7 @@
           <legend class="sr-only">Send updates</legend>
           <fieldset class="cw-wide">
             <legend>Send to</legend>
-            <div class="cw-checks" id="cd-run-destinations"><span class="muted">No destinations yet.</span></div>
+            <div class="cw-checks" id="cd-run-destinations"><span class="muted">No destinations yet. Add one below to send consent updates.</span></div>
           </fieldset>
           <details class="governance-details cw-wide">
             <summary>Batch size</summary>
@@ -93,7 +111,7 @@
         <h2 id="cd-failed-heading">Failed deliveries</h2>
         <button class="btn btn--ghost" type="button" id="cd-purge"{% if not cd_admin %} disabled{% endif %}>Delete old records</button>
       </div>
-      <p class="muted">Updates that could not be delivered after every retry. Fix the problem at the receiving system, then try again.</p>
+      <p class="muted">Updates that need attention. An unconfirmed send is held and cannot be sent again automatically; first confirm what happened at the receiving system.</p>
       <div id="cd-dead-table"><p class="muted">Loading…</p></div>
     </section>
 
@@ -102,7 +120,7 @@
         <h2 id="cd-apps-heading">Connected apps</h2>
         <button class="btn" type="button" id="cd-adapter-status">Check connections</button>
       </div>
-      <p class="muted">Salesforce, Marketo, Adobe Experience Platform and Snowflake connect through the Connections page. Lightwork checks each delivery really arrived.</p>
+      <p class="muted">Separately configured Salesforce, Marketo, Adobe Experience Platform and Snowflake delivery adapters can check whether an update arrived. These app-specific adapters are separate from the signed destinations and automatic subscription above.</p>
       <div class="grid" id="cd-provider-grid" aria-label="Connected app status">
         <div class="stat" data-provider="salesforce"><strong>Salesforce</strong><p class="muted">Not checked yet.</p></div>
         <div class="stat" data-provider="marketo"><strong>Marketo</strong><p class="muted">Not checked yet.</p></div>
@@ -124,38 +142,43 @@
       <div id="cd-history-table"><p class="muted">Loading…</p></div>
     </section>
   </fieldset>
+  <section id="cd-recovery" class="panel" hidden aria-label="Original delivery setup">
+    <button class="btn" type="button" id="cd-managed-original" hidden>Read original save</button>
+    <button class="btn" type="button" id="cd-managed-fresh" hidden>Prepare a new review</button>
+    <p id="cd-original-status" class="muted" role="status" aria-live="polite"></p>
+  </section>
 </div>
 <script src="/static/lightwork-consent-workbench.js"></script>
-<script>
+<script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
 (function () {
   "use strict";
   var API = "/api/v1/consent/delivery";
   var ADAPTERS = "/destination-adapters";
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path, options) {
-    var opts = Object.assign({cache: "no-store"}, options || {});
-    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("cd-root")) start();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (CW && document.getElementById("cd-root")) { if (window.mvFetchJSON) start(); else document.addEventListener("DOMContentLoaded", start); }
 
   function start() {
     var $ = function (id) { return document.getElementById(id); };
     var root = $("cd-root"), status = $("cd-status");
     var can = {admin: root.dataset.canAdmin === "true", audit: root.dataset.canAudit === "true", operate: root.dataset.canOperate === "true"};
-    var state = {destinations: [], afterSequence: 0};
+    var state = {destinations: [], keys: [], afterSequence: 0, managed: null};
+    var pendingKey = "lightwork:consent-delivery:original:" + location.pathname;
+    var pending = "";
+    try { pending = sessionStorage.getItem(pendingKey) || ""; } catch (_e) { /* memory recovery remains available */ }
+    $("cd-managed-original").hidden = !pending;
+    $("cd-recovery").hidden = !pending;
     var EVENTS = {destination_enrolled: "Destination added", signing_key_rotated: "Signing key changed", signing_key_revoked: "Old signing key retired",
       destination_revoked: "Destination stopped", change_enqueued: "Update prepared", lease_recovered: "Stalled send recovered", message_cancelled: "Update cancelled",
-      message_claimed: "Sending started", delivery_acknowledged: "Delivered", retry_scheduled: "Will retry", message_dead_lettered: "Failed after every retry",
-      claim_invalidated: "Send stopped for safety", dead_letter_replayed: "Retried a failed update", terminal_payloads_purged: "Old records deleted"};
+      message_claimed: "Sending started", delivery_acknowledged: "Delivered", retry_scheduled: "Will retry", message_dead_lettered: "Delivery needs attention",
+      claim_invalidated: "Send stopped for safety", dead_letter_replayed: "Retried a failed update", terminal_payloads_purged: "Old records deleted", managed_setup_saved: "Reviewed delivery setup saved"};
     var PROBLEMS = {transport_error: "Could not reach the system", timeout: "The system took too long to answer", rate_limited: "The system asked us to slow down",
       remote_unavailable: "The system was unavailable", authentication_rejected: "The system did not accept our signature", contract_rejected: "The system rejected the update",
-      unexpected_status: "The system gave an unexpected answer"};
+      unexpected_status: "The system gave an unexpected answer", delivery_unconfirmed: "Needs confirmation from the receiving system; it will not be sent again automatically"};
     document.querySelectorAll("[data-cd-close]").forEach(function (b) { b.addEventListener("click", function () { $(b.dataset.cdClose).hidden = true; }); });
 
     function keyNames() {
@@ -163,10 +186,10 @@
       state.destinations.forEach(function (d) { (d.keys || []).forEach(function (k) { if (k.status !== "revoked") names[k.key_id] = true; }); });
       return Object.keys(names).sort();
     }
-    function newKeyName() { var d = new Date(); return "signing-key-" + d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") + "-" + CW.reference().slice(0, 6); }
+    function keyLabel(id) { var key = state.keys.find(function (k) { return k.key_id === id; }); return key ? key.label : "Deployment-managed signing key"; }
     function keyOptions(exclude) {
-      var fresh = newKeyName();
-      return [{value: fresh, label: "A new key (" + fresh + ")"}].concat(keyNames().filter(function (k) { return k !== exclude; }).map(function (k) { return {value: k, label: "Existing key " + k}; }));
+      return state.keys.filter(function (k) { return k.key_id !== exclude; }).map(function (k) { return {value: k.key_id, label: k.label}; })
+        .concat(keyNames().filter(function (k) { return k !== exclude && !state.keys.some(function (saved) { return saved.key_id === k; }); }).map(function (k, i) { return {value: k, label: "Existing deployment key " + (i + 1)}; }));
     }
     function retention(seconds) {
       var days = Math.round(Number(seconds) / 86400);
@@ -184,8 +207,8 @@
         columns: [
           {label: "Name", value: function (d) { return CW.human(d.destination_id); }},
           {label: "Web address", value: function (d) { return d.origin; }},
-          {label: "Status", value: function (d) { return d.status === "active" ? CW.badge("Sending", "ok") : CW.badge("Stopped", "idle"); }},
-          {label: "Signing key", value: function (d) { return d.active_key_id || ""; }},
+          {label: "Status", value: function (d) { return d.status === "active" ? CW.badge("Available", "ok") : CW.badge("Stopped", "idle"); }},
+          {label: "Signing key", value: function (d) { return d.active_key_id ? keyLabel(d.active_key_id) : "Not selected"; }},
           {label: "Retries", value: function (d) { return "Up to " + d.max_attempts + " times"; }},
           {label: "Records kept", value: function (d) { return retention(d.default_retention_seconds); }},
         ],
@@ -196,12 +219,15 @@
         ],
         empty: {title: "No destinations yet.", body: "Add the first system that should receive consent updates.", action: can.admin ? {label: "Add a destination", run: function () { openDestination(); }} : null},
       });
-      var box = $("cd-run-destinations"); box.replaceChildren();
+      var box = $("cd-run-destinations"), previous = {};
+      box.querySelectorAll("input").forEach(function (input) { previous[input.value] = input.checked; });
+      box.replaceChildren();
       var active = state.destinations.filter(function (d) { return d.status === "active"; });
       if (!active.length) box.appendChild(CW.el("span", "muted", "Add a destination first."));
       active.forEach(function (d) {
         var label = CW.el("label"), input = document.createElement("input");
-        input.type = "checkbox"; input.name = "destination_ids"; input.value = d.destination_id; input.checked = true;
+        input.type = "checkbox"; input.name = "destination_ids"; input.value = d.destination_id;
+        input.checked = Object.prototype.hasOwnProperty.call(previous, d.destination_id) ? previous[d.destination_id] : true;
         label.append(input, " " + CW.human(d.destination_id)); box.appendChild(label);
       });
     }
@@ -209,7 +235,7 @@
 
     var destinationForm = $("cd-destination");
     function openDestination() {
-      destinationForm.reset();
+      if (!keyOptions().length) { CW.say(status, "Save a signing key above before adding a destination.", true); $("cd-key-form").elements.label.focus(); return; }
       CW.fill(destinationForm.elements.signing_key_id, keyOptions());
       CW.open(destinationForm, "[name=destination_name]");
     }
@@ -228,13 +254,13 @@
         await call("/destinations/" + encodeURIComponent(id), {method: "POST", json: {origin: origin, signing_key_id: f.signing_key_id.value,
           idempotency_key: f.idempotency_key.value || CW.reference(), max_attempts: Number(f.max_attempts.value),
           default_retention_seconds: Number(f.retention.value)}});
-        destinationForm.hidden = true; await loadDestinations(); CW.say(status, "Added " + name + ".");
+        destinationForm.hidden = true; destinationForm.reset(); await loadDestinations(); CW.say(status, "Added " + name + ".");
       } catch (error) { CW.fail(status, error, "add the destination"); }
     });
     async function rotate(d, button) {
       var answer = await window.mvForm("Change the signing key for " + CW.human(d.destination_id), [
-        {key: "key", label: "New signing key", type: "select", options: keyOptions(d.active_key_id), required: true,
-          help: "Your IT administrator must install this key’s secret on the server before the next send."}], {okText: "Change key"});
+        {key: "key", label: "New signing key", type: "select", options: keyOptions().filter(function (option) { return !(d.keys || []).some(function (key) { return key.key_id === option.value; }); }), required: true,
+          help: "Save its shared secret above first. Automatic delivery will be held until you review the changed destination again."}], {okText: "Change key"});
       if (!answer) return;
       CW.busy(button, async function () {
         try {
@@ -244,10 +270,10 @@
       });
     }
     async function retireKey(d, button) {
-      var keys = oldKeys(d).map(function (k) { return {value: k.key_id, label: k.key_id}; });
-      var answer = await window.mvForm("Retire an old signing key", [{key: "key", label: "Key to retire", type: "select", options: keys, required: true}], {okText: "Continue"});
+      var keys = oldKeys(d).map(function (k) { return {value: k.key_id, label: keyLabel(k.key_id)}; });
+      var answer = await window.mvForm("Retire an old signing key", [{key: "key", label: "Key to retire", type: "select", options: keys, required: true}], {okText: "Review key retirement"});
       if (!answer) return;
-      if (!(await CW.confirm("Retire the key " + answer.key + " for " + CW.human(d.destination_id) + "? Updates signed with it will no longer be accepted.", "Retire key"))) return;
+      if (!(await CW.confirm("Retire " + keyLabel(answer.key) + " for " + CW.human(d.destination_id) + "? Updates signed with it will no longer be accepted.", "Retire key"))) return;
       CW.busy(button, async function () {
         try {
           await call("/destinations/" + encodeURIComponent(d.destination_id) + "/revoke-key", {method: "POST", json: {key_id: answer.key, expected_revision: d.revision, idempotency_key: CW.reference()}});
@@ -319,8 +345,8 @@
             {label: "Attempts", value: function (m) { return m.attempts; }},
             {label: "Last tried", value: function (m) { return CW.when(m.updated_at); }},
           ],
-          actions: [{label: "Try again", when: function () { return can.admin; }, run: function (m, b) { replay(m, b); }}],
-          empty: {title: "No failed deliveries.", body: "Everything that was sent either arrived or is still being retried."},
+          actions: [{label: "Try again", when: function (m) { return can.admin && m.last_error_code !== "delivery_unconfirmed"; }, run: function (m, b) { replay(m, b); }}],
+        empty: {title: "No failed deliveries.", body: "Unconfirmed sends are held here for independent confirmation; they are never retried automatically."},
         });
       } catch (error) { $("cd-dead-table").replaceChildren(); CW.fail(status, error, "load failed deliveries"); }
     }
@@ -357,7 +383,7 @@
             {label: "What happened", value: function (e) { return EVENTS[e.event_type] || CW.human(e.event_type); }},
             {label: "Destination", value: function (e) { return e.details && e.details.destination_id ? CW.human(e.details.destination_id) : ""; }},
           ],
-          empty: {title: "Nothing has happened yet."},
+          empty: {title: "Nothing has happened yet.", body: "Deliveries appear here once a destination receives a consent update."},
         });
       } catch (error) { $("cd-history-table").replaceChildren(); CW.fail(status, error, "load delivery history"); }
     }
@@ -377,8 +403,8 @@
         var bindings = Array.isArray(body.destinations) ? body.destinations : [], support = body.reconciliation_supported || {};
         ["salesforce", "marketo", "adobe_experience_platform", "snowflake"].forEach(function (provider) {
           var binding = bindings.filter(function (b) { return b.provider_id === provider; })[0];
-          if (!binding) setCard(provider, "Set it up on the Connections page.", "idle");
-          else if (binding.credential_reference_present !== true) setCard(provider, "Its sign-in details are missing. Reconnect it on the Connections page.", "warn");
+          if (!binding) setCard(provider, "No app-specific delivery adapter is configured.", "idle");
+          else if (binding.credential_reference_present !== true) setCard(provider, "Its configured sign-in details are unavailable.", "warn");
           else if (support[provider] !== true) setCard(provider, "Updates can be sent, but Lightwork cannot yet confirm they arrived.", "warn");
           else if (body.transport_factory_installed === true) setCard(provider, "Ready to send and confirm deliveries.", "ok");
           else setCard(provider, "Set up, but not ready to send yet.", "warn");
@@ -416,8 +442,99 @@
       });
     }
 
+    var managedStatus = $("cd-managed-status"), keyForm = $("cd-key-form");
+    function retain(token) {
+      pending = token;
+      try { if (token) sessionStorage.setItem(pendingKey, token); else sessionStorage.removeItem(pendingKey); } catch (_e) { /* retain in memory, never save plaintext */ }
+      $("cd-managed-original").hidden = !token;
+      $("cd-recovery").hidden = !token;
+      $("cd-managed-fresh").hidden = true;
+    }
+    function clearManagedPrivate() {
+      state.keys = []; state.managed = null; state.destinations = [];
+      keyForm.reset(); destinationForm.reset(); $("cd-subscription-name").value = "";
+      destinationForm.elements.signing_key_id.replaceChildren();
+      $("cd-run-destinations").replaceChildren(); $("cd-destination-table").replaceChildren();
+      ["cd-dead-table", "cd-history-table", "cd-history-check", "cd-provider-grid", "cd-unconfirmed"].forEach(function (id) { if ($(id)) $(id).replaceChildren(); });
+      ["cd-subscribe", "cd-subscription-pause"].forEach(function (id) { $(id).disabled = true; });
+      keyForm.querySelectorAll("input,button").forEach(function (control) { control.disabled = true; });
+    }
+    async function loadManaged() {
+      try {
+        var body = await call("/managed");
+        if (!body || !/^[a-f0-9]{64}$/.test(body.context) || !Array.isArray(body.keys) || !body.worker) throw new Error("Delivery setup could not be read.");
+        state.managed = body; state.keys = body.keys;
+        var sub = body.subscription, worker = body.worker;
+        $("cd-subscription-pause").hidden = !(can.admin && sub && sub.active);
+        var text = sub ? sub.label + ": " + (sub.active ? "Automatic future delivery authorized." : "Paused.") : "No automatic subscription is authorized.";
+        if (body.setup_requires_sign_in) text += " Sign in as an administrator to authorize ongoing delivery.";
+        text += worker.enabled ? (worker.running_here ? " Worker running here." : " No worker is running in this dashboard process.") : " Automatic worker is turned off in Settings.";
+        if (body.holding) text += " " + body.holding;
+        if (pending) text += " Read original save before preparing another review.";
+        CW.say(managedStatus, text, !!body.holding);
+        return body;
+      } catch (error) {
+        if ([401,403,409].indexOf(error.status) >= 0) clearManagedPrivate();
+        CW.fail(managedStatus, error, "read current delivery setup");
+        throw error;
+      }
+    }
+    async function managedSave(body) {
+      if (pending) { CW.say(managedStatus, "Read original save before preparing another review.", true); return; }
+      var review;
+      try { review = await call("/managed/review", {method:"POST",json:body}); }
+      catch (error) { if ([401,403].indexOf(error.status) >= 0) clearManagedPrivate(); CW.fail(managedStatus,error,"prepare the complete review"); return; }
+      if (!review || !review.token || !review.summary || !review.context || !Number.isFinite(review.expires_at)) { CW.say(managedStatus,"The complete review could not be read. Nothing was saved.",true); return; }
+      if (!(await CW.confirm(review.summary, "Save this reviewed setup"))) return;
+      retain(review.token);
+      keyForm.elements.secret.value = "";
+      try {
+        var result = await call("/managed/save", {method:"POST",json:{token:pending}});
+        if (!result || result.saved !== true || !result.reference || !Number.isInteger(result.revision)) throw new Error("The original save was not confirmed.");
+        retain(""); await refresh(); CW.say(managedStatus,"The reviewed setup was saved. Current delivery status is shown above.");
+      } catch (error) {
+        if ([401,403].indexOf(error.status) >= 0) clearManagedPrivate();
+        CW.say(managedStatus,"This save could not be confirmed. Read original save; Save will not be sent again automatically.",true);
+      }
+    }
+    keyForm.addEventListener("submit", function (event) {
+      event.preventDefault(); var button = keyForm.querySelector("button");
+      CW.busy(button,function () { return managedSave({kind:"key",label:keyForm.elements.label.value,secret:keyForm.elements.secret.value}); });
+    });
+    $("cd-subscribe").addEventListener("click", function () {
+      var button = this; CW.busy(button,function () { return managedSave({kind:"subscription",label:$("cd-subscription-name").value,destination_ids:chosen(),active:true}); });
+    });
+    $("cd-subscription-pause").addEventListener("click", function () {
+      var sub = state.managed && state.managed.subscription, button = this;
+      if (!sub) return;
+      CW.busy(button,function () { return managedSave({kind:"subscription",label:sub.label,destination_ids:[],active:false}); });
+    });
+    $("cd-managed-refresh").addEventListener("click", function () { CW.busy(this,refresh); });
+    $("cd-managed-original").addEventListener("click", function () {
+      CW.busy(this,async function () {
+        if (!pending) return;
+        try {
+          var result = await call("/managed/original",{method:"POST",json:{token:pending}});
+          if (result.confirmed === true) { retain(""); if (root.dataset.featureEnabled !== "false") await refresh(); }
+          else $("cd-managed-fresh").hidden = result.new_review_available !== true;
+          $("cd-recovery").hidden = false;
+          CW.say($("cd-original-status"),result.message,result.confirmed !== true);
+        } catch (error) { if ([401,403].indexOf(error.status) >= 0) clearManagedPrivate(); CW.fail($("cd-original-status"),error,"read the original save"); }
+      });
+    });
+    $("cd-managed-fresh").addEventListener("click", async function () {
+      if (await CW.confirm("The expired original review has no saved receipt. Prepare a separate current review? This does not repeat the old Save.", "Prepare a new review")) { retain(""); CW.say(managedStatus,"Prepare a new complete review using the current setup."); }
+    });
+    window.LightworkConsentDelivery = {openReview:async function (_empty, options) {
+      if (Object.keys(_empty || {}).length || location.pathname !== "/consent/delivery" || !options || !options.isCurrent || !options.isCurrent() || !/^[a-f0-9]{64}$/.test(options.context || "")) return false;
+      try {
+        var current = await call("/managed");
+        if (!options.isCurrent() || location.pathname !== "/consent/delivery" || current.context !== options.context) return false;
+        $("cd-managed").scrollIntoView({block:"center"}); $("cd-managed").focus({preventScroll:true}); return true;
+      } catch (_error) { return false; }
+    }};
     if (root.dataset.featureEnabled === "false") { ["cd-destination-table", "cd-dead-table", "cd-history-table"].forEach(function (id) { $(id).replaceChildren(CW.el("p", "muted", "Turn this feature on to use it.")); }); return; }
-    async function refresh() { await loadDestinations(); await Promise.all([loadCounts(), loadDead(), loadHistory(false)]); }
+    async function refresh() { await loadManaged(); await loadDestinations(); await Promise.all([loadCounts(), loadDead(), loadHistory(false)]); }
     refresh();
   }
 })();

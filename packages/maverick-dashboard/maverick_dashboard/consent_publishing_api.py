@@ -429,15 +429,10 @@ async def rollback(request: Request, property_id: str, body: RollbackIn) -> dict
 async def withdraw(request: Request, property_id: str, body: WithdrawIn) -> dict:
     """Replace the exact active head with a locally constructed tombstone."""
 
+    from . import consent_publication_withdrawal
+
     require_global_permission(request, "admin")
-    ops, tenant, store = _authority()
-    return await _call(
-        ops,
-        store.withdraw,
-        tenant,
-        property_id,
-        **body.model_dump(),
-    )
+    return await run_in_threadpool(consent_publication_withdrawal.legacy, request, property_id, body.model_dump())
 
 
 @router.get("/properties/{property_id}/history")

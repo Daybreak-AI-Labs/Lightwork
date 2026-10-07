@@ -12,6 +12,37 @@ labels and error descriptions may remain. Review the report before sharing it.
 The full installation report requires current global administrator permission;
 ordinary workspace members can inspect their own task status instead.
 
+## Task reports and failure references
+
+**Report a problem with a task** searches accessible failed or blocked tasks by
+name and UTC date. **Find older tasks** continues through older history. A
+stopped task also links directly to its authorized selection in Help.
+
+Task report drafts are reviewed and edited inside Lightwork. They are held only
+in the page's memory. They include the installed dashboard version and a short
+recorded failure reason when the task has one, even when no separate error
+event was saved. The reason is bounded and recognized secrets are removed, but
+business details can remain and should be reviewed. Confirming the exact fields
+checks access and secret scrubbing; if scrubbing changes an edited draft, review
+the updated text again. The enabled **Copy reviewed draft** and
+**Download reviewed draft** buttons keep the page open and make a local copy.
+Send that copy through the
+support channel your organization gave you. This installation has no configured
+task-report support inbox, and Help does not send the draft to GitHub or another
+service. A blocked clipboard write leaves the draft visible for download or
+manual selection and copying.
+
+Unexpected dashboard failures return a unique reference and UTC time. The same
+reference identifies the exception in restricted server logs. It contains no
+request URL, query string, customer name or stack trace. Following **Help** from
+the failure page includes that reference in an authorized installation report.
+Uncertain changes are checked before retrying; loading a failed read is safe to
+retry. An independent minimal failure page remains available if normal template
+rendering fails.
+
+Focused task-report builder and API checks pass locally. An installed-browser
+support journey remains unverified.
+
 Previews are encrypted, account/workspace-bound, valid for ten minutes, and
 bounded to sixteen retained copies per context. Downloads recheck current
 permission, context, feature availability, expiry and the reviewed digest. Access

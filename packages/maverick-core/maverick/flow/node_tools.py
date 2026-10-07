@@ -27,8 +27,8 @@ _DEFAULT_MIN_FRAC = 0.8
 
 
 def _path():
-    from ..paths import data_dir
-    return data_dir("flows", "node-tools.ndjson")
+    from .store import _flow_dir
+    return _flow_dir("node-tools.ndjson")
 
 
 def _current_revision(flow_id: str) -> str:

@@ -1,6 +1,12 @@
-# Lightwork — Shipped Features
+# Lightwork - Shipped Features
 
-What Lightwork **does today**, grounded in the code on `main`. This is the
+- **Personal device pairing preview** — default-off `[device_pairing] enabled`
+  lets named members approve an expiring device code. Scoped credentials read
+  only their own work in one workspace, with protected renewal and explicit
+  removal in Your paired devices. Mobile/watch/vision settings store the
+  connection securely. See [scope, retention and qualification](device-pairing.md).
+
+What Lightwork **does today**, grounded in the current repository code. This is the
 catalogue of built features and tools; the forward backlog (what's *not* done
 yet) lives in [`ROADMAP.md`](./ROADMAP.md). When a roadmap item ships, it moves
 here.
@@ -19,6 +25,44 @@ here.
 
 ## Agent kernel & orchestration
 
+- **Conversation alternatives** — Try again, Edit and resend, and Branch from
+  here open a complete review before starting a separate conversation. The
+  original stays intact; the selected prior messages, answered clarifications,
+  files and named account restrictions are retained. Answer only is the default;
+  repeating connected actions requires a separate choice and review. Settings
+  and the installer expose `[chat_message_actions] enabled`. Copilot opens the
+  same protected form. Interrupted admission reads its original receipt without
+  repeating work; copied content keeps its sources' current access rules.
+
+- **Complete workflow-pilot controls** — ordinary forms and Copilot prepare
+  unstarted tasks, freeze a paired plan, record time and complete cost evidence,
+  and obtain an independent review. Each write has a complete consequence review
+  and a pure original-outcome reader. Prepared tasks are admitted atomically on
+  SQLite and PostgreSQL; pilot-plan creation currently requires the local
+  governed-record backend. Task start and release publication remain separate.
+  Reported measurements do not by themselves establish causal improvement.
+
+- **Decision checks and joint observation planning** — Decision evidence accepts
+  named possible situations, choices, exact decimal losses and observation costs.
+  It checks whether a choice stays acceptable across every remaining declared
+  situation, then finds the least-cost joint observation batch whose possible
+  answers each support a choice, within the entered limits. UI and Copilot share
+  check, reservation, acknowledgement and original-outcome controls. The bounded
+  model supports eight facts, sixteen cases, four choices and 128 situations;
+  it records operator premises and requests, without executing business actions.
+
+- **Employee companion preview** - default-off `[features] employee_companions`
+  adds an explicitly enrolled employee's private conversation and workspace-admin
+  policy/metadata page. A separate policy grant enables draft replies through the
+  configured writer model, with optional permitted own-task context and bounded
+  retained history. Deterministic task status stays available alongside work.
+  No agent tools execute; request receipts prevent automatic paid replay, and
+  authority is rechecked before dispatch/publication. History retention is optional
+  and encrypted; connector retrieval,
+  learned memory, actions and voice are unavailable. This increment is untested
+  and does not change legacy administrator access to ordinary task/chat content.
+  See [scope and qualification gaps](employee-companions.md).
+
 - **Guided restored-connection review** — recovery uses ordinary outcome,
   evidence and date controls instead of editing a data object. Recovery Copilot
   hosts the same current-authority form locally. Interrupted recording can
@@ -27,15 +71,121 @@ here.
   whole-platform Copilot coverage remain incomplete. See
   [review boundaries](recovery-connected-services.md).
 
-- **First global Copilot action** — on a workflow run, Copilot can check the
-  current learning example and open the same protected stop-use form as the
-  page. The signed-in person enters a reason and confirms; the native service
-  rechecks current authority and example revision and reports confirmed or
-  audit-pending results. The closed catalog is default-off under
-  `[features] copilot_operations` and appears in Settings and the installer.
-  Direct page withdrawal does not depend on this flag. This covers one
-  operation, not all post-install work; see
-  [operation coverage](post-install-operation-coverage.md).
+- **Copilot product controls** — the default-off
+  `[features] copilot_operations` catalog shares selected native product
+  writers, complete consequence reviews and original-outcome recovery with
+  ordinary pages. Named choices replace technical request editing; protected
+  handoffs retain entered work where the complete native form is required.
+  Native authority, source/version, permission and deadline checks remain at
+  the effect. Settings and the installer expose the catalog and its permitted
+  operation families. Ordinary controls retain their own feature requirements
+  independently of Copilot. Exact operating scope and dated journey evidence,
+  including remaining coverage gaps, are in the
+  [operation coverage register](post-install-operation-coverage.md).
+
+- **Checked answer regions** — optional `[features] applicability_regions`
+  adds ordinary Learning controls for two exact versions of an owned taught
+  rule. It executes both over the complete declared finite input grid, retains
+  current permitted comparison evidence and separately reviewed hypothetical
+  answers, and shows where the original, proposed, both or neither answer is
+  supported. Unknown and conflicting answers stay unresolved. A minimal
+  axis-split routing tree is checked against an independent full-grid lookup;
+  trying a checked route runs the chosen native rule without publishing it.
+  Copilot shares full review, private authoring, withdrawal and exact originals.
+
+- **Rewrite and check local rules** — optional
+  `[features] governed_rule_evolution` adds ordinary controls for constructing
+  native decision routes from one owned published taught rule and improving
+  the order of complete checks against declared wrong-answer examples. A
+  separate unchanged complete-domain gate remains outside both artifacts.
+  Full comparison, separate owner acceptance, separately authorized publication,
+  active-release checking and exact retained-release restoration use the native
+  workflow store. Copilot uses those same reviewed controls and original
+  outcomes. This changes supported local rule graphs; it does not modify host
+  source, plugins, provider models or arbitrary code.
+
+- **Complete task search** — Tasks and `tasks.find` continue through protected
+  parts of the current owned task range instead of treating the latest 1,000
+  records as the whole history. Search progress and unfinished reads stay
+  visible; interrupted parts can be retried without replacing newer search
+  words. Ordinary task-list continuation also preserves distinct older rows.
+
+- **Reviewed agent removal and reset** — Agent Factory distinguishes deleting
+  a custom agent from restoring a built-in agent. Full current and resulting
+  definitions, exact source versions and the original request are retained
+  through review, native removal and interrupted replies. A damaged saved
+  definition has an explicit discard review with its true resulting behavior;
+  it is not presented as an editable working agent. Copilot shares current
+  authority, complete review and original-outcome recovery.
+
+- **Additional-work capability qualification** — the optional
+  `[features] commitment_capability_learning` setting adds guided Promise
+  review forms for competing material/capacity/shared-setup explanations,
+  jointly offered work and inclusion-minimal hypothetical additions. Completed
+  attributed trials or exact owned published local-rule tests narrow those
+  explanations within one shared test/effort allowance. Every surviving model
+  must protect all accepted commitments. Native UI and Copilot retain current
+  sources, consent, exact originals and unknown attempts without replay or
+  allowance refund. Own history remains readable after disable or archive.
+  This supports conditional planning under entered premises; it does not verify
+  physical capacity, make purchases, establish revenue or claim a new algorithm.
+
+- **Compliance studio protected draft saves** — guided risk, control, vendor
+  and evidence record design now reviews the complete supported current and
+  proposed draft before the existing native Save. Interrupted create/replace
+  replies recover the exact original request; uncertain admission never repeats
+  a write. Current source, actor/workspace and expiry are rechecked after native
+  writer waits. Copilot opens the protected form without replacing newer
+  choices. Independent review, approval, publication and connected-destination
+  delivery remain separate operations.
+
+- **Share preparation safely** — guided per-case confidentiality groups and
+  deadlines allow eligible preparation to be shared across two to eight permitted
+  original local-rule cases. Each case also receives a separate complete native
+  run. Work, source checks and receipts share one allowance. Ordinary controls
+  and Copilot preserve case choices and original outcomes; disabled operation
+  retains authorized history. This does not move connected effects or approvals.
+
+- **Share and qualify local rule structures** — export reviewed anonymous
+  operations, input types and repeated-value relationships without source names,
+  literal thresholds or private cases. Import through a file chooser, automatically
+  search target bindings, qualify against target-owned cases and the complete
+  declared finite input domain, then run the qualified local rule in its owned
+  receipt. Qualification does not create or publish an independent workflow.
+
+- **Reuse complete rule-behavior evidence** — optional complete native evaluation
+  of every declared eligible input allows prior case output to be reused across
+  a rule rewrite with identical typed behavior. Both the finite checks and a
+  separate complete workflow comparison count toward the existing work allowance.
+  Current case, source, policy and reuse permission remain mandatory. Unsupported
+  or ambiguous rules use ordinary checking; no research or speed advantage is
+  implied by finite-function equivalence.
+
+- **Private task calculations** — choose an owned native task attachment, enter
+  ordinary bounded conditions, review a local calculation and separately approve
+  its fixed outward answer. Current analysis/export purpose and inherited source
+  permissions remain mandatory. Exact originals, spent uses and one allowed
+  release follow the physical source across copies and removal; uncertain work
+  never repeats automatically. Private names, rows and traces stay local.
+
+- **Understand a missing reply** — use isolated fictional native sign-offs to
+  enumerate the complete declared bounded situations, find shortest histories
+  with identical visible status but different original obligations, and identify
+  a permitted observation that separates them. Original-result readback cannot
+  rerun the practice. This changes no live approval and establishes no remote
+  delivery guarantee or advantage over the matched exhaustive comparison.
+
+These five capabilities are separate, default-off feature choices in ordinary
+Settings and the installation wizard. Their local native qualification and
+limits are recorded in the [operation coverage register](post-install-operation-coverage.md).
+
+- **Run a learned workflow from Copilot** — on a saved workflow's designer page,
+  the closed catalog checks the published release and opens the same labelled
+  input form as Run. The form pins that release; the native run endpoint rechecks
+  access and publication before accepting work. Copilot reports an accepted run
+  as in progress, with a link to its status, rather than claiming the business
+  outcome is complete. This is a local journey, not installed-app acceptance or
+  whole-platform operation coverage.
 
 - **Bounded audit reads and explicit coverage** — live tails seek a bounded
   suffix; newly sealed history uses authenticated 1 MiB frames without changing
@@ -145,7 +295,9 @@ here.
   supervisor) that doesn't join the control flow; `blackboard.post` tees into
   it, a slow observer drops its oldest events rather than stalling the swarm,
   and it's a no-op (lock-free subscriber check) when nobody is watching.
-- **Context lifecycle** — deferred tool loading + `find_tools`, cross-session
+- **Context lifecycle** — deferred tool loading + `find_tools` with a
+  role- and pack-aware short catalog (`[tools] exposure`, default `core`:
+  ~30-40 tools per turn instead of ~240), cross-session
   `memory` tool (`tools/memory.py`), programmatic tool calling
   (`tools/code_exec.py`), structural/retrieval-augmented compaction
   (`compaction/__init__.py`, `context_compactor.py`), and a **long-context retrieval
@@ -215,8 +367,13 @@ here.
   auto-apply, model-weight adoption, and DGM code self-modification retain
   separate gates.
 - **Local continuous learning** — distill successful run trajectories into a
-  reusable, validator-compliant `SKILL.md` under `~/.maverick/learned-skills`
-  (`skill_distillation_local.py`), default-on via `[self_learning] distill_local`.
+  validator-compliant `SKILL.md` suggestion under the active tenant's
+  `learned-skills` store (`skill/distillation_local.py`), default-on via
+  `[self_learning] distill_local`. A suggestion does not enter agent recall
+  automatically. An administrator reviews its full instructions and shared
+  source tasks on Skills, then explicitly admits one exact version into the
+  installed-skill store; the guarded Copilot learning actions use the same
+  admission and withdrawal services.
   **v2** (`skill_distillation_v2.py`) adds two quality gates so the loop stays
   useful: it won't distill from fewer than N successful trajectories (a one-off
   success is noise), and it dedups a candidate against the learned-skills store
@@ -335,19 +492,17 @@ here.
   (`role_stats.py` `<domain>::<role>` keys); a domain run's routing guidance
   prefers its own department's track record and falls back to the global
   signal when history is thin.
-- **Counterfactual promotion** — the self-improvement controller can judge a
-  learned change (tool/prompt/policy) on its confounder-adjusted *causal*
-  effect on outcomes, not a correlation that merely co-occurred with success
-  (`promotion_effect.py`: stratified/subclassification ATE with a confidence
-  interval over the logged trajectory population). The evidence gate then
-  requires the effect's lower confidence bound to clear the margin, and every
-  promotion records the effect, its CI, the naive (confounded) number for
-  contrast, and the confounders adjusted for. Fail-closed by calibration: an
-  estimate with too little overlap, or one that leaks a non-zero effect under a
-  within-stratum placebo permutation, is refused. Distinct from per-swarm CSCA
-  (`credit.py`) — this is offline, corpus-level, for promotion decisions.
-  Default-on via `[self_improvement] causal_promotion`; applies only when
-  self-improvement is enabled.
+- **Controlled-evidence promotion** — `promotion_effect.py` compares outcomes
+  within recorded context groups and reports overlap, a confidence interval,
+  and a permutation p-value. Ordinary task history remains observational:
+  matching by recorded fields cannot exclude unrecorded reasons why a change
+  was tried on easier work. Such comparisons can surface candidates, but cannot
+  authorize automatic promotion. A promotion-grade estimate requires
+  prospectively randomized assignment, sufficient support in both arms, and
+  an observed effect that clears the evidence margin. The receipt retains the
+  assignment design, p-value, interval, and sample counts. The
+  `[self_improvement] causal_promotion` interlock is on when self-improvement is
+  enabled; the current trajectory-to-unit adapter does not assert randomization.
 - **Capability grading on the promotion receipt** — the capability
   non-escalation gate always refused a widening change, but the durable receipt
   did not record *what the gate concluded*, so a third party reading the ledger
@@ -362,27 +517,27 @@ here.
   their hash-chained journal entries still verify. A verifier must read that
   absence as *unknown*, never as bounded; an unrecognised grading fails closed
   rather than being downgraded to a weaker one.
-- **Model-based counterfactual rollouts** — when confounding is so severe that no
+- **Model-based counterfactual rollouts** — when measured strata have no
   stratum has both arms (zero overlap), stratification is blind; g-computation
   over a tabular transition model fit from the logged `(state, action) ->
-  next_state` records (`counterfactual_rollout.py`) recovers the effect anyway by
+  next_state` records (`counterfactual_rollout.py`) simulates a possible effect by
   re-simulating each context with the decision forced to treated vs control and
   rolling forward to a terminal outcome. Returns the same `EffectEstimate`, so
   the gate is unchanged. Fail-closed by calibration: trustworthy only when the
   model predicts held-out one-step transitions, both actions have support, and a
-  null-action placebo reads ~0. The tabular learning half of the Operating Twin
-  (a generative transition model is a drop-in behind the same interface); same
-  `causal_promotion` knob.
-- **Pre-execution rehearsal** — the governance half of the Operating Twin: before
-  a risky plan runs, simulate it against the same learned world-model and gate on
-  the prediction (`rehearsal.py`). Proceed when the model has support and
-  confidently predicts a good outcome (let the agent be bold), **block** a
-  confidently-poor outcome, and **escalate** to a human/canary when the rollout is
-  too uncertain or — crucially — when the model has never seen the move (a
-  simulator that bluffs about the unknown is worse than none). Governance as a
-  capability, not just a brake. Default-on (`[rehearsal] enable`); it fails
-  toward caution (unknown / over-uncertain / error all
-  escalate). The verdict maps onto the existing consent / autonomy-gate surfaces.
+  null-action placebo reads ~0. A model fit to observational trajectories still
+  cannot establish a causal effect; the promotion gate requires independent
+  controlled evidence. The tabular learning half of the Operating Twin uses the
+  same `causal_promotion` knob.
+- **Pre-execution rehearsal** — before a high-impact tool runs, compare it with
+  the learned world-model (`rehearsal.py`). It is **observe-only by default**:
+  an unfamiliar or poor prediction is logged but does not stop the action.
+  Shield, capability, consent, and other approval checks still apply. An
+  administrator can change the observation switch and mode under Settings >
+  Safety. The explicit `mode = "hold"` choice retains the experimental refusal
+  behavior, but there is no in-product approval path for that mode;
+  it is not a customer-ready way to govern actions. Held calls are not counted
+  as executed tool experience.
 - **Human-override ingestion** — when a human declines an Art-14 approval
   gate, the refusal is persisted as a recallable lesson
   (`reflexion.record_human_override`, failure class `human_override`,
@@ -408,7 +563,10 @@ here.
   preference statements ("I prefer tables", "call me Sam") distilled from
   recent conversations into briefing notes injected ONLY for their exact
   (channel, user) scope; the store rewrites every cycle, so deleted
-  conversations stop feeding notes.
+  conversations stop feeding notes. Each person's own recent-conversation window
+  is bounded independently; coworkers cannot evict it. Newest matching source
+  turns take precedence over opposite preferences, source turn/version metadata
+  is retained, and an unavailable rebuild preserves the last complete store.
 - **Learned behavior selection** — `[planning] mode = "auto"` picks
   tree-of-thought per task class from a learned outcome record
   (`planning_stats.py`, bandit-lite + deterministic); budget task classes
@@ -513,6 +671,15 @@ here.
   `output.gate` lighter than the playbook's final sign-off). All 2,031 built-in
   packs lint clean (0 errors, 0 warnings); every pack carries at least a
   suite-level `knowledge_sources` grounding fallback.
+- **Pack prose lint** — `python -m maverick.domain_prose_lint [--ci --fix]`
+  (`domain_prose_lint`), run inside `domains-lint` so the CI catalog gate
+  covers the words as well as the envelope. Errors: quote corruption
+  (`company"s`), smart-quote/mojibake damage, the wrong article before a
+  curated term list (`a IT/GRC`, `a HR`, `an SaaS`), two packs sharing one
+  persona, a persona under 300 or a description under 30 characters, an
+  empty TOML field, and a tool name absent from the registry, the risk
+  catalog, and the audited abstract-adapter list. `--fix` rewrites the
+  mechanical classes in place without re-serialising the TOML.
 - **Pack deployment prerequisites** — tool-risk checks preserve the declared
   risk ceilings and denylists. Read-only workflows use `sql_query_read` and
   `spreadsheet_read`; these tools do not expose their mutable siblings' write
@@ -1738,7 +1905,11 @@ here.
   Raw deletion is never described as erasing learned-weight influence. The
   production projector currently supports exact approved evidence-graph nodes
   and immutable fleet-memory inbox records; unsupported or mismatched stores
-  fail closed. See [Governed Knowledge](knowledge-access.md).
+  fail closed. The purpose picker walks every authorized registry page and
+  distinguishes unavailable from empty with retry. Operators can submit an
+  exact visible source/version for independent administrator review and inspect
+  their own limited status receipts; this grants no approval, deletion, hold or
+  training authority. See [Governed Knowledge](knowledge-access.md).
 - **Cortex — the company brain** (`cortex.py`, default-on `[cortex] enable`
   / `MAVERICK_CORTEX`; CLI `maverick cortex status|recall|deposit`; dashboard
   compatibility page `/cortex`; audit kinds `cortex_recall` / `cortex_deposit`) — ONE
@@ -1776,13 +1947,19 @@ here.
   record: goals (with departments, outcomes, spend) + human approvals
   (with deciders) threaded into one queryable spine, exportable as an
   Ed25519-signed portable **capsule** (decision spine + learned state)
-  verifiable offline; tampering fails verification.
+  verifiable offline; tampering fails verification. `maverick record verify`
+  also requires the signing key to be trusted -- this installation's own audit
+  keys by default, or the publisher's key via `--pubkey <hex>` /
+  `--trusted-keys <file>` -- and rejects a capsule signed by any other key as
+  "signed by an untrusted key" (printing that key's fingerprint), because the
+  key embedded in a capsule proves nothing about who made it.
 - **Portable attestation — provable to somebody who trusts nobody**
   (`attestation.py`, `attestation_verify.py`, `maverick attest
   key|export|verify|export-verifier`) — the capsule proves *integrity* but is
-  self-certifying: `verify_capsule` checks the signature with the public key
-  stored inside the capsule, so it establishes that nobody edited the file and
-  nothing about who signed it. An attestation bundle closes that gap. It binds
+  self-certifying on its own: `verify_capsule_integrity` checks the signature
+  with the public key stored inside the capsule, so it establishes that nobody
+  edited the file and nothing about who signed it (`verify_capsule` adds the
+  trusted-key requirement above). An attestation bundle goes further. It binds
   three claims to evidence a third party can re-derive — every recorded action
   stayed inside the declared governance envelope; self-improvement never widened
   its own authority; the decision history is intact and complete (per-day content
@@ -1904,7 +2081,11 @@ here.
   (never raw trajectories) cross instance boundaries as Ed25519-signed
   bundles; imports are fail-closed against `[dreaming]
   trusted_insight_pubkeys`, Shield-scanned, provenance-tagged, and merged
-  through the normal dedup gate. Transport is deliberately operator-managed
+  through the normal dedup gate. Import checks the operator HALT again at the
+  write boundary and requires a learning audit preparation record before any
+  lesson becomes usable. A separate completion record distinguishes a clean
+  import from a published one whose final activity record is missing.
+  Transport is deliberately operator-managed
   (a file), never a network call. **Fleet aggregation:** a central
   `maverick dream --donations-dir` replays the whole fleet's donated
   trajectory records through the same consolidation.
@@ -1919,32 +2100,29 @@ here.
   in the same Postgres database as the world-model backend (cosine `<=>`
   search); it takes an injected embedder rather than embedding itself, so
   recall reuses the local fastembed model.
-- **Cognitive Data Engine — the causal improvement flywheel** (`data_engine.py`
+- **Cognitive Data Engine — outcome-pattern discovery** (`data_engine.py`
   + `flywheel.py`, `maverick flywheel`, default-on `[data_engine] enable` /
   `MAVERICK_DATA_ENGINE`) — the Tesla-style data engine for a governed
-  workforce: production failures are triaged by their **causal** impact on real
-  outcomes (fix what moves reality most, not what's merely frequent), the worst
-  actions are mined into **guardrails** (`negative_knowledge.py` — kept only
-  when the causal harm is trustworthy and self-retired when it's gone),
+  workforce: production failures are triaged by observed outcome differences
+  within recorded context groups. These are hypotheses for review, not proof of
+  cause. Candidate guardrails (`negative_knowledge.py`) need controlled
+  evidence before automatic promotion,
   beneficial actions consolidate into **habits** (`procedural_memory.py`, a
   reinforce/forget curve), and the whole loop composes in one pass. It reads the
   trajectory store and can be disabled independently. Observable
   read-only at `GET /api/v1/flywheel` (mined guardrails + consolidated habits).
-- **Causal estimators — the rigor under the flywheel** (`promotion_effect.py`,
-  `counterfactual_rollout.py`) — effects are estimated, not guessed: a
-  stratified/subclassification ATE with a confidence interval, a placebo
-  refutation, and a `trustworthy` calibration gate (`estimate_effect`), plus a
-  g-computation rollout over a learned tabular world-model
-  (`estimate_effect_via_rollout`). An untrustworthy estimate never promotes a
-  change. Validated to recover a known effect under confounding while rejecting
-  the naive (confounded) contrast.
-- **Operations Scientist — discover a better process and prove it**
+- **Outcome-comparison estimators** (`promotion_effect.py`,
+  `counterfactual_rollout.py`) — a stratified difference and a learned-model
+  rollout help rank hypotheses. The statistical gate uses sample variance and
+  compares the observed statistic with shuffled assignments; the average of
+  shuffles is not a refutation. Neither method alone establishes causation from
+  observational logs, and those logs cannot clear the promotion gate.
+- **Operations Scientist — propose a process change for a controlled trial**
   (`operations_scientist.py`, default-on `[operations_scientist] enable` /
-  `MAVERICK_OPERATIONS_SCIENTIST`) — pairs a causally-harmful action with the
-  beneficial habit that should replace it ("stop A; do B"), validates the swap
-  in the world-model **before** spending a real experiment, and only a
-  trustworthy positive lift is promoted to a live trial. Discovery, not just
-  labour; it can be disabled independently.
+  `MAVERICK_OPERATIONS_SCIENTIST`) — pairs a harmful-looking action pattern with
+  a candidate replacement ("stop A; do B"), simulates the swap in the learned
+  model, and prioritizes candidates for a real trial. The simulated lift is a
+  forecast, not a measured causal gain; it can be disabled independently.
 - **Consequence Engine — reality is the reward** (`consequence.py`, `maverick
   record-outcome`, dashboard `POST /api/v1/outcomes`, default-on `[consequence]
   enable` / `MAVERICK_CONSEQUENCE`) — when a real downstream result lands (an
@@ -2209,9 +2387,9 @@ here.
   tenant-scoped indexed metadata history and cursor-paged due-run recovery,
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
   list ops, `and`/`or` conditions with numeric-or-lexical ordering so date/string
-  comparisons work; action params may additionally use `{{secret('NAME')}}` to
-  pull a connector credential from the governed vault at run time so the raw
-  value never enters the flow definition or persisted run data), a whole-flow wall-clock deadline
+  comparisons work; legacy `secret(...)` action expressions are refused before
+  effects, while authorized native connectors resolve their scoped accounts
+  internally; see [credential migration](./flow-credential-migration.md)), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
   (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
   foreach can't fan out unbounded cost), a per-flow **concurrency cap**
@@ -2244,11 +2422,12 @@ here.
   before/after outcomes, versions the definition, and autonomously reverts a
   regression. It grounds which tool a reliable agent node keeps calling
   (`node_tools.py`, sourced from the trajectory store) so a **hardening**
-  proposal (agent → deterministic action) can name — and, under `[flows]
-  auto_apply`, autonomously apply — the inferred tool instead of waiting for a
-  human to pick one. Both autonomy knobs (`auto_evolve` revert, `auto_apply`
-  forward) are toggled from the Learning page, deliberately kept outside the
-  blanket learning control. `evolution_log.improvement_count()` reports the
+  proposal (agent → deterministic action) can name a candidate tool. The
+  proposal is currently review-only because tool-name history does not prove
+  the parameters or effects needed for a safe replay; `auto_apply` cannot
+  activate it. The Learning page exposes the separate evolution controls,
+  including automatic regression revert when enabled.
+  `evolution_log.improvement_count()` reports the
   self-rewrites that stuck (reverted ones netted out) as the moat number. A failed run records WHICH node failed (`FlowRun.cursor`) and can
   **resume from the failed step** with the data as of the failure
   (`execution.execute(from_failure=True)`, `POST /flows/runs/{id}/retry?from_failure=1`)
@@ -2304,7 +2483,18 @@ here.
   signed Approve/Reject links to a channel (`approvals.py` — a stateless HMAC
   token; `POST /flow/approve` resumes) so a human clears it without a dashboard
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
-  fires a flow with the submitted fields as data.
+  is accepted only for a registered form trigger with a current published flow
+  release or bound template (or a live vendor questionnaire), and becomes flow
+  data when the trigger polls. Its per-token queue is capped at
+  5,000 submissions / 32 MiB; a full queue refuses new submissions with 507
+  rather than accepting data that cannot be retained.
+  An owner can replace a form link in Automations after every accepted
+  submission has been checked. The old link stops accepting submissions, the
+  new link starts with an empty queue, and the old submission file is retained.
+  Replacement refuses pending or unreadable history. An owner can review an
+  exact waiting submission and record a signed, reasoned decision that it must
+  not run; that decision is checked again when the queue advances. Repairing a
+  submission for a new target remains unavailable.
 
   The administrator's connected-automation settings show the effective signing
   configuration. Reviewed changes recheck current authority and settings,
@@ -2339,6 +2529,22 @@ here.
   UIDVALIDITY changes establish a new baseline. Provider-wide OAuth vault
   authorizations and token rotations are serialized across local processes.
 
+  The sender-check upgrade holds earlier, unstarted IMAP goals and workflow
+  runs before execution. Older non-email goals continue only when their saved
+  admission receipt proves the current owner and unchanged trigger generation;
+  older non-email workflow runs require the same binding and a source ID that
+  reproduces their generation-scoped reservation key. Missing, deleted, edited,
+  and ambiguous legacy work stays held for review. A run reserved under the
+  older protocol is not proof that its email sender was verified, even when it
+  reached the queue. Owners should review held items and start fresh work from
+  the current trigger after confirming the source. A pre-upgrade IMAP batch tied to an
+  edited trigger configuration may remain retained but cannot be attributed to
+  the new binding or automatically replayed. This requires explicit operator
+  reconciliation; there is no in-product one-click repair for that historical
+  batch. New IMAP work requires the receiving server to remove forged sender
+  results before stamping its own aligned result; a successful mail sign-in
+  test does not prove that server behavior.
+
 - **Migration fidelity** (`automation_import.to_flow`) — a per-source
   `_STRUCTURAL_LOWERERS` registry (register a source in one line): n8n IF/Filter,
   Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope`, Workato
@@ -2353,10 +2559,11 @@ here.
   `approximated` (the Orchestrator API returns no .xaml, so the process's
   internal control flow isn't visible), never a false `preserved`.
   `to_flow_with_report` returns the per-step fidelity log
-  (`preserved` / `approximated` + why), and the dashboard import can save the
-  graphs directly (`as_flows: true` on `POST /import/run`) with the fidelity
-  summary rendered per automation — an import never silently pretends to be
-  lossless.
+  (`preserved` / `approximated` + why). Automations presents the full import
+  review before saving instruction or visual drafts; the older unreviewed
+  `POST /import/run` directs customers to those controls. Imported drafts are
+  not automatically published or activated. Fidelity is shown per automation;
+  an import never silently pretends to be lossless.
   Supported n8n `$json` references normalize to flow-data paths and every
   AND/OR clause is retained. WDL `If` preserves nested AND/OR/NOT as a branch
   graph, including literal types and nested trigger fields. Unsupported
@@ -2366,6 +2573,56 @@ here.
   bounded, secret-redacted operational inputs without silent truncation.
   WDL `Until` remains an approximation because the generated loop checks its
   exit condition before each pass; compound exit expressions require repair.
+
+- **Reviewed automation imports** use the existing automation-import and
+  Connections switches. Customers choose an exported file or their own named
+  n8n, Make, Workato or UiPath account in Automations; Power Automate uses an
+  exported file. The current account, workspace, connection revision, complete
+  bounded source, parameters and migration limits are reviewed before saving.
+  Unsupported or oversized work is refused before saving any member of the
+  batch. Lost replies read exact original outcomes without importing again.
+  Visual conversion is optional, and instruction drafts keep supported
+  nonsecret operational inputs instead of silently shortening them. Publishing
+  and activation remain separate decisions. Activation reviews the current
+  template, spending/time allowance, named timezone and next occurrences,
+  then admits the native schedule once. Copilot opens these protected forms
+  without receiving credentials or replacing an entered draft.
+
+- **Protected report downloads** provide explicit, named controls for the
+  SOC 2 snapshot, AI inventory, OSCAL assessment, statement of applicability
+  and public consent-signing key. Ordinary download actions verify the current
+  account and bounded native response before offering a file; interrupted
+  sign-in, missing records and stale signing keys remain readable errors in
+  the page. Copilot focuses the protected download control without fetching
+  report bytes or delivering private content through its answer. Offering a
+  file does not establish that the customer saved it.
+
+- **Owned generated-tool stopping** shows current owned tools, disabled files
+  awaiting cleanup and retained original decisions on Learned. Each removal
+  reviews exact stopping and file consequences before consent and guarded
+  native deletion. A withdrawn source allows only its owner's metadata-only
+  stopping or cleanup; it does not reveal the old source or restore permission.
+  An interrupted removal remains unknown. Any later cleanup requires its own
+  explicit acknowledgment and current review, rather than replaying the old
+  decision. Native library callers retain their existing defaults, while the
+  older unreviewed dashboard delete opens the complete review.
+
+- **Invitation expiry choices** let administrators choose one hour, one day,
+  seven days or thirty days for installation and workspace invitations. The
+  result and waiting list show the actual native expiration date. Creation
+  rechecks the current administrator, people context, invitation switch and
+  existing workspace MFA requirement at the physical write, and records the
+  chosen lifetime and exact expiration in the creation audit. A lost one-time
+  link cannot be recovered: review and cancel the waiting invitation before
+  deliberately creating its replacement. Copilot opens the same protected
+  people form while keeping entered email and expiration choices.
+
+- **Truthful workflow retry waits** show supported no-wait, ten-second and
+  thirty-second choices. Earlier saved requests remain intact until deliberately
+  changed; the designer states their actual first wait and thirty-second cap.
+  Later eligible waits double within that cap, and uncertain or unsafe actions
+  retain the native refusal to repeat. Ordinary editing, Undo, draft recovery
+  and the existing workflow Copilot share the native saved field.
 
 - **Rich human tasks** — an `approval` node carries `choices` (verdicts beyond
   approve/reject, recorded to `output` for a downstream switch), an `assignee`,
@@ -2671,11 +2928,18 @@ here.
   `{id,result|error}`); the host (`ts_plugin_host.py`, `[plugins] ts =
   [["node", "/path/plugin.js"]]`, wizard step included) loads the manifest
   into regular Tools with a persistent scrubbed-env child, per-call timeout,
-  one crash-restart, and the no-shadowing rule built-ins enjoy. A **gRPC
+  no automatic call replay, owned process cleanup, and the no-shadowing rule built-ins enjoy. A **gRPC
   plugin host** (`grpc_plugin_host.py`, proto `grpc_api/plugin_host.proto`,
   `[plugins] grpc = [{target, command}]`) carries the same contract over gRPC
   for any language: Describe → Tools, Call with a deadline, scrubbed-env spawn,
-  reconnect/respawn-once.
+  owned process cleanup and typed unknown outcomes without call replay.
+  **Governed qualification workbench** (`plugin_workbench.py`, `/plugins`) runs
+  actual Python tool/channel/skill/persona, bundled Node and local gRPC contracts
+  in a reviewed immutable no-network container. It records observed completion or
+  interruption, rejects unknown/malformed versions, retains task/workflow pins,
+  and offers explicit stopped-work migration. Settings and the installer control
+  it and its shared native/Copilot review operations; no live-service acceptance
+  is inferred from process startup.
   **Retrospective generators (time-gated runs)** — the 2-/36-month
   retrospectives ship as period generators the operator runs at the mark:
   `safety_report` (safety), `benchmark_retrospective` (perf), and
@@ -2690,8 +2954,9 @@ here.
   the Annex III risk self-assessment, Art. 14 oversight measures (consent
   mode, capability enforcement, delegation, killswitch), Art. 12 logging
   (audit signing, retention, day-files present), Art. 15 evidence (red-team
-  gate, shield calibration, reliability cert when present), Art. 50
-  transparency wiring — sections without evidence say so, and the items only a
+  gate, shield calibration, reliability cert when present), and the effective
+  Art. 50 first-turn disclosure setting (including an explicit opt-out) —
+  sections without evidence say so, and the items only a
   provider can complete (intended purpose, conformity route) are an explicit
   checklist, not fabricated prose.
   **Adversarial-prompt corpus release** (`maverick_shield/corpus_release.py`,
@@ -2822,7 +3087,17 @@ here.
 
 ## Channels
 
-17 wired channels (`packages/maverick-channels/`): Telegram, Discord, Slack,
+18 wired channels (`packages/maverick-channels/`): Telegram, Discord, Slack,
+**Microsoft Teams** (`teams.py`: Azure Bot Framework webhook — Bot Connector JWT
+verified fail-closed against Microsoft's OpenID keys, tenant + Entra object-id
+allowlists, mention stripping in channels/group chats, replies through the
+activity's service URL with a tenant-aware client-credentials token, and
+**approvals in Teams**: Adaptive Cards with the dashboard card's content,
+Approve/Reject/Ask-a-question, a second confirm card for high/critical risk,
+decided through the dashboard's own `approval_decisions` path with `channel =
+teams` in the audit, cards updated in place; Teams accounts are linked to
+Lightwork users on the Channels page or by a one-time `link <code>` in chat —
+see [docs/channels/teams.md](channels/teams.md)),
 Signal, Email, Matrix, Bluesky, Mastodon, Voice (Twilio), WhatsApp (Twilio),
 **WhatsApp Cloud API** (`whatsapp_cloud.py`: Meta's first-party Graph API —
 GET verification handshake, constant-time `X-Hub-Signature-256` HMAC,
@@ -2845,7 +3120,11 @@ carry their platform `message_id` and adapters expose `send_threaded`
 `reply_to_message_id`; base falls back to a plain send) so long-running
 answers land under the message that asked. **Email v2** adds IMAP IDLE (push
 instead of poll) + conversation threading from Message-ID/In-Reply-To/References
-(`email_v2.py`). **Discord Stages voice v2** (`discord_stages.py`): drive Lightwork from a
+(`email_v2.py`). Inbound IMAP/SMTP channel work and IMAP-triggered workflows
+require a configured receiving-server identity, a matching From-aligned
+sender-authentication result, and an explicit permitted-sender list before an
+email can start work. The Channels and Automations pages provide those controls.
+**Discord Stages voice v2** (`discord_stages.py`): drive Lightwork from a
 Stage channel — per-speaker utterance assembly over an injected transcriber,
 the same `DISCORD_ALLOWED_USER_IDS` speaker allowlist as Discord text,
 optional wake-word gating, replies spoken when the bot holds a speaker slot
@@ -2864,7 +3143,7 @@ messages pass through byte-identical. **Channel SDK v2** (RFC 0001 C2,
 `base.py`): handlers may return a structured `Reply` (text + attachments +
 thread_ref) instead of bare `str` — `as_reply` is the v1 shim (bare `str`
 accepted through the deprecation window), `Channel.dispatch`/`dispatch_text`
-normalize either contract, and all 18 in-tree adapters route through the
+normalize either contract, and all 19 in-tree adapters route through the
 dispatch path so a v2 handler works everywhere unchanged.
 
 ## Sandboxes
@@ -4219,7 +4498,18 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   (never the worklog, spend, controls, or nav; `noindex`), and 404s a bad token
   with no detail. Create/revoke are operator-role + goal-access-gated; the goal
   page grows a Sharing panel (create → copy-once link, list, revoke). 7-day default.
-  the deliverable their pack declares and scoped to the consumer role, so an
+- **Chat answer actions** — the conversation shows role-filtered product
+  navigation and puts Copy answer, Print conversation, Download answer,
+  Read aloud, Edit and Share beside a saved result under current permissions.
+  Actions appear when live work finishes without discarding the next message;
+  a failed refresh has an explicit retry. Copy uses the saved answer rather
+  than unsaved edits. Earlier answers have snapshot copy/download and an Open
+  answer link. Downloads recheck access and review requirements; structured
+  exports contain the reviewed table. Print includes stored clarifications and
+  wraps wide content. Sharing retains approval, expiry and revocation across
+  selected workspaces. Native desktop and real-customer acceptance remain open.
+- **Deliverables inbox (`/deliverables`)** — presents each team's results as
+  the deliverable their pack declares and scopes them to the consumer role, so an
   FP&A analyst sees "my forecasts" and a risk officer sees "assessments awaiting
   my sign-off" instead of the flat `/goals` stream. Filter chips per consumer
   role; a gated deliverable whose run has finished surfaces in an "Awaiting
@@ -4263,6 +4553,34 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   delivered over the SSRF-safe webhook path. Best-effort and never blocks the
   sign-off; the payload carries the parsed deliverable (table rows) and
   attribution. Fires only on `approved` (`webhooks.fire_deliverable_handoff`).
+- **Deadline alerts** — nothing used to tell anyone that a data-subject
+  request, an incident's 72-hour notification clock, an assessment renewal or
+  review, a vendor contract renewal or an approval card was about to run out.
+  `maverick.deadline_alerts` evaluates every such record per workspace and
+  sends plain-language alerts (`due_soon_<lead>`, `due_today`, `overdue`;
+  lead times per type under `[deadline_alerts.lead_days]` /
+  `[deadline_alerts.lead_hours]`, quiet hours, immediate or one summary per
+  person) through `notifications.notify`, so every configured backend — and
+  any backend added later — carries them. Each (record, state, deadline)
+  alerts once, recorded in the `deadline_alerts` ledger table (world-model
+  migration v42) so restarts never re-send; the record pages show an "Alerts"
+  section and `GET /api/v1/deadline-alerts` lists them. Routing prefers the
+  record's assignee, else the workspace owner named in `[deadline_alerts]
+  owner`. Run by `maverick_dashboard.deadline_alerts_scheduler` (a wizard step,
+  rows on All settings). On by default while the privacy register is on.
+- **Webhook subscriptions, delivery log and retries** — outbound webhooks are
+  now records (`maverick.webhook_subscriptions`: address, event filter, sealed
+  secret, on/off, description) managed on Settings → Webhooks
+  (`/settings/webhooks/manage`, `/api/v1/webhooks/subscriptions`,
+  `/api/v1/webhooks/deliveries`) with "Send test event" and "Retry now"; the
+  `[webhooks] outbound` list keeps working as a legacy default subscription.
+  Every delivery is logged (attempts, status, latency, response snippet, next
+  retry) and retried five times over about an hour with jitter before it is
+  parked as dead. Record events (`dsar.*`, `incident.*`, `assessment.*`,
+  `vendor.*`, `approval.*`, `policy.published`; `maverick.webhook_events`)
+  share one envelope (event id, type, occurred_at, workspace, record summary,
+  link) documented in `docs/webhooks.md`; the HMAC signature scheme is
+  unchanged. Addresses go through the same SSRF guard as the dispatcher.
 - **In-dashboard skill authoring** — the `/skills` page can now *create* a skill,
   not just install one: a form (name, trigger phrases, tools, instructions)
   composes a `SKILL.md` and writes it via the same validate + secret/shield-scan
@@ -4386,7 +4704,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   model, unchanged).
 - **Bounded governed-record Postgres connections** — the governed backend shares
   the world-model libpq timeout policy and offers separate opt-in
-  `[governed_records] pool_size` / `pool_timeout_seconds` settings. Transactions
+  `[governed_records] pool_size` / `pool_timeout_seconds` / `pool_min_size`
+  (connections kept open while idle, default 1) settings. Transactions
   retain current RLS, schema, role and encryption-key checks; pooled tenant state
   is cleared before reuse and unknown writes are never replayed automatically.
   The installer offers a one-connection starting point. See
@@ -4832,6 +5151,10 @@ tested without spawning py-spy.
   counts once (enforced by the `(approval_id, approver)` PK); `GET
   /approvals/{id}/state` shows quorum progress; a barred self-approval is 403.
   Off by default (`required = 1` = legacy single approver); SQLite migration v21.
+  With one approver, `[approval] separate_approver` (default `when_available`)
+  has someone other than the requester approve a high/critical action whenever
+  another eligible approver exists (`channel_approvals.separate_approver_refusal`,
+  enforced in `record_vote` for the dashboard, Slack and Teams).
 - **Web dashboard** — run list, plan-tree, chat at `/chat`,
   [root conversation summaries and shared durable SSE replay](./dashboard-read-models.md)
   (schema 37 root indexes; monotonic heartbeat deadlines), and an approval queue with
@@ -5022,8 +5345,10 @@ tested without spawning py-spy.
   bytes plugs in.
 - **Image edit tool** (`tools/image_edit.py`): the edit verbs to pair with
   replicate's generation — hosted inpaint/variation/upscale over the same
-  Replicate API surface (default models are operator knobs:
-  `MAVERICK_{INPAINT,VARIATION,UPSCALE}_MODEL` or per-call `model=`; local
+  Replicate API surface. All settings > AI models > Images and the installer
+  provide reviewed choices for repainting, variations and enlargement; the
+  actual tool reads them on each operation. Existing
+  `MAVERICK_{INPAINT,VARIATION,UPSCALE}_MODEL` overrides remain authoritative; local
   images inlined as data URIs) and local crop/resize/rotate via Pillow
   (`[computer-use]` extra, no key). Every model-supplied path is
   workspace-confined.
@@ -5179,8 +5504,9 @@ tested without spawning py-spy.
   button appears only when `navigator.xr` reports support (untested
   without headset hardware — stated on the page).
 - **RTL language support** (`i18n.py` `RTL_LANGS` + `dir_for()`):
-  `dir="rtl"` driven by the active language (ar/he/fa/ur) through the
-  existing lang resolution, logical-property CSS in the base layout, and an
+  `dir="rtl"` driven by the language the page body is written in (ar/he/fa/ur
+  via `content_lang()`, so an English page is never mirrored by a browser
+  or cookie that selects Arabic chrome strings), logical-property CSS in the base layout, and an
   Arabic community-seed catalog (genuinely translated starter keys, English
   fallback; he/fa/ur activate the moment a catalog lands — they're not
   offered in the picker until one does, to avoid implying support).
@@ -5259,9 +5585,9 @@ tested without spawning py-spy.
   The schema-bound API result covers the public `aiEvidenceAnalysisResult`
   outcome locally without claiming OneTrust wire compatibility, calibrated
   detection quality, preview entitlement or customer acceptance.
-- **Named cloud-agent governance and Databricks framework control plane**
-  (`ai_cloud_agent_governance.py`, dashboard `/assurance/cloud-agents`, opt-in
-  `[ai_cloud_agent_governance]`) — exact
+- **Cloud-agent governance research preview (not available in the shipped dashboard)**
+  (`ai_cloud_agent_governance.py`, informational dashboard page
+  `/assurance/cloud-agents`) — experimental
   provider contracts normalize AWS Bedrock, Azure AI Foundry and Google Vertex
   inventories into opaque tenant/scope references with revision manifests,
   observability records, policy evaluations, enforcement intents, signed
@@ -5272,7 +5598,10 @@ tested without spawning py-spy.
   attestation and activation. Canonical state is still process-local in the
   shipped composition; credentials, production transports, broad provider
   writes, licensed framework prose, certification and live acceptance are not
-  included.
+  included. The production runtime intentionally refuses enabled operation
+  until durable canonical state and provider composition ship. Settings and the
+  installer therefore do not offer an enable control. The API remains
+  fail-closed and injectable for controlled development tests.
 - **Assessment-question comments** (`assessment.py`, assessment-session API) —
   create audited, bounded comments only for section/question pairs pinned to
   the saved questionnaire and retrieve deterministic bounded pages ordered by
@@ -5730,3 +6059,376 @@ Provider adapters declare supported settings and refuse unsupported nonempty fie
 WorldModel and governed-record connections bound established-socket waits, including commit, rollback and pool reset, while preserving unknown outcomes without replaying writes. See [PostgreSQL client I/O deadlines](operations/postgres-io-deadlines.md) for the independent client, connection and server timeout settings and reconciliation contract.
 
 PostgreSQL learning stores use tenant-scoped keys for addenda, line metadata, transfer memory and corpus rows. [Migration 39](operations/learning-store-tenant-keys.md) preserves existing data and refuses unrecognized constraint layouts.
+
+### Personal daily work and first-job activation
+
+Today composes authorized native work, decisions, occurrences and template pins with personal card order, period and starting-page preferences. Employee activation keeps sample/real source drafts private, returns from scoped connection repair, starts through native submission receipts, requires current human acceptance and hands off reusable private workflow instructions. Both expose reviewed native Copilot operations; see [employee activation](employee-activation.md). These audit changes remain draft implementation awaiting final integrated qualification.
+- **Selected-source analysis tasks** (`knowledge_task_context.py`, opt-in
+  `[knowledge_access] task_context`): named members select exact approved sources
+  in Knowledge for one budgeted, tool-free AI attempt. Native and typed Copilot
+  admission share immutable references and current-use checks. Private results
+  revalidate source access; ordinary task history and exports contain only a link.
+  See [Selected-source analysis](knowledge-source-analysis.md).
+
+- **Assessment precedent provenance**: per-question suggested answers show exact
+  saved fragments, source dates, pinned/current questionnaire versions, named
+  approval and supporting versus dissenting votes. Stale and unreviewed precedent
+  stays visibly distinct from current approved precedent. Each value can be
+  rejected or added to the respondent draft independently under `assessments.learn`.
+### Bounded model samples
+
+Settings > Models combines reported capability/pricing evidence with separately enabled,
+explicitly reviewed synthetic text/image generation tests. Each uses one admitted physical
+request, narrow existing Budget limits, no failover/retry, and a durable account/workspace
+receipt with native Stop and recovery. Copilot's Models family uses the same service.
+Tool support remains provider-reported and untested. See [model choice tests](model-choice-tests.md).
+
+- Historical metadata discovery: finder source/date/oldest filters, bounded
+  current-authority continuation beyond recent-list caps, exact record and
+  recovery links, and the shared typed Copilot operation. See
+  [record search](record-search.md); governed by existing record-search Settings
+  and installer controls. Migration 45 adds owner/date indexes; no content index.
+
+### Local rule combinations, single-step checks and reported financial alternatives
+
+| Product control | Native path and operating boundary |
+| --- | --- |
+| Check local rules together | Learning → Check local rules together. Choose two owned published pure rules and permitted retained cases. All supported finite starting values, both orders and separate native references count toward one reviewed work allowance. A qualified request can run with ordinary named inputs; it remains unpublished. |
+| Prepare an answer for this request | Learning → Prepare an answer for this request. Choose up to three existing taught steps, permitted original cases and explicit desired answers. Every sequence through three steps is checked by the native runner. Only complete agreement among all surviving arrangements supports an answer. No arbitrary code or connected action is generated. |
+| Try one taught step | Workflow builder or Designer → select a taught local rule with AI fallback off → Try. Ordinary exact text, whole-number and Yes/No inputs lead to a complete review and one native step. AI calls and connected actions are refused; the original request is retained without automatic replay. |
+| Compare additional-work economics | Promise reviews → select current additional-work qualification → enter complete financial assumptions. Exact currency amounts and all incremental expenses are compared across jointly feasible offer/addition combinations while every accepted commitment stays protected. Demand, source availability and financial premises remain team reports. |
+
+Each capability has a default-off Features control and an installer choice.
+Native ownership, current authority, source custody, learning stops and review
+expiry apply. Original records are distinct from fresh calculations and remain
+unconfirmed after a calculation-to-receipt gap. Historical private values require
+current source permission. These local mechanisms do not publish workflows,
+reserve resources, establish future accuracy or demonstrate research superiority.
+
+### Complete teaching-question plans and native original recovery
+
+Learning → Plan teaching questions starts from an owned saved taught step and
+all its surviving simple rules. Ordinary selectors choose an optional owned
+published check rule, its named answer and earlier permitted effort reports.
+The complete finite question plan covers every possible answer branch;
+unreported effort uses the explicitly entered default. Yes/No and exact
+whole-number/text answers have complete source and use-permission review.
+Independent whole-domain native execution checks a proposed rule before Teach
+can open its private unsaved draft. A separate full acceptance review and
+source grant are required before normal Save; publication remains separate.
+
+This default-off Features/installer control supports one to three inputs,
+thirty-two complete situations and sixteen different surviving behaviors.
+Question, planning and native-run allowances remain spent after withdrawal,
+removal, interrupted replies or worker restart. Original history and an owner's
+metadata-only Stop remain available when the capability is off or its original
+workflow was removed. Current permissions, source versions, meaning and review
+dates are checked again at admission, execution and the physical writer.
+
+All settings, Chat's specialist questions and consent-banner withdrawal now
+have ordinary complete review and exact native original readback. Their
+Copilot paths share the same protected services or hand off to their complete
+ordinary forms. Copilot does not repeat uncertain original work.
+
+### Reviewed access-key changes and exact original recovery
+
+Account > Access keys collects named owners, permitted work, expiry and current
+workspace choices. Create, rotate and revoke use a complete consequence review
+and a native original request. A lost reply never issues another key. The secret
+is shown once only to the current authorized account; original history retains
+metadata without recovering or exposing the secret. A separately reviewed
+revocation and replacement handles a lost one-time key. Copilot opens the same
+protected ordinary controls and original reader. Existing API-key settings and
+installation choices govern the feature.
+
+### Recorded learning cycles and complete operating reads
+
+Learning requires a confirmed signed start before a cycle can save insights.
+Recent activity distinguishes recorded completion from an interrupted or
+unrecorded result and opens the actual retained saved point for separate
+restoration review. Copilot reads the same current-authority metadata without
+starting another cycle. Existing audit-signing and learning settings apply.
+
+Task starts use the current workspace helper-depth ceiling, including ordinary
+starts that omit a depth. A reviewed narrower choice remains available from
+Copilot. Original-outcome checks read the existing native task admission and
+never dispatch a replacement.
+
+Privacy source checks honor the configured Microsoft 365 token source. Failed
+or incomplete checks stay visibly incomplete instead of implying no personal
+data was found. AI-literacy reports either read every record within their
+supported bounds or clearly withhold a complete report. Governed-agent activity
+orders by actual last update, including after reopening the native store.
+
+Task maps package their pinned Cytoscape library locally with its MIT notice.
+Map, ordinary task navigation and live updates no longer need a public CDN.
+
+### Available recovery controls and accurate learning signals
+
+The safety-settings error page opens real installation health controls on Help,
+which remains available when the normal Settings page cannot read its policy.
+A current installation administrator explicitly consents to service checks;
+Copilot opens that protected form without starting a check or repairing settings.
+
+AI-literacy assignment and completion forms expose every supported role and
+training choice through ordinary search while keeping selected choices. Hybrid
+context compaction keeps each workspace's existing weights and outcomes in its
+own native storage. Read-only file denials now remain refused tool results,
+instead of successful signals for an agent or its learning loop.
+
+Vendor evidence keeps incomplete sets visibly incomplete and their work-item
+freshness unknown. Failed documents no longer contribute an epoch date to usable
+source freshness. API reference pages package their fixed Swagger distribution
+and notices locally, retaining the ordinary endpoints and sign-in behavior.
+
+The installer explains license enforcement in plain language and points to the
+existing License and All settings pages for later review instead of requiring
+configuration-file edits. Native scheduled skill retirement was also confirmed
+to stay within its current tenant and configured skills directory.
+
+### Correct task setup and routing feedback
+
+Invalid task limits stop new work before admission, preserve the entered task,
+and open the actual Settings repair control. Reviewed numeric repairs distinguish
+an unknown prior limit from a safe relaxation and keep deployment-owned limits
+visibly locked. Copilot reviews the same current limit.
+
+Equivalent reviewed website findings share one native tracker registration while
+retaining their separate observations. Conflicting mappings across the full report
+stop before an update. Existing exact original requests remain the retry authority.
+
+Optional route learning keeps each workspace's native history separate and binds
+feedback to the original role, tier and selected model. Retained clients preserve
+that decision; ordinary explicit model strings do not invent one. Failed calls
+remain failures, and refused pre-send work contributes no routing outcome.
+API-reference authorization and request protections also honor a real deployment
+mount prefix without trusting forwarding headers or matching arbitrary suffixes.
+
+### Saved installation safety settings recovery
+
+Help can separately restore an exact retained installation safety-settings copy.
+A global administrator chooses a saved copy, reviews its complete supported
+settings and explicitly confirms. Current source, authority and review lifetime
+are checked at native replacement. Original requests remain readable after an
+interrupted reply; an unknown outcome is never repeated automatically.
+
+This uses the existing Backup and recovery opt-in and requires it enabled before
+damage, a verified retained copy and the original deployment encryption key.
+The last 32 distinct policy copies are retained. Protected connection credentials
+can roll back with the selected copy; their bytes stay hidden. Unsupported or
+unsafe inline-credential reviews refuse without changing settings. This does not
+restore workspaces, sign-in configuration or external services.
+
+The rehearsal evaluation bridge now reads the native current workspace queue
+under the configured installation location, retaining explicit-path support and
+local-source filtering. Explicit deployment-isolation off values now agree with
+the native work-area builder; independent container requirements and invalid-mode
+refusal remain enforced. Signed workflow callbacks distinguish unavailable
+workspaces from an unreadable workspace inventory before admitting continuation.
+
+Local ranking training now requires actual comparable saved work details.
+Missing details, zero-confidence comparisons and structurally indistinguishable
+examples cannot become invented training evidence. The ordinary form and
+Copilot show usable, skipped and unresolved counts before admission. Cross-checks
+abstain from missing or tied structural evidence; original answer-preference
+pairs remain available for their separate purpose.
+
+### Current signed skill preparation and local provider choices
+
+Learning shows whether automatic skill preparation is off, needs trusted
+publishers, lacks available signature verification, or can check signed matches.
+The ordinary status and Copilot use the same current protected read. A working
+Settings link opens the existing publisher-file upload. Missing prerequisites
+stop before catalog search or optional AI analysis and post a plain task
+observation; native signature enforcement remains unchanged. Readiness never
+promises that a matching signed skill exists.
+
+Local-first model choices use actual native provider identities and aliases,
+preserving the selected model string. Unsupported adapters are excluded. Probe
+ports agree with native Ollama and TGI dispatch; explicit role choices, the
+existing opt-in and configured fallback retain their precedence.
+
+Nightly learning review now stops the combined scheduled command visibly when
+the native learning stop is active, configuration cannot be read, or the review
+fails. It reports a nonzero exit and warns that earlier changes may already be
+saved. Explicitly disabled review stays a no-op; failure payloads are not copied
+into the user-facing refusal.
+
+Page controllers and styles in trusted literal template tags now use the same
+content-versioned URLs as the shell. Public unchanged scripts and styles can
+revalidate without another response body; private or refused assets keep their
+native authorization and cache policy. File metadata changes refresh cached
+hashes, including a file that appears after an earlier missing-file check.
+
+### Configured gateway screening and bounded web content
+
+When request screening is explicitly enabled, an unavailable built-in checker
+returns a readable service refusal before upstream forwarding or spending
+admission. Existing text-free and screening-off behavior stays available, and
+actual detector refusals remain blocked. Activity keeps digest/count metadata;
+private request or exception payloads are not copied into the new refusal.
+
+Web-page reads keep their 64KB default and accept at most 10MiB of retained
+response content. Invalid download limits refuse before request preflight.
+The ordinary workflow input uses the same native schema range; exact-limit
+completion is distinguished from actual omitted content with one extra byte.
+
+### Reviewed improvement cycles and visible incomplete learning
+
+Learning and Copilot offer the same reviewed improvement cycle. Before it starts,
+the customer sees the complete current and proposed safeguards and habits,
+including removals and strength changes, the workspace, permitted work and local
+cost limit. The cycle uses existing recorded work and native causal admission;
+observational patterns alone do not qualify new guidance as proven improvements.
+
+The reviewed source, permission, settings and guidance are checked again before
+native writes. Empty permitted work preserves existing guidance. A required
+learning safety copy and stop controls remain in place. Failed writes or missing
+activity confirmations produce a visible incomplete or uncertain outcome,
+including any earlier saved changes. The original task stays readable after an
+interrupted reply without automatically repeating the cycle.
+
+The combined nightly command also stops with a nonzero exit when this cycle is
+incomplete or halted. Earlier changes may remain saved; failure is not reported
+as a successful empty review.
+
+### Reviewed product switches and truthful queued-task outcomes
+
+All current product switches are available through the existing reviewed Settings
+controls, with plain On/Off comparisons and original-save recovery. The Features
+overview opens those controls. An old whole-form Features submission refuses
+instead of overwriting newer switches. Current configuration precedence and
+configured administrator verification are checked before physical replacement.
+
+Queued tasks defer for a confirmed concurrency-slot refusal. A deleted task,
+closed admission or unconfirmed outcome stops with its actual reason instead of
+repeatedly reporting a busy slot. Scheduled task creation records its intent
+before creation; a later attempt with an unconfirmed original creation reads that
+state and stops instead of creating another task. Ordinary confirmed task failure
+keeps the existing retry policy, and future schedule occurrences keep clean inputs.
+
+### Local lesson maintenance when AI checks are held
+
+Enabled stale-lesson retirement can run for the selected model even when the
+AI testing prerequisites are incomplete. New lessons and trial acceptance,
+failure and relapse decisions remain held. The result distinguishes held checks
+from actual retirement; missing model selection does not retire every model.
+
+Reviewed maintenance checks the current learning stop, sources, permissions and
+planned guidance generation at physical writes. A failed write or missing
+activity confirmation retains an incomplete outcome and any earlier saved
+change. Reading the original task does not start another pass. The nightly
+summary reports inspection-only when all model reports have held qualification.
+
+Assessment lists, due items and details use current specialist or workflow names
+from the authorized picker. A name unavailable in that view is identified as
+unavailable; an optional recorded reference remains available for support.
+Native record identity, version checks and review permissions are unchanged.
+
+### Scoped trial decisions and protected assessment review
+
+Recorded trial outcomes change only the exact model and scope that supplied
+them. Identical lesson text in another department stays intact. Governed passes
+check current sources, evidence, learning stops and budgets at the native write,
+confirm each change before advancing, and retain failed or partial outcomes.
+Unreadable transfer history refuses its rewrite. Result summaries distinguish
+accepted, removed and returned-to-trial lessons. Legacy deliberate whole-model
+rollback and transfer-attempt memory keep their existing meaning.
+
+On Assessments, Copilot can open the selected specialist or workflow's complete
+current findings and, for an administrator, its existing human review controls.
+The protected handoff binds account, workspace, record version and content;
+opening it records no new review decision. Auditors retain readable findings
+without enabled administrator actions. A changed account clears private
+assessment content and its owned evidence dialog. Current review permission is
+checked after writer waits and again at physical replacement. A decision already
+published before a later refusal remains explicitly unconfirmed until read back.
+
+### Assessment actions and interrupted bulk refresh
+
+Refresh, evidence changes and removal recheck the current actor and workspace
+at native replacement, after waiting for another writer. A refused write leaves
+the original unchanged; a refusal after a saved effect asks the person to check
+the current record before retrying. Assessment reviews also require the named
+decision scope when called with an access key.
+
+Bulk refresh reports confirmed checks and unavailable or unconfirmed checks.
+A changed account stops the operation and clears private screen content.
+Interrupted responses offer a read-only current-state check. That check is not
+the original operation's receipt and does not repeat a refresh, decision or
+removal. Unsaved frequency and evidence drafts survive ordinary same-account
+errors; losing access clears private findings and disables write controls.
+
+### Model checks, spending and add-on readiness
+
+Model checks belong to the current workspace and configured connection. Changing
+the key or endpoint invalidates the old evidence. A failed refresh preserves
+previous model choices and their last successful check, while showing that they
+are unconfirmed. Settings updates that status without discarding unsaved choices;
+changed lists offer an explicit reload. Overlapping checks cannot let an older
+response replace a newer check, even after a connection changes away and back.
+
+An expired OpenRouter zero-price listing is checked before a new request when
+discovery is enabled. Waiters share one bounded check, and a recent failure has a
+short retry pause. Only fresh evidence from the official listing with all
+advertised prices at zero grants a zero-price quote. OpenRouter advertises
+[request and other price fields](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
+as well as input and output prices; an additional charge excludes that row.
+
+Each actual SDK attempt retains its admitted price for response accounting.
+Expiry or a changed connection after dispatch does not discard an already
+returned answer. Retries, hedges and compatibility resends recheck the current
+connection and price before their own sends. Async initial metadata checks run
+off the event loop; accounting does not make model-list requests.
+
+Python add-ons with a declared unsupported or unreadable contract are refused
+before their entry point loads. Older supported contracts and add-ons without a
+manifest retain their existing behavior. The add-on page shows the reason, and
+Copilot offers a complete count summary plus a selected add-on's current
+compatibility and practice-readiness details, including refused add-ons.
+
+### Read connection status without enabling actions
+
+Copilot connection diagnostics use a read-only control, so they remain available
+when its write actions are disabled. The summary shows the saved credential's
+presence, dated check, permitted related-work counts and coverage gaps, with a
+link to Connections. An earlier credential revision or unconfirmed check time
+is explicit. Current ownership and account context still apply. Reading this
+summary contacts no service and does not prove current task access.
+
+Recovery's source-checkpoint form keeps the chosen date and collection effect
+visible when paging or another lookup fails. A new read clears confirmation;
+manual changes are identified, and invalid manual fields reveal their remedy.
+The ordinary form and its Copilot host retain the same exact checkpoint binding.
+Choosing a collection checkpoint does not confirm an earlier message's delivery.
+
+### Named access requests and interrupted decisions
+
+Access requests offer named dashboard and tool actions, search and ordinary
+paging instead of requiring an internal action name. The complete review shows
+the selected action, current policies, responsible administrator and business
+reason. Copilot uses the same choices and native review. Supported built-in
+actions and authorized personally created actions are discoverable without
+loading add-on code; the interface explains that add-on choices are unavailable
+through this listing. A listed action is not evidence that its connection works.
+
+A request or review whose reply was lost offers a read-only check of the exact
+saved operation in Copilot. It rechecks the current account and workspace and
+does not submit another request, decision or activity write. Incomplete history
+or a pending activity receipt remains explicitly unconfirmed. Recording a review
+does not grant access; only the actual current policy can confirm permission.
+
+Privacy-notice release approval, approval withdrawal and update-proposal review
+require current administrator authority. Access keys also need approval
+permission in addition to administrator scope. Those decisions recheck the
+account, workspace, session and current key permissions after a writer wait and
+before the native transaction finishes. Independent reviewers, exact versions,
+original operation keys and native activity records keep their existing meaning.
+An unconfirmed decision asks the person to read the current notice before
+deciding again; ordinary failure messages distinguish missing key permission
+from author or approval-ownership restrictions.
+
+Copilot's standard change review shows named business headings and complete
+values. When both an existing and proposed value are supplied, their comparison
+is explicit. Other review shapes keep all their details, and an incomplete
+review still cannot be applied from the compact panel.

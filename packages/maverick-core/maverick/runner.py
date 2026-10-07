@@ -29,11 +29,29 @@ import math
 import os
 import threading
 import time
-from typing import Any, Protocol
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal, Protocol
 
 from ._envparse import env_float
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GoalRunUnavailable:
+    """Current invocation's unavailable result; only a slot refusal permits defer.
+
+    This does not certify the absence of effects in earlier task attempts.
+    Legacy callers receive ``None`` instead and cannot reconstruct this result.
+    """
+
+    reason: Literal["concurrency_slot", "missing", "admission_closed", "unknown"]
+
+
+def _unavailable_goal_run(reason, *, detailed_outcome: bool):
+    return GoalRunUnavailable(reason) if detailed_outcome else None
+
 
 # Two-level fair concurrency so people don't wait behind each other:
 #
@@ -183,8 +201,28 @@ def _optional_limit(name: str) -> float | None:
     return value
 
 
-DEFAULT_MAX_DOLLARS = _optional_limit("MAVERICK_DEFAULT_MAX_DOLLARS")
-DEFAULT_MAX_WALL_SECONDS = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
+# Product policy for goals started before an installation config exists. Keep
+# the optional environment defaults separate: older config files with no task
+# caps reflect an operator's existing no-limit choice and must stay that way.
+DEFAULT_MAX_DOLLARS = 2.0
+DEFAULT_MAX_WALL_SECONDS = 1800.0
+_operator_default_dollars = _optional_limit("MAVERICK_DEFAULT_MAX_DOLLARS")
+_operator_default_wall_seconds = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
+
+
+def goal_budget_defaults() -> dict[str, float | None]:
+    """Per-goal fallbacks, preserving no-cap installations already on disk."""
+    from .config import config_path
+
+    first_install = not config_path().exists()
+    return {
+        "max_dollars": (_operator_default_dollars if _operator_default_dollars is not None
+                        else DEFAULT_MAX_DOLLARS if first_install else None),
+        "max_wall_seconds": (_operator_default_wall_seconds if _operator_default_wall_seconds is not None
+                             else DEFAULT_MAX_WALL_SECONDS if first_install else None),
+    }
+
+
 def _default_max_depth_setting() -> int:
     """``[swarm] default_max_depth`` (env ``MAVERICK_DEFAULT_MAX_DEPTH`` wins)."""
     from .env_setting import env_or_config_int
@@ -211,21 +249,40 @@ def _resolved_cap(field: str, default: float | None) -> float | None:
 
 
 def configured_max_dollars() -> float | None:
-    """The deployment's per-goal spend ceiling, in USD.
+    """The effective spend limit for an omitted goal request, in USD.
 
     The same precedence a run's budget is built with -- the Settings page's
     spend cap, else the ``[budget]`` config section, else
-    ``MAVERICK_BUDGET_DOLLARS``, else ``DEFAULT_MAX_DOLLARS`` -- resolved
-    without reserving tenant allowance.  The dashboard clamps requested
-    per-goal limits to this value; ``DEFAULT_MAX_DOLLARS`` alone is only the
-    fallback for a deployment that configured nothing, so using it as the
-    ceiling rejected the very cap the operator had set.
+    ``MAVERICK_BUDGET_DOLLARS``, else the first-install product default --
+    resolved without reserving tenant allowance. An explicit request may
+    exceed only that first-install default, not an operator-set ceiling.
     """
-    return _resolved_cap("max_dollars", DEFAULT_MAX_DOLLARS)
+    return _resolved_cap("max_dollars", goal_budget_defaults()["max_dollars"])
 
 
 def configured_max_wall_seconds() -> float | None:
-    return _resolved_cap("max_wall_seconds", DEFAULT_MAX_WALL_SECONDS)
+    return _resolved_cap("max_wall_seconds", goal_budget_defaults()["max_wall_seconds"])
+
+
+def configured_goal_ceiling_dollars() -> float | None:
+    """An operator-set ceiling, excluding the first-install product default."""
+    return _resolved_cap("max_dollars", _operator_default_dollars)
+
+
+def configured_goal_ceiling_wall_seconds() -> float | None:
+    return _resolved_cap("max_wall_seconds", _operator_default_wall_seconds)
+
+
+def requested_goal_dollars(requested: float | None) -> float | None:
+    if requested is None:
+        return configured_max_dollars()
+    return clamp_task_limit(requested, configured_goal_ceiling_dollars())
+
+
+def requested_goal_wall_seconds(requested: float | None) -> float | None:
+    if requested is None:
+        return configured_max_wall_seconds()
+    return clamp_task_limit(requested, configured_goal_ceiling_wall_seconds())
 
 
 def clamp_task_limit(requested: float | None, configured: float | None) -> float | None:
@@ -297,6 +354,42 @@ def _runner_principal_binding(world, goal, execution_principal):
     return True
 
 
+def _goal_run_exception_status(world, goal_id: int, exc: Exception) -> str:
+    """Distinguish an intentional legacy hold from a retryable run crash."""
+    from .event_admission import EventRegistryUnavailable, LegacyEventGoalHeld
+    from .stop_reasons import exception_stop_text, explain_stop
+
+    if isinstance(exc, LegacyEventGoalHeld):
+        return "blocked"
+    if isinstance(exc, EventRegistryUnavailable) and _finished_goal_status(world, goal_id) == "pending":
+        # The execution claim rolled back before the goal started. Preserve its
+        # pending status; the durable worker will retry the same reservation.
+        return "error"
+    # The swarm crashed after starting; reclaim the visible goal, but leave a
+    # retryable queue result so the worker's existing policy can decide.
+    log.exception("goal #%s crashed inside run_goal_sync", goal_id)
+    try:
+        if _finished_goal_status(world, goal_id) not in {"done", "failed", "cancelled"}:
+            reason = exception_stop_text(exc)
+            world.set_goal_status(goal_id, "failed", result=reason)
+            world.append_event(goal_id, "Lightwork", "error", explain_stop(reason).message)
+    except Exception:  # pragma: no cover
+        log.exception("failed to reclaim goal #%s after crash", goal_id)
+    return "error"
+
+
+def _run_world(db_path: Path | None):
+    from .world_model import open_world
+
+    if db_path is None:
+        return open_world()
+    from .world_model_backends import is_postgres_configured
+
+    if is_postgres_configured():
+        raise RuntimeError("An explicit local database cannot run through Postgres.")
+    return open_world(db_path)
+
+
 def run_goal_in_thread(
     goal_id: int,
     max_dollars: float | None = None,
@@ -311,7 +404,9 @@ def run_goal_in_thread(
     allowed_suites: frozenset[str] | None = None,
     acquire_timeout: float | None = None,
     usage_observer=None,
-) -> str | None:
+    detailed_outcome: bool = False,
+    db_path: Path | None = None,
+) -> str | None | GoalRunUnavailable:
     """Synchronously run a goal under the global concurrency semaphore.
 
     Designed to be passed to ``fastapi.BackgroundTasks.add_task`` or any
@@ -327,10 +422,11 @@ def run_goal_in_thread(
     a whole worker thread for up to ``_ACQUIRE_TIMEOUT`` per semaphore.
 
     Returns the goal's terminal status string (``"done"`` / ``"blocked"``
-    / ...) so the worker daemon can decide whether the *job* succeeded:
-    a goal that ends ``blocked``/``failed`` -- or ``None`` when the run
-    could not even start (no slot) -- must surface as a job failure so the
-    queue's retry/backoff actually runs. Polling callers ignore the value.
+    / ...), or the legacy ``None`` when admission/setup/readback is unavailable.
+    With ``detailed_outcome=True`` that unavailable result identifies an actual
+    semaphore refusal separately from a missing task or an unconfirmed outcome.
+    The worker defers only a semaphore refusal; intentional blocked results do
+    not restart the task. Polling callers keep their existing default contract.
 
     Acquires a fresh WorldModel + LLM + Sandbox per call so each
     background goal gets its own connection (SQLite WAL + check_same_thread
@@ -351,7 +447,7 @@ def run_goal_in_thread(
             "%.0fs (goal_id=%s, principal=%s); refusing run",
             MAX_CONCURRENT_GOALS_PER_PRINCIPAL, timeout, goal_id, lane_principal,
         )
-        return None
+        return _unavailable_goal_run("concurrency_slot", detailed_outcome=detailed_outcome)
     # Global ceiling next: only a host-wide saturation makes anyone wait here.
     if not _run_semaphore.acquire(timeout=timeout):
         principal_sem.release()
@@ -359,12 +455,12 @@ def run_goal_in_thread(
             "run_goal_in_thread: no global concurrency slot within %.0fs "
             "(goal_id=%s); refusing run", timeout, goal_id,
         )
-        return None
+        return _unavailable_goal_run("concurrency_slot", detailed_outcome=detailed_outcome)
     if not _mark_inflight_started(require_admission=True):
         _run_semaphore.release()
         principal_sem.release()
         log.info("run_goal_in_thread: shutdown admission is closed (goal_id=%s)", goal_id)
-        return None
+        return _unavailable_goal_run("admission_closed", detailed_outcome=detailed_outcome)
     world = None
     sandbox = None
     budget = None
@@ -376,8 +472,8 @@ def run_goal_in_thread(
             run_goal_sync,
         )
         from .sandbox import build_sandbox
-        from .world_model import close_world_if_owned, open_world
-        world = open_world()  # client/tenant-floored canonical world
+        from .world_model import close_world_if_owned
+        world = _run_world(db_path)
         from .federation_admission import FederationAdmissionRequired, require_execution
         try:
             require_execution(world, goal_id, capability=capability,
@@ -394,10 +490,22 @@ def run_goal_in_thread(
         )
         goal = world.get_goal(goal_id)
         if goal is None:
-            return None
+            return _unavailable_goal_run("missing", detailed_outcome=detailed_outcome)
+        from .chat_message_actions import runtime_limits, runtime_scope
+        alternative, max_dollars, max_wall_seconds, max_depth, capability = runtime_limits(
+            world, goal, max_dollars, max_wall_seconds, max_depth, capability)
+        from .goal_mutations import GoalMutationConflict
+        from .human_conversation_handoffs import require_ai_open
+        from .task_handoffs import closure
+        try:
+            require_ai_open(world, goal_id)
+        except GoalMutationConflict:
+            return "blocked"
+        if closure(world, goal_id):
+            return "blocked"
         principal_matches = _runner_principal_binding(world, goal, execution_principal)
         if principal_matches is None:
-            return None
+            return _unavailable_goal_run("unknown", detailed_outcome=detailed_outcome)
         if not principal_matches:
             # A rejected caller has no authority to change the goal. In
             # particular, it must not interrupt another principal's live run.
@@ -413,24 +521,25 @@ def run_goal_in_thread(
         # background runner's conservative defaults (tighter than the
         # interactive Budget defaults on purpose).
         budget = budget_from_config(
-            defaults={
-                "max_dollars": DEFAULT_MAX_DOLLARS,
-                "max_wall_seconds": DEFAULT_MAX_WALL_SECONDS,
-            },
+            defaults=goal_budget_defaults(),
             max_dollars=max_dollars,
             max_wall_seconds=max_wall_seconds,
         )
         admission = _allowance_admission(world, goal_id, budget)
         if admission is not None:
             return admission
-        llm = LLM()
+        from .task_model_selection import run_scope as task_model_scope
+        # Validate retained choices before provider/sandbox construction. The
+        # same scope is reinstated below for every normal team role on resume.
+        with task_model_scope(world, goal_id):
+            llm = LLM()
         sandbox = build_sandbox()
         # Trace pinning: stamp the run with the workspace's git state so the
         # trace/replay ties to an exact commit. Best-effort, never blocks.
         from .trace_pin import pin_trace
         pin_trace(world, goal_id)
         try:
-            with run_scope(director):
+            with run_scope(director), runtime_scope(world, goal_id, alternative), task_model_scope(world, goal_id):
                 run_goal_sync(
                     llm, world, budget,
                     goal_id, sandbox=sandbox, max_depth=max_depth,
@@ -438,25 +547,16 @@ def run_goal_in_thread(
                     user_id=user_id, capability=capability,
                     allowed_suites=allowed_suites, resume=True,
                 )
-        except Exception:
-            # If the swarm raises an unexpected exception (anything not
-            # caught by run_goal itself), the goal row is still 'active'.
-            # Mark it 'blocked' so the dashboard doesn't show a ghost.
-            log.exception("goal #%s crashed inside run_goal_sync", goal_id)
-            try:
-                world.set_goal_status(goal_id, "blocked", result="internal error")
-            except Exception:  # pragma: no cover
-                log.exception("failed to reclaim goal #%s after crash", goal_id)
-            # A genuine crash IS retryable -- return a distinct signal. An
-            # intentional 'blocked' read back below (budget cap, killswitch
-            # halt, awaiting-user) is TERMINAL and must not be re-run, or the
-            # worker re-executes the whole swarm and re-spends budget.
-            return "error"
+        except Exception as exc:
+            return _goal_run_exception_status(world, goal_id, exc)
         # Read back the terminal status so the worker can decide retry.
-        return _finished_goal_status(world, goal_id)
+        status = _finished_goal_status(world, goal_id)
+        return status if status is not None else _unavailable_goal_run(
+            "unknown", detailed_outcome=detailed_outcome,
+        )
     except Exception:
         log.exception("background goal run failed (goal_id=%s)", goal_id)
-        return None
+        return _unavailable_goal_run("unknown", detailed_outcome=detailed_outcome)
     finally:
         if usage_observer is not None and budget is not None:
             # Internal flow accounting observes the completed meter. It cannot
@@ -532,6 +632,7 @@ class LocalThreadDispatcher:
         capability: Any | None = None,
         concurrency_principal: str | None = None,
         allowed_suites: frozenset[str] | None = None,
+        db_path: Path | None = None,
     ) -> str | None:
         return run_goal_in_thread(
             goal_id=goal_id, max_dollars=max_dollars,
@@ -540,6 +641,7 @@ class LocalThreadDispatcher:
             capability=capability,
             concurrency_principal=concurrency_principal,
             allowed_suites=allowed_suites,
+            **({"db_path": db_path} if db_path is not None else {}),
         )
 
 
@@ -571,19 +673,34 @@ def run_goal_in_background(
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    db_path: Path | None = None,
 ) -> str | None:
     """Dispatch a goal through the active :class:`Dispatcher`. Defaults to
     in-process thread execution; ``set_dispatcher`` swaps in a task queue
     without breaking callers (the contract is unchanged: returns the terminal
     status, ``"queued"`` after asynchronous acceptance, or ``None`` if it could
-    not start)."""
-    return get_dispatcher().submit(
+    not start).
+
+    A practice task (:mod:`maverick.practice`) never goes to an outside
+    worker, which would run it live: it is stopped with the reason instead."""
+    from . import practice
+
+    dispatcher = get_dispatcher()
+    if db_path is not None and not isinstance(dispatcher, LocalThreadDispatcher):
+        raise RuntimeError("An explicit local database cannot be sent to a network worker.")
+
+    if practice.active() and not isinstance(dispatcher, LocalThreadDispatcher):
+        _mark_dispatch_failure(goal_id, practice.WORKERS_REASON + " This practice task did not start.",
+                               **({"db_path": db_path} if db_path is not None else {}))
+        return "error"
+    return dispatcher.submit(
         goal_id, max_dollars=max_dollars,
         max_wall_seconds=max_wall_seconds, max_depth=max_depth,
         channel=channel, user_id=user_id, conversation_id=conversation_id,
         capability=capability,
         concurrency_principal=concurrency_principal,
         allowed_suites=allowed_suites,
+        **({"db_path": db_path} if db_path is not None else {}),
     )
 
 
@@ -599,6 +716,7 @@ async def run_goal_in_background_async(
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    db_path: Path | None = None,
 ) -> str | None:
     """Dispatch without blocking an async channel or HTTP event loop.
 
@@ -627,6 +745,7 @@ async def run_goal_in_background_async(
         capability=capability,
         concurrency_principal=concurrency_principal,
         allowed_suites=allowed_suites,
+        **({"db_path": db_path} if db_path is not None else {}),
     )
     try:
         status = await loop.run_in_executor(_goal_executor, call)
@@ -637,23 +756,25 @@ async def run_goal_in_background_async(
         # in-process fallback. Keep the external error generic and the details
         # in operator logs.
         log.exception("goal #%s dispatcher submission failed", goal_id)
-        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch failed")
+        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch failed",
+                                **({"db_path": db_path} if db_path is not None else {}))
         return "error"
     if status is None:
         # ``None`` means the dispatcher could not start the goal. Queue-backed
         # acceptance has the explicit ``queued`` status, so this is no longer
         # ambiguous with a successful asynchronous enqueue.
-        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch unavailable")
+        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch unavailable",
+                                **({"db_path": db_path} if db_path is not None else {}))
     return status
 
 
-def _mark_dispatch_failure(goal_id: int, result: str) -> None:
+def _mark_dispatch_failure(goal_id: int, result: str, *, db_path: Path | None = None) -> None:
     """Best-effort terminalization after a dispatcher cannot start a goal."""
     world = None
     try:
-        from .world_model import close_world_if_owned, open_world
+        from .world_model import close_world_if_owned
 
-        world = open_world()
+        world = _run_world(db_path)
         goal = world.get_goal(goal_id)
         # Do not clobber a worker that started despite an ambiguous transport
         # failure, or any goal that reached a terminal state in the meantime.

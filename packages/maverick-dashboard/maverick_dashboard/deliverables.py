@@ -15,9 +15,16 @@ is the honest signal we can compute from a run's status.
 """
 from __future__ import annotations
 
+import functools
+import logging
 from typing import Any
 
+log = logging.getLogger(__name__)
+
 _DONE = "done"
+# Deliverables per page: a catalog of 2,031 packs rendered at once was a 1.16 MB
+# page, hundreds of thousands of pixels tall on a phone.
+PAGE_SIZE = 25
 
 
 def persona_roles_for(principal: str | None) -> list[str]:
@@ -56,6 +63,55 @@ def _run_view(g: Any, gate: str | None, signoff: str | None) -> dict:
     }
 
 
+def recent_runs_by_domain(world: Any, domains: list[str], *, owner: str | None = None,
+                          per_domain: int = 5) -> dict[str, list]:
+    """Each domain's newest runs, newest first, for the whole catalog at once.
+
+    One grouped read answers every pack together. A store that cannot group
+    (an older adapter, or a database without window functions) is asked one
+    pack at a time as before, and a pack whose query fails simply has no runs:
+    a bad query never breaks the page."""
+    wanted = [d for d in domains if d]
+    grouped = getattr(world, "recent_goals_by_domain", None)
+    if callable(grouped):
+        try:
+            return dict(grouped(wanted, owner=owner, per_domain=per_domain))
+        except Exception:
+            log.warning("grouped read of recent runs failed; asking one pack at a time",
+                        exc_info=True)
+    runs: dict[str, list] = {}
+    for domain in wanted:
+        try:
+            runs[domain] = world.list_goals(domain=domain, owner=owner,
+                                            limit=per_domain, order="desc")
+        except Exception:  # pragma: no cover -- a bad domain query never breaks the page
+            runs[domain] = []
+    return runs
+
+
+def paginate(items: list[dict], page: Any = 1, per_page: int = PAGE_SIZE) -> dict:
+    """One page of ``items`` and where it sits in the whole list.
+
+    ``page`` is whatever the visitor typed, so it is forgiving: junk or an
+    out-of-range number lands on a real page rather than an error. Returns
+    ``page_items`` (the slice), ``page``, ``pages``, ``total``, ``first``/
+    ``last`` (1-based positions shown, 0 when empty) and ``prev``/``next`` page
+    numbers (``None`` at either end)."""
+    per_page = max(1, int(per_page))
+    pages = max(1, -(-len(items) // per_page))
+    try:
+        number = int(page)
+    except (TypeError, ValueError):
+        number = 1
+    number = min(max(number, 1), pages)
+    start = (number - 1) * per_page
+    chunk = items[start:start + per_page]
+    return {"page_items": chunk, "page": number, "pages": pages, "total": len(items),
+            "first": start + 1 if chunk else 0, "last": start + len(chunk),
+            "prev": number - 1 if number > 1 else None,
+            "next": number + 1 if number < pages else None}
+
+
 def build_inbox(specs: list[dict], runs_by_domain: dict[str, list],
                 role: str | None = None,
                 signoffs: dict[int, str] | None = None,
@@ -74,8 +130,11 @@ def build_inbox(specs: list[dict], runs_by_domain: dict[str, list],
 
     Returns ``roles`` (every consumer role, for the filter), the selected
     ``role``, ``mine``/``showing_mine`` (the default-to-my-roles state),
-    ``items`` (one per deliverable, runs attached, gated-and-finished floated to
-    the top), and ``awaiting`` (the flat sign-off queue, newest first)."""
+    ``items`` (one per deliverable in view, runs attached; gated-and-finished
+    first, then deliverables with results, then ones nobody has produced yet),
+    and ``awaiting`` (the flat sign-off queue, newest first). ``items`` is the
+    whole view; ``paginate(page)`` is :func:`paginate` over it, for the page to
+    render one slice at a time."""
     signoffs = signoffs or {}
     # Full consumer set (for the searchable "jump to any role" control) and the
     # much smaller set of roles that actually have live work right now (the only
@@ -112,12 +171,17 @@ def build_inbox(specs: list[dict], runs_by_domain: dict[str, list],
         items.append({**s, "runs": runs, "latest": runs[0] if runs else None,
                       "awaiting_count": awaiting_count})
 
-    # Deliverables that need a human float to the top; then alphabetical.
-    items.sort(key=lambda it: (it["awaiting_count"] == 0, it["deliverable"].lower()))
+    # Deliverables that need a human float to the top, then the ones with
+    # results (a catalog of thousands must not bury them on a late page); then
+    # alphabetical.
+    items.sort(key=lambda it: (it["awaiting_count"] == 0, it["latest"] is None,
+                               it["deliverable"].lower()))
     awaiting.sort(key=lambda r: r["updated_at"], reverse=True)
     return {"roles": roles, "active_roles": active_roles, "role": role or "",
             "mine": sorted(mine or []), "showing_mine": showing_mine,
-            "items": items, "awaiting": awaiting}
+            "items": items, "awaiting": awaiting,
+            "paginate": functools.partial(paginate, items)}
 
 
-__all__ = ["build_inbox", "persona_roles_for"]
+__all__ = ["PAGE_SIZE", "build_inbox", "paginate", "persona_roles_for",
+           "recent_runs_by_domain"]

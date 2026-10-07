@@ -15,26 +15,16 @@
   }
   function q(sel) { return document.querySelector(sel); }
   function out(name) { return q('[data-ops-out="' + name + '"]'); }
-  function say(name, text) { var node = q('[data-ops-status="' + name + '"]'); if (node) node.textContent = text || ''; }
+  function say(name, text) { window.mvStatus(q('[data-ops-status="' + name + '"]'), text || ''); }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ''; }
   function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function call(path, method, body) {
-    var init = {method: method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {Accept: 'application/json'}};
-    if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
-    var response = await window.fetch(path, init);
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store', body: body});
   }
   async function confirmed(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, {okText: okText}) : false;
@@ -260,7 +250,7 @@
       var data = await call(BASE + '/settings-file');
       var nodes = [para(data.summary)];
       if (data.can_update) {
-        var update = el('button', 'btn btn--primary', 'Update the settings file');
+        var update = el('button', 'btn', 'Update the settings file');
         update.type = 'button';
         update.addEventListener('click', updateSettingsFile);
         nodes.push(update);
@@ -349,6 +339,8 @@
     if (current.state === 'done') done(current.result || {});
     else if (current.state === 'failed') say(name, current.error || 'It did not finish.');
     else say(name, 'Still working. Check back in a few minutes.');
+    if (current.record_warning) say(name, (current.state === 'done' ? 'The work finished. ' : '') +
+      'Its result could not be added to the activity record. Ask your administrator to reconcile it before continuing.');
   }
   runners.components = async function () {
     if (!await confirmed('Prepare the connection components now? This rebuilds them in Lightwork\'s program folder.', 'Prepare')) return;

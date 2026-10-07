@@ -14,6 +14,10 @@ The store accepts opaque identifiers and SHA-256 digests only.  It has no
 credential, cookie, IP-address, email-address, free-text, or secret field.
 Callers keep the corresponding identity and evidence material in their own
 approved systems of record.
+
+Restoration floors are integrity-checked local authority records, not an
+independent proof against a privileged database writer who can remove rows and
+triggers. Keep the database and deletion outbox under protected custody.
 """
 
 from __future__ import annotations
@@ -394,7 +398,7 @@ def _decision_from_receipts(
         choices = _loads(row["choices_json"], "receipt choices")
         if not isinstance(choices, list):
             return EnforcementDecision(False, "untrusted_receipt")
-        matches: list[tuple[int, dict[str, Any]]] = []
+        matches: list[tuple[int, dict[str, Any], bool]] = []
         for item in choices:
             if not isinstance(item, dict):
                 return EnforcementDecision(False, "untrusted_receipt")
@@ -404,22 +408,37 @@ def _decision_from_receipts(
                 and item.get("vendor_id") in {vendor, "all"}
             ):
                 expiry = None if clear_expiration or reactivated else item.get("expires_at")
-                if expiry is None or (
+                current = expiry is None or (
                     isinstance(expiry, (int, float))
                     and not isinstance(expiry, bool)
                     and math.isfinite(float(expiry))
                     and float(expiry) > evaluated
-                ):
-                    specificity = int(item.get("channel") == channel) + int(
-                        item.get("vendor_id") == vendor
-                    )
-                    matches.append((specificity, item))
+                )
+                specificity = int(item.get("channel") == channel) + int(
+                    item.get("vendor_id") == vendor
+                )
+                matches.append((specificity, item, current))
         if not matches:
             continue
-        most_specific = max(score for score, _item in matches)
+        current_matches = [(score, item) for score, item, current in matches if current]
+        # A receipt's still-current choices retain their usual specificity and
+        # negative-action priority. Only when the newer receipt has no current
+        # match may expiry block fallthrough to an older permanent grant.
+        if not current_matches:
+            return EnforcementDecision(
+                False,
+                "no_current_explicit_grant",
+                policy_id=policy,
+                policy_version=version,
+                receipt_id=str(row["receipt_id"]),
+                receipt_sha256=str(row["receipt_sha256"]),
+                profile_revision=profile_revision,
+                evaluated_at=evaluated,
+            )
+        most_specific = max(score for score, _item in current_matches)
         actions = {
             str(item.get("action"))
-            for score, item in matches
+            for score, item in current_matches
             if score == most_specific
         }
         if not actions.issubset(_ACTIONS):
@@ -743,6 +762,7 @@ class ConsentPreferenceStore:
                     BEGIN SELECT RAISE(ABORT, 'consent outbox is immutable'); END;
                 """
             )
+            self._ensure_restoration_floor_schema(conn)
             conn.execute(
                 "INSERT OR IGNORE INTO consent_meta(key, value) "
                 "VALUES ('schema_version', ?)",
@@ -754,6 +774,36 @@ class ConsentPreferenceStore:
             if existing is None or existing["value"] != str(SCHEMA_VERSION):
                 raise ConsentPreferencesError("unsupported consent store schema")
             self._backfill_profile_link_authority(conn)
+            self._backfill_restoration_floors(conn, clock=self._clock)
+
+    @staticmethod
+    def _ensure_restoration_floor_schema(conn: sqlite3.Connection) -> None:
+        # executescript commits a caller's active transaction in both SQLite
+        # and the shared-store adapter. A store move must keep these DDL writes
+        # in the same transaction as its copied rows and authority backfill.
+        for statement in (
+            """CREATE TABLE IF NOT EXISTS consent_profile_restoration_floors (
+                marker_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant TEXT NOT NULL,
+                profile_id TEXT NOT NULL,
+                profile_revision INTEGER NOT NULL,
+                receipt_sequence INTEGER NOT NULL CHECK (receipt_sequence >= 0),
+                source TEXT NOT NULL CHECK (source IN (
+                    'restoration', 'link_propagation', 'legacy_backfill'
+                )),
+                created_at REAL NOT NULL,
+                record_sha256 TEXT NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS consent_restoration_floor_profile
+                ON consent_profile_restoration_floors(tenant, profile_id, marker_sequence DESC)""",
+            """CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_update
+                BEFORE UPDATE ON consent_profile_restoration_floors
+                BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END""",
+            """CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_delete
+                BEFORE DELETE ON consent_profile_restoration_floors
+                BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END""",
+        ):
+            conn.execute(statement)
 
     @staticmethod
     def _link_current_body(
@@ -1147,6 +1197,181 @@ class ConsentPreferenceStore:
             conn.execute("COMMIT")
         except BaseException:
             if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+
+    @staticmethod
+    def _insert_restoration_floor(
+        conn: sqlite3.Connection,
+        *,
+        tenant: str,
+        profile_id: str,
+        profile_revision: int,
+        receipt_sequence: int,
+        source: str,
+        created_at: float,
+    ) -> None:
+        body = {
+            "tenant": tenant,
+            "profile_id": profile_id,
+            "profile_revision": profile_revision,
+            "receipt_sequence": receipt_sequence,
+            "source": source,
+            "created_at": created_at,
+        }
+        conn.execute(
+            "INSERT INTO consent_profile_restoration_floors(tenant, profile_id, "
+            "profile_revision, receipt_sequence, source, created_at, record_sha256) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tenant, profile_id, profile_revision, receipt_sequence, source,
+             created_at, _sha256(body)),
+        )
+
+    def _propagate_restoration_floor(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        tenant: str,
+        group: Sequence[str],
+        now: float,
+    ) -> None:
+        """Keep the strongest erasure boundary after a later unlink."""
+        floor = self._restoration_receipt_floor(conn, tenant, group)
+        if floor == 0:
+            return
+        for profile_id in group:
+            if self._restoration_receipt_floor(conn, tenant, [profile_id]) >= floor:
+                continue
+            profile = self._profile_row(conn, tenant, profile_id)
+            self._insert_restoration_floor(
+                conn, tenant=tenant, profile_id=profile_id,
+                profile_revision=int(profile["revision"]),
+                receipt_sequence=floor, source="link_propagation", created_at=now,
+            )
+
+    @classmethod
+    def _backfill_restoration_floors(  # noqa: C901 - one atomic migration
+        cls, conn: sqlite3.Connection, *, clock: Callable[[], float]
+    ) -> None:
+        """Conservatively revoke legacy restored grants using durable erasure events.
+
+        Pre-upgrade stores did not record the receipt boundary when restoring a
+        subject. The exact restore-time boundary cannot be reconstructed, so
+        every receipt present at migration is excluded for that subject and
+        every historically linked identity, including later valid grants.
+        """
+        owns_transaction = not conn.in_transaction
+        if owns_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        try:
+            completed = conn.execute(
+                "SELECT value FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+            ).fetchone()
+            if completed is not None:
+                if completed["value"] != "1":
+                    raise ConsentPreferencesError("invalid consent restoration migration state")
+                if owns_transaction:
+                    conn.execute("COMMIT")
+                return
+            events = conn.execute(
+                "SELECT tenant, event_id, event_type, payload_json, payload_sha256, "
+                "created_at FROM consent_outbox WHERE event_type = 'profile.subject_deleted' "
+                "ORDER BY sequence"
+            )
+            deleted_revisions: dict[tuple[str, str], int] = {}
+            saw_event = False
+            for event in events:
+                saw_event = True
+                body = _loads(event["payload_json"], "subject deletion event")
+                if (
+                    not isinstance(body, dict)
+                    or body.get("schema") != OUTBOX_SCHEMA
+                    or body.get("event_id") != event["event_id"]
+                    or body.get("event_type") != event["event_type"]
+                    or body.get("created_at") != event["created_at"]
+                    or _canonical(body).decode("ascii") != event["payload_json"]
+                    or not hmac.compare_digest(_sha256(body), str(event["payload_sha256"]))
+                ):
+                    raise ConsentPreferencesError("stored subject deletion event integrity failed")
+                payload = body.get("payload")
+                if not isinstance(payload, dict):
+                    raise ConsentPreferencesError("stored subject deletion event is invalid")
+                profile_id = _text(payload.get("profile_id"), "profile_id")
+                revision = _positive_version(payload.get("revision"), "revision")
+                _digest(payload.get("tombstone_sha256"), "tombstone_sha256")
+                tenant = str(event["tenant"])
+                key = (tenant, profile_id)
+                deleted_revisions[key] = max(deleted_revisions.get(key, 0), revision)
+            if not saw_event:
+                # An empty shared target may receive a pre-upgrade local store
+                # after startup. Do not plant a target-only migration marker.
+                if owns_transaction:
+                    conn.execute("COMMIT")
+                return
+            if deleted_revisions:
+                last_receipt = conn.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) AS value FROM consent_receipts"
+                ).fetchone()
+                receipt_sequence = int(last_receipt["value"])
+                now = _timestamp(clock(), "clock")
+                assert now is not None
+                associations: dict[tuple[str, str], set[str]] = {}
+                for link in conn.execute(
+                    "SELECT tenant, known_profile_id, anonymous_profile_id "
+                    "FROM consent_profile_links"
+                ):
+                    tenant = str(link["tenant"])
+                    known = str(link["known_profile_id"])
+                    anonymous = str(link["anonymous_profile_id"])
+                    associations.setdefault((tenant, known), set()).add(anonymous)
+                    associations.setdefault((tenant, anonymous), set()).add(known)
+                for (tenant, profile_id), deleted_revision in deleted_revisions.items():
+                    profile = conn.execute(
+                        "SELECT revision FROM consent_profiles WHERE tenant = ? "
+                        "AND profile_id = ?", (tenant, profile_id),
+                    ).fetchone()
+                    if profile is None:
+                        raise ConsentPreferencesError("subject deletion profile is missing")
+                    lifecycle = cls._profile_lifecycle(conn, tenant, profile_id)
+                    if lifecycle["status"] != "active":
+                        continue
+                    profile_revision = int(profile["revision"])
+                    if profile_revision <= deleted_revision:
+                        raise ConsentPreferencesError("restored profile revision is invalid")
+                    # Historical links may already be severed; every identity
+                    # ever associated with this erased subject gets the safe
+                    # migration boundary, including account transitions.
+                    component = {profile_id}
+                    pending = [profile_id]
+                    while pending:
+                        for linked in associations.get((tenant, pending.pop()), ()):
+                            if linked not in component:
+                                component.add(linked)
+                                pending.append(linked)
+                    for affected in component:
+                        affected_profile = cls._profile_row(conn, tenant, affected)
+                        existing_floor = conn.execute(
+                            "SELECT 1 FROM consent_profile_restoration_floors WHERE "
+                            "tenant = ? AND profile_id = ? LIMIT 1", (tenant, affected),
+                        ).fetchone()
+                        current_floor = cls._restoration_receipt_floor(
+                            conn, tenant, [affected]
+                        )
+                        if existing_floor is None or current_floor < receipt_sequence:
+                            cls._insert_restoration_floor(
+                                conn, tenant=tenant, profile_id=affected,
+                                profile_revision=int(affected_profile["revision"]),
+                                receipt_sequence=receipt_sequence,
+                                source="legacy_backfill", created_at=now,
+                            )
+            conn.execute(
+                "INSERT INTO consent_meta(key, value) VALUES "
+                "('restoration_floor_backfill_v1', '1')"
+            )
+            if owns_transaction:
+                conn.execute("COMMIT")
+        except BaseException:
+            if owns_transaction and conn.in_transaction:
                 conn.execute("ROLLBACK")
             raise
 
@@ -1902,6 +2127,10 @@ class ConsentPreferenceStore:
                     created_at=now,
                     retention_until=retained_until,
                 )
+                self._propagate_restoration_floor(
+                    conn, tenant=tenant,
+                    group=self._profile_group(conn, tenant, known), now=now,
+                )
                 result = {
                     **link_body,
                     "link_sha256": link_sha,
@@ -2004,7 +2233,8 @@ class ConsentPreferenceStore:
         Immutable receipts keep the stable ``profile_id``.  Only the current
         digest and its declared known/anonymous type change.  Supplying a new
         digest for a deleted profile also restores its active lifecycle; the
-        former digest is never returned or written to an event.
+        former digest is never returned or written to an event. Restoration
+        requires a new consent receipt; retained receipts remain audit history.
         """
 
         tenant = self._tenant(tenant_id)
@@ -2041,6 +2271,7 @@ class ConsentPreferenceStore:
                 row = self._profile_row(conn, tenant, profile)
                 if int(row["revision"]) != revision:
                     raise ConsentConflict("profile revision changed")
+                restoring = self._profile_lifecycle(conn, tenant, profile)["status"] == "deleted"
                 if str(row["identity_kind"]) != identity_kind:
                     linked = conn.execute(
                         "SELECT 1 FROM consent_profile_link_current WHERE tenant = ? "
@@ -2065,6 +2296,28 @@ class ConsentPreferenceStore:
                     ) from exc
                 if updated.rowcount != 1:
                     raise ConsentConflict("profile revision changed")
+                if restoring:
+                    # Receipt sequence is global and never reused. Record the
+                    # boundary in the same transaction that makes the profile
+                    # active so no pre-restoration grant can regain authority.
+                    last_receipt = conn.execute(
+                        "SELECT COALESCE(MAX(sequence), 0) AS value FROM consent_receipts"
+                    ).fetchone()
+                    for linked_profile in self._profile_group(conn, tenant, profile):
+                        linked_revision = (
+                            revision + 1 if linked_profile == profile
+                            else int(self._profile_row(conn, tenant, linked_profile)["revision"])
+                        )
+                        self._insert_restoration_floor(
+                            conn, tenant=tenant, profile_id=linked_profile,
+                            profile_revision=linked_revision,
+                            receipt_sequence=int(last_receipt["value"]),
+                            source="restoration", created_at=now,
+                        )
+                    conn.execute(
+                        "INSERT OR IGNORE INTO consent_meta(key, value) "
+                        "VALUES ('restoration_floor_backfill_v1', '1')"
+                    )
                 lifecycle_body = {
                     "profile_id": profile,
                     "status": "active",
@@ -2298,13 +2551,20 @@ class ConsentPreferenceStore:
                 if lifecycle["status"] != "active":
                     raise ConsentConflict("deleted profile receipt cannot be changed")
                 receipt_row = conn.execute(
-                    "SELECT receipt_id FROM consent_receipts WHERE tenant = ? "
+                    "SELECT receipt_id, sequence FROM consent_receipts WHERE tenant = ? "
                     "AND profile_id = ? AND receipt_id = ?",
                     (tenant, profile, receipt),
                 ).fetchone()
                 if receipt_row is None:
                     raise ConsentNotFound(
                         "receipt does not exist for this profile in this tenant"
+                    )
+                group = self._profile_group(conn, tenant, profile)
+                if int(receipt_row["sequence"]) <= self._restoration_receipt_floor(
+                    conn, tenant, group
+                ):
+                    raise ConsentConflict(
+                        "receipt predates subject restoration; collect new consent"
                     )
                 prior = conn.execute(
                     "SELECT reactivation_at, clear_expiration, revision "
@@ -3051,6 +3311,33 @@ class ConsentPreferenceStore:
             raise ConsentPreferencesError("linked profile bound exceeded")
         return sorted(profiles)
 
+    @staticmethod
+    def _restoration_receipt_floor(
+        conn: sqlite3.Connection, tenant: str, group: Sequence[str]
+    ) -> int:
+        """Exclude receipts predating any restored identity in this linked group."""
+        placeholders = ",".join("?" for _ in group)
+        rows = conn.execute(
+            "SELECT tenant, profile_id, profile_revision, receipt_sequence, "
+            "source, created_at, record_sha256 FROM consent_profile_restoration_floors "
+            f"WHERE tenant = ? AND profile_id IN ({placeholders})",
+            (tenant, *group),
+        ).fetchall()
+        highest = 0
+        for row in rows:
+            body = {
+                "tenant": str(row["tenant"]),
+                "profile_id": str(row["profile_id"]),
+                "profile_revision": int(row["profile_revision"]),
+                "receipt_sequence": int(row["receipt_sequence"]),
+                "source": str(row["source"]),
+                "created_at": float(row["created_at"]),
+            }
+            if not hmac.compare_digest(_sha256(body), str(row["record_sha256"])):
+                raise ConsentPreferencesError("stored consent restoration floor integrity failed")
+            highest = max(highest, body["receipt_sequence"])
+        return highest
+
     def _decide(
         self,
         tenant_id: str,
@@ -3206,12 +3493,14 @@ class ConsentPreferenceStore:
                     evaluated_at=evaluated,
                 )
             placeholders = ",".join("?" for _ in group)
+            receipt_floor = self._restoration_receipt_floor(conn, tenant, group)
             rows = conn.execute(
                 "SELECT receipt_id, receipt_sha256, choices_json FROM consent_receipts "
                 f"WHERE tenant = ? AND profile_id IN ({placeholders}) "
-                "AND policy_id = ? AND policy_version = ? "
+                "AND policy_id = ? AND policy_version = ? AND sequence > ? "
                 "ORDER BY sequence DESC LIMIT ?",
-                (tenant, *group, policy, version, _MAX_DECISION_RECEIPTS + 1),
+                (tenant, *group, policy, version, receipt_floor,
+                 _MAX_DECISION_RECEIPTS + 1),
             ).fetchall()
             if len(rows) > _MAX_DECISION_RECEIPTS:
                 return EnforcementDecision(
@@ -3313,6 +3602,12 @@ class ConsentPreferenceStore:
                 "authority_unavailable",
                 evaluated_at=evaluated,
             )
+
+    def outbox_watermark(self, tenant_id: str) -> int:
+        """Current native sequence for an explicit future-only subscription."""
+        tenant = self._tenant(tenant_id)
+        with self._connect() as conn:
+            return int(conn.execute("SELECT COALESCE(MAX(sequence),0) FROM consent_outbox WHERE tenant=?", (tenant,)).fetchone()[0])
 
     def read_outbox(
         self,
@@ -3477,6 +3772,7 @@ class ConsentPreferenceStore:
         actor_sha256: str,
         access_purpose: str,
         receipt_limit: int = 100,
+        before_sequence: int | None = None,
     ) -> dict[str, Any]:
         """Export bounded linked-profile state and append an access log."""
 
@@ -3485,6 +3781,8 @@ class ConsentPreferenceStore:
         actor = _digest(actor_sha256, "actor_sha256")
         purpose = _text(access_purpose, "access_purpose")
         page_size = _limit(receipt_limit)
+        if before_sequence is not None and (isinstance(before_sequence, bool) or not isinstance(before_sequence, int) or before_sequence < 1):
+            raise ConsentValidationError("Choose a valid earlier records page.")
         now = _timestamp(self._clock(), "clock")
         assert now is not None
         with self._connect() as conn:
@@ -3498,11 +3796,12 @@ class ConsentPreferenceStore:
                     f"AND profile_id IN ({placeholders}) ORDER BY profile_id",
                     (tenant, *group),
                 ).fetchall()
+                before = " AND sequence < ?" if before_sequence is not None else ""
                 receipt_rows = conn.execute(
                     "SELECT * FROM consent_receipts WHERE tenant = ? "
-                    f"AND profile_id IN ({placeholders}) "
+                    f"AND profile_id IN ({placeholders})" + before + " "
                     "ORDER BY sequence DESC LIMIT ?",
-                    (tenant, *group, page_size + 1),
+                    (tenant, *group, *((before_sequence,) if before_sequence is not None else ()), page_size + 1),
                 ).fetchall()
                 truncated = len(receipt_rows) > page_size
                 receipt_rows = receipt_rows[:page_size]
@@ -3522,6 +3821,7 @@ class ConsentPreferenceStore:
                     ],
                     "receipts": receipts,
                     "receipts_truncated": truncated,
+                    "next_before_sequence": int(receipt_rows[-1]["sequence"]) if truncated else None,
                     "generated_at": now,
                 }
                 export_sha = _sha256(body)
@@ -3900,19 +4200,51 @@ class ConsentPreferenceStore:
         policies = [self._policy_from_row(row) for row in rows[:page_size]]
         return {"policies": policies, "truncated": len(rows) > page_size}
 
-    def list_profiles(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:
+    def list_profiles(self, tenant_id: str, *, limit: int = 100,
+                      after: str | None = None, search: str = "") -> dict[str, Any]:
         tenant = self._tenant(tenant_id)
         page_size = _limit(limit)
+        if after is not None:
+            after = _text(after, "profile page")
+        if not isinstance(search, str) or len(search) > 128 or _CONTROL_RE.search(search):
+            raise ConsentValidationError("Search must be at most 128 characters without control characters.")
+        pattern = "%" + search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where, values = "tenant = ?", [tenant]
+        if after is not None:
+            where += " AND profile_id > ?"
+            values.append(after)
+        if search.strip():
+            where += " AND profile_id LIKE ? ESCAPE '\\'"
+            values.append(pattern)
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT profile_id, identity_kind, subject_sha256, revision, created_at "
-                "FROM consent_profiles WHERE tenant = ? ORDER BY profile_id LIMIT ?",
-                (tenant, page_size + 1),
+                "FROM consent_profiles WHERE " + where + " ORDER BY profile_id LIMIT ?",
+                (*values, page_size + 1),
             ).fetchall()
         return {
             "profiles": [dict(row) for row in rows[:page_size]],
             "truncated": len(rows) > page_size,
+            "next_after": str(rows[page_size - 1]["profile_id"]) if len(rows) > page_size else None,
         }
+
+    def lookup_profiles(self, tenant_id: str, profile_ids: list[str]) -> dict[str, Any]:
+        """Resolve a bounded exact selection without scanning the first list page."""
+        tenant = self._tenant(tenant_id)
+        if (not isinstance(profile_ids, list) or not 1 <= len(profile_ids) <= 100
+                or any(not isinstance(value, str) for value in profile_ids)
+                or len(set(profile_ids)) != len(profile_ids)):
+            raise ConsentValidationError("Choose between 1 and 100 different people per lookup.")
+        selected = [_text(value, "person reference") for value in profile_ids]
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT profile_id, identity_kind, revision, created_at FROM consent_profiles "
+                "WHERE tenant = ? AND profile_id IN (" + ",".join("?" for _ in selected) + ")",
+                (tenant, *selected),
+            ).fetchall()
+        found = {str(row["profile_id"]): dict(row) for row in rows}
+        return {"profiles": [found[value] for value in selected if value in found],
+                "missing": [value for value in selected if value not in found]}
 
     def get_profile_authority(
         self,

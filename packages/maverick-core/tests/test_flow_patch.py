@@ -74,6 +74,64 @@ def test_set_field_accepts_rich_human_task_fields():
     assert out.validate() == []
 
 
+def test_copilot_can_set_run_questions_timezone_and_concurrency():
+    original = _flow()
+    out = apply_patches(original, [
+        {"op": "set_flow_field", "field": "inputs", "value": [
+            {"key": "issue", "label": "What issue should we triage?", "type": "text", "required": True},
+        ]},
+        {"op": "set_flow_field", "field": "timezone", "value": "America/New_York"},
+        {"op": "set_flow_field", "field": "max_concurrent", "value": 3},
+    ])
+    assert out.inputs == [{
+        "key": "issue", "label": "What issue should we triage?", "type": "text", "required": True,
+    }]
+    assert out.timezone == "America/New_York" and out.max_concurrent == 3
+    assert original.inputs == [] and original.timezone == "" and original.max_concurrent == 0
+
+
+@pytest.mark.parametrize("field,value", [
+    ("inputs", [{"key": "a", "type": "text"}, {"key": "a", "type": "text"}]),
+    ("inputs", [{"key": "bad key", "type": "text"}]),
+    ("timezone", "Nowhere/Invalid"),
+    ("max_concurrent", 33),
+    ("max_concurrent", True),
+])
+def test_copilot_rejects_invalid_run_settings(field, value):
+    with pytest.raises(PatchError):
+        apply_patches(_flow(), [{"op": "set_flow_field", "field": field, "value": value}])
+
+
+def test_removing_escalation_step_heals_approval_expiry_route():
+    flow = Flow.from_dict({
+        "id": "f2", "name": "Review", "start": "approve",
+        "nodes": [
+            {"id": "approve", "kind": "approval", "prompt": "Approve?", "next": "done",
+             "on_expire": "escalate"},
+            {"id": "escalate", "kind": "agent", "brief": "Tell the owner", "next": "done"},
+            {"id": "done", "kind": "agent", "brief": "Finish"},
+        ],
+    })
+    out = apply_patches(flow, [{"op": "remove_node", "id": "escalate"}])
+    assert out.nodes["approve"].on_expire == "done"
+    assert out.validate() == []
+
+
+def test_removing_switch_target_heals_case_route():
+    flow = Flow.from_dict({
+        "id": "f3", "name": "Sort", "start": "sort",
+        "nodes": [
+            {"id": "sort", "kind": "switch", "condition": "priority",
+             "cases": [{"value": "high", "to": "urgent"}], "next": "done"},
+            {"id": "urgent", "kind": "agent", "brief": "Handle urgent", "next": "done"},
+            {"id": "done", "kind": "agent", "brief": "Finish"},
+        ],
+    })
+    out = apply_patches(flow, [{"op": "remove_node", "id": "urgent"}])
+    assert out.nodes["sort"].cases[0]["to"] == "done"
+    assert out.validate() == []
+
+
 def test_set_field_rejects_id_and_unknown_fields():
     with pytest.raises(PatchError, match="not editable"):
         apply_patches(_flow(), [{"op": "set_field", "id": "n0", "field": "id", "value": "zz"}])

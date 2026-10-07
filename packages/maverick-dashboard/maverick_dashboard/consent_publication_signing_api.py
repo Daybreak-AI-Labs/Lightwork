@@ -92,10 +92,13 @@ def overview(request: Request, response: Response) -> dict:
 def download_public_key(request: Request) -> Response:
     """The active workspace's public key as a file for its websites."""
     require_permission(request, "operate")
-    key = key_state(_tenant_id())["key"]
+    from . import report_downloads
+
+    context = report_downloads.capture(request, "public_key")
+    key = report_downloads.current_public_key()
     if key is None:
         raise HTTPException(status_code=404, detail="There is no signing key yet.")
-    return Response(
+    response = Response(
         content=json.dumps(key, indent=2, sort_keys=True) + "\n",
         media_type="application/json",
         headers={
@@ -105,6 +108,11 @@ def download_public_key(request: Request) -> Response:
             "X-Content-Type-Options": "nosniff",
         },
     )
+    revision = report_downloads.public_key_revision(key)
+    if revision != report_downloads.public_key_revision(report_downloads.current_public_key()):
+        raise HTTPException(409, "The signing key changed while preparing the file. Try the current download again.")
+    response.headers[report_downloads.KEY_HEADER] = revision
+    return report_downloads.finish(request, "public_key", context, response)
 
 
 @router.post("/rotate")

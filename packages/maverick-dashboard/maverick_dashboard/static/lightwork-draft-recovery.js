@@ -14,13 +14,17 @@
   // [{key:'fields.due_date', name:'due_date', value:'x'}]. Internal
   // bookkeeping (format markers, schema variants) is left out.
   function flatten(value, path, name, out) {
-    if (out.length >= 200) return out;
+    if (out.length >= 200) { out.truncated = true; return out; }
     if (Array.isArray(value)) {
       if (value.every(function (item) { return item === null || typeof item !== 'object'; })) {
         out.push({key:path, name:name, value:value.map(show).join(', ')});
       } else value.forEach(function (item, index) { flatten(item, path + '.' + index, name + ' ' + (index + 1), out); });
     } else if (value && typeof value === 'object') {
       Object.keys(value).forEach(function (key) {
+        if (key === '_fdEvidence' && root.FDRecipeInputs && value[key] && typeof value[key] === 'object' &&
+            Object.keys(value[key]).length && Object.keys(value[key]).every(function (field) {
+              try { return root.FDRecipeInputs.fieldText(value, field) === value[key][field]; } catch (_error) { return false; }
+            })) return;
         if (!path && (key === 'format' || key === 'variants')) return;
         flatten(value[key], path ? path + '.' + key : key, (!path && key === 'fields') ? '' : key, out);
       });
@@ -31,8 +35,7 @@
     if (value === true) return 'Yes';
     if (value === false) return 'No';
     if (value === null || value === undefined || value === '') return '(empty)';
-    var text = String(value);
-    return text.length > 300 ? text.slice(0, 300) + '…' : text;
+    return String(value);
   }
   function assertSafe(value, depth) {
     if ((depth || 0) > 25) throw new Error('This draft is too complex for recovery storage. Save it before leaving.');
@@ -78,6 +81,45 @@
     storageRefresh.type = storageRetire.type = 'button'; storageRefresh.className = storageRetire.className = 'btn btn--ghost';
     storageRefresh.textContent = 'Refresh storage summary'; storageRetire.textContent = 'Free discarded recovery space'; storageRetire.disabled = true;
     storage.append(storageTitle, storageStatus, storageRefresh, storageRetire); panel.append(storage);
+    // Chat's dock needs one quiet readiness row. The same native controls stay
+    // available in its disclosure; unresolved recovery always opens in full.
+    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false, slowCheck = false, checkingSince = 0;
+    if (compact) {
+      disclosure = doc.createElement('details'); disclosureTitle = doc.createElement('summary');
+      disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Draft recovery';
+      disclosureTitle.style.cssText = 'cursor:pointer;color:var(--muted);font-size:var(--text-xs);line-height:1.5';
+      // Opened, the row floats above the composer: it opens by itself when
+      // recovery needs attention, and growing the dock in place pushed the
+      // conversation up (a 0.17 layout shift on phones).
+      var disclosureBody = doc.createElement('div');
+      disclosure.style.position = 'relative';
+      disclosureBody.style.cssText = 'position:absolute;inset-inline:0;bottom:calc(100% + var(--space-1));z-index:var(--z-popover);' +
+        'max-height:min(44vh,24rem);overflow:auto;overflow-wrap:anywhere;padding:var(--space-3);background:var(--surface-1);' +
+        'border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg)';
+      while (panel.firstChild) disclosureBody.appendChild(panel.firstChild);
+      if (options.information) disclosureBody.appendChild(options.information);
+      disclosure.append(disclosureTitle, disclosureBody); panel.append(disclosure);
+      panel.style.cssText = 'padding:var(--space-2);margin-block:var(--space-2);min-width:0';
+      // The loading words appear only when the check takes longer than
+      // 300 ms (the mvLoading rule), so a quick check never flashes them.
+      root.setTimeout(function () {
+        slowCheck = true;
+        if (initialized) return;
+        checkingSince = Date.now(); compactControls();
+        // Counted from the first frame that can show the words: a busy phone
+        // paints late, and a page still loading is inert (not yet shown).
+        function shown() {
+          if (!checkingSince) return;
+          if (disclosureTitle.closest('[inert], [hidden]')) { root.requestAnimationFrame(shown); return; }
+          checkingSince = Date.now();
+        }
+        if (typeof root.requestAnimationFrame === 'function') root.requestAnimationFrame(shown);
+      }, 300);
+      disclosureTitle.addEventListener('click', function (event) {
+        if (blocked || failed || pendingOperation) { event.preventDefault(); disclosure.open = true; }
+        else automaticallyOpened = false;
+      });
+    }
     function storageControls() { storageRefresh.disabled = storageBusy; storageRetire.disabled = storageBusy || !storageSnapshot || !storageSnapshot.discarded; }
     async function storageCall(body) {
       var response = await send('/api/v1/drafts/storage' + (body ? '/retire' : ''), {method:body ? 'POST' : 'GET', cache:'no-store',
@@ -85,10 +127,10 @@
       if (response.status === 401 || response.status === 403) throw new Error('Your access changed. Sign in again before managing recovery storage.');
       var data; try { data = await response.json(); } catch (_error) { throw new Error('Recovery storage could not confirm this request. Refresh the summary before trying again.'); }
       if (!response.ok) throw new Error(failText(response, body ? 'free the recovery space' : 'load the recovery storage summary',
-        response.status === 409 ? 'Recovery storage changed. Refresh the summary before trying again.' : 'Recovery storage is unavailable.'));
+        response.status === 409 ? 'Recovery storage changed. Refresh the summary before trying again.' : 'Recovery storage is unavailable. Refresh the page and try again.'));
       if (!data || data.context !== context || !/^[0-9a-f]{64}$/.test(data.version) ||
           !['capacity','saved','discarded','available'].every(function (key) { return Number.isInteger(data[key]) && data[key] >= 0; }) ||
-          data.saved + data.discarded + data.available !== data.capacity) throw new Error('The recovery storage summary could not be verified.');
+          data.saved + data.discarded + data.available !== data.capacity) throw new Error('The recovery storage summary could not be verified. Refresh the page and try again.');
       return data;
     }
     function showStorage(data, prefix) {
@@ -105,7 +147,7 @@
       if (storageBusy || !storageSnapshot || !storageSnapshot.discarded || disposed) return;
       var selected = storageSnapshot; storageBusy = true; storageControls();
       try {
-        if (!(await confirmed('Free space from ' + selected.discarded + ' already discarded recovery copies? Open editors will check their saved version before saving again.'))) return;
+        if (!(await confirmed('Free space from ' + selected.discarded + ' already discarded recovery copies? Open editors will check their saved version before saving again.', 'Free space'))) return;
         showStorage(await storageCall({expected_version:selected.version}), 'Discarded recovery space freed. ');
       } catch (error) { storageSnapshot = null; storageStatus.textContent = error.message; }
       finally { storageBusy = false; storageControls(); }
@@ -123,6 +165,20 @@
         try { compare(remote, read()); }
         catch (_error) { contents.textContent = 'Current draft comparison is unavailable until credentials are removed. The recovery copy has been kept.'; }
       }
+      compactControls();
+    }
+    function compactControls() {
+      if (!compact) return;
+      var attention = blocked || failed || pendingOperation;
+      // Once shown, the checking words stay 500 ms so they can be read.
+      var shownFor = checkingSince ? Date.now() - checkingSince : 500;
+      if (initialized && !attention && shownFor < 500) { root.setTimeout(compactControls, 500 - shownFor); return; }
+      if (initialized) checkingSince = 0;
+      disclosureTitle.textContent = failed ? 'Draft recovery needs attention' : blocked ? 'Recovery copy needs review' :
+        pendingOperation ? 'Recovery save needs confirmation' : !initialized ? (slowCheck ? 'Checking draft recovery…' : 'Draft recovery') :
+        running || changed ? 'Keeping unsent text…' : remote ? 'Unsent text protected' : 'Draft recovery ready';
+      if (attention && !disclosure.open) { automaticallyOpened = true; disclosure.open = true; }
+      else if (!attention && automaticallyOpened) { automaticallyOpened = false; disclosure.open = false; }
     }
     // The label a person sees for a stored field: the editor's own label for
     // that control when there is one, else the field name in words.
@@ -130,8 +186,9 @@
       var control = null;
       try { control = options.host.querySelector('[name="' + String(row.name).replace(/["\\]/g, '\\$&') + '"]') ||
         (/^[A-Za-z][\w-]*$/.test(row.name) ? doc.getElementById(row.name) : null); } catch (_error) { control = null; }
-      var text = control && control.labels && control.labels[0] ? control.labels[0].textContent :
-        control ? control.getAttribute('aria-label') : '';
+      var label = control && control.labels && control.labels[0] ? control.labels[0].cloneNode(true) : null;
+      if (label) label.querySelectorAll('[data-mv-required]').forEach(function (marker) { marker.remove(); });
+      var text = label ? label.textContent : control ? control.getAttribute('aria-label') : '';
       text = String(text || '').replace(/\s+/g, ' ').trim();
       if (text) return text;
       if (root.mvHuman) return root.mvHuman(row.name || row.key);
@@ -139,27 +196,37 @@
       return words.charAt(0).toUpperCase() + words.slice(1);
     }
     function compare(saved, current) {
+      if (typeof options.compare === 'function') { contents.replaceChildren(); options.compare(contents, saved, current); return; }
       var before = flatten(saved, '', '', []), after = flatten(current, '', '', []), rows = {}, order = [];
       before.forEach(function (row) { if (!rows[row.key]) { rows[row.key] = {row:row, saved:'(empty)', current:'(empty)'}; order.push(row.key); } rows[row.key].saved = row.value; });
       after.forEach(function (row) { if (!rows[row.key]) { rows[row.key] = {row:row, saved:'(empty)', current:'(empty)'}; order.push(row.key); } rows[row.key].current = row.value; });
       var changedRows = order.filter(function (key) { return rows[key].saved !== rows[key].current; });
       contents.replaceChildren();
       var note = doc.createElement('p'); note.className = 'muted';
+      var partial = before.truncated || after.truncated;
       note.textContent = changedRows.length
         ? changedRows.length + (changedRows.length === 1 ? ' field differs' : ' fields differ') + ' between the recovery copy and your current draft.' +
           (order.length > changedRows.length ? ' Fields that are the same are not shown.' : '')
-        : 'The recovery copy matches your current draft.';
+        : same(saved, current) ? 'The recovery copy matches your current draft.'
+        : 'Some draft values or saved learning evidence differ. This comparison does not show every difference. Review the complete draft after restoring and before saving.';
+      if (partial) note.textContent += ' Only the first 200 fields of each draft are shown; other fields may differ.';
       contents.append(note);
       if (!changedRows.length) return;
-      var table = doc.createElement('table'), head = doc.createElement('thead'), headRow = doc.createElement('tr'), bodyEl = doc.createElement('tbody');
-      ['Field', 'Recovery copy', 'Current draft'].forEach(function (label) { var th = doc.createElement('th'); th.scope = 'col'; th.textContent = label; headRow.append(th); });
-      head.append(headRow); table.append(head, bodyEl);
       changedRows.forEach(function (key) {
-        var tr = doc.createElement('tr'), th = doc.createElement('th'), a = doc.createElement('td'), b = doc.createElement('td');
-        th.scope = 'row'; th.textContent = fieldLabel(rows[key].row); a.textContent = rows[key].saved; b.textContent = rows[key].current;
-        tr.append(th, a, b); bodyEl.append(tr);
+        var field = doc.createElement('section'), heading = doc.createElement('h4'), values = doc.createElement('div');
+        field.className = 'draft-recovery__field';
+        heading.textContent = fieldLabel(rows[key].row);
+        heading.style.cssText = 'margin-block:var(--space-3) var(--space-2);font-size:var(--text-sm);overflow-wrap:anywhere';
+        values.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:var(--space-2);min-width:0';
+        [['Recovery copy', rows[key].saved], ['Current draft', rows[key].current]].forEach(function (value) {
+          var column = doc.createElement('div'), label = doc.createElement('p'), text = doc.createElement('pre');
+          column.style.minWidth = '0'; label.textContent = value[0];
+          text.textContent = value[1]; text.tabIndex = 0; text.setAttribute('aria-label', value[0]);
+          text.style.cssText = 'margin:0;padding:var(--space-2);border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-sunken)';
+          column.append(label, text); values.append(column);
+        });
+        field.append(heading, values); contents.append(field);
       });
-      contents.append(table);
     }
     async function call(method, body) {
       var response = await send('/api/v1/drafts/' + slot, {method:method, cache:'no-store', headers:{'Content-Type':'application/json','X-Lightwork-Draft-Context':context}, ...(body ? {body:JSON.stringify(body)} : {})});
@@ -168,10 +235,10 @@
       if (!response.ok) {
         var error = new Error(response.status === 409
           ? 'A newer recovery copy was saved from another tab or window. Review it before continuing.'
-          : failText(response, 'save the recovery copy', 'Recovery storage could not confirm this request.'));
+          : failText(response, 'save the recovery copy', 'Recovery storage could not confirm this request. Refresh the page and try again.'));
         error.status = response.status; throw error;
       }
-      if (!data || data.context !== context || data.slot !== slot || !Number.isInteger(data.revision) || data.revision < 0 || !Object.prototype.hasOwnProperty.call(data, 'payload') || (data.payload !== null && (typeof data.payload !== 'object' || Array.isArray(data.payload)))) throw new Error('The recovery copy could not be verified for this workspace.');
+      if (!data || data.context !== context || data.slot !== slot || !Number.isInteger(data.revision) || data.revision < 0 || !Object.prototype.hasOwnProperty.call(data, 'payload') || (data.payload !== null && (typeof data.payload !== 'object' || Array.isArray(data.payload)))) throw new Error('The recovery copy could not be verified for this workspace. Refresh the page and try again.');
       assertSafe(data.payload); return data;
     }
     async function initialize() {
@@ -193,7 +260,7 @@
       pendingOperation = operation;
       try {
         var data = await call('PUT', operation);
-        if (data.revision !== operation.expected_revision + 1 || !same(data.payload, operation.payload)) throw new Error('The saved recovery copy did not match the submitted draft.');
+        if (data.revision !== operation.expected_revision + 1 || !same(data.payload, operation.payload)) throw new Error('The saved recovery copy did not match the submitted draft. Try again.');
         revision = data.revision; remote = data.payload; pendingOperation = null; failed = false; lastSaved = JSON.stringify(operation.payload);
         status.textContent = data.payload ? 'Recovery copy saved. You control when this work is saved, run, or published.' : 'Recovery copy discarded. Your editor contents have been kept.';
         return true;
@@ -219,15 +286,16 @@
     function markChanged(event) {
       if (event && panel.contains(event.target)) return;
       try { changed = JSON.stringify(read()) !== lastSaved; } catch (_error) { changed = true; }
+      compactControls();
       if (changed && initialized && !blocked) schedule();
     }
-    async function confirmed(message) { return typeof root.mvConfirm === 'function' ? root.mvConfirm(message) : root.confirm(message); }
-    async function review(message, action) {
+    async function confirmed(message, okText) { return typeof root.mvConfirm === 'function' ? root.mvConfirm(message, {okText: okText}) : root.confirm(message); }
+    async function review(message, action, okText) {
       if (running || !initialized) return;
       running = true; controls();
       try {
         var before = JSON.stringify(read()), candidate = remote, expected = revision;
-        if (!(await confirmed(message))) return;
+        if (!(await confirmed(message, okText))) return;
         var latest = await call('GET');
         if (latest.revision !== expected || !same(latest.payload, candidate)) {
           remote = latest.payload; revision = latest.revision; blocked = true;
@@ -235,7 +303,7 @@
         }
         if (before !== JSON.stringify(read())) { status.textContent = 'Your newer editor changes have been kept. Review again before continuing.'; return; }
         await action(candidate);
-      } catch (error) { status.textContent = error.message || 'Could not restore this copy. Current work has been kept.'; }
+      } catch (error) { status.textContent = error.message || 'Could not restore this copy. Current work has been kept. Try again.'; }
       finally { running = false; controls(); }
     }
     async function restoreCopy() {
@@ -244,22 +312,22 @@
         await options.restore(candidate);
         blocked = false; changed = false; failed = false; lastSaved = JSON.stringify(read());
         status.textContent = 'Recovery copy restored for review. Nothing was run, saved to the live resource, or published.';
-      });
+      }, 'Restore recovery copy');
     }
-    async function replaceReviewed(payload, message) {
+    async function replaceReviewed(payload, message, okText) {
       await review(message, async function () {
         running = false; pendingOperation = null;
         if (await persist(payload())) { blocked = false; changed = false; lastSaved = JSON.stringify(read()); }
-      });
+      }, okText);
     }
-    async function keepCurrent() { await replaceReviewed(read, 'Replace the recovery copy with the current editor draft? The live resource is unchanged.'); }
-    async function discardCopy() { await replaceReviewed(function () { return null; }, 'Discard the saved recovery copy? Your current editor contents will stay here.'); }
+    async function keepCurrent() { await replaceReviewed(read, 'Replace the recovery copy with the current editor draft? The live resource is unchanged.', 'Keep current draft'); }
+    async function discardCopy() { await replaceReviewed(function () { return null; }, 'Discard the saved recovery copy? It can\'t be restored. Your current editor contents will stay here.', 'Discard recovery copy'); }
     async function retryRecovery() {
       if (running) return;
       if (!initialized) { await initialize(); return; }
       if (blocked) { status.textContent = 'Review the recovery copy, then choose Restore, Keep current draft, or Discard.'; return; }
       if (pendingOperation) {
-        if (await persist(pendingOperation.payload)) { changed = JSON.stringify(read()) !== lastSaved; if (changed) schedule(); }
+        if (await persist(pendingOperation.payload)) { changed = JSON.stringify(read()) !== lastSaved; compactControls(); if (changed) schedule(); }
       } else { changed = true; await saveChanged(); }
     }
     options.host.addEventListener('input', markChanged); options.host.addEventListener('change', markChanged);
@@ -268,6 +336,20 @@
     status.textContent = 'Checking for a recovery copy…'; controls();
     var ready = initialize();
     return {ready:ready, changed:markChanged, save:saveChanged, panel:panel,
+      clear:async function () {
+        var beforeClear;
+        try { beforeClear = JSON.stringify(read()); } catch (_error) { return false; }
+        await ready;
+        if (running || blocked || pendingOperation || disposed) return false;
+        root.clearTimeout(timer);
+        if (!(await persist(null))) return false;
+        if (disposed) return true;
+        lastSaved = beforeClear;
+        try { changed = JSON.stringify(read()) !== beforeClear; } catch (_error) { changed = true; }
+        compactControls();
+        if (changed) schedule();
+        return true;
+      },
       dispose:function () { disposed = true; root.clearTimeout(timer); root.removeEventListener('beforeunload', unload); options.host.removeEventListener('input', markChanged); options.host.removeEventListener('change', markChanged); }};
   }
   root.mvDraftRecovery = {create:create, assertSafe:assertSafe};

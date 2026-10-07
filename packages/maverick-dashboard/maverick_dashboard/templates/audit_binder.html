@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Audit binder · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .bnd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); margin: var(--space-3) 0 var(--space-4); }
   .bnd-stat .v { font-size: var(--text-2xl); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
@@ -12,8 +13,8 @@
   @media print {
     .sidebar, .topbar, nav, .bnd-actions, footer, header,
     .mv-copilot, .mv-copilot__fab { display: none !important; }
-    .panel { break-inside: avoid; border: 1px solid #ccc; }
-    body { background: #fff; color: #000; }
+    .panel { break-inside: avoid; border: 1px solid var(--print-border); }
+    body { background: var(--print-paper); color: var(--print-ink-strong); }
   }
 </style>
 
@@ -22,7 +23,7 @@
   {% from "_hero.html" import hero %}
   {{ hero('Governance', 'Audit binder',
           lede='A printable evidence pack of approvals, assessments and records for the selected period, ready to hand to an auditor.') }}
-  <p class="muted">Covers the last {{ days }} days · made {{ generated }}. The privacy and finance sections show how things stand today.</p>
+  <p class="muted">Covers the last {{ days }} days · made {{ b.generated_at | datetime('absolute') }}. The privacy and finance sections show how things stand today.</p>
   <div class="bnd-actions">
     <button class="btn btn--primary" id="binder-print" type="button">Print or save as PDF</button>
     <button class="btn btn--ghost" id="binder-json" type="button">Download evidence file (for auditors)</button>
@@ -32,7 +33,7 @@
       <option value="{{ value }}"{% if value == days %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
-    <a class="btn btn--ghost" href="/audit">Back to the activity log</a>
+    {{ back_link('/audit', 'Activity log') }}
   </div>
 
   <div class="section-head"><h2>Tamper-evident activity log</h2></div>
@@ -44,14 +45,14 @@
       <div class="bnd-stat"><div class="v">{{ b.chain.kinds | length }}</div><div class="l">Kinds of event</div></div>
     </div>
     {% if b.chain.files %}
-    <div class="bnd-scroll">
+    <div class="bnd-scroll" tabindex="0" role="region" aria-label="Activity log verification by day">
     <table>
       <thead><tr><th scope="col">Day</th><th scope="col">Events</th>
         <th scope="col">Result</th><th scope="col">Problems found</th></tr></thead>
       <tbody>
         {% for f in b.chain.files %}
         <tr>
-          <td>{{ f.day }}</td>
+          <td>{{ f.day | datetime('date') }}</td>
           <td>{{ f.events }}</td>
           <td><span class="badge {{ 'done' if f.verdict == 'verified' else 'blocked' if f.verdict == 'broken' else 'warn' }}">{{ chain_words.get(f.verdict) or (f.verdict | humanize) }}</span></td>
           <td>{% if f.breaks %}{{ f.breaks | length }} entr{{ 'y' if f.breaks | length == 1 else 'ies' }} changed or could not be confirmed{% else %}None{% endif %}</td>
@@ -66,14 +67,14 @@
     {% endif %}
     {% if b.chain.anchor_breaks %}
     <p class="badge blocked">The record linking the days together shows a day was removed or changed</p>
-    <p>Check the activity log for the affected days, and contact support if you did not expect this. <a href="/audit">Open the activity log</a> · <a href="/support">Get help</a></p>
+    <p>Check the activity log for the affected days, and contact support if you did not expect this. <a href="/audit">Open the activity log</a> · <a href="/help">Get help</a></p>
     {% endif %}
   </div>
 
   <div class="section-head"><h2>Approvals: who decided and how many agreed</h2></div>
   <div class="panel">
     {% if b.approvals %}
-    <div class="bnd-scroll">
+    <div class="bnd-scroll" tabindex="0" role="region" aria-label="Recorded approval decisions">
     <table>
       <thead><tr><th scope="col">Action</th><th scope="col">Risk</th>
         <th scope="col">Decision</th><th scope="col">Requested by</th>
@@ -87,7 +88,7 @@
           <td>{{ (a.requested_by | identity) if a.requested_by else '—' }}</td>
           <td>{{ (a.decided_by | identity) if a.decided_by else '—' }}</td>
           <td>{{ a.approved_count }} of {{ a.approvals_required }}</td>
-          <td>{% if a.approvers %}{% for p in a.approvers %}{{ p | identity }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td>
+          <td>{% if a.approvers %}{% for p in a.approvers %}{{ p | identity }}{% if p == a.requested_by %} (their own request){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td>
           <td>{{ ('Waiting (' ~ a.audit_pending_count ~ ')') if a.audit_pending_count else 'Yes' }}</td>
         </tr>
         {% endfor %}
@@ -96,14 +97,14 @@
     </div>
     <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approval records in print. The JSON snapshot contains all {{ b.approvals_total }} records in the exact window.</p>
     {% else %}
-    <p class="muted">No approvals in this period.</p>
+    <p class="muted">No approvals in this period. Choose a longer period to include earlier decisions.</p>
     {% endif %}
   </div>
 
   <div class="section-head"><h2>Assessments and decisions</h2></div>
   <div class="panel">
     {% if b.assessments %}
-    <div class="bnd-scroll">
+    <div class="bnd-scroll" tabindex="0" role="region" aria-label="Assessment decisions">
     <table>
       <thead><tr><th scope="col">Questionnaire</th><th scope="col">Subject</th>
         <th scope="col">Risk before → after fixes</th><th scope="col">Status</th>
@@ -156,7 +157,7 @@
     </div>
     <p class="muted">Accepted first time means approved with no follow-up questions. See the monthly trend on the <a href="/privacy/board">command center</a>.</p>
     {% else %}
-    <p class="muted">No assessments have been decided yet.</p>
+    <p class="muted">No assessments have been decided yet. Decided assessments appear here once a reviewer approves or rejects one.</p>
     {% endif %}
   </div>
 

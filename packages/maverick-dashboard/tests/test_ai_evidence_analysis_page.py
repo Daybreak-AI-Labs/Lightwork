@@ -25,22 +25,17 @@ class _Markup(HTMLParser):
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
     app = FastAPI()
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
-        nav_groups=[],
-        t=lambda key: key,
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app.include_router(page.create_ai_evidence_analysis_page_router(templates))
     return TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -78,8 +73,8 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
     assert "The text read from them is not stored either" in response.text
     assert "a different, authorized person" in response.text
     assert "/api/v1/ai-evidence-analysis" in response.text
-    assert "may be sent to that provider" in response.text
-    assert "Do not type in document contents, passwords," in response.text
+    assert "recent guide questions" in response.text
+    assert "Do not include document text, passwords," in response.text
     assert 'aria-describedby="mv-copilot-egress"' in response.text
 
 
@@ -111,6 +106,8 @@ def test_workbench_has_only_closed_evidence_controls(client: TestClient) -> None
 
     # Shell assets carry a content-hash query (W3-77); compare the paths.
     script_sources = {(item.get("src") or "").split("?")[0] for item in scripts}
+    # The Copilot's script is named on its button and loaded after the page.
+    script_sources |= {(attrs.get("data-copilot-src") or "").split("?")[0] for tag, attrs in parser.tags if tag == "button"}
     assert {
         "/static/lightwork-copilot.js",
         "/static/lightwork-ui.js",
@@ -192,20 +189,21 @@ def test_workbench_server_renders_exact_role_controls(
 def test_custom_theme_css_uses_a_per_response_csp_nonce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import maverick.config as config
+    from maverick_dashboard.app import _theme_context
+
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "dashboard": {"theme": "custom", "themes": {"custom": {
+            "bg": "#000", "panel": "#111", "text": "#fff", "accent": "#0f0",
+        }}},
+    })
     monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="custom",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="body.theme-custom { --bg:#000; --panel:#111; --text:#fff; --accent:#0f0; }",
-        custom_theme_names=["custom"],
-        dir="ltr",
-        nav_groups=[],
-        t=lambda key: key,
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
     app.include_router(page.create_ai_evidence_analysis_page_router(templates))
     response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
@@ -214,6 +212,7 @@ def test_custom_theme_css_uses_a_per_response_csp_nonce(
     parser.feed(response.text)
     nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]
     assert len(nonces) == 1
+    assert "body.theme-custom { --bg: #000; --panel: #111;" in response.text
     assert nonces[0]
     assert f"'nonce-{nonces[0]}'" in response.headers["content-security-policy"]
 
@@ -272,7 +271,8 @@ def test_client_uses_raw_file_body_without_persistent_or_html_injection_channels
     assert ".status-card > .governance-details" in css
     assert "Grounded in the current page" not in copilot_source
     assert "AI answers can be wrong" in copilot_source
-    assert 'history.push({role: "user", content: message})' in copilot_source
+    assert "conversation_token: conversationToken" in copilot_source
+    assert "history: history.slice(-6)" not in copilot_source
     assert '{role: "assistant", content: payload.reply}' not in copilot_source
 
 
@@ -347,3 +347,25 @@ def test_workbench_is_plain_language_with_lists_and_row_actions(client: TestClie
     source = (PACKAGE / "static" / "lightwork-ai-evidence-analysis.js").read_text(encoding="utf-8")
     for label in ('"View findings"', '"Approve"', '"Reject"', '"Withdraw"', '"History"'):
         assert label in source
+
+
+@pytest.mark.parametrize("enabled", (False, True))
+def test_turned_off_module_shows_its_gate_instead_of_loaders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, enabled: bool,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "module_activation_enabled", lambda _section: enabled)
+    text = client.get(ROUTE).text
+    main = text[text.index('<div class="evidence-workbench"'):text.index("<noscript>")]
+    assert f'data-module-enabled="{"true" if enabled else "false"}"' in main
+    if enabled:
+        assert "data-module-gate" not in main
+        assert main.count("Loading…") == 3
+        return
+    # The gate follows the title; no availability check repeats it and no
+    # loader is left saying "Loading".
+    assert main.index('class="page-title hero-title"') < main.index("data-module-gate")
+    assert 'aria-labelledby="status-title" hidden>' in main
+    assert "Loading" not in main
+    assert "Analyses appear here once AI evidence analysis is turned on." in main

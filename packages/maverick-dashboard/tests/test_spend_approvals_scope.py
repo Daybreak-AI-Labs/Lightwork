@@ -78,24 +78,25 @@ def test_spend_scoped_to_caller(monkeypatch):
     assert bob["total"]["dollars"] == pytest.approx(9.00)
 
 
-def test_spend_admin_sees_all(monkeypatch):
+def test_spend_admin_keeps_exact_owner_scope(monkeypatch):
     _enable_oidc(monkeypatch)
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
     _spend_goal("user:alice", 1.00)
     _spend_goal("user:bob", 9.00)
     root = client.get("/api/v1/spend", headers=_as("root")).json()
-    assert root["total"]["dollars"] == pytest.approx(10.00)
+    assert root["total"]["dollars"] == 0
+    assert root["episodes"] == []
 
 
 def test_spend_auth_off_unchanged():
-    # No auth -> deployment-wide totals (legacy single-operator behaviour).
+    # No auth identifies only unowned local work; named users stay private.
     _spend_goal("", 2.00)
     _spend_goal("", 3.00)
     data = client.get("/api/v1/spend").json()
     assert data["total"]["dollars"] == pytest.approx(5.00)
 
 
-@pytest.mark.parametrize("user,total", [("alice", 1.0), ("bob", 9.0), ("root", 10.0)])
+@pytest.mark.parametrize("user,total", [("alice", 1.0), ("bob", 9.0), ("root", 0.0)])
 def test_spend_html_scopes_episodes_and_totals_to_authenticated_user(monkeypatch, user, total):
     _enable_oidc(monkeypatch)
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
@@ -103,8 +104,8 @@ def test_spend_html_scopes_episodes_and_totals_to_authenticated_user(monkeypatch
     bob_goal = _spend_goal("user:bob", 9.0)
     response = client.get("/spend", headers=_as(user))
     assert response.status_code == 200
-    assert f"${total:,.2f} total spent" in response.text
-    expected = {"alice": {alice_goal}, "bob": {bob_goal}, "root": {alice_goal, bob_goal}}
+    assert f"${total:,.2f} recorded across all time" in response.text
+    expected = {"alice": {alice_goal}, "bob": {bob_goal}, "root": set()}
     rendered_goals = {int(value) for value in re.findall(r'href="/chat/goal/(\d+)"', response.text)}
     assert rendered_goals == expected[user]
 
@@ -123,7 +124,8 @@ def test_approvals_list_requires_operate(monkeypatch):
 def test_approvals_list_allows_operator(monkeypatch):
     _enable_oidc(monkeypatch, default_role="operator")
     from maverick_dashboard.app import _world
-    _world().create_approval("rm -rf /", risk="high", detail="x")
+    _world().create_approval("rm -rf /", risk="high", detail="x", requested_by="user:op-olivia")
+    _world().create_approval("send", risk="high", detail="private other card", requested_by="user:other")
     r = client.get("/api/v1/approvals", headers=_as("op-olivia"))
     assert r.status_code == 200
     assert len(r.json()["approvals"]) == 1

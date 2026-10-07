@@ -1,0 +1,54 @@
+[
+  {
+    "id": "LW-107",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "personal_memory.py provides revision-bound owned note corrections, durable exact/topic suppression read by consolidation and recall; personal_data_api.py and My Data show source date/revision or legacy unavailable and re-authorize source reads.",
+      "Encrypted controls and metadata-only audit preserve administrator content privacy; feature knob, installer and Account entry provide the direct journey.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay."
+    ],
+    "validation": "The 62-case final batch passed durable suppression after rebuild, revision conflict, unknown identity refusal, admin recall ceiling and excluded-source recall. The 59-case local-copy/personal-data batch passed source access isolation and shared native control adapters. Earlier core-memory final rerun: 205 passed, 2 Windows symlink skips. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final installed note correction/source-unavailable/reconsolidation interaction remains; local tests establish semantics, not model recall quality. Legacy unknown sources remain labeled and are not assigned inferred ownership."
+  },
+  {
+    "id": "LW-108",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "personal_identity.py implements two-sided challenge proof, exact tenant/account/sender bindings, explicit dashboard confirmation, unlink and fresh membership checks.",
+      "Durable incoming account proof binds new channel conversations and goal owners without changing execution ACL principals; legacy accountless histories remain unverified.",
+      "My Data exposes explicit authoritative-source conflict choice and channel-only default; personal note and style recall consume current verified links.",
+      "memory_ownership.py, owner-filtered recall SQL, source-bound reflections/dream insights, generated skill lineage and owner-separated model memory prevent adjacent cross-account enrichment. Legacy unknown-source records are retained but not inherited.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay."
+    ],
+    "validation": "The 62-case final batch passed two-sided exact-tenant/account linking, missing-account/replayed-proof refusal, unlink/feature-disable stopping sharing and admin ceilings. Prior 205-pass/2-skip core privacy run validates adjacent owner-scoped memory paths. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Live Slack/Telegram adapter identity proofs and final installed link/conflict/unlink journey remain; unverified legacy identities stay unlinked and cross-tenant inheritance is never inferred."
+  },
+  {
+    "id": "LW-109",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "My Data separates personal recall and collection, organization lesson promotion, workflow examples, source-bound local training and prior/external derivatives.",
+      "Exact task owners can apply existing durable local-learning exclusions; user turns now bind goal_id for exclusion lineage. Personal choices cannot expand administrator ceilings or companion policy.",
+      "My Data now projects effective personal collection, organization shared-source promotion and local skill/self-learning ceilings. restriction_state distinguishes unavailable enforcement from a confirmed exclusion; source-bound recall and capture honor task exclusion.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay."
+    ],
+    "validation": "The 62-case final batch passed personal recall/admin ceiling and excluded-source enforcement; 205-pass/2-skip final core memory/privacy and 158-pass learning/policy runs establish source-bound local reuse and deliberate unknown-legacy withholding. Shared personal operations and native deletion controls passed in the 59-case batch. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final installed comprehension/control journey remains. Stopping recall/collection or excluding future local reuse does not unlearn previously trained models or remove external/manual datasets; holds and administrator ceilings remain visible."
+  },
+  {
+    "id": "LW-112",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Owner-only My Data inventory combines personal notes, exact verified conversation scopes, owned tasks, private draft metadata, companion retention and known preservation gates.",
+      "Selected-scope export uses strict existing subject-data export plus notes/controls; shared derivatives and external copies are labeled separately without false deletion claims.",
+      "personal_data_requests.py provides owner-requested exact-scope deletion, distinct current administrator review, held/requested/dispatching/purged/unconfirmed per-store records, signed database-closure receipts, fresh preservation gates, and retained/external exceptions.",
+      "Adapters cover selected conversations/tasks/attachments, personal notes, stale-tab-safe encrypted draft deletion, employee-companion history, personal style/display records, scoped model memory, private notification receipts and owned diagnostic reports. Current account identity and privacy restrictions remain explicit retained stores.",
+      "Selected activation drafts and personal project defaults now use owner/revision-bound erasure helpers with durable tombstones; active/uncertain activation dispatch blocks erasure, created workflows/source tasks remain explicit exceptions, and pending audit acknowledgments stay unconfirmed.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay.",
+      "My Data inventories/exports/reviews erasure for exact named-owner model-test history and queued conversation text/files, retains no-replay/generation tombstones, blocks active/uncertain outcomes and treats audit-pending deletion as unconfirmed. Current generated tools use opaque reviewer keys and locked expected-digest CAS; readable learning lineage and retained/withheld exceptions are explicit.",
+      "43da36e: personal_shared_inventory.py uses current native bundle/handoff ACLs for bounded exact-owner metadata, source/use/expiry/dependency/action links, explicit retained local exceptions, and honest unavailable/partial states. Selected contents and recipient successor details are not copied into My Data; its existing shared status adapter consumes this same inventory."
+    ],
+    "validation": "43da36e closes the discovered local-copy gap. Its 59-case batch passed owner/recipient isolation, native bundle/handoff authority, retained revoked copies, changed-source labels, private accepted-successor exclusion, bounded/unavailable inventories and personal-data/shared-operation controls. Fifteen My Data/access-loss/handoff Node cases passed. Installed enterprise lifecycle passed personal export, real departure and clearing stale private DOM. The 62-case acceptance batch passed holds, review authority and suppression. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final consolidated-build browser/suite and PostgreSQL qualification remain. Local bundles/handoffs are explicitly retained with current native action links; unavailable records are not claimed counted. Knowledge copies, external custodians and prior model derivatives require their own governed process, never a whole-person deletion certificate."
+  }
+]

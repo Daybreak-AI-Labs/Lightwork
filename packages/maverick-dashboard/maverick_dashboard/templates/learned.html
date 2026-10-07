@@ -8,14 +8,15 @@
   {% from "_hero.html" import hero, state %}
   {% call hero('Self-improving workforce', 'Learned',
                subtitle='Skills and lessons',
-               lede='What Lightwork taught itself: skills and tools it picked up while working, lessons it
-                     learned from its own mistakes, and tools it wrote for itself. Anything here can be removed.') %}
+               lede='What Lightwork proposed or recorded from completed work. Suggested skills need review
+                     on Skills before they can guide a later task. Lessons and tools have their own controls.') %}
     {{ state('Current state',
-             learned | length ~ ' learned skill' ~ ('' if learned | length == 1 else 's') ~ ' and tool' ~ ('' if learned | length == 1 else 's') ~ ' on record',
+             learned | length ~ ' learning record' ~ ('' if learned | length == 1 else 's'),
              badge='Self-coaching on' if harness_enabled else 'Self-coaching off',
              badge_class='ok' if harness_enabled else 'idle',
-             copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.') }}
+             copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.' | safe) }}
   {% endcall %}
+  <p class="muted">This page shows your own learning records and lessons explicitly available to the workspace. Older records without verified ownership are preserved privately and are not reused automatically. Administrator access does not include other employees' content.</p>
   <p id="gt-msg" role="status" aria-live="polite" class="muted"></p>
 
   <div class="section-head"><h2>Learned skills and tools</h2></div>
@@ -43,7 +44,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted" id="no-learned">Nothing learned yet. Lightwork picks up skills and tools as it works once self-learning is on.</p>
+      <p class="muted" id="no-learned">Nothing learned yet. Review any suggested skills on <a href="/skills#to-learned-skills">Skills</a> before agents can use them.</p>
       <p><a class="btn btn--ghost" href="/learning">Turn on self-learning</a></p>
     {% endif %}
   </div>
@@ -52,7 +53,10 @@
   <div class="panel" id="harness-guidance">
     <p class="muted">
       Reminders Lightwork now gives itself before similar work, learned from its own repeated mistakes.
-      Any lesson can be removed.
+      Any displayed lesson can be removed.
+      Older lessons or suggested test cases without verified shared sources are retained
+      separately and withheld from prompts and this page. Private employee work is never
+      made shared by an administrator role.
     </p>
     {% if harness and not harness_enabled %}
       <p><strong>Self-coaching is off.</strong> These lessons are kept but not used until it is switched on on the
@@ -126,33 +130,15 @@
         </div>
       {% endfor %}
     {% else %}
-      <p class="muted" id="no-harness">No lessons learned yet.</p>
+      <p class="muted" id="no-harness">No shared lessons yet. Lessons appear here after agents finish tasks and Lightwork reviews them.</p>
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Tools Lightwork wrote for itself</h2></div>
-  <div class="panel" id="generated-tools">
-    <p class="muted">Remove a tool that misbehaves. It is deleted and will not be used again.</p>
-    {% if generated_tools %}
-      <table>
-        <thead><tr><th scope="col">Tool</th><th scope="col">Actions</th></tr></thead>
-        <tbody>
-        {% for f in generated_tools %}
-          {% set tool_name = (f[:-3] if f.endswith('.py') else f) %}
-          {% set tool_name = (tool_name[4:] if tool_name.startswith('gen_') else tool_name) | humanize %}
-          <tr data-name="{{ f }}">
-            <td>{{ tool_name }}</td>
-            <td>{% if can_remove_tools %}<button type="button" class="btn btn--danger gt-remove" data-name="{{ f }}" data-label="{{ tool_name }}" aria-label="Remove {{ tool_name }}">Remove</button>{% else %}<span class="muted">Administrators can remove tools.</span>{% endif %}</td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="muted" id="no-generated">No tools written yet.</p>
-    {% endif %}
-  </div>
+  {% if can_remove_tools %}{% include "_generated_tool_removal.html" %}
+  {% else %}<section class="panel" id="generated-tools"><h2>Tools Lightwork wrote</h2><p>Administrators can review their owned tools for stopping, removal and original-result recovery.</p></section>{% endif %}
 
   {% include "_learning_loop.html" %}
+  {% include "_learning_jobs.html" %}
   {% include "_learned_ops.html" %}
 
   <style>
@@ -165,18 +151,10 @@
   <script>
     (function () {
       var msg = document.getElementById('gt-msg');
-      function say(text) { if (msg) msg.textContent = text; }
+      function say(text) { window.mvStatus(msg, text); }
       async function post(url, body, action) {
-        try {
-          var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body || {}) });
-          if (!r.ok) {
-            var j = await r.json().catch(function () { return {}; });
-            say(r.status === 404 && typeof j.detail === 'string' ? j.detail : window.mvErrorText(r, action));
-            return null;
-          }
-          return await r.json().catch(function () { return {}; });
-        } catch (e) { say(window.mvErrorText(e, action)); return null; }
+        try { return (await window.mvFetchJSON(url, { method: 'POST', body: body || {} }, action)) || {}; }
+        catch (e) { say(e.status === 404 && window.mvPlainDetail(e.detail) || e.message); return null; }
       }
 
       // Suggested test cases: one decision per click, then reload -- positions
@@ -231,28 +209,6 @@
           if (out.retired) setTimeout(function () { location.reload(); }, 800); }
       });
 
-      document.querySelectorAll('button.gt-remove').forEach(function (btn) {
-        btn.addEventListener('click', async function () {
-          var label = btn.dataset.label || 'this tool';
-          if (!(await mvConfirm('Remove the tool “' + label + '”? It is deleted and will not be used again.', { okText: 'Remove tool' }))) return;
-          btn.disabled = true;
-          say('Removing ' + label + '…');
-          try {
-            var r = await fetch('/api/v1/generated-tools/' + encodeURIComponent(btn.dataset.name), { method: 'DELETE' });
-            if (r.ok || r.status === 204) {
-              say(label + ' removed.');
-              var row = btn.closest('tr');
-              if (row) row.remove();
-            } else {
-              btn.disabled = false;
-              say(window.mvErrorText(r, 'remove the tool'));
-            }
-          } catch (e) {
-            btn.disabled = false;
-            say(window.mvErrorText(e, 'remove the tool'));
-          }
-        });
-      });
     })();
   </script>
 {% endblock %}

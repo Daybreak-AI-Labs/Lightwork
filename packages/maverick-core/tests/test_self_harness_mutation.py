@@ -56,7 +56,7 @@ def test_signature_uses_most_frequent_not_longest_message():
 def test_signature_frequency_through_mine_failures():
     # Same property end-to-end through mining, so the kill isn't tied to the
     # private helper's name.
-    recs = [{"model_id": "M", "failure_class": "timeout", "goal_text": "do the task",
+    recs = [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": "timeout", "goal_text": "do the task",
              "failure_msg": m, "channel": None, "user_id": None}
             for m in ["frequent", "frequent", "frequent", "a rare long message"]]
     sigs = sh.mine_failures(recs, model_id="M", min_support=3)
@@ -69,7 +69,7 @@ def test_signature_frequency_through_mine_failures():
 
 def _promote(model, line_key, store):
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False, ledger=si.PromotionLedger())
-    recs = [{"model_id": model, "failure_class": line_key,
+    recs = [{"owner": "", "goal_id": 0, "model_id": model, "failure_class": line_key,
              "goal_text": f"task run {i}", "failure_msg": line_key,
              "channel": None, "user_id": None} for i in range(3)]
     sh.run_self_harness(

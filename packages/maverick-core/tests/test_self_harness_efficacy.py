@@ -64,7 +64,7 @@ def _cases(cls, n, tag):
 
 def _learn(cls, store):
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False, ledger=si.PromotionLedger())
-    recs = [{"model_id": "M", "failure_class": cls, "goal_text": f"{cls} task variant",
+    recs = [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": cls, "goal_text": f"{cls} task variant",
              "failure_msg": f"{cls} precondition missed", "channel": None, "user_id": None}
             for _ in range(5)]
     return sh.run_self_harness(
@@ -139,7 +139,7 @@ def test_gate_refuses_guidance_that_does_not_help(tmp_path):
     # loop only promotes REAL improvements (no learning theater).
     store = tmp_path / "addenda.json"
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False, ledger=si.PromotionLedger())
-    recs = [{"model_id": "M", "failure_class": "auth_timeout",
+    recs = [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": "auth_timeout",
              "goal_text": "auth_timeout task", "failure_msg": "missed",
              "channel": None, "user_id": None} for _ in range(5)]
     flat = _scorer(3)                      # same scorer both sides -> zero delta

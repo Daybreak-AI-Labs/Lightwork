@@ -669,3 +669,65 @@ def connector_catalog() -> list[dict]:
     out.extend(_BESPOKE_CATALOG)
     out.sort(key=lambda e: e["name"])
     return out
+
+
+def connection_setup_catalog() -> list[dict]:
+    """Describe existing adapters without resolving credentials or calling providers."""
+    specs = {spec["name"]: spec for spec in _SPECS + _READ_SPECS + _GRAPHQL_SPECS}
+    rows = []
+    for item in connector_catalog():
+        spec = specs.get(item["name"])
+        supported = spec is not None and not spec.get("extra_headers_env")
+        auth = ("Username and API key" if spec.get("basic") else
+                str(spec.get("scheme") or "API key") + " token") if spec is not None else "Dedicated integration"
+        rows.append({"name": item["name"], "label": item["label"], "auth_method": auth,
+                     "key_setup_supported": supported,
+                     "prerequisites": ("Service API address and a credential with only the permissions your task needs."
+                                       if supported else "This adapter requires its dedicated administrator setup; a single saved key is insufficient."),
+                     "live_provider_verified": False})
+    for spec in _PUBLIC_DATA_SPECS:
+        if spec.get("keyless"):
+            continue
+        rows.append({"name": spec["name"],
+                     "label": spec["description"].split(", READ-ONLY", 1)[0],
+                     "auth_method": "Key from the reference service",
+                     "key_setup_supported": True, "reference_data": True,
+                     "default_base_url": spec["default_base_url"],
+                     "prerequisites": "Paste a key issued by this service. Lightwork fills in its address and "
+                                      "keeps the key encrypted. These tools read reference data; they do not change it. "
+                                      "Saving does not contact the service or establish that its data is current. "
+                                      "The service's own access and usage limits still apply.",
+                     "live_provider_verified": False})
+    # Definition imports use these protected named credentials. Preserve the
+    # existing tool labels; UiPath has no generic connector catalog entry.
+    for name, label, auth, location in (
+        ("n8n", "n8n workflow import", "n8n API key", "The HTTPS address of your n8n instance"),
+        ("make", "Make workflow import", "Make API token", "The HTTPS address of your Make region, such as https://eu1.make.com"),
+        ("workato", "Workato workflow import", "Workato API token", "The HTTPS address of your Workato region"),
+        ("uipath", "UiPath workflow import", "UiPath bearer token", "The HTTPS address of your UiPath service, such as https://cloud.uipath.com"),
+    ):
+        row = next((row for row in rows if row["name"] == name), None)
+        if row is None:
+            row = {"name": name, "label": label, "live_provider_verified": False}
+            rows.append(row)
+        row.update(auth_method=auth, key_setup_supported=True,
+                   prerequisites=location + ". For workflow imports, enter the service address only, without a path or query. "
+                                 "Use access that can read the definitions you want to import. "
+                                 + ("Choose your organization and tenant separately on the workflow import page. " if name == "uipath" else "")
+                                 + "Saving does not contact the service or import or run a workflow.")
+    # These credentials belong to the closed read-only evidence collectors,
+    # not the generic REST tool. Source selection and checks stay in Evidence.
+    for name, label, auth in (
+        ("aws_security_hub", "Evidence: AWS Security Hub", "AWS access key and secret key"),
+        ("aws_config", "Evidence: AWS Config", "AWS access key and secret key"),
+        ("azure_defender", "Evidence: Microsoft Defender for Cloud", "Microsoft access token"),
+        ("azure_policy", "Evidence: Azure Policy", "Microsoft access token"),
+        ("gcp_security_command_center", "Evidence: Google Cloud Security Command Center", "Google access token"),
+        ("github_security", "Evidence: GitHub security alerts", "GitHub access token"),
+        ("okta_posture", "Evidence: Okta policies", "Okta API token"),
+    ):
+        rows.append({"name": name, "label": label, "auth_method": auth,
+                     "key_setup_supported": True, "live_provider_verified": False,
+                     "prerequisites": "Use access that can read the selected security source. "
+                                      "Saving only keeps the encrypted credential; choose and check the exact source in Continuous evidence."})
+    return rows

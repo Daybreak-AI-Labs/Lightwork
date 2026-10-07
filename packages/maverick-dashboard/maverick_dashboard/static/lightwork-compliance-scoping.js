@@ -11,6 +11,7 @@
   var statusEl = document.getElementById('cs-status');
   var records = { questionnaires: [], assessments: [], scopes: [], reports: [] };
   var answering = null;
+  var names = {};
 
   var STATUS = {
     pending_review: ['Waiting for approval', 'warn'], published: ['Ready to use', 'active'],
@@ -26,7 +27,7 @@
     ['control_owner', 'Control owner'], ['evidence_owner', 'Evidence owner'],
   ];
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(failure, action) { say(R.errorText(failure, action)); }
   function statusBadge(value) {
     var s = STATUS[value] || [R.human(value), 'info'];
@@ -34,15 +35,18 @@
   }
   // "ref:question-org-size" -> "Org size"; "framework-eu-privacy" -> "Eu privacy".
   function label(ref) {
-    return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap)[-_]/, ''));
+    return names[ref] || R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap)[-_]/, ''));
   }
   function questionnaireName(id, version) {
-    return label(id) + (version ? ' (version ' + version + ')' : '');
+    var q = records.questionnaires.find(function (row) { return row.questionnaire_id === id && (!version || row.version === version); });
+    return (q && q.display_names && q.display_names[id] || label(id)) + (version ? ' (version ' + version + ')' : '');
   }
 
   function load() {
     return R.call('GET', API + '/records').then(function (body) {
       records = body;
+      names = {};
+      records.questionnaires.slice().reverse().forEach(function (q) { Object.assign(names, q.display_names || {}); });
       render();
       say(records.assessments.length ? '' : 'Start an assessment to work out which controls apply to you.');
     }).catch(function (f) {
@@ -88,13 +92,14 @@
     var latest = {};
     records.questionnaires.forEach(function (q) { latest[q.questionnaire_id] = Math.max(latest[q.questionnaire_id] || 0, q.version); });
     R.table(document.getElementById('cs-questionnaires'), [
-      { label: 'Questionnaire', value: function (q) { return label(q.questionnaire_id); } },
+      { label: 'Questionnaire', value: function (q) { return q.display_names && q.display_names[q.questionnaire_id] || label(q.questionnaire_id); } },
       { label: 'Version', value: function (q) { return q.version; } },
       { label: 'Questions', value: function (q) { return q.questions; } },
       { label: 'Status', value: function (q) { return statusBadge(q.status); } },
     ], records.questionnaires, [
       { label: 'Approve for use', kind: 'primary', when: function (q) { return canAdmin && q.status !== 'published'; }, run: publishQuestionnaire },
-    ], { text: 'No questionnaires yet. Add one from a file your compliance team provides.' });
+      { label: 'Review a new version', run: function (q) { window.LightworkComplianceQuestionnaire.open(q.questionnaire_id); } },
+    ], { text: 'No questionnaires yet. Build one here and have a different administrator approve it.' });
   }
 
   function find(kind, key, value) {
@@ -102,9 +107,53 @@
   }
 
   // ---- questionnaires -----------------------------------------------------
-  function publishQuestionnaire(q) {
-    R.confirm('Approve “' + questionnaireName(q.questionnaire_id, q.version) + '” for use? It can then be used for assessments and can no longer be changed.', 'Approve').then(function (ok) {
-      if (!ok) return;
+  function showQuestionnaireReview(q, parent) {
+    var labels = q.display_names || {}, questions = {};
+    function named(ref) { return labels[ref] || R.human(String(ref || '').replace(/^ref:/, '')); }
+    function add(tag, text, host) { var node = R.el(tag, '', text); host.appendChild(node); return node; }
+    (q.questions || []).forEach(function (item) { questions[item.question_id] = item; });
+    function condition(c) {
+      if (!c) return 'Always';
+      var question = questions[c.question_id], value = c.value;
+      if (!question) return 'Unavailable question · approval is paused';
+      var answer = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : typeof value === 'number' ? String(value) :
+        (Array.isArray(value) ? value : [value]).map(named).join(' / ');
+      return named(question.question_ref) + ' ' + ({equals: 'is', not_equals: 'is not', contains: 'includes', in: 'is any of', greater_or_equal: 'is at least', less_or_equal: 'is at most'}[c.operator] || R.human(c.operator)) + ' ' + answer;
+    }
+    var kinds = {boolean: 'Yes or no', integer: 'Whole number', single_choice: 'Choose one', multi_choice: 'Choose several', opaque_ref: 'Named item'};
+    if (q.studio_source && q.studio_source.studio_id) add('p', 'Imported from Compliance studio: ' + R.human(q.studio_source.studio_id) + ' · ' + R.human(q.studio_source.form_id) + ' · version ' + q.studio_source.version + '. This questionnaire is a separate immutable version.', parent);
+    q.questions.forEach(function (item, index) {
+      var card = add('section', undefined, parent); card.className = 'panel cs-stack';
+      add('h4', (index + 1) + '. ' + named(item.question_ref), card);
+      add('p', DOMAINS[item.domain] + ' · ' + (kinds[item.answer_type] || R.human(item.answer_type)) + ' · ' + (item.required ? 'Answer required' : 'Optional answer'), card);
+      if (item.options.length) add('p', 'Choices: ' + item.options.map(named).join(' / '), card);
+      add('p', 'Appears: ' + condition(item.condition), card);
+    });
+    q.rules.forEach(function (item, index) {
+      var card = add('section', undefined, parent); card.className = 'panel cs-stack';
+      add('h4', 'Rule ' + (index + 1) + ' · ' + named(item.framework_ref), card);
+      add('p', 'Controls: ' + item.control_refs.map(named).join(' / '), card);
+      if (item.overlap_refs.length) add('p', 'Shared requirements: ' + item.overlap_refs.map(named).join(' / '), card);
+      add('p', 'Reason: ' + named(item.reason_code), card);
+      add('p', 'Applies: ' + (item.conditions.length ? item.conditions.map(condition).join(' AND ') : 'Always'), card);
+    });
+  }
+  async function publishQuestionnaire(q) {
+    var full;
+    try { full = await R.call('GET', API + '/questionnaires/' + encodeURIComponent(q.questionnaire_id) + '/versions/' + q.version); }
+    catch (f) { fail(f, 'read the questionnaire for approval'); return; }
+    if (full.revision !== q.revision || full.status !== 'pending_review') { say('This saved version changed. Refresh its current details before approving it.'); return; }
+    var message = document.getElementById('mv-confirm-msg'), dialog = document.getElementById('mv-confirm');
+    if (!message || !dialog || typeof dialog.showModal !== 'function' || dialog.open) { say('The complete approval review is unavailable. Keep this saved version and reopen its full controls before approving.'); return; }
+    var answer = R.confirm('Review every question, choice and scope rule in “' + questionnaireName(q.questionnaire_id, q.version) + '” below. Approving makes this exact saved version available for new assessments. A different administrator from its creator must approve it. Existing assessments keep their original version.', 'Approve for use');
+    var detail = null, current = true;
+    function invalidate() { current = false; if (detail) detail.remove(); if (dialog.open) dialog.dispatchEvent(new Event('cancel', {cancelable: true})); }
+    var events = ['lightwork:account-context-changed', 'lightwork:workspace-changed', 'lightwork:copilot-context-changed'];
+    events.forEach(function (event) { document.addEventListener(event, invalidate); }); window.addEventListener('lightwork:context-changed', invalidate);
+    if (dialog.open) { detail = document.createElement('div'); message.insertAdjacentElement('afterend', detail); showQuestionnaireReview(full, detail); }
+    var ok;
+    try { ok = await answer; } finally { if (detail) detail.remove(); events.forEach(function (event) { document.removeEventListener(event, invalidate); }); window.removeEventListener('lightwork:context-changed', invalidate); }
+      if (!ok || !current) return;
       R.call('POST', API + '/questionnaires/' + encodeURIComponent(q.questionnaire_id) + '/versions/' + q.version + '/publish',
         { expected_revision: q.revision, idempotency_key: R.newKey() })
         .then(function () { say('Questionnaire approved.'); return load(); })
@@ -112,10 +161,11 @@
           if (f && f.status === 403) { say('A different administrator from the person who added it must approve it.'); return; }
           fail(f, 'approve the questionnaire');
         });
-    });
   }
 
-  document.getElementById('cs-add-questionnaire').addEventListener('click', function () {
+  document.getElementById('cs-add-questionnaire').addEventListener('click', function () { window.LightworkComplianceQuestionnaire.open(); });
+  document.addEventListener('lightwork:questionnaire-saved', load);
+  document.getElementById('cs-import-questionnaire').addEventListener('click', function () {
     R.form('Add a questionnaire', [
       { key: 'name', label: 'Questionnaire name', type: 'text', required: true, placeholder: 'For example: Annual scoping' },
     ], 'Choose file').then(function (values) {
@@ -170,7 +220,7 @@
 
   function fieldFor(q, index) {
     var wrap = R.el('fieldset', 'panel');
-    var legend = R.el('legend', '', label(q.question_ref));
+    var legend = R.el('legend', '', q.display_name || label(q.question_ref));
     wrap.appendChild(legend);
     wrap.appendChild(R.el('p', 'muted', DOMAINS[q.domain] || R.human(q.domain)));
     var id = 'cs-q-' + index;
@@ -186,14 +236,14 @@
     } else if (q.answer_type === 'single_choice') {
       control = R.el('select', 'select'); control.id = id;
       var blank = R.el('option', '', 'Choose an answer'); blank.value = ''; control.appendChild(blank);
-      q.options.forEach(function (o) { var op = R.el('option', '', label(o)); op.value = o; control.appendChild(op); });
+      q.options.forEach(function (o) { var op = R.el('option', '', (q.option_labels || {})[o] || label(o)); op.value = o; control.appendChild(op); });
       var lab = R.el('label', '', 'Answer'); lab.setAttribute('for', id); wrap.appendChild(lab);
     } else if (q.answer_type === 'multi_choice') {
       control = R.el('div');
       q.options.forEach(function (o, j) {
         var l = R.el('label');
         var c = R.el('input'); c.type = 'checkbox'; c.name = id; c.value = o; c.id = id + '-' + j;
-        l.appendChild(c); l.appendChild(document.createTextNode(' ' + label(o) + ' '));
+        l.appendChild(c); l.appendChild(document.createTextNode(' ' + ((q.option_labels || {})[o] || label(o)) + ' '));
         control.appendChild(l);
       });
     } else if (q.answer_type === 'integer') {
@@ -302,6 +352,7 @@
   // ---- scopes -------------------------------------------------------------
   function viewScope(s) {
     R.call('GET', API + '/scopes/' + encodeURIComponent(s.scope_id)).then(function (scope) {
+      Object.assign(names, scope.display_names || {});
       var box = document.getElementById('cs-scope-detail');
       box.textContent = '';
       box.appendChild(R.el('h2', '', 'Scope results'));
@@ -310,7 +361,7 @@
       R.table(ctl, [
         { label: 'Control', value: function (c) { return label(c.control_ref); } },
         { label: 'Framework', value: function (c) { return label(c.framework_ref); } },
-        { label: 'Why it applies', value: function (c) { return (c.reason_codes || []).map(R.human).join(', '); } },
+        { label: 'Why it applies', value: function (c) { return (c.reason_codes || []).map(label).join(', '); } },
       ], scope.control_applicability, null, { text: 'No controls apply.' });
       box.appendChild(ctl);
       var owners = scope.responsibility_assignments || {};

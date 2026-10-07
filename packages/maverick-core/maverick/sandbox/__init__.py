@@ -23,6 +23,7 @@ from .docker import DockerBackend
 from .firecracker import FirecrackerBackend
 from .gvisor import GVisorRuntimeValidationError, validate_docker_gvisor_runtime
 from .kubernetes import KubernetesBackend
+from .kubernetes_authority import deployment_isolation_mode
 from .local import ExecResult, LocalBackend
 from .podman import PodmanBackend
 from .sdk import SDK_VERSION, SandboxV2
@@ -180,7 +181,13 @@ def _container_backend_required(full_cfg: dict | None = None) -> bool:
     require_container = true``, or enterprise mode is on. Off by default so
     single-tenant/dev installs keep the (warned) local backend.
     """
-    if os.environ.get("MAVERICK_DEPLOYMENT_ISOLATION") or _config_truthy_env("MAVERICK_REQUIRE_CONTAINER_BACKEND"):
+    try:
+        deployment_required = deployment_isolation_mode() is not None
+    except ValueError:
+        # Invalid deployment modes still require isolation; construction rejects
+        # them through the same parser before any backend can be selected.
+        return True
+    if deployment_required or _config_truthy_env("MAVERICK_REQUIRE_CONTAINER_BACKEND"):
         return True
     if full_cfg and _config_bool(full_cfg.get("require_container"), False):
         return True

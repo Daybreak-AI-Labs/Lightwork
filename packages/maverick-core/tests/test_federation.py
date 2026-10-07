@@ -348,10 +348,10 @@ def test_deadline_plumbed_to_goal_service():
     assert goals.started[0]["user_id"] == "federation:A"
 
 
-def test_no_deadline_means_no_wall_cap():
+def test_no_deadline_uses_first_install_wall_cap():
     goals = _Goals()
     _node(_service(goal_service=goals)).delegate("B", "task")
-    assert goals.started[0]["max_wall_seconds"] is None
+    assert goals.started[0]["max_wall_seconds"] == 1800.0
 
 
 # ---- gRPC binding (thin adapter; no grpcio needed) --------------------------

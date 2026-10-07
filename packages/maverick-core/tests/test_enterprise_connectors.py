@@ -165,7 +165,7 @@ def test_existing_record_update_requires_and_sends_if_match(monkeypatch):
         "op": "patch", "path": "/things/7", "body": {"name": "new"},
         "confirm": True,
     })
-    assert "requires if_match" in missing
+    assert "requires the current remote ETag/revision" in missing
     req.assert_not_called()
 
     out = tool.fn({

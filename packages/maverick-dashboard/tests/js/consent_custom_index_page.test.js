@@ -4,6 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {webcrypto}=require("node:crypto");
 const {JSDOM}=require("jsdom");
+const {shell} = require('./_shell');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<30;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -30,6 +31,7 @@ async function page(options={}){
     if(url.endsWith("/search"))return reply(200,{profile_ids:["customer-1","customer-2"],next_cursor:null});
     return reply(200,{});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-custom-index.js"));
   await flush();
@@ -80,5 +82,40 @@ test("a new searchable question is picked from published questions not yet searc
     assert.deepEqual([...select.options].map(o=>o.value),["topics"]);
     ui.d.getElementById("custom-index-create-form").dispatchEvent(new ui.w.Event("submit",{bubbles:true,cancelable:true}));await flush();
     const body=ui.posts()[0].body;assert.equal(body.index_id,"search-topics");assert.equal(body.element_name,"topics");assert.ok(body.idempotency_key);
+  }finally{ui.dom.window.close();}
+});
+
+// ---- no loader keeps saying "Loading" ---------------------------------------
+async function statusPage(status,moduleEnabled="true"){
+  const html=read("templates/consent_custom_indexes.html").replace(/\{%[\s\S]*?%\}/g,"").replace(/\{\{[\s\S]*?\}\}/g,"");
+  const dom=new JSDOM(html,{url:"https://lightwork.test/consent/custom-indexes",runScripts:"outside-only"});
+  const w=dom.window,d=w.document,calls=[];
+  Object.defineProperty(w,"crypto",{value:webcrypto});w.TextEncoder=TextEncoder;w.TextDecoder=TextDecoder;
+  Object.assign(d.getElementById("custom-index-shell").dataset,{apiBase:"/api/v1/consent/custom-indexes",canAdmin:"true",canAudit:"true",moduleEnabled});
+  d.getElementById("custom-index-table").innerHTML='<p class="muted">Loading…</p>';
+  w.mvErrorText=(failure,action)=>"Could not "+action+". Try again later.";
+  w.fetch=async url=>{calls.push(url);return status();};
+  shell(w);
+  w.eval(read("static/lightwork-consent-workbench.js"));
+  w.eval(read("static/lightwork-consent-custom-index.js"));
+  await flush();
+  return {dom,d,calls,table:()=>d.getElementById("custom-index-table").textContent};
+}
+
+test("a failed availability check replaces the table's Loading with what happened",async()=>{
+  const ui=await statusPage(()=>reply(503,{detail:"unavailable"}));
+  try{assert.equal(ui.table(),"Could not load searchable questions. Try again later.");}finally{ui.dom.window.close();}
+});
+
+test("searching that is on but not ready says when questions will appear",async()=>{
+  const ui=await statusPage(()=>reply(200,{enabled:true,ready:false}));
+  try{assert.equal(ui.table(),"Searchable questions appear here once an administrator finishes the setup.");}finally{ui.dom.window.close();}
+});
+
+test("a turned-off module starts no checks and shows no red sentence under its gate",async()=>{
+  const ui=await statusPage(()=>{throw new Error("no request expected");},"false");
+  try{
+    assert.deepEqual(ui.calls,[]);
+    assert.equal(ui.d.getElementById("custom-index-runtime-status").textContent,"");
   }finally{ui.dom.window.close();}
 });

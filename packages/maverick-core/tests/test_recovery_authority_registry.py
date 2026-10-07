@@ -17,6 +17,8 @@ from maverick.recovery_authorities import (
     DYNAMIC_JSON_AUTHORITY_POLICIES,
     GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES,
     GLOBAL_START_JSON_AUTHORITY_POLICIES,
+    NON_AUTHORIZING_GOVERNED_NAMESPACES,
+    PERSONAL_PUSH_AUTHORITY_POLICIES,
     authority_policy,
 )
 
@@ -45,6 +47,42 @@ def test_canonical_authority_registry_covers_every_declared_store() -> None:
     assert authority_policy("future-authority.lock", is_sqlite=True) == "unknown_sqlite"
 
 
+def test_retained_knowledge_rights_are_protected_recovery_authority(tmp_path: Path) -> None:
+    relative = "tenants/acme/knowledge-rights-archive/recovered.json"
+    assert authority_policy(relative, is_sqlite=False) == "knowledge_access_authority"
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    record = _write(stage, relative, {"schema": "lightwork.knowledge-rights-archive.v1"})
+    original = record.read_bytes()
+
+    removed, report = recovery._reconcile_bootstrap_stage(stage)
+
+    assert removed == set()
+    assert record.read_bytes() == original
+    item, = [row for row in report["items"] if row["source"] == relative]
+    assert item["prior_state"] == "unclassified:knowledge_access_authority"
+    assert item["safe_state"] == "global_start_blocked"
+    assert item["requires_external_readback"] is True
+
+
+def test_non_authorizing_preferences_and_warnings_restore_as_data(tmp_path: Path) -> None:
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    originals = {}
+    for namespace in NON_AUTHORIZING_GOVERNED_NAMESPACES:
+        relative = f"tenants/acme/{namespace}/record.json"
+        path = _write(stage, relative, {"revision": 1, "owner": "user:alice"})
+        originals[relative] = path.read_bytes()
+        assert authority_policy(relative.swapcase(), is_sqlite=False) is None
+        # A file's SQLite identity still wins over a data-only directory name.
+        assert authority_policy(relative, is_sqlite=True) == "unknown_sqlite"
+
+    removed, report = recovery._reconcile_bootstrap_stage(stage)
+
+    assert removed == set()
+    assert report["items"] == []
+    assert report["protected_authority"]["classification_complete"] is True
+    assert all((stage / relative).read_bytes() == payload for relative, payload in originals.items())
+
+
 def test_shared_a2a_binding_is_retained_and_blocks_restored_admission(tmp_path: Path) -> None:
     """An opaque anti-downgrade receipt cannot be discarded as an ordinary cache."""
     stage = file_lock.ensure_private_directory(tmp_path / "stage")
@@ -70,7 +108,8 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
     """Make adding a default governed store without recovery policy fail CI."""
     packages = Path(__file__).parents[2]
     source_roots = (packages / "maverick-core" / "maverick",
-                    packages / "maverick-channels" / "maverick_channels")
+                    packages / "maverick-channels" / "maverick_channels",
+                    packages / "maverick-dashboard" / "maverick_dashboard")
     declarations: dict[str, str] = {}
     dynamic_declarations: set[str] = set()
     for source in (path for root in source_roots for path in root.rglob("*.py")):
@@ -115,9 +154,13 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
     missing = {
         relative: location
         for relative, location in declarations.items()
-        if authority_policy(relative, is_sqlite=False) is None
+        if relative.split("/")[0] not in NON_AUTHORIZING_GOVERNED_NAMESPACES
+        and authority_policy(relative, is_sqlite=False) is None
     }
     assert missing == {}
+    for namespace in NON_AUTHORIZING_GOVERNED_NAMESPACES:
+        assert f"{namespace}/recovered.json" in declarations
+        assert authority_policy(f"{namespace}/recovered.json", is_sqlite=False) is None
     for namespace, policy in GLOBAL_START_JSON_AUTHORITY_POLICIES.items():
         relative = f"{namespace}/recovered.json"
         assert relative in declarations
@@ -130,7 +173,17 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
     assert dynamic_declarations == {
         "f'identity_governance_{sink}_outcomes'",
         "f'identity_governance_{sink}_requests'",
+        "'conversation-organization-' + context_for(request)",
+        # personal_push_devices.store: "<kind>-<32 hex owner digest>".
+        "kind + '-' + scope",
     }
+    for kind, policy in PERSONAL_PUSH_AUTHORITY_POLICIES.items():
+        relative = f"{kind}-{'c' * 32}/recovered.json"
+        assert authority_policy(relative, is_sqlite=False) == policy
+        assert authority_policy(relative.upper(), is_sqlite=False) == policy
+        assert GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES[relative] == policy
+        # Only the exact bounded expansion is classified this way.
+        assert authority_policy(f"{kind}-short/recovered.json", is_sqlite=False) is None
     for namespace, policy in DYNAMIC_JSON_AUTHORITY_POLICIES.items():
         relative = f"{namespace}/recovered.json"
         assert authority_policy(relative, is_sqlite=False) == policy
@@ -533,3 +586,20 @@ def test_privacy_queue_and_callback_leases_are_held(tmp_path: Path) -> None:
     assert ("privacy_remediation", "leased") in unresolved
     assert ("privacy_discovery_job", "queued") not in unresolved
     assert ("privacy_remediation", "queued") not in unresolved
+
+
+def test_installation_passphrases_and_link_signing_key_are_protected_authority() -> None:
+    """Colleague sign-in passphrases and the mute-link signing key are retained
+    restore blockers, never ordinary data, replayed state or discarded bytes."""
+    expected = {
+        "dashboard-passphrases.json": "dashboard_local_passphrases",
+        "notification-links/signing.key": "notification_link_signing_key",
+        "privacy_automation/discovery-data-use-key.sealed": "privacy_discovery_data_use_key",
+    }
+    for relative, policy in expected.items():
+        assert authority_policy(relative, is_sqlite=False) == policy
+        assert authority_policy(relative.upper(), is_sqlite=False) == policy
+        assert GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES[relative] == policy
+        assert relative not in DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES
+    assert authority_policy("notification-links/signing.key.lock", is_sqlite=False) is None
+    assert authority_policy("other/signing.key", is_sqlite=False) is None

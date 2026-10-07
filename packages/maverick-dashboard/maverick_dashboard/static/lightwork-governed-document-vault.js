@@ -77,20 +77,21 @@
     catch (_error) { throw failure("response_invalid_json", "Lightwork returned something unexpected. Refresh the page and try again.", response.status); }
   }
 
-  function friendly(status) {
-    if (typeof global.mvErrorText === "function") return global.mvErrorText({ status }, "finish this");
+  function friendly(status, headers) {
+    // Headers carry the turned-off reason, so "off" is never read as "no permission".
+    if (typeof global.mvErrorText === "function") return global.mvErrorText({ status, headers }, "finish this");
     if (status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (status === 404) return "That document no longer exists. Refresh the page to see the latest.";
     if (status === 409) return "This document changed since you opened the page. Refresh and try again.";
     if (status === 413) return "That file is too large.";
-    if (status === 415) return "That kind of file can't be stored here.";
-    return "Something went wrong. Please try again.";
+    if (status === 415) return "That kind of file can't be stored here. Try a PDF, image or office document.";
+    return "Something went wrong. Try again.";
   }
 
   async function parseJsonResponse(response) {
     const payload = await readBoundedJson(response);
     if (!response.ok) {
-      const error = failure("request_failed", friendly(response.status), response.status);
+      const error = failure("request_failed", friendly(response.status, response.headers), response.status);
       error.technical = payload && typeof payload.detail === "string" ? payload.detail : "";
       throw error;
     }
@@ -147,7 +148,7 @@
   }
   function when(ts) {
     if (typeof global.mvWhen === "function") return global.mvWhen(ts);
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function megabytes(bytes) {
     if (!Number.isFinite(bytes)) return "";
@@ -159,7 +160,7 @@
     return "vault-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
   }
   function setStatus(target, message, failed) {
-    target.textContent = message;
+    window.mvStatus(target, message, {error: !!failed});
     target.dataset.state = failed ? "failed" : "ready";
   }
   function technical(value) {
@@ -197,7 +198,7 @@
       const result = await callback();
       return result;
     } catch (error) {
-      const message = error && error.code ? error.message : "Something went wrong. Please try again.";
+      const message = error && error.code ? error.message : "Something went wrong. Try again.";
       setStatus(operationStatus, message, true);
       technical(error && error.technical ? error.technical : undefined);
       throw error;
@@ -484,7 +485,7 @@
     }
     if (!items.length) {
       const tr = document.createElement("tr");
-      const td = cell("Nothing has happened in the vault yet.");
+      const td = cell("Nothing has happened in the vault yet. Add a document above to start its history.");
       td.colSpan = 2;
       tr.appendChild(td);
       rows.appendChild(tr);
@@ -516,7 +517,7 @@
     await run("Finding the linked document", async () => {
       const ref = bounded(requested, /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/, "The link");
       const record = await requestJson(vaultBase, "/documents/" + encodeURIComponent(ref));
-      if (!record || record.document_ref !== ref) throw failure("request_failed", "The linked document could not be found.");
+      if (!record || record.document_ref !== ref) throw failure("request_failed", "The linked document could not be found. Refresh the page to see the latest.");
       highlighted = ref;
       if (!documents.some((item) => item.document_ref === ref)) documents.unshift(record);
       renderDocuments();

@@ -148,7 +148,7 @@ def translate(raw: dict[str, Any]) -> ImportedAutomation:
 
 class PowerAutomateImporter:
     source = "power_automate"
-    can_fetch_definitions = True
+    can_fetch_definitions = False
 
     def __init__(self, token: str | None = None):
         self.token = (token or os.environ.get("POWER_AUTOMATE_TOKEN", "")).strip()

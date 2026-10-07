@@ -44,18 +44,14 @@ class _CardBadges(HTMLParser):
 
 
 def _templates() -> Jinja2Templates:
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    from maverick_dashboard.app import _theme_context
+
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
-        # Render the real, role-filtered nav so the sidebar entry is genuine.
         nav_groups=ui_visibility.nav_groups(None),
-        t=lambda key: key,
     )
     return templates
 
@@ -75,7 +71,7 @@ def test_page_renders_with_one_h1_and_every_suite(client: TestClient) -> None:
     parser = _CardBadges()
     parser.feed(body)
     assert parser.h1 == 1
-    assert "Autonomous Compliance" in body
+    assert "Autonomous compliance" in body
     for suite in page.visible_suites(catalog.suites(), ui_visibility.not_ready_paths()):
         assert escape(suite.label) in body
         assert f'id="acm-suite-{suite.key}"' in body
@@ -98,6 +94,37 @@ def test_every_offered_module_card_carries_the_catalog_badge(client: TestClient)
             expected = catalog.STATUS_BADGE_CLASS[module.status]
             assert expected in parser.by_href[module.path], (module.path, module.status)
     assert offered and len(parser.by_href) == offered
+
+
+def test_module_cards_use_each_page_s_one_name(client: TestClient) -> None:
+    """A card names its page exactly as the sidebar, heading and title do."""
+
+    class Names(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.by_href: dict[str, str] = {}
+            self._href: str | None = None
+            self._capture = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            d = dict(attrs)
+            if tag == "a" and "card" in (d.get("class") or ""):
+                self._href = d.get("href")
+            self._capture = tag == "span" and "acm-card__name" in (d.get("class") or "")
+
+        def handle_data(self, data: str) -> None:
+            if self._capture and self._href:
+                self.by_href[self._href] = self.by_href.get(self._href, "") + data
+
+        def handle_endtag(self, tag: str) -> None:
+            self._capture = False
+
+    names = Names()
+    names.feed(client.get(page.PAGE_PATH).text)
+    labels = {p["path"]: p["label"] for p in ui_visibility.PAGES}
+    registered = {href: name.strip() for href, name in names.by_href.items() if href in labels}
+    assert registered and all(name == labels[href] for href, name in registered.items()), registered
+    assert names.by_href["/consent/global-opt-out"].strip() == "Opt out everywhere"
 
 
 def test_visible_suites_drops_held_modules_and_empty_suites() -> None:

@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -57,7 +57,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False, http=client):
-    return http.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(http, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -82,11 +82,15 @@ def test_page_lists_groups_controls_and_speaks_plain_language():
     assert "Save changes in Safety" in page
     assert 'id="settings-all-search"' in page
     assert "/static/lightwork-settings-all.js" in page
+    assert 'id="settings-signin-guide"' in page
+    for setting in ("auth.oidc.redirect_uri", "auth.saml.acs_url", "auth.saml.sp_entity_id"):
+        assert f"/settings/all?id={setting}" in page
+    assert 'data-signin-check="oidc"' in page and 'data-signin-check="saml"' in page
     assert "What can&#39;t be changed here" in page or "What can't be changed here" in page
     assert developer_terms(page) == []
     group = client.get("/settings/all?group=safety").text
     assert 'role="switch"' in group and "<select" in group and 'type="number"' in group
-    assert "Reset to default" in group and "Save changes in Safety" in group
+    assert "Reset to product default" in group and "Use inherited value" in group and "Save changes in Safety" in group
     assert developer_terms(group) == []
 
 
@@ -97,6 +101,10 @@ def _row_ids(html: str) -> list[str]:
     return re.findall(r'data-setting-id="([^"]+)"', html)
 
 
+def _available_settings(catalog):
+    return [s for s in catalog.SETTINGS if s.section != "ai_cloud_agent_governance"]
+
+
 def test_first_load_is_the_list_of_groups_without_their_settings():
     from maverick_dashboard import settings_catalog as catalog
 
@@ -104,13 +112,13 @@ def test_first_load_is_the_list_of_groups_without_their_settings():
     assert r.status_code == 200 and len(r.content) < 300_000
     assert _row_ids(r.text) == []
     for name in catalog.GROUPS:
-        count = sum(1 for s in catalog.SETTINGS if s.group == name)
+        count = sum(1 for s in _available_settings(catalog) if s.group == name)
         slug = name.lower().replace(" & ", "-").replace(" ", "-")
         assert f'data-group="{slug}" data-loaded="0"' in r.text, name
         # Works without the page's script too: a plain link to the group.
         assert f'href="/settings/all?group={slug}#group-{slug}"' in r.text, name
         assert f"Show the {count} settings in" in r.text, name
-    assert f"0 of {len(catalog.SETTINGS)} settings" in r.text
+    assert f"0 of {len(_available_settings(catalog))} settings" in r.text
     assert 'data-module="' in r.text  # the module switches are always there
 
 
@@ -124,7 +132,7 @@ def test_each_group_lists_all_its_settings_and_every_setting_has_a_group():
         rows = client.get("/settings/all/rows", params={"group": slug})
         assert rows.status_code == 200 and rows.headers["cache-control"] == "no-store"
         assert f'data-complete="{slug}"' in rows.text
-        ids = [s.id for s in catalog.SETTINGS if s.group == name]
+        ids = [s.id for s in _available_settings(catalog) if s.group == name]
         assert sorted(_row_ids(page)) == sorted(ids) == sorted(_row_ids(rows.text)), name
         assert f'data-group="{slug}" data-loaded="1"' in page
         assert f'<option value="{slug}" selected>' in page
@@ -132,7 +140,7 @@ def test_each_group_lists_all_its_settings_and_every_setting_has_a_group():
         assert [g["name"] for g in listed] == [name]
         assert [s["id"] for s in listed[0]["settings"]] == _row_ids(rows.text)
         seen += ids
-    assert sorted(seen) == sorted(s.id for s in catalog.SETTINGS)
+    assert sorted(seen) == sorted(s.id for s in _available_settings(catalog))
     assert client.get(API, params={"group": "nothing-here"}).status_code == 404
 
 
@@ -153,7 +161,7 @@ def test_search_finds_matching_settings_in_every_group_without_the_rest():
     from maverick_dashboard import settings_catalog as catalog
 
     words = ("records", "keep")
-    expected = [s.id for s in catalog.SETTINGS
+    expected = [s.id for s in _available_settings(catalog)
                 if all(w in " ".join((s.label, s.help, s.aliases, s.group, s.subgroup)).lower()
                        for w in words)]
     assert 1 < len(expected) < len(catalog.SETTINGS) // 10
@@ -184,7 +192,7 @@ def test_only_changed_settings_and_a_link_to_one_setting(audit_rows):
             for s in g["settings"]] == ["ifc.mode"]
     page = client.get("/settings/all", params={"changed": "1"}).text
     assert _row_ids(page) == ["ifc.mode"] and "1 changed here" in page
-    assert f"1 of {len(catalog.SETTINGS)} settings" in page
+    assert f"1 of {len(_available_settings(catalog))} settings" in page
     # ?id= opens the setting's group and points the page at the setting.
     group = catalog.BY_ID["ifc.mode"].group
     linked = client.get("/settings/all", params={"id": "ifc.mode"}).text
@@ -217,10 +225,10 @@ def test_a_save_replies_with_the_rows_it_touched_not_every_row(audit_rows):
     assert again.json()["changed"] == []
     assert [s["id"] for g in again.json()["groups"] for s in g["settings"]] == ["ifc.mode"]
     # ?full=1 keeps the whole listing for a caller that wants it.
-    whole = client.post(API + "?full=1", json={"changes": [{"id": "ifc.mode", "reset": True}],
+    whole = save_catalog(client, API + "?full=1", json={"changes": [{"id": "ifc.mode", "reset": True}],
                                                 "confirm": True})
     assert whole.status_code == 200
-    assert sum(len(g["settings"]) for g in whole.json()["groups"]) == len(catalog.SETTINGS)
+    assert sum(len(g["settings"]) for g in whole.json()["groups"]) == len(_available_settings(catalog))
 
 
 def test_rows_changed_by_a_save_come_back_even_when_not_named():
@@ -353,7 +361,7 @@ def test_invalid_values_are_refused_with_a_plain_message(audit_rows):
     assert r.json()["message"].startswith("Actions per task:")
     assert _save([{"id": "no.such_setting", "value": 1}]).status_code == 400
     r = _save([{"id": "ai_cloud_agent_governance.enable", "value": True}])
-    assert r.status_code == 400 and "Clouds to oversee" in r.json()["message"]
+    assert r.status_code == 409 and "cannot be turned on" in r.json()["message"]
     assert "ai_cloud_agent_governance" not in _loaded()
     assert audit_rows == []
 
@@ -491,7 +499,7 @@ def test_values_that_would_break_the_settings_file_are_refused(audit_rows, bad):
 
     assert _save([{"id": "sandbox.timeout", "value": 30}]).status_code == 200
     # Sent as escaped JSON, the way any script can send it.
-    body = json.dumps({"changes": [{"id": "persona.name", "value": bad}]})
+    body = json.dumps({"expected_revision": client.get(API, params={"q":"__revision__"}).json()["revision"], "changes": [{"id": "persona.name", "value": bad}]})
     r = client.post(API, content=body, headers={"Content-Type": "application/json"})
     assert r.status_code == 400
     message = r.json()["message"]
@@ -508,7 +516,9 @@ def test_list_entries_that_would_break_the_settings_file_are_refused(audit_rows)
 
     from maverick_dashboard import settings_catalog as catalog
 
-    listed = next(s for s in catalog.SETTINGS if s.control == "list")
+    # A text list: the percentage lists have their own number check in coerce().
+    numeric = {"spending_limits.alert_at", "budget.warning_thresholds"}
+    listed = next(s for s in catalog.SETTINGS if s.control == "list" and s.id not in numeric)
     free_text = dataclasses.replace(listed, pattern="")
     assert catalog.coerce(free_text, ["ok"]) == ["ok"]
     for bad in ("bad\ud800", "bad\x7f", "bad\x1b"):

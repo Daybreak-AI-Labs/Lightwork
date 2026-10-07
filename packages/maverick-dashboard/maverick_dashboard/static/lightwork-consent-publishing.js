@@ -7,33 +7,146 @@
   "use strict";
   var API = "/api/v1/consent/publishing";
 
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path, options) {
-    var opts = Object.assign({ cache: "no-store" }, options || {});
-    if (opts.json !== undefined) {
-      opts.body = JSON.stringify(opts.json);
-      opts.headers = { "Content-Type": "application/json" };
-      delete opts.json;
-    }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); }
-    catch (_error) {
-      var bad = new Error("Request failed: the server returned an invalid JSON response.");
-      bad.status = response.ok ? 0 : response.status;
-      throw bad;
-    }
-    if (!response.ok) {
-      var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed.");
-      failure.status = response.status;
-      throw failure;
-    }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
 
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("cpp-root")) start();
-  if (CW && document.getElementById("cpp-signing")) startSigning();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  function begin() {
+    if (CW && document.getElementById("cpp-withdrawal-original")) startWithdrawal();
+    if (CW && document.getElementById("cpp-root")) start();
+    if (CW && document.getElementById("cpp-signing")) startSigning();
+  }
+  if (window.mvFetchJSON) begin(); else document.addEventListener("DOMContentLoaded", begin);
+
+  // Withdrawal has its own complete review and native original-request reader.
+  // The ordinary Publish/Restore controls retain their separate contracts.
+  function startWithdrawal() {
+    var $ = function (id) { return document.getElementById(id); };
+    var status = $("cpp-withdrawal-status"), select = $("cpp-withdrawal-requests");
+    var panel = $("cpp-withdrawal-review"), result = $("cpp-withdrawal-result");
+    var client = CW.client("/api/v1/consent/withdrawal-requests");
+    function request(path, options) { return client(path, Object.assign({timeout: 20000, onAccess: clear}, options || {})); }
+    var context = "", generation = 0, prepared = null, after = null, busy = false, ended = false;
+    var requested = new URLSearchParams(window.location.search).get("withdrawal") || "";
+    function say(text, bad) { CW.say(status, text, bad); }
+    function clear() {
+      generation++; ended = true; prepared = null; after = null; panel.hidden = true;
+      $("cpp-withdrawal-changes").replaceChildren(); result.replaceChildren(); select.replaceChildren();
+      $("cpp-withdrawal-confirm").disabled = true; $("cpp-withdrawal-read").disabled = true;
+      say("Your account, workspace or access changed. Reload before using private banner records.", true);
+    }
+    function check(value, started) {
+      if (ended || generation !== started) return false;
+      if (!value || !/^[a-f0-9]{64}$/.test(value.context) || context && value.context !== context) { clear(); return false; }
+      if (!context) context = value.context;
+      return true;
+    }
+    function failed(error, action) {
+      if (error && (error.status === 401 || error.status === 403 || error.redirected)) { clear(); return; }
+      say(CW.errorText(error, action), true);
+      if (error && (error.status === 404 || error.status === 409)) {
+        var started = generation;
+        request("", {method: "GET"}).then(function (value) { check(value, started); }).catch(function (failure) {
+          if (failure.status === 401 || failure.status === 403 || failure.accessChanged) clear();
+        });
+      }
+    }
+    function show(value) {
+      CW.facts(result, [["Original result", value.message], ["Current banner", value.current],
+        ["Original decision time", value.accepted_at ? CW.when(value.accepted_at) : "Not confirmed"], ["Scope", value.notice]]);
+      say(value.message, !value.confirmed);
+    }
+    async function load() {
+      var started = generation, value = await request("", {method: "GET"});
+      if (!check(value, started)) return false;
+      if (!requested) {
+        try { requested = window.sessionStorage.getItem("lightwork-banner-withdrawal:" + context) || ""; } catch (_error) { requested = ""; }
+      }
+      CW.fill(select, value.requests, value.requests.length ? "Choose your original request" : "No original withdrawal requests yet");
+      if (requested && value.requests.some(function (row) { return row.value === requested; })) select.value = requested;
+      $("cpp-withdrawal-read").disabled = !select.value;
+      return true;
+    }
+    async function read() {
+      if (!context || !select.value || ended) return;
+      var selected = select.value, started = generation;
+      var value = await request("/" + encodeURIComponent(selected) + "?context=" + encodeURIComponent(context), {method: "GET"});
+      if (check(value, started) && select.value === selected) show(value);
+    }
+    async function review(website, callback) {
+      if (busy || ended) return false;
+      if (!context && !(await load())) return false;
+      var started = ++generation;
+      var value = await request("/review", {method: "POST", json: {website: website, context: context}});
+      if (!check(value, started)) return false;
+      if (!Array.isArray(value.changes) || value.changes.length !== 8 || !value.changes.every(function (row) {
+        return typeof row.label === "string" && (typeof row.after === "string" || Array.isArray(row.after) && row.after.length <= 64 && row.after.every(function (item) { return typeof item === "string"; }));
+      })) { say("The complete review could not be displayed. Nothing was withdrawn.", true); return false; }
+      var list = CW.el("dl");
+      value.changes.forEach(function (row) {
+        list.appendChild(CW.el("dt", "", row.label));
+        var entry = CW.el("dd");
+        if (Array.isArray(row.after)) { var items = CW.el("ul"); row.after.forEach(function (item) { items.appendChild(CW.el("li", "", item)); }); entry.appendChild(items); }
+        else entry.textContent = row.after;
+        list.appendChild(entry);
+      });
+      $("cpp-withdrawal-changes").replaceChildren(list); prepared = value; after = callback;
+      $("cpp-withdrawal-confirm").disabled = false;
+      panel.hidden = false;
+      var heading = $("cpp-withdrawal-review-title"); heading.focus({preventScroll: true}); heading.scrollIntoView({block: "center"});
+      say("Review every current address and the exact banner. Keep the banner to cancel.");
+      return true;
+    }
+    $("cpp-withdrawal-confirm").addEventListener("click", function () {
+      if (!prepared || busy || ended) return;
+      var original = prepared, started = generation, callback = after;
+      CW.busy(this, async function () {
+        busy = true; requested = original.operation;
+        try { window.sessionStorage.setItem("lightwork-banner-withdrawal:" + context, requested); } catch (_error) { /* Native history remains available. */ }
+        var option = Array.from(select.options).find(function (item) { return item.value === requested; });
+        if (!option) { option = CW.el("option", "", "The withdrawal you just confirmed"); option.value = requested; select.appendChild(option); }
+        select.value = requested; $("cpp-withdrawal-read").disabled = false;
+        panel.hidden = true; prepared = null; after = null;
+        say("Waiting for the original withdrawal result. A missing reply will not run it again.");
+        try {
+          var value = await request("/apply", {method: "POST", json: {operation: original.operation, token: original.token, confirmed: true}});
+          if (!check(value, started)) return;
+          show(value); await load();
+          if (generation === started && !ended && value.confirmed && callback) await callback();
+        } catch (error) {
+          failed(error, "confirm the banner withdrawal");
+          if (!ended && generation === started) say(error.status === 409 || error.status === 422 ?
+            "This reviewed change was refused. Read its original result, then review current banner settings before a new decision." :
+            "The original response is uncertain. Use Read original result before reviewing a new withdrawal. Nothing will repeat automatically.", true);
+        } finally { busy = false; }
+      });
+    });
+    $("cpp-withdrawal-cancel").addEventListener("click", function () {
+      generation++; prepared = null; after = null; panel.hidden = true;
+      say("Cancelled. The banner was kept.");
+    });
+    select.addEventListener("change", function () { requested = select.value; result.replaceChildren(); $("cpp-withdrawal-read").disabled = !select.value; });
+    $("cpp-withdrawal-read").addEventListener("click", function () { CW.busy(this, function () { return read().catch(function (error) { failed(error, "read the original withdrawal"); }); }); });
+    $("cpp-withdrawal-refresh").addEventListener("click", function () { CW.busy(this, function () { return load().catch(function (error) { failed(error, "load original withdrawals"); }); }); });
+    document.addEventListener("lightwork:copilot-context-changed", function () {
+      // Selection alone is not a new account; verify instead of discarding work.
+      var started = generation;
+      request("", {method: "GET"}).then(function (value) { check(value, started); }).catch(function (error) { failed(error, "verify current banner access"); });
+    });
+    window.addEventListener("lightwork:context-changed", clear);
+    window.addEventListener("lightwork:draft-context-changed", clear);
+    window.LightworkConsentWithdrawal = {review: review};
+    load().then(function (ok) { if (ok && select.value) return read(); }).catch(function (error) { failed(error, "load original withdrawals"); });
+    // Only an opaque operation reference survives a missing reply or reload.
+    window.addEventListener("pagehide", function () {
+      if (requested && context && !ended) {
+        try { window.sessionStorage.setItem("lightwork-banner-withdrawal:" + context, requested); } catch (_error) { /* Native history remains available. */ }
+      }
+    });
+  }
 
   // ---- Signing key: shown by fingerprint only; the private key never leaves the server.
   function startSigning() {
@@ -133,7 +246,7 @@
     }
     function checks(name, options, chosen) {
       var box = CW.el("div", "cw-checks");
-      if (!options.length) box.appendChild(CW.el("span", "muted", "Nothing saved yet."));
+      if (!options.length) box.appendChild(CW.el("span", "muted", "Nothing saved yet. Save a choice above to use it here."));
       options.forEach(function (o) {
         var l = CW.el("label"), c = input(name, "checkbox", (chosen || []).indexOf(o.value) >= 0);
         c.value = o.value; l.append(c, " " + o.label); box.appendChild(l);
@@ -197,13 +310,13 @@
           { label: "Type", value: function (p) { return p.kind === "mobile" ? "Mobile app" : "Website"; } },
           { label: "Addresses", value: function (p) { return (p.kind === "mobile" ? p.mobile_bundle_ids : p.web_domains).join(", "); } },
           { label: "Consent group", value: function (p) { return CW.human(p.consent_group_id); } },
-          { label: "Published", value: function (p) { return p.publication_revision ? CW.badge("Yes", "ok") : CW.badge("Not yet", "idle"); } },
+          { label: "Published", value: function (p) { return p.publication_action === "withdraw" ? CW.badge("Withdrawn", "idle") : p.publication_revision ? CW.badge("Yes", "ok") : CW.badge("Not yet", "idle"); } },
         ],
         actions: [
           { label: "Preview and publish", run: function (p) { openPromotion(p); } },
           { label: "History", when: function (p) { return p.publication_revision > 0; }, run: function (p) { openHistory(p); } },
           { label: "Edit", when: function () { return canAdmin; }, run: function (p) { editProperty(p); } },
-          { label: "Withdraw", kind: "danger", when: function (p) { return canAdmin && p.publication_revision > 0; }, run: function (p, b) { withdraw(p, b); } },
+          { label: "Withdraw", kind: "danger", when: function (p) { return canAdmin && p.publication_revision > 0 && p.publication_action !== "withdraw"; }, run: function (p, b) { withdraw(p, b); } },
         ],
         empty: { title: "No websites or apps yet.", body: "Add the website or app where your consent banner should appear.", action: canAdmin ? { label: "Add a website or app", run: function () { editProperty(null); } } : null },
       });
@@ -347,7 +460,7 @@
             { label: "Live now", value: function (h) { return h === head && h.action !== "withdraw" ? CW.badge("Live", "ok") : ""; } },
           ],
           actions: [{ label: "Restore this version", when: function (h) { return canAdmin && h !== head && h.action !== "withdraw"; }, run: function (h, b) { restore(p, h, b); } }],
-          empty: { title: "Nothing has been published here yet." },
+          empty: { title: "Nothing has been published here yet.", body: "Publish a reviewed version above to put it live." },
         });
       } catch (error) { CW.fail(status, error, "load the publishing history"); }
     }
@@ -366,12 +479,12 @@
     }
     function withdraw(p, button) {
       CW.busy(button, async function () {
-        if (!(await CW.confirm("Stop showing the banner on " + CW.human(p.property_id) + "? Visitors will no longer see it. The publishing history is kept and you can restore it later.", "Withdraw"))) return;
         try {
-          await call("/properties/" + encodeURIComponent(p.property_id) + "/withdraw", { method: "POST", json: {
-            expected_property_revision: p.revision, expected_publication_revision: p.publication_revision, idempotency_key: CW.reference() } });
-          await loadProperties(); CW.say(status, "The banner no longer shows on " + CW.human(p.property_id) + ".");
-        } catch (error) { CW.fail(status, error, "withdraw the banner"); }
+          if (!window.LightworkConsentWithdrawal) throw new Error("The protected banner review is unavailable. Reload this page.");
+          await window.LightworkConsentWithdrawal.review(p.property_id, loadProperties);
+        } catch (error) {
+          CW.fail(status, error, "review the banner withdrawal");
+        }
       });
     }
 

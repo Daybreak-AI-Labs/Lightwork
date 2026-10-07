@@ -93,6 +93,14 @@ def excluded(goal_id) -> bool:
         return True
 
 
+def restriction_state(goal_id) -> str:
+    """Describe the effective gate without mistaking an unreadable ledger for a receipt."""
+    try:
+        return "excluded" if _directly_excluded(goal_id) or _excluded_ancestor(goal_id) else "permitted"
+    except Exception:
+        return "unavailable"
+
+
 def evidence(goal_id, *, pilot_id, plan_version, input_version):
     """Read a matching policy receipt without claiming prior/external exposure."""
     try:

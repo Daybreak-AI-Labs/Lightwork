@@ -26,8 +26,10 @@ type = "desktop"       # desktop | docker | vps | phone
 #               code/weights promotions, WORM audit export, long retention
 # A label for humans + dashboards: the wizard expands it into the concrete
 # knobs ([audit], [quotas], [self_improvement], [retention], ...) below, so
-# hand-edits keep working. Re-run `maverick init` to switch levels (the wizard
-# defaults to your previously recorded level). The advanced wizard writes
+# hand-edits keep working. A later `maverick init` protects saved settings and
+# will not switch levels. Review supported changes in Lightwork Settings;
+# advanced deployment-managed changes require an installation administrator.
+# The advanced first-run wizard writes
 # "custom": the operator hand-picked every knob, no preset applies.
 profile = "essentials"   # essentials | standard | regulated | custom
 
@@ -98,7 +100,8 @@ skill_distiller = "anthropic:claude-sonnet-4-6"
 # default       = "anthropic:claude-sonnet-4-6"
 
 [budget]
-# Omitted task limits stay unset. These examples are explicit opt-in limits.
+# New installs save $2 / 1800 seconds; existing configs with omitted limits
+# retain their prior no-limit behavior. These are explicit override examples.
 task_limits_enabled = true
 # max_dollars       = 25.0
 # max_wall_seconds  = 3600
@@ -117,10 +120,35 @@ scan_output     = true
 # (pay, delete, deploy, passwords, all customers, production ...) before it
 # starts. When set, tasks at or above this level wait on the dashboard's
 # Approvals page until a person approves them, and do not start if nobody
-# does within MAVERICK_CONSENT_DASHBOARD_TIMEOUT (300 s). It reads only the
+# does within [approval] dashboard_wait_seconds (1800 s). It reads only the
 # words: every action is still checked on its own once the task runs.
 # goal_risk_require_human = "high"   # never (default) | high | medium
 # goal_risk_floor         = "low"    # low (default) | medium | high
+
+[approval]
+# The Approvals page. A risky step waits this long for a decision (30
+# minutes; MAVERICK_CONSENT_DASHBOARD_TIMEOUT wins); after 10 minutes the
+# people who can decide get one in-app reminder, and with no decision in
+# time the step is refused. A request's card stays approvable for the wait,
+# at most an hour.
+dashboard_wait_seconds  = 1800
+# A decision can be undone for this long; the agent
+# only acts on an approval once the window has passed (0 = act at once,
+# no Undo). High and critical risk approvals need an explicit confirmation
+# (a ticked box; typing APPROVE for critical) unless switched off.
+undo_grace_seconds      = 30
+require_acknowledgement = true
+# Who approves a high or critical risk action someone asked for:
+# "when_available" (default) = someone else whenever another approver could
+# decide it, else the requester (recorded as a self-approval); "always" =
+# always someone else; "never" = the requester may approve it.
+separate_approver       = "when_available"
+# One row per approval check: when, workspace, risk, kind of action, agent or
+# specialist, and whether it was allowed, sent to a person or refused. Never
+# the content, arguments or command. For previewing a threshold change later;
+# rows older than check_retention_days are pruned a few hundred at a time.
+record_checks           = true
+check_retention_days    = 90
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
@@ -187,6 +215,35 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # upgrade restyles on the next page load without a hard refresh.
 # compress = true
 
+# Glass effects for everyone: "off" (the default) keeps panels, rows, controls
+# and dialogs solid, so clicks and typing repaint quickly; "on" brings back the
+# see-through, blurred look until people choose their own in Display
+# preferences (on this device or on their account). The top bar and sidebar
+# stay translucent either way. Settings > All settings and the setup wizard's
+# advanced step set it too.
+# glass = "off"
+
+# The sidebar: "classic" (the default) keeps today's groups; "areas" puts
+# every page in one of nine job-named areas (Home, Work, Agents, Rules &
+# safety, Privacy, Risk & compliance, Evidence & audit, Costs & value,
+# Settings) with local tabs and an "Area › Section" breadcrumb, and starts
+# each role from its own layout. Who may open a page never changes. In areas
+# mode merged pages' old addresses forward to their new homes, each still
+# checked as the old page was: /today, /me and /overview to Home's views,
+# /action-center to Approvals' "All decisions", /my-work to Tasks with
+# background work, /project-workspaces to Projects (one project's to its Plan
+# tab), /goal-builder to Chat's form, /run-tree and /walkthroughs to Task
+# replay's Branches and Video tabs, /plan-tree-3d to the task map's 3D view,
+# /trust, /discovery, /autonomous-compliance and /cortex to tabs of Outside
+# agents, Permissions, Compliance and Knowledge access, and /flows/designer to
+# the workflow builder's Steps mode. Anyone the new address would not admit,
+# and classic mode, keeps the old address. Run the tree test in
+# docs/research/tree-test/ before switching everyone.
+# navigation_personal = true lets each person choose for themselves in Your
+# preferences. Settings > All settings and the setup wizard set both.
+# navigation = "classic"
+# navigation_personal = false
+
 # Department (suite) access for authenticated users with NO explicit grant on
 # the Users page (job-function scoping: a finance analyst sees and runs only
 # Finance specialists). Unset = unrestricted — scoping is opt-in per user.
@@ -215,6 +272,15 @@ enforce           = false                 # or MAVERICK_LICENSE_ENFORCE=1
 # api_url           = "https://api.example/license"   # optional connected refresh
 # api_token         = "${MAVERICK_LICENSE_API_TOKEN}"
 # refresh_interval_seconds = 60
+
+[rehearsal]
+# Predict outcomes for high-impact actions. Predictions are observed by default;
+# they do not stop tool calls or replace Shield, capability, or consent checks.
+# The observation switch and mode are also available under Settings > Safety.
+enable = true
+mode = "observe"       # observe (default) | hold (experimental)
+# "hold" can refuse unfamiliar or poor predicted actions and has no in-product
+# approval path. Do not use it as a customer approval workflow.
 
 [flows]
 # The visual flow-automation engine (a deterministic graph of agent/action/
@@ -470,7 +536,17 @@ risk_limited = true              # require >=8 held-out
 # MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY=1 requests confirmatory
 # custody and currently fails closed on local/Windows deployments because the
 # controller account also administers the ledger and Docker daemon.
-auto_run = true                  # run the fleet cycle as part of `maverick dream`
+auto_run = true                  # run the fleet cycle on the dashboard's overnight
+#                                schedule, or as part of `maverick dream`.
+#                                Learning shows the last review receipt. The
+#                                dashboard starts this schedule even if dreaming
+#                                is off; UI changes apply without a restart.
+#                                One evaluation allowance is shared across the
+#                                fleet and an eligible transfer sweep. Reviews
+#                                remain inspection-only without evaluation cases
+#                                or authority for additional model calls. The
+#                                careful profile holds changes back without the
+#                                exact deployed prompt and independent checks.
 #   promote_as_canary = true     stage every promotion on probation
 #   relapse_failure_share = 0.5  re-probate a line whose recent outcomes turn bad
 #   metamorphic = true           reject lines overfit to exact goal wording
@@ -493,10 +569,11 @@ allow_mcp_acquisition = false # starting third-party MCP remains a separate opt-
 allow_provider_egress = false # extra learning-only model calls may cross providers
 preflight = true           # default uses a local redacted catalog match; the
                            # LLM needs-analysis call requires provider egress above
-distill_local = true
+distill_local = true       # stages a suggestion; review and add it from Skills
 auto_distill = false       # a model writes a recallable skill straight from each
                            #   finished run (untrusted run text: keep off unless
                            #   reviewed). MAVERICK_AUTO_DISTILL, when set, decides.
+                           #   Existing saved and built-in skills are never replaced.
 provision_packs = true     # equip a freshly-approved pack with the skills + tools
                            #   its workflow needs at creation time (capability
                            #   provisioning at pack-birth). Default on once
@@ -784,6 +861,10 @@ weaviate_grpc_port = 50051    # MAVERICK_WEAVIATE_GRPC_PORT (443 for a standard 
 weaviate_vectorizer = ""      # MAVERICK_WEAVIATE_VECTORIZER (default text2vec-transformers)
 
 [tools]
+exposure = "core"             # MAVERICK_TOOL_EXPOSURE: "core" describes a short role-aware tool list on each
+                              # request (a specialist pack sees its own allow_tools) and agents look the rest
+                              # up with find_tools; "full" offers more up front, up to the model's tool limit
+core_extra = []               # tool names always described as well as the short list
 speculative = false           # MAVERICK_SPECULATIVE_TOOLS: read ahead for repeated look-ups (needs output_cache)
 openapi_spec_max_bytes = 10000000   # MAVERICK_OPENAPI_SPEC_MAX_BYTES (read at startup)
 openapi_call_max_bytes = 1000000    # MAVERICK_OPENAPI_CALL_MAX_BYTES (read at startup)
@@ -791,7 +872,7 @@ openapi_call_max_bytes = 1000000    # MAVERICK_OPENAPI_CALL_MAX_BYTES (read at s
 [models]
 embed = ""                    # MAVERICK_EMBED_MODEL (default BAAI/bge-small-en-v1.5)
 clap = ""                     # MAVERICK_CLAP_MODEL (default laion/clap-htsat-unfused)
-openai_max_tools = 128        # MAVERICK_OPENAI_MAX_TOOLS (read at startup)
+openai_max_tools = 128        # MAVERICK_OPENAI_MAX_TOOLS (read at startup); overflow remains discoverable through find_tools
 
 [energy]                      # used by the energy_accounting tool's estimates
 wh_per_1k_tokens = 0.3        # MAVERICK_ENERGY_WH_PER_1K_TOKENS
@@ -836,8 +917,29 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 # dollars = 2.0                # review checkpoint
 # tool_calls = 25
 
+[agent_factory]
+jd_hiring = true              # Agent Factory: draft or match agents from a job description
+require_passing_tests = true  # changed instructions publish only after every saved test passes (or with a recorded reason)
+
+[autonomy]
+confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork
+
+[practice]
+enable = true                 # offer practice mode: a separate practice workspace where nothing is sent, paid or changed
+daily_spend_cap = 1.0         # dollars per person per day for AI in practice: real provider cost, counted apart
+                              # from real spending limits and never above one that applies
+
 [analytics]
 task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)
+usability_survey = false      # optional ease-of-use survey (SUS + one question after top tasks); answers stay local
+web_vitals = false            # optional page speed for real visitors (LCP, INP, CLS, p75 per page); counts stay local
+web_vitals_sample_rate = 0.5  # share of visits measured when web_vitals is on (0 to 1)
+usage_measures = false        # optional name-free counts: first result in the first session, AI suggestions used or dismissed
+
+[collaboration]
+comments = true               # comments and @mentions on tasks, runs, approvals and policies; mentions reach personal notifications
+suggestions = true            # agents and colleagues suggest edits to AI use rules, data use rules and privacy notices; accepting creates a draft that keeps its own approval
+ai_suggestions = true         # the AI assistant drafts a suggested edit when a person asks (within the per-task spending cap)
 
 [env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered
 enable = true
@@ -905,7 +1007,15 @@ workspace_dollars = 500.0       # 0 or unset = no workspace limit
 workspace_period = "month"      # "day" or "month"
 default_user_dollars = 50.0     # 0 or unset = no limit for each person
 default_user_period = "month"   # "task", "day" or "month"
+typical_cost_min_runs = 10      # finished tasks needed before a typical cost shows
 ```
+
+Beside the task form on **Teams** and in a specialist's or agent's **Check
+access** panel, Lightwork shows what that agent's or specialist's past runs
+usually cost: the middle half (25th to 75th percentile) and the median of its
+most recent finished tasks in this workspace. It is recorded history, never a
+prediction. With fewer finished tasks than `typical_cost_min_runs` (2 to 1000,
+default 10) it says there are not enough past runs yet.
 
 Spend is counted from the usage ledger plus runs still going in the dashboard
 process. Runs in separate worker processes are counted once they settle, so

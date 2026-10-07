@@ -22,7 +22,7 @@ import contextvars
 import dataclasses
 import hashlib
 import logging
-import os
+import shutil
 import tempfile
 import threading
 import time
@@ -36,7 +36,7 @@ from pydantic import BaseModel, ConfigDict
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_permission
+from .auth import caller_principal, execution_user_id_from_request, require_permission
 from .tools_ops_api import record, same_origin
 
 log = logging.getLogger(__name__)
@@ -92,17 +92,15 @@ def _export(name: str) -> str:
     work = Path(tempfile.mkdtemp(prefix="lw-export-"))
     try:
         copy = vault.export(name, work / "copy" / name)
-        fd, out = tempfile.mkstemp(prefix="lw-export-", suffix=".zip")
-        os.close(fd)
-        try:
-            _zip_tree(copy, Path(out))
-        except BaseException:
-            Path(out).unlink(missing_ok=True)
-            raise
-        return out
-    finally:
-        import shutil
+        # Windows installations can create a private temporary directory but
+        # refuse a second open of a file created directly in the temp root.
+        # Keep the archive in that private directory until FileResponse ends.
+        out = work / "copy.zip"
+        _zip_tree(copy, out)
+        return str(out)
+    except BaseException:
         shutil.rmtree(work, ignore_errors=True)
+        raise
 
 
 @router.post("/repos/{name}/export")
@@ -120,7 +118,7 @@ async def export_repo(name: str, body: ConfirmIn, request: Request) -> FileRespo
     except Exception as exc:  # noqa: BLE001 -- vault errors can carry paths
         raise HTTPException(502, "Lightwork could not make a copy of this code project.") from exc
     return FileResponse(out, media_type="application/zip", filename=f"{name}-copy.zip",
-                        background=BackgroundTask(lambda: Path(out).unlink(missing_ok=True)),
+                        background=BackgroundTask(lambda: shutil.rmtree(Path(out).parent, ignore_errors=True)),
                         headers={"Cache-Control": "no-store"})
 
 
@@ -282,9 +280,13 @@ async def watch_note_start(name: str, note_id: str, body: ConfirmIn, request: Re
     if await run_in_threadpool(_provider_missing):
         raise HTTPException(503, "Set up an AI provider in Settings before asking Lightwork to "
                                  "work on a note.")
+    owner = caller_principal(request) or ""
+    user_id = execution_user_id_from_request(request)
+    if owner and owner != f"user:{user_id}":
+        raise HTTPException(403, "A current named execution identity is required.")
     record(request, "code_watch_note_start", installation=False, repo=name, note=note_id,
            protect=repo.protect)
-    bg.add_task(_run_feature, name, note["title"], note["task"], None)
+    bg.add_task(_run_feature, name, note["title"], note["task"], None, owner, user_id)
     return {"started": True, "repo": name, "protect": repo.protect}
 
 

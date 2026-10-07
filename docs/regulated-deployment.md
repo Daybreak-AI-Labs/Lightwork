@@ -17,7 +17,7 @@ With the profile below, every load-bearing control is fail-closed at once:
 | **Application egress lock** | Governed LLM calls are pinned to local / self-hosted models (`ollama` / `vllm` / `tgi`, or an allow-listed endpoint). A cloud-routed call raises `EgressBlocked` **before any prompt is sent**; supported Python HTTP clients are checked per request. | GDPR Art. 32 / AI Act Art. 15 |
 | **Encryption at rest** | AES-256-GCM seals the memory store and the world-DB content (turns, facts, messages, questions). | GDPR Art. 32 |
 | **Tamper-evident audit** | Every event is Ed25519 hash-chained, so a forged or deleted log line is detectable. | EU AI Act Art. 12 |
-| **Human oversight** | Destructive-action consent defaults to `ask` — and therefore *deny* in non-interactive contexts — instead of auto-approve. | EU AI Act Art. 14 |
+| **Human oversight** | Destructive-action consent defaults to `ask` instead of auto-approve: a task someone started in Lightwork's chat waits for a person on the Approvals page and is refused if nobody decides in time; other non-interactive runs are *denied*. | EU AI Act Art. 14 |
 | **Storage limitation** | Retention windows expire audit, episode, and event data on a schedule. | GDPR Art. 5(1)(e) |
 | **Isolated execution** | Agent-generated shell runs in a container (docker → podman), never `shell=True` on the host; if no container runtime exists it fails closed. Plugin tool calls can be isolation-proxied and plugin distributions can be content-hash-checked after a lockfile is generated, but plugin import/discovery code still runs in-process; install only trusted plugins. | EU AI Act Art. 15 (robustness / cybersecurity) |
 

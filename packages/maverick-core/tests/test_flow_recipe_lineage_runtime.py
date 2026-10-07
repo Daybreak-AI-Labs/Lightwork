@@ -152,8 +152,32 @@ def test_raw_operator_assertion_still_runs_when_policy_explicitly_allows(setup):
     flow, settings, receipts, checks, calls, run = setup
     flow.recipe_lineage = None
     settings["require_action_recipe_lineage"] = False
+    settings["action_recipe_lineage"] = False
     assert run().status == "completed" and len(calls) == 2 and checks == []
     assert all("recipe_lineage" not in row for row in receipts)
+
+
+@pytest.mark.parametrize("capture,lineage,required,blocked", [
+    (True, False, False, True),
+    (False, True, False, True),
+    (True, True, False, True),
+    (False, False, True, True),
+    (False, False, False, False),
+])
+def test_customer_learning_flags_require_signed_lineage_even_when_explicit_toggle_is_off(
+    setup, capture, lineage, required, blocked,
+):
+    flow, settings, _, checks, calls, run = setup
+    flow.recipe_lineage = None
+    settings.update(action_episode_capture=capture, action_recipe_lineage=lineage,
+                    require_action_recipe_lineage=required)
+    if blocked:
+        with pytest.raises(ValueError, match="admitted signed evidence"):
+            recipe_flow.check_persisted_lineage(flow)
+        assert run().status == "failed" and calls == checks == []
+    else:
+        recipe_flow.check_persisted_lineage(flow)
+        assert run().status == "completed" and len(calls) == 2
 
 
 @pytest.mark.parametrize("container", ["root", "scope", "subflow"])

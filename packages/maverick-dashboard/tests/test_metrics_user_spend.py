@@ -18,13 +18,13 @@ def _isolated(tmp_path, monkeypatch):
     yield
 
 
-def test_per_user_spend_gauge_present_for_admin_or_single_user():
+def test_installation_credential_does_not_enumerate_named_employee_spend():
     from maverick.quotas import UsageLedger
     UsageLedger().record("user:alice", 3.25, 100, 50)
 
     text = client.get("/metrics").text
-    assert "# HELP maverick_user_spend_dollars_today" in text
-    assert 'maverick_user_spend_dollars_today{principal="user:alice"} 3.2500' in text
+    assert "maverick_user_spend_dollars_today" not in text
+    assert "user:alice" not in text
 
 
 def test_per_user_spend_gauge_hidden_from_non_admin(monkeypatch):

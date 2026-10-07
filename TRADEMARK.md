@@ -4,7 +4,8 @@
 trademarks of Christopher Day / Day AI Labs (the "Licensor"). All rights
 reserved.
 
-The Marks are **not** licensed under the software [`LICENSE`](./LICENSE).
+The Marks are **not** licensed under the software
+[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/).
 Receiving or viewing any Lightwork software grants no right to use the Marks.
 
 Without the Licensor's prior written permission, you may not:
@@ -19,4 +20,4 @@ Nominative/referential use (e.g., a factual "compatible with Lightwork" or a
 reference in an article) is permitted where it does not imply endorsement.
 
 For permission to use the Marks, contact the Licensor:
-https://github.com/Daybreak-AI-Labs/Lightwork
+chris@daybreakailabs.com

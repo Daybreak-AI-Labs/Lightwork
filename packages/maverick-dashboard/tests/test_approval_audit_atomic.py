@@ -5,6 +5,7 @@ import contextlib
 import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -109,6 +110,7 @@ def test_audit_refusal_keeps_final_decision_non_effective_and_retry_is_safe(
     monkeypatch.setattr(audit, "record", refuse)
     first = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers=headers,
     )
 
@@ -138,6 +140,7 @@ def test_audit_refusal_keeps_final_decision_non_effective_and_retry_is_safe(
     monkeypatch.setattr(audit, "record", accept)
     retry = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers=headers,
     )
 
@@ -215,6 +218,7 @@ def test_later_quorum_vote_repairs_older_audit_event_before_becoming_effective(
     monkeypatch.setattr(audit, "record", record)
     first = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers=headers,
     )
     assert first.status_code == 202
@@ -224,6 +228,7 @@ def test_later_quorum_vote_repairs_older_audit_event_before_becoming_effective(
     monkeypatch.setattr(api, "_supervisor", lambda _request: "u:bob")
     second = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers=headers,
     )
 
@@ -264,6 +269,7 @@ def test_lost_commit_ack_is_reconciled_from_outbox_before_response(
     monkeypatch.setattr(world, "_writing", uncertain_commit)
     response = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers=headers,
     )
 
@@ -296,6 +302,7 @@ def test_postcommit_state_read_failure_does_not_turn_success_into_retry(
     )
     response = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
+        json={"acknowledged": True, "confirmation": "approve"},
         headers=headers,
     )
 
@@ -308,6 +315,13 @@ def test_unreconcilable_commit_outcome_is_explicit_and_retry_keyed():
     from maverick_dashboard import api
 
     class UnavailableWorld:
+        @staticmethod
+        def get_approval(approval_id):
+            # The request someone else asked for: the separate-approver check
+            # before the vote has nothing to refuse.
+            return SimpleNamespace(id=approval_id, status="pending", risk="high",
+                                   approvals_required=1, requested_by="u:bob")
+
         @staticmethod
         def approval_audit_event_id(*_args):
             return "approval-v1-stable"

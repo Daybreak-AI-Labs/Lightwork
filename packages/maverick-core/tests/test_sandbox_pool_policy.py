@@ -312,32 +312,30 @@ def test_actual_runner_keeps_fresh_lifecycle_and_does_not_claim_pool_savings(tmp
         closed.append(sandbox)
         original_close(sandbox)
 
-    class World:
-        def __init__(self):
-            self.goals = {}
-
-        def get_goal(self, goal_id):
-            return self.goals.setdefault(
-                goal_id, SimpleNamespace(id=goal_id, status="pending", execution_principal="user:alice"),
-            )
+    database = tmp_path / "world.db"
+    seeded = world_model.WorldModel(database)
+    goals = [seeded.create_goal(f"Synthetic goal {index}", owner="user:alice",
+                               execution_principal="user:alice") for index in range(2)]
+    seeded.close()
 
     def execute(_llm, world, _budget, goal_id, **kwargs):
         sandbox = kwargs["sandbox"]
         built.append(sandbox)
         assert sandbox.exec("synthetic task").ok
-        world.get_goal(goal_id).status = "done"
+        world.set_goal_status(goal_id, "done")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(world_model, "open_world", World)
-    monkeypatch.setattr(world_model, "close_world_if_owned", lambda world: None)
+    # Exercise the real transactional authority/lineage read before setup.
+    monkeypatch.setattr(world_model, "open_world", lambda: world_model.WorldModel(database))
+    monkeypatch.setattr(world_model, "close_world_if_owned", lambda world: world.close())
     monkeypatch.setattr(llm, "LLM", object)
     monkeypatch.setattr(budget, "budget_from_config", lambda **kw: budget.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", execute)
     monkeypatch.setattr(trace_pin, "pin_trace", lambda *a: None)
     monkeypatch.setattr(DockerBackend, "close", close)
     monkeypatch.setattr(pool, "park_at_run_end", lambda sandbox: pytest.fail("unqualified parking enabled"))
-    assert runner.run_goal_in_thread(1, user_id="alice") == "done"
-    assert runner.run_goal_in_thread(2, user_id="alice") == "done"
+    assert runner.run_goal_in_thread(goals[0], user_id="alice") == "done"
+    assert runner.run_goal_in_thread(goals[1], user_id="alice") == "done"
     assert built[0] is not built[1]
     assert [id(sandbox) for sandbox in closed] == [id(sandbox) for sandbox in built]
     assert len(pool.shared_pool()) == 0
@@ -348,7 +346,6 @@ def test_actual_runner_keeps_fresh_lifecycle_and_does_not_claim_pool_savings(tmp
 
 @pytest.mark.parametrize("reported", ["sha256:" + "a" * 64, "b" * 64])
 def test_both_engine_image_id_forms_pin_the_image(monkeypatch, reported):
-    from types import SimpleNamespace
     monkeypatch.setattr(pool.subprocess, "run",
                         lambda *a, **k: SimpleNamespace(returncode=0, stdout=reported + "\n"))
     assert pool._image_digest("podman", "python:3.12") == reported

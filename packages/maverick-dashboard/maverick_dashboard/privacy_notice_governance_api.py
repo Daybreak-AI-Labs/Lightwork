@@ -9,6 +9,8 @@ this adapter performs no provider I/O, SDK deployment, or site mutation.
 from __future__ import annotations
 
 import hashlib
+import sqlite3
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, Literal
@@ -112,6 +114,7 @@ class ApprovalPolicyIn(_StrictModel):
 
 
 class ReleaseCreateIn(_StrictModel):
+    expected_context: Digest | None = None
     property_id: OpaqueId
     jurisdictions: list[Jurisdiction] = Field(min_length=1, max_length=64)
     locales: list[Locale] = Field(min_length=1, max_length=64)
@@ -308,7 +311,13 @@ def _default_store_for(tenant_id: str, principal_ref: str):
             tenant=tenant_id,
         ),
         principal_resolver=lambda: principal_ref,
+        regulatory_reference_resolver=_approved_regulatory_reference,
     )
+
+
+def _approved_regulatory_reference(tenant, document, source, evidence):
+    from .privacy_notice_proposals import reference_allowed
+    return reference_allowed(tenant, document, source, evidence)
 
 
 class PrivacyNoticeGovernanceDependencies:
@@ -322,6 +331,110 @@ class PrivacyNoticeGovernanceDependencies:
         self.store_for = store_for
 
 
+
+def authority(request: Request, *, store_for=_default_store_for):
+    notice = _notice()
+    tenant = _tenant_id()
+    principal = _principal(request, tenant)
+    factory = getattr(
+        request.app.state,
+        "privacy_notice_governance_store_factory",
+        None,
+    )
+
+    def resolver() -> str:
+        return principal
+
+    try:
+        store = (
+            factory(
+                tenant_id=tenant,
+                principal_ref=principal,
+                principal_resolver=resolver,
+                request=request,
+            )
+            if callable(factory)
+            else store_for(tenant, principal)
+        )
+    except (notice.PrivacyNoticeGovernanceError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy-notice governance store is unavailable",
+        ) from exc
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy-notice governance store is unavailable",
+        )
+    return notice, tenant, store
+
+
+def _fresh_decision_access(request: Request) -> None:
+    from . import auth, session_revocation
+
+    require_global_permission(request, "admin")
+    auth.require_api_key_scope(request, "approvals:decide")
+    principal = getattr(request.state, "principal", None)
+    claims = getattr(principal, "claims", None) or {}
+    via = claims.get("via")
+    fresh = principal
+    if via in {"session", "invite", "proxy"}:
+        fresh = (auth._session_principal(request) if via == "session" else
+                 auth._invite_session_principal(request) if via == "invite" else
+                 auth._proxy_principal(request))
+    expiry = claims.get("exp")
+    if (fresh is None or getattr(fresh, "principal", None) != auth.caller_principal(request)
+            or (expiry is not None and (type(expiry) not in {int, float}
+                or not time.time() < expiry < float("inf")))):
+        raise HTTPException(401, "Sign in again before reviewing this notice.")
+    subject = getattr(principal, "sub", None)
+    if subject is not None:
+        if (via not in {"session", "invite", "proxy", "api_key"}
+                and session_revocation.is_revoked(subject, claims.get("iat"))):
+            raise HTTPException(401, "Sign in again before reviewing this notice.")
+        auth._enforce_scim_active(fresh)
+        auth._enforce_workspace_policies(request, fresh)
+
+
+def _decision_guard(request: Request) -> Callable[[], None]:
+    from . import auth, workspace_tenants
+    from .draft_api import context_for
+
+    with auth.fresh_configuration():
+        _fresh_decision_access(request)
+        actor, tenant, context = auth.caller_principal(request), _tenant_id(), context_for(request)
+        selection = (workspace_tenants.get_selection_binding(actor)
+                     if getattr(request.state, "workspace_tenant_source", None) == "principal_selection" else None)
+
+    def guard():
+        with auth.fresh_configuration():
+            _fresh_decision_access(request)
+            if (auth.caller_principal(request) != actor or _tenant_id() != tenant
+                    or context_for(request) != context or (selection is not None
+                        and workspace_tenants.get_selection_binding(actor) != selection)):
+                raise HTTPException(409, "Your account or workspace changed. Reopen the current notice before reviewing it.")
+
+    return guard
+
+
+async def _guarded_decision(notice, function, *args, call, guard, **kwargs):
+    from maverick.authority_effects import authority_effect_fence
+
+    def decide():
+        with authority_effect_fence():
+            guard()
+            return function(*args, effect_guard=guard, **kwargs)
+
+    try:
+        return await call(notice, decide)
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        raise HTTPException(503, "This decision could not be confirmed. It may already be saved. Read the current notice before deciding again.") from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(503, "This decision could not be confirmed. It may already be saved. Read the current notice before deciding again.") from exc
+
+
 def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
     dependencies: PrivacyNoticeGovernanceDependencies | None = None,
 ) -> APIRouter:
@@ -332,41 +445,8 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         route_class=_GenericValidationRoute,
     )
 
-    def authority(request: Request):
-        notice = _notice()
-        tenant = _tenant_id()
-        principal = _principal(request, tenant)
-        factory = getattr(
-            request.app.state,
-            "privacy_notice_governance_store_factory",
-            None,
-        )
-
-        def resolver() -> str:
-            return principal
-
-        try:
-            store = (
-                factory(
-                    tenant_id=tenant,
-                    principal_ref=principal,
-                    principal_resolver=resolver,
-                    request=request,
-                )
-                if callable(factory)
-                else deps.store_for(tenant, principal)
-            )
-        except (notice.PrivacyNoticeGovernanceError, OSError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="privacy-notice governance store is unavailable",
-            ) from exc
-        if store is None:
-            raise HTTPException(
-                status_code=503,
-                detail="privacy-notice governance store is unavailable",
-            )
-        return notice, tenant, store
+    def route_authority(request: Request):
+        return authority(request, store_for=deps.store_for)
 
     async def call(notice, function, *args, **kwargs):
         try:
@@ -553,7 +633,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         signed records and the publication queue size, for the page lists."""
 
         require_permission(request, "view")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         listed = await call(notice, store.list_records, tenant)
         return {
             "policies": [
@@ -627,7 +707,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         """Signed metadata record for one notice with the deployment key."""
 
         require_permission(request, "operate")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         export_id = "record-" + hashlib.sha256(
             f"{notice_id}:{body.idempotency_key}".encode()
         ).hexdigest()[:24]
@@ -651,7 +731,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: ApprovalPolicyIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -665,7 +745,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
     @router.get("/approval-policies/{policy_id}")
     async def get_approval_policy(request: Request, policy_id: ObjectPath):
         require_permission(request, "view")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(await call(notice, store.get_approval_policy, tenant, policy_id))
 
     @router.put("/releases/{notice_id}/versions")
@@ -675,16 +755,11 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: ReleaseCreateIn,
     ):
         require_permission(request, "operate")
-        notice, tenant, store = authority(request)
-        return _without_lease(
-            await call(
-                notice,
-                store.create_release,
-                tenant,
-                notice_id,
-                **body.model_dump(),
-            )
-        )
+        notice, tenant, store = route_authority(request)
+        if body.update_proposal_ref is not None or body.expected_context is not None:
+            from .privacy_notice_proposals import create_version
+            return _without_lease(await call(notice, create_version, request, store, tenant, notice_id, body.model_dump()))
+        return _without_lease(await call(notice, store.create_release, tenant, notice_id, **body.model_dump(exclude={"expected_context"})))
 
     @router.get("/releases/{notice_id}/versions/{version}")
     async def get_release(
@@ -693,7 +768,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         version: VersionPath,
     ):
         require_permission(request, "view")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(await call(notice, store.get_release, tenant, notice_id, version))
 
     @router.post("/releases/{notice_id}/versions/{version}/submit")
@@ -704,7 +779,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: RevisionIn,
     ):
         require_permission(request, "operate")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -723,15 +798,16 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         version: VersionPath,
         body: ApprovalIn,
     ):
-        require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        guard = _decision_guard(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
-            await call(
+            await _guarded_decision(
                 notice,
                 store.approve_release,
                 tenant,
                 notice_id,
                 version,
+                call=call, guard=guard,
                 **body.model_dump(),
             )
         )
@@ -744,16 +820,17 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         role: ApprovalRole,
         body: ApprovalRevocationIn,
     ):
-        require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        guard = _decision_guard(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
-            await call(
+            await _guarded_decision(
                 notice,
                 store.revoke_approval,
                 tenant,
                 notice_id,
                 version,
                 role=role,
+                call=call, guard=guard,
                 **body.model_dump(),
             )
         )
@@ -766,7 +843,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: ScheduleIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -784,7 +861,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: ClaimPublicationIntentsIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         items = await call(
             notice,
             store.claim_publication_intents,
@@ -800,7 +877,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: FailPublicationIntentIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -818,7 +895,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: RevisionIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -836,7 +913,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: AcknowledgePublicationIntentIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -855,7 +932,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: RollbackIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -875,7 +952,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: WithdrawIn,
     ):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -896,7 +973,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         at: float | None = Query(default=None, gt=0, lt=100_000_000_000.0),
     ):
         require_permission(request, "view")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -916,25 +993,28 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: UpdateProposalIn,
     ):
         require_permission(request, "operate")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         payload = body.model_dump()
         payload["regulatory_citations"] = [
             citation.model_dump() for citation in body.regulatory_citations
         ]
+        from .privacy_notice_proposals import legacy_proposal
         return _without_lease(
             await call(
                 notice,
-                store.create_update_proposal,
+                legacy_proposal,
+                request,
+                store,
                 tenant,
                 proposal_id,
-                **payload,
+                payload,
             )
         )
 
     @router.get("/update-proposals/{proposal_id}")
     async def get_update_proposal(request: Request, proposal_id: ObjectPath):
         require_permission(request, "view")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(await call(notice, store.get_update_proposal, tenant, proposal_id))
 
     @router.post("/update-proposals/{proposal_id}/review")
@@ -943,14 +1023,15 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         proposal_id: ObjectPath,
         body: UpdateProposalReviewIn,
     ):
-        require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        guard = _decision_guard(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
-            await call(
+            await _guarded_decision(
                 notice,
                 store.review_update_proposal,
                 tenant,
                 proposal_id,
+                call=call, guard=guard,
                 **body.model_dump(),
             )
         )
@@ -963,7 +1044,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         body: ExportNoticeIn,
     ):
         require_permission(request, "operate")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(
             await call(
                 notice,
@@ -978,19 +1059,19 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
     @router.get("/exports/{export_id}")
     async def get_export(request: Request, export_id: ObjectPath):
         require_permission(request, "view")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(await call(notice, store.get_export, tenant, export_id))
 
     @router.post("/retention/purge")
     async def purge_expired(request: Request, body: PurgeIn):
         require_global_permission(request, "admin")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         return _without_lease(await call(notice, store.purge_expired, tenant, **body.model_dump()))
 
     @router.get("/integrity")
     async def verify_integrity(request: Request):
         require_global_permission(request, "audit")
-        notice, tenant, store = authority(request)
+        notice, tenant, store = route_authority(request)
         result = _without_lease(await call(notice, store.verify_integrity, tenant))
         result["valid"] = True
         return result

@@ -2,6 +2,10 @@
 reality over the proxy -- only when enabled (OFF by default)."""
 from __future__ import annotations
 
+import json
+import os
+
+import pytest
 from maverick import consequence as cq
 
 
@@ -133,6 +137,44 @@ def test_correlation_persists_across_reload(tmp_path):
     assert cq.CorrelationStore(path=p).resolve("deal:ACME") == (3, 5)
 
 
+def test_correlation_native_workers_keep_the_latest_link_and_ignore_torn_rows(tmp_path):
+    path = tmp_path / "linked-workers.ndjson"
+    first, second = cq.CorrelationStore(path=path), cq.CorrelationStore(path=path)
+    assert first.link("invoice:42", 1, 7, ts=10)
+    assert second.resolve("invoice:42") == (1, 7)
+    assert second.link("invoice:42", 2, 8, ts=20)
+    assert first.resolve("invoice:42") == (2, 8)
+    assert first.link("invoice:42", 1, 7, ts=15)
+    assert first.resolve("invoice:42") == second.resolve("invoice:42") == (2, 8)
+    assert not first.link("x" * 257, 3, 9)
+    with path.open("ab") as stream:
+        stream.write(b'{"key":"invoice:42","goal_id":3,"episode_id":9,"ts":30}')
+    assert second.resolve("invoice:42") == (2, 8)
+    assert not first.link("invoice:42", 4, 10, ts=40)
+    assert first.count() == second.count() == 1
+
+
+def test_correlation_late_write_failure_preserves_prior_binding(tmp_path, monkeypatch):
+    path = tmp_path / "linked-late-failure.ndjson"
+    store = cq.CorrelationStore(path=path)
+    assert store.link("invoice:42", 1, 7)
+    original = path.read_bytes()
+    native_sync, failures = os.fsync, []
+    inode = path.stat().st_ino
+
+    def fail_first_data_sync(fd):
+        if os.fstat(fd).st_ino == inode:
+            failures.append(fd)
+            if len(failures) == 1:
+                raise OSError("completed append could not be synced")
+        return native_sync(fd)
+
+    monkeypatch.setattr(cq.os, "fsync", fail_first_data_sync)
+    assert not store.link("invoice:42", 2, 8)
+    assert path.read_bytes() == original
+    assert store.resolve("invoice:42") == (1, 7)
+
+
 def test_record_outcome_for_key_grounds_when_linked(tmp_path):
     cstore = cq.ConsequenceStore(path=tmp_path / "c.ndjson")
     corr = cq.CorrelationStore(path=tmp_path / "links.ndjson")
@@ -178,3 +220,158 @@ def test_reset_shared_reresolves_correlation_path(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: second.joinpath(*p))
     cq.reset_shared()
     assert cq.shared_correlation().resolve("k") is None
+
+
+def test_business_report_survives_feedback_signoff_and_newer_correction(tmp_path):
+    path = tmp_path / "classified.ndjson"
+    store = cq.ConsequenceStore(path=path)
+    assert store.record(1, 7, 1.0, kind="invoice_paid", ts=10)
+    assert store.record(1, 7, 0.0, kind="feedback", source="human_feedback", ts=20)
+    assert store.record(1, 7, 0.0, kind="signoff", ts=21)
+    assert store.resolve(1, 7) == 1.0
+    assert cq.ConsequenceStore(path=path).resolve(1, 7) == 1.0
+    assert store.record(1, 7, 0.0, kind="invoice_reversed", source="reported_business", ts=30)
+    assert store.record(1, 7, 1.0, kind="feedback", source="human_feedback", ts=40)
+    assert store.record(1, 7, 1.0, kind="invoice_paid", ts=25)
+    assert store.resolve(1, 7) == 0.0
+    assert cq.ConsequenceStore(path=path).resolve(1, 7) == 0.0
+    assert store.count() == 1
+    assert len(path.read_text().splitlines()) == 6
+
+
+def test_local_fallback_uses_timestamp_and_append_ties_live_and_reloaded(tmp_path):
+    path = tmp_path / "local.ndjson"
+    store = cq.ConsequenceStore(path=path)
+    assert store.record(1, 7, 0.0, kind="failed", source="execution_verdict", ts=10)
+    assert store.record(1, 7, 1.0, kind="feedback", source="human_feedback", ts=20)
+    assert store.record(1, 7, 0.0, kind="failed", source="execution_verdict", ts=15)
+    assert store.resolve(1, 7) == 1.0
+    assert cq.ConsequenceStore(path=path).resolve(1, 7) == 1.0
+    assert store.record(1, 7, 0.0, kind="failed", source="execution_verdict", ts=20)
+    assert store.resolve(1, 7) == 0.0
+    assert cq.ConsequenceStore(path=path).resolve(1, 7) == 0.0
+
+
+def test_legacy_kinds_and_unknown_reports_keep_honest_precedence(tmp_path):
+    path = tmp_path / "legacy.ndjson"
+    rows = [{"goal_id": 1, "episode_id": 7, "ts": 10, "value": .75, "kind": "renewed"},
+            *[{"goal_id": 1, "episode_id": 7, "ts": 20 + index, "value": 0, "kind": kind}
+              for index, kind in enumerate(("feedback", "signoff", "edit", "failed"))],
+            {"goal_id": 2, "episode_id": 8, "ts": 40, "value": .4, "kind": ""},
+            {"goal_id": 1, "episode_id": 7, "ts": 50, "value": 0, "kind": "paid", "source": "externally_verified"},
+            {"goal_id": 1, "episode_id": 7, "ts": float("nan"), "value": 0, "kind": "paid"}]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    store = cq.ConsequenceStore(path=path)
+    assert store.resolve(1, 7) == .75
+    assert store.resolve(2, 8) == .4
+    assert store.count() == 2
+    assert len(path.read_text().splitlines()) == 8
+
+
+def test_failed_append_and_invalid_provenance_do_not_change_resolution(tmp_path, monkeypatch):
+    path = tmp_path / "failed.ndjson"
+    store = cq.ConsequenceStore(path=path)
+    assert store.record(1, 7, 1.0, kind="paid", ts=10)
+    assert store.resolve(1, 7) == 1.0
+    original = path.read_bytes()
+    opener = os.open
+
+    def unavailable(filename, *args, **kwargs):
+        if str(filename) == str(path):
+            raise OSError("synthetic append unavailable")
+        return opener(filename, *args, **kwargs)
+
+    monkeypatch.setattr(cq.os, "open", unavailable)
+    assert not store.record(1, 7, 0.0, kind="payment_reversed", ts=20)
+    assert store.resolve(1, 7) == 1.0
+    assert not store.record(1, 7, 0.0, source="verified", ts=30)
+    for stamp in (float("nan"), float("inf"), -1, True):
+        assert not store.record(1, 7, 0.0, ts=stamp)
+    assert store.resolve(1, 7) == 1.0
+    assert path.read_bytes() == original
+
+
+def test_independent_native_workers_refresh_each_others_business_records(tmp_path):
+    path = tmp_path / "workers.ndjson"
+    first, second = cq.ConsequenceStore(path=path), cq.ConsequenceStore(path=path)
+    assert first.record(1, 7, 1.0, kind="paid", ts=10)
+    assert second.resolve(1, 7) == 1.0
+    assert second.record(1, 7, 0.0, kind="feedback", ts=20)
+    assert first.resolve(1, 7) == 1.0
+    assert second.record(1, 7, 0.0, kind="payment_reversed", ts=30)
+    assert first.resolve(1, 7) == 0.0
+    assert first.record(1, 7, 1.0, kind="signoff", ts=40)
+    assert second.resolve(1, 7) == 0.0
+    assert first.count() == second.count() == 1
+
+
+def test_self_outcome_cannot_masquerade_as_business_by_kind(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+    path = tmp_path / "self.ndjson"
+    store = cq.ConsequenceStore(path=path)
+    assert cq.record_self_outcome(_FakeWorld([_FakeEpisode(99)]), 7, 1.0, kind="invoice_paid", store=store)
+    assert json.loads(path.read_text())["source"] == "execution_verdict"
+    assert store.record(7, 99, 0.0, kind="invoice_not_paid", ts=10)
+    assert store.resolve(7, 99) == 0.0
+
+
+def test_complete_append_fsync_failure_removes_only_attempted_suffix(tmp_path, monkeypatch):
+    path = tmp_path / "late-failure.ndjson"
+    store = cq.ConsequenceStore(path=path)
+    assert store.record(1, 7, 1.0, kind="paid", ts=10)
+    original = path.read_bytes()
+    sync, data_syncs = os.fsync, []
+    inode = path.stat().st_ino
+
+    def fail_first_data_sync(fd):
+        if os.fstat(fd).st_ino == inode:
+            data_syncs.append(fd)
+            if len(data_syncs) == 1:
+                assert path.read_bytes().startswith(original)
+                assert len(path.read_bytes()) > len(original)
+                raise OSError("synthetic late fsync failure")
+        return sync(fd)
+
+    monkeypatch.setattr(cq.os, "fsync", fail_first_data_sync)
+    assert not store.record(1, 7, 0.0, kind="payment_reversed", ts=20)
+    assert len(data_syncs) == 2
+    assert path.read_bytes() == original
+    assert store.resolve(1, 7) == 1.0
+    assert cq.ConsequenceStore(path=path).resolve(1, 7) == 1.0
+
+
+def test_unverified_late_append_cleanup_reports_uncertainty(tmp_path, monkeypatch):
+    path = tmp_path / "uncertain.ndjson"
+    store = cq.ConsequenceStore(path=path)
+    assert store.record(1, 7, 1.0, kind="paid", ts=10)
+    assert store.resolve(1, 7) == 1.0
+    original, inode = path.read_bytes(), path.stat().st_ino
+    sync, truncate = os.fsync, os.ftruncate
+
+    def fail_sync(fd):
+        if os.fstat(fd).st_ino == inode:
+            raise OSError("synthetic late fsync failure")
+        return sync(fd)
+
+    def fail_cleanup(fd, size):
+        if os.fstat(fd).st_ino == inode:
+            raise OSError("synthetic cleanup unavailable")
+        return truncate(fd, size)
+
+    monkeypatch.setattr(cq.os, "fsync", fail_sync)
+    monkeypatch.setattr(cq.os, "ftruncate", fail_cleanup)
+    with pytest.raises(cq.ConsequenceWriteUncertain, match="may have been written"):
+        store.record(1, 7, 0.0, kind="payment_reversed", ts=20)
+    assert path.read_bytes().startswith(original)
+    assert len(path.read_bytes()) > len(original)
+    assert store._loaded_stamp == ()
+
+
+def test_local_uncertainty_keeps_task_output_and_is_not_confirmed_failure(monkeypatch):
+    monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+
+    def uncertain(*args, **kwargs):
+        raise cq.ConsequenceWriteUncertain("synthetic original write unconfirmed")
+
+    monkeypatch.setattr(cq, "record_outcome", uncertain)
+    assert cq.record_self_outcome(_FakeWorld([_FakeEpisode(99)]), 7, 1.0, kind="signoff") is None

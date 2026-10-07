@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from maverick import audit, config, world_model
+from maverick.candidate_promotion import DeploymentObservation
+from maverick.outcome_accounting import COST_COVERAGE_FAMILIES
 from maverick.outcome_pilot_start_gate import (
     OutcomePilotAdmissionRequired,
     require_work_item_admission,
@@ -14,6 +16,7 @@ from maverick.outcome_pilot_start_gate import (
 from maverick.paths import tenant_scope
 from maverick.privacy_ops import RecordConflict
 from maverick_dashboard import outcome_accounting_bridge as accounting_bridge
+from maverick_dashboard import outcome_pilot_releases as releases
 from maverick_dashboard import outcome_pilot_sources as sources
 from maverick_dashboard import outcome_pilots as pilots
 from maverick_dashboard import outcome_pilots_api as api
@@ -92,6 +95,208 @@ def test_plan_freezes_groups_and_exact_retries_do_not_reallocate(records):
     with pytest.raises(RecordConflict):
         pilots.create(changed, context="alice", actor="user:alice", resolve=lambda k, r: records[r])
     assert pilots.get(record["id"], "alice")["criteria"] == plan()["criteria"]
+
+
+def _candidate_release():
+    return {"candidate_id": "candidate-one", "state": "authorized", "revision": 3,
+        "manifest_sha256": "c" * 64,
+        "manifest": {"target": {"target_id": "installed-lightwork",
+            "expected_active_sha256": "a" * 64, "state_schema": "state.v1",
+            "queued_intent_schema": "queue.v1", "external_reconciliation_schema": "external.v1"},
+            "run": {"run_id": "research-run-one", "output_artifact_sha256": "b" * 64}}}
+
+
+def _deployment(active="a" * 64, *, compatible=True):
+    return DeploymentObservation(tenant="tenant-one", target_id="installed-lightwork",
+        active_artifact_sha256=active, state_schema="state.v1",
+        queued_intent_schema="queue.v1", external_state_sha256="d" * 64,
+        pending_intents_sha256="e" * 64, rollback_handle="retained-baseline",
+        rollback_compatible=compatible, evidence_sha256="f" * 64)
+
+
+@pytest.mark.parametrize(("release_decisions", "deployed_release_check", "expected"), [
+    (False, False, (False, False)),
+    (True, False, (True, False)),
+    (False, True, (False, True)),
+])
+def test_release_choices_explain_missing_setup_without_listing_candidates(
+    monkeypatch, release_decisions, deployed_release_check, expected,
+):
+    service = SimpleNamespace(list=lambda *_args, **_kwargs: pytest.fail("listed before readiness"))
+    adapter = SimpleNamespace(observe=lambda *_args: _deployment())
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        candidate_promotion_deployment_adapter=adapter if deployed_release_check else None,
+    )))
+    monkeypatch.setattr(releases, "_identity", lambda _request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda _request, required=False:
+                        service if release_decisions else None)
+    response = releases.choices(request)
+    assert response["available"] is False
+    assert response["items"] == []
+    assert response["readiness"]["status"] == "setup_required"
+    assert (response["readiness"]["release_decisions"],
+            response["readiness"]["deployed_release_check"]) == expected
+    assert "normal workflow pilot" in response["readiness"]["next_action"]
+
+
+def test_release_choices_need_named_account_and_explain_empty_ready_state(monkeypatch):
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        candidate_promotion_deployment_adapter=SimpleNamespace(observe=lambda *_args: _deployment()),
+    )))
+    def unnamed(_request):
+        raise PermissionError("A named account is required.")
+
+    monkeypatch.setattr(releases, "_identity", unnamed)
+    denied = releases.choices(request)
+    assert denied["readiness"]["status"] == "sign_in_required"
+    assert denied["items"] == []
+    monkeypatch.setattr(releases, "_identity", lambda _request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda _request, required=False:
+                        SimpleNamespace(list=lambda *_args, **_kwargs: []))
+    ready = releases.choices(request)
+    assert ready["available"] is True
+    assert ready["items"] == []
+    assert ready["readiness"]["status"] == "ready"
+    assert "no candidate" in ready["readiness"]["next_action"]
+
+
+def test_release_readiness_route_explains_missing_setup_without_exposing_candidates(monkeypatch):
+    monkeypatch.setattr(app.state, "candidate_promotion_deployment_adapter", None, raising=False)
+    monkeypatch.setattr(releases, "_identity", lambda _request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda _request, required=False: None)
+    monkeypatch.setattr(api, "context_for", lambda _request: "alice")
+    monkeypatch.setattr(api, "require_permission", lambda *_args: None)
+    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+        "/api/v1/outcome-pilots/release-candidates",
+    )
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json()["context"] == "alice"
+    assert response.json()["items"] == []
+    assert response.json()["readiness"]["status"] == "setup_required"
+    assert "normal workflow pilot" in response.json()["readiness"]["next_action"]
+
+
+def test_improvement_plan_freezes_trusted_versions_but_never_claims_causal_lift(records, monkeypatch):
+    value = _candidate_release()
+    adapter = SimpleNamespace(observe=lambda tenant, target: _deployment())
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        candidate_promotion_deployment_adapter=adapter)))
+    service = SimpleNamespace(inspect=lambda tenant, actor, candidate: value,
+        list=lambda tenant, actor, limit: [value])
+    monkeypatch.setattr(releases, "_identity", lambda request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda request, required=True: service)
+    assert releases.choices(request)["items"][0]["candidate_id"] == "candidate-one"
+    frozen = releases.bind(request, "candidate-one")
+    body = {**protected_plan(), "operation_id": "improvement-pilot-operation",
+            "candidate_id": "candidate-one"}
+    record = pilots.create(body, context="alice", actor="user:alice",
+        resolve=lambda _kind, reference: records[reference],
+        resolve_release=lambda _id: frozen)
+    assert record["release_binding"]["baseline_sha256"] == "a" * 64
+    assert record["release_binding"]["candidate_sha256"] == "b" * 64
+    assert record["release_binding"]["deployment_observation_sha256"] == "f" * 64
+    assert record["plan_version"] != pilots.digest({key: record[key] for key in (
+        "title", "customer", "workflow", "criteria", "cases", "frozen_at",
+        "learning_mode", "prior_exposure_statement")})
+    # A retry uses the exact frozen record even if the deployment changed.
+    adapter.observe = lambda tenant, target: _deployment("b" * 64)
+    assert pilots.create(body, context="alice", actor="user:alice",
+        resolve=lambda _kind, reference: records[reference],
+        resolve_release=lambda _id: pytest.fail("exact retry re-resolved the release"))["plan_version"] == record["plan_version"]
+    result = pilots.report(record, resolve=lambda _kind, reference: records[reference])
+    assert result["release_binding"]["promotion_manifest_sha256"] == "c" * 64
+    assert result["measurement_basis"] == "operator_reported"
+    assert result["case_exposure_verified"] is False
+    assert result["causal_lift_qualified"] is False
+    assert "cannot establish release lift" in result["limitations"][-1]
+    current = releases.status(request, frozen)
+    assert current["deployment_state"] == "candidate_active"
+    assert current["case_exposure_verified"] is False
+    assert current["causal_lift_qualified"] is False
+
+
+def test_improvement_plan_refuses_untrusted_or_changed_release(records, monkeypatch):
+    body = {**protected_plan(), "operation_id": "improvement-refusal-operation",
+            "candidate_id": "candidate-one"}
+    def resolve(_kind, reference):
+        return records[reference]
+    with pytest.raises(PermissionError, match="trusted release"):
+        pilots.create(body, context="alice", actor="user:alice", resolve=resolve)
+    with pytest.raises(ValueError, match="could not be bound"):
+        pilots.create(body, context="alice", actor="user:alice", resolve=resolve,
+            resolve_release=lambda _id: {"baseline_sha256": "a" * 64})
+    with pytest.raises(ValueError, match="protected evaluation"):
+        pilots.create({**body, "learning_mode": "observational"}, context="alice",
+            actor="user:alice", resolve=resolve, resolve_release=lambda _id: None)
+    assert pilots.STORE.list() == []
+    value = _candidate_release()
+    adapter = SimpleNamespace(observe=lambda tenant, target: _deployment("b" * 64))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        candidate_promotion_deployment_adapter=adapter)))
+    monkeypatch.setattr(releases, "_identity", lambda request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda request, required=True:
+        SimpleNamespace(inspect=lambda tenant, actor, candidate: value))
+    with pytest.raises(ValueError, match="deployed release"):
+        releases.bind(request, "candidate-one")
+    adapter.observe = lambda tenant, target: _deployment(compatible=False)
+    with pytest.raises(ValueError, match="rollback compatibility"):
+        releases.bind(request, "candidate-one")
+    adapter.observe = lambda tenant, target: _deployment()
+    frozen = releases.bind(request, "candidate-one")
+    value["manifest_sha256"] = "9" * 64
+    assert releases.status(request, frozen)["deployment_state"] == "candidate_changed"
+    assert releases.status(request, frozen)["release_evidence_current"] is False
+    value["manifest_sha256"] = "c" * 64
+    adapter.observe = lambda tenant, target: _deployment(compatible=False)
+    incompatible = releases.status(request, frozen)
+    assert incompatible["deployment_state"] == "rollback_unavailable"
+    assert incompatible["release_evidence_current"] is False
+
+
+def test_operator_score_arrays_cannot_be_submitted_as_improvement_proof():
+    body = {**protected_plan(), "candidate_id": "candidate-one", "scores": [0.8, 0.9]}
+    with pytest.raises(ValueError):
+        api.PlanIn.model_validate(body)
+    with pytest.raises(ValueError):
+        api.ObservationIn.model_validate({**observation(1), "score_array": [0.8, 0.9]})
+
+
+def test_improvement_routes_bind_server_observed_release_and_scope_status(records, monkeypatch):
+    value = _candidate_release()
+    adapter = SimpleNamespace(observe=lambda tenant, target: _deployment())
+    service = SimpleNamespace(inspect=lambda tenant, actor, candidate: value,
+        list=lambda tenant, actor, limit: [value])
+    monkeypatch.setattr(app.state, "candidate_promotion_deployment_adapter", adapter, raising=False)
+    monkeypatch.setattr(releases, "_identity", lambda request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda request, required=True: service)
+    monkeypatch.setattr(api, "context_for", lambda request: "alice")
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(api, "require_permission", lambda *args: None)
+    monkeypatch.setattr(api, "_resolver", lambda request: lambda _kind, reference: records[reference])
+    client = TestClient(app, headers={"Origin": "http://testserver",
+        "X-Lightwork-Pilot-Context": "alice"})
+    choices = client.get("/api/v1/outcome-pilots/release-candidates")
+    assert choices.status_code == 200
+    assert choices.json()["items"][0]["candidate_id"] == "candidate-one"
+    assert choices.json()["readiness"]["status"] == "ready"
+    assert choices.headers["cache-control"] == "private, no-store"
+    body = {**protected_plan(), "operation_id": "improvement-route-operation",
+        "candidate_id": "candidate-one"}
+    saved = client.post("/api/v1/outcome-pilots", json=body)
+    assert saved.status_code == 200, saved.text
+    identifier = saved.json()["id"]
+    status = client.get(f"/api/v1/outcome-pilots/{identifier}/release-status")
+    assert status.status_code == 200, status.text
+    assert status.json()["deployment_state"] == "baseline_active"
+    assert status.json()["binding"]["baseline_sha256"] == "a" * 64
+    assert status.json()["checked_at"] is not None
+    assert status.json()["case_exposure_verified"] is False
+    assert status.json()["causal_lift_qualified"] is False
+    assert status.headers["cache-control"] == "private, no-store"
+    monkeypatch.setattr(api, "context_for", lambda request: "another-account")
+    assert client.get(f"/api/v1/outcome-pilots/{identifier}/release-status",
+        headers={"X-Lightwork-Pilot-Context": "another-account"}).status_code == 404
 
 
 def test_concurrent_pilots_cannot_claim_the_same_tenant_work_items(records):
@@ -385,14 +590,21 @@ def test_goal_resume_api_blocks_pending_pilot_without_state_change_and_allows_ex
     client = TestClient(app, headers={"Origin": "http://testserver"})
     refused = client.post(f"/api/v1/goals/{goal_id}/resume")
     assert refused.status_code == 409, refused.text
-    assert refused.json()["detail"]["code"] == "outcome_pilot_admission_incomplete"
+    assert refused.json()["detail"]["code"] == "admission_hold"
     assert world.get_goal(goal_id).status == "blocked"
     assert world.get_goal(goal_id).result == sources.PREPARED
     assert not dispatched and world.list_episodes(goal_id=goal_id) == []
 
     finish_admission(pending, runtime_records)
-    resumed = client.post(f"/api/v1/goals/{goal_id}/resume")
-    assert resumed.status_code == 204, resumed.text
+    review = client.get(f"/api/v1/goals/{goal_id}/resume-review")
+    assert review.status_code == 200, review.text
+    state = review.json()
+    body = {"operation_id": "e" * 32, "expected_context": state["context"],
+            "expected_updated_at": state["expected_updated_at"],
+            "expected_owner": state["expected_owner"]}
+    resumed = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["admitted"]
     assert world.get_goal(goal_id).status == "pending"
     assert len(dispatched) == 1
     world.close()
@@ -472,25 +684,41 @@ def test_independent_review_api_requires_global_admin_and_reauthorizes_every_sou
     monkeypatch.setattr(api, "context_for", lambda request: "bob")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
     monkeypatch.setattr(api, "require_permission", lambda *a: None)
-    monkeypatch.setattr(api, "_resolver", lambda request: lambda k, r: records[r])
-    monkeypatch.setattr(sources, "resolve", lambda request, k, r: records[r])
+    resolutions = []
+
+    def resolve_source(request, kind, reference, *, independent_review=False):
+        resolutions.append((kind, reference, independent_review))
+        return records[reference]
+
+    # Exercise the native resolver's independent-review dispatch rather than
+    # replacing it with a mock that silently omits the authority mode.
+    monkeypatch.setattr(sources, "resolve", resolve_source)
     route = "/api/v1/outcome-pilots/independent-review/" + record["id"]
     client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Pilot-Context": "bob"})
     def denied(*_a):
         raise HTTPException(403, "Global administrator required")
     monkeypatch.setattr(api, "require_global_permission", denied)
     assert client.get(route).status_code == 403
+    assert resolutions == []
     monkeypatch.setattr(api, "require_global_permission", lambda *a: None)
     packet = client.get(route)
     assert packet.status_code == 200 and packet.json()["context"] == "bob"
+    assert {reference for _, reference, _ in resolutions} == set(records)
+    resolutions.clear()
     body = {"expected_revision": record["revision"], "operation_id": "actual-api-review-operation",
             "evidence_version": packet.json()["learning_policy"]["evidence_version"], "decision": "accepted_local_scope",
             "notes": "Independent local policy evidence checked; provider limitations retained.", "confirm": True}
     assert client.post(route, json=body).status_code == 200
-    def source_revoked(*_a):
+    assert {(kind, reference) for kind, reference, _ in resolutions} == {
+        ("goal", reference) for reference in records
+    }
+    assert all(independent for _, _, independent in resolutions)
+
+    def source_revoked(*_a, **_kwargs):
         raise PermissionError("Revoked source")
     monkeypatch.setattr(sources, "resolve", source_revoked)
     assert client.get(route).status_code == 403
+    assert client.post(route, json=body).status_code == 403
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     assert client.get(route).status_code == 403
 
@@ -518,6 +746,8 @@ def test_rejected_and_missing_cases_stay_in_denominator_cost_not_invented(record
     assert result["groups"]["all"]["accepted"] == 0
     assert result["groups"]["all"]["reported_minutes_difference"] == 55
     assert result["groups"]["all"]["reported_cost_difference"] is None
+    assert result["evidence_readiness"]["reported_effort_comparison_ready"] is False
+    assert result["evidence_readiness"]["reported_cost_comparison_ready"] is False
     assert result["provider_invoice_verified"] is False
     assert result["holdout_exposure_verified"] is False
     records["1"]["version"] = "c" * 64
@@ -655,6 +885,8 @@ def test_api_context_validation_and_rendered_page(records, monkeypatch):
 def test_observation_api_refuses_pending_manifest_before_mutating_pilot(records, monkeypatch):
     monkeypatch.setattr(api, "context_for", lambda request: "alice")
     monkeypatch.setattr(api, "require_permission", lambda *args: None)
+    # Observations are recorded by the pilot's own account.
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     monkeypatch.setattr(api, "_resolver", lambda request: lambda kind, reference: records[reference])
     record = pilots.create(
         plan(), context="alice", actor="user:alice",
@@ -719,8 +951,16 @@ def test_create_api_exact_retry_repairs_interrupted_all_case_admission(records, 
     assert accounting_bridge.default_service.portfolio_report()["admitted"] == 2
 
     monkeypatch.setattr(accounting_bridge, "_admit", original)
+    # An exact retry is a read of the original request, never a second
+    # admission: while the original is unconfirmed it says so and repeats nothing.
+    unconfirmed = client.post("/api/v1/outcome-pilots", json=plan())
+    assert unconfirmed.status_code == 503
+    assert accounting_bridge.default_service.portfolio_report()["admitted"] == 2
+    # Opening the pilot's report repairs the interrupted all-case admission
+    # inside the app; the exact retry then confirms the same original pilot.
+    assert client.get("/api/v1/outcome-pilots/" + pending[0]["id"]).status_code == 200
     recovered = client.post("/api/v1/outcome-pilots", json=plan())
-    assert recovered.status_code == 200
+    assert recovered.status_code == 200, recovered.text
     saved = pilots.get(recovered.json()["id"], "alice")
     assert saved["admission_manifest"]["status"] == "complete"
     assert saved["admission_manifest"]["admitted_count"] == 4
@@ -736,7 +976,7 @@ def test_goal_acceptance_requires_current_human_signoff_and_suite(monkeypatch):
     decision = {"decision": "approved", "decided_by": "agent:reviewer"}
     world = SimpleNamespace(get_goal=lambda i: goal, list_episodes=lambda **k: [], signoff_for=lambda i: copy.deepcopy(decision))
     monkeypatch.setattr("maverick_dashboard.app._world", lambda: world)
-    monkeypatch.setattr("maverick.domain.suite_for", lambda d: "privacy")
+    monkeypatch.setattr(sources, "domain_suites_allowed", lambda *a: True)
     monkeypatch.setattr(sources, "can_access_goal", lambda *a: True)
     monkeypatch.setattr(sources, "suite_allowed", lambda *a: True)
     monkeypatch.setattr(sources, "caller_principal", lambda *a: "user:alice")
@@ -748,7 +988,7 @@ def test_goal_acceptance_requires_current_human_signoff_and_suite(monkeypatch):
     decision.clear()
     assert not sources.goal_source(None, "1")["accepted"]
     assert sources.goal_source(None, "1")["version"] != old["version"]
-    monkeypatch.setattr(sources, "suite_allowed", lambda *a: False)
+    monkeypatch.setattr(sources, "domain_suites_allowed", lambda *a: False)
     with pytest.raises(LookupError):
         sources.goal_source(None, "1")
 
@@ -757,7 +997,9 @@ def test_prepare_task_in_app_is_private_idempotent_and_does_not_run(monkeypatch)
     world = world_model.WorldModel(world_model.DEFAULT_DB)
     monkeypatch.setattr("maverick_dashboard.app._world", lambda: world)
     monkeypatch.setattr("maverick_dashboard.app._deliverable_specs", lambda: [{"domain": "finance_sox", "gate": "human", "suite": "finance"}])
-    monkeypatch.setattr("maverick.domain.enabled_domains", lambda: ["finance_sox"])
+    monkeypatch.setattr("maverick.domain.enabled_domains", lambda: {
+        "finance_sox": SimpleNamespace(name="finance_sox"),
+    })
     monkeypatch.setattr(sources, "suite_allowed", lambda *a: True)
     monkeypatch.setattr(sources, "caller_principal", lambda *a: "user:alice")
     monkeypatch.setattr(sources, "can_access_goal", lambda request, goal: goal.owner == "user:alice")
@@ -780,9 +1022,12 @@ def test_prepare_task_in_app_is_private_idempotent_and_does_not_run(monkeypatch)
 
 def test_total_cost_per_accepted_includes_rejected_cases_and_requires_complete_coverage(records):
     record = create(records)
+    coverage = {family: {"status": "included", "note": "Recorded in the total-cost source."}
+                for family in COST_COVERAGE_FAMILIES}
     for number in range(1, 5):
         records[str(number)].update(finished=True, accepted=number == 1, version="b" * 64)
-        body = observation(record["revision"], baseline_cost="100", ai_total_cost="25", currency="USD", criteria_met=number == 1)
+        body = observation(record["revision"], baseline_cost="100", ai_total_cost="25", currency="USD", criteria_met=number == 1,
+                           cost_coverage=coverage)
         body["operation_id"] = "observation-operation-" + str(number)
         record = pilots.observe(record["id"], str(number), body, context="alice", actor="user:alice", resolve=lambda k, r: records[r])
         group = pilots.report(record, resolve=lambda k, r: records[r])["groups"]["all"]
@@ -792,6 +1037,11 @@ def test_total_cost_per_accepted_includes_rejected_cases_and_requires_complete_c
     assert group["reported_ai_cost_per_accepted"] == "100"
     assert group["reported_cost_difference"] == "300"
     assert group["acceptance_rate"] == .25
+    readiness = pilots.report(record, resolve=lambda k, r: records[r])["evidence_readiness"]
+    assert readiness["reported_effort_comparison_ready"] is True
+    assert readiness["frozen_criteria_review_ready"] is True
+    assert readiness["reported_cost_comparison_ready"] is True
+    assert readiness["causal_release_lift_qualified"] is False
 
 
 def test_review_queue_lists_other_peoples_protected_pilots_in_this_workspace_only(records, monkeypatch):

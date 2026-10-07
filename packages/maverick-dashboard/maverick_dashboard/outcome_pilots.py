@@ -11,9 +11,12 @@ import json
 import math
 import secrets
 import time
+from contextlib import contextmanager
+from dataclasses import asdict
 from decimal import Decimal
 
 from maverick.governed_records import GovernedRecordStore
+from maverick.outcome_accounting import COST_COVERAGE_FAMILIES
 from maverick.privacy_ops import RecordConflict
 
 STORE = GovernedRecordStore("outcome_pilots", "OPL", "outcome_pilots")
@@ -237,7 +240,23 @@ def _existing_work_item_claims():
     return discovered
 
 
-def _claim_work_items(identifier, cases, actor, creation_request):
+def original_plan_claim(identifier, creation_request=None):
+    """Pure exact custody of a plan claimed before its pilot row existed."""
+    current = ADMISSION_INDEX.get(_ADMISSION_INDEX_ID)
+    if current is None:
+        return False
+    claims = current.get("claims")
+    if (current.get("schema") != _ADMISSION_INDEX_SCHEMA or not isinstance(claims, dict)
+            or len(claims) > LIMIT * _MAX_CASES
+            or any(not _sha256_text(key) or not _valid_claim(value) for key, value in claims.items())):
+        raise RecordConflict("The original plan admission cannot be verified. No work was repeated.")
+    matching = [value for value in claims.values() if value["pilot_id"] == identifier]
+    if creation_request is not None and any(value["creation_request"] != creation_request for value in matching):
+        raise RecordConflict("This original request belongs to another plan.")
+    return bool(matching)
+
+
+def _claim_work_items(identifier, cases, actor, creation_request, *, before_write=None):
     """Atomically claim all exact work items within the current tenant."""
     candidate = {"pilot_id": identifier, "creation_request": creation_request}
     if not _sha256_text(creation_request):
@@ -273,17 +292,24 @@ def _claim_work_items(identifier, cases, actor, creation_request):
             return current
         try:
             if current is None:
-                return ADMISSION_INDEX.create({
-                    "id": _ADMISSION_INDEX_ID,
-                    "schema": _ADMISSION_INDEX_SCHEMA,
-                    "claims": updated,
-                }, action="claim_outcome_pilot_work", actor=actor)
+                with _guided_creation(_ADMISSION_INDEX_ID, before_write, store=ADMISSION_INDEX):
+                    return ADMISSION_INDEX.create({
+                        "id": _ADMISSION_INDEX_ID,
+                        "schema": _ADMISSION_INDEX_SCHEMA,
+                        "claims": updated,
+                    }, action="claim_outcome_pilot_work", actor=actor,
+                       **({"effect_guard": before_write} if before_write is not None else {}))
+            def mutate(value, claimed=updated):
+                if before_write is not None:
+                    before_write()
+                value.update(claims=claimed)
             saved = ADMISSION_INDEX.update(
                 _ADMISSION_INDEX_ID,
-                lambda value, claimed=updated: value.update(claims=claimed),
+                mutate,
                 expected_revision=current["revision"],
                 action="claim_outcome_pilot_work",
                 actor=actor,
+                **({"effect_guard": before_write} if before_write is not None else {}),
             )
             if saved is not None:
                 return saved
@@ -323,7 +349,47 @@ def prepare_admission(pilot_id, *, context, resolve):
     return _finish_protected_plan(record, resolve) if record.get("state") == "preparing" else record
 
 
-def create(body, *, context, actor, resolve):
+def _release_for_plan(body, mode, actor, resolve_release):
+    candidate_id = body.get("candidate_id")
+    if candidate_id is None:
+        return None
+    from .outcome_pilot_releases import ReleaseBinding
+
+    if mode != "exclude_local_learning":
+        raise ValueError("An improvement candidate needs protected evaluation tasks and prior-exposure checks.")
+    if not actor.startswith("user:") or not callable(resolve_release):
+        raise PermissionError("A named account and trusted release connection are required for an improvement pilot.")
+    release_binding = resolve_release(candidate_id)
+    if type(release_binding) is not ReleaseBinding or release_binding.candidate_id != candidate_id:
+        raise ValueError("The selected improvement candidate could not be bound to this pilot.")
+    return release_binding
+
+
+@contextmanager
+def _guided_creation(identifier, before_write, *, store=STORE):
+    if before_write is None:
+        yield
+        return
+    # The bounded local create takes namespace admission before its row lock.
+    # Re-enter those exact native locks, rather than check before a writer wait.
+    from maverick.file_lock import cross_process_lock
+
+    backend = store._backend()
+    if backend.kind == "postgres" and backend.shared:
+        # The native transaction supplies the callback after SQL writer waits
+        # and immediately before its effect and commit. This installation’s
+        # authority fence remains distinct from multi-replica control planes.
+        yield
+        return
+    native_store = getattr(backend, "_store", None)
+    if native_store is None:
+        raise ValueError("Reviewed pilot creation is unavailable with this storage service. No plan was created.")
+    with cross_process_lock(native_store._dir() / ".namespace-admission", strict=True), cross_process_lock(native_store._path(identifier), strict=True):
+        before_write()
+        yield
+
+
+def create(body, *, context, actor, resolve, resolve_release=None, before_write=None):
     mode = body.get("learning_mode", "observational")
     if mode not in {"observational", "exclude_local_learning"}:
         raise ValueError("Choose an available pilot learning-data treatment.")
@@ -342,6 +408,7 @@ def create(body, *, context, actor, resolve):
         if existing["creation_request"] != request:
             raise RecordConflict("This operation reference already belongs to another pilot.")
         return prepare_admission(identifier, context=context, resolve=resolve)
+    release_binding = _release_for_plan(body, mode, actor, resolve_release)
     sources, cases = set(), []
     for index, case in enumerate(body["cases"]):
         key = (case["kind"], case["reference"])
@@ -362,7 +429,12 @@ def create(body, *, context, actor, resolve):
               "learning_mode": mode, "prior_exposure_statement": body.get("prior_exposure_statement", ""),
               "state": "preparing" if mode == "exclude_local_learning" else "frozen",
               "creation_request": request, "frozen_at": time.time(), "operations": {}}
-    record["plan_version"] = digest({k: record[k] for k in ("title", "customer", "workflow", "criteria", "cases", "frozen_at", "learning_mode", "prior_exposure_statement")})
+    if release_binding is not None:
+        record["release_binding"] = asdict(release_binding)
+    plan_material = {k: record[k] for k in ("title", "customer", "workflow", "criteria", "cases", "frozen_at", "learning_mode", "prior_exposure_statement")}
+    if release_binding is not None:
+        plan_material["release_binding"] = record["release_binding"]
+    record["plan_version"] = digest(plan_material)
     record["admission_manifest"] = admission_manifest(record)
     # Recheck after assembling the whole plan. This detects concurrent starts;
     # sources remain separate stores, so report eligibility also checks times.
@@ -370,18 +442,20 @@ def create(body, *, context, actor, resolve):
         source = resolve(case["kind"], case["reference"])
         if not source["unstarted"] or source["input_version"] != case["input_version"]:
             raise RecordConflict("A case changed while the plan was being prepared.")
-    _claim_work_items(identifier, cases, actor, request)
+    _claim_work_items(identifier, cases, actor, request, before_write=before_write)
     try:
-        saved = STORE.create(record, action="prepare_outcome_pilot" if mode == "exclude_local_learning" else "freeze_outcome_pilot", actor=actor, max_records=LIMIT)
+        with _guided_creation(identifier, before_write):
+            saved = STORE.create(record, action="prepare_outcome_pilot" if mode == "exclude_local_learning" else "freeze_outcome_pilot", actor=actor, max_records=LIMIT,
+                                 **({"effect_guard": before_write} if before_write is not None else {}))
     except RecordConflict:
         concurrent = get(identifier, context)
         if concurrent["creation_request"] != request:
             raise
         saved = concurrent
-    return _finish_protected_plan(saved, resolve) if saved.get("state") == "preparing" else saved
+    return _finish_protected_plan(saved, resolve, before_write=before_write) if saved.get("state") == "preparing" else saved
 
 
-def _finish_protected_plan(record, resolve):
+def _finish_protected_plan(record, resolve, *, before_write=None):
     from maverick.pilot_learning import protect
     for case in record["cases"]:
         source = resolve(case["kind"], case["reference"])
@@ -389,17 +463,24 @@ def _finish_protected_plan(record, resolve):
             raise RecordConflict("Work started or inputs changed before the protected plan could freeze. Its learning exclusions are retained; prepare new unstarted cases.")
     for case in record["cases"]:
         if case["allocation"] == "holdout":
+            if before_write is not None:
+                before_write()
             protect(int(case["reference"]), pilot_id=record["id"], plan_version=record["plan_version"],
                     input_version=case["input_version"], actor=record["actor"])
     for case in record["cases"]:
         source = resolve(case["kind"], case["reference"])
         if not source["unstarted"] or source["input_version"] != case["input_version"]:
             raise RecordConflict("A task started while exclusions were being installed. The plan is not frozen; prepare new unstarted cases.")
-    return STORE.update(record["id"], lambda current: current.update(state="frozen"), expected_revision=record["revision"],
-                        action="freeze_protected_outcome_pilot", actor=record["actor"])
+    def freeze(current):
+        if before_write is not None:
+            before_write()
+        current.update(state="frozen")
+    return STORE.update(record["id"], freeze, expected_revision=record["revision"],
+                        action="freeze_protected_outcome_pilot", actor=record["actor"],
+                        **({"effect_guard": before_write} if before_write is not None else {}))
 
 
-def complete_admission(pilot_id, manifest, *, context, actor, resolve):
+def complete_admission(pilot_id, manifest, *, context, actor, resolve, before_write=None):
     """Publish one all-case admission manifest after verifying admission preceded work."""
     record = get(pilot_id, context)
     validate_admission_manifest(record)
@@ -425,6 +506,8 @@ def complete_admission(pilot_id, manifest, *, context, actor, resolve):
             raise RecordConflict("Work started before its durable pilot admission could be verified. No observations can be accepted.")
 
     def mutate(current):
+        if before_write is not None:
+            before_write()
         _owned(current, context)
         validate_admission_manifest(current)
         if current["admission_manifest"]["status"] == "complete":
@@ -437,6 +520,7 @@ def complete_admission(pilot_id, manifest, *, context, actor, resolve):
         saved = STORE.update(
             pilot_id, mutate, expected_revision=record["revision"],
             action="complete_outcome_pilot_admission", actor=actor,
+            **({"effect_guard": before_write} if before_write is not None else {}),
         )
     except RecordConflict:
         current = get(pilot_id, context)
@@ -448,7 +532,7 @@ def complete_admission(pilot_id, manifest, *, context, actor, resolve):
     return saved
 
 
-def observe(pilot_id, case_id, body, *, context, actor, resolve):
+def observe(pilot_id, case_id, body, *, context, actor, resolve, before_write=None):
     record = get(pilot_id, context)
     if record.get("state", "frozen") != "frozen":
         raise RecordConflict("This plan has not finished freezing its learning policy. No observation was accepted.")
@@ -486,6 +570,8 @@ def observe(pilot_id, case_id, body, *, context, actor, resolve):
     )
 
     def mutate(current):
+        if before_write is not None:
+            before_write()
         _owned(current, context)
         if len(current["operations"]) >= 5000:
             raise ValueError("This pilot reached its observation history limit. Export its record before further work.")
@@ -499,7 +585,8 @@ def observe(pilot_id, case_id, body, *, context, actor, resolve):
         current["operations"] = {**current["operations"], body["operation_id"]: request}
 
     saved = STORE.update(pilot_id, mutate, expected_revision=body["expected_revision"],
-                         action="record_pilot_observation", actor=actor)
+                         action="record_pilot_observation", actor=actor,
+                         **({"effect_guard": before_write} if before_write is not None else {}))
     if saved is None:
         raise RecordConflict("The pilot disappeared. Refresh before continuing.")
     return saved
@@ -536,6 +623,41 @@ def _pair(case, source, frozen_at, admitted_at=None):
            ("baseline_minutes", "ai_hands_on_minutes", "review_minutes", "rework_minutes", "corrections")):
         return "partial_measurement"
     return "paired"
+
+
+def _evidence_readiness(record, rows, groups, admission):
+    """Qualify complete reported evidence, never infer business or release lift."""
+    admitted = (record.get("state", "frozen") == "frozen"
+                and admission["status"] == "complete"
+                and admission["admitted_count"] == admission["expected_count"] == len(rows))
+    paired = admitted and bool(rows) and all(row["status"] == "paired" for row in rows)
+    criteria = paired and all(type(row["measurement"].get("criteria_met")) is bool for row in rows)
+    costs = paired and groups["all"]["reported_cost_difference"] is not None and all(
+        isinstance(row["measurement"].get("cost_coverage"), dict)
+        and set(row["measurement"]["cost_coverage"]) == set(COST_COVERAGE_FAMILIES)
+        and all(isinstance(value, dict) and value.get("status") in {"included", "zero"}
+                for value in row["measurement"]["cost_coverage"].values())
+        for row in rows
+    )
+    next_steps = []
+    if not admitted:
+        next_steps.append("Complete admission for every frozen case before treating the comparison as reviewable.")
+    if any(row["status"] == "unavailable" for row in rows):
+        next_steps.append("Restore authorized access to unavailable cases; keep them in the denominator.")
+    if not paired:
+        next_steps.append("Review every planned case, including missing, changed, rejected, or unfinished work; do not drop it from the cohort.")
+    if paired and not criteria:
+        next_steps.append("Record whether every case met the criteria frozen before work began.")
+    if paired and not costs:
+        next_steps.append("Complete total-cost evidence and every cost family for every case in one currency before using a cost comparison.")
+    return {
+        "reported_effort_comparison_ready": paired,
+        "frozen_criteria_review_ready": criteria,
+        "reported_cost_comparison_ready": costs,
+        "causal_release_lift_qualified": False,
+        "comparison_basis": "operator_reported_observational",
+        "next_steps": next_steps,
+    }
 
 
 def report(record, *, resolve):
@@ -622,20 +744,27 @@ def report(record, *, resolve):
     reviewed = record.get("independent_review")
     learning["independent_review"] = {**reviewed, "current": reviewed["evidence_version"] == learning["evidence_version"]} if reviewed else None
     learning["review_history"] = record.get("independent_review_history", [])
+    limitations = ["Observations and evidence references are attributed to their recorder; they are not independently verified.",
+        "Time fields are non-overlapping hands-on effort. Wall time and costs remain separate observations.",
+        "All planned cases remain in the acceptance denominator, including missing and rejected cases.",
+        "Paired comparisons include current complete observations, including rejected results. Missing pairs can bias comparisons.",
+        "The selected local-learning mode covers automatic goal-bound capture, replay and ingestion only. It does not prove prior exposure, provider training exclusion or manually relabelled imports.",
+        "Recorded runtime prices are not provider invoices. Reported total cost must include review, rework, and failed attempts."]
+    if record.get("release_binding") is not None:
+        limitations.append("The frozen release binding records a deployed baseline and proposed candidate at planning time. Case execution does not yet attest which release handled each case, so this pilot cannot establish release lift or a causal improvement.")
+    readiness = _evidence_readiness(record, rows, groups, admission)
     return {"id": record["id"], "title": record["title"], "customer": record["customer"],
             "workflow": record["workflow"], "criteria": record["criteria"], "revision": record["revision"],
             "plan_version": record["plan_version"], "frozen_at": record["frozen_at"], "cases": rows,
             "state": record.get("state", "frozen"),
             "admission": admission,
             "groups": groups, "measurement_basis": "operator_reported",
+            "evidence_readiness": readiness,
+            "release_binding": record.get("release_binding"),
+            "case_exposure_verified": False, "causal_lift_qualified": False,
             "learning_policy": learning,
             "provider_invoice_verified": False, "holdout_exposure_verified": False,
-            "limitations": ["Observations and evidence references are attributed to their recorder; they are not independently verified.",
-              "Time fields are non-overlapping hands-on effort. Wall time and costs remain separate observations.",
-              "All planned cases remain in the acceptance denominator, including missing and rejected cases.",
-              "Paired comparisons include current complete observations, including rejected results. Missing pairs can bias comparisons.",
-              "The selected local-learning mode covers automatic goal-bound capture, replay and ingestion only. It does not prove prior exposure, provider training exclusion or manually relabelled imports.",
-              "Recorded runtime prices are not provider invoices. Reported total cost must include review, rework, and failed attempts."]}
+            "limitations": limitations}
 
 
 def review_queue(actor, *, limit=200):
@@ -669,7 +798,7 @@ def review_queue(actor, *, limit=200):
     return items
 
 
-def independent_review(pilot_id, body, *, actor, resolve):
+def independent_review(pilot_id, body, *, actor, resolve, before_write=None):
     if body.get("confirm") is not True:
         raise ValueError("Explicitly confirm the exact learning-policy evidence you reviewed.")
     record = STORE.get(pilot_id)
@@ -694,11 +823,14 @@ def independent_review(pilot_id, body, *, actor, resolve):
             raise RecordConflict("This review reference was already used differently.")
         return record
     def update(current):
+        if before_write is not None:
+            before_write()
         if len(current.get("review_operations", {})) >= 100:
             raise ValueError("This pilot has reached its independent review history limit.")
         if current.get("independent_review"):
             current.setdefault("independent_review_history", []).append(current["independent_review"])
         current["independent_review"] = {"actor": actor, "decision": body["decision"], "notes": body["notes"],
-                                         "evidence_version": body["evidence_version"], "reviewed_at": time.time()}
+                                         "evidence_version": body["evidence_version"], "reviewed_at": time.time(), "operation_id": body["operation_id"]}
         current.setdefault("review_operations", {})[body["operation_id"]] = request
-    return STORE.update(pilot_id, update, expected_revision=body["expected_revision"], action="independent_learning_review", actor=actor)
+    return STORE.update(pilot_id, update, expected_revision=body["expected_revision"], action="independent_learning_review", actor=actor,
+                        **({"effect_guard": before_write} if before_write is not None else {}))

@@ -2,10 +2,11 @@
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
-const script = fs.readFileSync(path.join(folder, 'static/lightwork-tool-ops.js'), 'utf8');
+const read = name => fs.readFileSync(path.join(folder, name), 'utf8').replace(/\r\n?/g, '\n');
+const script = read('static/lightwork-tool-ops.js');
 
 function template(name) {
-  return fs.readFileSync(path.join(folder, 'templates', name), 'utf8')
+  return read('templates/' + name)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/{% if not [^%]*%}disabled{% endif %}/g, '')  // rendered for an administrator
     .replace(/{%[\s\S]*?%}/g, '').replace(/{{[\s\S]*?}}/g, '');
@@ -22,6 +23,15 @@ function response(value, status = 200) {
 }
 const ADMIN = {can: {installation_admin: true}};
 
+// The shell's shared helpers (mvFetchJSON) load before page scripts, as in
+// base.html; this fixture's own stand-ins for the other helpers are kept.
+function withShell(window) {
+  const kept = Object.fromEntries(Object.keys(window).filter((k) => k.startsWith('mv')).map((k) => [k, window[k]]));
+  if (!window.matchMedia) window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  window.eval(read('static/lightwork-ui.js'));
+  Object.assign(window, kept);
+}
+
 async function fixture(markup, route, {confirm = true} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [];
@@ -37,6 +47,7 @@ async function fixture(markup, route, {confirm = true} = {}) {
   window.mvWhen = () => 'today';
   window.URL.createObjectURL = () => 'blob:x';
   window.URL.revokeObjectURL = () => {};
+  withShell(window);
   window.eval(script);
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done)); };
   await settle();
@@ -48,6 +59,85 @@ const button = (root, text) => [...root.querySelectorAll('button')].find((b) => 
 const PREVIEW = {name: 'weekly-status', triggers: ['weekly status'], tools: ['http_fetch'], instructions: '# Steps\n1. Summarise.',
   instructions_cut_short: false, signed: false, ok: true, problems: [], suggestions: ['It does not list the tools it uses.'],
   fingerprint: 'f'.repeat(64), technical: [{text: "no 'tools_needed:' declared"}], can_add: true};
+
+// Suggested skills change only through a reviewed, confirmed request whose
+// original result stays readable.
+const CONTEXT = 'c'.repeat(64);
+function reviewed(action) {
+  return response({context: CONTEXT, operation: (action === 'admit' ? 'a' : 'b').repeat(32), token: 'sealed-' + action,
+    message: action === 'admit' ? 'Review the exact skill.' : 'Review the exact removal.',
+    changes: [{label: 'Full instructions', after: 'Check the renewal date with the account owner.'}]});
+}
+async function confirmReview(ui, label) {
+  const review = ui.document.getElementById('to-learned-review');
+  const box = review.querySelector('input[type="checkbox"]');
+  box.checked = true; box.dispatchEvent(new ui.window.Event('change'));
+  button(review, label).click();
+  await ui.settle();
+}
+
+test('a completed-work suggestion stays a draft until an administrator reviews and adds it', async (t) => {
+  const markup = slice('skills.html', '<section class="panel sk-section" aria-labelledby="to-learned-title"', '</section>');
+  const candidate = {name: 'renewal-timing', triggers: ['review customer renewals'], tools: [],
+    instructions: '# Steps\n1. Check the renewal date with the account owner.\n2. Report the result.',
+    source_tasks: [17], fingerprint: 'a'.repeat(64), ok: true, problems: [], suggestions: []};
+  let added = false;
+  const ui = await fixture(markup, (url, options) => {
+    if (url.endsWith('/learned-candidates')) return response({context: CONTEXT, can_add: true, blocked: '',
+      suggestions: added ? [] : [candidate], added: added ? [{name: 'renewal-timing', fingerprint: 'b'.repeat(64),
+        recall_ready: true, use_tracking: true, uses: 1, status: 'Available for matching new tasks.'}] : []});
+    if (url.endsWith('/learned-requests')) return response({context: CONTEXT, requests: []});
+    if (url.endsWith('/review')) return reviewed(JSON.parse(options.body).action);
+    if (url.endsWith('/admit')) { added = true; return response({context: CONTEXT, confirmed: true, action: 'admit',
+      result: {name: 'renewal-timing'}, message: 'Added renewal timing.'}); }
+    if (url.endsWith('/withdraw')) { added = false; return response({context: CONTEXT, confirmed: true, action: 'withdraw',
+      result: {name: 'renewal-timing'}, message: 'Removed renewal timing.'}); }
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  assert.equal(posts(ui.calls, '/admit').length, 0);
+  assert.match(ui.document.getElementById('to-learned-list').textContent, /Check the renewal date/);
+  assert.equal(ui.document.querySelector('#to-learned-list a').getAttribute('href'), '/chat/goal/17');
+  button(ui.document.getElementById('to-learned-list'), 'Review adding this skill').click();
+  await ui.settle();
+  assert.deepEqual(posts(ui.calls, '/review')[0].body, {action: 'admit', fingerprint: candidate.fingerprint,
+    publish_name: 'renewal-timing', context: CONTEXT});
+  assert.equal(posts(ui.calls, '/admit').length, 0, 'a review alone adds nothing');
+  await confirmReview(ui, 'Add reviewed skill');
+  assert.deepEqual(posts(ui.calls, '/admit')[0].body, {fingerprint: candidate.fingerprint, confirm: true,
+    review_token: 'sealed-admit', publish_name: 'renewal-timing'});
+  assert.match(ui.document.getElementById('to-learned-added').textContent, /renewal timing/);
+  assert.match(ui.document.getElementById('to-learned-added').textContent, /Used on 1 later task/);
+  button(ui.document.getElementById('to-learned-added'), 'Review removal').click();
+  await ui.settle();
+  await confirmReview(ui, 'Remove reviewed skill');
+  assert.deepEqual(posts(ui.calls, '/withdraw')[0].body, {fingerprint: 'b'.repeat(64), confirm: true,
+    review_token: 'sealed-withdraw'});
+  assert.match(ui.document.getElementById('to-learned-status').textContent, /Removed renewal timing/);
+});
+
+test('a lost readback does not claim a suggested skill is ready', async (t) => {
+  const markup = slice('skills.html', '<section class="panel sk-section" aria-labelledby="to-learned-title"', '</section>');
+  const row = {name: 'renewal-timing', triggers: ['review renewal'], tools: [],
+    instructions: '# Steps\n1. Review it.', source_tasks: [17], fingerprint: 'a'.repeat(64),
+    ok: true, problems: [], suggestions: []};
+  const ui = await fixture(markup, (url) => {
+    if (url.endsWith('/learned-candidates')) return response({context: CONTEXT, can_add: true, blocked: '', suggestions: [row], added: []});
+    if (url.endsWith('/learned-requests')) return response({context: CONTEXT, requests: []});
+    if (url.endsWith('/review')) return reviewed('admit');
+    if (url.endsWith('/admit')) return response({detail: 'unavailable'}, 503);
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  button(ui.document.getElementById('to-learned-list'), 'Review adding this skill').click();
+  await ui.settle();
+  await confirmReview(ui, 'Add reviewed skill');
+  assert.equal(posts(ui.calls, '/admit').length, 1);
+  const status = ui.document.getElementById('to-learned-status').textContent;
+  assert.match(status, /may have completed\. Check the original result/);
+  assert.doesNotMatch(status, /Added|ready/);
+  assert.equal(ui.document.getElementById('to-learned-original').disabled, false, 'the original result stays readable');
+});
 
 test('a skill is checked and shown before it can be added, then added after confirmation', async (t) => {
   const markup = slice('skills.html', '<details class="sk-more" id="to-skill-install">', '</details>');
@@ -99,12 +189,12 @@ test('a skill with problems cannot be added and a bad address is caught before a
 
 test('when adding skills from a web address is off, the check says so plainly and shows nothing to add', async (t) => {
   // The server's own sentence, read from the route, through the page's real plain-sentence filter.
-  const api = fs.readFileSync(path.join(folder, 'tools_ops_api.py'), 'utf8');
+  const api = read('tools_ops_api.py');
   const off = /_INSTALL_OFF = \(([\s\S]*?)\)\n/.exec(api)[1].match(/"([^"]*)"/g).map((q) => q.slice(1, -1)).join('');
   const ui = await fixture(slice('skills.html', '<details class="sk-more" id="to-skill-install">', '</details>'),
     () => response({detail: off}, 403));
   t.after(() => ui.window.close());
-  const lib = fs.readFileSync(path.join(folder, 'static/lightwork-ui.js'), 'utf8');
+  const lib = read('static/lightwork-ui.js');
   const filter = /var JARGON = [\s\S]*?window\.mvPlainDetail = function \(detail\) \{[\s\S]*?return text;\n\s*\};/.exec(lib)[0];
   ui.window.eval(filter);
   ui.document.getElementById('to-skill-url').value = 'https://example.com/s.md';
@@ -224,6 +314,7 @@ test('the connectors panel stays hidden from people who are not installation adm
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const calls = [];
   dom.window.fetch = async (url) => { calls.push(url); return response({can: {installation_admin: false}}); };
+  withShell(dom.window);
   dom.window.eval(script);
   for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done));
   t.after(() => dom.window.close());

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import threading
 import time
 
 import pytest
@@ -17,6 +18,7 @@ from maverick.consent_native_sdk import (
     VerifiedNativeAttestation,
 )
 from maverick_dashboard import consent_native_composition as composition
+from maverick_dashboard.consent_public_api import PublicConsentDependencies
 
 
 def _digest(value: str) -> str:
@@ -382,3 +384,234 @@ def test_application_and_device_lists_are_tenant_bound_and_carry_no_key_material
         "items": [],
         "truncated": False,
     }
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_timed_verdict_reuses_a_pass_until_it_expires() -> None:
+    clock = _Clock()
+    runs: list[float] = []
+
+    def check() -> bool:
+        runs.append(clock.now)
+        return True
+
+    verdict = composition._TimedVerdict(check, pass_seconds=30, fail_seconds=5, clock=clock)
+    assert [verdict(), verdict(), verdict()] == [True, True, True]
+    assert runs == [100.0]
+    clock.now += 29.9
+    assert verdict() is True
+    assert runs == [100.0]
+    clock.now += 0.2
+    assert verdict() is True
+    assert runs == [100.0, 130.1]
+
+
+def test_timed_verdict_rechecks_a_changed_revision_and_refuses_a_racing_write() -> None:
+    clock = _Clock()
+    revision = [0]
+    runs: list[int] = []
+
+    def check() -> bool:
+        runs.append(revision[0])
+        if len(runs) == 1:
+            revision[0] = 1  # a write during the replay cannot be certified
+        return True
+
+    verdict = composition._TimedVerdict(
+        check, pass_seconds=30, fail_seconds=5, clock=clock,
+        revision=lambda: revision[0],
+    )
+    assert verdict() is False
+    assert verdict() is True
+    assert runs == [0, 1]
+    assert verdict() is True  # unchanged burst does not replay
+    revision[0] = 2
+    assert verdict() is True
+    assert runs == [0, 1, 2]
+
+
+def test_shared_directory_revision_reads_the_database_wal_position(monkeypatch) -> None:
+    monkeypatch.setattr(composition.consent_storage, "shared", lambda: True)
+    directory = object.__new__(composition.NativeApplicationDirectory)
+    sql: list[str] = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, statement):
+            sql.append(statement)
+            return self
+
+        def fetchone(self):
+            return ("0/DEADBEEF",)
+
+    monkeypatch.setattr(directory, "_connect", lambda: Connection())
+    assert directory.integrity_revision() == ("postgres", "0/DEADBEEF")
+    assert sql == ["SELECT pg_current_wal_insert_lsn()"]
+
+
+def test_timed_verdict_fails_closed_and_retries_a_failure_sooner_than_a_pass() -> None:
+    clock = _Clock()
+    outcomes: list[object] = [RuntimeError("database is locked"), False, True]
+    runs: list[float] = []
+
+    def check() -> bool:
+        runs.append(clock.now)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return bool(outcome)
+
+    verdict = composition._TimedVerdict(check, pass_seconds=30, fail_seconds=5, clock=clock)
+    assert verdict() is False  # an error closes the gate, it never opens it
+    clock.now += 4.9
+    assert verdict() is False
+    assert len(runs) == 1  # not re-run on every request while broken
+    clock.now += 0.2
+    assert verdict() is False  # a clean "no" is retried after the same short wait
+    clock.now += 5.1
+    assert verdict() is True
+    assert len(runs) == 3
+    clock.now += 29
+    assert verdict() is True
+    assert len(runs) == 3
+
+
+def test_timed_verdict_treats_anything_but_true_as_a_failure() -> None:
+    verdict = composition._TimedVerdict(lambda: 1, pass_seconds=30, fail_seconds=5)  # type: ignore[arg-type,return-value]
+    assert verdict() is False
+
+
+def test_timed_verdict_never_swallows_interpreter_shutdown() -> None:
+    runs: list[int] = []
+
+    def check() -> bool:
+        runs.append(1)
+        raise KeyboardInterrupt
+
+    verdict = composition._TimedVerdict(check, pass_seconds=30, fail_seconds=5)
+    for _ in range(2):
+        with pytest.raises(KeyboardInterrupt):
+            verdict()
+    assert len(runs) == 2  # the interrupt was not remembered as an answer
+
+
+def test_timed_verdict_runs_one_check_for_concurrent_callers() -> None:
+    runs: list[int] = []
+
+    def check() -> bool:
+        runs.append(1)
+        time.sleep(0.2)
+        return True
+
+    verdict = composition._TimedVerdict(check, pass_seconds=30, fail_seconds=5)
+    answers: list[bool] = []
+    threads = [threading.Thread(target=lambda: answers.append(verdict())) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert answers == [True] * 8
+    assert len(runs) == 1
+
+
+def _fresh_app() -> FastAPI:
+    app = FastAPI()
+    app.state.consent_native_attestation_verifier = _Verifier()
+    return app
+
+
+def _public_dependencies() -> PublicConsentDependencies:
+    return PublicConsentDependencies(
+        credential_store=None,  # type: ignore[arg-type]
+        publishing_store_for=lambda _tenant: None,
+        preference_store_for=lambda _tenant: None,
+        gate=lambda: True,
+        rate_limit=lambda *_args: None,
+        context_resolver=lambda *_args: None,  # type: ignore[arg-type,return-value]
+    )
+
+
+def test_public_gate_scans_the_directory_once_for_a_burst_of_requests(
+    tmp_path, monkeypatch
+) -> None:
+    """Every anonymous native request used to replay the whole directory audit
+    chain (about 40 ms with 300 registered apps, growing with the fleet)."""
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    scans: list[int] = []
+    real_scan = composition.NativeApplicationDirectory.verify_integrity
+
+    def counting_scan(self) -> bool:
+        scans.append(1)
+        return real_scan(self)
+
+    monkeypatch.setattr(composition.NativeApplicationDirectory, "verify_integrity", counting_scan)
+    monkeypatch.setattr(
+        composition.NativeApplicationDirectory, "has_active_application", lambda _self: True
+    )
+    dependencies = composition.attach_consent_native_composition(
+        _fresh_app(), public_dependencies=_public_dependencies()
+    )
+    assert [dependencies.gate() for _ in range(25)] == [True] * 25
+    assert len(scans) == 1
+
+
+@pytest.mark.parametrize("mutation", ["alter", "delete"])
+def test_public_gate_stays_closed_for_a_changed_directory_and_without_an_application(
+    tmp_path, monkeypatch, mutation
+) -> None:
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    dependencies = composition.attach_consent_native_composition(
+        _fresh_app(), public_dependencies=_public_dependencies()
+    )
+    assert dependencies.gate() is False  # nothing registered yet
+
+    directory = composition.NativeApplicationDirectory(
+        composition.data_dir(
+            "consent_public_api",
+            "native-consent-application-directory.sqlite3",
+            tenant=None,
+        )
+    )
+    alpha = _authority(tenant="alpha", application_ref="mobile-alpha")
+    directory.register_new(
+        alpha,
+        registry=NativeConsentDeviceRegistry(tmp_path / "alpha" / "registry.db"),
+        settings=_settings(),
+        public_key_hex=_public_key(),
+        expected_revision=0,
+    )
+    assert dependencies.gate() is True  # registering opens it at once
+
+    before_revision = directory.integrity_revision()
+    with sqlite3.connect(directory.path) as connection:
+        if mutation == "alter":
+            connection.execute(
+                "UPDATE native_consent_application_directory SET current_public_key_hex=? "
+                "WHERE application_ref=?",
+                ("f" * 64, "mobile-alpha"),
+            )
+        else:
+            connection.execute("DROP TRIGGER native_consent_directory_audit_no_delete")
+            connection.execute("DELETE FROM native_consent_directory_audit")
+    after_revision = directory.integrity_revision()
+    assert before_revision != after_revision, (before_revision, after_revision)
+    # A cached pass must be invalidated as soon as a normal file mutation is
+    # observable, even before its 30-second expiry.
+    assert dependencies.gate() is False
+    fresh = composition.attach_consent_native_composition(
+        _fresh_app(), public_dependencies=_public_dependencies()
+    )
+    assert fresh.gate() is False

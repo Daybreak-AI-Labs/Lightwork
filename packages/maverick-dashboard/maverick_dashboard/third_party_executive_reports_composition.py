@@ -506,6 +506,7 @@ class ThirdPartyExecutiveReportRuntime:
         report_id: str | None,
         expected_absent_revision: int,
         idempotency_key: str,
+        effect_guard: Callable[[], None] | None = None,
     ) -> reports.ExecutiveReportRecord:
         if self.role_view == "viewer":
             raise reports.ThirdPartyExecutiveReportPermissionDenied(
@@ -524,6 +525,7 @@ class ThirdPartyExecutiveReportRuntime:
             report_id=report_id,
             expected_absent_revision=expected_absent_revision,
             idempotency_key=idempotency_key,
+            **({"effect_guard": effect_guard} if effect_guard is not None else {}),
         )
 
 

@@ -8,7 +8,11 @@ call ``require_consent(action, risk_level)`` which:
   2. Checks ``MAVERICK_CONSENT_MODE`` env var:
         - "auto-approve" (default) -> grant + log (no friction out of the box)
         - "auto-deny"              -> deny + log
-        - "ask"                    -> ask the user; in non-tty contexts, deny
+        - "ask"                    -> ask a person: prompt at a terminal; for a
+                                      task someone started in Lightwork's chat,
+                                      park it on the Approvals page and deny if
+                                      nobody decides in time; otherwise (a
+                                      headless run) deny at once
         - "dashboard"              -> park in the approvals queue + poll
   3. Logs an audit event for prompt + result.
 
@@ -33,11 +37,12 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -192,8 +197,9 @@ def _configured_mode() -> str:
 
 
 # Consent modes from the strictest to the loosest. "ask" outranks "dashboard":
-# outside a terminal (every server-run task) it refuses, while "dashboard" can
-# still be approved on the Approvals page.
+# outside a terminal it refuses every headless run at once and withdraws an
+# unanswered request, while "dashboard" parks any run's request on the
+# Approvals page.
 _STRICTNESS = ("auto-deny", "ask", "dashboard", "auto-approve")
 
 # A per-task consent mode (director mode's autonomy level for one task). It is
@@ -246,14 +252,22 @@ def _installation_mode(risk: str | None = None) -> str:
     env = os.environ.get("MAVERICK_CONSENT_MODE")
     if env:
         return env.strip().lower()
+    return installation_mode_for(_configured_mode(), risk)
+
+
+def installation_mode_for(configured: str, risk: str | None = None) -> str:
+    """The mode an action at ``risk`` gets when ``[safety] consent_mode`` is
+    ``configured`` ("" when unset) and no environment variable overrides it.
+    The approval-threshold preview asks this for a choice not yet saved; the
+    gate asks it for the saved one, so both always agree."""
     # The same choice made in the dashboard (``[safety] consent_mode``); the
-    # environment variable above still wins. A value this module does not know
+    # environment variable still wins. A value this module does not know
     # fails closed to asking a person.
-    configured = _configured_mode()
+    configured = str(configured or "").strip().lower()
     if configured:
-        return configured
+        return configured if configured in _CONSENT_MODES else "ask"
     # Enterprise mode flips the default to 'ask' so destructive actions are gated
-    # (and denied in non-interactive contexts) when handling sensitive data.
+    # (a person decides; headless runs are denied) when handling sensitive data.
     try:
         from ..enterprise import enterprise_enabled
         if enterprise_enabled():
@@ -262,8 +276,9 @@ def _installation_mode(risk: str | None = None) -> str:
         pass
     # Secure-by-default: gate HIGH/CRITICAL-risk actions (an autonomous run can't
     # take a destructive action without an explicit decision -> 'ask', which
-    # denies in a non-interactive context). Low/medium stay frictionless so
-    # normal goals are unaffected. An explicit MAVERICK_CONSENT_MODE opts out.
+    # asks the person behind a chat task on the Approvals page and denies a
+    # headless run). Low/medium stay frictionless so normal goals are
+    # unaffected. An explicit MAVERICK_CONSENT_MODE opts out.
     if str(risk or "").strip().lower() in ("high", "critical"):
         try:
             from ..security_defaults import secure_by_default
@@ -479,11 +494,15 @@ def _active_grants(records: list[dict]) -> dict[tuple[str, str], None]:
 
 def _append_record_unlocked(
     path: Path, key: bytes, records: list[dict], *, op: str,
-    action: str, scope: str,
+    action: str, scope: str, effect_guard: Callable[[], None] | None = None,
+    authority_binding: tuple[str, str, str] | None = None,
 ) -> None:
     if len(records) >= _MAX_LEDGER_RECORDS:
         raise ConsentLedgerError("consent ledger contains too many records")
-    tenant, principal, policy = _authority_binding()
+    current_binding = _authority_binding()
+    tenant, principal, policy = current_binding if authority_binding is None else authority_binding
+    if authority_binding is not None and (tenant != current_binding[0] or not re.fullmatch(r"[a-f0-9]{64}", principal) or not re.fullmatch(r"[a-f0-9]{64}", policy)):
+        raise ConsentLedgerError("consent revocation binding is invalid")
     unsigned = {
         "action": action,
         "op": op,
@@ -505,6 +524,8 @@ def _append_record_unlocked(
     try:
         with os.fdopen(fd, "ab") as stream:
             fd = -1
+            if effect_guard is not None:
+                effect_guard()
             stream.write(encoded)
             stream.flush()
             os.fsync(stream.fileno())
@@ -551,6 +572,8 @@ def revoke(
     path: Path | None = None,
     strict: bool = False,
     write_tombstone: bool = False,
+    effect_guard: Callable[[], None] | None = None,
+    all_matching_bindings: bool = False,
 ) -> bool:
     """Remove all matching grants. Returns True if anything was removed.
 
@@ -566,8 +589,14 @@ def revoke(
     action, normalized_scope = _validated_key(action, scope)
     try:
         with _locked_ledger(path) as resolved:
+            if effect_guard is not None:
+                effect_guard()
             key = _ledger_key(resolved, create=write_tombstone)
             records = _load_records_unlocked(resolved, key)
+            if all_matching_bindings and key is not None and _revoke_generated_bindings(
+                resolved, key, records, action, normalized_scope, effect_guard,
+            ):
+                return True
             was_active = (action, normalized_scope) in _active_grants(records)
             if key is None or (not was_active and not write_tombstone):
                 return False
@@ -589,7 +618,7 @@ def revoke(
                     return False
             _append_record_unlocked(
                 resolved, key, records, op="revoke",
-                action=action, scope=normalized_scope,
+                action=action, scope=normalized_scope, effect_guard=effect_guard,
             )
             return was_active
     except (ConsentLedgerError, OSError, PermissionError) as exc:
@@ -597,6 +626,32 @@ def revoke(
             raise
         log.warning("consent: cannot revoke standing grant: %s", exc)
         return False
+
+
+def _generated_bindings(records, action, scope):
+    tenant = _authority_binding()[0]
+    if action != "register-generated-tool" or not re.fullmatch(re.escape(tenant) + r":[a-z][a-z0-9_]{1,40}:[a-f0-9]{64}", scope):
+        raise ValueError("cross-binding revocation is limited to this tenant's exact generated source")
+    latest = {}
+    for record in records:
+        if (record["tenant"], record["action"], record["scope"]) == (tenant, action, scope):
+            latest[(record["principal"], record["policy"])] = record["op"]
+    return [(tenant, principal, policy) for (principal, policy), op in latest.items() if op == "grant"]
+
+
+def _revoke_generated_bindings(path, key, records, action, scope, effect_guard):
+    bindings = _generated_bindings(records, action, scope)
+    if not bindings:
+        return False
+    if len(bindings) > 128:
+        raise ConsentLedgerError("the complete generated-source authority exceeds 128 active bindings")
+    for binding in bindings:
+        _append_record_unlocked(path, key, records, op="revoke", action=action, scope=scope,
+                                effect_guard=effect_guard, authority_binding=binding)
+        # Every append changes seq/prev. Re-verify the complete native signed
+        # ledger before constructing the next row, retaining all prior bytes.
+        records = _load_records_unlocked(path, key)
+    return True
 
 
 def list_grants(*, path: Path | None = None) -> list[tuple[str, str]]:
@@ -682,6 +737,16 @@ def require_consent(
         # path below (fail-open: the kernel never *requires* the dashboard).
     # 3) Interactive prompt (or non-tty deny).
     if not sys.stdin.isatty():
+        if mode == "ask":
+            # "Ask a person": a task someone started in Lightwork's chat sends
+            # the step to the Approvals page and waits for them. Nobody deciding
+            # in time is still the refusal below, and the request is withdrawn.
+            asked = _decide_via_dashboard(
+                action, risk, scope, detail, provenance, approval_card,
+                withdraw_on_timeout=True, chat_tasks_only=True,
+            )
+            if asked is not None:
+                return _decided(asked, action, scope, detail, raise_on_deny)
         d = _emit(ConsentDecision(False, "non-tty-deny", risk, ts), action, scope, detail)
         if raise_on_deny:
             raise ConsentDenied(action)
@@ -716,6 +781,19 @@ def require_consent(
     return d
 
 
+def _decided(
+    decision: ConsentDecision,
+    action: str,
+    scope: str | None,
+    detail: str | None,
+    raise_on_deny: bool,
+) -> ConsentDecision:
+    decision = _emit(decision, action, scope, detail)
+    if not decision.granted and raise_on_deny:
+        raise ConsentDenied(action)
+    return decision
+
+
 def require_person(
     action: str,
     *,
@@ -723,6 +801,7 @@ def require_person(
     scope: str | None = None,
     detail: str | None = None,
     provenance: str | None = None,
+    approval_card: Mapping[str, object] | None = None,
 ) -> ConsentDecision:
     """A decision made by a person, for a gate an administrator turned on.
 
@@ -731,7 +810,7 @@ def require_person(
     ``ask`` mode at an interactive terminal, to the terminal prompt). No
     decision within the dashboard wait is a refusal, and the unanswered
     request is withdrawn. ``auto-deny`` refuses at once; nothing grants
-    silently.
+    silently. A supplied exact-operation card is checked with the decision.
     """
     ts = time.time()
     mode = _resolve_mode(risk)
@@ -740,12 +819,22 @@ def require_person(
     if mode == "ask" and sys.stdin.isatty():
         return require_consent(action, risk=risk, scope=scope, detail=detail,
                                provenance=provenance, allow_auto_approve=False,
-                               consult_ledger=False)
+                               consult_ledger=False, approval_card=approval_card)
     decided = _decide_via_dashboard(action, risk, scope, detail, provenance,
+                                    approval_card,
                                     withdraw_on_timeout=True)
     if decided is not None:
         return _emit(decided, action, scope, detail)
     return _emit(ConsentDecision(False, "no-decision", risk, ts), action, scope, detail)
+
+
+# A risky step waits this long (seconds) for a decision on the Approvals page
+# unless [approval] dashboard_wait_seconds says otherwise: 30 minutes, with
+# one in-app reminder to the people who can decide after 10 (see the
+# dashboard's approval_reminders).
+DEFAULT_DASHBOARD_WAIT_SECONDS = 1800.0
+# A parked request's card never stays approvable longer than this.
+_CARD_LIFETIME_CAP_SECONDS = 3600.0
 
 
 def _dashboard_timeout() -> float:
@@ -754,7 +843,8 @@ def _dashboard_timeout() -> float:
     A timeout falls through to the interactive/non-tty path (fail-open),
     so a dashboard that's never opened doesn't wedge the agent forever.
     ``MAVERICK_CONSENT_DASHBOARD_TIMEOUT`` wins; otherwise ``[approval]
-    dashboard_wait_seconds`` (set on Settings > All settings) applies.
+    dashboard_wait_seconds`` (set on Settings > All settings) applies;
+    default 1800 (30 minutes).
     """
     raw = os.environ.get("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "")
     if not raw.strip():
@@ -767,11 +857,22 @@ def _dashboard_timeout() -> float:
         if isinstance(value, (int, float)) and not isinstance(value, bool) \
                 and math.isfinite(value):
             return max(0.0, float(value))
-        raw = "300"
+        return DEFAULT_DASHBOARD_WAIT_SECONDS
     try:
         return max(0.0, float(raw))
     except ValueError:
-        return 300.0
+        return DEFAULT_DASHBOARD_WAIT_SECONDS
+
+
+def _approval_card_ttl() -> float:
+    """How long a parked request's card stays approvable (seconds): the
+    dashboard wait, at least a minute and never more than an hour."""
+    return max(60.0, min(_dashboard_timeout(), _CARD_LIFETIME_CAP_SECONDS))
+
+
+def dashboard_wait_seconds() -> float:
+    """How long a task waits for a decision on the Approvals page (seconds)."""
+    return _dashboard_timeout()
 
 
 def _consent_requester(wm) -> str | None:
@@ -1036,9 +1137,18 @@ def require_operation_consent(
     budget_provider: Callable[[], Mapping[str, Any]] | None = None,
     allow_auto_approve: bool = False,
     consult_ledger: bool = False,
-    ttl_seconds: float = 300.0,
+    require_fresh_person: bool = False,
+    ttl_seconds: float | None = None,
+    display_command: str | None = None,
 ) -> ConsentPermit:
-    """Obtain a one-use exact-operation permit for a mutating boundary."""
+    """Obtain a one-use exact-operation permit for a mutating boundary.
+
+    ``require_fresh_person`` sends the committed card to an explicit reviewer
+    regardless of silent consent or standing grants. ``display_command`` is
+    the exact command shown to whoever may read the card. ``ttl_seconds``
+    defaults to the dashboard wait (capped at an hour), so a person deciding
+    late in the wait is not refused as expired.
+    """
 
     from ..approval_cards import ApprovalCardError, build_approval_card, digest
 
@@ -1077,7 +1187,7 @@ def require_operation_consent(
         )
         display_detail = _card_label(detail, "Review this exact operation.")
         display_provenance = _card_label(provenance, "operation-consent")
-        ttl = float(ttl_seconds)
+        ttl = _approval_card_ttl() if ttl_seconds is None else float(ttl_seconds)
         if not math.isfinite(ttl) or ttl <= 0:
             raise ApprovalCardError("consent permit ttl must be positive and finite")
         card = build_approval_card(
@@ -1100,18 +1210,26 @@ def require_operation_consent(
             before=before,
             after=after,
             irreversible=irreversible,
+            display_command=display_command,
         )
-        decision = require_consent(
-            display_action,
-            risk=risk,
-            scope=display_scope,
-            detail=display_detail,
-            provenance=display_provenance,
-            raise_on_deny=True,
-            allow_auto_approve=allow_auto_approve,
-            consult_ledger=consult_ledger,
-            approval_card=card,
-        )
+        if require_fresh_person:
+            decision = require_person(
+                display_action, risk=risk, scope=display_scope,
+                detail=display_detail, provenance=display_provenance,
+                approval_card=card,
+            )
+        else:
+            decision = require_consent(
+                display_action,
+                risk=risk,
+                scope=display_scope,
+                detail=display_detail,
+                provenance=display_provenance,
+                raise_on_deny=True,
+                allow_auto_approve=allow_auto_approve,
+                consult_ledger=consult_ledger,
+                approval_card=card,
+            )
         if not decision.granted:
             raise ConsentDenied(display_action)
         permit = ConsentPermit(
@@ -1151,6 +1269,53 @@ def consume_operation_consent(
         yield card
 
 
+def described_approval_card(
+    action: str,
+    *,
+    scope: str | None,
+    summary: str,
+    target_label: str,
+    request: Mapping[str, object],
+    what_it_will_do: Sequence[str],
+    known_effects: Sequence[str],
+    open_questions: Sequence[str] = (),
+    before: str,
+    after: str,
+    irreversible: bool,
+    requester: str | None = None,
+) -> dict[str, object]:
+    """An exact-request card whose plain words the caller writes.
+
+    The authority, budget and expiry come from the same live sources as every
+    other card, so a caller only describes the request; it cannot widen it."""
+    from ..approval_cards import build_approval_card, digest
+
+    authority, runtime_budget, _principal_is_current = _runtime_approval_authority(
+        actor_hint=requester,
+    )
+    return build_approval_card(
+        action=action,
+        summary=summary,
+        target_label=target_label,
+        target={"scope": scope},
+        parameters=dict(request),
+        parameter_summary=list(what_it_will_do),
+        actor=str(authority["actor"]),
+        workspace=str(authority["workspace"]),
+        role=str(authority["role"]),
+        authority_versions=dict(authority["versions"]),
+        input_versions={"request_sha256": digest(dict(request))},
+        credential_versions={"state": "not_applicable"},
+        budget=_operation_budget(runtime_budget, None),
+        expires_at=time.time() + _approval_card_ttl(),
+        known_effects=list(known_effects),
+        unresolved_assumptions=list(open_questions),
+        before=before,
+        after=after,
+        irreversible=irreversible,
+    )
+
+
 def _dashboard_approval_card(
     action: str,
     risk: str,
@@ -1161,75 +1326,143 @@ def _dashboard_approval_card(
 ) -> dict[str, object]:
     """Build a conservative exact-request card for unadapted consent callers."""
 
-    from ..approval_cards import build_approval_card, digest
-
     def label(value: object, fallback: str) -> str:
         text = " ".join(str(value or "").split())
         return (text or fallback)[:500]
 
-    authority, runtime_budget, _principal_is_current = _runtime_approval_authority(
-        actor_hint=requester,
-    )
     action_label = label(action, "requested operation")
-    target_label = label(scope, "the exact committed request scope")
     effect = label(detail, f"Run {action_label} once for the reviewed scope.")
-    request = {
-        "action": action,
-        "risk": risk,
-        "scope": scope,
-        "detail": detail,
-        "provenance": provenance,
-    }
-    return build_approval_card(
-        action=action_label,
+    return described_approval_card(
+        action_label,
+        scope=scope,
         summary=effect,
-        target_label=target_label,
-        target={"scope": scope},
-        parameters=request,
-        parameter_summary=[
-            "Authorize this exact committed action, scope, detail, and provenance once."
-        ],
-        actor=str(authority["actor"]),
-        workspace=str(authority["workspace"]),
-        role=str(authority["role"]),
-        authority_versions=dict(authority["versions"]),
-        input_versions={"request_sha256": digest(request)},
-        credential_versions={"state": "not_applicable"},
-        budget=_operation_budget(runtime_budget, None),
-        expires_at=time.time() + max(60.0, min(_dashboard_timeout(), 3600.0)),
+        target_label=label(scope, "the exact committed request scope"),
+        request={"action": action, "risk": risk, "scope": scope, "detail": detail,
+                 "provenance": provenance},
+        what_it_will_do=["Authorize this exact committed action, scope, detail, and provenance once."],
         known_effects=[effect],
-        unresolved_assumptions=[
-            "This compatibility caller supplied no operation-specific credential metadata."
-        ],
+        open_questions=["This compatibility caller supplied no operation-specific credential metadata."],
         before="The requested operation has not been authorized.",
         after="The exact committed request may execute once after this decision.",
         irreversible=risk in {"high", "critical"},
+        requester=requester,
     )
 
 
-def _decide_via_dashboard(
+def approval_undo_grace_seconds() -> float:
+    """How long (seconds) a dashboard decision can still be undone.
+
+    The Approvals page offers "Undo" for this long after approve/reject, so
+    the agent-side consumer must not act on a decision until the window has
+    passed. ``MAVERICK_APPROVAL_UNDO_GRACE_SECONDS`` wins; otherwise
+    ``[approval] undo_grace_seconds`` (Settings > All settings) applies;
+    default 30. ``0`` disables undo and restores immediate consumption.
+    """
+    raw = os.environ.get("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "")
+    if not raw.strip():
+        try:
+            from ..config import load_config
+
+            value = ((load_config() or {}).get("approval") or {}).get("undo_grace_seconds")
+        except Exception:  # config never blocks the approval wait
+            value = None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and math.isfinite(value):
+            return max(0.0, min(float(value), 3600.0))
+        raw = "30"
+    try:
+        return max(0.0, min(float(raw), 3600.0))
+    except ValueError:
+        return 30.0
+
+
+def approval_requires_acknowledgement() -> bool:
+    """Whether approving a high or critical risk request must carry an explicit
+    acknowledgement (the Approvals page confirmation; the API's
+    ``acknowledged`` field, plus a typed ``confirmation`` for critical risk).
+
+    ``MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT`` wins; otherwise ``[approval]
+    require_acknowledgement`` applies; default on.
+    """
+    raw = os.environ.get("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT", "").strip().lower()
+    if raw:
+        return raw not in ("0", "false", "no", "off")
+    try:
+        from ..config import load_config
+
+        value = ((load_config() or {}).get("approval") or {}).get("require_acknowledgement")
+    except Exception:  # config never weakens the confirmation
+        value = None
+    return value if isinstance(value, bool) else True
+
+
+def approval_decision_settles_at(row: object, *, grace: float | None = None) -> float:
+    """Wall-clock time when a decided approval stops being undoable.
+
+    Until then the decision is recorded but not yet in effect: a consumer
+    keeps waiting and an undo returns the request to pending.
+    """
+    if grace is None:
+        grace = approval_undo_grace_seconds()
+    decided_at = getattr(row, "decided_at", None)
+    if not isinstance(decided_at, (int, float)) or isinstance(decided_at, bool):
+        decided_at = time.time()
+    return float(decided_at) + grace
+
+
+# Task states after which a waiting request can no longer be acted on: the
+# person pressed Stop, or the run finished or paused for good. A decision made
+# later must not start the step in a run nobody is following any more.
+_TASK_OVER = frozenset({"cancelled", "done", "completed", "failed", "error", "blocked"})
+
+
+def _web_chat_goal(wm) -> int | None:
+    """The running task when a person started it in Lightwork's chat, else None.
+
+    That person follows the task on its chat page and can open the Approvals
+    page, so "ask" sends the decision there. A headless run (the command line,
+    a webhook, a schedule, an API script) has no chat behind it.
+    """
+    try:
+        from ..chat_threads import ChatThreads
+        from ..logging_config import current_goal_id
+
+        goal_id = current_goal_id()
+        if goal_id is None:
+            return None
+        return goal_id if ChatThreads(wm).binding(goal_id) is not None else None
+    except Exception:  # an unreadable binding never widens who is asked
+        return None
+
+
+def _task_over(wm, goal_id: int | None) -> bool:
+    if goal_id is None:
+        return False
+    try:
+        goal = wm.get_goal(goal_id)
+    except Exception:  # a failed read keeps waiting; the approval poll fails closed
+        return False
+    return goal is None or str(getattr(goal, "status", "") or "") in _TASK_OVER
+
+
+def _withdraw_approval(wm, approval_id: int, by: str) -> None:
+    """Take a request nobody can act on any more off the Approvals page."""
+    try:
+        wm.decide_approval(approval_id, "denied", decided_by=by)
+    except Exception:  # pragma: no cover -- the refusal stands either way
+        pass
+
+
+def _park_approval(
+    wm,
     action: str,
     risk: str,
     scope: str | None,
     detail: str | None,
     provenance: str | None,
-    approval_card: Mapping[str, object] | None = None,
-    *,
-    withdraw_on_timeout: bool = False,
-) -> ConsentDecision | None:
-    """Park the action in the world model and poll for a dashboard decision.
-
-    Returns a ConsentDecision once the operator approves/denies via the
-    dashboard /approvals page, or ``None`` if the world model is
-    unavailable or the wait times out -- the caller then falls back to
-    the interactive/non-tty path (fail-open per the kernel contract).
-    """
-    try:
-        from ..world_model import close_world_if_owned, open_world
-        wm = open_world()  # client/tenant-floored: the same DB the dashboard reads
-    except Exception as e:  # world model missing/unwritable -> fail-open
-        log.warning("consent: dashboard mode unavailable, falling back: %s", e)
-        return None
+    approval_card: Mapping[str, object] | None,
+) -> tuple[int, Mapping[str, object]]:
+    """Queue the exact request on the Approvals page; raise when it can't be."""
     # Approval-delegation routing (opt-in via [governance.delegation] rules):
     # a risk/tool rule can route this approval to a specific delegate. No-op
     # (route returns None) when no rules are configured, so the default queue
@@ -1251,75 +1484,148 @@ def _decide_via_dashboard(
     except Exception:  # pragma: no cover -- config never blocks consent
         required = 1
     requester = _consent_requester(wm)
-    try:
-        from ..approval_cards import encode_approval_detail
+    from ..approval_cards import encode_approval_detail
 
-        if approval_card is None:
-            approval_card = _dashboard_approval_card(
-                action, risk, scope, detail, provenance, requester,
-            )
-        detail = encode_approval_detail(approval_card)
-        approval_id = wm.create_approval(
-            action, risk=risk, scope=scope, detail=detail, provenance=provenance,
-            approvals_required=required, requested_by=requester,
+    if approval_card is None:
+        approval_card = _dashboard_approval_card(
+            action, risk, scope, detail, provenance, requester,
         )
-    except Exception as e:
-        log.warning("consent: cannot queue approval, falling back: %s", e)
-        close_world_if_owned(wm)
-        return None
+    stored = encode_approval_detail(approval_card)
+    approval_id = wm.create_approval(
+        action, risk=risk, scope=scope, detail=stored, provenance=provenance,
+        approvals_required=required, requested_by=requester,
+    )
+    # Chat channels get the same card with decision buttons: the world model
+    # announces it (maverick.approval_notify) right after the row commits.
+    return approval_id, approval_card
 
+
+def _settled_decision(row, approval_card: Mapping[str, object], risk: str) -> ConsentDecision:
+    """The final answer for a decision whose undo window has passed."""
+    granted = row.status == "approved"
+    source = "dashboard"
+    if granted:
+        try:
+            from ..approval_cards import (
+                decode_approval_detail,
+                require_current_approval_card,
+            )
+
+            stored = decode_approval_detail(row.detail)
+            if stored is None:
+                raise ValueError("legacy approval detail")
+            expected_binding = str(approval_card["binding_sha256"])
+            require_current_approval_card(
+                stored, expected_binding=expected_binding,
+            )
+        except Exception:
+            # A decision can become stale between the API vote and this
+            # poll. Return a denial; operation-permit consumers also
+            # rebuild all live authority immediately before the effect.
+            granted = False
+            source = "dashboard-stale"
+    return ConsentDecision(
+        granted,
+        source,
+        risk,
+        time.time(),
+        actor=str(getattr(row, "decided_by", "") or ""),
+    )
+
+
+def _await_dashboard_decision(
+    wm,
+    approval_id: int,
+    approval_card: Mapping[str, object],
+    risk: str,
+    *,
+    goal_id: int | None,
+    withdraw_on_timeout: bool,
+) -> ConsentDecision | None:
+    """Poll the parked request until a person decides, the task stops, or time runs out."""
     # monotonic for the elapsed-time window: a wall-clock jump must not collapse
     # the human-approval window (timing out a risky-action prompt early) or
     # extend it (stalling the agent). The decision record below keeps wall time.
     deadline = time.monotonic() + _dashboard_timeout()
-    while time.monotonic() < deadline:
+    grace = approval_undo_grace_seconds()
+    while True:
         try:
             row = wm.get_approval(approval_id)
         except Exception:
-            close_world_if_owned(wm)
             return None
+        if _task_over(wm, goal_id):
+            # Stop (or the end of the run) withdraws the request, so a later
+            # approval can never start the step after the person pressed Stop.
+            _withdraw_approval(wm, approval_id, "system:task-stopped")
+            return ConsentDecision(False, "task-stopped", risk, time.time())
         if row is not None and row.status != "pending":
-            granted = row.status == "approved"
-            source = "dashboard"
-            if granted:
-                try:
-                    from ..approval_cards import (
-                        decode_approval_detail,
-                        require_current_approval_card,
-                    )
-
-                    stored = decode_approval_detail(row.detail)
-                    if stored is None:
-                        raise ValueError("legacy approval detail")
-                    expected_binding = str(approval_card["binding_sha256"])
-                    require_current_approval_card(
-                        stored, expected_binding=expected_binding,
-                    )
-                except Exception:
-                    # A decision can become stale between the API vote and this
-                    # poll. Return a denial; operation-permit consumers also
-                    # rebuild all live authority immediately before the effect.
-                    granted = False
-                    source = "dashboard-stale"
-            decision = ConsentDecision(
-                granted,
-                source,
-                risk,
-                time.time(),
-                actor=str(getattr(row, "decided_by", "") or ""),
-            )
-            close_world_if_owned(wm)
-            return decision
+            # The person can still undo for the grace window: keep polling
+            # (a decision seen near the deadline still gets its full window;
+            # an undo flips the row back to pending and the wait resumes).
+            remaining = approval_decision_settles_at(row, grace=grace) - time.time()
+            if remaining > 0:
+                time.sleep(min(1.0, remaining))
+                continue
+            return _settled_decision(row, approval_card, risk)
+        if time.monotonic() >= deadline:
+            break
         time.sleep(1.0)
     if withdraw_on_timeout:
         # Nobody decided in time and the caller will not act on a later vote:
         # take the request off the Approvals page instead of leaving it there.
-        try:
-            wm.decide_approval(approval_id, "denied", decided_by="system:no-decision")
-        except Exception:  # pragma: no cover -- the refusal stands either way
-            pass
-    close_world_if_owned(wm)
+        _withdraw_approval(wm, approval_id, "system:no-decision")
     return None  # timed out: caller falls back
+
+
+def _decide_via_dashboard(
+    action: str,
+    risk: str,
+    scope: str | None,
+    detail: str | None,
+    provenance: str | None,
+    approval_card: Mapping[str, object] | None = None,
+    *,
+    withdraw_on_timeout: bool = False,
+    chat_tasks_only: bool = False,
+) -> ConsentDecision | None:
+    """Park the action in the world model and poll for a dashboard decision.
+
+    Returns a ConsentDecision once the operator approves/denies via the
+    dashboard /approvals page (or a refusal when the task is stopped while it
+    waits), or ``None`` if the world model is unavailable or the wait times
+    out -- the caller then falls back to the interactive/non-tty path
+    (fail-open per the kernel contract). ``chat_tasks_only`` parks the request
+    only for a task a person started in Lightwork's chat and returns ``None``
+    at once for anything else.
+    """
+    try:
+        from ..world_model import close_world_if_owned, open_world
+        wm = open_world()  # client/tenant-floored: the same DB the dashboard reads
+    except Exception as e:  # world model missing/unwritable -> fail-open
+        log.warning("consent: dashboard mode unavailable, falling back: %s", e)
+        return None
+    try:
+        if chat_tasks_only:
+            goal_id = _web_chat_goal(wm)
+            if goal_id is None:
+                return None
+        else:
+            from ..logging_config import current_goal_id
+
+            goal_id = current_goal_id()
+        try:
+            approval_id, approval_card = _park_approval(
+                wm, action, risk, scope, detail, provenance, approval_card,
+            )
+        except Exception as e:
+            log.warning("consent: cannot queue approval, falling back: %s", e)
+            return None
+        return _await_dashboard_decision(
+            wm, approval_id, approval_card, risk,
+            goal_id=goal_id, withdraw_on_timeout=withdraw_on_timeout,
+        )
+    finally:
+        close_world_if_owned(wm)
 
 
 def _format_prompt(
@@ -1372,6 +1678,11 @@ def _emit(
         source=decision.source,
         decided_by=decision.actor,
     )
+    # One content-free row per decision, for previewing a threshold change.
+    from ..approval_checks import record_decision
+
+    record_decision(risk=decision.risk, action=action, granted=decision.granted,
+                    source=decision.source)
     return decision
 
 
@@ -1380,11 +1691,13 @@ __all__ = [
     "ConsentDecision",
     "ConsentDenied",
     "ConsentLedgerError",
+    "described_approval_card",
     "consume_operation_consent",
     "require_consent",
     "require_operation_consent",
     "require_person",
     "grant_persistent",
+    "installation_mode_for",
     "revoke",
     "list_grants",
 ]

@@ -12,17 +12,22 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from maverick_dashboard import settings_all_page as settings_page
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_governance as governance
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = tuple(governance.entries(catalog.S, catalog.C, catalog.Column))
 IDS = {row.id for row in ROWS}
-WEAKENING = tuple(row for row in ROWS if row.warning)
+# Cloud agent oversight is still in development: its rows are listed but refused.
+UNAVAILABLE = tuple(row for row in ROWS if row.section in settings_page._UNAVAILABLE_SETTING_SECTIONS)
+SAVEABLE = tuple(row for row in ROWS if row not in UNAVAILABLE)
+SAVEABLE_IDS = {row.id for row in SAVEABLE}
+WEAKENING = tuple(row for row in SAVEABLE if row.warning)
 _ENV_TO_CLEAR = (
     "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_CONFIG", "MAVERICK_CONFIG_OVERLAY",
     "MAVERICK_SECRETS_BACKEND", "MAVERICK_SECRETS_DIR", "MAVERICK_RED_TEAM_COMMITMENT_KEY",
@@ -68,7 +73,7 @@ def _loaded() -> dict:
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _rows_by_id() -> dict:
@@ -213,22 +218,22 @@ def test_every_row_saves_reads_back_and_resets(audit_rows):
     # The Databricks check needs cloud oversight, a row of another group.
     _base('[ai_cloud_agent_governance]\nenable = true\nenabled_providers = ["aws_bedrock"]\n')
     changes = [{"id": row.id, "value": _TOGETHER_SAMPLES.get(row.id, _sample(row))}
-               for row in ROWS]
+               for row in SAVEABLE]
     r = _save(changes, confirm=True)
     assert r.status_code == 200, r.text
-    assert set(r.json()["changed"]) == IDS
+    assert set(r.json()["changed"]) == SAVEABLE_IDS
     loaded = _loaded()
     state = _rows_by_id()
-    for row, change in zip(ROWS, changes, strict=True):
+    for row, change in zip(SAVEABLE, changes, strict=True):
         present, value = catalog.lookup(loaded, row.path)
         assert present, row.id
         assert value == _stored(row, change["value"]), row.id
         assert state[row.id]["source"] == "here", row.id
     # One audit row per change, keys only as set / not set.
-    assert len(audit_rows) == len(ROWS)
-    assert {(a["section"], a["key"]) for a in audit_rows} == {(r.section, r.key) for r in ROWS}
+    assert len(audit_rows) == len(SAVEABLE)
+    assert {(a["section"], a["key"]) for a in audit_rows} == {(r.section, r.key) for r in SAVEABLE}
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
-    for row in ROWS:
+    for row in SAVEABLE:
         if row.secret:
             audited = next(a for a in audit_rows if (a["section"], a["key"]) == (row.section, row.key))
             assert audited["new"] == "set" and audited["old"] == "not set"
@@ -238,19 +243,26 @@ def test_every_row_saves_reads_back_and_resets(audit_rows):
     assert "k" * 40 not in every_group(client)
 
     # Going back to a looser default is confirmed like any other loosening.
-    everything = [{"id": row.id, "reset": True} for row in ROWS]
+    everything = [{"id": row.id, "reset": True} for row in SAVEABLE]
     assert _save(everything).status_code == 409
     reset = _save(everything, confirm=True)
     assert reset.status_code == 200, reset.text
     loaded = _loaded()
-    for row in ROWS:
+    for row in SAVEABLE:
         assert not catalog.lookup(loaded, row.path)[0], row.id
 
 
-@pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
+@pytest.mark.parametrize("setting", SAVEABLE, ids=lambda s: s.id)
 def test_invalid_values_are_refused(setting):
     r = _save([{"id": setting.id, "value": _invalid(setting)}], confirm=True)
     assert r.status_code == 400, (setting.id, r.text)
+    assert not catalog.lookup(_loaded(), setting.path)[0]
+
+
+@pytest.mark.parametrize("setting", UNAVAILABLE, ids=lambda s: s.id)
+def test_rows_still_in_development_are_refused(setting):
+    r = _save([{"id": setting.id, "value": _sample(setting)}], confirm=True)
+    assert r.status_code == 409 and "still in development" in r.json()["detail"], setting.id
     assert not catalog.lookup(_loaded(), setting.path)[0]
 
 

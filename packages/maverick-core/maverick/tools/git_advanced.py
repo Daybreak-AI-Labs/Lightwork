@@ -15,7 +15,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ..approval_cards import ApprovalCardError
+from ..safety import ConsentDenied, consume_operation_consent
+from ..safety.secret_detector import redact
 from . import Tool
+from .execution_consent import execution_target, file_version, request_execution_consent
 
 log = logging.getLogger(__name__)
 
@@ -242,6 +246,28 @@ _GIT_OPS = {
     "show_commit": _op_show_commit,
     "blame_line": _op_blame_line,
 }
+_MUTATING_OPS = frozenset({
+    "bisect_start", "bisect_good", "bisect_bad", "bisect_skip", "bisect_reset",
+    "rebase_onto", "cherry_pick", "worktree_add", "worktree_remove",
+})
+
+
+def _mutation_error(op: str, args: dict[str, Any]) -> str | None:
+    if op == "cherry_pick" and not args.get("commit"):
+        return "ERROR: cherry_pick requires commit"
+    if op == "rebase_onto" and (not args.get("onto") or not args.get("upstream")):
+        return "ERROR: rebase_onto requires onto and upstream"
+    if op == "worktree_add" and not args.get("path"):
+        return "ERROR: worktree_add requires path"
+    if op == "worktree_remove" and not args.get("path"):
+        return "ERROR: worktree_remove requires path"
+    keys = {
+        "bisect_good": ("ref",), "bisect_bad": ("ref",), "bisect_skip": ("ref",),
+        "rebase_onto": ("onto", "upstream", "branch"),
+        "cherry_pick": ("commit",), "worktree_add": ("path", "branch"),
+        "worktree_remove": ("path",),
+    }.get(op, ())
+    return _reject_option_like(*(str(args.get(key) or "") for key in keys))
 
 
 def _make_run(sandbox):
@@ -259,6 +285,36 @@ def _make_run(sandbox):
         handler = _GIT_OPS.get(op)
         if handler is None:
             return f"ERROR: unknown op {op!r}"
+        if op in _MUTATING_OPS:
+            if error := _mutation_error(op, args):
+                return error
+            parameters = {"op": op, "arguments": args}
+            preview, _ = redact(", ".join(
+                f"{key}={value}" for key, value in args.items() if key != "op"
+            )[:240] or "no arguments")
+            try:
+                permit = request_execution_consent(
+                    "git_advanced",
+                    target_provider=lambda: execution_target(sandbox),
+                    parameters=parameters,
+                    parameters_provider=lambda: {"op": op, "arguments": args},
+                    detail=f"Run one Git {op.replace('_', ' ')} operation.",
+                    effect=f"Git {op.replace('_', ' ')} may change the repository or worktrees.",
+                    review_items=[f"Operation: {op}", f"Repository: {workdir}",
+                                  f"Arguments (truncated, redacted): {preview}"],
+                    timeout=30,
+                    input_versions_provider=lambda: file_version(workdir / ".git" / "HEAD")
+                    if (workdir / ".git").is_dir() else file_version(workdir / ".git"),
+                )
+            except ConsentDenied:
+                return "ERROR: Git change was not approved; no Git operation was run"
+            except (ApprovalCardError, OSError):
+                return "ERROR: Git operation, target, or approval authority changed; review it again"
+            try:
+                with consume_operation_consent(permit):
+                    return handler(sandbox, workdir, args)
+            except (ApprovalCardError, OSError):
+                return "ERROR: Git operation, target, or approval authority changed; review it again"
         return handler(sandbox, workdir, args)
 
     return _run

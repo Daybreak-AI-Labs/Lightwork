@@ -266,8 +266,9 @@ def _worker_digest(tenant_id: str, instance_nonce: bytes) -> str:
     ).hexdigest()
 
 
-def _idempotency(operation: str, item_id: object) -> str:
-    digest = hashlib.sha256(f"{operation}:{item_id}".encode()).hexdigest()
+def _idempotency(operation: str, item_id: object, job_id: str = "") -> str:
+    identity = f"{job_id}:{operation}:{item_id}" if job_id else f"{operation}:{item_id}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()
     return f"bulk-item-{digest}"
 
 
@@ -330,10 +331,11 @@ class ConsentBulkExecutor:
         self,
         operation: str,
         item: Mapping[str, Any],
+        *, job_id: str = "",
     ) -> Mapping[str, Any]:
         tenant = self.tenant_id
         profile = str(item["profile_id"])
-        key = _idempotency(operation, item["item_id"])
+        key = _idempotency(operation, item["item_id"], job_id)
         if operation == "export_receipts":
             if "after_sequence" in item:
                 return self._required("export_receipts")(
@@ -419,13 +421,21 @@ class ConsentBulkJobsRuntime:
     def operation_capabilities(self) -> dict[str, bool]:
         return self.executor.capabilities()
 
-    def run_job(self, job_id: str) -> dict[str, Any]:
+    def run_job(self, job_id: str, *, expected_revision: int | None = None) -> dict[str, Any]:
+        scope = self.store.job_executor_scope(self.tenant_id, job_id)
+
+        def execute(operation: str, item: Mapping[str, Any]) -> Mapping[str, Any]:
+            if scope == "job" and operation in {"reactivate", "clear_expiration"}:
+                item = self.store.receipt_execution_item(self.tenant_id, job_id, item)
+            return self.executor(operation, item, job_id=job_id if scope == "job" else "")
+
         return self.store.run_job(
             self.tenant_id,
             job_id,
             worker_sha256=self.worker_sha256,
-            executor=self.executor,
+            executor=execute,
             batch_size=self.worker_batch_size,
+            **({"expected_revision": expected_revision} if expected_revision is not None else {}),
         )
 
     def run_next(self) -> dict[str, Any]:

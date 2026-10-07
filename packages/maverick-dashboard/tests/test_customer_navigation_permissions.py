@@ -1,6 +1,8 @@
 """Customer navigation and direct HTTP admission share actual RBAC authority."""
 from __future__ import annotations
 
+from html.parser import HTMLParser
+
 import pytest
 
 
@@ -38,8 +40,113 @@ def test_customer_destination_labels(monkeypatch, tmp_path):
     }
 
 
+def test_chat_product_navigation_uses_current_role(monkeypatch, tmp_path):
+    from maverick_dashboard import rbac
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    rbac.set_role("user:customer", "operator")
+    _as(monkeypatch, "user:customer")
+    page = client.get("/chat")
+    assert page.status_code == 200
+    assert 'aria-label="Primary"' in page.text
+    assert 'href="/goals"' in page.text
+    assert 'href="/settings"' not in page.text
+    assert 'href="/connections"' not in page.text
+    assert 'href="/chat"' in page.text
+
+
+class _Sidebar(HTMLParser):
+    """The shared sidebar's links (Most used, then each group) and shell chrome."""
+
+    def __init__(self, html):
+        super().__init__()
+        self.stack, self.quick, self.groups, self.brand, self.hrefs = [], [], [], None, set()
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        classes = (values.get("class") or "").split()
+        if tag in ("ul", "div"):
+            self.stack.append(classes)
+        if tag == "div" and "navgrp" in classes:
+            self.groups.append((values.get("data-grp"), []))
+        if tag == "button" and "navgrp__toggle" in classes and self.groups:
+            self.groups[-1] = (values.get("data-grp"), self.groups[-1][1])
+        if tag != "a" or not values.get("href"):
+            return
+        self.hrefs.add(values["href"])
+        if {"brand", "cs-brand"} & set(classes):
+            self.brand = values["href"]
+        if any("navquick-list" in entry for entry in self.stack):
+            self.quick.append(values["href"])
+        elif any("navgrp" in entry for entry in self.stack):
+            self.groups[-1][1].append(values["href"])
+
+    def handle_endtag(self, tag):
+        if tag in ("ul", "div") and self.stack:
+            self.stack.pop()
+
+
+@pytest.mark.parametrize("role", [None, "operator", "admin"])
+def test_both_shells_render_one_sidebar(monkeypatch, tmp_path, role):
+    """Chat (home) and every product page show the same navigation, logo and links."""
+    from maverick_dashboard import rbac
+
+    client = _client(monkeypatch, tmp_path)
+    if role is not None:
+        monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:customer" if role == "admin" else "")
+        rbac.set_role("user:customer", role)
+        _as(monkeypatch, "user:customer")
+    product, chat = (_Sidebar(client.get(path).text) for path in ("/goals", "/chat"))
+    assert product.quick and product.groups
+    assert (chat.quick, chat.groups) == (product.quick, product.groups)
+    # Approvals sits in Most used, so anyone who can decide reaches it in one click.
+    assert "/approvals" in chat.quick
+    # The logo always goes home; Help, Docs, the account and the workspace
+    # switcher are reachable from the chat shell too.
+    assert product.brand == chat.brand == "/"
+    for href in ("/help", "/account", "/workspace/tenant"):
+        assert href in chat.hrefs and href in product.hrefs, href
+    docs = "https://daybreak-ai-labs.github.io/Lightwork/"
+    assert any(h.startswith(docs) for h in chat.hrefs) and any(h.startswith(docs) for h in product.hrefs)
+
+
+@pytest.mark.parametrize("global_role,workspace_role", [("viewer", "viewer"), ("admin", "viewer")])
+def test_read_only_chat_projects_workspace_authority(monkeypatch, tmp_path, global_role, workspace_role):
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import app, rbac, ui_visibility
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    rbac.set_role("user:customer", global_role)
+    rbac.set_tenant_role("acme", "user:customer", workspace_role)
+    ui_visibility.set_visibility("/chat", "viewer", True)
+    _as(monkeypatch, "user:customer")
+    scope = set_tenant("acme")
+    try:
+        world = app._world()
+        gid = world.create_goal("Owned answer", "", owner="user:customer")
+        world.set_goal_status(gid, "done", result="saved answer")
+        page = client.get(f"/chat/goal/{gid}")
+        assert page.status_code == 200
+        assert 'id="chat-read-only" class="muted" role="status">' in page.text
+        assert 'id="copy-result"' in page.text
+        assert 'id="edit-toggle"' not in page.text
+        assert 'id="feedback-up"' not in page.text
+        assert 'id="share-open"' not in page.text
+        assert 'id="ps-run"' not in page.text
+        assert client.get(f"/chat/goal/{gid}/download.md").status_code == 200
+        assert client.post(f"/api/v1/goals/{gid}/deliverable/edit", json={
+            "text": "change", "expected_updated_at": world.get_goal(gid).updated_at,
+            "operation_id": "viewer-denied-edit-1",
+        }).status_code == 403
+    finally:
+        reset_tenant(scope)
+
+
 @pytest.mark.parametrize("path,title", [
-    ("/goals", "Tasks"), ("/cortex", "Knowledge"), ("/deliverables", "Results"),
+    ("/goals", "Tasks"), ("/cortex", "Cortex memory diagnostics"), ("/deliverables", "Results"),
 ])
 def test_customer_read_destinations_remain_available(monkeypatch, tmp_path, path, title):
     from maverick_dashboard import rbac
@@ -165,6 +272,17 @@ def test_tenant_admin_cannot_see_or_open_installation_controls(monkeypatch, tmp_
     _as(monkeypatch, "user:tenant-admin")
     token = set_tenant("acme")
     try:
+        # Connections ships switched off. A workspace administrator cannot turn
+        # modules on (that is installation-wide), so the sidebar leaves out the
+        # page that would only say it is turned off; the finder still lists it.
+        context = app._nav_context(Request({"type": "http", "headers": []}))
+        assert "/connections" not in {link["href"] for group in context["nav_groups"] for link in group["links"]}
+        assert "/connections" in {link["href"] for group in context["finder_pages"] for link in group["links"]}
+        from maverick import config
+        from maverick_dashboard import settings_store
+
+        settings_store.set_module_enables(["connections"], True)
+        config.reset_config_cache()
         context = app._nav_context(Request({"type": "http", "headers": []}))
         for key in ("nav_groups", "finder_pages"):
             links = {link["href"] for group in context[key] for link in group["links"]}
@@ -276,7 +394,7 @@ def test_security_operators_do_not_request_installation_switches(
         response = client.get("/security")
         assert response.status_code == 200
         assert ('id="sec-hunters"' in response.text) is can_manage
-        assert ("fetch('/api/v1/features/switches')" in response.text) is can_manage
+        assert ("mvFetchJSON('/api/v1/features/switches'" in response.text) is can_manage
         if not can_manage:
             assert "An administrator turns threat hunting on or off." in response.text
     finally:

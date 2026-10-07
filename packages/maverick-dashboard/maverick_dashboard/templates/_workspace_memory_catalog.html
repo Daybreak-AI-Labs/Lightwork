@@ -21,17 +21,17 @@
   <div class="panel">
     {% if precedents %}
     <p class="muted" style="margin-top:0; font-size:var(--text-sm);">Completed assessments feed
-      the platform's memory: similar future requests open pre-filled with these precedents,
-      and the suggestions carry their provenance. Click one to open the full record.</p>
+      the platform's memory: similar future requests can reuse these precedents after individual review. Prior agreement is not factual certainty. Open an assessment to compare exact source answers and current questionnaire versions.</p>
     <table>
       <thead><tr><th scope="col">Subject</th><th scope="col">Questionnaire</th>
-        <th scope="col">Risk before → after safeguards</th><th scope="col">Findings</th></tr></thead>
+        <th scope="col">Source date and review</th><th scope="col">Risk before → after safeguards</th><th scope="col">Findings</th></tr></thead>
       <tbody>
         {% set _ptitles = {} %}{% for t in templates %}{% set _ = _ptitles.update({t.type: t.title}) %}{% endfor %}
         {% for p in precedents %}
         <tr>
           <td><button class="pw-mem-link" data-assessment="{{ p.id }}" type="button">{{ p.subject }}</button></td>
           <td class="muted">{{ _ptitles.get(p.type) or (p.type | humanize) }}</td>
+          <td><span class="badge {{ 'warn' if p.review_due or p.status != 'approved' else 'done' }}">{{ 'Stale precedent - review due' if p.review_due else 'Approved precedent - recheck before reuse' if p.status == 'approved' else 'Unreviewed precedent' }}</span><br><span class="muted">{{ p.created_at | datetime }}</span></td>
           <td class="pw-risk">
             <span class="badge {{ 'blocked' if p.inherent_risk == 'high' else 'warn' if p.inherent_risk == 'medium' else 'done' }}">{{ p.inherent_risk | humanize }}</span>
             <span aria-hidden="true" class="muted">→</span>
@@ -44,7 +44,7 @@
     </table>
     {% else %}
       <p class="muted">Memory builds as assessments complete — the second assessment of a
-        similar system opens pre-filled from the first.</p>
+        similar system can offer individually reviewed suggestions from the first.</p>
     {% endif %}
   </div>
 
@@ -123,7 +123,7 @@
   var editingRevision = 0;
   var editingDigest = '';
   function plain(failure, what) {
-    return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
   }
   function setFramework(value) {
     var sel = document.getElementById('tpl-framework');
@@ -191,8 +191,7 @@
     tplDlg.showModal();
     if (!type) { tplQs.appendChild(qRow()); return; }
     tplStatus.textContent = 'Loading…';
-    fetch('/api/v1/assess/templates/' + encodeURIComponent(type))
-      .then(function (r) { if (!r.ok) throw new Error(plain(r, 'open the questionnaire')); return r.json(); })
+    window.mvFetchJSON('/api/v1/assess/templates/' + encodeURIComponent(type), {}, 'open the questionnaire')
       .then(function (tpl) {
         tplStatus.textContent = '';
         document.getElementById('tpl-title').value = tpl.title;
@@ -272,26 +271,25 @@
     publication.catch(function (e) { tplStatus.textContent = e && e.name !== 'TypeError' && e.message ? e.message : plain(e, 'save the questionnaire'); });
   });
 
-  tplRestore.addEventListener('click', async function () {
+  tplRestore.addEventListener('click', function () {
     if (!editingType) return;
-    if (!(await mvConfirm('Restore the original questionnaire? Your team’s changes are removed for new assessments; existing ones keep the version they started with.', { okText: 'Restore original' }))) return;
-    tplStatus.textContent = 'Restoring…';
-    fetch('/api/v1/assess/templates/' + encodeURIComponent(editingType) +
+    // One action with a way back (CTL-1): the team's changes are removed,
+    // for new assessments only, when the Undo time is up.
+    var url = '/api/v1/assess/templates/' + encodeURIComponent(editingType) +
           '?expected_revision=' + encodeURIComponent(editingRevision) +
-          '&expected_digest=' + encodeURIComponent(editingDigest),
-          { method: 'DELETE' })
-      .then(function (r) {
-        if (r.ok) { location.reload(); return; }
-        throw new Error(plain(r, 'restore the original'));
-      })
-      .catch(function (e) { tplStatus.textContent = e && e.name !== 'TypeError' && e.message ? e.message : plain(e, 'restore the original'); });
+          '&expected_digest=' + encodeURIComponent(editingDigest);
+    tplStatus.textContent = 'Restoring the original questionnaire. Existing assessments keep the version they started with.';
+    mvUndo('Original questionnaire restored. Your team’s changes are removed for new assessments.', {
+      action: 'restore the original',
+      run: function (keepalive) { return fetch(url, { method: 'DELETE', keepalive: keepalive }); },
+      undo: function () { tplStatus.textContent = ''; tplRestore.focus(); },
+      done: function () { location.reload(); }
+    });
   });
-  // Client-side worklist filters.
+  // Client-side worklist filters (the shared tab bar marks the chosen one).
   var buttons = document.querySelectorAll('.pw-filters button[data-filter]');
   buttons.forEach(function (fb) {
     fb.addEventListener('click', function () {
-      buttons.forEach(function (b) { b.classList.remove('btn--primary'); });
-      fb.classList.add('btn--primary');
       var f = fb.dataset.filter;
       document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
         var show = f === 'all' ||
@@ -309,9 +307,8 @@
   // refresh rather than overwriting someone else's change.
   var reviewers = null;
   function loadReviewers() {
-    if (!reviewers) reviewers = fetch('/api/v1/assess/reviewers')
-      .then(function (r) { if (!r.ok) throw r; return r.json(); })
-      .then(function (j) { return j.items || []; });
+    if (!reviewers) reviewers = window.mvFetchJSON('/api/v1/assess/reviewers')
+      .then(function (j) { return (j && j.items) || []; });
     return reviewers;
   }
   document.querySelectorAll('.pw-assign-btn').forEach(function (btn) {

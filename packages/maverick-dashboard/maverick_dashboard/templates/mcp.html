@@ -25,7 +25,7 @@
       <table>
         <thead><tr>
           <th scope="col">Server</th>
-          <th scope="col">Runs</th>
+          <th scope="col">Where it runs</th>
           <th scope="col">Added By</th>
           <th scope="col">Status</th>
           <th scope="col">Actions</th>
@@ -44,13 +44,13 @@
             <td class="mcp-actions">
               <form method="post" action="/mcp/test">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--primary" aria-label="Test {{ label }}">Test</button>
+                <button type="submit" class="btn btn--primary" aria-label="Test server {{ label }}">Test server</button>
               </form>
               {% if s.removable %}
               <form method="post" action="/mcp/remove"
                     data-mcp-confirm="Remove the {{ label }} tool server? Agents will stop using its tools.">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--danger" aria-label="Remove {{ label }}">Remove</button>
+                <button type="submit" class="btn btn--danger" aria-label="Remove server {{ label }}">Remove server</button>
               </form>
               {% else %}<span class="muted">Only your administrator can remove it.</span>{% endif %}
             </td>
@@ -144,7 +144,7 @@
       form.addEventListener('submit', function (event) {
         if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
         event.preventDefault();
-        window.mvConfirm(form.dataset.mcpConfirm, {okText: 'Remove'}).then(function (ok) {
+        window.mvConfirm(form.dataset.mcpConfirm, {okText: form.dataset.mcpOk || 'Remove server'}).then(function (ok) {
           if (!ok) return;
           form.dataset.confirmed = 'true';
           if (form.requestSubmit) form.requestSubmit(); else form.submit();

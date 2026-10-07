@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Compliance Tasks · Lightwork{% endblock %}
+{% block title %}Turn scope into tasks · Lightwork{% endblock %}
 {% block content %}
 <style>
   .csa-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -10,9 +10,9 @@
   .csa-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
                 word-break:break-word; }
   .csa-warning { border:2px solid var(--danger); padding:var(--space-3);
-                 border-radius:8px; background:var(--surface-2); }
+                 border-radius: var(--radius-md); background:var(--surface-2); }
   .csa-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
-  @media (max-width:900px) { .csa-grid { grid-template-columns:1fr; } }
+  @media (max-width:880px) { .csa-grid { grid-template-columns:1fr; } }
 </style>
 
 {% from "_hero.html" import hero %}
@@ -50,6 +50,7 @@
   <div class="panel" id="csa-reports"><p class="muted">Loading…</p></div>
 
   <div class="section-head"><h2>Mappings</h2>
+    <a class="btn btn--primary" href="/compliance/scope-actions/mapping">Build a mapping from a final scope</a>
     <button type="button" class="btn btn--ghost" id="csa-add-catalog">Add a mapping from a file</button></div>
   <p class="muted">A mapping says which tasks each control in a scope needs. Your compliance team provides it.</p>
   <div class="panel" id="csa-catalogs"><p class="muted">Loading…</p></div>
@@ -65,7 +66,7 @@
 <div class="csa-grid">
   <section class="panel csa-stack">
     <h2>Choose an action</h2>
-    <p>Tenant and actor come only from the authenticated request. Unknown fields,
+    <p>The workspace and the person acting come only from your sign-in. Unknown fields,
       framework prose, raw evidence, key values, provider or target selectors,
       and code are rejected.</p>
     <label>Operation
@@ -82,7 +83,7 @@
         <option value="plan-rollback" data-method="POST" data-path="/plans/{plan_id}/rollback">Plan: rollback through injected local callback</option>
         <option value="plan-export" data-method="PUT" data-path="/plans/{plan_id}/exports/{export_id}">Plan: create signed local export</option>
         <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Export: get and verify signature</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: check this workspace’s records</option>
       </select>
     </label>
     <label>Record references (JSON)
@@ -130,6 +131,20 @@
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
+  // Failures read as plain sentences: never "HTTP 403", "Error:" or raw server text.
+  function requestProblem(status, detail) {
+    return window.mvPlainDetail(detail) || window.mvErrorText({status: status, detail: detail}, "complete the request");
+  }
+  function problemText(error) {
+    var kind = error && error.name;
+    if (kind === "SyntaxError") {
+      return "Record references and Action details must be valid JSON. Check the quotes, commas and brackets, then try again.";
+    }
+    if (kind === "TypeError" || kind === "AbortError") {
+      return window.mvErrorText(error, "complete the request");
+    }
+    return error && error.message ? error.message : window.mvErrorText(error, "complete the request");
+  }
   function selectedRoute() {
     return operation.options[operation.selectedIndex];
   }
@@ -148,7 +163,7 @@
     return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
       var value = values[key];
       if ((typeof value !== "string" && typeof value !== "number") || value === "") {
-        throw new Error("Missing path value: " + key);
+        throw new Error("Add \"" + key + "\" to Record references, then try again.");
       }
       return encodeURIComponent(String(value));
     });
@@ -166,16 +181,16 @@
       if (!responseText) { throw new Error("empty response"); }
       result = JSON.parse(responseText);
     } catch (_error) {
-      throw new Error("Request failed: the server returned an invalid JSON response.");
+      throw new Error("Lightwork's reply could not be read. Refresh the page and try again.");
     }
     if (!response.ok) {
-      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+      throw new Error(requestProblem(response.status, result && result.detail));
     }
     show({status: response.status, ok: response.ok, result: result});
   }
 
   document.getElementById("csa-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+    run("GET", "/status", {}).catch(function (error) { show(problemText(error)); });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("csa-submit").addEventListener("click", async function () {
@@ -187,11 +202,11 @@
       var pathValues = JSON.parse(paths.value || "{}");
       var payload = JSON.parse(body.value || "{}");
       if (containsForbiddenKey(payload)) {
-        throw new Error("Authority, raw content, secrets, provider targets, and code are never accepted.");
+        throw new Error("Authority, raw content, secrets, provider targets, and code are never accepted. Remove them from Action details, then try again.");
       }
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);
-    } catch (error) { show(String(error)); }
+    } catch (error) { show(problemText(error)); }
   });
   updateConfirmation();
 }());

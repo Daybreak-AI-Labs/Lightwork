@@ -90,7 +90,8 @@ class _RuntimeService:
                 "policy_sha256": "8" * 64,
                 "evaluated_at": 1_800_000_000.0,
                 "asset_binding": {
-                    "tenant_ref": "TEN-" + ("9" * 24),
+                    # Bound to the current workspace, as a native receipt is.
+                    "tenant_ref": runtime._tenant_ref(),
                     "asset_id": ASSET_ID,
                     "asset_revision": 1,
                     "asset_version_digest": ASSET_DIGEST,
@@ -117,6 +118,16 @@ class _BlockActionRuntimeService:
         )
 
 
+def _stub_review_is_current(monkeypatch, assurance):
+    """These stubbed records stand for a current reviewed declaration only
+    while it is approved for the observed version. The full review binding
+    (record digests, profile and hierarchy) is model_risk_assurance's own
+    check, which hand-written stub records cannot satisfy."""
+    monkeypatch.setattr(assurance._DEFAULT, "_declaration_is_current", lambda declaration, observation: (
+        declaration.get("status") == "approved"
+        and declaration.get("observed_version_digest") == observation.get("version_digest")))
+
+
 @pytest.fixture
 def pilot_estate(tmp_path, monkeypatch):
     from maverick import agent_trust, config, governed_rest, world_model
@@ -125,6 +136,8 @@ def pilot_estate(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "1")
+    # Safeguard activity is retained per workspace; unbound mode refuses it.
+    monkeypatch.setenv("MAVERICK_TENANT", "pilot-workspace")
     monkeypatch.setenv("MAVERICK_EXTERNAL_CONNECTORS", "pilot")
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
@@ -144,6 +157,7 @@ def pilot_estate(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "default_service", _RuntimeService())
     monkeypatch.setattr(runtime, "dynamic_risk_receipt", lambda _result: None)
     monkeypatch.setattr(assurance, "enabled", lambda: True)
+    _stub_review_is_current(monkeypatch, assurance)
     monkeypatch.setattr(
         assurance,
         "get_observation",
@@ -212,9 +226,10 @@ def _scenario(prefix="acceptance"):
 
 
 def _approve(approval_id, _label):
-    from maverick.world_model import WorldModel
+    from maverick.world_model import open_world
 
-    return WorldModel().decide_approval(
+    # The workspace's own world, where the gateway parked the approval.
+    return open_world().decide_approval(
         approval_id,
         "approved",
         decided_by="pilot-operator@corp.test",
@@ -332,7 +347,8 @@ def test_connector_outage_after_effect_stays_indeterminate_and_is_not_retried(
     assert report["summary"]["indeterminate"] == 1
     change = next(item for item in report["events"] if item["name"] == "change_commit")
     assert change["verdict"] == "indeterminate"
-    assert change["observed"]["status"] == "failed"
+    # The gateway records an outage after the effect as indeterminate, not failed.
+    assert change["observed"]["status"] == "indeterminate"
     assert not any(item["name"].startswith("compensation") for item in report["events"])
 
 

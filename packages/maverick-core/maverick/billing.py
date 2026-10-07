@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .quotas import UsageLedger
@@ -386,14 +387,21 @@ def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
     Policy lookup errors propagate so a communication surface can refuse rather
     than silently restoring a feature removed by tenant policy.
     """
+    return feature_availability((feature,), tenant=tenant)[feature]
+
+
+def feature_availability(features: Iterable[str], *, tenant: str | None = None) -> dict[str, bool]:
+    """Read one current plan for a display batch; retain no cross-call grants."""
+    requested = tuple(features)
     tid = tenant or _active_tenant_id()
     if not tid:
-        return True
+        return dict.fromkeys(requested, True)
     from .tenant.registry import get_tenant
     rec = get_tenant(tid)
     if rec is None:
-        return True
-    return feature in _effective_features_for_rec(rec)
+        return dict.fromkeys(requested, True)
+    allowed = _effective_features_for_rec(rec)
+    return {feature: feature in allowed for feature in requested}
 
 
 def _active_tenant_id() -> str | None:
@@ -429,6 +437,6 @@ __all__ = [
     "RateCard", "LineItem", "Invoice",
     "rate_ledger", "generate_invoice", "ledger_for_tenant",
     "Entitlements", "DEFAULT_PLANS", "entitlements_for", "entitled",
-    "BASE_PLAN", "BillingPolicyError", "tenant_entitled", "feature_allowed",
+    "BASE_PLAN", "BillingPolicyError", "tenant_entitled", "feature_allowed", "feature_availability",
     "effective_features", "plan_features_for_tenant", "gateable_features",
 ]

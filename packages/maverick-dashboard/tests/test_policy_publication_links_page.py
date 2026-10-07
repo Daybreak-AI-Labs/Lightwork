@@ -10,21 +10,14 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def page_client() -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
-    templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
+    templates = Jinja2Templates(
+        directory=str(template_dir),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
 
     @app.get("/compliance/policy-links")
@@ -44,7 +37,7 @@ def test_operator_page_renders_full_safe_contract(page_client: TestClient) -> No
     response = page_client.get("/compliance/policy-links")
     assert response.status_code == 200
     page = response.text
-    assert "Policy Links" in page
+    assert "Policy links" in page
     assert "Two other people" in page
     # Policies, links and scheduled changes load as lists with row buttons.
     for host in ("ppl-policies", "ppl-links", "ppl-jobs"):

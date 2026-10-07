@@ -135,29 +135,29 @@ def test_graph_editor_page_renders(client, tree):
 
 def test_retitle_persists(client, world, tree):
     g1, *_ = tree
-    r = client.post(f"/api/v1/goals/{g1}/retitle", json={"title": "renamed root"})
+    r = client.post(f"/api/v1/goals/{g1}/retitle", json={"title": "renamed root", "expected_updated_at": world.get_goal(g1).updated_at})
     assert r.status_code == 204
     assert world.get_goal(g1).title == "renamed root"
 
 
-def test_retitle_rejects_blank_and_missing(client, tree):
+def test_retitle_rejects_blank_and_missing(client, world, tree):
     g1, *_ = tree
     assert client.post(f"/api/v1/goals/{g1}/retitle",
-                       json={"title": "   "}).status_code == 400
+                       json={"title": "   ", "expected_updated_at": world.get_goal(g1).updated_at}).status_code == 400
     assert client.post("/api/v1/goals/99999/retitle",
-                       json={"title": "x"}).status_code == 404
+                       json={"title": "x", "expected_updated_at": 1}).status_code == 404
 
 
 def test_reparent_moves_subtree(client, world, tree):
     g1, g2, g3, g4 = tree
-    r = client.post(f"/api/v1/goals/{g4}/reparent", json={"parent_id": g1})
+    r = client.post(f"/api/v1/goals/{g4}/reparent", json={"parent_id": g1, "expected_updated_at": world.get_goal(g4).updated_at})
     assert r.status_code == 204
     assert world.get_goal(g4).parent_id == g1
 
 
 def test_reparent_to_root(client, world, tree):
     g1, g2, *_ = tree
-    r = client.post(f"/api/v1/goals/{g2}/reparent", json={"parent_id": None})
+    r = client.post(f"/api/v1/goals/{g2}/reparent", json={"parent_id": None, "expected_updated_at": world.get_goal(g2).updated_at})
     assert r.status_code == 204
     assert world.get_goal(g2).parent_id is None
 
@@ -165,22 +165,23 @@ def test_reparent_to_root(client, world, tree):
 def test_reparent_refuses_cycles_and_self(client, world, tree):
     g1, g2, g3, g4 = tree
     # under its own grandchild -> cycle
-    r = client.post(f"/api/v1/goals/{g1}/reparent", json={"parent_id": g3})
+    r = client.post(f"/api/v1/goals/{g1}/reparent", json={"parent_id": g3, "expected_updated_at": world.get_goal(g1).updated_at})
     assert r.status_code == 400
     assert "descendant" in r.json()["detail"]
     assert world.get_goal(g1).parent_id is None  # unchanged
     # under itself
     assert client.post(f"/api/v1/goals/{g1}/reparent",
-                       json={"parent_id": g1}).status_code == 400
+                       json={"parent_id": g1, "expected_updated_at": world.get_goal(g1).updated_at}).status_code == 400
     # under a goal that doesn't exist
     assert client.post(f"/api/v1/goals/{g1}/reparent",
-                       json={"parent_id": 4242}).status_code == 404
+                       json={"parent_id": 4242, "expected_updated_at": world.get_goal(g1).updated_at}).status_code == 404
 
 
 def test_create_child_is_pending_and_not_started(client, world, tree):
     g1, *_ = tree
     r = client.post(f"/api/v1/goals/{g1}/children",
-                    json={"title": "new subgoal", "description": "details"})
+                    json={"title": "new subgoal", "description": "details",
+                          "operation_id": "new-child-operation-1"})
     assert r.status_code == 201
     body = r.json()
     assert body["status"] == "pending"
@@ -192,9 +193,9 @@ def test_create_child_is_pending_and_not_started(client, world, tree):
 def test_create_child_rejects_blank_title_and_missing_parent(client, tree):
     g1, *_ = tree
     assert client.post(f"/api/v1/goals/{g1}/children",
-                       json={"title": " "}).status_code == 400
+                       json={"title": " ", "operation_id": "blank-child-operation-1"}).status_code == 400
     assert client.post("/api/v1/goals/99999/children",
-                       json={"title": "x"}).status_code == 404
+                       json={"title": "x", "operation_id": "missing-child-operation-1"}).status_code == 404
 
 
 def test_mutations_blocked_cross_origin(client, world, tree):

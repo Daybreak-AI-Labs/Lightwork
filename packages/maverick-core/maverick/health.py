@@ -54,39 +54,37 @@ def _is_outage(exc: BaseException) -> bool:
     return "InternalServerError" in names
 
 
+def _console_text(value: str) -> str:
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        value.encode(encoding)
+        return value
+    except UnicodeEncodeError:
+        return value.translate(str.maketrans({"✓": "OK", "✗": "FAIL", "→": "->"})).encode(
+            encoding, errors="replace").decode(encoding)
+
+
 def _row(marker: str, label: str, detail: str = "", fix: str = "") -> None:
     if marker == RED:
         _FAILURES.append(label)
     line = f"  {marker} {label}"
     if detail:
         line += click.style(f"  ({detail})", fg="bright_black")
-    click.echo(line)
+    click.echo(_console_text(line))
     if fix:
-        click.echo(click.style(f"      → {fix}", fg="cyan"))
+        click.echo(_console_text(click.style(f"      → {fix}", fg="cyan")))
 
 
 def _check_config() -> dict:
-    # tomllib (with config.py's 3.10 tomli fallback) is reused for the
-    # validity probe below.
-    from .config import config_path, load_config, tomllib
-    p = config_path()
-    if not p.exists():
-        _row(RED, "config", f"{p} not found",
-             fix="run  maverick init")
+    from .operator_preflight import _config_state
+
+    check, cfg = _config_state()
+    if check.status == "blocked":
+        _row(RED, "config", check.detail,
+             fix="Open Settings > Installation health. Ask an administrator to repair unavailable settings or restore a known-good copy.")
         return {}
-    # Parse directly: load_config() fails SOFT (returns {} + logs a warning) on
-    # a syntax error, so checking validity through it always reported GREEN --
-    # a corrupt config that silently drops every user setting went unflagged by
-    # the very tool meant to catch it.
-    try:
-        with open(p, "rb") as f:
-            tomllib.load(f)
-    except Exception as e:
-        _row(RED, "config", f"invalid TOML -- your settings are being IGNORED ({e})",
-             fix=f"edit {p} -- fix the TOML syntax, or back it up + re-run `maverick init`")
-        return {}
-    _row(GREEN, "config", str(p))
-    return load_config(p)
+    _row(GREEN, "config", check.detail)
+    return cfg or {}
 
 
 def _check_config_lint(cfg: dict) -> None:
@@ -149,7 +147,7 @@ def _check_anthropic() -> None:
                  fix="fine unless a [models] role routes to an anthropic model")
         else:
             _row(RED, "anthropic", "ANTHROPIC_API_KEY not set",
-                 fix="add to ~/.maverick/.env or `export ANTHROPIC_API_KEY=sk-ant-...`")
+                 fix="open Lightwork Settings > Models to connect an AI service")
         return
     if not key.startswith("sk-ant-"):
         _row(YELLOW, "anthropic", "key doesn't start with sk-ant-",
@@ -168,7 +166,7 @@ def _check_anthropic() -> None:
         _row(GREEN, "anthropic", "key validated")
     except anthropic.AuthenticationError:
         _row(RED, "anthropic", "API rejected the key",
-             fix="generate a new key at https://console.anthropic.com/settings/keys, then `maverick init` to update .env")
+             fix="generate a new key at https://console.anthropic.com/settings/keys, then update it in Lightwork Settings > Models")
     except Exception as e:
         # A real outage (no connection / timeout / 5xx) is RED -- the agent
         # cannot reach the API, so reporting it as a benign YELLOW "skipped"
@@ -204,7 +202,7 @@ def _check_openai() -> None:
         _row(GREEN, "openai", "key validated")
     except AuthenticationError:
         _row(RED, "openai", "API rejected the key",
-             fix="regenerate at https://platform.openai.com/api-keys, then `maverick init`")
+             fix="regenerate at https://platform.openai.com/api-keys, then update it in Lightwork Settings > Models")
     except Exception as e:
         # Real outage (no connection / timeout / 5xx) is RED; everything else
         # stays YELLOW "skipped" -- see _check_anthropic.
@@ -377,7 +375,8 @@ def _check_sandbox(cfg: dict) -> None:
     # the "unsupported" catch-all while build_sandbox actually runs it.
     backend = str(cfg.get("sandbox", {}).get("backend", "local") or "local").strip().lower()
     if backend == "local":
-        _row(GREEN, "sandbox", "local subprocess")
+        _row(YELLOW, "sandbox", "work runs directly on this computer, without isolation",
+             fix="start Docker or Podman, then select its container in Lightwork > Permissions > Where work runs")
         return
     if backend == "docker":
         _check_sandbox_docker()
@@ -445,6 +444,75 @@ def _check_sandbox(cfg: dict) -> None:
         f"backend={backend} not recognized",
         fix=f"supported: {', '.join(BUILTIN_SANDBOX_BACKENDS)}, or ep:<name>",
     )
+
+
+_FILE_WORK_TOOLS = ("shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit")
+
+
+def file_work_limits(cfg: dict) -> tuple[list[str], list[str]]:
+    """Configured first-run blocks and higher-priority effective tool blocks."""
+    from .runtime_overrides import denied_tools as runtime_denied_tools
+
+    security = cfg.get("security") or {}
+    if not isinstance(security, dict):
+        security = {}
+    denied = {name for name in (security.get("denied_tools") or [])
+              if isinstance(name, str)}
+    allowed = {name for name in (security.get("allowed_tools") or [])
+               if isinstance(name, str)}
+    runtime_denied = runtime_denied_tools()
+    setup = [name for name in _FILE_WORK_TOOLS if name in denied]
+    other = [name for name in _FILE_WORK_TOOLS
+             if (allowed and name not in allowed) or name in runtime_denied]
+    return setup, other
+
+
+def file_work_notice(cfg: dict, *, backend: str | None = None) -> str:
+    """Plain, pre-task explanation of missing file/program authority."""
+    setup, other = file_work_limits(cfg)
+    chosen = str(backend or (cfg.get("sandbox") or {}).get("backend") or "local").lower()
+    if not setup and not other:
+        return ""
+    if other and not setup:
+        return (
+            "An additional organization rule limits file changes or program "
+            "execution. Review Permissions or ask an administrator before "
+            "starting a task that needs those actions."
+        )
+    if chosen == "local":
+        message = (
+            "File changes or program execution are off in this setup. "
+            "Lightwork can still answer questions. Start Docker or Podman, "
+            "then open Lightwork > Permissions > Where work runs, choose its "
+            "container and select Allow file work before asking for files or programs."
+        )
+    else:
+        message = (
+            "File changes or program execution are still off. Open Lightwork > "
+            "Permissions > Where work runs and select Allow file work after the "
+            "container is running."
+        )
+    if other:
+        message += " Another organization rule may still block those actions."
+    return message
+
+
+def _check_file_work(cfg: dict) -> None:
+    if not cfg:
+        return  # the missing/corrupt config row already explains the blocker
+    from .runtime_overrides import RuntimeOverridesSecurityError
+
+    try:
+        setup, other = file_work_limits(cfg)
+    except (RuntimeOverridesSecurityError, OSError, TypeError, ValueError):
+        _row(RED, "file work", "the effective tool rules could not be verified",
+             fix="repair the saved policy, then run lightwork doctor again")
+        return
+    if not setup and not other:
+        _row(GREEN, "file work", "file and program actions are allowed by tool rules")
+        return
+    _row(YELLOW, "file work", "file changes or program execution are limited",
+         fix=file_work_notice(cfg))
 
 
 CHANNEL_DEPS = {
@@ -539,9 +607,10 @@ def _check_shield() -> None:
     # itself, so the raw "SDK not installed" log line would just bleed into the
     # health-check output mid-table.
     s = Shield.from_config(warn_if_missing=False)
+    from maverick_shield.builtin_rules import RULES
     backend_label = {
-        "agent-shield": "agent-shield SDK (full ~115 patterns)",
-        "builtin": "builtin rules (~20 high-impact patterns)",
+        "agent-shield": "agent-shield SDK",
+        "builtin": f"builtin rules ({len(RULES)} bundled patterns)",
         "none": "DISABLED -- [safety] profile=off in config",
     }.get(s.backend, s.backend)
     if s.backend == "agent-shield":
@@ -890,6 +959,7 @@ def diagnose() -> int:
     _check_anthropic()
     _check_openai()
     _check_sandbox(cfg)
+    _check_file_work(cfg)
     _check_channels(cfg)
     _check_world_db()
     _check_shield()

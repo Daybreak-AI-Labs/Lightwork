@@ -231,7 +231,7 @@
       body.expected_pointer_revision = pointer ? pointer.revision : 0;
       return { path: base + "publish", body: body };
     }
-    throw problem("That action is not available.");
+    throw problem("That action is not available. Refresh the page to see the latest.");
   }
 
   function buildRollbackRequest(row, pointer, reason, opId) {
@@ -295,7 +295,7 @@
     var advertised = Number(response.headers.get("content-length") || "0");
     if (advertised > MAX_RESPONSE_BYTES) {
       if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
-      throw problem("That is too large to show here.");
+      throw problem("That is too large to show here. Narrow the search or choose fewer records.");
     }
     var text;
     if (response.body && typeof response.body.getReader === "function") {
@@ -309,7 +309,7 @@
         total += read.value.byteLength;
         if (total > MAX_RESPONSE_BYTES) {
           await reader.cancel();
-          throw problem("That is too large to show here.");
+          throw problem("That is too large to show here. Narrow the search or choose fewer records.");
         }
         parts.push(decoder.decode(read.value, { stream: true }));
       }
@@ -317,7 +317,7 @@
       text = parts.join("");
     } else {
       text = await response.text();
-      if (new TextEncoder().encode(text).length > MAX_RESPONSE_BYTES) { throw problem("That is too large to show here."); }
+      if (new TextEncoder().encode(text).length > MAX_RESPONSE_BYTES) { throw problem("That is too large to show here. Narrow the search or choose fewer records."); }
     }
     var payload = null;
     try { payload = text ? JSON.parse(text) : {}; } catch (_error) { payload = null; }
@@ -377,7 +377,7 @@
   var status = {};
 
   // ---------- small helpers ----------
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) { node.className = cls; }
     if (text !== undefined && text !== null) { node.textContent = String(text); }
@@ -385,12 +385,12 @@
   }
   function when(ts) {
     if (typeof global.mvWhen === "function") { return global.mvWhen(ts); }
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function plainError(error, action) {
     if (error && error.plain) { return error.message; }
     if (typeof global.mvErrorText === "function") { return global.mvErrorText(error, action); }
-    return "Could not " + action + ". Please try again.";
+    return "Could not " + action + ". Try again.";
   }
   function report(message, technical) {
     operationStatus.textContent = message;
@@ -414,17 +414,15 @@
     return Promise.resolve(out);
   }
   async function request(path, options) {
-    var settings = Object.assign({ credentials: "same-origin", headers: { Accept: "application/json" } }, options || {});
-    if (settings.body !== undefined && typeof settings.body !== "string") {
-      settings.body = JSON.stringify(settings.body);
-      settings.headers["Content-Type"] = "application/json";
-    }
-    var response;
-    try { response = await fetch(apiBase + path, settings); } catch (error) { throw error; }
-    return readBoundedJson(response);
+    var current = draftGeneration, controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 20000);
+    draftCalls.add(controller);
+    var settings = Object.assign({ credentials: "same-origin", signal: controller.signal, headers: { Accept: "application/json" } }, options || {});
+    if (settings.body !== undefined && typeof settings.body !== "string") { settings.body = JSON.stringify(settings.body); settings.headers["Content-Type"] = "application/json"; }
+    try { var response = await fetch(apiBase + path, settings); var result = await readBoundedJson(response); if (current !== draftGeneration) { throw problem("The account or workspace changed before the reply. Private details were cleared."); } return result; }
+    finally { clearTimeout(timeout); draftCalls.delete(controller); }
   }
   function button(label, handler, cls, aria) {
-    var node = el("button", label, cls || "btn btn--ghost");
+    var node = el("button", cls || "btn btn--ghost", label);
     node.type = "button";
     if (aria) { node.setAttribute("aria-label", aria); }
     node.addEventListener("click", function () {
@@ -453,7 +451,7 @@
       reader.onload = function () {
         try { resolve(JSON.parse(String(reader.result || ""))); } catch (_error) { reject(problem("That file could not be read. Choose a file saved from this studio.")); }
       };
-      reader.onerror = function () { reject(problem("That file could not be read.")); };
+      reader.onerror = function () { reject(problem("That file could not be read. Choose it again, or try a different file.")); };
       reader.readAsText(file);
     });
   }
@@ -486,28 +484,42 @@
     try {
       status = await request("/status");
       var ready = status.enabled === true && status.configured === true && status.ready === true;
+      var connected = status.runtime_projection_apply_configured === true;
       operations.disabled = !ready;
       statusMark.className = "badge " + (ready ? "ok" : "failed");
-      statusMark.textContent = ready ? "Ready" : "Not ready";
-      readiness.textContent = ready ? "The studio is ready." : (status.enabled ? "The studio is not set up yet." : "The studio is turned off.");
-      readinessDetail.textContent = ready ? "" : "Ask an administrator to finish setting up the no-code GRC studio for this workspace.";
+      statusMark.textContent = ready ? "Ready to build" : "Not ready";
+      readiness.textContent = ready ? "You can build and approve blueprints here." : (status.enabled ? "The studio is not set up yet." : "The studio is turned off.");
+      readinessDetail.textContent = ready ? (connected
+        ? "Destinations are connected. Check the specific destination before applying a published blueprint to it."
+        : "Publishing makes a blueprint active in this studio. Use the questionnaire builder below to bring supported form questions into a reviewed questionnaire. Evidence checks and reports need their own supported destination.")
+        : status.enabled ? "Ask an administrator to finish setting up the no-code GRC studio for this workspace."
+          : "Ask an administrator to turn on the no-code GRC studio for this workspace.";
       $("grcs-projection-panel").hidden = !(ready && status.runtime_projection_preview_configured === true);
       $("grcs-projection-apply").disabled = !permissions.admin || status.runtime_projection_apply_configured !== true;
       if (ready) {
         await loadVersions();
         if (permissions.admin) { loadBackups(); }
+        if (permissions.operate) { await currentDraftContext(); }
       } else {
-        listStatus.textContent = "Nothing to show until the studio is ready.";
-        versionList.replaceChildren();
+        settleLoaders("Nothing to show until the studio is ready.");
       }
     } catch (error) {
       operations.disabled = true;
       statusMark.className = "badge failed";
       statusMark.textContent = "Not available";
-      readiness.textContent = "The studio could not be reached.";
+      readiness.textContent = "The studio could not be reached. Check your connection and try again.";
       readinessDetail.textContent = plainError(error, "check the studio");
-      listStatus.textContent = "";
+      settleLoaders(plainError(error, "load your blueprints"));
     }
+  }
+  // Nothing below loads until the studio is ready: say so in every loader
+  // instead of leaving "Loading…" there.
+  function settleLoaders(listText) {
+    listStatus.textContent = listText;
+    versionList.replaceChildren();
+    fillSelect($("grcs-collector-choice"), [], "Not available until the studio is ready");
+    fillSelect($("grcs-projection-target"), [], "Not available until the studio is ready");
+    if (permissions.admin) { $("grcs-backup-status").textContent = "Backups appear here once the studio is ready."; }
   }
 
   // ---------- register ----------
@@ -527,22 +539,30 @@
 
   // ---------- collectors and destinations to choose from ----------
   var sources = { collectors: [], destinations: [], listed: false, loaded: false };
+  function collectorKey(item) { return item.collector_id + ":" + item.collector_version + ":" + item.collector_integrity_sha256; }
+  function selectedCollector() { var key = $("grcs-collector-choice").value; return sources.collectors.find(function (item) { return collectorKey(item) === key; }); }
   async function loadSources() {
+    var current = draftGeneration;
     try {
       var payload = await request("/sources");
+      if (current !== draftGeneration) { return; }
+      if (draftContext && payload.context !== draftContext) { privateBoundary(); throw problem("Your account, workspace or access changed. Read the current evidence choices again."); }
       sources = {
         collectors: Array.isArray(payload.collectors) ? payload.collectors.filter(function (item) {
           return item && ID.test(String(item.collector_id || "")) && Number.isSafeInteger(item.collector_version) &&
-            item.collector_version > 0 && FINGERPRINT.test(String(item.collector_integrity_sha256 || ""));
+            item.collector_version > 0 && FINGERPRINT.test(String(item.collector_integrity_sha256 || "")) &&
+            typeof item.label === "string" && Array.isArray(item.outputs) && Array.isArray(item.controls);
         }) : [],
         destinations: Array.isArray(payload.destinations) ? payload.destinations.filter(function (item) {
           return item && PROJECTION_LABEL[item.target_kind] && ID.test(String(item.target_id || "")) &&
             Number.isSafeInteger(item.target_revision) && item.target_revision > 0;
         }) : [],
         listed: payload.destinations_listed === true,
-        loaded: true
+        loaded: true, notice: payload.collectors_notice || ""
       };
     } catch (error) {
+      if (current !== draftGeneration) { return; }
+      if (error && (error.status === 401 || error.status === 403)) { privateBoundary(); return; }
       sources = { collectors: [], destinations: [], listed: false, loaded: false };
     }
     fillCollectorChoices();
@@ -552,19 +572,28 @@
     var select = $("grcs-collector-choice");
     var note = $("grcs-collector-note");
     fillSelect(select, sources.collectors.map(function (item, index) {
-      return { value: String(index), label: human(item.collector_id) + " (version " + item.collector_version + ")" };
-    }), sources.collectors.length ? "Choose a collector" : "No collectors linked yet");
-    note.textContent = sources.collectors.length ? "" : (sources.loaded
-      ? "No collectors are linked in this workspace yet. Ask your administrator which collector to use, then enter it under Technical details."
-      : "The list of collectors could not be loaded. Refresh the page to try again.");
-    useCollector();
+      return { value: collectorKey(item), label: item.label + " · approved version " + item.collector_version };
+    }), sources.collectors.length ? "Choose an approved source" : "No approved sources available");
+    note.textContent = sources.notice || (sources.collectors.length ? "" : (sources.loaded
+      ? "Set up an evidence source in Continuous evidence and have a different administrator approve it. It will appear here before its first blueprint link."
+      : "Current evidence choices could not be verified. Your entered blueprint is kept; refresh the current choices before adding a link."));
+    useCollector(true);
   }
-  function useCollector() {
-    var item = sources.collectors[Number($("grcs-collector-choice").value)];
-    if ($("grcs-collector-choice").value === "" || !item) { return; }
-    $("grcs-collector-id").value = item.collector_id;
-    $("grcs-collector-version").value = String(item.collector_version);
-    $("grcs-collector-digest").value = item.collector_integrity_sha256;
+  function useCollector(keepChoices) {
+    var item = selectedCollector(), field = $("grcs-source-path"), controls = $("grcs-control-refs");
+    var kept = keepChoices === true ? Array.from(controls.querySelectorAll("input:checked")).map(function (input) { return input.value; }) : [];
+    $("grcs-collector-id").value = item ? item.collector_id : "";
+    $("grcs-collector-version").value = item ? String(item.collector_version) : "";
+    $("grcs-collector-digest").value = item ? item.collector_integrity_sha256 : "";
+    if (keepChoices !== true) { field.value = ""; }
+    fillSelect(field, item ? item.outputs.map(function (output) { return { value: output.path.join(","), label: output.label }; }) : [], "Choose a result field");
+    controls.replaceChildren(el("legend", null, "Controls this link supports"));
+    (item ? item.controls : []).forEach(function (control) {
+      var label = el("label", "grcs-check"), input = document.createElement("input");
+      input.type = "checkbox"; input.value = control.value; input.checked = kept.indexOf(control.value) >= 0;
+      label.append(input, el("span", null, control.label)); controls.appendChild(label);
+    });
+    if (!item || !item.controls.length) { controls.appendChild(el("p", "muted", item ? "This source has no supported named controls for a blueprint link." : "Choose a source first.")); }
   }
   function fillTargetChoices() {
     var select = $("grcs-projection-target");
@@ -611,19 +640,19 @@
     versionList.replaceChildren();
     $("grcs-list-count").textContent = allRows.length + (allRows.length === 1 ? " version" : " versions");
     if (!rows.length) {
-      var tr = el("tr"); var td = el("td", allRows.length ? "No versions match these filters." : "No blueprints yet." + (permissions.operate ? " Choose “Start a new blueprint” to build one." : ""));
+      var tr = el("tr"); var td = el("td", null, allRows.length ? "No versions match these filters." : "No blueprints yet." + (permissions.operate ? " Choose “Start a new blueprint” to build one." : ""));
       td.colSpan = 5; tr.appendChild(td); versionList.appendChild(tr);
       listStatus.textContent = "";
       return;
     }
     rows.forEach(function (row) {
       var tr = el("tr");
-      var th = el("th", nameOf(row)); th.scope = "row"; tr.appendChild(th);
-      tr.appendChild(el("td", "Version " + row.version));
-      var badgeCell = el("td"); badgeCell.appendChild(el("span", STATE_LABEL[row.state] || human(row.state), "badge " + (STATE_BADGE[row.state] || "idle")));
+      var th = el("th", null, nameOf(row)); th.scope = "row"; tr.appendChild(th);
+      tr.appendChild(el("td", null, "Version " + row.version));
+      var badgeCell = el("td"); badgeCell.appendChild(el("span", "badge " + (STATE_BADGE[row.state] || "idle"), STATE_LABEL[row.state] || human(row.state)));
       tr.appendChild(badgeCell);
-      tr.appendChild(el("td", when(row.updated_at)));
-      var actions = el("td"); var box = el("div", null, "grcs-actions");
+      tr.appendChild(el("td", null, when(row.updated_at)));
+      var actions = el("td"); var box = el("div", "grcs-actions", null);
       var label = nameOf(row) + " version " + row.version;
       rowActions(row, permissions).forEach(function (action) {
         var spec = ACTIONS[action];
@@ -652,28 +681,28 @@
     var blueprint = row.blueprint || {};
     $("grcs-view-title").textContent = nameOf(row) + " — version " + row.version;
     body.replaceChildren();
-    body.appendChild(el("p", (STATE_LABEL[row.state] || human(row.state)) + ". " + summaryOf(blueprint) + "."));
+    body.appendChild(el("p", null, (STATE_LABEL[row.state] || human(row.state)) + ". " + summaryOf(blueprint) + "."));
     (blueprint.objects || []).forEach(function (object) {
-      body.appendChild(el("h3", human(object.label_ref) + " (" + (KIND_LABEL[object.kind] || human(object.kind)) + ")"));
+      body.appendChild(el("h3", null, human(object.label_ref) + " (" + (KIND_LABEL[object.kind] || human(object.kind)) + ")"));
       var list = el("ul");
       (object.fields || []).forEach(function (field) {
         var bits = [TYPE_LABEL[field.field_type] || human(field.field_type)];
         if (field.required) { bits.push("required"); }
         if (field.options && field.options.length) { bits.push("choices: " + field.options.map(human).join(", ")); }
-        list.appendChild(el("li", human(field.label_ref) + " — " + bits.join(", ")));
+        list.appendChild(el("li", null, human(field.label_ref) + " — " + bits.join(", ")));
       });
       body.appendChild(list);
     });
     if ((blueprint.rules || []).length) {
-      body.appendChild(el("h3", "Rules"));
+      body.appendChild(el("h3", null, "Rules"));
       var rules = el("ul");
-      blueprint.rules.forEach(function (rule) { rules.appendChild(el("li", describeRule(rule))); });
+      blueprint.rules.forEach(function (rule) { rules.appendChild(el("li", null, describeRule(rule))); });
       body.appendChild(rules);
     }
     if ((blueprint.report_views || []).length) {
-      body.appendChild(el("h3", "Reports"));
+      body.appendChild(el("h3", null, "Reports"));
       var reports = el("ul");
-      blueprint.report_views.forEach(function (view) { reports.appendChild(el("li", human(view.title_ref) + " — columns: " + view.columns.map(human).join(", "))); });
+      blueprint.report_views.forEach(function (view) { reports.appendChild(el("li", null, human(view.title_ref) + " — columns: " + view.columns.map(human).join(", "))); });
       body.appendChild(reports);
     }
     panel.hidden = false;
@@ -709,11 +738,13 @@
       ] }]).then(function (values) { if (values) { return lifecycle("approve", row, values, "approve it", "Approved. It can now be published."); } });
     } },
     publish: { label: "Publish", cls: "btn btn--primary", run: function (row) {
-      return confirmed("Publish “" + nameOf(row) + "” version " + row.version + "? It replaces the live version straight away.", "Publish")
+      return confirmed("Publish “" + nameOf(row) + "” version " + row.version + "? It replaces the version active in this studio straight away.", "Publish")
         .then(async function (ok) {
           if (!ok) { return; }
           var pointer = await activePointer(row.studio_id);
-          return lifecycle("publish", row, { pointer: pointer }, "publish it", "Published. Version " + row.version + " is now live.");
+          return lifecycle("publish", row, { pointer: pointer }, "publish it", status.runtime_projection_apply_configured === true
+            ? "Published. Version " + row.version + " is now active."
+            : "Published in this studio. Other questionnaires, evidence checks and reports are not connected yet.");
         });
     } },
     restore: { label: "Restore this version", cls: "btn", run: function (row) {
@@ -746,12 +777,12 @@
         (result.items || []).forEach(function (item) {
           var snapshot = item.snapshot || {};
           var tr = el("tr");
-          tr.appendChild(el("td", when(snapshot.updated_at)));
-          tr.appendChild(el("td", EVENT_LABEL[item.event_type] || human(item.event_type)));
-          tr.appendChild(el("td", STATE_LABEL[snapshot.state] || human(snapshot.state)));
+          tr.appendChild(el("td", null, when(snapshot.updated_at)));
+          tr.appendChild(el("td", null, EVENT_LABEL[item.event_type] || human(item.event_type)));
+          tr.appendChild(el("td", null, STATE_LABEL[snapshot.state] || human(snapshot.state)));
           list.appendChild(tr);
         });
-        if (!list.children.length) { var tr = el("tr"); var td = el("td", "Nothing recorded yet."); td.colSpan = 3; tr.appendChild(td); list.appendChild(tr); }
+        if (!list.children.length) { var tr = el("tr"); var td = el("td", null, "Nothing recorded yet. Entries appear here once the form is used."); td.colSpan = 3; tr.appendChild(td); list.appendChild(tr); }
         $("grcs-history-title").textContent = "History of " + nameOf(row) + " version " + row.version;
         $("grcs-history-panel").hidden = false;
         $("grcs-history-title").focus();
@@ -776,6 +807,7 @@
 
   // ---------- builder ----------
   function openBuilder(options) {
+    ++draftEditRevision; clearReview();
     var row = options && options.row;
     composerState = emptyComposerState();
     editing = { mode: "create", studioId: null, row: null };
@@ -793,6 +825,7 @@
     $("grcs-builder-mode").textContent = editing.mode === "replace" ? "Saving updates this draft." :
       editing.studioId ? "Saving creates version " + (latestVersion(editing.studioId) + 1) + " as a draft." : "Saving creates the first draft.";
     builderPanel.hidden = false;
+    $("grcs-save-baseline").hidden = editing.mode !== "replace";
     renderComposer();
     $("grcs-builder-title").focus();
   }
@@ -823,14 +856,14 @@
     fieldset.querySelectorAll("input:checked").forEach(function (input) { checked[input.value] = true; });
     Array.prototype.slice.call(fieldset.querySelectorAll("label")).forEach(function (node) { node.remove(); });
     (object ? object.fields : []).forEach(function (field) {
-      var label = el("label", null, "grcs-check");
+      var label = el("label", "grcs-check", null);
       var input = document.createElement("input");
       input.type = "checkbox"; input.name = name; input.value = field.field_id; input.checked = Boolean(checked[field.field_id]);
-      label.appendChild(input); label.appendChild(el("span", human(field.label_ref)));
+      label.appendChild(input); label.appendChild(el("span", null, human(field.label_ref)));
       fieldset.appendChild(label);
     });
     if (!object || !object.fields.length) {
-      var hint = el("label", "Add fields in step 2 first.", "muted");
+      var hint = el("label", "muted", "Add fields in step 2 first.");
       fieldset.appendChild(hint);
     }
   }
@@ -849,13 +882,13 @@
 
   function listItem(text, removeLabel, onRemove) {
     var li = el("li");
-    li.appendChild(el("span", text));
+    li.appendChild(el("span", null, text));
     li.appendChild(button("Remove", function () { onRemove(); renderComposer(); }, "btn btn--ghost", removeLabel));
     return li;
   }
   function renderList(id, items, emptyText) {
     var target = $(id); target.replaceChildren();
-    if (!items.length) { target.appendChild(el("li", emptyText, "muted")); return; }
+    if (!items.length) { target.appendChild(el("li", "muted", emptyText)); return; }
     items.forEach(function (item) { target.appendChild(item); });
   }
   function describeRule(rule) {
@@ -893,21 +926,21 @@
           "Remove field " + human(field.label_ref), function () { object.fields.splice(index, 1); }));
       });
     });
-    renderList("grcs-field-list", fieldItems, "No fields yet.");
+    renderList("grcs-field-list", fieldItems, "No fields yet. Add the first field above.");
     renderList("grcs-form-list", composerState.forms.map(function (item, index) {
       return listItem(human(item.title_ref) + " — " + item.sections.map(function (section) { return human(section.label_ref); }).join(", "),
         "Remove form " + human(item.title_ref), function () { composerState.forms.splice(index, 1); });
-    }), "No forms yet.");
+    }), "No forms yet. Add a form above to collect answers.");
     renderList("grcs-rule-list", composerState.rules.map(function (item, index) {
       return listItem(describeRule(item), "Remove rule " + human(item.rule_id), function () { composerState.rules.splice(index, 1); });
-    }), "No rules yet.");
+    }), "No rules yet. Add a rule above to check answers.");
     renderList("grcs-view-list", composerState.report_views.map(function (item, index) {
       return listItem(human(item.title_ref) + " — " + item.columns.length + " columns", "Remove report " + human(item.title_ref), function () { composerState.report_views.splice(index, 1); });
-    }), "No reports yet.");
+    }), "No reports yet. Add a report above to show results.");
     renderList("grcs-binding-list", composerState.collector_bindings.map(function (item, index) {
       return listItem(human(item.binding_id) + " — fills " + item.field_mappings.map(function (mapping) { return human(mapping.target_field_id); }).join(", "),
         "Remove evidence link " + human(item.binding_id), function () { composerState.collector_bindings.splice(index, 1); });
-    }), "No evidence links yet.");
+    }), "No evidence links yet. Choose an approved source above to link its recorded results.");
     refreshSelectors();
     toggleFieldType();
     toggleActionType();
@@ -1062,22 +1095,25 @@
     var object = needObject("grcs-binding-object");
     var bindingId = slug($("grcs-binding-name").value, "the evidence link");
     var collector = String($("grcs-collector-id").value || "").trim();
-    if (!ID.test(collector)) { throw problem("Choose a collector from the list."); }
+    var source = selectedCollector();
+    if (!source || !ID.test(collector)) { throw problem("Choose a current approved source from the list."); }
     var version = Number($("grcs-collector-version").value);
-    if (!Number.isSafeInteger(version) || version < 1) { throw problem("Choose a collector from the list, or enter its version as a whole number under Technical details."); }
+    if (!Number.isSafeInteger(version) || version < 1) { throw problem("Choose a current approved source from the list."); }
     var fingerprint = String($("grcs-collector-digest").value || "").trim().toLowerCase();
-    if (!FINGERPRINT.test(fingerprint)) { throw problem("Choose a collector from the list. The details entered by hand are incomplete."); }
+    if (!FINGERPRINT.test(fingerprint)) { throw problem("The current approved source could not be verified. Refresh its choices before adding this link."); }
     var target = needField(object, "grcs-mapping-target", "the field to fill");
     var path = String($("grcs-source-path").value || "").split(",").map(function (item) { return item.trim(); }).filter(Boolean);
     if (!path.length || path.length > 16 || path.some(function (item) { return !ID.test(item); })) {
-      throw problem("Enter where the value comes from, for example: findings, severity.");
+      throw problem("Choose a result field from this source.");
     }
+    if (!source.outputs.some(function (output) { return output.path.join(",") === path.join(","); })) { throw problem("Choose a current named result field from this source."); }
     var mapping = { source_path: path, target_field_id: target.field_id, mode: $("grcs-mapping-mode").value === "append" ? "append" : "replace" };
-    var controls = listOf($("grcs-control-refs").value, "control", 512, 1);
+    var controls = Array.from($("grcs-control-refs").querySelectorAll("input:checked")).map(function (input) { return input.value; });
+    if (!controls.length || controls.some(function (control) { return !source.controls.some(function (row) { return row.value === control; }); })) { throw problem("Choose at least one supported named control."); }
     var existing = composerState.collector_bindings.find(function (item) { return item.binding_id === bindingId; });
     if (existing) {
       if (existing.object_id !== object.object_id || existing.collector_id !== collector || existing.collector_version !== version || existing.collector_integrity_sha256 !== fingerprint) {
-        throw problem("The evidence link “" + human(bindingId) + "” uses a different collector. Use a different link name.");
+        throw problem("The evidence link “" + human(bindingId) + "” uses a different source. Use a different link name.");
       }
       if (existing.field_mappings.some(function (item) { return item.target_field_id === target.field_id; })) { throw problem("This evidence link already fills “" + human(target.label_ref) + "”."); }
       existing.field_mappings.push(mapping);
@@ -1098,17 +1134,128 @@
     return buildBlueprintFromComposer({ studio_id: studioId, name: name, description: $("grcs-description").value }, composerState);
   }
 
-  async function saveDraft(event) {
-    event.preventDefault();
-    try {
-      var blueprint = currentBlueprint();
-      var built = buildSavePayload(editing.mode === "replace" ? { mode: "replace", row: editing.row } : { mode: "create", latestVersion: latestVersion(blueprint.studio_id) }, blueprint, operationId());
-      var result = await request(built.path, { method: built.method, body: built.body });
-      report("Saved “" + human(blueprint.name_ref) + "” as draft version " + (result.version || "") + ". Send it for review when it's ready.", result);
-      builderPanel.hidden = true;
-      await loadVersions();
-    } catch (error) { fail(error, "save the draft"); }
+  // One retained original identity per browser; a lost reply never starts another save.
+  var draftContext = "", draftGeneration = 0, draftEditRevision = 0, draftBusy = false, draftReview = null, draftOriginal = null;
+  var draftCalls = new Set(), draftStorage = "lightwork-grc-original-save", originalRead = false;
+  var saveReview = $("grcs-save-review"), saveOriginal = $("grcs-save-original");
+  function clearReview() { draftReview = null; saveReview.hidden = true; $("grcs-save-review-body").replaceChildren(); $("grcs-save-confirm").checked = false; $("grcs-save-apply").disabled = true; }
+  function privateBoundary() {
+    ++draftGeneration; draftCalls.forEach(function (call) { call.abort(); }); draftContext = ""; draftOriginal = null; originalRead = false;
+    clearReview(); saveOriginal.hidden = true; $("grcs-save-original-status").textContent = ""; $("grcs-save-original-current").textContent = "";
+    composerState = emptyComposerState(); editing = { mode: "create", studioId: null, row: null }; builderForm.reset(); renderComposer(); builderPanel.hidden = true;
+    allRows = []; versionList.replaceChildren(); $("grcs-list-count").textContent = "0 versions"; fillStudioFilter(); sources = { collectors: [], destinations: [], listed: false, loaded: false }; fillCollectorChoices(); fillProjection(); fillTargetChoices(); $("grcs-view-body").replaceChildren(); $("grcs-view-panel").hidden = true;
+    $("grcs-history-list").replaceChildren(); $("grcs-history-panel").hidden = true; $("grcs-backup-list").replaceChildren(); $("grcs-retention-list").replaceChildren(); $("grcs-projection-form").reset(); operationOutput.textContent = "";
+    operations.disabled = true; draftBusy = false; report("Private studio details were cleared because your account, workspace or access changed. Refresh in the current account to continue.");
   }
+  async function draftRequest(path, body, expected) {
+    var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 20000), current = draftGeneration;
+    draftCalls.add(controller);
+    try {
+      var response = await fetch("/api/v1/compliance/grc-draft-changes" + path, { method: body ? "POST" : "GET", credentials: "same-origin", cache: "no-store", signal: controller.signal,
+        headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      if (response.redirected || response.status === 401 || response.status === 403) { privateBoundary(); throw problem("Private details were cleared. Sign in with current studio permission before continuing."); }
+      var value = await readBoundedJson(response);
+      if (current !== draftGeneration) { throw problem("The account or workspace changed before the reply. Private details were cleared."); }
+      if (expected && value.context !== expected) { privateBoundary(); throw problem("Your account, workspace or access changed. Private details were cleared."); }
+      return value;
+    } catch (error) {
+      if (error && error.technical) { error.message = error.technical; error.plain = true; }
+      if (error && error.status === 409 && String(error.message).indexOf("account, workspace or access changed") >= 0) { privateBoundary(); }
+      if (error.name === "AbortError" || error instanceof TypeError || error instanceof SyntaxError) { throw problem("The reply is unconfirmed. Check the original save; nothing will be repeated automatically."); }
+      throw error;
+    } finally { clearTimeout(timeout); draftCalls.delete(controller); }
+  }
+  function draftLock(value) { draftBusy = value; $("grcs-save").disabled = value; $("grcs-save-read").disabled = value; $("grcs-save-restore").disabled = value; $("grcs-save-new").disabled = value; $("grcs-save-cancel").disabled = value; $("grcs-save-apply").disabled = value || !draftReview || !$("grcs-save-confirm").checked; }
+  async function currentDraftContext(expected, mayPublish) {
+    var value = await draftRequest("", undefined, expected || draftContext || undefined);
+    if (mayPublish && !mayPublish()) { return value; }
+    if (draftContext && draftContext !== value.context) { privateBoundary(); throw problem("Your account or workspace changed. Private details were cleared."); }
+    if (!draftContext) { draftContext = value.context; }
+    if (!draftOriginal) { try { var retained = JSON.parse(sessionStorage.getItem(draftStorage) || "null"); if (retained && retained.context === draftContext && typeof retained.token === "string" && retained.token.length <= 240000) { draftOriginal = retained; originalStatus("A previous reviewed save is retained. Check its original outcome before another save."); } } catch (_) {} }
+    return value;
+  }
+  function originalStatus(message, value) {
+    saveOriginal.hidden = !draftOriginal; $("grcs-save-original-status").textContent = message;
+    $("grcs-save-original-current").textContent = value && value.confirmed ? value.name + " · version " + value.version + " · recorded change " + value.revision + ". " + (value.current || "") : "Current matching content is not an original receipt.";
+    $("grcs-save-new").hidden = !originalRead;
+  }
+  function renderDraftReview(value) {
+    if (!Array.isArray(value.changes) || !value.changes.length || value.changes.length > 512 || JSON.stringify(value.changes).length > 131072) { throw problem("The complete draft could not be displayed. No partial review can be confirmed."); }
+    var body = $("grcs-save-review-body"); body.replaceChildren();
+    value.changes.forEach(function (row) {
+      if (!row || typeof row.label !== "string" || typeof row.before !== "string" || typeof row.after !== "string") { throw problem("The full review is unavailable. Keep editing; nothing was saved."); }
+      var holder = body;
+      if (row.technical) { holder = el("details"); holder.appendChild(el("summary", null, row.label)); body.appendChild(holder); }
+      holder.appendChild(el("dt", null, row.label)); holder.appendChild(el("dd", null, "Current: " + row.before + "\nAfter save: " + row.after));
+    });
+    draftReview = value; saveReview.hidden = false; $("grcs-save-review-title").focus();
+  }
+  async function saveDraft(event) {
+    event.preventDefault(); if (draftBusy) { return; } var current = draftGeneration; draftLock(true); clearReview();
+    try {
+      await currentDraftContext(); if (current !== draftGeneration) { return; }
+      if (draftOriginal) { originalStatus("Check the retained original save first. A new review must be chosen explicitly after that lookup."); $("grcs-save-read").focus(); return; }
+      var blueprint = currentBlueprint(), built = buildSavePayload(editing.mode === "replace" ? { mode: "replace", row: editing.row } : { mode: "create", latestVersion: latestVersion(blueprint.studio_id) }, blueprint, "review-only");
+      var edited = draftEditRevision; delete built.body.operation_id; if (editing.mode === "replace") { built.body.version = editing.row.version; }
+      var value = await draftRequest("/review", { context: draftContext, kind: editing.mode === "replace" ? "replace" : "create", studio: blueprint.studio_id, body: built.body }, draftContext);
+      if (current !== draftGeneration) { return; } if (edited !== draftEditRevision) { report("Your entered work changed while this review was loading. Review your current choices again; nothing was saved."); return; } renderDraftReview(value); report("Review the complete current and proposed choices before saving.");
+    } catch (error) { if (current === draftGeneration) { clearReview(); fail(error, "review the draft"); } }
+    finally { if (current === draftGeneration) { draftLock(false); } }
+  }
+  $("grcs-save-baseline").addEventListener("click", async function () {
+    if (draftBusy || editing.mode !== "replace") { return; } var current = draftGeneration, selected = editing.row; draftLock(true); clearReview();
+    try { await currentDraftContext(); var row = await request("/studios/" + encodeURIComponent(selected.studio_id) + "/versions/" + selected.version); await currentDraftContext();
+      if (current !== draftGeneration || editing.row !== selected) { return; } if (row.state !== "draft") { throw problem("This version is no longer editable. Choose “New version from this” in the register; your entered work is kept here."); }
+      editing.row = row; report("Your entered choices are kept. The next complete review will compare them against the current saved draft, including other changes.");
+    } catch (error) { if (current === draftGeneration) { fail(error, "update the saved comparison"); } } finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  $("grcs-save-confirm").addEventListener("change", function () { draftLock(draftBusy); });
+  $("grcs-save-cancel").addEventListener("click", function () { clearReview(); $("grcs-save").focus(); });
+  function editedDraft() { ++draftEditRevision; clearReview(); }
+  builderForm.addEventListener("input", editedDraft); builderForm.addEventListener("change", editedDraft); builderForm.addEventListener("click", function (event) { if (event.target.closest("button") && event.target.id !== "grcs-save") { editedDraft(); } });
+  $("grcs-save-apply").addEventListener("click", async function () {
+    if (draftBusy || !draftReview || !$("grcs-save-confirm").checked) { return; } var current = draftGeneration, selected = draftReview;
+    draftLock(true);
+    try {
+      await currentDraftContext(selected.context); if (current !== draftGeneration || draftReview !== selected) { return; }
+      draftOriginal = { context: selected.context, token: selected.token }; originalRead = false;
+      try { sessionStorage.setItem(draftStorage, JSON.stringify(draftOriginal)); } catch (_) { draftOriginal = null; throw problem("This browser cannot retain your original review. Free browser storage before saving; nothing was submitted."); }
+      clearReview(); originalStatus("Saving the reviewed draft. If the reply is interrupted, check this original request without saving again.");
+      var value = await draftRequest("/save", { token: selected.token, confirmed: true }, selected.context);
+      if (current !== draftGeneration) { return; } originalRead = true; originalStatus(value.message, value); report(value.message);
+      // Never replace the person's composer with an earlier result.
+      await loadVersions();
+    } catch (error) { if (current === draftGeneration) { originalStatus(draftOriginal ? "The original save is unconfirmed. Check its result without repeating it." : "Nothing was submitted."); fail(error, "confirm the original save"); } }
+    finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  $("grcs-save-read").addEventListener("click", async function () {
+    if (draftBusy || !draftOriginal) { return; } var current = draftGeneration, selected = draftOriginal; draftLock(true);
+    try { var value = await draftRequest("/original", { token: selected.token }, selected.context); if (current !== draftGeneration) { return; } originalRead = true; originalStatus(value.message, value); report(value.message); }
+    catch (error) { if (current === draftGeneration) { fail(error, "read the original save"); } }
+    finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  $("grcs-save-new").addEventListener("click", function () { if (!draftBusy && originalRead) { draftOriginal = null; originalRead = false; sessionStorage.removeItem(draftStorage); saveOriginal.hidden = true; clearReview(); report("Your entered work is kept. Choose the current saved version before reviewing another save; the earlier original request remains historical."); $("grcs-save").focus(); } });
+  $("grcs-save-restore").addEventListener("click", async function () {
+    if (draftBusy || !draftOriginal || !await confirmed("Replace the entered editor choices with the retained original reviewed choices? This does not save anything.", "Restore choices")) { return; }
+    if (!draftOriginal) { return; } var current = draftGeneration, selected = draftOriginal; draftLock(true);
+    try { var value = await draftRequest("/choices", { token: selected.token }, selected.context); if (current !== draftGeneration) { return; }
+      var input = value.inputs; openBuilder({ mode: value.kind === "replace" ? "replace" : "create", row: { studio_id: value.studio, blueprint: input.blueprint, version: input.version, revision: input.expected_revision, integrity_sha256: input.expected_integrity_sha256 } }); report("Original choices restored to the editor. Current-source review is required before any new save.");
+    } catch (error) { if (current === draftGeneration) { fail(error, "restore reviewed choices"); } } finally { if (current === draftGeneration) { draftLock(false); } }
+  });
+  document.addEventListener("lightwork:copilot-context-changed", async function (event) {
+    if (event.detail && event.detail.reason === "selection") { var selected = draftReview, current = draftGeneration; try { if (selected) { await draftRequest("/review-status", { token: selected.token }, selected.context); } else { await currentDraftContext(); } } catch (error) { if (current === draftGeneration) { if (draftReview === selected) { clearReview(); } fail(error, "verify current access"); } } }
+    else { privateBoundary(); }
+  });
+  global.addEventListener("lightwork:copilot-context-changed", privateBoundary);
+  document.addEventListener("lightwork:account-context-changed", privateBoundary);
+  global.LightworkGRCDraft = { open: async function (expected, original, isActive) {
+    var active = typeof isActive === "function" ? isActive : function () { return true; }; if (draftBusy || !active()) { return false; } var current = draftGeneration;
+    await currentDraftContext(expected, function () { return current === draftGeneration && active(); }); if (current !== draftGeneration || !active() || draftContext !== expected) { return false; }
+    if (draftReview) { await draftRequest("/review-status", { token: draftReview.token }, expected); if (current !== draftGeneration || !active()) { return false; } }
+    if (original) { if (!draftOriginal) { report("No original save is retained in this browser for the current account. Open its saved draft from the register; matching content cannot establish an earlier request."); return false; } saveOriginal.hidden = false; saveOriginal.scrollIntoView({ block: "start" }); $("grcs-save-read").focus(); }
+    else { if (builderPanel.hidden) { openBuilder(null); } builderPanel.scrollIntoView({ block: "start" }); $("grcs-name").focus(); }
+    return true;
+  } };
 
   // ---------- projection ----------
   function fillProjection() {
@@ -1173,7 +1320,7 @@
       var result = await request("/operations/retention?limit=1000");
       var items = result.items || [];
       renderList("grcs-retention-list", items.map(function (item) {
-        return el("li", nameOf(item) + " version " + item.version + " — " + (STATE_LABEL[item.state] || human(item.state)) + ", due " + when(item.retention_due_at));
+        return el("li", null, nameOf(item) + " version " + item.version + " — " + (STATE_LABEL[item.state] || human(item.state)) + ", due " + when(item.retention_due_at));
       }), "No versions are due for deletion.");
       report(items.length ? items.length + " sent-back versions are due for deletion." : "No versions are due for deletion.");
       return items.length;
@@ -1198,18 +1345,18 @@
       var result = await request("/operations/recovery/backups");
       var items = result.items || [];
       list.replaceChildren();
-      statusLine.textContent = items.length ? "" : "No backups yet.";
+      statusLine.textContent = items.length ? "" : "No backups yet. Save a backup above before you change a blueprint.";
       items.forEach(function (item) {
         var tr = el("tr");
-        tr.appendChild(el("td", when(item.created_at)));
+        tr.appendChild(el("td", null, when(item.created_at)));
         var cell = el("td");
-        var outcome = el("span", "", "muted");
+        var outcome = el("span", "muted", "");
         cell.appendChild(button("Check it", async function () {
           try {
             var verified = await request("/operations/recovery/backups/" + encodeURIComponent(item.backup_id));
             outcome.className = "badge " + (verified.verified === true ? "ok" : "failed");
             outcome.textContent = verified.verified === true ? "Intact" : "Could not confirm";
-            report(verified.verified === true ? "The backup from " + when(item.created_at) + " is intact." : "Could not confirm the backup is intact.", verified);
+            report(verified.verified === true ? "The backup from " + when(item.created_at) + " is intact." : "Could not confirm the backup is intact. Refresh the page and try again.", verified);
           } catch (error) {
             outcome.className = "badge failed"; outcome.textContent = "Could not confirm";
             fail(error, "check the backup");
@@ -1292,5 +1439,7 @@
   $("grcs-backup").addEventListener("click", makeBackup);
 
   renderComposer();
-  loadStatus();
+  // A turned-off studio shows its gate instead: nothing is checked or loaded,
+  // and the page already says when blueprints will appear.
+  if (shell.dataset.moduleEnabled !== "false") { loadStatus(); }
 }(typeof window !== "undefined" ? window : globalThis));

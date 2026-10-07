@@ -87,11 +87,20 @@ def test_pysaml_config_disables_unsolicited_responses(monkeypatch):
     fake.BINDING_HTTP_POST = "post"
     fake.BINDING_HTTP_REDIRECT = "redirect"
     monkeypatch.setitem(sys.modules, "saml2", fake)
-
     cfg = saml_mod.SamlConfig(**ENABLED_CFG)
+
+    # Without an installed signature backend, no client configuration exists.
+    monkeypatch.setattr(saml_mod, "runtime_readiness", lambda: {
+        "ready": False, "backend": "", "message": "not installed"})
+    with pytest.raises(saml_mod.SamlUnavailable):
+        saml_mod._pysaml2_config(cfg)
+
+    monkeypatch.setattr(saml_mod, "runtime_readiness", lambda: {
+        "ready": True, "backend": "XMLSecurity", "message": "installed"})
     conf = saml_mod._pysaml2_config(cfg)
 
     assert conf["service"]["sp"]["allow_unsolicited"] is False
+    assert conf["crypto_backend"] == "XMLSecurity"
 
 
 def test_routes_404_when_disabled(monkeypatch):
@@ -170,9 +179,16 @@ def test_verify_acs_response_passes_outstanding_request_id(monkeypatch):
     fake = types.ModuleType("saml2")
     fake.BINDING_HTTP_POST = "post"
     monkeypatch.setitem(sys.modules, "saml2", fake)
+    monkeypatch.setattr(saml_mod, "_auth_saml_cfg", lambda: dict(ENABLED_CFG))
     seen = {}
 
     class _Client:
+        # ``client_scope`` builds the native client from the resolved config.
+        config = types.SimpleNamespace(crypto_backend="xmlsec1")
+
+        def __init__(self, cfg):
+            seen["cfg"] = cfg
+
         def parse_authn_request_response(self, response, binding, *, outstanding):
             seen.update(
                 response=response, binding=binding, outstanding=dict(outstanding)
@@ -185,6 +201,7 @@ def test_verify_acs_response_passes_outstanding_request_id(monkeypatch):
     identity = saml_mod.verify_acs_response("signed", request_id="request-123")
 
     assert identity.name_id == "alice@example.com"
+    assert seen.pop("cfg").idp_metadata_url == ENABLED_CFG["idp_metadata_url"]
     assert seen == {
         "response": "signed",
         "binding": "post",
@@ -196,8 +213,14 @@ def test_verify_acs_response_rejects_wrong_in_response_to(monkeypatch):
     fake = types.ModuleType("saml2")
     fake.BINDING_HTTP_POST = "post"
     monkeypatch.setitem(sys.modules, "saml2", fake)
+    monkeypatch.setattr(saml_mod, "_auth_saml_cfg", lambda: dict(ENABLED_CFG))
 
     class _Client:
+        config = types.SimpleNamespace(crypto_backend="xmlsec1")
+
+        def __init__(self, cfg):
+            pass
+
         def parse_authn_request_response(self, response, binding, *, outstanding):
             parsed = _FakeResp()
             parsed.in_response_to = "attacker-request"
@@ -279,7 +302,8 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
         seen["response"] = response
         seen["request_id"] = request_id
         return saml_mod.SamlIdentity(
-            name_id="alice@example.com", assertion_id="assertion-login-1"
+            name_id="opaque-name-id", attributes={"mail": ["alice@example.com"]},
+            assertion_id="assertion-login-1"
         )
 
     monkeypatch.setattr(
@@ -300,7 +324,8 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
     cookie = res.cookies.get("mvk_session")
     assert cookie
     payload = verify_session(cookie, SECRET)
-    assert payload["sub"] == "alice@example.com"
+    assert payload["sub"] == "opaque-name-id"
+    assert payload["idp_email"] == "alice@example.com"
 
 
 def test_acs_rejects_replayed_assertion(_enabled, monkeypatch, tmp_path):

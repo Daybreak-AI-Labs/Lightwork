@@ -410,7 +410,8 @@ class VendorOnboardingService:
         cost = ({"state": "exact", "currency": "USD", "amount": str(measured_cost)}
                 if type(measured_cost) in (int, float) and math.isfinite(measured_cost)
                 else {"state": "unknown", "reason": "provider_billing_unmeasured"})
-        freshness = (row.get("evidence") or {}).get("fresh_until")
+        evidence = row.get("evidence") or {}
+        freshness = evidence.get("fresh_until") if evidence.get("status") == "available" else None
         idempotency = ({"state": "bound", "key": operation["id"]}
                        if operation.get("id") else
                        {"state": "unknown", "reason": "action_not_prepared"})
@@ -446,7 +447,7 @@ class VendorOnboardingService:
             budget={"state": "unknown", "reason": "workflow_budget_not_configured"},
             cost=cost,
             fresh_until=(freshness if freshness is not None else
-                         {"state": "unknown", "reason": "evidence_not_collected"}),
+                         {"state": "unknown", "reason": "evidence_incomplete" if evidence else "evidence_not_collected"}),
             human_intervention={
                 "required": True, "review_count": len(row.get("review_history") or []),
                 "acceptance_state": business,
@@ -1374,7 +1375,11 @@ class VendorOnboardingService:
             evidence = {"source": "evidence_set", "version": digest([dict(self._identity(item), source=item["source"]) for item in results]),
                         "content_sha256": digest([{key: item.get(key) for key in ("source", "document_id", "version", "content_sha256")}
                                                    for item in results]),
-                        "fresh_until": min((item.get("fresh_until", 0) for item in results), default=0)}
+                        "fresh_until": min((item["fresh_until"] for item in results
+                                             if item["status"] == "available"
+                                             and type(item.get("fresh_until")) in (int, float)
+                                             and math.isfinite(item["fresh_until"])
+                                             and item["fresh_until"] > 0), default=0)}
         return dict(evidence, status=status, documents=results, collected_at=self.clock())
 
     @staticmethod
@@ -2024,8 +2029,9 @@ class VendorOnboardingService:
                 message="Operation authority changed; prepare and review a new action.",
             )
         self._check_prepared_inputs(execution, row)
-        approval = {"reviewer": ctx.actor, "at": self.clock(),
-                    "binding_sha256": operation_binding(operation), "scope": operation["scope"]}
+        approval = {"reviewer": ctx.actor, "reviewer_context": ctx.binding(),
+                    "at": self.clock(), "binding_sha256": operation_binding(operation),
+                    "scope": operation["scope"]}
         return self._save(ctx, row, operation=dict(operation, state="approved", approval=approval),
                           stage="action_approved")
 
@@ -2118,9 +2124,29 @@ class VendorOnboardingService:
             validate_approval(operation, ctx, self.clock())
         except ApprovalBindingError as exc:
             self._require_new_action_review(ctx, row, code=exc.code, message=str(exc))
-        approver = ServiceContext(**operation["context"], human=True)
-        approver = ServiceContext(**dict(asdict(approver), actor=operation["approval"]["reviewer"]))
-        self._permit(approver, "action.approve", case_id, human=True)
+        approval = operation["approval"]
+        reviewer_context = approval.get("reviewer_context")
+        if reviewer_context is None:
+            # Older approvals were possible only for the bound executor.
+            if approval["reviewer"] != operation["context"]["actor"]:
+                raise ApprovalBindingError(
+                    "The exact operation has no valid human approval.",
+                    code="approval_binding_invalid",
+                )
+            reviewer_context = operation["context"]
+        approver = ServiceContext(**reviewer_context, human=True)
+        if approver.actor != approval["reviewer"] or approver.tenant != ctx.tenant:
+            raise ApprovalBindingError(
+                "The exact operation has no valid human approval.",
+                code="approval_binding_invalid",
+            )
+        try:
+            self._permit(approver, "action.approve", case_id, human=True)
+        except PermissionError:
+            self._require_new_action_review(
+                ctx, row, code="approval_authority_changed",
+                message="Operation authority changed; prepare and review a new action.",
+            )
         self._check_prepared_inputs(ctx, row)
         operation = dict(operation, state="executing", attempts=operation["attempts"] + 1,
                          started_at=self.clock())

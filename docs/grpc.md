@@ -55,8 +55,8 @@ service Maverick {
   suite grant must cross a process or host boundary; unrestricted `None`
   remains supported over gRPC.
 
-The full message definitions are in
-[`maverick.proto`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/grpc_api/maverick.proto).
+The full message definitions are in `maverick/grpc_api/maverick.proto` in the
+licensed package.
 
 ## Authentication
 

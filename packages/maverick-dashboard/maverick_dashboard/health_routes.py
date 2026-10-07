@@ -119,9 +119,19 @@ def health_should_redact() -> bool:
 
 
 async def health_response(
-    *, world_provider: WorldProvider, provider_key_set: ProviderKeyCheck
+    *,
+    world_provider: WorldProvider,
+    provider_key_set: ProviderKeyCheck,
+    provider_verdict: Callable[[], dict[str, Any]] | None = None,
 ) -> JSONResponse:
-    """Build the deep health response without coupling to the app singleton."""
+    """Build the deep health response without coupling to the app singleton.
+
+    ``llm_key`` keeps its load-balancer meaning (a provider is configured at
+    all). ``provider`` adds the workspace verdict every page shows (``ready``
+    / ``needs_test`` / ``not_ready`` and why) so a probe and the UI cannot
+    disagree; it never changes the status code, because a saved key that is
+    merely untested must not take a pod out of rotation.
+    """
     from maverick.runner import MAX_CONCURRENT_GOALS, inflight_goals
 
     checks: dict[str, str] = {}
@@ -142,6 +152,12 @@ async def health_response(
     else:
         checks["llm_key"] = "missing"
         overall_ok = False
+    if provider_verdict is not None:
+        try:
+            verdict = await run_in_threadpool(provider_verdict)
+            checks["provider"] = f"{verdict['verdict']}: {verdict['reason']}"
+        except Exception as exc:  # noqa: BLE001 -- a probe never fails on wording
+            checks["provider"] = f"unknown: {type(exc).__name__}"
 
     checks["runner"] = f"in_flight={inflight_goals()}/{MAX_CONCURRENT_GOALS}"
     status = "ok" if overall_ok else "degraded"

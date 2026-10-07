@@ -33,6 +33,20 @@ class TestValidateClamp:
 
 
 class TestGenerate:
+    def test_non_ascii_business_names_get_loadable_distinct_identities(self, tmp_path):
+        accented = generate_profile(IntakeSpec(name="Café Olé"))
+        plain = generate_profile(IntakeSpec(name="Cafe Ole"))
+        non_latin = generate_profile(IntakeSpec(name="東京"))
+        assert accented.name.startswith("cafe_ole_")
+        assert accented.name != plain.name
+        assert non_latin.name.startswith("business_")
+        for profile in (accented, plain, non_latin):
+            assert load_domain(save_profile(profile, approved=True, dest_dir=tmp_path)).name == profile.name
+
+    def test_builtin_name_is_not_shadowed_by_generated_specialist(self):
+        profile = generate_profile(IntakeSpec(name="HR Screening"))
+        assert profile.name.startswith("business_hr_screening_")
+
     def test_dangerous_proposal_is_clamped(self):
         spec = IntakeSpec(name="Acme Capital", description="a hedge fund")
 
@@ -76,6 +90,25 @@ class TestGenerate:
 
 
 class TestSaveAndRoundtrip:
+    def test_direct_save_cannot_shadow_a_guarded_builtin(self, tmp_path):
+        profile = DomainProfile(name="hr_screening", persona="Replacement", max_risk="medium")
+        with pytest.raises(FileExistsError, match="built-in specialist"):
+            save_profile(profile, approved=True, dest_dir=tmp_path)
+        assert not (tmp_path / "hr_screening.toml").exists()
+
+    def test_saved_identity_cannot_escape_or_replace_an_existing_pack(self, tmp_path):
+        profile = generate_profile(IntakeSpec(name="Epsilon Health"))
+        path = save_profile(profile, approved=True, dest_dir=tmp_path)
+        with pytest.raises(FileExistsError):
+            save_profile(profile, approved=True, dest_dir=tmp_path)
+        assert load_domain(path).name == profile.name
+        (tmp_path / "epsilon_health.toml").rename(tmp_path / "legacy-filename.toml")
+        with pytest.raises(FileExistsError, match="existing workspace specialist"):
+            save_profile(profile, approved=True, dest_dir=tmp_path)
+        assert not (tmp_path / "epsilon_health.toml").exists()
+        with pytest.raises(ValueError):
+            save_profile(DomainProfile(name="../outside"), approved=True, dest_dir=tmp_path)
+
     def test_unapproved_is_refused(self, tmp_path):
         prof = generate_profile(IntakeSpec(name="Delta"))
         with pytest.raises(PermissionError):
@@ -167,9 +200,9 @@ class TestRunIntake:
         chunks = attach_docs_to_profile(spec, prof, kb)
 
         assert chunks >= 1
-        assert prof.name == "finance"
+        assert prof.name.startswith("business_finance_")
         assert prof.knowledge_sources != ["finance"]
-        assert prof.knowledge_sources[0].startswith("intake_pending_finance_")
+        assert prof.knowledge_sources[0].startswith("intake_pending_business_finance_")
         assert not kb.search("finance", "POISONED", k=3)
         assert kb.search(prof.knowledge_sources[0], "POISONED", k=3)
 

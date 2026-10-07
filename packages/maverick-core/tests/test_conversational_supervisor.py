@@ -202,6 +202,16 @@ def test_prioritize_records_fact_not_fake_column(world, ledger):
     assert world.get_fact(f"goal:{gid}:priority") == "high"
 
 
+def test_prioritize_refuses_a_concurrent_fact_change(world, ledger, monkeypatch):
+    from maverick.fact_revision import FactConflict
+
+    gid = world.create_goal("priority race")
+    sup = make_supervisor(world, ledger, confirm=lambda _description: True)
+    monkeypatch.setattr(world, "upsert_fact", lambda *_args, **_kwargs: (_ for _ in ()).throw(FactConflict("changed")))
+    out = sup.handle(f"prioritize goal {gid}")
+    assert "changed" in out and "nothing was changed" in out
+
+
 def test_prioritize_by_title_unique_match(world, ledger):
     gid = world.create_goal("deploy the api")
     world.create_goal("write the docs")

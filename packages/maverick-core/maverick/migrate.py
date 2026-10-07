@@ -36,19 +36,38 @@ log = logging.getLogger(__name__)
 # [security] "silently do nothing" -- advice that would delete live config).
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
+    "conversation_inbox",
+    # [chat_message_actions] enabled: alternative conversation answers
+    # (maverick.chat_message_actions), changeable on All settings.
+    "chat_message_actions",
     "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
+    # [collaboration] comments: comment threads and @mentions (maverick.comments).
+    "collaboration",
+    # [work_details] enable: reviewed business fields and stages on tasks and
+    # security records (maverick.work_record_details), on All settings.
+    "work_details",
+    # [first_outcome] department / sample_workspace_created: the department
+    # first task picked at setup (maverick.sample_outcomes).
+    "first_outcome",
+    # [practice] enable: offer practice mode (maverick.practice), written by
+    # the installer's capabilities step and changeable on All settings.
+    "practice",
     # [third_party_portal] routing_keyring: the vendor portal link keyring
     # rotated on the Third-Party Collaboration page (sealed).
     "third_party_portal",
     # [consent_publication_signing] keyring: the consent publication signing
     # key made on the Banner and Preference Center page (sealed).
     "consent_publication_signing",
+    # [approval_challenges] enable / [instruction_capture] enable: fictional
+    # approval practices and per-task instruction records (Settings > All
+    # settings, Memory & learning).
+    "approval_challenges", "instruction_capture",
     "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
-    "deployment",
+    "deployment", "device_pairing", "personalization", "copilot", "settings", "_dashboard_resets", "mobile_offline", "workflows",
     "benchmark", "billing", "budget", "cache", "calendar", "calibration",
     # Written by the installer's candidate promotion, governed knowledge and
     # agent suites steps, and changeable on Settings > All settings.
@@ -57,19 +76,21 @@ KNOWN_SECTIONS = frozenset({
     "compliance", "computer_use", "connections", "consent_preferences",
     "consequence", "containment", "control_plane",
     "context", "credit", "customer_sandbox_lifecycle", "data_engine", "data_use_governance",
-    "dashboard", "director", "durable", "ebpf_monitor", "effort", "egress", "ekko",
+    "dashboard", "deadline_alerts", "director", "durable", "ebpf_monitor", "effort", "egress", "ekko",
     "emergent_codec", "emergent_protocol",
     "email", "embedded", "encryption", "energy", "enterprise", "entity_graph",
     "erp", "event_triggers",
     "experience", "features", "federation", "finance", "finance_operations", "flows", "github",
-    "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "intake",
+    "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "image_edit", "intake",
     "kms", "knowledge",
     "langchain", "latency", "license", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "mcp_sidecar", "memory",
     # [mcp]: the tool server's limits and switches (maverick_mcp.settings),
     # [replay]: recording run traces (replay/trace.py); both on All settings.
     "mcp", "replay",
-    "model_cost_tiers", "model_proxy", "models", "notifications", "oauth", "observability",
+    "model_cost_tiers", "model_proxy", "models",
+    # [my_work] the personal "My work" page and daily summary (maverick.daily_digest).
+    "my_work", "notifications", "oauth", "observability",
     "paper_review",
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
@@ -84,6 +105,8 @@ KNOWN_SECTIONS = frozenset({
     "retention", "role_assignments", "roles", "routing", "safety",
     "sandbox", "screening", "search", "security", "self_learning",
     "sharing", "shield", "skill_synthesis", "skills", "security_ops",
+    # [support] the Help menu's status page and support contact (config.get_support).
+    "support",
     "shoring",
     "system", "telemetry", "template_registries", "tenancy", "thinking",
     "tools", "tui", "value", "verification", "voice", "webhooks", "workforce",

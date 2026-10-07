@@ -4,10 +4,13 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const dir = path.resolve(__dirname, "../../maverick_dashboard");
 const helpers = fs.readFileSync(path.join(dir, "static/lightwork-record-workflows.js"), "utf8");
 const source = fs.readFileSync(path.join(dir, "static/lightwork-privacy-notice-governance.js"), "utf8");
+// The protected version save lives with the accepted-update controls.
+const versions = fs.readFileSync(path.join(dir, "static/lightwork-privacy-notice-proposals.js"), "utf8");
 const template = fs.readFileSync(path.join(dir, "templates/privacy_notice_governance.html"), "utf8");
 let app = template.slice(template.indexOf('<div id="png-app"'), template.indexOf('<details class="panel" id="png-technical">'));
 app = app.replace(/{% for code, name in jurisdictions %}[\s\S]*?{% endfor %}/g, '<label><input type="checkbox" name="jurisdiction" value="eu"> European Union</label>')
@@ -35,8 +38,10 @@ async function fixture(forms = []) {
     if (url.endsWith("/records")) return json(records);
     return json({});
   };
+  shell(window);
   window.eval(helpers);
   window.eval(source);
+  window.eval(versions);
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise((d) => setImmediate(d)); };
   await settle();
   return { window, doc: window.document, calls, confirms, settle };
@@ -73,6 +78,6 @@ test("new version form refuses to save without files or places", async (t) => {
   ui.doc.getElementById("png-notice-name").value = "Website notice";
   ui.doc.getElementById("png-release-form").dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
   await ui.settle();
-  assert.equal(ui.doc.getElementById("png-status").textContent, "Choose where the notice applies.");
+  assert.equal(ui.doc.getElementById("png-status").textContent, "Choose jurisdictions and languages, then check the effective and keep-until dates.");
   assert.equal(ui.calls.some((c) => c.method === "PUT"), false);
 });

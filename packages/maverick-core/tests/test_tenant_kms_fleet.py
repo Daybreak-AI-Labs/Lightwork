@@ -2,6 +2,8 @@
 DEK-cache TTL so a revoked key takes effect, and fleet-wide KEK rotation."""
 from __future__ import annotations
 
+import os
+
 import pytest
 
 importorskip = pytest.importorskip
@@ -121,6 +123,34 @@ def test_kms_config_for_raw_tenant_with_escaped_chars_finds_byok_overlay():
     assert cfg["key_id"] == "alice-cmk"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_maximum_tenant_segment_reads_byok_overlay_and_existing_wrapped_dek(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from maverick.file_lock import (
+        _windows_extended_path,
+        atomic_write_text,
+        ensure_private_directory,
+    )
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, maverick_home
+
+    home = tmp_path / ("h" * max(1, 90 - len(os.path.abspath(tmp_path)) - 1))
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    tenant = "t" * MAX_TENANT_SEGMENT_LENGTH
+    plain_overlay = maverick_home() / "tenants" / tenant / "config.toml"
+    assert len(os.path.abspath(plain_overlay)) > 260
+    overlay = Path(_windows_extended_path(plain_overlay))
+    ensure_private_directory(overlay.parent)
+    atomic_write_text(overlay, '[kms]\nprovider = "aws"\nkey_id = "tenant-cmk"\n')
+
+    assert K._kms_config_for(tenant)["provider"] == "aws"
+    assert K._tenant_own_key_id(tenant) == "tenant-cmk"
+    first = K.tenant_dek(tenant, kms=K.LocalKMS())
+    assert K._wrapped_dek_path(tenant).is_file()
+    K._clear_cache()
+    assert K.tenant_dek(tenant, kms=K.LocalKMS()) == first
+
+
 def test_named_tenant_config_error_does_not_leak_ambient(monkeypatch):
     # A named tenant whose overlay is malformed must fall back to GLOBAL config,
     # never to the ambient (active) tenant's [kms] -- else its DEK is wrapped
@@ -154,6 +184,38 @@ def test_each_tenant_resolves_its_own_provider_and_key(monkeypatch):
     assert acme.key_id == "acme-cmk"        # the TENANT's key, not ambient
     assert acme.region == "us-east-1"
     assert isinstance(K.get_kms("globex"), K.LocalKMS)
+
+
+def test_tenants_own_key_beats_the_server_wide_env_key(monkeypatch):
+    # BYOK: the customer pinned THEIR key so they can revoke ours. An operator's
+    # server-wide MAVERICK_KMS_KEY_ID must not silently wrap their DEK instead.
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global-cmk")
+    _write_tenant_kms("acme", '[kms]\nprovider = "aws"\nkey_id = "acme-byok-cmk"\n')
+
+    assert K.get_kms("acme").key_id == "acme-byok-cmk"
+
+
+def test_server_wide_env_key_is_the_fallback_for_a_tenant_without_its_own(monkeypatch):
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global-cmk")
+    _write_tenant_kms("globex", '[kms]\nprovider = "aws"\n')
+
+    assert K.get_kms("globex").key_id == "operator-global-cmk"
+
+
+def test_env_key_still_wins_over_the_global_config_key(monkeypatch):
+    # "Env vars win over config" is the documented rule for the operator's OWN
+    # setting; only a tenant's own pinned key is protected from the env key.
+    from maverick.config import config_path
+
+    cfg = config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text('[kms]\nprovider = "aws"\nkey_id = "global-config-cmk"\n',
+                   encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global-cmk")
+    _write_tenant_kms("globex", '[kms]\nregion = "us-east-1"\n')
+
+    assert K.get_kms("globex").key_id == "operator-global-cmk"
+    assert K.get_kms(None).key_id == "operator-global-cmk"
 
 
 def test_byok_resolution_ignores_ambient_context(monkeypatch):

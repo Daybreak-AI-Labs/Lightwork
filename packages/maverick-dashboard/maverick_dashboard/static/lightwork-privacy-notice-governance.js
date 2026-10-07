@@ -20,8 +20,25 @@
   var ROLE = { privacy: 'Privacy', legal: 'Legal', brand: 'Brand', accessibility: 'Accessibility' };
   var PROPOSAL = { pending_review: ['Waiting for review', 'warn'], approved: ['Accepted', 'active'], rejected: ['Rejected', 'idle'] };
 
-  function say(text) { statusEl.textContent = text; }
-  function fail(f, action) { say(R.errorText(f, action)); }
+  function say(text) { window.mvStatus(statusEl, text); }
+  function fail(f, action) {
+    var detail = f && f.detail;
+    if (f && f.status === 403 && detail === 'This API key does not have a scope that allows this. Create a key with the scope you need on your account page.') {
+      say('This access key is not allowed to make approval decisions. Use a key with approval permission and installation administrator access.');
+      return;
+    }
+    var refusals = {
+      'the release author cannot approve their own release': 'A different person must approve this notice version.',
+      'a role or authenticated human already approved this release': 'This person or approval role has already approved this notice version.',
+      'only the authenticated approver can revoke this approval': 'Only the person who gave this approval can withdraw it.',
+      'update proposal requires a reviewer distinct from its creator': 'A different person must review this update proposal.'
+    };
+    if (f && f.status === 403 && Object.prototype.hasOwnProperty.call(refusals, detail)) {
+      say(refusals[detail]); return;
+    }
+    var plain = f && f.status === 503 && window.mvPlainDetail ? window.mvPlainDetail(detail) : '';
+    say(plain || R.errorText(f, action));
+  }
   function badge(map, v) { var s = map[v] || [R.human(v), 'info']; return R.badge(s[0], s[1]); }
   function name(id) { return R.human(id); }
   function checkedValues(nameAttr) {
@@ -29,10 +46,11 @@
   }
   function days(seconds) { var d = Math.round(seconds / 86400); return d + (d === 1 ? ' day' : ' days'); }
 
+  document.addEventListener("lightwork:notice-proposal-saved", function () { load(); });
   function load() {
     return R.call('GET', API + '/records').then(function (body) {
       data = body;
-      say('');
+      if (statusEl.textContent.indexOf('Loading') === 0) say('');
       render();
     }).catch(function (f) {
       if (f && f.status === 409) { say('Choose a workspace first, then come back to this page.'); return; }
@@ -87,7 +105,7 @@
     R.table(document.getElementById('png-records'), [
       { label: 'Notice', value: function (e) { return name(e.notice_id); } },
       { label: 'Created', value: function (e) { return R.when(e.created_at); } },
-    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet.' });
+    ], data.records, [{ label: 'Download', run: downloadRecord }], { text: 'No signed records yet. Records appear here when a notice version is published.' });
 
     var q = data.queue || {};
     var waiting = (q.pending || 0) + (q.leased || 0);
@@ -127,7 +145,6 @@
     return R.call('POST', API + '/releases/' + encodeURIComponent(r.notice_id) + '/versions/' + r.version + path, body)
       .then(function () { say(done); return load(); })
       .catch(function (f) {
-        if (f && f.status === 403) { say('You cannot do this step: the author of a version, or someone who already approved it, cannot approve it again.'); return; }
         if (f && f.status === 409) { say('This version changed or is not ready for this step. The list has been refreshed.'); load(); return; }
         fail(f, action);
       });
@@ -163,7 +180,6 @@
           { expected_approval_revision: a.revision, idempotency_key: R.newKey() })
           .then(function () { say('Approval withdrawn.'); return load(); })
           .catch(function (f) {
-            if (f && f.status === 403) { say('Only the person who gave this approval can withdraw it.'); return; }
             fail(f, 'withdraw the approval');
           });
       });
@@ -223,12 +239,13 @@
   }
 
   function reviewProposal(p, decision) {
-    R.confirm(decision === 'approved' ? 'Accept this suggested update? You must not be the person who suggested it.' : 'Reject this suggested update?', decision === 'approved' ? 'Accept' : 'Reject').then(function (ok) {
-      if (!ok) return;
-      R.call('POST', API + '/update-proposals/' + encodeURIComponent(p.proposal_id) + '/review', { decision: decision, expected_revision: p.revision, idempotency_key: R.newKey() })
-        .then(function () { say(decision === 'approved' ? 'Update accepted.' : 'Update rejected.'); return load(); })
-        .catch(function (f) { fail(f, 'review the update'); });
-    });
+    R.call('GET', '/api/v1/privacy/notice-proposals/proposal?identity=' + encodeURIComponent(p.proposal_id)).then(function (card) {
+      var message = card.notice + ' · based on version ' + card.base_version + '. Reasons: ' + card.reasons.join('; ') + '.\n' + card.references.map(function (ref) { return ref.label + (ref.version ? ' · version ' + ref.version : '') + '. ' + ref.source_name + '. ' + ref.citation_labels.join('; '); }).join('\n') + '\n' + card.notice_scope;
+      return R.confirm(message + (decision === 'approved' ? '\nAccept this recorded proposal? You must be a different person from its author.' : '\nReject this proposal?'), decision === 'approved' ? 'Accept recorded proposal' : 'Reject').then(function (ok) {
+        if (!ok) return;
+        return R.call('POST', API + '/update-proposals/' + encodeURIComponent(p.proposal_id) + '/review', {decision: decision, expected_revision: card.revision, idempotency_key: R.newKey()}).then(function () { say(decision === 'approved' ? 'Recorded proposal accepted. Nothing was published.' : 'Proposal rejected.'); return load(); });
+      });
+    }).catch(function (f) { fail(f, 'review the update'); });
   }
 
   // ---- approval rules -------------------------------------------------------
@@ -248,7 +265,7 @@
       var roles = Object.keys(ROLE).filter(function (role) { return v['r_' + role]; });
       var quorum = parseInt(v.quorum, 10);
       if (!roles.length) { say('Choose at least one role that must approve.'); return; }
-      if (quorum > roles.length) { say('The number of approvals cannot be more than the number of roles chosen.'); return; }
+      if (quorum > roles.length) { say('The number of approvals cannot be more than the number of roles chosen. Lower the number or choose more roles.'); return; }
       var id = existing && existing.policy_id ? existing.policy_id : R.slug(v.name, 'approval-rule');
       return R.call('PUT', API + '/approval-policies/' + encodeURIComponent(id), {
         required_roles: roles, quorum: quorum, approval_ttl_seconds: parseInt(v.ttl, 10),
@@ -274,48 +291,15 @@
 
   document.getElementById('png-release-form').addEventListener('submit', function (ev) {
     ev.preventDefault();
-    var existing = document.getElementById('png-notice').value;
-    var newName = (document.getElementById('png-notice-name').value || '').trim();
-    if (!existing && !newName) { say('Choose a notice or give the new notice a name.'); return; }
-    var noticeId = existing || R.slug(newName, 'privacy-notice');
-    var jur = checkedValues('jurisdiction');
-    var loc = checkedValues('locale');
-    if (!jur.length) { say('Choose where the notice applies.'); return; }
-    if (!loc.length) { say('Choose at least one language.'); return; }
-    var from = R.toEpoch(document.getElementById('png-from').value);
-    var until = R.toEpoch(document.getElementById('png-until').value);
-    var keep = R.toEpoch(document.getElementById('png-keep').value);
-    if (!from || !until || !keep || until <= from || keep < until) { say('Check the dates: it must stop applying after it takes effect, and the record must be kept at least until then.'); return; }
-    var files = ['png-file-content', 'png-file-policy', 'png-file-config'].map(function (id) { return document.getElementById(id).files[0]; });
-    if (files.some(function (f) { return !f; })) { say('Choose all three files.'); return; }
-    var latest = data.releases.filter(function (r) { return r.notice_id === noticeId; }).reduce(function (n, r) { return Math.max(n, r.version); }, 0);
-    say('Saving…');
-    Promise.all(files.map(R.fingerprint)).then(function (fps) {
-      return R.call('PUT', API + '/releases/' + encodeURIComponent(noticeId) + '/versions', {
-        property_id: R.slug(document.getElementById('png-property').value, 'website'),
-        jurisdictions: jur, locales: loc,
-        content_sha256: fps[0].sha256, policy_sha256: fps[1].sha256, configuration_sha256: fps[2].sha256,
-        consent_publication_ref: R.slug(document.getElementById('png-publication').value, 'consent-release'),
-        approval_policy_id: document.getElementById('png-policy').value,
-        effective_from: from - 86399, effective_until: until, retained_until: keep,
-        update_proposal_ref: null, expected_latest_version: latest, idempotency_key: R.newKey(),
-      });
-    }).then(function () {
-      document.getElementById('png-release-panel').hidden = true;
-      document.getElementById('png-release-form').reset();
-      say('Version saved as a draft. Send it for approval when it is ready.');
-      return load();
-    }).catch(function (f) {
-      if (f && f.status === 409) { say('Someone saved another version of this notice at the same time. The list has been refreshed; try again.'); load(); return; }
-      fail(f, 'save the version');
-    });
+    if (window.LightworkPrivacyNoticeVersions) window.LightworkPrivacyNoticeVersions.save();
+    else say('The protected version controls are still loading. Nothing was saved.');
   });
 
   // ---- which version is live ------------------------------------------------
   document.getElementById('png-effective').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var prop = document.getElementById('png-eff-property').value;
-    if (!prop) { say('There are no notices yet.'); return; }
+    if (!prop) { say('There are no notices yet. Create a notice first, then check which version is live.'); return; }
     var q = '?jurisdiction=' + encodeURIComponent(document.getElementById('png-eff-jur').value) +
       '&locale=' + encodeURIComponent(document.getElementById('png-eff-lang').value);
     var at = R.toEpoch(document.getElementById('png-eff-at').value);

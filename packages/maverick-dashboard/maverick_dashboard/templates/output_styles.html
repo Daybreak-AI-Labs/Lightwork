@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Output Styles · Lightwork{% endblock %}
+{% block title %}Response styles · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Output styles</h1>
+  <h1 class="page-title">Response styles</h1>
   <p class="page-subtitle">Pick how agents write their answers — tone and layout only. It never changes what they are allowed to do or any safety rule.</p>
 
   <div class="panel">
     <form method="post" action="/styles/set" style="margin: 0;">
-      <div role="radiogroup" aria-label="Output style">
+      <div role="radiogroup" aria-label="Response style">
       <table>
         <thead><tr><th scope="col"><span class="sr-only">Choose</span></th><th scope="col">Style</th><th scope="col">What it does</th></tr></thead>
         <tbody>
@@ -32,6 +32,6 @@
     </form>
   </div>
   <p class="muted" style="font-size: var(--text-sm);">
-    Applies to everyone here, starting with the next task. Styles per conversation and your own custom styles are coming later.
+    This sets the organization default for the next task. <a href="/preferences">Your preferences</a> supports a named personal style. Open a conversation's preferences to override its response style.
   </p>
 {% endblock %}

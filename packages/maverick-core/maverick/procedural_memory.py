@@ -1,23 +1,9 @@
-"""The Hippocampus -- consolidate beneficial experience into procedural memory.
+"""Retain and decay supported procedural memories.
 
-Cure the agent's amnesia. Today's agent is a brilliant colleague with total
-anterograde amnesia: every session starts from zero, fine-tuning is lab-side and
-forgets, RAG is a sticky note. There's no *consolidation* -- no hippocampus
-writing episodic experience into durable procedural skill while you sleep.
-
-This is that consolidation. Between shifts, the episodic record (the trajectory
-store -- the fast hippocampal log) is distilled into PROCEDURAL memory: the
-actions that *causally help* (positive, trustworthy effect on outcome via
-``promotion_effect``), each carrying a **strength** that grows when the pattern
-keeps proving itself and **decays** otherwise -- so good habits persist and stale
-ones fade, *without catastrophic forgetting* (a reinforced memory never drops; an
-unreinforced one fades over a few cycles). It is the positive complement of
-``negative_knowledge`` (which consolidates causally-*harmful* patterns into
-guardrails): this consolidates the causally-*good* ones into recallable memories.
-
-Pure: consolidation runs over the captured trajectory corpus when the flywheel
-turns (``[data_engine]``, on by default), and ``recall`` on an empty store
-returns nothing (no behaviour change).
+Ordinary trajectory history can suggest a helpful action but cannot establish
+that the action caused the result. Automatic consolidation requires a
+promotion-grade comparison; observed task history alone creates no new habit.
+Previously accepted memories still decay when fresh evidence is absent.
 """
 from __future__ import annotations
 
@@ -45,7 +31,7 @@ class Memory:
     """A consolidated 'this action helps' habit, with a reinforcement strength."""
 
     action: str
-    benefit: float      # causal effect on outcome (> 0)
+    benefit: float      # supported outcome difference (> 0)
     strength: float     # 0..1; grows on reinforcement, decays otherwise
 
     def to_dict(self) -> dict:
@@ -57,8 +43,8 @@ def consolidate(steps, prior=(), *, decay: float = _DECAY, reinforce: float = _R
                 retire_below: float = _RETIRE_BELOW, outcome_fn=None) -> list[Memory]:
     """One consolidation cycle: reinforce habits that still help, decay the rest.
 
-    Beneficial = an action whose confounder-adjusted effect on outcome is
-    positive with confidence (``ci_low > 0``). Priors decay by ``decay``;
+    Beneficial = an action with promotion-grade controlled evidence and a
+    positive lower confidence bound (``ci_low > 0``). Priors decay by ``decay``;
     still-beneficial ones are reinforced by ``reinforce`` (net climb); new ones
     enter at ``base``; anything below ``retire_below`` is forgotten. ``outcome_fn``
     (default ``_terminal_outcome``) lets the flywheel ground consolidation in real
@@ -115,21 +101,38 @@ class MemoryStore:
         if self.path is not None:
             self._load()
 
-    def update(self, memories) -> None:
-        with self._lock:
+    def update(self, memories, *, strict: bool = False, before_write=None) -> None:
+        from .learning_store import derived_guidance_fence
+
+        with derived_guidance_fence(), self._lock:
+            if before_write is not None:
+                before_write()
+            previous = self._mem
             self._mem = {m.action: m for m in memories}
-            self._save()
+            try:
+                self._save(strict=strict, before_write=before_write)
+            except Exception:
+                self._mem = previous
+                raise
 
     def recall(self, *, top_k: int = 5) -> list[Memory]:
         """The strongest consolidated habits -- a learned prior the planner can
         prefer. Empty store -> []."""
         with self._lock:
+            self._refresh()
             return sorted(self._mem.values(), key=lambda m: m.strength, reverse=True)[:top_k]
 
     def strength_of(self, action: str) -> float:
         with self._lock:
+            self._refresh()
             m = self._mem.get(action)
             return m.strength if m else 0.0
+
+    def _refresh(self) -> None:
+        if self.path is not None:
+            self._mem.clear()
+            if Path(self.path).exists():
+                self._load()
 
     def _load(self) -> None:
         try:
@@ -146,7 +149,7 @@ class MemoryStore:
             except (KeyError, TypeError, ValueError):
                 continue
 
-    def _save(self) -> None:
+    def _save(self, *, strict: bool = False, before_write=None) -> None:
         if self.path is None:
             return
         try:
@@ -155,8 +158,11 @@ class MemoryStore:
                 json.dumps(
                     [m.to_dict() for m in self._mem.values()], sort_keys=True,
                 ),
+                **({"effect_guard": before_write} if before_write is not None else {}),
             )
         except Exception:  # pragma: no cover -- best-effort
+            if strict:
+                raise
             log.debug("procedural memory save failed", exc_info=True)
 
 
@@ -183,6 +189,17 @@ def shared() -> MemoryStore:
 def reset_shared() -> None:
     with _shared_lock:
         _shared.clear()
+
+
+def refresh_shared() -> None:
+    """Refresh the active tenant's existing objects after native restoration."""
+    from .paths import data_dir
+
+    with _shared_lock:
+        store = _shared.get(data_dir("procedural_memory.json"))
+        if store is not None:
+            with store._lock:
+                store._refresh()
 
 
 def recall_prompt(*, store: MemoryStore | None = None, top_k: int = 5) -> str:

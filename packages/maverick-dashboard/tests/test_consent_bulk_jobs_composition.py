@@ -422,6 +422,74 @@ def test_executor_interoperates_with_real_consent_preference_authority(
     assert deleted["revision"] == 5
     assert deleted["status"] == "deleted"
 
+    # The workbench numbers each job's rows from item-1. Separate jobs for the
+    # same person must apply separately, while a resumed job retains its key.
+    jobs = bulk.ConsentBulkJobStore(tmp_path / "repeat-jobs.sqlite3", clock=lambda: NOW)
+    jobs.ensure_credit_account("tenant-a", initial_credits=2)
+    runtime = composition.ConsentBulkJobsRuntime("tenant-a", "operator", "e" * 64,
+        jobs, executor, "f" * 64, 5, lambda: NOW)
+    for revision, action in ((1, "grant"), (2, "deny")):
+        job = jobs.create_job("tenant-a", kind="mutation", operation="edit_preferences",
+            items=[{"item_id": "item-1", "profile_id": "profile-2", "expected_revision": revision,
+                    "policy_id": "policy-1", "policy_version": 1,
+                    "context": {"jurisdiction": "us", "country_code": "US", "asserted_source": "operator"},
+                    "choices": [{"purpose_id": "analytics", "action": action}]}],
+            actor_sha256="e" * 64, scheduled_for=None, idempotency_key=f"repeated-bulk-job-{revision}")
+        assert jobs.job_executor_scope("tenant-a", job["job_id"]) == "job"
+        assert runtime.run_job(job["job_id"])["state"] == "succeeded"
+
+
+@pytest.mark.parametrize("operation", ["reactivate", "clear_expiration"])
+@pytest.mark.parametrize("outside_edit", [None, "before", "between"])
+def test_selected_receipts_follow_confirmed_versions_only(
+    tmp_path: Path, operation: str, outside_edit: str | None,
+) -> None:
+    native = preferences.ConsentPreferenceStore(tmp_path / "receipts.sqlite3", clock=lambda: NOW)
+    native.publish_policy("tenant-a", "policy-1", 1, {"analytics": "consent"},
+                          "a" * 64, NOW - 60, expected_current_version=0)
+    native.create_profile("tenant-a", "profile-1", "known", "b" * 64, "create-profile-1")
+    receipts = [native.record_preferences(
+        "tenant-a", "profile-1", "policy-1", 1,
+        preferences.ConsentContext(jurisdiction="us", country_code="US", asserted_source="operator"),
+        [preferences.PreferenceChoice(purpose_id="analytics", action="grant", expires_at=NOW + 30)],
+        expected_revision=version, idempotency_key=f"initial-choice-{version}", actor_sha256="c" * 64,
+    )["receipt_id"] for version in range(2)]
+    jobs = bulk.ConsentBulkJobStore(tmp_path / "jobs.sqlite3", clock=lambda: NOW)
+    jobs.ensure_credit_account("tenant-a", initial_credits=2)
+    executor = composition.ConsentBulkExecutor(tenant_id="tenant-a", actor_sha256="e" * 64,
+                                                preference_store=native)
+    runtime = composition.ConsentBulkJobsRuntime("tenant-a", "operator", "e" * 64,
+        jobs, executor, "f" * 64, 1, lambda: NOW)
+    job = jobs.create_job("tenant-a", kind="mutation", operation=operation,
+        items=[{"item_id": f"item-{index}", "profile_id": "profile-1", "expected_revision": 2,
+                "receipt_id": receipt, **({"reactivation_at": NOW + 60} if operation == "reactivate" else {})}
+               for index, receipt in enumerate(receipts)],
+        actor_sha256="e" * 64, scheduled_for=None, idempotency_key="selected-receipts-1")
+
+    def edit(version):
+        native.set_receipt_reactivation("tenant-a", "profile-1", receipts[0], NOW + 120,
+            expected_revision=version, idempotency_key="other-reviewed-change", actor_sha256="d" * 64)
+
+    if outside_edit == "before":
+        edit(2)
+    runtime.run_job(job["job_id"])
+    if outside_edit == "between":
+        edit(3)
+    # A new runtime resumes from durable predecessor results, not memory.
+    resumed = composition.ConsentBulkJobsRuntime("tenant-a", "operator", "e" * 64,
+        jobs, executor, "f" * 64, 1, lambda: NOW)
+    result = resumed.run_job(job["job_id"])
+    assert result["processed_items"] == 2
+    if outside_edit is None:
+        assert result["state"] == "succeeded"
+        for receipt in receipts:
+            assert native.get_receipt_lifecycle("tenant-a", receipt)["revision"] == 1
+    else:
+        assert result["state"] == "failed"
+        assert result["failed_items"] == (2 if outside_edit == "before" else 1)
+        with pytest.raises(preferences.ConsentNotFound):
+            native.get_receipt_lifecycle("tenant-a", receipts[1])
+
 
 def test_run_next_executes_one_bounded_export_job(tmp_path: Path) -> None:
     app = FastAPI()

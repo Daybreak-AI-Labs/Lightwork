@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-candidate-promotions.js'),
@@ -62,6 +63,7 @@ async function fixture(handler) {
     if (value && value.__status) return {ok:false, status:value.__status, json:async () => value.body};
     return {ok:true, status:200, json:async () => value};
   };
+  shell(dom.window);
   dom.window.eval(source);
   await settle();
   return {dom, window:dom.window, document:dom.window.document, calls, prompts};
@@ -156,7 +158,7 @@ test('submits an independent app review with the current context and exact revis
   assert.deepEqual(submitted, {context:CONTEXT, confirm:true, expected_revision:1,
     approve:true, reason_code:'reviewed_scope',
     note:'Verified current rights and the rollback plan.'});
-  assert.match(ui.document.getElementById('research-promotions-list').textContent, /authorized/);
+  assert.match(ui.document.getElementById('research-promotions-list').textContent, /Approved for preparation/);
   ui.dom.window.close();
 });
 
@@ -190,9 +192,24 @@ test('actions confirm in the page dialog and failures read as plain sentences', 
     .find(button => button.textContent === 'Stage candidate').click();
   await settle();
   assert.equal(ui.prompts.length, 1);
-  assert.equal(ui.prompts[0].options.okText, 'Continue');
+  // CTL-2: the confirm button repeats the chosen action, not a generic word.
+  assert.equal(ui.prompts[0].options.okText, 'Stage candidate');
   const shown = ui.document.getElementById('research-promotions').textContent;
   assert.match(shown, /Could not update this candidate\. This was changed since you opened it/);
   assert.doesNotMatch(shown, /expected_revision|mismatch/);
   ui.dom.window.close();
+});
+
+test('a refused first load clears the list\'s Loading and says what happened above it', async () => {
+  const dom = new JSDOM(html(), {url:'https://lightwork.test/research', runScripts:'outside-only'});
+  const document = dom.window.document;
+  document.getElementById('research-promotions-list').innerHTML = '<li>Loading…</li>';
+  dom.window.mvErrorText = (failure, action) => `Could not ${action}. Try again later. (${failure.status})`;
+  dom.window.fetch = async () => ({ok:false, status:503, json:async () => ({detail:'unavailable'})});
+  shell(dom.window);
+  dom.window.eval(source);
+  await settle();
+  assert.equal(document.getElementById('research-promotions-list').textContent, '');
+  assert.equal(document.getElementById('research-promotions-status').textContent, 'Could not load candidate promotions. Try again later. (503)');
+  dom.window.close();
 });

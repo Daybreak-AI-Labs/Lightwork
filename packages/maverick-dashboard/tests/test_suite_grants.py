@@ -170,6 +170,92 @@ def test_scoped_user_sees_only_granted_departments(monkeypatch, tmp_path):
     assert c.get("/api/v1/departments/nope").status_code == 404
 
 
+def test_direct_goal_admission_checks_inherited_suite(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+    from maverick_dashboard import api
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    checked = []
+
+    def require(request, suite):
+        checked.append(suite)
+        raise HTTPException(403, "outside granted departments")
+
+    monkeypatch.setattr(api, "require_suite", require)
+    with pytest.raises(HTTPException) as exc:
+        api._require_enabled_specialist(None, "client_fork")
+    assert exc.value.status_code == 403
+    assert checked == ["aerospace_defense"]
+
+
+def test_domain_read_scope_checks_inherited_suite(monkeypatch, tmp_path):
+    from maverick_dashboard import auth
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
+    assert not auth.domain_suites_allowed(None, "client_fork")
+    assert auth.domain_suites_allowed(None, "finance_ap")
+
+
+def test_deleted_generic_specialist_does_not_lose_persisted_goal_scope(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from maverick import domain
+    from maverick_dashboard import auth
+    from starlette.requests import Request
+
+    pack = tmp_path / "client_fork.toml"
+    pack.write_text('name = "client_fork"\nextends = "finance_ap"\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"sales"}))
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
+    request = Request({"type": "http", "method": "GET", "path": "/chat/goal/1", "headers": []})
+    goal = SimpleNamespace(id=1, owner="user:alice", domain="client_fork")
+
+    assert domain.suites_for_domain("client_fork") == frozenset({"finance"})
+    assert not auth.domain_suites_allowed(None, "client_fork")
+    assert not auth.can_access_goal(request, goal)
+    pack.unlink()
+    # Old goals retain the domain string after their specialist is removed.
+    assert not auth.domain_suites_allowed(None, "client_fork")
+    assert not auth.can_access_goal(request, goal)
+    assert domain.suites_for_domain("finance_ap") == frozenset({"finance"})
+
+    # A fork's own prefix can still be granted while the missing parent suite
+    # cannot be reconstructed from the persisted goal's domain string.
+    prefixed = tmp_path / "gtm_fork.toml"
+    prefixed.write_text('name = "gtm_fork"\nextends = "finance_ap"\n', encoding="utf-8")
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"sales_gtm"}))
+    goal.domain = "gtm_fork"
+    assert domain.suites_for_domain("gtm_fork") == frozenset({"sales_gtm", "finance"})
+    assert not auth.can_access_goal(request, goal)
+    prefixed.unlink()
+    assert not auth.domain_suites_allowed(request, "gtm_fork")
+    assert not auth.can_access_goal(request, goal)
+
+    # A valid generic pack has no inherited department and stays available.
+    monkeypatch.setattr(
+        domain, "available_domains",
+        lambda: {"general_assistant": domain.DomainProfile(name="general_assistant")},
+    )
+    assert domain.suites_for_domain("general_assistant") == frozenset()
+    assert auth.domain_suites_allowed(None, "general_assistant")
+    goal.domain = "general_assistant"
+    assert auth.can_access_goal(request, goal)
+
+    # Unscoped administrators can still recover old records after deletion.
+    monkeypatch.setattr(auth, "caller_suites", lambda request: None)
+    assert auth.domain_suites_allowed(None, "client_fork")
+    goal.domain = "client_fork"
+    assert auth.can_access_goal(request, goal)
+
+
 def test_finance_operations_and_workspace_require_finance_grant(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[finance_operations]\nenable = true\n", encoding="utf-8")
@@ -342,22 +428,28 @@ def test_scoped_user_sees_filtered_pack_catalog(monkeypatch, tmp_path):
     assert "legal" in all_suites
 
 
-def test_scoped_user_sees_filtered_html_pages(monkeypatch, tmp_path):
-    # /workforce and /agents (HTML) must match the JSON filtering — the pages
-    # previously showed the full catalog, diverging from /api/v1/departments.
+def test_scoped_user_sees_filtered_agents_and_safe_workforce_recovery(monkeypatch, tmp_path):
+    # /agents keeps its filtered roster. /workforce's company rollups are
+    # unfiltered, so a scoped user gets their own department board instead.
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
     c = _client(monkeypatch, tmp_path)
     from maverick_dashboard import suite_grants
     suite_grants.set_suites("user:fin", ["finance"])
     _as(monkeypatch, "user:fin")
 
-    workforce = c.get("/workforce").text
-    assert "Close the books" in workforce            # the finance charter line
-    assert "Capital Markets" not in workforce        # another department's card
+    workforce = c.get("/workforce", headers={"Accept": "text/html"})
+    assert workforce.status_code == 200
+    assert "Other people's work and inaccessible departments are excluded. These are not company totals." in workforce.text.replace("&#39;", "'")
+    assert "Capital Markets" not in workforce.text
 
     agents_page = c.get("/agents").text
-    assert "finance_ap" in agents_page
     assert "legal_contracts" not in agents_page
+    # The roster is searched through the page's picker endpoint, which is
+    # scoped the same way: the finance pack is found, another department's is not.
+    picker = {item["name"] for item in c.get(
+        "/agents/picker", params={"q": "finance_ap", "setup": "1"}).json()["items"]}
+    assert "finance_ap" in picker
+    assert c.get("/agents/picker", params={"q": "legal_contracts", "setup": "1"}).json()["items"] == []
     # Deep-linking another department's editor renders no config.
     selected = c.get("/agents?name=legal_contracts").text
     assert "legal_contracts" not in selected
@@ -408,3 +500,72 @@ def test_scoped_user_sees_filtered_compartments_and_deliverables(monkeypatch, tm
     deliv = c.get("/deliverables")
     assert deliv.status_code == 200
     assert "legal_contracts" not in deliv.text
+
+
+def test_cross_suite_fork_is_hidden_from_compartments_without_both_grants(monkeypatch, tmp_path):
+    domains_dir = tmp_path / "domains"
+    domains_dir.mkdir()
+    (domains_dir / "legal_client.toml").write_text(
+        'name = "legal_client"\nextends = "aero_avionics"\n'
+        'description = "Private cross-suite sentinel"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(domains_dir))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import suite_grants
+
+    suite_grants.set_suites("user:aero", ["aerospace_defense"])
+    _as(monkeypatch, "user:aero")
+    response = c.get("/compartments", params={"q": "Private cross-suite sentinel"})
+    assert response.status_code == 200
+    assert "No agents or specialists match this search" in response.text
+
+
+def test_cross_suite_fork_requires_both_grants_on_agent_and_deliverable_views(
+    monkeypatch, tmp_path,
+):
+    domains_dir = tmp_path / "domains"
+    domains_dir.mkdir()
+    (domains_dir / "legal_client.toml").write_text(
+        'name = "legal_client"\nextends = "aero_avionics"\n'
+        'description = "Private cross-suite sentinel"\n'
+        '[output]\nshape = "report"\n'
+        'deliverable = "Private cross-suite artifact"\n'
+        'consumers = ["cross_suite_private_role"]\n'
+        'cadence = "on-demand"\ngate = "review"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(domains_dir))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick.domain import available_domains
+    from maverick_dashboard import suite_grants
+
+    assert "legal_client" in available_domains()
+    _as(monkeypatch, "user:limited")
+    for suites in (["aerospace_defense"], ["legal"]):
+        suite_grants.set_suites("user:limited", suites)
+        names = {a["name"] for a in c.get("/api/v1/agents").json()["agents"]}
+        assert "legal_client" not in names
+        assert 'data-name="legal_client"' not in c.get("/agents?name=legal_client").text
+        assert c.get("/api/v1/agents/legal_client").status_code == 403
+        assert c.get("/api/v1/agents/legal_client/jobcard").status_code == 403
+        assert "Private cross-suite artifact" not in c.get(
+            "/deliverables?role=cross_suite_private_role",
+        ).text
+
+    suite_grants.set_suites("user:limited", ["aerospace_defense", "legal"])
+    agents = c.get("/api/v1/agents").json()["agents"]
+    fork = next(a for a in agents if a["name"] == "legal_client")
+    assert fork["suites"] == ["aerospace_defense", "legal"]
+    detail = c.get("/api/v1/agents/legal_client")
+    assert detail.status_code == 200
+    assert detail.json()["name"] == "legal_client"
+    assert detail.json()["suites"] == fork["suites"]
+    assert c.get("/api/v1/agents/legal_client/jobcard").json()[
+        "job_description"
+    ]["suites"] == fork["suites"]
+    assert 'data-name="legal_client"' in c.get("/agents?name=legal_client").text
+    assert "Private cross-suite artifact" in c.get(
+        "/deliverables?role=cross_suite_private_role",
+    ).text

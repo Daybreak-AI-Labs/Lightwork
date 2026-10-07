@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 from maverick_dashboard import api, auth
 from maverick_dashboard import app as dashboard
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import Request
 
 
 @pytest.fixture
@@ -34,8 +34,10 @@ async def _unexpected_sleep(delay):
 
 
 def _request(last_id=None):
-    return SimpleNamespace(headers={"last-event-id": str(last_id)} if last_id else {},
-                           is_disconnected=_connected)
+    headers = [(b"last-event-id", str(last_id).encode())] if last_id else []
+    request = Request({"type": "http", "method": "GET", "scheme": "http", "path": "/events", "headers": headers})
+    request.is_disconnected = _connected
+    return request
 
 
 def _goal(world, n=3, status="done"):
@@ -131,3 +133,70 @@ async def test_polling_terminal_only_after_replay_is_drained(event_world, surfac
     assert not last["has_more"] and last["terminal"]
     assert len(first["events"]) + len(last["events"]) == 3
     assert json.dumps(last)
+
+
+@pytest.mark.asyncio
+async def test_customer_activity_is_plain_across_transports_and_retains_durable_evidence(event_world):
+    goal_id = _goal(event_world, n=0, status="blocked")
+    raw = [
+        ("plan", "role=orchestrator depth=0 brief=INTERNAL PROMPT ## Prior failures"),
+        ("observation", "private model scratch text"),
+        ("observation", "tool=ask_user -> <tool_output tool='ask_user'>QUEUED question #2</tool_output>"),
+        ("error", "RuntimeError: private diagnostic C:\\server\\secret.log"),
+        ("finding", "The invoice matches the approved purchase order."),
+    ]
+    for kind, content in raw:
+        event_world.append_event(goal_id, "reviewer", kind, content)
+    event_world.set_goal_status(goal_id, "blocked", "Stopped: the assistant ran into an error. maverick resume 7")
+    outputs = []
+    for route in (api.goal_events, dashboard.api_goal_events_legacy):
+        value = await run_in_threadpool(route, _request(), goal_id)
+        outputs.append(json.dumps(value.model_dump() if hasattr(value, "model_dump") else value))
+    for route in (api.goal_events_stream, dashboard.api_goal_events_stream):
+        response = await route(_request(), goal_id)
+        outputs.append("".join([frame async for frame in response.body_iterator]))
+    socket = Socket()
+    await dashboard.run_events_firehose(socket, goal_id, principal=None)
+    outputs.append(json.dumps(socket.frames))
+    for output in outputs:
+        assert "Requested more information from you." in output
+        assert "The invoice matches the approved purchase order." in output
+        for marker in ("INTERNAL PROMPT", "private model scratch", "tool_output", "QUEUED", "private diagnostic", "maverick resume"):
+            assert marker not in output
+    assert [(e.kind, e.content) for e in event_world.goal_events(goal_id)] == raw
+
+
+@pytest.mark.asyncio
+async def test_goal_waiting_for_an_answer_is_held_open_only_by_the_rest_poll(event_world, monkeypatch):
+    """UX-068 transport contract (docs/api.md): a goal parked on a question is
+    ``blocked``. GET /api/v1/goals/{id}/events says so with ``terminal: false``
+    and ``needs_input: true``; the push streams and the older browser poller
+    still end at ``blocked`` (a stream cannot be held open for a person's
+    answer), so a client that sees one end reads ``needs_input`` from the REST
+    goal instead."""
+    monkeypatch.setattr(api.asyncio, "sleep", _unexpected_sleep)
+    goal_id = _goal(event_world, status="blocked")
+    question_id = event_world.ask("Which market first?", goal_id=goal_id)
+
+    poll = await run_in_threadpool(api.goal_events, _request(), goal_id)
+    assert poll.status == "blocked"
+    assert (poll.terminal, poll.needs_input, poll.open_question_ids) == (False, True, [question_id])
+    goal = api._to_goal_out(event_world.get_goal(goal_id))
+    assert (goal.needs_input, goal.open_question_ids) == (True, [question_id])
+
+    response = await api.goal_events_stream(_request(), goal_id)
+    body = "".join([frame async for frame in response.body_iterator])
+    assert "event: end" in body and '"status": "blocked"' in body
+
+    legacy = await run_in_threadpool(dashboard.api_goal_events_legacy, _request(), goal_id)
+    assert legacy["status"] == "blocked" and legacy["terminal"] is True
+
+    socket = Socket()
+    await dashboard.run_events_firehose(socket, goal_id, principal=None)
+    assert socket.frames[-1]["content"] == "blocked" and socket.frames[-1]["terminal"] is True
+
+    # Answering lets the task carry on: the same poll then stops reporting it.
+    event_world.answer(question_id, "US")
+    event_world.set_goal_status(goal_id, "blocked", result="stopped")
+    again = await run_in_threadpool(api.goal_events, _request(), goal_id)
+    assert (again.terminal, again.needs_input, again.open_question_ids) == (True, False, [])

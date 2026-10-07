@@ -41,11 +41,13 @@ test("history renders in plain words with fingerprints tucked away", async (t) =
   const ui = await fixture();
   t.after(() => ui.window.close());
   const text = ui.doc.getElementById("elv-entries").textContent;
-  assert.match(text, /Adopted a learned improvement/);
-  assert.match(text, /tamper-evident chain/);
+  assert.match(text, /Adopted a learning change/);
+  assert.match(text, /Stored chain checks match/);
   assert.match(text, /cannot be confirmed here/);
   assert.ok(ui.doc.querySelector("#elv-entries details summary"));
-  assert.match(ui.doc.getElementById("elv-limitations").textContent, /does not by itself prove who approved it/);
+  assert.equal(ui.doc.querySelector('#elv-entries a').getAttribute('href'),
+    '/api/v1/audit/evolution-ledger/entries/' + 'a'.repeat(64) + '/receipt');
+  assert.match(ui.doc.getElementById("elv-limitations").textContent, /do not establish who created or approved a receipt/);
 });
 
 test("a failed load shows a plain sentence, not a status code", async (t) => {

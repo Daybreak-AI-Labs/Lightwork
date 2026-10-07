@@ -5,6 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {webcrypto}=require('node:crypto');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const source=fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-draft-recovery.js'),'utf8');
 const guided=fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-guided-actions.js'),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
@@ -125,6 +126,8 @@ test('guided recovery keeps raw request references and separate resource drafts 
   d.querySelector('form').addEventListener('submit',()=>{submits++;});
   w.mvDraftRecovery={create:options=>{adapters.push(options);return {};}};
   w.fetch=async()=>({ok:true,json:async()=>({paths:{'/first':{post:{requestBody:{content:{'application/json':{schema:{type:'object'}}}}}},'/second':{post:{requestBody:{content:{'application/json':{schema:{type:'object'}}}}}}},components:{schemas:{}}})});
+  shell(w);  // guided actions read their definitions through the shell's mvFetchJSON
+  w.mvDraftRecovery={create:options=>{adapters.push(options);return {};}};
   w.eval(guided);await tick();
   const adapter=adapters[0],raw=d.querySelector('textarea[name=payload]'),select=d.getElementById('kind');
   select.value='second';select.dispatchEvent(new w.Event('change',{bubbles:true}));raw.value='{"expected_revision":2,"idempotency_key":"second-request"}';raw.dispatchEvent(new w.Event('change',{bubbles:true}));
@@ -133,18 +136,21 @@ test('guided recovery keeps raw request references and separate resource drafts 
   select.value='first';select.dispatchEvent(new w.Event('change',{bubbles:true}));assert.equal(JSON.parse(raw.value).idempotency_key,'exact-request');assert.equal(submits,0);dom.window.close();
 });
 
-test('the comparison is a readable field-by-field table, not raw data',async()=>{
+test('the comparison is a readable field-by-field view, not raw data',async()=>{
   const ui=await fixture({remote:{brief:'unfinished',format:1,variants:{a:1}},revision:1,initial:'current'});
   ui.d.getElementById('brief').setAttribute('aria-label','Task brief');
   ui.edit('current draft');await tick();
   const details=ui.recovery.panel.querySelector('details');
   Object.defineProperty(details,'open',{value:true});details.dispatchEvent(new ui.w.Event('toggle'));
-  assert.equal(details.querySelector('pre'),null);
   const text=details.textContent;
   assert.match(text,/1 field differs/);
-  assert.equal(details.querySelector('tbody th').textContent,'Task brief');
-  const cells=[...details.querySelectorAll('tbody td')].map(cell=>cell.textContent);
-  assert.deepEqual(cells,['unfinished','current draft']);
+  // One section per changed field, named by its label, with each side's own value
+  // (kept whole and wrapped by the stylesheet) -- never the stored record.
+  const fields=details.querySelectorAll('.draft-recovery__field');
+  assert.equal(fields.length,1);
+  assert.equal(fields[0].querySelector('h4').textContent,'Task brief');
+  const values=[...fields[0].querySelectorAll('pre')].map(value=>[value.getAttribute('aria-label'),value.textContent]);
+  assert.deepEqual(values,[['Recovery copy','unfinished'],['Current draft','current draft']]);
   assert.doesNotMatch(text,/[{}"]|variants|format/);
   ui.dom.window.close();
 });
@@ -162,4 +168,71 @@ test('request failures show plain sentences, never server text or browser errors
   assert.match(other.recovery.panel.textContent,/Could not save the recovery copy\. Something went wrong on our side/);
   assert.doesNotMatch(other.recovery.panel.textContent,/sqlite|OperationalError/);
   other.dom.window.close();
+});
+
+// Chat's compact row said "Checking draft recovery…" for 18-109 ms on every
+// load. A check that answers within 300 ms now never shows the loading words;
+// a slow one still says so.
+async function compactRow(delayMs,frameMs,inertMs){
+  const dom=new JSDOM('<meta name="lightwork-draft-context" content="account-workspace"><form id="editor"><textarea id="brief"></textarea></form>',{url:'https://lightwork.test/chat',runScripts:'outside-only'});
+  const w=dom.window,d=w.document;Object.defineProperty(w,'crypto',{value:webcrypto});w.TextEncoder=TextEncoder;
+  const labels=[];
+  w.fetch=async url=>{await new Promise(resolve=>setTimeout(resolve,delayMs));return {ok:true,json:async()=>({context:'account-workspace',revision:0,payload:null,slot:url.split('/').pop()})};};
+  if(frameMs!==undefined)w.requestAnimationFrame=callback=>setTimeout(callback,frameMs);
+  if(inertMs){d.getElementById('editor').setAttribute('inert','');setTimeout(()=>d.getElementById('editor').removeAttribute('inert'),inertMs);}
+  w.eval(source);
+  const recovery=w.mvDraftRecovery.create({key:'chat',compact:true,host:d.getElementById('editor'),read:()=>({brief:''}),restore:()=>{}});
+  const summary=recovery.panel.querySelector('.draft-recovery__compact > summary');
+  new w.MutationObserver(()=>labels.push(summary.textContent)).observe(summary,{childList:true,characterData:true,subtree:true});
+  labels.push(summary.textContent);
+  await recovery.ready;await tick();
+  return {dom,labels,summary};
+}
+test('a quick recovery check never shows the loading words in the compact row',async()=>{
+  const ui=await compactRow(20);
+  assert.ok(!ui.labels.includes('Checking draft recovery…'),JSON.stringify(ui.labels));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});
+test('a slow recovery check says it is checking, long enough to read',async()=>{
+  const ui=await compactRow(450);
+  assert.ok(ui.labels.includes('Checking draft recovery…'),JSON.stringify(ui.labels));
+  // Shown at 300 ms and answered at 450 ms: the words stay 500 ms, not 150.
+  assert.equal(ui.summary.textContent,'Checking draft recovery…');
+  await new Promise(resolve=>setTimeout(resolve,500));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});
+
+// A busy phone painted the words up to 200 ms after they were set, so they
+// were on screen for 283 ms, not 500: the 500 ms count from the first frame.
+test('the checking words stay 500 ms from the frame that shows them',async()=>{
+  const started=Date.now();
+  const ui=await compactRow(450,200);   // set at 300 ms, first frame at about 500 ms
+  await new Promise(resolve=>setTimeout(resolve,Math.max(0,900-(Date.now()-started))));
+  assert.equal(ui.summary.textContent,'Checking draft recovery…');
+  await new Promise(resolve=>setTimeout(resolve,300));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});
+
+// While the page is still inert (not yet usable) the words cannot be seen;
+// the 500 ms start once it is usable.
+test('the checking words stay 500 ms from when the page can show them',async()=>{
+  const started=Date.now();
+  const ui=await compactRow(450,20,600);   // set at 300 ms, page usable at 600 ms
+  await new Promise(resolve=>setTimeout(resolve,Math.max(0,1000-(Date.now()-started))));
+  assert.equal(ui.summary.textContent,'Checking draft recovery…');
+  await new Promise(resolve=>setTimeout(resolve,250));
+  assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
+});
+
+// A recovery problem opens Chat's compact row by itself, with no input from
+// the person. Opening it in place grew the docked composer from 331 to 544 px
+// and pushed the conversation up (layout shift 0.17-0.19 on phones), so the
+// opened row floats above the composer instead of resizing the dock.
+test('the compact row opens above the composer without resizing it',async()=>{
+  const ui=await compactRow(20);
+  const body=ui.summary.nextElementSibling;
+  assert.equal(body.style.position,'absolute');
+  assert.match(body.style.bottom,/100%/);
+  assert.equal(ui.summary.parentElement.style.position,'relative');
+  ui.dom.window.close();
 });

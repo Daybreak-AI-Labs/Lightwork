@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Redaction Check · Lightwork{% endblock %}
+{% block title %}Redaction check · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Redaction check</h1>
   <p class="page-subtitle">Paste text to find passwords, keys and personal details, choose which kinds to hide, and copy the cleaned result. Nothing you paste is stored.</p>
@@ -40,13 +40,13 @@
         let d;
         try { d = await res.json(); }
         catch (e) {
-          const msg = "Could not read the result. Please try again.";
+          const msg = "Could not read the result. Try again.";
           badge.className = "badge failure"; badge.textContent = msg;
           mvToast(msg, { error: true });
           return;
         }
         if (!res.ok) {
-          const msg = window.mvErrorText ? window.mvErrorText({ status: res.status }, "check the text") : "Could not check the text. Please try again.";
+          const msg = window.mvErrorText ? window.mvErrorText({ status: res.status, headers: res.headers }, "check the text") : "Could not check the text. Try again.";
           badge.className = "badge failure"; badge.textContent = msg;
           mvToast(msg, { error: true });
           return;
@@ -76,7 +76,7 @@
       } catch (e) {
         badge.className = "badge failure";
         badge.textContent = "Can't reach Lightwork. Check your connection and try again.";
-        mvToast("Could not check the text — Lightwork can't be reached.", { error: true });
+        mvToast("Could not check the text — Lightwork can't be reached. Check your connection and try again.", { error: true });
       } finally {
         inflight = false;
         previewBtn.disabled = false; previewBtn.removeAttribute("aria-busy");

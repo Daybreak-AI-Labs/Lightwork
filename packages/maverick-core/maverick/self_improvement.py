@@ -1046,10 +1046,16 @@ class SelfImprovementController:
                 raise PromotionLedgerError(
                     "pre-apply authorization requires the exact original artifact"
                 )
-            allowed, reason = self._model_risk_record_approval(current.record)
-            if allowed:
+            failure = self._prepared_control_failure()
+            if failure is None:
+                allowed, reason = self._model_risk_record_approval(current.record)
+                failure = (self._prepared_control_failure() if allowed else (
+                    "model_risk_assurance",
+                    f"model-risk authority changed before artifact application: {reason}",
+                ))
+            if failure is None:
                 return preparation.verdict
-            denial = f"model-risk authority changed before artifact application: {reason}"
+            gate, denial = failure
             self.ledger.abort(
                 current.id,
                 artifact=artifact,
@@ -1058,7 +1064,7 @@ class SelfImprovementController:
             )
             failed = self._fail_verdict(
                 preparation.verdict,
-                gate="model_risk_assurance",
+                gate=gate,
                 reason=denial,
             )
             self._audit(
@@ -1089,6 +1095,21 @@ class SelfImprovementController:
                 transaction=preparation.transaction.id,
             )
             return failed
+
+    def _prepared_control_failure(self) -> tuple[str, str] | None:
+        """Current new-effect controls, never a gate on committed originals."""
+        if not enabled():
+            return "enabled", "self-improvement disabled"
+        halt_reason = self._halt_reason("promotion")
+        if halt_reason is not None:
+            return "killswitch", halt_reason
+        try:
+            frozen = self.frozen_fn()
+        except Exception:
+            frozen = True  # Same unavailable-calibration refusal as evaluate.
+        if frozen:
+            return "calibration", "learning frozen: verifier mis-calibrated"
+        return None
 
     def commit_prepared(
         self, preparation: PromotionPreparation, *, artifact: ArtifactRevision,
@@ -1737,10 +1758,14 @@ class PromotionLedger:
     JSONL stream fsynced under a strict cross-process lock. Missing, stale, or
     malformed projections are rebuilt from the journal; journal corruption and
     lock/commit failures fail closed with :class:`PromotionLedgerError`.
+
+    History is retained without a lifetime receipt ceiling by default. An
+    explicitly supplied ``max_records`` keeps the legacy bound on committed
+    receipts plus unresolved reservations; it never deletes older receipts.
     """
 
     path: Path | None = None
-    max_records: int = 1000
+    max_records: int | None = None
     _records: dict[str, PromotionRecord] = field(default_factory=dict)
     _transactions: dict[str, PromotionTransaction] = field(default_factory=dict)
     _audit_pending: dict[str, dict[str, Any]] = field(
@@ -1750,8 +1775,11 @@ class PromotionLedger:
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def __post_init__(self) -> None:
-        if self.max_records < 0:
-            raise ValueError("max_records must be >= 0")
+        if self.max_records is not None and (
+                isinstance(self.max_records, bool)
+                or not isinstance(self.max_records, int)
+                or self.max_records < 0):
+            raise ValueError("max_records must be None or a nonnegative integer")
         if self.path is not None:
             self.path = Path(self.path)
             self._refresh()
@@ -1780,7 +1808,8 @@ class PromotionLedger:
                         or any(tx.record.id == rec.id for tx in transactions.values())):
                     raise PromotionLedgerError(f"promotion record {rec.id!r} already exists")
                 reservations = sum(tx.state == "prepared" for tx in transactions.values())
-                if len(records) + reservations >= self.max_records:
+                if (self.max_records is not None
+                        and len(records) + reservations >= self.max_records):
                     raise PromotionLedgerError("promotion ledger retention limit reached")
 
                 if self.path is not None:
@@ -1873,7 +1902,8 @@ class PromotionLedger:
                     raise PromotionLedgerError(
                         f"artifact {before.identity!r} has an unresolved promotion transaction")
                 reservations = sum(tx.in_doubt for tx in transactions.values())
-                if len(records) + reservations >= self.max_records:
+                if (self.max_records is not None
+                        and len(records) + reservations >= self.max_records):
                     raise PromotionLedgerError("promotion ledger retention limit reached")
 
                 if self.path is not None:
@@ -2270,7 +2300,8 @@ class PromotionLedger:
             self._transactions = transactions
             return records.get(record_id)
 
-    def mark_rolled_back(self, record_id: str, *, at: float) -> bool:
+    def mark_rolled_back(self, record_id: str, *, at: float, effect_guard=None,
+                         rollback_metadata: Mapping[str, Any] | None = None) -> bool:
         """Append a rollback event; never report success without its receipt."""
         try:
             with self._locked():
@@ -2278,8 +2309,13 @@ class PromotionLedger:
                 rec = records.get(record_id)
                 if rec is None or rec.rolled_back:
                     return False
+                provenance = dict(rec.provenance)
+                if rollback_metadata is not None:
+                    provenance["rollback_receipt"] = _receipt_provenance(rollback_metadata)
+                    provenance = _receipt_provenance(provenance)
                 updated = PromotionRecord(
-                    **{**rec.to_dict(), "rolled_back": True, "rolled_back_at": at})
+                    **{**rec.to_dict(), "rolled_back": True, "rolled_back_at": at,
+                       "provenance": provenance})
                 if self.path is not None:
                     if not has_journal:
                         head = self._migrate_legacy_locked(records)
@@ -2289,12 +2325,19 @@ class PromotionLedger:
                         occurred_at=at,
                     )
                     event = self._event("rollback", head, record_id=record_id,
-                                        rolled_back_at=at, audit=audit_receipt)
-                    self._append_events_locked((event,))
+                                        rolled_back_at=at, audit=audit_receipt,
+                                        **({"rollback_metadata": provenance["rollback_receipt"]}
+                                           if rollback_metadata is not None else {}))
+                    if effect_guard is None:
+                        self._append_events_locked((event,))
+                    else:
+                        self._append_events_locked((event,), effect_guard=effect_guard)
                     self._audit_pending[audit_receipt["event_id"]] = audit_receipt
                     records[record_id] = updated
                     self._sync_projection_after_journal_locked(records)
                 else:
+                    if effect_guard is not None:
+                        effect_guard()
                     records[record_id] = updated
                     audit_receipt = _promotion_audit_envelope(
                         updated,
@@ -2391,6 +2434,16 @@ class PromotionLedger:
             text = journal.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             raise PromotionLedgerError("cannot read promotion ledger journal") from exc
+        return self._replay_journal_text(text)
+
+    def _replay_journal_text(self, text: str) -> tuple[
+        dict[str, PromotionRecord], dict[str, PromotionTransaction], str,
+    ]:
+        """Verify and replay an already-read journal without repairing files.
+
+        Audit readers may bound their read before using the same native replay
+        authority. The caller owns any file permission and read-size checks.
+        """
         if not text or not text.endswith("\n"):
             raise PromotionLedgerError("promotion ledger journal is incomplete")
 
@@ -2555,9 +2608,16 @@ class PromotionLedger:
         except (TypeError, ValueError) as exc:
             raise PromotionLedgerError(
                 f"promotion ledger journal event {line_number} has an invalid rollback time") from exc
+        provenance = dict(rec.provenance)
+        if "rollback_metadata" in event:
+            try:
+                provenance["rollback_receipt"] = _receipt_provenance(event["rollback_metadata"])
+                provenance = _receipt_provenance(provenance)
+            except (TypeError, ValueError) as exc:
+                raise PromotionLedgerError("invalid rollback receipt metadata") from exc
         records[record_id] = PromotionRecord(
             **{**rec.to_dict(), "rolled_back": True,
-               "rolled_back_at": rolled_back_at})
+               "rolled_back_at": rolled_back_at, "provenance": provenance})
 
     def _event(self, kind: str, previous: str | None, **payload: Any) -> dict[str, Any]:
         event = {
@@ -2618,7 +2678,8 @@ class PromotionLedger:
         except OSError as exc:
             raise PromotionLedgerError("cannot create promotion ledger journal") from exc
 
-    def _append_events_locked(self, events: tuple[dict[str, Any], ...] | list[dict[str, Any]]) -> str:
+    def _append_events_locked(self, events: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+                              *, effect_guard=None) -> str:
         if not events:
             raise PromotionLedgerError("cannot commit an empty promotion journal transaction")
         self._ensure_journal_locked()
@@ -2626,6 +2687,8 @@ class PromotionLedger:
         try:
             payload = "".join(_canonical_json(event) + "\n" for event in events)
             with journal.open("a", encoding="utf-8", newline="\n") as stream:
+                if effect_guard is not None:
+                    effect_guard()
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())

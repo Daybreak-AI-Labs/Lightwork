@@ -123,6 +123,7 @@ def _draft(spec, use_ai: bool, principal: str, actor: str) -> dict:
 
 def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal: str = "") -> dict:
     from maverick.audit import AuditRefused, audit_event
+    from maverick.domain import available_domains
     from maverick.intake import (
         IntakeSpec,
         attach_docs_to_profile,
@@ -130,10 +131,30 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
         save_profile,
     )
     try:
-        audit_event("business_agent_approved", agent="dashboard", actor=actor, agent_name=profile.name,
-                    documents=len(docs))
+        audit_event("business_agent_approval_requested", agent="dashboard", actor=actor,
+                    agent_name=profile.name, documents=len(docs))
     except AuditRefused:
         return {"saved": False, "message": "The activity log couldn't record this approval, so nothing was saved."}
+    try:
+        saved_path = Path(save_profile(profile, approved=True))
+    except PermissionError:
+        return {"saved": False, "message": "This installation's plan doesn't include new agents, so it wasn't saved."}
+    except FileExistsError:
+        return {"saved": False, "message": "An agent or specialist with this name already exists. Open it from the list or use a different name."}
+    except (ValueError, OSError):
+        return {"saved": False, "message": "This agent could not be saved. Check its name and try again."}
+    try:
+        if profile.name not in available_domains():
+            saved_path.unlink(missing_ok=True)
+            return {"saved": False, "message": "This agent did not pass its final setup check. Nothing was added."}
+        audit_event("business_agent_approved", agent="dashboard", actor=actor,
+                    agent_name=profile.name, documents=len(docs))
+    except AuditRefused:
+        saved_path.unlink(missing_ok=True)
+        return {"saved": False, "message": "The activity log couldn't record this approval, so nothing was saved."}
+    except Exception:
+        saved_path.unlink(missing_ok=True)
+        return {"saved": False, "message": "This agent could not be confirmed. Nothing was added."}
     loaded, note = 0, ""
     with tempfile.TemporaryDirectory(prefix="lw-onboard-") as folder:
         paths = []
@@ -147,15 +168,10 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
             if kb is None:
                 note = ("Company documents are turned off, so the documents weren't loaded. An administrator can turn "
                         "them on in settings." if problem == "disabled"
-                        else "The documents couldn't be loaded right now, so the specialist has no document memory yet.")
+                        else "The documents couldn't be loaded right now, so the agent has no document memory yet.")
             else:
                 spec = IntakeSpec(name=profile.name, doc_paths=paths)
                 loaded = attach_docs_to_profile(spec, profile, kb)
-        try:
-            save_profile(profile, approved=True)
-        except PermissionError:
-            return {"saved": False, "message": "This installation's plan doesn't include new specialists, so it "
-                                               "wasn't saved."}
     added = ""
     if plan is not None and not plan.is_empty():
         try:
@@ -213,13 +229,27 @@ def _equip(profile, plan, principal: str, actor: str) -> str:
 @router.post("/api/v1/agents/business-setup/draft", status_code=202)
 def start_business_agent_draft(request: Request, body: DraftIn) -> dict:
     """Draft (never save) a specialist from a business description."""
-    from maverick.intake import IntakeSpec
+    from maverick.domain import available_domains, user_dir
+    from maverick.intake import IntakeSpec, _slug
     from maverick.orchestrator import _execution_principal
 
     from ._shared import require_provider_or_400
     from .ops_jobs import JOBS, Busy, identity
 
     _guard(request)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "Enter a name for the new agent.")
+    candidate = _slug(name)
+    if candidate in available_domains() or (user_dir() / f"{candidate}.toml").exists():
+        from .agent_changelog import agent_kind
+
+        kind = agent_kind(candidate)  # owner glossary: built-in packs are specialists
+        raise HTTPException(
+            409,
+            f"{'A specialist' if kind == 'specialist' else 'An agent'} called “{name}” already exists. "
+            f"Choose another name for the new agent. The existing {kind} and its safeguards have not changed.",
+        )
     use_ai = body.use_ai
     if use_ai:
         try:
@@ -228,7 +258,7 @@ def start_business_agent_draft(request: Request, body: DraftIn) -> dict:
             use_ai = False  # the command's fallback: a deterministic draft, not an error
     principal = _execution_principal(user_id=execution_user_id_from_request(request), capability=None)
     actor = caller_principal(request) or principal
-    spec = IntakeSpec(name=body.name.strip(), description=body.description.strip(), industry=body.industry.strip())
+    spec = IntakeSpec(name=name, description=body.description.strip(), industry=body.industry.strip())
     owner, tenant = identity(request)
     try:
         job = JOBS.start(owner=owner, tenant=tenant, kind=_DRAFT, work=lambda: _draft(spec, use_ai, principal, actor))
@@ -245,7 +275,7 @@ async def approve_business_agent(request: Request, job_id: str, confirm: bool = 
 
     _guard(request)
     if confirm is not True:
-        raise HTTPException(409, "Confirm that you reviewed this specialist and want to add it.")
+        raise HTTPException(409, "Confirm that you reviewed this agent and want to add it.")
     if len(documents) > MAX_DOCS:
         raise HTTPException(413, f"Attach at most {MAX_DOCS} documents.")
     docs, total = [], 0

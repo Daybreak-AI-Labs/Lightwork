@@ -54,6 +54,21 @@ def test_allow_private_override(monkeypatch):
     assert _ssrf.resolve_pinned_ip("localhost") == "127.0.0.1"
 
 
+def test_public_only_client_ignores_private_override(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))
+    with pytest.raises(_ssrf.BlockedHost):
+        _ssrf.safe_client("https://internal.example", require_public=True)
+
+
+def test_public_only_resolution_ignores_scoped_private_hosts(monkeypatch):
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))
+    with _ssrf.allow_private_hosts({"127.0.0.1"}):
+        with pytest.raises(_ssrf.BlockedHost):
+            _ssrf.resolve_pinned_ip("127.0.0.1", require_public=True)
+
+
 def test_scoped_private_host_is_exact_and_resets(monkeypatch):
     monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))

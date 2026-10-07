@@ -29,6 +29,11 @@ def client():
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
+# Accepting an invitation in local mode sets the colleague's passphrase.
+PASSPHRASE_FORM = {"password": "synthetic invite passphrase",  # pragma: allowlist secret
+                   "password2": "synthetic invite passphrase"}  # pragma: allowlist secret
+
+
 def _admin_auth(monkeypatch) -> dict[str, str]:
     token = "invite-admin-test-token"  # pragma: allowlist secret
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", token)
@@ -126,17 +131,48 @@ def test_local_accept_flow_signs_in_and_binds_role(client, monkeypatch):
     r = client.get(f"/auth/invite/{token}")
     assert r.status_code == 200 and "bob@corp.com" in r.text
     assert invites.peek_invite(token) is not None
-    # POST consumes: signs the browser in + binds the role
-    r = client.post(f"/auth/invite/{token}", follow_redirects=False)
+    # POST consumes: sets the passphrase, signs the browser in + binds the role
+    r = client.post(f"/auth/invite/{token}", data=PASSPHRASE_FORM, follow_redirects=False)
     assert r.status_code == 303
     assert "mvk_session=" in r.headers.get("set-cookie", "")
     assert rbac.get_stored_role("user:bob@corp.com") == "viewer"
-    # single-use: replaying the link is dead
-    assert client.post(f"/auth/invite/{token}").status_code == 410
+    # single-use: replaying the link only reads the original result
+    replay = client.post(f"/auth/invite/{token}")
+    assert replay.status_code == 200 and "it does not give access again" in replay.text
+    assert "mvk_session=" not in replay.headers.get("set-cookie", "")
     # the cookie now establishes a principal whose role gates admin pages
     assert client.get("/users").status_code == 403      # viewer ≠ admin
     client.cookies.clear()
     assert client.get("/users").status_code == 401      # invites on => no anonymous admin
+
+
+def test_sso_global_invite_requires_current_provider_email_match(client, monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import invite_routes, invites, rbac
+
+    _inv, token = invites.create_invite("right@corp.com", "admin", created_by="owner")
+    path = f"/auth/invite/{token}"
+    monkeypatch.setattr(invites, "local_login_mode", lambda: False)
+    signed_in = VerifiedPrincipal(sub="opaque-sub", issuer="oidc-session", audience="", claims={})
+    monkeypatch.setattr(invite_routes, "_session_principal", lambda _request: signed_in)
+    assert client.post(path).status_code == 403
+    assert invites.peek_invite(token) is not None
+    # An email-shaped subject alone is not proof of the address asserted in
+    # this signed session; the login callback must have saved that assertion.
+    signed_in = VerifiedPrincipal(sub="right@corp.com", issuer="oidc-session", audience="", claims={})
+    assert client.post(path).status_code == 403
+    assert invites.peek_invite(token) is not None
+    signed_in = VerifiedPrincipal(sub="opaque-sub", issuer="oidc-session", audience="",
+                                  claims={"idp_email": "wrong@corp.com"})
+    assert client.get(path).status_code == 403
+    assert client.post(path).status_code == 403
+    assert invites.peek_invite(token) is not None
+    assert rbac.get_stored_role("user:opaque-sub") is None
+    signed_in = VerifiedPrincipal(sub="opaque-sub", issuer="oidc-session", audience="",
+                                  claims={"idp_email": "RIGHT@corp.com"})
+    assert client.post(path, follow_redirects=False).status_code == 303
+    assert rbac.get_stored_role("user:opaque-sub") == "admin"
 
 
 def test_accept_post_requires_same_origin(client, monkeypatch):
@@ -291,6 +327,6 @@ def test_require_auth_fails_closed_without_session(client, monkeypatch):
     _inv, token = invites.create_invite("bob@corp.com", "admin", created_by="me")
     assert client.get("/goals").status_code == 401       # anonymous → closed
     assert client.get(f"/auth/invite/{token}").status_code == 200  # link exempt
-    r = client.post(f"/auth/invite/{token}", follow_redirects=False)
+    r = client.post(f"/auth/invite/{token}", data=PASSPHRASE_FORM, follow_redirects=False)
     assert r.status_code == 303                          # accept works
     assert client.get("/users").status_code == 200       # admin session opens it

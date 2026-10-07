@@ -22,8 +22,10 @@ uploaded file, or from the files installed on this server.
 Not here, with the reason:
 
 * ``tech_risk_compliance.continuous_evidence.stock_collectors.sources``: see
-  settings_catalog_structured (``grc_sync.response_field_params`` is there
-  too, as a table of names and values).
+  the guided source form on Continuous evidence. It stores each exact source
+  in that workspace's signed definition, with separate approval and enrollment.
+  ``grc_sync.response_field_params`` is in settings_catalog_structured as a
+  table of names and values.
 * ``red_team_assurance.commitment_secret_ref`` and the connectors'
   ``credential_secret_ref`` keys name environment variables on the server;
   the sealed key rows below make the key itself adjustable instead.
@@ -129,7 +131,7 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- filled by the group
         *_outbound_vendors(S),
         S("swarm", "finding_post_max_chars", "Length of helper findings shared with the team",
           "How much of each helper agent's final answer is posted for the other helpers to "
-          "read. The full answer still reaches the lead agent and the run record.", "number",
+          "read. The full answer still reaches the lead agent and the task record.", "number",
           "Spending & limits", 1500, "maverick.agent", minimum=200, maximum=100000,
           integer=True, unit="characters", env=("MAVERICK_FINDING_POST_MAX_CHARS",)),
     )
@@ -644,7 +646,7 @@ def _tech_risk(S) -> tuple:
     stock = "maverick_dashboard.trc_stock_evidence_composition"
     rg = "maverick_dashboard.no_code_grc_studio_composition"
     ev = {"subgroup": "Continuous evidence"}
-    gs = {"subgroup": "No-code GRC studio"}
+    gs = {"subgroup": "Compliance studio"}
     return (
         S(feature, "enabled_collectors", "Where evidence is collected from",
           "The checks and systems continuous evidence may collect from. Choose at least one "

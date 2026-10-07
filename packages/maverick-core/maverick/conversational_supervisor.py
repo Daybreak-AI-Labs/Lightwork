@@ -303,7 +303,14 @@ class Supervisor:
             return f"Cancelled goal {goal.id} ('{goal.title}')."
         if intent == "prioritize":
             # No priority column exists: record it as a fact + an event.
-            self.world.upsert_fact(f"goal:{goal.id}:priority", "high")
+            from .fact_revision import FactConflict
+            key = f"goal:{goal.id}:priority"
+            current = self.world.fact_record(key)
+            try:
+                self.world.upsert_fact(key, "high", source="supervisor:operator",
+                                       expected_revision=current["revision"] if current else 0)
+            except FactConflict:
+                return f"Goal {goal.id}'s saved priority changed while handling this request. Review it before trying again; nothing was changed."
             self.world.append_event(goal.id, "supervisor", "supervision", "prioritized by operator")
             return f"Prioritized goal {goal.id} ('{goal.title}') — recorded priority=high."
         return HELP_TEXT  # unreachable with MUTATING_INTENTS

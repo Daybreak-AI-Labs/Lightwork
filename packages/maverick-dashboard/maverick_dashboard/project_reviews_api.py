@@ -7,7 +7,6 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from maverick import config
-from maverick.domain import suite_for
 from maverick.paths import current_tenant_id_strict
 from maverick.privacy_ops import RecordConflict
 from maverick.project_reviews import ProjectReviewDenied, ProjectReviews
@@ -36,12 +35,19 @@ class MembershipIn(MutationIn):
 
 
 class SendIn(MutationIn):
+    previous_packet_id: str | None = Field(None, pattern=r"^PRP-[0-9a-f]{32}$")
+    change_summary: str = Field("", max_length=4000)
     goal_id: int = Field(..., ge=1)
     reviewer: str = Field(..., min_length=6, max_length=256)
     note: str = Field(..., min_length=1, max_length=4000)
     due_at: float = Field(..., gt=0)
     source_version: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     expected_team_revision: int = Field(..., ge=1)
+
+
+class RevisionIn(MutationIn):
+    expected_revision: int = Field(..., ge=1)
+    source_version: str = Field(..., pattern=r"^[0-9a-f]{64}$")
 
 
 class ResponseIn(MutationIn):
@@ -121,7 +127,7 @@ async def _call(request, response, operation, *, write=False):
     except Exception as exc:
         raise HTTPException(
             503,
-            "Project review authority is unavailable. No live task was changed; reload before retrying.",
+            "Project review authority is unavailable. The operation could not be confirmed; reload and retry the same request before creating another.",
         ) from exc
 
 
@@ -129,8 +135,8 @@ def _overview(request):
     service = _service(request)
     projects = []
     for project in service.world.list_projects(owner=service.principal):
-        if project.get("status") == "active" and service._can(
-            service.principal, suite_for(project.get("domain", "")), "operate"
+        if project.get("status") == "active" and service._can_domain(
+            service.principal, project.get("domain", ""), "operate"
         ):
             projects.append({key: project[key] for key in ("id", "name", "description")})
     items = service.inbox()
@@ -194,11 +200,11 @@ async def project_setup(request: Request, response: Response, project_id: int):
         service = _service(request)
         team = service.team(project_id)
         project = service.world.get_project(project_id)
-        suite = suite_for(project.get("domain", ""))
+        domain = project.get("domain", "")
         eligible = [
             actor
             for actor in rbac.list_tenant_roles(service.tenant)
-            if actor != service.principal and service._can(actor, suite, "operate", member=True)
+            if actor != service.principal and service._can_domain(actor, domain, "operate", member=True)
         ]
         goals = []
         for goal in service.world.list_goals(
@@ -207,7 +213,7 @@ async def project_setup(request: Request, response: Response, project_id: int):
             if (
                 goal.result
                 and goal.status not in {"active", "pending"}
-                and service._can(service.principal, suite_for(goal.domain), "operate")
+                and service._can_domain(service.principal, goal.domain, "operate")
             ):
                 goals.append({"id": goal.id, "title": goal.title, "status": goal.status})
         return {"team": team, "eligible_members": sorted(eligible), "goals": goals}
@@ -253,3 +259,9 @@ async def respond(request: Request, response: Response, packet_id: str, body: Re
         lambda: _service(request).respond(packet_id, **body.model_dump()),
         write=True,
     )
+
+
+@router.post(BASE + "/packets/{packet_id}/revision-draft")
+async def revision_draft(request: Request, response: Response, packet_id: str, body: RevisionIn):
+    return await _call(request, response,
+                       lambda: _service(request).revision_draft(packet_id, **body.model_dump()), write=True)

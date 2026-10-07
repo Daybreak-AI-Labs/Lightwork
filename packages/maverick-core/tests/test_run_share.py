@@ -53,5 +53,5 @@ def test_share_run_requires_a_token(monkeypatch):
     from maverick import run_share
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    with pytest.raises(RuntimeError, match="GitHub token"):
+    with pytest.raises(RuntimeError, match="GitHub sharing is not connected"):
         run_share.share_run(7)

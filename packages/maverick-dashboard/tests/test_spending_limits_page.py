@@ -94,3 +94,80 @@ def test_spending_limits_is_in_the_admin_menu():
     from maverick_dashboard import ui_visibility
     entry = next(p for p in ui_visibility.PAGES if p["path"] == "/spending-limits")
     assert entry["group"] == "Admin" and entry["floor"] == "admin"
+
+
+def test_page_says_when_spending_was_updated_and_when_alerts_arrive(client):
+    from maverick import spending_limits
+    from maverick.quotas import UsageLedger
+    page = client.get("/spending-limits").text
+    assert "No spending recorded yet." in page
+    assert "alert in Lightwork at 50%, 75% and 100% of each daily or monthly limit" in page
+    assert 'href="/settings/all?id=spending_limits.alert_at"' in page
+    UsageLedger().record("user:alice", 1.0, 0, 0)
+    stamp = spending_limits.spend_recorded_at()
+    page = client.get("/spending-limits").text
+    # The label carries the ledger's own time, which the page script shows as "x minutes ago".
+    assert "Spending updated <time" in page and f'data-mv-time="{stamp:.3f}"' in page
+
+
+def test_spend_page_freshness_comes_from_the_newest_cost(client):
+    page = client.get("/spend").text
+    assert "No spending recorded yet." in page
+    from maverick import world_model
+    w = world_model.open_world()
+    gid = w.create_goal("Quarterly summary")
+    episode = w.start_episode(gid)
+    w.end_episode(episode, "Done", "success", cost_dollars=0.42)
+    newest = w.list_episodes(limit=1)[0]
+    from maverick_dashboard import app as dash_app
+    dash_app._world_cache.clear()
+    page = client.get("/spend").text
+    assert f'data-mv-time="{(newest.ended_at or newest.started_at):.3f}"' in page
+
+
+def _finished_task(owner, cost):
+    from maverick import world_model
+    from maverick.quotas import UsageLedger
+    UsageLedger().record(owner, cost, 0, 0)  # so the person is listed for a personal limit
+    w = world_model.open_world()
+    gid = w.create_goal("Weekly report", owner=owner)
+    w.end_episode(w.start_episode(gid), "Done", "success", cost_dollars=cost)
+
+
+def test_preview_reports_what_a_stricter_limit_would_have_stopped_and_saves_nothing(client):
+    import re
+
+    from maverick import spending_limits
+    _finished_task("user:alice", 6.0)
+    _finished_task("user:alice", 6.0)
+    _finished_task("user:bob", 1.0)
+    page = client.get("/spending-limits", params={
+        "preview": "workspace", "choice": "limit", "amount": "10", "period": "month"}).text
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
+    assert "Preview only. Nothing changes until you save." in text
+    assert "In the last 30 days, 2 tasks by 2 people would have stopped at $10.00 per month, of 3 finished." in text
+    assert spending_limits.load()["workspace"] is None  # report-only
+    # The form keeps the previewed amount so Save applies exactly that.
+    assert 'value="10.00"' in page
+    # Every form offers the preview, which never asks the "raise the limit" question.
+    assert page.count('name="preview" value=') == 3
+    assert "event.submitter.name === 'preview'" in page
+
+
+def test_preview_for_one_person_and_a_bad_amount(client):
+    _finished_task("user:alice", 6.0)
+    page = client.get("/spending-limits", params={
+        "preview": "person", "principal": "user:alice", "amount": "5", "period": "task"}).text
+    assert "1 task</strong> would have stopped at $5.00 per task, of 1 finished." in page
+    page = client.get("/spending-limits", params={"preview": "default", "amount": "-3", "period": "day"}).text
+    assert "No preview." in page and "Enter the limit as an amount in dollars" in page
+
+
+def test_saving_a_limit_is_recorded_in_the_audit_log(client, monkeypatch):
+    import maverick.audit as audit
+    events = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **kw: events.append((kind, kw)) or True)
+    r = client.post("/spending-limits/workspace", data={"choice": "limit", "amount": "75", "period": "day"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert events, "saving a spending limit must write an audit record"

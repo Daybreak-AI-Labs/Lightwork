@@ -163,6 +163,19 @@ def test_disabled_status_is_honest_no_store_and_does_not_construct_runtime(envir
     assert state["factory_calls"] == []
 
 
+def test_shipped_router_reports_unavailable_before_asking_for_a_workspace(monkeypatch) -> None:
+    monkeypatch.setattr(api, "require_permission", lambda _request, _permission: None)
+    monkeypatch.setattr(api, "_tenant_id", lambda: (_ for _ in ()).throw(AssertionError("tenant")))
+    app = FastAPI()
+    app.include_router(api.create_ai_cloud_agent_governance_router(), prefix="/api/v1")
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    response = client.get(f"{BASE}/status")
+    assert response.status_code == 200
+    assert response.json()["reason"] == "not_connected"
+    assert response.json()["production_runtime_available"] is False
+    assert client.get(f"{BASE}/inventory").status_code == 503
+
+
 def test_tenant_and_principal_are_server_derived_and_runtime_must_match(environment) -> None:
     client, state, app = environment
     first = client.get(f"{BASE}/inventory?offset=4&limit=17")

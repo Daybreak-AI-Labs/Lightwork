@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from maverick.file_lock import (
@@ -162,6 +163,55 @@ def test_windows_secure_temp_and_atomic_write_beyond_max_path(tmp_path):
     assert [entry.name for entry in parent.iterdir()] == ["state.json"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_windows_atomic_reads_beyond_max_path(tmp_path):
+    """A published file must remain readable when its final path exceeds MAX_PATH."""
+    parent = tmp_path
+    index = 0
+    while len(os.path.abspath(parent)) < 230:
+        remaining = 230 - len(os.path.abspath(parent)) - 1
+        parent /= f"s{index}-" + ("x" * min(35, remaining - 3))
+        parent.mkdir()
+        index += 1
+
+    text_path = parent / ("state-" + "x" * 40 + ".json")
+    bytes_path = parent / ("state-" + "y" * 40 + ".bin")
+    missing_path = parent / ("missing-" + "z" * 40 + ".json")
+    assert len(os.path.abspath(text_path)) > 260
+    assert len(os.path.abspath(bytes_path)) > 260
+
+    atomic_write_text(text_path, '{"state": "published"}')
+    atomic_write_bytes(bytes_path, b"\x00published\xff")
+    assert json.loads(atomic_read_text(text_path)) == {"state": "published"}
+    assert atomic_read_bytes(bytes_path) == b"\x00published\xff"
+    with pytest.raises(FileNotFoundError):
+        atomic_read_text(missing_path)
+    with pytest.raises(FileNotFoundError):
+        atomic_read_bytes(missing_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_windows_private_directory_helpers_create_and_verify_deep_paths(tmp_path):
+    import maverick.file_lock as file_lock
+
+    parent = tmp_path / ("s0-" + "x" * 35)
+    index = 1
+    while len(os.path.abspath(parent)) < 285:
+        parent /= f"s{index}-" + "x" * 35
+        index += 1
+    assert file_lock.ensure_private_directory(parent) == parent
+    assert file_lock.require_private_directory(parent) == parent
+    assert file_lock.prepare_private_directory(parent) == parent
+    assert private_path_is_restricted(Path(file_lock._windows_extended_path(parent)), 0o700)
+
+    target = parent / ("r" * 64) / ("p" * 64 + ".bin")
+    file_lock.atomic_create_bytes(target, b"deep private payload")
+    assert atomic_read_bytes(target) == b"deep private payload"
+    assert private_path_is_restricted(
+        Path(file_lock._windows_extended_path(target.parent)), 0o700,
+    )
+
+
 def test_atomic_write_bytes_round_trips_privately_without_temp_files(tmp_path):
     p = tmp_path / "payload.bin"
     payload = bytes(range(256)) + b"\x00\xffaudit"
@@ -259,6 +309,18 @@ def test_ensure_private_file_does_not_reharden_already_private_file(
     monkeypatch.setattr(file_lock, "harden_path_permissions", _unexpected_hardening)
     assert ensure_private_file(path) == path
     assert path.read_text(encoding="utf-8") == "private"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode fast path")
+def test_ensure_private_file_leaves_an_already_private_posix_file_unchanged(tmp_path):
+    """Re-applying the same mode still moves ctime, which reads as a change."""
+    path = tmp_path / "already-private.txt"
+    atomic_create_text(path, "private")
+    before = path.stat()
+    ensure_private_file(path)
+    after = path.stat()
+    assert after.st_ctime_ns == before.st_ctime_ns
+    assert private_path_is_restricted(path)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
@@ -687,6 +749,25 @@ def test_strict_cross_process_lock_uses_platform_backend(tmp_path):
     with cross_process_lock(p, strict=True):
         atomic_write_text(p, "strict")
     assert p.read_text() == "strict"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_windows_lock_accepts_maximum_tenant_segment_without_splitting_identity(tmp_path):
+    import maverick.file_lock as file_lock
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH
+
+    tenant = "t" * MAX_TENANT_SEGMENT_LENGTH
+    target = tmp_path / "tenants" / tenant / "flows" / "runs" / ("." + "a" * 32 + ".checkpoint")
+    lock_path = target.parent / (target.name + ".lock")
+    extended_target = Path(file_lock._windows_extended_path(target))
+    extended_lock = Path(file_lock._windows_extended_path(lock_path))
+    assert len(os.path.abspath(lock_path)) > 260
+    assert file_lock._canonical_lock_path(lock_path) == file_lock._canonical_lock_path(extended_lock)
+
+    with cross_process_lock(target, strict=True):
+        with cross_process_lock(extended_target, strict=True):
+            assert private_path_is_restricted(extended_lock)
+    assert extended_lock.read_bytes() == b"\0"
 
 
 def test_strict_nested_lock_refuses_degraded_outer_scope(tmp_path):

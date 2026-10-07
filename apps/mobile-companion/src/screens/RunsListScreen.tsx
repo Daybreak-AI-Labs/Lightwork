@@ -1,24 +1,111 @@
+import {msg, messageLanguage, useLanguage, formattedTime} from "../language";
 /* Tasks list — GET /api/v1/goals (newest first), polled every 10s.
  * Falls back to the cached offline bundle when the dashboard is unreachable. */
-import React, { useCallback } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { BundleGoal, Goal, Settings, listGoals } from "../api";
+import { ApiError, BundleGoal, Goal, Settings, isAccessDenied, listGoals, searchGoals } from "../api";
 import { ConnectionNotice } from "../components/ConnectionNotice";
-import { Banner, EmptyState, Loading, StatusPill } from "../components/ui";
+import { Banner, Button, EmptyState, Loading, StatusPill } from "../components/ui";
 import { statusLabel, taskTitle } from "../format";
 import { offlineBanner, useCachedBundle } from "../offlineCache";
 import { usePolling } from "../poll";
-import { theme } from "../theme";
+import { useTheme, type Palette } from "../theme";
+
+// Re-read the visible ID window so removed or newly inaccessible older rows do
+// not survive in an append-only cache. Every cursor page is scoped by the server
+// again; usePolling publishes a complete window only for its current generation.
+async function readTaskWindow(settings: Settings, signal: AbortSignal, status: string,
+  floor: number | null, extend: boolean): Promise<{rows: Goal[]; hasMore: boolean}> {
+  const rows: Goal[] = [];
+  let before: number | undefined, addedBelow = 0;
+  while (true) {
+    if (signal.aborted) throw new ApiError('Request cancelled.', undefined, 'cancelled');
+    const page = await listGoals(settings, 50, signal, 0, status, before);
+    if (signal.aborted) throw new ApiError('Request cancelled.', undefined, 'cancelled');
+    if (!Array.isArray(page) || page.length > 50) {
+      throw new ApiError('The task list changed in a way this app could not read. Refresh, or ask your administrator to update the dashboard.', undefined, 'protocol');
+    }
+    let previous = before ?? Infinity;
+    for (const row of page) {
+      if (!Number.isSafeInteger(row.id) || row.id <= 0 || row.id >= previous) {
+        throw new ApiError('The task list changed in a way this app could not read. Refresh, or ask your administrator to update the dashboard.', undefined, 'protocol');
+      }
+      previous = row.id;
+    }
+    for (const row of page) {
+      const below = floor !== null && row.id < floor;
+      if (rows.length >= 50 && (floor === null || below) && (!extend || addedBelow >= 50)) {
+        return {rows, hasMore: true};
+      }
+      rows.push(row);
+      if (below) addedBelow++;
+    }
+    if (page.length < 50) return {rows, hasMore: false};
+    if (floor === null || (extend ? addedBelow >= 50 : previous <= floor)) return {rows, hasMore: true};
+    before = previous;
+  }
+}
 
 export function RunsListScreen(props: {
   settings: Settings;
   onOpenRun: (id: number, title?: string) => void;
   onOpenSettings?: () => void;
+  onNewTask?: () => void;
 }): React.JSX.Element {
+  useLanguage();
+  const theme = useTheme(), styles = stylesFor(theme);
   const { settings, onOpenRun, onOpenSettings } = props;
-  const fetcher = useCallback((signal: AbortSignal) => listGoals(settings, 50, signal), [settings]);
-  const { data, error, accessDenied, unsupported, refresh } = usePolling<Goal[]>(fetcher, 10_000);
+  const [query, setQuery] = useState(''), [search, setSearch] = useState(''), [status, setStatus] = useState('');
+  const window = useMemo(() => ({floor: null as number | null, expanding: false, busy: false, sequence: 0}), [settings, search, status]);
+  const activeWindow = useRef<typeof window | null>(window); activeWindow.current = window;
+  useEffect(() => {
+    activeWindow.current = window;
+    return () => { if (activeWindow.current === window) activeWindow.current = null; };
+  }, [window]);
+  const [pageState, setPageState] = useState({owner: window, loading: false, hasMore: true});
+  const loadingMore = pageState.owner === window && pageState.loading;
+  const hasMore = pageState.owner !== window || pageState.hasMore;
+  const fetcher = useCallback(async (signal: AbortSignal): Promise<Goal[]> => {
+    if (signal.aborted || activeWindow.current !== window) throw new ApiError('Request cancelled.', undefined, 'cancelled');
+    if (search) return searchGoals(settings, search, signal);
+    const sequence = ++window.sequence;
+    window.busy = window.expanding;
+    setPageState(previous => ({owner: window, loading: window.expanding, hasMore: previous.owner !== window || previous.hasMore}));
+    try {
+      const result = await readTaskWindow(settings, signal, status, window.floor, window.expanding);
+      if (!signal.aborted && activeWindow.current === window && window.sequence === sequence) {
+        window.floor = result.rows.at(-1)?.id ?? null;
+        window.expanding = false;
+        setPageState({owner: window, loading: false, hasMore: result.hasMore});
+      }
+      return result.rows;
+    } catch (failure) {
+      if (activeWindow.current === window && window.sequence === sequence
+          && (isAccessDenied(failure) || (failure as {kind?: string})?.kind === 'unsupported')) {
+        window.floor = null; window.expanding = false;
+      }
+      throw failure;
+    } finally {
+      if (activeWindow.current === window && window.sequence === sequence) {
+        window.busy = false;
+        setPageState(previous => ({owner: window, loading: false, hasMore: previous.owner !== window || previous.hasMore}));
+      }
+    }
+  }, [settings, search, status, window]);
+  const { data, error, accessDenied, unsupported, refresh, updatedAt } = usePolling<Goal[]>(fetcher, 10_000);
+  useEffect(() => {
+    if (error) {
+      window.busy = false;
+      setPageState(previous => ({owner: window, loading: false, hasMore: previous.owner !== window || previous.hasMore}));
+    }
+  }, [error, window]);
+  function loadMore(): void {
+    if (activeWindow.current !== window || window.busy || loadingMore || search || !data || !hasMore || accessDenied || unsupported) return;
+    window.expanding = true; window.busy = true;
+    setPageState({owner: window, loading: true, hasMore});
+    refresh();
+  }
   const cached = useCachedBundle(settings, Boolean(error && !data && !accessDenied && !unsupported));
 
   const offline = !data && cached;
@@ -35,27 +122,41 @@ export function RunsListScreen(props: {
   else if (data || offline) {
     empty = (
       <EmptyState
-        title="No tasks yet"
-        body="Tasks started from the Lightwork dashboard will appear here. This list refreshes on its own."
-        actionLabel="Refresh now"
+        title={search || status ? "No matching tasks" : "No tasks yet"}
+        body={search || status ? "Try another search or status. Matching tasks may be outside the saved offline copy." : "Start a task here with its separately approved device permission, or on your dashboard. This list refreshes on its own."}
+        actionLabel={msg("Refresh now")}
         onAction={refresh}
       />
     );
   }
 
-  return (
-    <View style={styles.fill}>
-      <Text style={styles.heading} accessibilityRole="header">Tasks</Text>
+  const header = <>
+      {props.onNewTask ? <Button label="Start a new task" onPress={props.onNewTask} /> : null}
+      <Text style={styles.heading} accessibilityRole="header" accessibilityLanguage={messageLanguage("Tasks")}>{msg("Tasks")}</Text>
+      <TextInput style={styles.search} accessibilityLabel={msg("Search tasks")} placeholder="Search all task titles and results" value={query} onChangeText={setQuery} onSubmitEditing={() => setSearch(query.trim())} />
+      <View style={styles.filters}>
+        <Button label={msg("Search")} language={messageLanguage("Search")} onPress={() => setSearch(query.trim())} />
+        <Button label={msg("Clear search")} language={messageLanguage("Clear search")} kind="secondary" onPress={() => {setQuery(''); setSearch('');}} />
+        {['', 'active', 'blocked', 'done'].map(value => <Button key={value} label={(status === value ? 'Selected: ' : '') + (value ? statusLabel(value) : 'All statuses')} kind="secondary" onPress={() => setStatus(value)} />)}
+      </View>
+      {updatedAt ? <Text style={styles.sub}>Updated {formattedTime(updatedAt)}</Text> : null}
+      {search ? <Banner text="Search shows up to 200 matches. Refine your search to find a specific task." /> : null}
       {offline && cached ? <Banner text={offlineBanner(cached)} /> : null}
       {error ? (
         <ConnectionNotice message={error} accessDenied={accessDenied} unsupported={unsupported}
           onRetry={refresh} onOpenSettings={accessDenied ? onOpenSettings : undefined} />
       ) : null}
       {error && data ? <Banner text="The list below may be out of date." /> : null}
+    </>;
+  return (
+    <View style={styles.fill}>
       <FlatList
-        data={rows}
+        maintainVisibleContentPosition={{minIndexForVisible: 0}}
+        ListHeaderComponent={header}
+        data={rows.filter(row => (!status || row.status === status) && (!offline || !search || `${row.title} ${row.result || ''}`.toLowerCase().includes(search.toLowerCase())))}
         keyExtractor={(g: Goal) => String(g.id)}
         ListEmptyComponent={empty}
+        ListFooterComponent={!search && data && data.length > 0 && hasMore ? <Button label={loadingMore ? 'Loading older tasks…' : 'Load older tasks'} disabled={loadingMore} onPress={loadMore} /> : null}
         renderItem={({ item }: { item: Goal }) => (
           <Pressable
             style={styles.row}
@@ -77,8 +178,10 @@ export function RunsListScreen(props: {
   );
 }
 
-const styles = StyleSheet.create({
-  fill: { flex: 1 },
+const stylesFor = (theme: Palette) => StyleSheet.create({
+  fill: { flex: 1, backgroundColor: theme.background },
+  filters: {flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 16},
+  search: {margin: 12, padding: 12, borderWidth: 1, borderColor: theme.border, color: theme.text, minHeight: 48},
   heading: { fontSize: 22, fontWeight: "700", color: theme.text, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
   row: {
     flexDirection: "row", alignItems: "center", gap: 10,

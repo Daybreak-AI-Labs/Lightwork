@@ -14,6 +14,17 @@ def _client():
     return TestClient(app)
 
 
+def _owner_client(monkeypatch):
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import auth
+    from maverick_dashboard.app import app
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
+        sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub": token}))
+    return TestClient(app, headers={"Authorization": "Bearer dana"})
+
+
 def _isolate(monkeypatch, tmp_path):
     # Fleets + audit log resolve under MAVERICK_HOME; the dashboard WorldModel
     # (used for the pending-approval count) resolves DEFAULT_DB.
@@ -40,7 +51,7 @@ def _save_fleet(name="acme", owner="user:dana"):
 def test_fleets_page_lists_a_saved_fleet(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
-    r = _client().get("/fleets")
+    r = _owner_client(monkeypatch).get("/fleets")
     assert r.status_code == 200
     text = r.text
     # Fleet name, owner, and each agent (name + role) are rendered.
@@ -48,6 +59,7 @@ def test_fleets_page_lists_a_saved_fleet(monkeypatch, tmp_path):
     assert "dana" in text                       # owner shown as a name
     assert "Researcher" in text                 # roles shown as job titles
     assert "Coder" in text
+    assert 'id="team-acme"' in text  # deployment links target the exact team
     from test_support.plain_language import developer_terms
     assert developer_terms(text) == []
 
@@ -63,13 +75,12 @@ def test_fleets_empty_state_shows_create_hint(monkeypatch, tmp_path):
 
 
 def test_fleets_page_reachable(monkeypatch, tmp_path):
-    # Fleets is folded out of the sidebar in the moderate declutter (reached
-    # from Workforce in-page), but the page still renders at its URL.
+    # The Teams destination keeps its existing /fleets URL for saved links.
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/fleets")
     assert r.status_code == 200
     # Shared hero h1 (page-title + hero-title classes) carries the page name.
-    assert ">Fleets</h1>" in r.text
+    assert ">Teams</h1>" in r.text
 
 
 def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):
@@ -88,7 +99,8 @@ def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):
     assert r.status_code == 200
     text = r.text
     assert "recent decisions by your company rules" in text.lower()
-    assert "Shell" in text
+    assert "Shell" not in text
+    assert "requires human approval" not in text
     assert "Require human actions" in text
     # Links the operator to the pending-approval (Art 14) queue.
     assert 'href="/approvals"' in text
@@ -116,15 +128,15 @@ def test_governance_hold_gets_source_label_on_approvals(monkeypatch, tmp_path):
     # and the spoofed ordinary hold does not create a second Art-14 badge.
     assert text.count("Required human oversight (EU AI Act)") == 1
     assert text.count('class="muted">An agent asked for permission</span>') == 1
-    # Both holds still render in the queue.
-    assert "Shell" in text
+    # Both holds still render in the queue (shell reads as its plain step words).
+    assert "Run a command" in text
     assert "Rm rf" in text
 
 
 def test_api_fleets_returns_roster(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
-    body = _client().get("/api/v1/fleets").json()
+    body = _owner_client(monkeypatch).get("/api/v1/fleets").json()
     assert len(body["fleets"]) == 1
     f = body["fleets"][0]
     assert f["name"] == "acme"

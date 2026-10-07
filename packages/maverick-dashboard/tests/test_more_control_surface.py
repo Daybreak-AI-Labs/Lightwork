@@ -128,7 +128,7 @@ def test_audit_grep_treats_regex_tokens_as_literal_text(monkeypatch, tmp_path):
     al = AuditLog(audit_dir=tmp_path / "audit")
     al.record(AuditEvent(
         ts=1.0, kind=EventKind.TOOL_CALL,
-        payload={"name": "has-parens", "input_summary": "(unclosed"}))
+        payload={"name": "has-parens", "principal": "user:(unclosed", "input_summary": "private-reason"}))
     import maverick.audit.writer as w
     w._default = al
     client = _client()
@@ -138,7 +138,9 @@ def test_audit_grep_treats_regex_tokens_as_literal_text(monkeypatch, tmp_path):
     assert r.status_code == 200
     events = r.json()["events"]
     assert len(events) == 1
-    assert events[0]["name"] == "has-parens"
+    assert events[0]["principal"] == "user:(unclosed"
+    assert "name" not in events[0] and "input_summary" not in events[0]
+    assert client.get("/api/v1/audit/grep?pattern=private-reason").json()["events"] == []
 
 
 def test_audit_grep_finds_matching_events(monkeypatch, tmp_path):
@@ -148,18 +150,19 @@ def test_audit_grep_finds_matching_events(monkeypatch, tmp_path):
     al = AuditLog(audit_dir=tmp_path / "audit")
     al.record(AuditEvent(
         ts=1.0, kind=EventKind.TOOL_CALL,
-        payload={"name": "shell", "input_summary": "ls"}))
+        payload={"name": "shell", "principal": "user:alice", "input_summary": "ls"}))
     al.record(AuditEvent(
         ts=2.0, kind=EventKind.TOOL_CALL,
-        payload={"name": "web_search", "input_summary": "x"}))
+        payload={"name": "web_search", "principal": "user:bob", "input_summary": "x"}))
     import maverick.audit.writer as w
     w._default = al
     client = _client()
-    r = client.get("/api/v1/audit/grep?pattern=shell")
+    r = client.get("/api/v1/audit/grep?pattern=user:alice")
     assert r.status_code == 200
     events = r.json()["events"]
     assert len(events) == 1
-    assert events[0]["name"] == "shell"
+    assert events[0]["principal"] == "user:alice"
+    assert "name" not in events[0] and "input_summary" not in events[0]
 
 
 def test_audit_grep_scans_complete_day_and_reports_result_cap(monkeypatch, tmp_path):
@@ -181,7 +184,8 @@ def test_audit_grep_scans_complete_day_and_reports_result_cap(monkeypatch, tmp_p
                 "kind": "tool_result",
                 "agent": "qa",
                 "goal_id": None,
-                "detail": "complete-day-needle" if index < 205 else "other",
+                "principal": "user:complete-day-needle" if index < 205 else "user:other",
+                "detail": "private context",
             }
         )
     (audit_dir / f"{day}.ndjson").write_text(
@@ -193,8 +197,8 @@ def test_audit_grep_scans_complete_day_and_reports_result_cap(monkeypatch, tmp_p
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["scanned"] == 1_205
-    # 204 seeded rows plus the instrumented request whose URL carries the
-    # literal query pattern.
+    # Exactly 205 seeded control identifiers match. A request URL is private
+    # payload and never creates an extra content-search result.
     assert body["total_matches"] == 205
     assert body["returned"] == 200
     assert body["truncated"] is True
@@ -216,7 +220,7 @@ def test_resume_404_for_unknown_goal(monkeypatch, tmp_path):
     assert r.status_code == 404
 
 
-def test_resume_400_when_goal_not_paused(monkeypatch, tmp_path):
+def test_resume_conflicts_when_goal_not_paused(monkeypatch, tmp_path):
     """Only blocked / cancelled / failed goals are resumable."""
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
@@ -231,8 +235,9 @@ def test_resume_400_when_goal_not_paused(monkeypatch, tmp_path):
         f"/api/v1/goals/{gid}/resume",
         headers={"Origin": "http://testserver"},
     )
-    assert r.status_code == 400
-    assert "active" in r.json()["detail"]
+    assert r.status_code == 409
+    assert r.json()["detail"]["code"] == "restart_changed"
+    assert r.json()["detail"]["next_action"]["href"] == f"/chat/goal/{gid}"
 
 
 def test_resume_flips_cancelled_to_pending(monkeypatch, tmp_path):

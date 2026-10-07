@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const script = fs.readFileSync(path.join(folder, 'static/lightwork-feature-actions.js'), 'utf8');
 
@@ -20,6 +21,9 @@ function response(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json', ...headers}});
 }
 const ME = {name: 'Ada', role: 'Administrator', departments: [], all_departments: true, tools: 'Every tool',
+  role_source: 'Current workspace role', access_owner: 'Installation administrator', department_source: 'Current workspace policy',
+  allowed_tool_names: [], allowed_tool_summary: 'Every tool', blocked_tool_names: [], tool_policy_source: 'Installation policy',
+  profile: 'Enterprise', enterprise_boundary: true, privacy_scope: 'Private task content requires owner access.',
   blocked_tools: 0, risk: 'No limit', limits_enforced: true, installation_admin: true,
   abilities: [{label: 'See work and results', allowed: true}, {label: 'Change settings and manage people', allowed: false}],
   can: {view: true, operate: true, audit: false, admin: true, installation_admin: true}};
@@ -27,6 +31,7 @@ const ME = {name: 'Ada', role: 'Administrator', departments: [], all_departments
 async function fixture(markup, route, {confirm = true} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [];
+  shell(window);
   window.fetch = async (url, options = {}) => {
     calls.push({url, options});
     if (url === '/api/v1/account/me') return response(ME);
@@ -117,6 +122,24 @@ test('sharing lessons previews the file and adds only after confirming', async (
   assert.match(ui.confirms[0], /Add 2 lessons/);
   assert.equal(nonAccount(ui.calls).filter((c) => c.url.endsWith('/import')).length, 1);
   assert.match(ui.document.getElementById('fa-lessons-status').textContent, /Added 2 lessons/);
+});
+
+test('a published lesson with incomplete activity evidence is not shown as clean success', async (t) => {
+  const markup = slice('learning.html', '<div data-fa-needs="installation_admin" hidden>', '</section>') + '</div>';
+  const ui = await fixture(markup, (url) => {
+    if (url.endsWith('/preview')) return response({usable: true, count: 1, lessons: ['Check totals'], summary: 'Ready.', technical: []});
+    if (url.endsWith('/import')) return response({added: 1, audit_complete: false, message: 'The lesson was added, but the activity record is incomplete.'}, 202);
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  choose(ui.window, ui.document.getElementById('fa-lessons-file'), 'lessons.json', '{}', 'application/json');
+  await ui.settle();
+  const add = [...ui.document.querySelectorAll('#fa-lessons-out button')].find((b) => b.textContent === 'Add these lessons');
+  add.click();
+  await ui.settle();
+  assert.match(ui.document.getElementById('fa-lessons-status').textContent, /activity record is incomplete/);
+  assert.doesNotMatch(ui.document.getElementById('fa-lessons-status').textContent, /Added 1 lesson/);
+  assert.equal(add.disabled, true);
 });
 
 test('an untrusted lesson file offers no add button', async (t) => {
@@ -228,11 +251,68 @@ test('independence levels and spending groups read in words', async (t) => {
       graduation_candidates: [{name: 'finance_clerk', sample: 20, approve_rate: 0.95, confidence: 0.9, reason: 'clean record'}]});
   });
   t.after(() => ui.window.close());
-  assert.match(ui.document.getElementById('fa-autonomy').textContent, /Suggest: 2/);
+  // Levels are off in this fixture: one plain line, no per-level counts that
+  // would read as a real split of the workforce.
+  assert.match(ui.document.getElementById('fa-autonomy-status').textContent, /Independence levels are turned off/);
+  assert.doesNotMatch(ui.document.getElementById('fa-autonomy').textContent, /Suggest: 2|Watch only: 1|Ask before acting|Still learning/);
   assert.match(ui.document.getElementById('fa-autonomy').textContent, /finance clerk2095%/);
   ui.document.getElementById('fa-tags-run').click();
   await ui.settle();
   assert.match(ui.document.getElementById('fa-tags-out').textContent, /Not labelled/);
+});
+
+test('independence levels show each level count once the levels are on', async (t) => {
+  const markup = slice('workforce.html', '<section class="panel" aria-labelledby="fa-autonomy-title">', '</section>');
+  const ui = await fixture(markup, () => response({levels_enabled: true, autonomy_posture: {observe: 1, suggest: 2, request: 3, auto: 4},
+    packs_onboarding: 5, graduation_candidates: []}));
+  t.after(() => ui.window.close());
+  const text = ui.document.getElementById('fa-autonomy').textContent;
+  assert.match(text, /Watch only: 1/);
+  assert.match(text, /Suggest: 2/);
+  assert.match(text, /Ask before acting: 3/);
+  assert.match(text, /Act on their own: 4/);
+  assert.match(text, /Still learning the ropes: 5/);
+  assert.match(ui.document.getElementById('fa-autonomy-status').textContent, /own level of independence/);
+});
+
+test('a graduation candidate can be granted only after confirmation and a fresh server check', async (t) => {
+  const markup = slice('workforce.html', '<section class="panel" aria-labelledby="fa-autonomy-title">', '</section>');
+  let granted = false;
+  const ui = await fixture(markup, (url, options) => {
+    if (url === '/api/v1/agents/finance_clerk/graduate') {
+      granted = true;
+      return response({autonomy: {onboarding: false}});
+    }
+    return response({levels_enabled: true, can_manage: true,
+      autonomy_posture: {suggest: 1}, packs_onboarding: granted ? 0 : 1,
+      graduation_candidates: granted ? [] : [{name: 'finance_clerk', sample: 20, approve_rate: 0.95,
+        confidence: 0.9, reason: 'clean record', generation: 'a'.repeat(64), can_grant: true}]});
+  });
+  t.after(() => ui.window.close());
+  const grant = [...ui.document.querySelectorAll('#fa-autonomy button')].find((button) => /Grant independence/.test(button.textContent));
+  assert.ok(grant);
+  grant.click();
+  await ui.settle();
+  const mutation = nonAccount(ui.calls).find((call) => call.url === '/api/v1/agents/finance_clerk/graduate');
+  assert.ok(mutation);
+  assert.equal(mutation.options.method, 'POST');
+  assert.deepEqual(JSON.parse(mutation.options.body), {expected_generation: 'a'.repeat(64)});
+  assert.equal(ui.confirms.length, 1);
+  assert.doesNotMatch(ui.document.getElementById('fa-autonomy').textContent, /Grant independence/);
+});
+
+test('an Act policy explains why aggregate approvals cannot grant independence', async (t) => {
+  const markup = slice('workforce.html', '<section class="panel" aria-labelledby="fa-autonomy-title">', '</section>');
+  const ui = await fixture(markup, () => response({levels_enabled: true, can_manage: true,
+    autonomy_posture: {suggest: 1}, packs_onboarding: 1,
+    graduation_candidates: [{name: 'finance_clerk', sample: 100, approve_rate: 1,
+      confidence: 1, reason: 'clean record', generation: 'a'.repeat(64), can_grant: false,
+      grant_block_reason: 'This specialist is set to Act on its own for high actions. Its overall approval record cannot prove those actions are safe.'}]}));
+  t.after(() => ui.window.close());
+  const panel = ui.document.getElementById('fa-autonomy');
+  assert.match(panel.textContent, /overall approval record cannot prove/);
+  assert.ok(panel.querySelector('a[href="/agents?name=finance_clerk#agent-autonomy"]'));
+  assert.doesNotMatch(panel.textContent, /Grant independence/);
 });
 
 test('a skill file is checked and problems stay in technical details', async (t) => {

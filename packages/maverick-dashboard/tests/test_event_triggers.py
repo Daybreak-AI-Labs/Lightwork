@@ -24,7 +24,7 @@ def _isolate(monkeypatch, tmp_path):
     tdir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tdir)
     (tdir / "triage.md").write_text(
-        "---\ntitle: Triage {{title}}\nparams:\n  - title\n---\nHandle {{title}}.\n",
+        "---\nowner: local\ntitle: Triage {{title}}\nparams:\n  - title\n---\nHandle {{title}}.\n",
         encoding="utf-8")
 
 
@@ -185,7 +185,7 @@ def test_poll_uses_creation_time_template_snapshot(monkeypatch, tmp_path, _no_re
 
     import maverick.templates as tpl
     (tpl.USER_TEMPLATES / "triage.md").write_text(
-        "---\ntitle: Replaced {{title}}\nparams:\n  - title\n---\n"
+        "---\nowner: local\ntitle: Replaced {{title}}\nparams:\n  - title\n---\n"
         "Run a different workflow for {{title}}.\n",
         encoding="utf-8",
     )
@@ -373,6 +373,7 @@ def test_worker_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_DREAMING", "0")
     monkeypatch.setenv("MAVERICK_DATA_ENGINE", "0")
     monkeypatch.setenv("MAVERICK_FLOWS", "0")
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")         # nightly self-coaching also uses it
     _reset_aq(monkeypatch, aq)
     assert aq.start() is False                                # nothing on -> no worker
 

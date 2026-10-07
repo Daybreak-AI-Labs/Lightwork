@@ -16,8 +16,18 @@ When set, the kernel fires:
   - episode_finished   (goal_id, episode_id, outcome, cost_dollars)
   - final_emitted      (goal_id, patch_size_bytes)
 
-The HTTP POST body is JSON; if ``secret`` is set, an HMAC-SHA256
-signature is sent in the ``X-Maverick-Signature`` header.
+Record events (``dsar.*``, ``incident.*``, ``assessment.*``, ``vendor.*``,
+``approval.*``, ``policy.*``; see :mod:`maverick.webhook_events`) use the
+same dispatcher. Since subscriptions became records
+(:mod:`maverick.webhook_subscriptions`) the config list above is the *legacy
+default subscription*: it still receives every event, and every delivery --
+to it or to a saved subscription -- is logged and retried.
+
+The HTTP POST body is the JSON envelope from :func:`build_envelope`
+(documented in docs/webhooks.md); if ``secret`` is set, an HMAC-SHA256
+signature over ``"<timestamp>." + body`` is sent in the
+``X-Lightwork-Signature`` header with the timestamp in ``X-Lightwork-Timestamp``.
+The original ``X-Maverick-*`` headers carry the same values for existing clients.
 
 Webhook failures are logged but never block the run.
 """
@@ -30,6 +40,8 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Mapping
+from contextvars import copy_context
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -117,7 +129,7 @@ def _sign(body: bytes, secret: str, *, timestamp: str | None = None) -> str:
 
     When ``timestamp`` is given it is prepended to the signed material
     (``"<ts>.".encode() + body``). This is the Lightwork-CONTROLLED replay
-    defence: the sender sends the same ``timestamp`` in an ``X-Maverick-
+    defence: the sender sends the same ``timestamp`` in an ``X-Lightwork-
     Timestamp`` header, so a captured request can't be replayed past the
     freshness window without breaking the signature. Body-only signing
     (``timestamp=None``) is preserved for the existing receiver round-trip.
@@ -176,10 +188,11 @@ def _submit(executor, fn, *args) -> bool:
     sem = _inflight  # capture: a reset must not make us release a different one
     if not sem.acquire(blocking=False):
         return False
+    context = copy_context()
 
     def _runner():
         try:
-            fn(*args)
+            context.run(fn, *args)
         finally:
             sem.release()
 
@@ -191,7 +204,12 @@ def _submit(executor, fn, *args) -> bool:
         raise
 
 
-def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> None:
+def _post_result(url: str, body: bytes, headers: dict[str, str],
+                 timeout: float) -> tuple[int | None, int, str, str]:
+    """POST through the SSRF guard and report ``(status_code, latency_ms,
+    response_snippet, error)`` -- the delivery log's raw material. A blocked
+    host, a missing client or a transport failure gives ``status_code=None``
+    and a short error; nothing here raises."""
     from .secrets import scrub
     # Outbound webhook URLs frequently carry credentials in the query string
     # (?token=, ?api_key=, presigned ?sig=); scrub before logging so they don't
@@ -201,7 +219,7 @@ def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> Non
         import httpx  # noqa: F401  (presence check; client built via _ssrf)
     except ImportError:
         log.warning("webhooks: httpx not installed; skipping %s", safe_url)
-        return
+        return None, 0, "", "httpx is not installed"
     # Route through the SSRF guard: an outbound URL comes from user config, but
     # a config that points at a loopback/metadata/internal host would let the
     # webhook dispatcher be used as an SSRF proxy. safe_client resolves once,
@@ -209,22 +227,165 @@ def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> Non
     try:
         from .tools._ssrf import BlockedHost, safe_client
     except Exception:  # pragma: no cover - guard unavailable
-        return
+        return None, 0, "", "SSRF guard unavailable"
     try:
         client = safe_client(url, timeout=timeout)
     except BlockedHost as e:
         log.warning("webhooks: %s blocked (SSRF guard): %s", safe_url, e)
-        return
+        return None, 0, "", f"blocked by the address guard: {scrub(str(e))[:120]}"
+    started = time.monotonic()
     try:
         with client:
             resp = client.post(url, content=body, headers=headers)
+        latency = int((time.monotonic() - started) * 1000)
+        snippet = scrub(resp.text[:200])
         if resp.status_code >= 400:
-            log.warning(
-                "webhooks: %s returned %d: %s",
-                safe_url, resp.status_code, scrub(resp.text[:200]),
-            )
+            log.warning("webhooks: %s returned %d: %s", safe_url, resp.status_code, snippet)
+            return resp.status_code, latency, snippet, f"HTTP {resp.status_code}"
+        return resp.status_code, latency, snippet, ""
     except Exception as e:
+        latency = int((time.monotonic() - started) * 1000)
         log.warning("webhooks: %s failed: %s: %s", safe_url, type(e).__name__, scrub(str(e)))
+        return None, latency, "", f"{type(e).__name__}: {scrub(str(e))[:120]}"
+
+
+def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> None:
+    _post_result(url, body, headers, timeout)
+
+
+def build_envelope(
+    event: str,
+    payload: dict[str, Any],
+    *,
+    record: dict[str, Any] | None = None,
+    link: str = "",
+    occurred_at: float | None = None,
+    event_id: str | None = None,
+    workspace: str | None = None,
+) -> dict[str, Any]:
+    """The JSON body every outbound webhook carries (documented in
+    docs/webhooks.md). ``v``/``event``/``ts``/``payload`` are the original
+    fields, kept as they were; ``id``, ``type``, ``occurred_at``,
+    ``workspace``, ``record`` and ``link`` were added for record events."""
+    import uuid
+
+    when = time.time() if occurred_at is None else float(occurred_at)
+    if workspace is None:
+        try:
+            from .paths import current_tenant_id
+            workspace = current_tenant_id() or ""
+        except Exception:
+            workspace = ""
+    return {
+        "v": 1,
+        "id": event_id or ("evt_" + uuid.uuid4().hex),
+        "event": event,
+        "type": event,
+        "ts": when,
+        "occurred_at": when,
+        "workspace": workspace,
+        "record": dict(record) if record else None,
+        "link": link or "",
+        "payload": payload,
+    }
+
+
+def encode_body(envelope: dict[str, Any]) -> bytes:
+    return json.dumps(envelope, default=str).encode("utf-8")
+
+
+def read_signature_headers(headers: Mapping[str, str]) -> tuple[str, str]:
+    """Read Lightwork or legacy authentication headers without ambiguity.
+
+    Matching aliases (including repeated header fields) are compatible. Any
+    conflicting signature or timestamp is refused before authentication, so a
+    caller cannot silently choose a different signed request interpretation.
+    """
+    observed: dict[str, str] = {}
+    accepted = {
+        "x-lightwork-signature", "x-maverick-signature",
+        "x-lightwork-timestamp", "x-maverick-timestamp",
+    }
+    for key, value in headers.items():
+        name = key.lower()
+        if name not in accepted:
+            continue
+        if name in observed and observed[name] != value:
+            raise ValueError("Conflicting webhook authentication headers.")
+        observed[name] = value
+    values = []
+    for field in ("signature", "timestamp"):
+        current = observed.get(f"x-lightwork-{field}")
+        legacy = observed.get(f"x-maverick-{field}")
+        if current is not None and legacy is not None and current != legacy:
+            raise ValueError("Conflicting webhook authentication headers.")
+        values.append(current if current is not None else legacy or "")
+    return values[0], values[1]
+
+
+def build_headers(body: bytes, event: str, secret: str | None, *,
+                  event_id: str | None = None) -> dict[str, str]:
+    """Request headers for one attempt. The signature binds a fresh timestamp
+    each time (see :func:`_sign`), so a retried delivery carries a signature
+    that passes the same freshness check as a first attempt."""
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Lightwork-Webhook/1.0",
+        "X-Lightwork-Event": event,
+        "X-Maverick-Event": event,
+    }
+    if event_id:
+        headers["X-Lightwork-Delivery"] = event_id
+        headers["X-Maverick-Delivery"] = event_id
+    if secret:
+        # Bind a timestamp into the signature so a receiver enforcing a max-age
+        # (see verify_signature) can reject a replayed capture. The timestamp is
+        # sent alongside in X-Lightwork-Timestamp and is part of the signed
+        # material -- it can't be altered without breaking the HMAC.
+        ts = str(int(time.time()))
+        signature = _sign(body, secret, timestamp=ts)
+        headers["X-Lightwork-Timestamp"] = ts
+        headers["X-Maverick-Timestamp"] = ts
+        headers["X-Lightwork-Signature"] = signature
+        headers["X-Maverick-Signature"] = signature
+    return headers
+
+
+def _subscriptions_enabled() -> bool:
+    """``[webhooks] subscriptions = false`` returns to one-shot config-list
+    dispatch with no delivery log (also ``MAVERICK_WEBHOOK_SUBSCRIPTIONS=0``)."""
+    env = os.environ.get("MAVERICK_WEBHOOK_SUBSCRIPTIONS", "").strip().lower()
+    if env:
+        return env not in ("0", "false", "no", "off")
+    try:
+        from .config import load_config
+        val = ((load_config() or {}).get("webhooks") or {}).get("subscriptions")
+        if val is not None:
+            return bool(val)
+    except Exception:
+        pass
+    return True
+
+
+def _fire_subscriptions(event: str, envelope: dict[str, Any], body: bytes,
+                        world: Any) -> int | None:
+    """Record + start deliveries through the subscription store. ``None`` means
+    the store was unavailable and the caller should fall back to the one-shot
+    config-list path."""
+    from . import webhook_subscriptions as subs
+    executor = _get_executor()
+
+    def _start(delivery_id: str) -> None:
+        if not _submit(executor, subs.attempt_delivery, delivery_id):
+            log.warning("webhooks: in-flight cap reached; delivery %s waits for the retry pump",
+                        delivery_id)
+
+    try:
+        return subs.dispatch(event, envelope, body, world=world, submit=_start)
+    except Exception as exc:
+        log.warning("webhooks: subscription store unavailable (%s); sending once to the "
+                    "configured list", type(exc).__name__)
+        return None
 
 
 def fire(
@@ -234,44 +395,45 @@ def fire(
     urls: list[str] | None = None,
     secret: str | None = None,
     timeout: float = 5.0,
+    record: dict[str, Any] | None = None,
+    link: str = "",
+    occurred_at: float | None = None,
+    world: Any = None,
 ) -> int:
-    """Dispatch ``event`` to all configured webhook URLs.
+    """Dispatch ``event`` to every subscriber.
 
-    Returns the number of dispatch attempts started. Returns 0 if
-    no webhooks are configured (silent no-op for users who haven't
-    opted in).
+    With ``urls`` given explicitly (the deliverable hand-off, tests) the body is
+    posted once to each address, as before. Otherwise the event goes through
+    :mod:`maverick.webhook_subscriptions`: every enabled subscription whose
+    filter matches, plus the legacy ``[webhooks] outbound`` list, gets a logged,
+    retried delivery. Returns the number of deliveries started; 0 when nobody
+    is subscribed (silent no-op for users who haven't opted in).
     """
-    if urls is None and secret is None:
-        urls, secret = _load_config_outbound()
-    if not urls:
+    from . import practice
+
+    if practice.active():  # practice mode: recorded (when someone would get it), never posted
+        targets = list(urls) if urls is not None else list(_load_config_outbound()[0] or [])
+        if targets:
+            practice.record("webhook", event, {"addresses": len(targets)})
         return 0
-    body_obj = {
-        "v": 1,
-        "event": event,
-        "ts": time.time(),
-        "payload": payload,
-    }
+    envelope = build_envelope(event, payload, record=record, link=link, occurred_at=occurred_at)
     # Serialize defensively: fire() promises never to raise into the run
     # loop, so a non-serializable payload must degrade to a no-op, not
     # crash the caller.
     try:
-        body = json.dumps(body_obj, default=str).encode("utf-8")
+        body = encode_body(envelope)
     except (TypeError, ValueError) as e:
         log.warning("webhook: payload not serializable, skipping: %s", e)
         return 0
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "Lightwork-Webhook/1.0",
-        "X-Maverick-Event": event,
-    }
-    if secret:
-        # Bind a timestamp into the signature so a receiver enforcing a max-age
-        # (see verify_signature) can reject a replayed capture. The timestamp is
-        # sent alongside in X-Maverick-Timestamp and is part of the signed
-        # material -- it can't be altered without breaking the HMAC.
-        ts = str(int(time.time()))
-        headers["X-Maverick-Timestamp"] = ts
-        headers["X-Maverick-Signature"] = _sign(body, secret, timestamp=ts)
+    if urls is None and secret is None:
+        if _subscriptions_enabled():
+            sent = _fire_subscriptions(event, envelope, body, world)
+            if sent is not None:
+                return sent
+        urls, secret = _load_config_outbound()
+    if not urls:
+        return 0
+    headers = build_headers(body, event, secret, event_id=envelope["id"])
 
     # Enterprise egress lock: outbound webhooks are off-box data egress just like
     # a tool fetch, so hold them to the SAME boundary (default-deny unless the
@@ -379,4 +541,5 @@ def inbound_secret() -> str | None:
     return secret or None
 
 
-__all__ = ["fire", "verify_signature", "inbound_secret"]
+__all__ = ["build_envelope", "build_headers", "encode_body", "fire",
+           "verify_signature", "inbound_secret", "read_signature_headers"]

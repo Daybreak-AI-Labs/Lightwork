@@ -287,17 +287,59 @@ def _vendor_reconciliation_source(
         return [], [{"kind": "vendor_reconciliation", "status": "unavailable"}]
 
 
-def collect(world, *, principal: str | None, owner: str | None, specs: list[dict],
-            assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
-            project_reviews: Callable[[], list[dict]] | None = None,
-            vendor_reconciliations: Callable[[], dict] | None = None,
-            now: float | None = None) -> dict:
-    """Project only authorized content; report failed or bounded sources honestly."""
-    now = time.time() if now is None else now
+def _evidence_source_approvals(source: Callable[[], dict] | None):
+    if source is None:
+        return [], []
+    try:
+        result = source()
+        if (not isinstance(result, dict) or result.get("coverage") not in {
+                "current", "partial", "disabled"} or result.get("limit") != 64
+                or not isinstance(result.get("items"), list) or len(result["items"]) > 64):
+            raise ValueError("Evidence source approvals are unavailable")
+        items = []
+        for row in result["items"]:
+            items.append(_item("evidence_source_approval", row["id"],
+                "Review evidence source: " + _bounded_text(row["title"], limit=100),
+                href="/compliance/continuous-evidence#trc-sources",
+                updated_at=_timestamp(row["updated_at"]), version=row["version"],
+                reason="Another administrator saved this source setup. Review its account and checks before approving; collection starts separately."))
+        return items, [{"kind": "evidence_source_approval", "status": result["coverage"],
+                        "limit": 64}]
+    except Exception:
+        return [], [{"kind": "evidence_source_approval", "status": "unavailable"}]
+
+
+def _owned_task_attention(world, principal, task_allowed=None):
+    """Private task questions and recovery never inherit a fleet-wide view."""
+    items, coverage = [], []
+    owner = principal or ""
+    for task_status in ("blocked", "failed"):
+        try:
+            rows = world.list_goals(status=task_status, owner=owner, limit=SOURCE_LIMIT + 1, order="desc")
+            for goal in rows[:SOURCE_LIMIT]:
+                if goal.owner != owner or (task_allowed is not None and not task_allowed(goal)):
+                    continue
+                questions = world.open_questions(goal_id=goal.id) if task_status == "blocked" else []
+                version = [[question.id, question.asked_at, question.question] for question in questions]
+                reason = (f"{len(questions)} clarification question(s) waiting for your answer" if questions
+                          else "Review the stopped task before choosing whether to restart; no retry happens automatically")
+                items.append(_item("task_attention", goal.id, goal.title,
+                                   href=f"/chat/goal/{goal.id}", owner=owner,
+                                   updated_at=goal.updated_at, version=[task_status, version], reason=reason))
+            coverage.append({"kind": "task_attention", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
+        except Exception:
+            coverage.append({"kind": "task_attention", "status": "unavailable"})
+    states = [source["status"] for source in coverage]
+    return items, [{"kind": "task_attention", "status": "unavailable" if "unavailable" in states else "partial" if "partial" in states else "current"}]
+
+
+def _approval_source(world, principal, approval_allowed):
     items, coverage = [], []
     try:
         rows = world.pending_approvals()
         for row in rows[:SOURCE_LIMIT]:
+            if approval_allowed is None or not approval_allowed(row):
+                continue
             if row.claimed_by and row.claimed_by != principal:
                 continue
             state = world.approval_state(row.id)
@@ -312,22 +354,62 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
         coverage.append({"kind": "approval", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
     except Exception:
         coverage.append({"kind": "approval", "status": "unavailable"})
+    return items, coverage
+
+
+def _flow_approval_source(source: Callable[[], dict], principal: str | None):
+    """Put currently authorized flow pauses in the same Approvals filter."""
+    try:
+        result = source()
+        if (not isinstance(result, dict) or not isinstance(result.get("items"), list)
+                or result.get("coverage") not in {"current", "partial", "unavailable"}):
+            raise ValueError("invalid flow approval source")
+        items = []
+        for row in result["items"][:SOURCE_LIMIT]:
+            item = _item(
+                "approval", f"flow:{row['run_id']}", row["title"],
+                href=row["href"], owner=principal or row["owner"],
+                due_at=row["due_at"], updated_at=row["updated_at"],
+                version=[row["approval_binding_sha256"], row["approval_card_status"]],
+                reason=("Flow approval waiting for you. Review the card, then approve or reject."
+                        if row["approval_card_status"] == "current"
+                        else "Flow approval details changed. Review them again before you approve or reject."),
+            )
+            item["flow_run_id"] = row["run_id"]
+            items.append(item)
+        status = "partial" if len(result["items"]) > SOURCE_LIMIT else result["coverage"]
+        return items, [{"kind": "flow_approval", "status": status}]
+    except Exception:
+        return [], [{"kind": "flow_approval", "status": "unavailable"}]
+
+
+def _signoff_source(world, owner, specs):
+    items, coverage = [], []
     try:
         rows = world.list_goals(status="done", owner=owner, limit=SOURCE_LIMIT + 1, order="desc")
-        scoped_specs = {spec["domain"]: spec for spec in specs if spec.get("gate")}
+        # Resolve current suite permissions only when this owner has completed
+        # work. Loading every specialist pack for an empty queue delays unrelated
+        # assigned reviews; authorization-dependent specs must never be cached.
+        resolved_specs = (specs() if callable(specs) else specs) if rows else []
+        scoped_specs = {spec["domain"]: spec for spec in resolved_specs if spec.get("gate")}
         candidates = [goal for goal in rows[:SOURCE_LIMIT] if goal.domain in scoped_specs]
         signed = world.signoffs_for_goals([goal.id for goal in candidates])
         for goal in candidates:
-            if signed.get(goal.id):
+            if signed.get(goal.id) == "approved":
                 continue
             spec = scoped_specs[goal.domain]
             items.append(_item("signoff", goal.id, spec["deliverable"],
                 href=f"/chat/goal/{goal.id}", owner=getattr(goal, "owner", ""),
                 updated_at=goal.updated_at, version=[goal.title, spec.get("gate")],
-                reason="Completed work awaiting sign-off"))
+                reason="Result was rejected. Revise it, then ask for approval again." if signed.get(goal.id) == "rejected" else "Finished result waiting for approval"))
         coverage.append({"kind": "signoff", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
     except Exception:
         coverage.append({"kind": "signoff", "status": "unavailable"})
+    return items, coverage
+
+
+def _assessment_source(assessments, assessment_allowed, principal):
+    items, coverage = [], []
     try:
         rows = assessments()
         for row in rows:
@@ -348,25 +430,106 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
         coverage.append({"kind": "assessment", "status": "current"})
     except Exception:
         coverage.append({"kind": "assessment", "status": "unavailable"})
+    return items, coverage
+
+
+def _governance_sources(source):
+    kinds = {"lifecycle_review", "drop_authority_review", "trust_center_review", "disclosure_review"}
+    if source is None:
+        return [], []
+    try:
+        result = source()
+        if (not isinstance(result, dict) or set(result) != {"items", "coverage"}
+                or not isinstance(result["items"], list) or len(result["items"]) > 6 * 99
+                or not isinstance(result["coverage"], list) or len(result["coverage"]) != len(kinds)
+                or {row["kind"] for row in result["coverage"]} != kinds
+                or any(row["status"] not in {"current", "partial", "disabled", "denied", "unavailable"}
+                       or row["limit"] != 99 for row in result["coverage"])):
+            raise ValueError("Current governance reviews are unavailable")
+        items = []
+        for row in result["items"]:
+            if row["kind"] not in kinds or not row["href"].startswith("/") or row["href"].startswith("//"):
+                raise ValueError("Current governance review destination is unavailable")
+            items.append(_item(row["kind"], row["key"], _bounded_text(row["title"], limit=500),
+                href=row["href"], due_at=_timestamp(row["due_at"], optional=True),
+                updated_at=_timestamp(row["updated_at"]), version=row["version"],
+                reason=_bounded_text(row["reason"])))
+        return items, result["coverage"]
+    except Exception:
+        return [], [{"kind": kind, "status": "unavailable", "limit": 99} for kind in sorted(kinds)]
+
+
+def collect(world, *, principal: str | None, owner: str | None,
+            specs: list[dict] | Callable[[], list[dict]],
+            assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
+            project_reviews: Callable[[], list[dict]] | None = None,
+            vendor_reconciliations: Callable[[], dict] | None = None,
+            connection_attention: Callable[[], dict] | None = None,
+            evidence_source_approvals: Callable[[], dict] | None = None,
+            governance_reviews: Callable[[], dict] | None = None,
+            flow_approvals: Callable[[], dict] | None = None,
+            approval_allowed: Callable[[object], bool] | None = None,
+            task_allowed: Callable[[object], bool] | None = None,
+            now: float | None = None) -> dict:
+    """Project only authorized content; report failed or bounded sources honestly."""
+    now = time.time() if now is None else now
+    items, coverage = [], []
+    task_items, task_coverage = _owned_task_attention(world, principal, task_allowed)
+    items.extend(task_items)
+    coverage.extend(task_coverage)
+    for source_items, source_coverage in (
+        _approval_source(world, principal, approval_allowed),
+        _signoff_source(world, owner, specs),
+        _assessment_source(assessments, assessment_allowed, principal),
+    ):
+        items.extend(source_items)
+        coverage.extend(source_coverage)
+    if flow_approvals is not None:
+        flow_items, flow_coverage = _flow_approval_source(flow_approvals, principal)
+        items.extend(flow_items)
+        coverage.extend(flow_coverage)
     if project_reviews is not None:
         try:
             reviews = project_reviews()
             for review in reviews:
-                if review["reviewer"] != principal or review["status"] != "pending":
+                owner_action = review.get("owner") == principal and (review["status"] == "changes_requested" or review["stale"])
+                if not owner_action and (review["reviewer"] != principal or review["status"] != "pending"):
                     continue
                 items.append(_item("project_review", review["id"], review["title"],
-                    href="/project-reviews#packet=" + review["id"], owner=review["reviewer"],
+                    href="/project-reviews#packet=" + review["id"], owner=principal if owner_action else review["reviewer"],
                     due_at=review["due_at"], updated_at=review["updated_at"],
                     version=[review["revision"], review["source_version"], review["stale"]],
-                    reason="Source changed; ask the owner for a fresh result" if review["stale"] else "Assigned project result review"))
+                    reason=("Address reviewer changes and submit a fresh packet" if review["status"] == "changes_requested" else "Source changed; submit a fresh result") if owner_action else ("Source changed; ask the owner for a fresh result" if review["stale"] else "Assigned project result review")))
             coverage.append({"kind": "project_review", "status": "current"})
         except Exception:
             coverage.append({"kind": "project_review", "status": "unavailable"})
+    if connection_attention is not None:
+        try:
+            connections = connection_attention()
+            if connections.get("coverage") not in {"current", "disabled", "unavailable", "partial"} or not isinstance(connections.get("items"), list):
+                raise ValueError("Connection coverage is unavailable")
+            for connection in connections["items"][:SOURCE_LIMIT]:
+                href = str(connection["href"])
+                if not href.startswith("/") or href.startswith("//"):
+                    raise ValueError("Invalid connection recovery destination")
+                items.append(_item("connection_attention", connection["name"], connection["title"],
+                                   href=href, owner=principal or "", version=connection["revision"], reason=connection["reason"]))
+            coverage.append({"kind": "connection_attention", "status": "partial" if len(connections["items"]) > SOURCE_LIMIT else connections["coverage"]})
+        except Exception:
+            coverage.append({"kind": "connection_attention", "status": "unavailable"})
+    else:
+        coverage.append({"kind": "connection_attention", "status": "unavailable"})
     reconciliations, reconciliation_coverage = _vendor_reconciliation_source(
         vendor_reconciliations,
     )
     items.extend(reconciliations)
     coverage.extend(reconciliation_coverage)
+    evidence_items, evidence_coverage = _evidence_source_approvals(evidence_source_approvals)
+    items.extend(evidence_items)
+    coverage.extend(evidence_coverage)
+    review_items, review_coverage = _governance_sources(governance_reviews)
+    items.extend(review_items)
+    coverage.extend(review_coverage)
     for row in items:
         row["overdue"] = bool(row["due_at"] and row["due_at"] <= now)
         row["assignment"] = "mine" if principal and row["owner"] == principal else "available"

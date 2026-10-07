@@ -12,8 +12,8 @@
              letter-spacing: 0.08em; color: var(--accent);
              border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
              background: var(--success-subtle);
-             border-radius: var(--radius-pill); padding: 2px 10px; }
-  .pb-live .dot { width: 7px; height: 7px; border-radius: 50%;
+             border-radius: var(--radius-pill); padding: var(--space-0-5) 10px; }
+  .pb-live .dot { width: 7px; height: 7px; border-radius: var(--radius-round);
                   background: var(--accent); animation: pb-pulse 2s infinite; }
   @keyframes pb-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
   .pb-stamp { font-size: var(--text-sm); color: var(--muted); }
@@ -29,10 +29,10 @@
   .pb-slicer button:not(.on):hover { color: var(--text); }
   .pb-chip { display: inline-flex; align-items: center; gap: 6px;
              font-size: var(--text-sm); border-radius: var(--radius-pill);
-             padding: 3px 6px 3px 12px; background: var(--brand-subtle);
+             padding: 3px 6px 3px var(--space-3); background: var(--brand-subtle);
              border: 1px solid var(--brand-border); color: var(--text); }
   .pb-chip button { border: 0; background: transparent; color: var(--muted);
-                    cursor: pointer; font-size: var(--text-sm); padding: 0 4px; }
+                    cursor: pointer; font-size: var(--text-sm); padding: 0 var(--space-1); }
   .pb-chip button:hover { color: var(--danger); }
 
   /* KPI band */
@@ -48,16 +48,16 @@
                text-transform: uppercase; letter-spacing: 0.07em;
                color: var(--muted); }
   .pb-kpi .v { font-size: var(--text-3xl); font-weight: var(--font-semibold);
-               line-height: 1.1; margin-top: 2px;
+               line-height: 1.1; margin-top: var(--space-0-5);
                font-variant-numeric: tabular-nums; }
   .pb-kpi .s { font-size: var(--text-xs); color: var(--muted);
-               margin-top: 4px; min-height: 1.1em;
+               margin-top: var(--space-1); min-height: 1.1em;
                /* Keep clear of the sparkline pinned bottom-right. */
                max-width: calc(100% - 96px); }
   .pb-kpi .delta { display: inline-flex; align-items: center; gap: 3px;
                    font-size: var(--text-xs); font-weight: var(--font-semibold);
-                   border-radius: var(--radius-pill); padding: 1px 8px;
-                   margin-inline-start: 8px; vertical-align: 4px;
+                   border-radius: var(--radius-pill); padding: 1px var(--space-2);
+                   margin-inline-start: var(--space-2); vertical-align: 4px;
                    font-variant-numeric: tabular-nums; }
   .pb-kpi .delta.good { color: var(--accent); background: var(--success-subtle); }
   .pb-kpi .delta.bad { color: var(--danger); background: var(--danger-subtle); }
@@ -79,7 +79,7 @@
   .pb-card h2 { margin: 0; font-size: var(--text-sm);
                 font-weight: var(--font-semibold); text-transform: uppercase;
                 letter-spacing: 0.07em; color: var(--muted); }
-  .pb-sub { margin: 2px 0 var(--space-3); font-size: var(--text-xs);
+  .pb-sub { margin: var(--space-0-5) 0 var(--space-3); font-size: var(--text-xs);
             color: var(--muted); }
   .pb-empty { color: var(--muted); font-size: var(--text-sm);
               padding: var(--space-4) 0; }
@@ -89,12 +89,12 @@
                    flex-wrap: wrap; }
   .pb-donut-wrap svg { flex: 0 0 176px; }
   .pb-donut-center { font-variant-numeric: tabular-nums; }
-  .pb-legend { display: flex; flex-direction: column; gap: 4px; flex: 1;
+  .pb-legend { display: flex; flex-direction: column; gap: var(--space-1); flex: 1;
                min-width: 9rem; }
-  .pb-legend button { display: flex; align-items: center; gap: 8px;
+  .pb-legend button { display: flex; align-items: center; gap: var(--space-2);
                       border: 1px solid transparent; background: transparent;
                       color: var(--text); font-size: var(--text-sm);
-                      padding: 4px 8px; border-radius: var(--radius-sm);
+                      padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
                       cursor: pointer; text-align: start; width: 100%;
                       font-variant-numeric: tabular-nums; }
   .pb-legend button:hover { background: var(--row-hover); }
@@ -112,7 +112,7 @@
                       font-size: var(--text-xs); color: var(--muted);
                       margin-bottom: 3px; font-variant-numeric: tabular-nums; }
   .pb-burn-bars { display: grid; gap: 3px; }
-  .pb-burn-bar { height: 9px; border-radius: 4px; min-width: 2px;
+  .pb-burn-bar { height: 9px; border-radius: var(--radius-xs); min-width: 2px;
                  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
   .pb-burn-bar.inh { opacity: 0.38; }
   .pb-burn-note { font-size: var(--text-sm); margin-top: var(--space-2);
@@ -122,7 +122,7 @@
   /* Posture gauges */
   .pb-gauge { margin-bottom: var(--space-3); }
   .pb-gauge .lbl { display: flex; justify-content: space-between;
-                   font-size: var(--text-sm); margin-bottom: 4px;
+                   font-size: var(--text-sm); margin-bottom: var(--space-1);
                    font-variant-numeric: tabular-nums; }
   .pb-gauge .lbl .pct { font-weight: var(--font-semibold); }
   .pb-gauge .track { height: 8px; border-radius: var(--radius-pill);
@@ -130,7 +130,7 @@
   .pb-gauge .fill { height: 100%; border-radius: var(--radius-pill);
                     transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
   .pb-gauge .note { font-size: var(--text-xs); color: var(--muted);
-                    margin-top: 2px; }
+                    margin-top: var(--space-0-5); }
 
   /* Throughput */
   #pb-flow { width: 100%; height: auto; display: block; }
@@ -153,11 +153,11 @@
   .pb-bars button.row { width: 100%; border: 1px solid transparent;
                         background: transparent; color: var(--text);
                         border-radius: var(--radius-sm); cursor: pointer;
-                        padding: 4px 6px; text-align: start; }
+                        padding: var(--space-1) 6px; text-align: start; }
   .pb-bars button.row:hover { background: var(--row-hover); }
   .pb-bars button.row.on { border-color: var(--brand-border);
                            background: var(--brand-subtle); }
-  .pb-bars .track { height: 10px; border-radius: 4px;
+  .pb-bars .track { height: 10px; border-radius: var(--radius-xs);
                     background: var(--surface-sunken); overflow: hidden;
                     display: flex; }
   .pb-bars .seg { height: 100%;
@@ -180,7 +180,7 @@
   .pb-registers .pill { font-size: var(--text-xs); color: var(--muted);
                         border: 1px solid var(--hairline);
                         background: var(--surface-sunken);
-                        border-radius: var(--radius-pill); padding: 2px 10px;
+                        border-radius: var(--radius-pill); padding: var(--space-0-5) 10px;
                         font-variant-numeric: tabular-nums; }
 
   /* Drill-through */
@@ -354,6 +354,17 @@
     if (cls) e.className = cls;
     if (txt != null) e.textContent = txt;
     return e;
+  }
+  // Empty cards use the shared compact empty state (lightwork-ui.js): what
+  // fills the card, then where to go next — the filters, or the workspace.
+  function filtered() { return !!(F.range || F.type || F.residual); }
+  function empty(box, title, body, action) {
+    box.appendChild(window.mvEmpty ? window.mvEmpty(title, body, action, { compact: true })
+      : el('p', 'pb-empty', title + '. ' + body));
+  }
+  function emptySlice(box, what) {
+    if (filtered()) empty(box, 'Nothing in this slice', what + ' Clear a filter or choose a longer time range above to see more.');
+    else empty(box, 'No assessments yet', what + ' Start one in the Privacy workspace.');
   }
   function svg(tag, attrs) {
     var e = document.createElementNS(SVGNS, tag);
@@ -607,8 +618,7 @@
     box.textContent = '';
     var rs = rows();
     if (!rs.length) {
-      box.appendChild(el('p', 'pb-empty',
-        'No assessments in this slice yet.'));
+      emptySlice(box, 'Risk before and after safeguards appears here for each assessment.');
       return;
     }
     var inh = {}, res = {};
@@ -834,7 +844,7 @@
       return by[b].total - by[a].total;
     });
     if (!types.length) {
-      box.appendChild(el('p', 'pb-empty', 'No assessments in this slice.'));
+      emptySlice(box, 'Assessments by questionnaire appear here.');
       return;
     }
     var max = by[types[0]].total;
@@ -874,10 +884,8 @@
     box.textContent = '';
     var d = DATA.dsar || { open: 0, bands: {}, by_kind: {} };
     if (!d.open) {
-      box.appendChild(el('p', 'pb-empty',
-        DATA.records_enabled
-          ? 'No open subject requests — the queue is clear.'
-          : 'Privacy records are turned off. An administrator can turn them on in the Privacy workspace.'));
+      if (DATA.records_enabled) empty(box, 'No open subject requests', 'The queue is clear. Requests people make about their data appear here with the time left before each deadline.');
+      else empty(box, 'Privacy records are turned off', 'Subject requests appear here once records are on. An administrator can turn them on in the Privacy workspace.');
       return;
     }
     var kinds = Object.keys(d.by_kind).sort(function (a, b) {
@@ -917,8 +925,7 @@
     box.textContent = '';
     var t = DATA.transfers || { flows: [], total: 0, unsafeguarded: 0 };
     if (!t.total) {
-      box.appendChild(el('p', 'pb-empty',
-        'No cross-border transfers recorded yet.'));
+      empty(box, 'No cross-border transfers recorded yet', 'Transfers appear here once your processing record or a transfer assessment names where personal data goes. Add them in the Privacy workspace.');
       return;
     }
     var okN = t.total - t.unsafeguarded;
@@ -971,8 +978,7 @@
       return n + (tiers[t] || 0);
     }, 0);
     if (!total) {
-      box.appendChild(el('p', 'pb-empty',
-        'No AI systems registered against the AI Act yet.'));
+      empty(box, 'No AI systems registered yet', 'AI systems appear here by EU AI Act risk level. Add them under AI systems in the Privacy workspace.');
     } else {
       var max = Math.max.apply(null, TIERS.map(function (t) {
         return tiers[t] || 0;
@@ -1013,8 +1019,9 @@
       return d || (b.created_at || 0) - (a.created_at || 0);
     });
     if (!rs.length) {
-      box.appendChild(el('p', 'pb-empty',
-        'Nothing matches the current slice — clear a filter above.'));
+      if (filtered()) empty(box, 'Nothing matches the current slice', 'Clear a filter or choose a longer time range above to see more.');
+      else empty(box, 'No assessments yet', 'Assessments appear here, highest risk first. Start one in the Privacy workspace.',
+        { label: 'Open the Privacy workspace', href: '/privacy' });
       return;
     }
     var table = el('table');
@@ -1056,7 +1063,7 @@
       risk.appendChild(pair);
       tr.appendChild(risk);
       tr.appendChild(el('td', 'muted-sm', s.created_at
-        ? new Date(s.created_at * 1000).toLocaleDateString() : '—'));
+        ? (window.mvDateAbsolute ? window.mvDateAbsolute(s.created_at) : new Date(s.created_at * 1000).toLocaleDateString()) : '—'));
       var flags = [];
       if (s.review_due) flags.push(s.review_due_reason ? 'Review due: ' + s.review_due_reason : 'Review due');
       if (s.risk_accepted) flags.push('Risk accepted');
@@ -1083,9 +1090,7 @@
     box.textContent = '';
     var L = DATA.learning || {};
     if (!L.decided) {
-      box.appendChild(el('p', 'pb-empty',
-        'No decided assessments yet — the acceptance trend starts with the '
-        + 'first approval.'));
+      empty(box, 'No decided assessments yet', 'The acceptance trend appears here from the first approval. Decide an assessment in the Privacy workspace to start it.');
       return;
     }
     var hero = el('div');
@@ -1140,8 +1145,7 @@
       d.load_bearing + ' change ratings · ' + d.inert +
       ' never flag anything (could be removed)';
     if (!d.assessed) {
-      box.appendChild(el('p', 'pb-empty',
-        'No saved assessments of this framework yet.'));
+      empty(box, 'No saved assessments of this framework yet', 'Which questions change ratings appears here once assessments of this framework are saved. Choose another framework above.');
       return;
     }
     var table = el('table');
@@ -1187,13 +1191,12 @@
     }
   }
   function loadRoi(type) {
-    fetch('/api/v1/assess/question-roi?type=' + encodeURIComponent(type))
-      .then(function (r) { if (!r.ok) throw r; return r.json(); })
+    window.mvFetchJSON('/api/v1/assess/question-roi?type=' + encodeURIComponent(type))
       .then(function (d) { roiAll = false; renderRoiTable(d); })
       .catch(function (e) {
         $('pb-roi').textContent = '';
         $('pb-roi').appendChild(el('p', 'pb-empty',
-          window.mvErrorText ? window.mvErrorText(e, 'load the question results') : 'Could not load the question results.'));
+          window.mvErrorText ? window.mvErrorText(e, 'load the question results') : 'Could not load the question results. Refresh the page and try again.'));
       });
   }
   var roiInit = false;
@@ -1202,7 +1205,7 @@
     var types = (DATA.by_type || []).map(function (r) { return r.type; });
     if (!types.length) {
       $('pb-roi').textContent = '';
-      $('pb-roi').appendChild(el('p', 'pb-empty', 'No assessments yet. Start one in the Privacy workspace.'));
+      empty($('pb-roi'), 'No assessments yet', 'Which questions change ratings appears here once assessments are saved. Start one in the Privacy workspace.');
       return;
     }
     if (!roiInit) {
@@ -1236,20 +1239,17 @@
   }
   function stamp() {
     $('pb-stamp').textContent = 'Updated ' +
-      new Date().toLocaleTimeString() + ' · updates every minute';
+      (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString()) + ' · updates every minute';
   }
   function load() {
-    fetch(API).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    }).then(function (d) {
+    window.mvFetchJSON(API).then(function (d) {
       DATA = d;
       stamp();
       renderAll();
     }).catch(function (e) {
       $('pb-stamp').textContent = (window.mvErrorText
         ? window.mvErrorText(e, 'load the dashboard')
-        : 'Could not load the dashboard.') + ' Trying again in a minute.';
+        : 'Could not load the dashboard. Refresh the page and try again.') + ' Trying again in a minute.';
     });
   }
 
@@ -1279,7 +1279,8 @@
   setInterval(function () {
     if (!document.hidden) load();
   }, 60000);
-  load();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', load);
 })();
 </script>
 {% endblock %}

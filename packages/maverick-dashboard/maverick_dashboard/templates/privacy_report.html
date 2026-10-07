@@ -1,14 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Privacy Program Report · Lightwork{% endblock %}
+{% block title %}Privacy program report · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .rpt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); margin: var(--space-3) 0 var(--space-4); }
   .rpt-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
   .rpt-note { color: var(--muted); font-size: var(--text-sm); }
   @media print {
     .sidebar, .topbar, nav, .rpt-actions, #mv-sidebar, header { display: none !important; }
-    .panel { break-inside: avoid; border: 1px solid #ccc; }
-    body { background: #fff; color: #000; }
+    .panel { break-inside: avoid; border: 1px solid var(--print-border); }
+    body { background: var(--print-paper); color: var(--print-ink-strong); }
   }
 </style>
 {% set status_labels = {
@@ -23,20 +24,20 @@
 {% macro days(n) %}{{ n }} {{ 'day' if n == 1 else 'days' }}{% endmacro %}
 
   <h1 class="page-title">Privacy program report</h1>
-  <p class="page-subtitle">Every number below is counted from your own records: assessments,
+  <p class="page-subtitle">Every number below is counted from your own records. These are assessments,
     vendor data agreements (DPAs), AI systems, the record of processing (GDPR Article 30),
-    data-subject requests and breaches. Generated {{ r.generated }}.</p>
+    data-subject requests and breaches. Generated {{ r.generated_at | datetime('absolute') }}.</p>
   <div class="rpt-actions">
     <button class="btn btn--primary" id="rpt-print" type="button">Print or save as PDF</button>
     <a class="btn btn--ghost" href="/api/v1/privacy/report" download="privacy-program-report.json">Download data</a>
     <a class="btn btn--ghost" href="/privacy/board">Open the privacy dashboard</a>
-    <a class="btn btn--ghost" href="/privacy">Back to Privacy</a>
+    {{ back_link('/privacy', 'Privacy') }}
   </div>
 
   {% set nothing = (r.assessments.total + r.dsar.total + r.incidents.total + r.dpa.total + r.ai.total + r.ropa.total) == 0 %}
   {% if nothing %}
   <div class="panel">
-    <p style="margin-top: 0;"><strong>Nothing recorded yet.</strong></p>
+    <p style="margin-top: 0;"><strong>Nothing recorded yet.</strong> The report fills in as requests, assessments and incidents are recorded in Privacy.</p>
     <p class="muted">This report fills in as you start assessments, log data requests, review vendor agreements and record breaches in the Privacy workspace.</p>
     <a class="btn btn--primary" href="/privacy">Go to the Privacy workspace</a>
   </div>
@@ -74,10 +75,17 @@
   <div class="panel">
     <div class="rpt-grid">
       <div class="stat"><div class="num">{{ r.dsar.total }}</div><div class="label">Requests tracked</div></div>
-      <div class="stat"><div class="num">{{ r.dsar.open }}</div><div class="label">Open</div></div>
-      <div class="stat"><div class="num {{ 'pw-age-warn' if r.dsar.overdue }}">{{ r.dsar.overdue }}</div><div class="label">Past the 30-day deadline</div></div>
-      <div class="stat"><div class="num">{{ r.dsar.handled_on_time }} of {{ r.dsar.handled }}</div><div class="label">Answered on time</div></div>
+      <div class="stat"><div class="num">{{ r.dsar.open }}</div><div class="label">Still open</div></div>
+      <div class="stat"><div class="num {{ 'pw-age-warn' if r.dsar.overdue }}">{{ r.dsar.overdue }}</div><div class="label">Past their deadline</div></div>
+      <div class="stat"><div class="num">{{ r.dsar.handled_on_time }} of {{ r.dsar.handled }}</div><div class="label">Handled requests answered on time</div></div>
+      <div class="stat"><div class="num {{ 'pw-age-warn' if r.dsar.closed_without_response }}">{{ r.dsar.closed_without_response }}</div><div class="label">Closed without a recorded answer</div></div>
     </div>
+    <p class="rpt-note">A request counts as answered only when the answer is on record. That means recorded when it was closed, marked answered by a named person, or a completion or refusal notice that was actually sent.
+      A deletion request also needs what happened to the data, or the lawful reason for keeping it.
+      Still open includes requests waiting for email confirmation or for deletion.
+      This report uses recorded answers. It does not confirm delivery or deletion.
+      {% if r.dsar.answered_late %}{{ r.dsar.answered_late }} answered after the deadline.{% endif %}
+      {% if r.dsar.withdrawn %}{{ r.dsar.withdrawn }} withdrawn by the requester.{% endif %}</p>
     {% if r.dsar.by_kind %}
     <p class="rpt-note">By type:
       {% for k, v in r.dsar.by_kind.items() %}{{ kind_labels.get(k, k | humanize) }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}</p>

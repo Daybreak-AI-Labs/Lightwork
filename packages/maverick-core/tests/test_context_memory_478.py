@@ -107,13 +107,13 @@ def test_recall_prefers_recent_on_equal_similarity(tmp_path):
     # Force timestamps: rewrite with explicit ts so the test is deterministic.
     import json
     lines = [
-        json.dumps({
+        json.dumps({"owner": "", "goal_id": 0,
             "ts": now - 10_000, "goal_text": "fix the parser bug now",
             "failure_class": "agent_error", "failure_msg": "stale",
             "reflection": "old lesson", "tools_used": [],
             "channel": None, "user_id": None,
         }),
-        json.dumps({
+        json.dumps({"owner": "", "goal_id": 0,
             "ts": now, "goal_text": "fix the parser bug now please",
             "failure_class": "agent_error", "failure_msg": "fresh",
             "reflection": "new lesson", "tools_used": [],
@@ -133,16 +133,16 @@ def test_recall_dedupes_near_identical_lessons(tmp_path):
     import json
     now = time.time()
     rows = [
-        {"ts": now, "goal_text": "deploy the service to staging",
+        {"owner": "", "goal_id": 0, "ts": now, "goal_text": "deploy the service to staging",
          "failure_class": "agent_error", "failure_msg": "dup-a",
          "reflection": "x", "tools_used": [], "channel": None, "user_id": None},
-        {"ts": now - 1, "goal_text": "deploy the service to staging",
+        {"owner": "", "goal_id": 0, "ts": now - 1, "goal_text": "deploy the service to staging",
          "failure_class": "agent_error", "failure_msg": "dup-b",
          "reflection": "x", "tools_used": [], "channel": None, "user_id": None},
-        {"ts": now - 2, "goal_text": "deploy the service to staging area zone",
+        {"owner": "", "goal_id": 0, "ts": now - 2, "goal_text": "deploy the service to staging area zone",
          "failure_class": "agent_error", "failure_msg": "dup-c",
          "reflection": "x", "tools_used": [], "channel": None, "user_id": None},
-        {"ts": now - 3, "goal_text": "rotate database credentials safely",
+        {"owner": "", "goal_id": 0, "ts": now - 3, "goal_text": "rotate database credentials safely",
          "failure_class": "agent_error", "failure_msg": "distinct",
          "reflection": "x", "tools_used": [], "channel": None, "user_id": None},
     ]
@@ -171,7 +171,7 @@ def test_recall_scan_cap_streams_without_reading_all_lines(tmp_path, monkeypatch
             import json
             now = time.time()
             for i in range(5):
-                yield json.dumps({
+                yield json.dumps({"owner": "", "goal_id": 0,
                     "ts": now + i,
                     "goal_text": f"target goal {i}",
                     "failure_class": "agent_error",
@@ -203,14 +203,14 @@ def test_recall_scan_cap_limits_considered_lines(tmp_path):
     now = time.time()
     rows = []
     # Old, highly-relevant lesson buried beyond the scan cap.
-    rows.append({
+    rows.append({"owner": "", "goal_id": 0,
         "ts": now - 1000, "goal_text": "optimize the image resizer pipeline",
         "failure_class": "agent_error", "failure_msg": "buried",
         "reflection": "x", "tools_used": [], "channel": None, "user_id": None,
     })
     # Many irrelevant recent rows pushing the buried one out of the window.
     for i in range(5):
-        rows.append({
+        rows.append({"owner": "", "goal_id": 0,
             "ts": now - i, "goal_text": f"unrelated chore number {i}",
             "failure_class": "agent_error", "failure_msg": "noise",
             "reflection": "x", "tools_used": [], "channel": None,

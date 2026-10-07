@@ -17,38 +17,40 @@ Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-age
 - 🛡️ **Governed & contained by default.** RBAC, capability tokens, per-tool ACLs, consent gates, and a kill switch bound every agent action — and in Enterprise mode an **egress lock** blocks the agent's outbound network paths (LLM calls and the built-in HTTP tools/connectors), so a prompt-injected agent can't exfiltrate through them (pair it with a network-level egress firewall to also cover raw-shell egress). Agent Shield also screens every prompt, tool call, and output; detector strength depends on the configured backend (see [`docs/safety.md`](./docs/safety.md)).
 - 🧾 **Tamper-evident & audit-ready.** A signed, hash-chained, append-only audit log (`lightwork audit verify`) with SIEM export, encryption-at-rest, DSAR, and SOC2-aligned evidence — built to survive a security review.
 - 🔒 **Self-host & air-gap.** Runs entirely in your environment — laptop, VPC, Kubernetes, or a disconnected network with no required data egress. No hyperscaler dependency, no telemetry.
-- 📈 **A workforce that provably improves.** Closed-loop learning — offline experience consolidation ("dreaming"), per-department memory, skill distillation with safe forgetting — every learned artifact audited, snapshotted, and rollback-able. `lightwork hindsight` detects if learning ever regressed; `lightwork proof` reports deliverables, cost avoided, ROI, and the improvement curve.
-- 🔬 **Causal learning, not vibes.** A default-on **Cognitive Data Engine** (`lightwork flywheel`) triages production failures by their *causal* impact on real outcomes — stratified ATE with confidence intervals, placebo refutation, and a trustworthiness gate — then mines self-retiring **guardrails**, consolidates **habits**, and lets an **Operations Scientist** prove a better process in a world-model before spending a real experiment. The **Consequence Engine** (`lightwork record-outcome`) grounds all of it in what *actually* happened — an invoice paid, a ticket reopened — so the workforce learns from reality, not a model grading its own work. Every loop remains independently stoppable.
-- 🏢 **2,031 prebuilt specialists across 54 business suites.** Customer support, finance, legal, HR, ops, GTM, marketing, procurement, data, security ops, tax preparation for CPA firms, and 30+ industry verticals (healthcare, insurance, banking, gov contracting, maritime, mining, semiconductors, chemicals, water, renewables, …) — every pack a real agent with a least-privilege tool envelope and risk ceiling, an editable workflow playbook, a declared deliverable, a right-sized reasoning tier, and hard prohibited-use refusals (EU AI Act Art-5 for HR, safety-critical for the physical suites). Prove it: `lightwork domains-lint` (0 errors, 0 warnings), `domains-audit` (0 drafting agents can reach a state-mutator), `domains-eval` (behavioral golden cases). The orchestrator finds the right one via query-based routing. Backed by a library of **514 reusable, validator-compliant skills** (Markdown with YAML front matter, `skills_builtin/`) that any pack can activate by trigger, and an **agent factory** that equips every freshly-approved pack with the skills and tools its workflow needs *at birth* — never widening the pack's already-clamped envelope.
+- 📈 **Reviewable improvement.** Lightwork captures experience, proposes skills and workflow changes, and records human review, activation, and rollback. Hindsight and proof reports help inspect outcomes; they do not by themselves establish customer savings or that a change caused improvement.
+- 🔬 **Outcome analysis.** The flywheel and Consequence Engine can connect selected work to reported downstream outcomes and propose changes for evaluation. Causal estimates and simulated results are exploratory until their data, assumptions, and independent comparisons have been checked. Each learning loop can be stopped independently.
+- 🏢 **2,031 prebuilt specialists across business suites.** Customer support, finance, legal, HR, operations, marketing, procurement, data, security, and industry packs each declare a workflow and permission envelope. The Agent Factory shows which specialists have their required actions available and what setup remains. Availability of a live connection and permission to use it are checked when work starts.
 - 🏭 **An agent factory that builds agents — and itself.** Describe a job, or demonstrate it: `lightwork learn-demo` consumes a reviewed action transcript and synthesizes the agent that does it through the same intake pipeline — identical envelope clamp and persona shield-scan, with a human review gate always appended. Default-on `lightwork factory-learn` closes the loop onto generation quality, mining provisioning/approval gaps into proposer guidance that improves future pack generation. It remains independently stoppable and never widens any pack's envelope.
 - 👁️ **Ekko work discovery.** An independently opt-in, local-first observer learns the structure of repeated work from allowlisted application transitions or explicitly guided semantic actions — never keystrokes, clipboard, screenshots, window titles, URLs, or document content — and turns the evidence into reviewable first-pass Flow and Agent Factory drafts. Capture is visibly start/pause/stop controlled, tenant/owner/device scoped, encrypted at rest, time-bounded, and cannot save, schedule, activate, or run its own recommendations. See [`docs/ekko-work-discovery.md`](./docs/ekko-work-discovery.md).
 - 📚 **Primary-source data grounding.** Every analyst pack is auto-granted (by suite) a set of 37 read-only, GET-only public-data connectors — SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending, SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates, NWS/NOAA weather, EPA, Climatiq, and more — so the workforce grounds its work in authoritative primary sources, not model recall. On by default (low-risk, deferred), with a kill switch (`[workforce] data_grounding = false` / `LIGHTWORK_WORKFORCE_DATA_GROUNDING=off`) and an installer wizard step. These sit alongside 2,877 write-capable long-tail enterprise REST/GraphQL connectors and dedicated modules (Salesforce, HubSpot, Stripe, ServiceNow, Snowflake, …).
 - 🧪 **Governance proven across the whole roster.** A roster-wide invariant test suite verifies six governance invariants across all 2,031 packs — tool-reachability (no drafting agent can reach a state-mutating tool), the autonomy dial (onboarding and high-risk actions are never autonomous), capability attenuation (a spawned child can never exceed its parent grant), compartment isolation (a quarantine seal never bleeds across suites), unstrippable hard refusals, and never-silently-exceeded budget caps — each fault-injected with a non-vacuous control across the full roster, plus hostile-argument fuzzing of every connector and tool.
-- 🧠 **Long-horizon multi-agent depth.** A recursive orchestrator spawns specialist sub-agents that work for hours under hard dollar / wall-clock / tool-call caps — frontier-agent depth, on the models *you* choose, with the governance and learning layers no coding-agent runtime ships.
-- 🔀 **Visual workflow automation that learns (better than Power Automate).** A deterministic flow engine — branch / switch / foreach / while / parallel / approval / delay / scope (try-catch) / sub-flow / setvar — where any step is *either* a fixed tool call *or* a full agentic goal, drawn on a visual designer or drafted from plain English by a chat copilot. Fires from cron (timezone/DST-aware), webhook, email, form, file, RSS, or polled/OAuth'd sources; pauses for human approval; retries with backoff; caps spend and concurrency; pulls credentials with `{{secret('NAME')}}` from the sealed vault; and takes typed, validated manual-run inputs. The differentiator: a **self-rewrite loop** grounds each node's real outcomes and *hardens* a reliably-succeeding agent step into a cheap deterministic action (inferring the very tool it kept calling) — or *softens* a flaky fixed step back to an agent — with measured before/after impact, versioned rollback, and auto-revert. OFF by default (`[flows] enable`).
+- 🧠 **Long-horizon multi-agent depth.** A recursive orchestrator spawns specialist sub-agents on the models *you* choose. Administrators can set per-task dollar, time, and tool-call limits in Settings; omitted limits are not automatic caps. [Task limits and spend accounting](docs/task-limits.md) explains the controls.
+- 🔀 **Visual workflow automation.** A flow engine supports branches, loops, parallel work, approvals, delays, sub-flows, fixed tool calls, and agentic goals in a visual designer. It can propose changes from observed runs and automatically revert a regression when enabled. Hardening an agent step into a fixed action remains a review-only suggestion until the required parameters and effects can be verified; it is not applied automatically. Flows are off by default and can be enabled in Settings.
 
 > **Proprietary software — not open source.** Lightwork is enterprise software; use, redistribution, and derivative works require a license. [Contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for evaluation or commercial access. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md).
 
+For a customer installation, obtain the signed binary for your operating
+system from an [asset-bearing GitHub Release](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+Verify the exact tag and attached signature, then open the local dashboard to
+complete setup in Lightwork. If the release has no binary for your platform,
+request a customer package. Repository access is an engineering arrangement:
+cloning the repository also copies internal research, audit and patent files.
+
+After connecting an AI service, a first task can be run in Chat or from the
+terminal without file or program access:
+
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init                        # four questions, safe defaults
-lightwork start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
+lightwork start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
 ```
 
-> A one-line `pipx install 'maverick-agent[installer]'` is planned after the
-> complete eight-package cohort is published. Until the package or an
-> asset-bearing GitHub Release exists, use a reviewed source commit as shown
-> above. The [Releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases)
-> is the authoritative source for downloadable artifacts.
+If Docker or Podman was not running at setup, file changes and program
+execution remain off. Start a container service, then use **Permissions → Where
+work runs → Allow file work** in Lightwork before asking it to create files or
+run programs. `lightwork doctor` shows the current limitation.
 
 ## Status
 
-Alpha and installable from a reviewed source commit today. Release automation
+Alpha with an engineering source-install path. Release automation
 builds an eight-package Python cohort, container, single-file binaries, four
 standalone source archives, and evidence artifacts. A downloadable artifact is
 available to users only after it appears on the
@@ -60,13 +62,13 @@ publishers are verified. See [`docs/getting-started.md`](./docs/getting-started.
 
 | Component | v0.1 (today) | Planned (v0.2+) |
 |---|---|---|
-| Install | Reviewed source commit; bootstrap/native assets when present on a GitHub Release | pipx after the complete cohort is published; code-signed bundles + auto-update |
+| Install | Signed release binary when the operating-system asset is published; reviewed source checkout for internal engineering | Complete published package cohort; code-signed bundles + auto-update |
 | GUI | Local web dashboard (`lightwork dashboard`) + chat at `/chat`; authenticated source-bootstrap shell is an internal engineering artifact | Self-contained, signed native installer + iOS/Android |
 | Sandbox | Local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, SSH, Modal | Firecracker microVM (scaffold — exec path does not yet mount the workspace), Daytona |
 | AI providers | Anthropic (full), OpenAI, OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (per-role routable) | Cohere |
 | Channels | 16 wired into `lightwork serve` — Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon, Voice, IRC, Threads, RCS; WhatsApp (Cloud API + Twilio)/SMS (need Twilio), iMessage (macOS-only) | Glasses (adapter is a stub), push notifications |
 | Safety | Shield wired at 3 chokepoints; agent-shield SDK if installed, else a built-in rule set | Agent-shield full ~115 patterns |
-| Distribution | Release workflow for GHCR image, binaries, four signed source archives, checksums, and SBOMs; reviewed source install works today | PyPI (8-package lockstep cohort, gated pending namespace verification); self-contained code-signed installer; Homebrew tap |
+| Distribution | Release workflow for GHCR image, binaries, four reduced demo source archives, checksums, and SBOMs | PyPI (8-package lockstep cohort, gated pending namespace verification); self-contained code-signed installer; Homebrew tap |
 | Tests | Ruff, security gates, posture ratchet, and pytest on Python 3.10/3.11/3.12 | Broader deployment and browser journey coverage |
 
 **Full list of shipped features → [`docs/FEATURES.md`](./docs/FEATURES.md).** The forward backlog (what isn't built yet) lives in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
@@ -86,57 +88,22 @@ system; a tag alone is not a downloadable build:
 | **Linux** | `maverick-linux-x86_64` |
 
 Verify the release tag, checksums, and attached Sigstore material before
-running a binary. The separate Tauri workflow currently produces an unsigned
+running a binary; then run its `dashboard` command and open the local address it
+prints. The dashboard guides first-owner setup. The separate Tauri workflow
+currently produces an unsigned
 authenticated source-bootstrap artifact for authorized repository users. It
 clones readable source from a pinned private commit and is not advertised as a
 self-contained product installer.
 
-### Terminal install with pipx (coming with the first tagged release)
+### Terminal install with pipx (planned)
 
-Once the packages are published to PyPI on the first tagged release, a single pipx command will install everything. **This does not work yet** — the packages aren't on the public index (see [Status](#status)); until then use the [From source](#from-source) steps above. The published command will be:
+The complete eight-package cohort has not been published to PyPI. Do not use
+public package names as an installation substitute. The signed release binary
+is the customer download path when an asset exists for your operating system.
 
-```bash
-pipx install 'maverick-agent[installer]'
-lightwork init
-```
-
-For source-based desktop bootstrapping, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit you trust, verify it, and set `MAVERICK_REF` to that lowercase, full 40-character commit SHA. The bootstrap scripts reject missing and mutable refs and never fall back to the public index.
-
-The PyPI distribution name is `maverick-agent` — Lightwork's original codename, kept because the `maverick` name is squatted on PyPI. The CLI it installs answers to **both `lightwork` and `maverick`**; every `MAVERICK_*` environment variable can equally be spelled `LIGHTWORK_*`. The `[installer]` extra pulls the wizard into the same pipx environment so `lightwork init` resolves.
-
-If you already installed the kernel without the extra, inject the wizard:
-
-From the reviewed source checkout, inject the local path so pipx never resolves
-a first-party name from a public index:
-
-```bash
-pipx inject maverick-agent ./apps/installer-cli
-```
-
-### From source
-
-Use Python 3.10–3.12. The manifest installer resolves all eight local packages
-together against the reviewed constraints. The examples below use a POSIX shell;
-[Getting started](docs/getting-started.md#install) includes PowerShell commands.
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-
-lightwork init                           # interactive wizard
-lightwork start "Plan a 2-week trip"      # one-shot goal
-lightwork chat                            # interactive REPL
-lightwork dashboard                       # web UI at http://127.0.0.1:8765
-lightwork serve                           # channel server (Telegram/Discord/...)
-lightwork mcp                             # MCP server (Claude Code / Cursor)
-lightwork doctor                          # health check
-lightwork version                         # installed package versions
-```
+The intended PyPI distribution name is `maverick-agent`. A complete cohort
+publication must precede any pipx customer guidance. For maintainers with
+existing repository access, see the [engineering source-install procedure](docs/internal/source-install.md).
 
 ## CLI reference
 
@@ -157,7 +124,7 @@ The CLI installs under two interchangeable names — `lightwork` (shown below) a
 | `lightwork schedule goal / add / list / rm` | Schedule recurring autonomous goals via cron |
 | `lightwork worker` | Drain the scheduled-job queue (runs the recurring tasks) |
 | `lightwork fact / facts` | Get / set persistent facts |
-| `lightwork skills` | List installed + distilled skills |
+| `lightwork skills` | List built-in and installed skills available for recall; review distilled suggestions on the Skills page |
 | `lightwork skill install / remove / info` | Manage the skill marketplace |
 | `lightwork template list / show` | Goal templates with `{{ var }}` substitution |
 | `lightwork learn-demo FILE [--name --no-llm --source --industry --yes]` | Build an agent from a recorded demonstration (parse → induce → approve → save → provision) |
@@ -168,7 +135,7 @@ The CLI installs under two interchangeable names — `lightwork` (shown below) a
 | `lightwork budget` | Total + per-run cost history |
 | `lightwork spend [--json --tag-field --top]` | FinOps export: total + per-goal + per-tag run cost (CLI face of `/spend`) |
 | `lightwork safety [--json]` | Safety posture: shield / sandbox backend / egress policy (assert in CI) |
-| `lightwork flywheel` | Default-on Cognitive Data Engine: causal failure triage → guardrails → habits |
+| `lightwork flywheel` | Review outcome patterns, candidate guardrails, and learned habits; observed patterns do not prove causation |
 | `lightwork record-outcome GOAL EP VALUE` | Feed a real downstream outcome to a past episode (Consequence Engine) |
 | `lightwork codebook / codec-learn` | Learn the swarm's auditable coordination shorthand from real messages |
 | `lightwork codec-probe` | Measure the codec's real token (not just byte) savings with the target tokenizer |

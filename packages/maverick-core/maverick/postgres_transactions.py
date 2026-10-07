@@ -40,6 +40,17 @@ def validate_pool_settings(size: object, timeout: object) -> tuple[int, float]:
     return size, seconds
 
 
+def validate_pool_min_size(min_size: object, size: int) -> int:
+    """Connections kept open while idle: an integer from 0 to ``size``.
+
+    Default 1: with ``min_size=0`` the first request after an idle period paid
+    the TCP + TLS + auth connect on the request path.
+    """
+    if isinstance(min_size, bool) or not isinstance(min_size, int) or min_size < 0:
+        raise ValueError("governed-record pool_min_size must be an integer from 0 to pool_size")
+    return min(min_size, size)
+
+
 def _reset_connection(connection: Any) -> None:
     """Remove any accidental session tenant binding before another lease."""
     # SET LOCAL in the authority transaction is the primary boundary. Reset the
@@ -49,13 +60,15 @@ def _reset_connection(connection: Any) -> None:
     connection.commit()
 
 
-def _shared_pool(dsn: str, kwargs: dict, size: int, timeout: float, io_timeout: float) -> _PoolEntry:
+def _shared_pool(dsn: str, kwargs: dict, size: int, timeout: float, io_timeout: float,
+                 min_size: int = 0) -> _PoolEntry:
     from psycopg_pool import ConnectionPool
 
     from .postgres_io import BoundedConnection
 
     # No plaintext credential is placed in cache keys or pool diagnostic names.
-    key = hashlib.sha256(json.dumps([dsn, kwargs, size, timeout, io_timeout], sort_keys=True).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([dsn, kwargs, size, timeout, io_timeout, min_size],
+                                    sort_keys=True).encode()).hexdigest()
     with _LOCK:
         if _CLOSED:
             raise RuntimeError("Postgres connection admission is closed")
@@ -64,7 +77,7 @@ def _shared_pool(dsn: str, kwargs: dict, size: int, timeout: float, io_timeout: 
             if len(_POOLS) >= _MAX_POOLS:
                 raise RuntimeError("Postgres shared pool identity capacity reached")
             entry = _PoolEntry(ConnectionPool(
-                dsn, min_size=0, max_size=size, max_waiting=64,
+                dsn, min_size=min_size, max_size=size, max_waiting=64,
                 timeout=timeout, reconnect_timeout=timeout,
                 connection_class=BoundedConnection,
                 kwargs={**kwargs, "io_timeout_seconds": io_timeout}, reset=_reset_connection,
@@ -84,9 +97,11 @@ class PostgresTransactions:
 
     def __init__(self, dsn: str, *, pool_size: int = 0,
                  pool_timeout_seconds: float = 5,
+                 pool_min_size: int = 1,
                  connect: Callable[..., Any] | None = None) -> None:
         self._dsn = dsn
         self._size, self._timeout = validate_pool_settings(pool_size, pool_timeout_seconds)
+        self._min_size = validate_pool_min_size(pool_min_size, self._size)
         if connect is not None and self._size:
             raise ValueError("injected Postgres connectors cannot join a shared pool")
         self._connect_override = connect
@@ -122,7 +137,8 @@ class PostgresTransactions:
                     connection.close()
             return
         kwargs = self._connection_options()
-        entry = _shared_pool(self._dsn, kwargs, self._size, self._timeout, self._io_timeout)
+        entry = _shared_pool(self._dsn, kwargs, self._size, self._timeout, self._io_timeout,
+                             self._min_size)
         with _LOCK:
             if _CLOSED:
                 raise RuntimeError("Postgres connection admission is closed")

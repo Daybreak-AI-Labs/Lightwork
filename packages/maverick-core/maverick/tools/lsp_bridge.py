@@ -35,7 +35,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..approval_cards import ApprovalCardError
+from ..safety import ConsentDenied, consume_operation_consent
 from . import Tool, scrub_child_env
+from .execution_consent import execution_target, file_version, request_execution_consent
 
 # Default servers per language; operators may override via [lsp.servers] {lang = [argv...]}.
 # Per-call executable overrides are intentionally forbidden: tool arguments are
@@ -333,6 +336,10 @@ def _run_query(args: dict[str, Any]) -> str:
         return path
     if not path.exists():
         return f"ERROR: no such file: {path}"
+    try:
+        source_text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"ERROR: cannot read file: {exc}"
 
     language = str(args.get("language") or _EXT_LANG.get(path.suffix, "")).lower()
     if not language:
@@ -348,8 +355,40 @@ def _run_query(args: dict[str, Any]) -> str:
     if not root.is_dir():
         return f"ERROR: root is not a directory: {root}"
     timeout = float(args.get("timeout_s") or _TIMEOUT_S)
+    if op not in {"symbols", "definition", "references", "hover", "diagnostics"}:
+        return f"ERROR: unknown op {op!r}"
+    if op in {"definition", "references", "hover"} and (
+        "line" not in args or "character" not in args
+    ):
+        return f"ERROR: {op} needs 'line' and 'character' (0-based)"
 
-    session = _LspSession(argv, root, deadline_s=timeout)
+    parameters = {"args": args, "argv": argv, "root": str(root),
+                  "file": str(path), "timeout_seconds": timeout}
+    try:
+        permit = request_execution_consent(
+            "lsp_bridge",
+            target_provider=lambda: {**execution_target(None), "workdir": str(root),
+                                     "server": shutil.which(argv[0])},
+            parameters=parameters,
+            detail=f"Start the {language} language server for one {op} query.",
+            effect="Starts an operator-configured language-server process on the host.",
+            review_items=[f"Executable: {argv[0]}", f"File: {path}",
+                          "Complete server arguments are included in the exact-operation digest."],
+            timeout=timeout,
+            parameters_provider=lambda: {"args": args, "argv": _server_for(language),
+                                         "root": str(root), "file": str(path),
+                                         "timeout_seconds": timeout},
+            input_versions_provider=lambda: file_version(path),
+        )
+    except ConsentDenied:
+        return "ERROR: language-server execution was not approved; no process was started"
+    except (ApprovalCardError, OSError):
+        return "ERROR: language server, file, or approval authority changed; review it again"
+    try:
+        with consume_operation_consent(permit):
+            session = _LspSession(argv, root, deadline_s=timeout)
+    except (ApprovalCardError, OSError):
+        return "ERROR: language server, file, or approval authority changed; review it again"
     try:
         session.request("initialize", {
             "processId": os.getpid(),
@@ -357,11 +396,10 @@ def _run_query(args: dict[str, Any]) -> str:
             "capabilities": {},
         })
         session.notify("initialized", {})
-        text = path.read_text(encoding="utf-8", errors="replace")
         session.notify("textDocument/didOpen", {
             "textDocument": {
                 "uri": _uri(path), "languageId": language,
-                "version": 1, "text": text,
+                "version": 1, "text": source_text,
             },
         })
 

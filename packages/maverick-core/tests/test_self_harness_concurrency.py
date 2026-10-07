@@ -37,7 +37,7 @@ def _enabled(monkeypatch):
 
 def _promote(model, line_key, store):
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False, ledger=si.PromotionLedger())
-    recs = [{"model_id": model, "failure_class": line_key,
+    recs = [{"owner": "", "goal_id": 0, "model_id": model, "failure_class": line_key,
              "goal_text": f"task run {i}", "failure_msg": line_key} for i in range(3)]
     sh.run_self_harness(
         recs, model_id=model, min_support=3, held_in=["a", "b"],

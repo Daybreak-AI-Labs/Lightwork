@@ -14,7 +14,7 @@ import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from maverick import config, connections, world_model
+from maverick import config, connections, templates, world_model
 from maverick import connection_oauth as oauth
 from maverick.paths import tenant_scope
 
@@ -51,7 +51,7 @@ def customer(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth, "_jira_sites", lambda *a: [{
         "id": CLOUD, "url": SITE, "scopes": oauth.PROFILES["jira-cloud"]["scopes"],
     }])
-    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token: {
+    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token, **_identity_inputs: {
         "provider": provider,
         "subject": "fixture-account",
         "display_name": "Fixture Account",
@@ -179,7 +179,10 @@ def test_authenticated_disconnect_requires_current_reviewed_revision(customer, r
     assert denied.status_code == (422 if review == "missing" else 409), denied.text
     with tenant_scope(tenant="workspace-a"):
         assert connections.get_connection("reviewed-account")["revision"] == current["revision"]
-    deleted = client.delete(path, params={"expected_revision": current["revision"]})
+    reviewed = client.get(path + "/impact")
+    assert reviewed.status_code == 200, reviewed.text
+    impact = reviewed.json()
+    deleted = client.delete(path, params={"expected_revision": current["revision"], "context": impact["context"], "impact_version": impact["impact_version"]})
     assert deleted.status_code == 200, deleted.text
     with tenant_scope(tenant="workspace-a"):
         assert connections.get_connection("reviewed-account") is None
@@ -291,7 +294,10 @@ def test_real_approved_vendor_action_rechecks_reconnected_or_revoked_account(cus
         assert replacement.status_code == 200, replacement.text
         assert replacement.json()["connection"]["revision"] != credential["revision"]
     elif change == "revoke":
-        revoked = client.delete("/api/v1/connections/reviewed-account", params={"expected_revision": credential["revision"]})
+        reviewed = client.get("/api/v1/connections/reviewed-account/impact")
+        assert reviewed.status_code == 200, reviewed.text
+        impact = reviewed.json()
+        revoked = client.delete("/api/v1/connections/reviewed-account", params={"expected_revision": credential["revision"], "context": impact["context"], "impact_version": impact["impact_version"]})
         assert revoked.status_code == 200, revoked.text
     response = client.post(f"{CASES}/{row['id']}/execute", json={"confirm": True, "expected_revision": row["revision"]})
     if change == "unchanged":
@@ -320,3 +326,129 @@ def test_real_approved_vendor_action_rechecks_reconnected_or_revoked_account(cus
     assert current.json()["operation"] is None
     assert current.json()["operation_history"][-1]["state"] == "invalidated"
     assert requests == []
+
+
+def _prepared_template(customer, monkeypatch, tmp_path):
+    client, _ = customer
+    monkeypatch.setattr(templates, "USER_TEMPLATES", tmp_path / "templates")
+    with tenant_scope(tenant="workspace-a"):
+        connections.set_connection("my-slack", connector="slack_api", owner=OWNER,
+                                   base_url="https://slack.com", token="synthetic-token")
+        connections.set_connection("other-slack", connector="slack_api", owner="user:other", access="tenant",
+                                   base_url="https://slack.com", token="not-visible")
+        templates.save_user_template("account-task", title="Review", body="Review {{account}}", owner=OWNER,
+            parameter_schema={"version": 1, "fields": {"account": {"type": "connection", "required": True}}})
+    response = client.get("/api/v1/templates/connection-choices")
+    assert response.status_code == 200, response.text
+    choices = response.json()["choices"]
+    assert [row["name"] for row in choices] == ["my-slack"]
+    preview = client.post("/api/v1/templates/account-task/prepare", json={"params": {"account": choices[0]["value"]}})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["description"] == "Review my-slack (slack_api)"
+    assert preview.json()["started"] is False
+    return client, preview.json(), choices[0]["value"]
+
+
+def test_preview_and_chat_preserve_exact_reference_in_atomic_admission(customer, monkeypatch, tmp_path):
+    from maverick_dashboard import app as dashboard
+    client, preview, _ = _prepared_template(customer, monkeypatch, tmp_path)
+    # Only the runner is replaced: cookie authority, multipart admission and encrypted stores are native.
+    monkeypatch.setattr(dashboard, "require_provider_or_400", lambda: None)
+    dispatched = []
+    monkeypatch.setattr(dashboard, "_dispatch_goal", lambda request, bg, goal_id, **kw: dispatched.append(goal_id))
+    response = client.post("/chat/send", data={"title": preview["title"], "description": preview["description"],
+        "connection_references": json.dumps(preview["connection_references"]), "submission_key": "chosen-account-chat"})
+    assert response.status_code == 303, response.text
+    assert len(dispatched) == 1
+    with tenant_scope(tenant="workspace-a"):
+        world = world_model.open_world()
+        try:
+            assert json.loads(world.goal_connection_selection(dispatched[0]))["references"] == preview["connection_references"]
+        finally:
+            world_model.close_world_if_owned(world)
+    # Same request id cannot be reused with its binding stripped.
+    changed = client.post("/chat/send", data={"title": preview["title"], "description": preview["description"],
+        "connection_references": "[]", "submission_key": "chosen-account-chat"})
+    assert changed.status_code == 409 and len(dispatched) == 1
+
+
+def test_rotation_rejects_prepared_selection_before_chat_admission(customer, monkeypatch, tmp_path):
+    from maverick_dashboard import app as dashboard
+    client, preview, token = _prepared_template(customer, monkeypatch, tmp_path)
+    monkeypatch.setattr(dashboard, "require_provider_or_400", lambda: None)
+    with tenant_scope(tenant="workspace-a"):
+        row = connections.get_connection("my-slack")
+        connections.set_connection("my-slack", connector="slack_api", owner=OWNER,
+            token="rotated-token", expected_revision=row["revision"])
+    assert client.post("/api/v1/templates/account-task/prepare", json={"params": {"account": token}}).status_code == 400
+    response = client.post("/chat/send", data={"title": "Review", "description": "Same reviewed task",
+        "connection_references": json.dumps(preview["connection_references"])})
+    assert response.status_code == 409, response.text
+    assert "select your current account again" in response.text
+
+
+def test_picker_static_asset_and_all_entry_points(customer, monkeypatch, tmp_path):
+    client, _, _ = _prepared_template(customer, monkeypatch, tmp_path)
+    asset = client.get("/static/lightwork-template-connections.js")
+    assert asset.status_code == 200 and "javascript" in asset.headers["content-type"]
+    assert "data-connected-account" in client.get("/templates").text
+    assert "lightwork-template-connections.js" in client.get("/workflow-builder?edit=account-task").text
+    assert 'name="connection_references"' in client.get("/chat").text
+
+
+def test_schedule_admission_pins_reviewed_account_and_rotation_cannot_reinterpret(customer, monkeypatch, tmp_path):
+    from maverick.job_queue import JobQueue
+    client, preview, token = _prepared_template(customer, monkeypatch, tmp_path)
+    version_route = "/api/v1/workflows/account-task"
+    history = client.get(version_route + "/versions")
+    assert history.status_code == 200, history.text
+    review = history.json()
+    current = next(row["version"] for row in review["versions"] if row["current"])
+    checked = client.post(version_route + "/fixtures", json={"context": review["context"],
+        "expected_version": current, "inputs": {"account": token}, "expected_contains": "my-slack (slack_api)"})
+    assert checked.status_code == 200 and checked.json()["passed"], checked.text
+    published = client.post(version_route + "/publish", json={"context": review["context"],
+        "expected_version": current, "impact_version": review["impact_version"], "label": "Reviewed", "confirm": True})
+    assert published.status_code == 200, published.text
+    created = client.post("/api/v1/schedules", json={"cron": "0 9 * * 1", "template": "account-task",
+        "params": {"account": token}, "tz": "UTC"})
+    assert created.status_code == 201, created.text
+    with tenant_scope(tenant="workspace-a"):
+        job = JobQueue().get(created.json()["id"])
+        assert job.payload["connection_references"] == preview["connection_references"]
+        assert job.payload["owner"] == OWNER
+        current = connections.get_connection("my-slack")
+        connections.set_connection("my-slack", connector="slack_api", owner=OWNER,
+            token="replacement-token", expected_revision=current["revision"])
+        assert JobQueue().get(job.id).payload["connection_references"] == preview["connection_references"]
+    denied = client.post("/api/v1/schedules", json={"cron": "0 9 * * 1", "template": "account-task",
+        "params": {"account": token}})
+    assert denied.status_code == 400, denied.text
+
+
+def test_copilot_account_review_uses_native_authority_and_refuses_stale_selection(customer, monkeypatch, tmp_path):
+    client, _, token = _prepared_template(customer, monkeypatch, tmp_path)
+    # Supply feature policy only; real session, tenant membership and native selection checks remain active.
+    previous_global, previous_features = config.load_global_config, config.get_features
+    monkeypatch.setattr(config, "load_global_config", lambda: {**previous_global(),
+        "features": {**previous_global().get("features", {}), "copilot_operations": True},
+        "copilot": {"operation_families": ["connections"]}})
+    monkeypatch.setattr(config, "get_features", lambda: {**previous_features(), "copilot_operations": True})
+    base = "/api/v1/copilot/product-operations"
+    response = client.post(base + "/catalog", json={"page": "/templates"})
+    assert response.status_code == 200, response.text
+    catalog = response.json()
+    operation = next(row for row in catalog["operations"] if row["id"] == "templates.accounts")
+    assert operation["available"] and not operation["confirmation_required"]
+    body = {"page": "/templates", "operation": operation["id"], "context": catalog["context"],
+            "revision": operation["revision"], "arguments": {"account": token}}
+    reviewed = client.post(base + "/prepare", json=body)
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["read_only"] is True
+    assert reviewed.json()["details"]["executed"] is False
+    with tenant_scope(tenant="workspace-a"):
+        row = connections.get_connection("my-slack")
+        connections.set_connection("my-slack", connector="slack_api", owner=OWNER,
+            token="replacement-token", expected_revision=row["revision"])
+    refused = client.post(base + "/prepare", json=body)
+    assert refused.status_code == 409, refused.text

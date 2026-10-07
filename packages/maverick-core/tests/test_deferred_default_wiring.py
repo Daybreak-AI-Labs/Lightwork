@@ -57,9 +57,10 @@ def test_default_offer_is_lean_but_execution_unrestricted(ctx, monkeypatch):
     offered = {t["name"] for t in agent.tools.to_anthropic()}
     registered = {t.name for t in agent.tools.all()}
     # The long tail is registered (executable) but not offered. Ratchet: 233
-    # at introduction (was 601 on the wire) -- lower it as more of the
-    # catalog earns deferral, never raise it.
-    assert len(offered) < 250, len(offered)
+    # at introduction (was 601 on the wire), 37 once [tools] exposure = "core"
+    # made the catalog role-aware -- lower it as more of the catalog earns
+    # deferral, never raise it.
+    assert len(offered) <= 45, len(offered)
     assert len(registered) > 500, len(registered)
     assert "find_tools" in offered
     # Kernel tools the swarm depends on stay visible.
@@ -85,4 +86,7 @@ def test_knob_off_restores_identity_catalog(ctx, monkeypatch):
     agent = _agent(ctx)
     offered = {t["name"] for t in agent.tools.to_anthropic()}
     assert "acumatica" in offered
-    assert "find_tools" not in offered
+    # Knob off = the identity catalog: everything registered is described.
+    # find_tools stays registered (a provider's tool ceiling may still truncate
+    # the catalog, and overflow must remain discoverable), but nothing hides.
+    assert offered == {t.name for t in agent.tools.all()}

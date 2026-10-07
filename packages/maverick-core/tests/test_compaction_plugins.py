@@ -120,7 +120,7 @@ def test_hybrid_flag_changes_strategy_selection(monkeypatch, tmp_path):
     for s in STRATEGIES:
         for _ in range(3):
             picker.record(msgs, s, success=(s == "retrieval"))
-    monkeypatch.setattr(cp, "_HYBRID_PICKER", picker)
+    monkeypatch.setattr(cp, "_hybrid_picker", lambda: picker)
 
     # Flag off -> built-in path; the spy strategy is never consulted.
     monkeypatch.delenv("MAVERICK_COMPACTION_HYBRID", raising=False)
@@ -144,7 +144,7 @@ def test_hybrid_records_outcomes_into_ledger(monkeypatch, tmp_path):
     monkeypatch.setattr("maverick.config.load_config", dict)
     picker = HybridPicker(epsilon=0.0, rng=Random(0),
                           ledger_path=tmp_path / "ledger.json")
-    monkeypatch.setattr(cp, "_HYBRID_PICKER", picker)
+    monkeypatch.setattr(cp, "_hybrid_picker", lambda: picker)
 
     msgs = _hybrid_window()  # 48k chars of stale tool output -> shrinkable
     cp.compact_with(msgs)
@@ -164,8 +164,8 @@ def test_hybrid_skips_recording_tiny_windows(monkeypatch, tmp_path):
     monkeypatch.setattr("maverick.config.load_config", dict)
     ledger = tmp_path / "ledger.json"
     monkeypatch.setattr(
-        cp, "_HYBRID_PICKER",
-        HybridPicker(epsilon=0.0, rng=Random(0), ledger_path=ledger))
+        cp, "_hybrid_picker",
+        lambda: HybridPicker(epsilon=0.0, rng=Random(0), ledger_path=ledger))
 
     msgs = _msgs(3)
     assert cp.compact_with(msgs) == msgs  # tiny window passes through
@@ -198,7 +198,7 @@ def test_hybrid_fails_open_to_builtin(monkeypatch, caplog):
         def pick(self, messages):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(cp, "_HYBRID_PICKER", _Boom())
+    monkeypatch.setattr(cp, "_hybrid_picker", _Boom)
     msgs = _msgs(3)
     with caplog.at_level(logging.WARNING, logger="maverick.compaction.plugins"):
         assert cp.compact_with(msgs) == msgs  # built-in passthrough, no raise

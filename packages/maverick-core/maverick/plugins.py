@@ -202,10 +202,44 @@ def _entry_points(group: str):
     return eps
 
 
+# A workbench pin must describe the module actually loaded, not newer disk bytes
+# beneath an old Python import-cache object. Reload is an explicit admin action.
+_PINNED_IMPORTS: dict[tuple[str, str], tuple[object, str]] = {}
+
+
+def _load_current_entry(ep):
+    if _plugins_config().get("workbench", False) is not True:
+        return ep.load()
+    import sys
+
+    from .plugin_lock import _dist_content_hash
+
+    distribution = _ep_dist_name(ep)
+    value = str(getattr(ep, "value", "") or "")
+    module_name = value.split(":", 1)[0]
+    digest = _dist_content_hash(distribution) if distribution else None
+    if not digest or not module_name:
+        raise ValueError("Plugin has no inspectable installed bytes; no code was imported.")
+    key = (distribution, module_name)
+    cached = sys.modules.get(module_name)
+    previous = _PINNED_IMPORTS.get(key)
+    if cached is not None and (previous is None or previous != (cached, digest)):
+        raise ValueError("Plugin import cache does not match reviewed bytes. Stop affected work and explicitly reload the plugin.")
+    group = str(getattr(ep, "group", ""))
+    if group in _PLUGIN_GROUPS:
+        from .plugin_execution_pins import check_pin
+        check_pin(group, ep.name, distribution, digest)
+    target = ep.load()
+    if _dist_content_hash(distribution) != digest:
+        raise ValueError("Plugin bytes changed during import. Reload its reviewed version before dispatch.")
+    _PINNED_IMPORTS[key] = (sys.modules.get(module_name), digest)
+    return target
+
+
 def _load(ep, what: str) -> Any | None:
     """Resolve an entry point's target with logging on failure."""
     try:
-        return ep.load()
+        return _load_current_entry(ep)
     except Exception as e:
         log.warning("plugin %s.%s failed to load: %s", what, ep.name, e)
         return None
@@ -270,19 +304,15 @@ def _allowed(ep_name: str, dist_name: str | None, allowlist: set[str] | None) ->
     return bool(dist_name) and f"{ep_name}@{dist_name}" in allowlist
 
 
-def _find_manifest(ep):
-    """Locate + parse the plugin's ``maverick-plugin.toml`` via its distribution.
-
-    Returns a ``PluginManifest`` or None (no distribution, no manifest file, or
-    a parse failure). Never raises -- manifest problems must not break loading.
-    """
+def _manifest_details(ep):
+    """Return the parsed manifest and whether a file declares that contract."""
     dist = getattr(ep, "dist", None)
     if dist is None:
-        return None
+        return None, False
     try:
         files = list(dist.files or [])
     except Exception:
-        return None
+        return None, False
     for f in files:
         if getattr(f, "name", "") != "maverick-plugin.toml":
             continue
@@ -295,10 +325,19 @@ def _find_manifest(ep):
             except Exception:
                 text = None
         if text is None:
-            return None
+            return None, True
         from .plugin_manifest import parse_text
-        return parse_text(text, source=_ep_dist_name(ep) or "<plugin>")
-    return None
+        try:
+            return parse_text(text, source=_ep_dist_name(ep) or "<plugin>"), True
+        except Exception as exc:
+            log.warning("plugin manifest could not be parsed (%s)", type(exc).__name__)
+            return None, True
+    return None, False
+
+
+def _find_manifest(ep):
+    """Return the parsed manifest, preserving legacy metadata-reader callers."""
+    return _manifest_details(ep)[0]
 
 
 def _requested_permissions(manifest) -> list[str]:
@@ -605,9 +644,25 @@ def _plugin_signature_ok(ep, root_pub: str | None, revoked: set[str]) -> bool:
     return bool(getattr(res, "ok", False))
 
 
+def _compatibility_error(manifest, *, declared: bool = False) -> str:
+    """Explain a declared unsupported contract without importing its add-on."""
+    if (manifest is None and not declared) or (manifest is not None and manifest.is_compatible()):
+        return ""
+    return (
+        "This add-on does not work with this version of Lightwork, or its "
+        "compatibility details are invalid. Ask its publisher for a compatible release."
+    )
+
+
+def _entry_compatibility_error(ep) -> str:
+    """Read a compatibility refusal without importing the add-on."""
+    manifest, declared = _manifest_details(ep)
+    return _compatibility_error(manifest, declared=declared)
+
+
 def _gate(ep, group: str, allow, name_dists, granted, enforce) -> bool:
-    """Decide whether ``ep`` may load: allowlist + name-squat + permission +
-    signature gate.
+    """Decide whether ``ep`` may load: allowlist, name-squat, compatibility,
+    permission and signature gates.
 
     Returns True to load. Never invokes the entry point, so a rejected plugin's
     code never executes.
@@ -632,8 +687,13 @@ def _gate(ep, group: str, allow, name_dists, granted, enforce) -> bool:
                 name, sorted(providers), name,
             )
             return False
-    # Manifest-declared permissions vs the user's grant.
-    manifest = _find_manifest(ep)
+    # A declared contract must be usable before importing any add-on code.
+    manifest, declared = _manifest_details(ep)
+    compatibility_error = _compatibility_error(manifest, declared=declared)
+    if compatibility_error:
+        log.warning("plugin %s.%s (%s): %s", group, name,
+                    dist or "unknown-dist", compatibility_error)
+        return False
     violations = _permission_violations(manifest, granted)
     if violations:
         if enforce:
@@ -751,6 +811,15 @@ def discover_tools() -> list[Any]:
         if count:
             # Applied last so the tick covers isolated calls too.
             factory = telemetry_wrap(name, dist, factory)
+        from .config import load_config
+        if (load_config().get("plugins") or {}).get("workbench", False) is True:
+            from .plugin_workbench import pinned_factory
+
+            try:
+                factory = pinned_factory(name, dist, factory)
+            except (ValueError, PermissionError):
+                log.warning("plugin tool %s has no inspectable pin; skipping this tool", name)
+                continue
         out.append((name, factory))
     return out
 
@@ -780,28 +849,52 @@ def _iter_loaded_with_value(group: str, what: str):
 def discover_channels() -> list[tuple[str, Any]]:
     """Return (name, Channel subclass) tuples for installed channel plugins."""
     out: list[tuple[str, Any]] = []
-    for name, target in _iter_loaded("maverick.channels", "channels"):
+    for name, target, _value, dist in _iter_loaded_with_value("maverick.channels", "channels"):
         # Heuristic: anything truthy + not a string passes; we don't import
         # the Channel base here to avoid a hard dep on maverick-channels.
         if isinstance(target, str):
             log.warning("plugin channel %s loaded a string; skipping", name)
             continue
+        if _plugins_config().get("workbench", False) is True:
+            from .plugin_execution_pins import bind_entry
+            try:
+                target = bind_entry("maverick.channels", name, dist, target)
+            except (ValueError, TypeError, PermissionError):
+                log.warning("plugin channel %s cannot retain an exact version pin; skipping", name)
+                continue
         out.append((name, target))
     return out
 
 
 def discover_skills() -> list[Any]:
     """Return a list of plugin-provided Skill objects."""
-    return [target for _, target in _iter_loaded("maverick.skills", "skills")]
+    result = []
+    for name, target, _value, dist in _iter_loaded_with_value("maverick.skills", "skills"):
+        if _plugins_config().get("workbench", False) is True:
+            from .plugin_execution_pins import bind_entry
+            try:
+                target = bind_entry("maverick.skills", name, dist, target)
+            except (ValueError, TypeError, AttributeError, PermissionError):
+                log.warning("plugin skill %s cannot retain an exact version pin; skipping", name)
+                continue
+        result.append(target)
+    return result
 
 
 def discover_personas() -> dict[str, Callable[[], str]]:
     """Return {name: renderer} for installed persona plugins."""
     out: dict[str, Callable[[], str]] = {}
-    for name, target in _iter_loaded("maverick.personas", "personas"):
+    for name, target, _value, dist in _iter_loaded_with_value("maverick.personas", "personas"):
         if not callable(target):
             log.warning("plugin persona %s is not callable; skipping", name)
             continue
+        if _plugins_config().get("workbench", False) is True:
+            from .plugin_execution_pins import bind_entry
+            try:
+                target = bind_entry("maverick.personas", name, dist, target)
+            except (ValueError, PermissionError):
+                log.warning("plugin persona %s cannot retain an exact version pin; skipping", name)
+                continue
         out[name] = target
     return out
 
@@ -833,6 +926,12 @@ def _target_contract_error(group: str, target: Any) -> str:
     if group == "maverick.personas" and not callable(target):
         return "persona entry point must be callable"
     return ""
+
+
+def _plugin_denial_status(row, ep) -> None:
+    compatibility_error = _entry_compatibility_error(ep)
+    row["state"] = "invalid_contract" if compatibility_error else "policy_denied"
+    row["load_error"] = compatibility_error or "Blocked by the effective plugin trust policy."
 
 
 def plugin_status_snapshot() -> dict[str, Any]:
@@ -903,11 +1002,10 @@ def plugin_status_snapshot() -> dict[str, Any]:
                 row["load_error"] = _status_error(exc)
                 continue
             if not row["allowed"]:
-                row["state"] = "policy_denied"
-                row["load_error"] = "Blocked by the effective plugin trust policy."
+                _plugin_denial_status(row, ep)
                 continue
             try:
-                target = ep.load()
+                target = _load_current_entry(ep)
             except Exception as exc:
                 row["state"] = "import_failed"
                 row["load_error"] = _status_error(exc)
@@ -1037,6 +1135,9 @@ def reload_plugin(dist_name: str) -> list[str]:
         if any(name == m or name.startswith(m + ".") for m in mods):
             del sys.modules[name]
             dropped.append(name)
+    for key in list(_PINNED_IMPORTS):
+        if key[0] == dist_name:
+            del _PINNED_IMPORTS[key]
     # The path finders cache directory listings (and .pyc staleness checks);
     # without this a just-edited file can re-import as the old code.
     importlib.invalidate_caches()

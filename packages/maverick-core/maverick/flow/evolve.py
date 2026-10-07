@@ -155,6 +155,7 @@ def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
     n: FlowNode = new.nodes[node_id]
     n.kind = to_kind
     n.learned_operator = None
+    n.learned_fallback = True
     # A node-kind rewrite never inherits an automatic replay policy from the old
     # implementation. Agent attempts and high-risk actions may already have
     # produced side effects before reporting failure.
@@ -213,12 +214,14 @@ def revert_node(flow: Flow, node_id: str, prior: FlowNode) -> Flow:
     n.retries = int(prior.retries)
     n.timeout = prior.timeout
     n.learned_operator = copy.deepcopy(prior.learned_operator)
+    n.learned_fallback = prior.learned_fallback
     # Output routing remains the current definition's property. Never silently
     # rebind a restored operator if that contract changed after the prior version.
     if (n.learned_operator is not None
             and (not isinstance(n.learned_operator, dict)
                  or n.learned_operator.get("work_sha256") != learned_operator_work_digest(n))):
         n.learned_operator = None
+        n.learned_fallback = True
     return new
 
 
@@ -247,6 +250,7 @@ def remove_learned_operator(flow: Flow, node_id: str) -> Flow:
         raise KeyError(f"no such node {node_id!r}")
     new = flow.copy()
     new.nodes[node_id].learned_operator = None
+    new.nodes[node_id].learned_fallback = True
     return new
 
 

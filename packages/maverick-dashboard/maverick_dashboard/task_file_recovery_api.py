@@ -6,7 +6,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from maverick import config, task_file_recovery, workspace_journal
-from maverick.domain import suite_for
+from maverick.domain import suites_for_domain
 from maverick.paths import current_tenant_id_strict
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -49,7 +49,8 @@ def _authority(request, goal_id=None, payload=None):
         goal = world.get_goal(goal_id)
         if goal is None or goal.owner != actor:
             raise HTTPException(404, "Task file history was not found.")
-        require_suite(request, suite_for(goal.domain))
+        for suite in suites_for_domain(goal.domain):
+            require_suite(request, suite)
         if goal.project_id is not None:
             project = world.get_project(goal.project_id)
             if not project or project.get("owner") != actor:

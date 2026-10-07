@@ -71,7 +71,8 @@ def _error(status: int, code: str, message: str):
 
 
 def _gate():
-    if config.get_features().get("copilot_operations") is not True:
+    from .product_operations import enabled_families
+    if config.get_features().get("copilot_operations") is not True or "learning" not in enabled_families():
         _error(403, "operation_disabled", "Copilot actions are turned off. You can still use the controls on this page.")
 
 

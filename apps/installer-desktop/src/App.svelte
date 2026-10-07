@@ -6,6 +6,22 @@
 
   type Status = 'idle' | 'installing' | 'done' | 'failed' | 'cancelled';
   type InstallFailure = { code: string; message: string };
+  type Inventory = { source_ref: string; previous_source_ref?: string; phase: string; outcome: string; previous_outcome: string; review: string; updated_at: number; inventory: {name: string; state: string; detail: string}[] };
+  let inventory: Inventory | null = null;
+  let checkingDependencies = false, dependenciesReviewed = false;
+  let inventoryMessage = '';
+  async function recheckDependencies() {
+    if (status === 'installing' || checkingDependencies || cleanupBlocked) return;
+    checkingDependencies = true; inventory = null; dependenciesReviewed = false;
+    try { inventory = await invoke<Inventory>('bootstrap_inventory'); inventoryMessage = 'Local checks complete. A response confirms launchability, not a full installation or cleanup proof. Review partial dependencies before continuing.'; }
+    catch (e) { inventoryMessage = String(e); }
+    finally { checkingDependencies = false; }
+  }
+  async function openDependencyRepair() {
+    inventory = null; dependenciesReviewed = false;
+    try { await invoke('open_dependency_repair'); inventoryMessage = 'OS application management opened. Complete or cancel its operations, then return and select Recheck dependencies. Lightwork will not stop those independent operations.'; }
+    catch (e) { inventoryMessage = String(e); }
+  }
 
   const MAX_LOG_LINES = 1000;
   const MAX_LOG_CHARS = 500_000;
@@ -166,6 +182,7 @@
       () => {
         listenersRegistered = true;
         resolveListenerReadiness(true);
+        void recheckDependencies();
       },
       (error) => {
         listenerRegistrationFailed = true;
@@ -184,6 +201,7 @@
 
   async function startInstall() {
     if (!(await listenerReadiness)) return;
+    if (!inventory || checkingDependencies || (inventory.previous_outcome && inventory.previous_outcome !== 'completed' && !dependenciesReviewed)) { inventoryMessage = 'Recheck dependencies and review the previous partial installation before resuming.'; return; }
     status = 'installing';
     phase = 0;
     copyFeedback = '';
@@ -196,7 +214,8 @@
     errorMsg = '';
     cleanupBlocked = false;
     cancellationRequested = false;
-    const operation = invoke<void>('install');
+    const operation = invoke<void>('install', { review: inventory.review, confirmDependenciesReviewed: dependenciesReviewed });
+    inventory = null;
     activeInstall = operation;
     try {
       await operation;
@@ -218,6 +237,7 @@
       }
     } finally {
       if (activeInstall === operation) activeInstall = undefined;
+      if (!cleanupBlocked) await recheckDependencies();
     }
   }
 
@@ -320,8 +340,25 @@
   </p>
   <header>
     <h1>Lightwork</h1>
-    <p class="sub">Set up Lightwork on this computer.</p>
+    <p class="sub">Engineering source setup for authorized repository users.</p>
   </header>
+
+  {#if status !== 'installing'}
+    <section aria-labelledby="dependency-title">
+      <h2 id="dependency-title">Installed dependencies and safe resume</h2>
+      <p role="status" aria-live="polite">{checkingDependencies ? 'Checking local Git, Python, pipx and Lightwork (no downloads)…' : inventoryMessage}</p>
+      {#if inventory}
+        <p>Reviewed source: <code>{inventory.source_ref}</code>. {#if inventory.previous_source_ref && inventory.previous_source_ref !== inventory.source_ref}Previous attempt used <code>{inventory.previous_source_ref}</code>; continuing explicitly installs the newly displayed revision.{/if} Last recorded phase: {inventory.phase || 'not started'}. Previous result: {inventory.previous_outcome || 'no prior attempt'}.</p>
+        <ul>{#each inventory.inventory as dependency}<li><strong>{dependency.name}: {dependency.state}</strong><pre>{dependency.detail}</pre></li>{/each}</ul>
+        {#if inventory.previous_outcome && inventory.previous_outcome !== 'completed'}
+          <label><input type="checkbox" bind:checked={dependenciesReviewed}>I reviewed the dependencies above and confirmed that any independent package-manager or elevation operation has finished. Continue the displayed pinned bootstrap using the reviewed existing dependencies.</label>
+        {/if}
+      {/if}
+      <button disabled={checkingDependencies || cleanupBlocked} onclick={recheckDependencies}>Recheck dependencies</button>
+      <button disabled={checkingDependencies || cleanupBlocked} onclick={openDependencyRepair}>Open OS application management</button>
+      <p>These checks never uninstall, kill unrelated processes, or report the computer as fully rolled back. Missing dependencies can be added by the reviewed bootstrap; partial or unconfirmed dependencies may need OS repair first.</p>
+    </section>
+  {/if}
 
   {#if status === 'idle'}
     <section>
@@ -336,7 +373,7 @@
         <p>A fixed, checked version of Lightwork, plus the helper programs it needs to run (such as Python and Git) if this computer doesn't have them yet.
           Lightwork's program files are kept on this computer in a readable form.</p>
       </details>
-      <button disabled={!listenersRegistered} onclick={startInstall}>
+      <button disabled={!listenersRegistered || checkingDependencies || !inventory || (!!inventory.previous_outcome && inventory.previous_outcome !== 'completed' && !dependenciesReviewed)} onclick={startInstall}>
         {listenersRegistered ? 'Install Lightwork' : 'Preparing installer…'}
       </button>
     </section>
@@ -383,15 +420,15 @@
       {:else if listenerRegistrationFailed}
         <button onclick={() => window.location.reload()}>Reload installer</button>
       {:else}
-        <button onclick={startInstall}>Try again</button>
+        <button disabled={!inventory || checkingDependencies || (!!inventory.previous_outcome && inventory.previous_outcome !== 'completed' && !dependenciesReviewed)} onclick={startInstall}>Resume reviewed bootstrap</button>
       {/if}
       {@render supportDetails()}
     </section>
   {:else}
     <section class="cancelled">
       <h2>Installation cancelled</h2>
-      <p>Nothing else will be installed. You can start again when you're ready.</p>
-      <button onclick={startInstall}>Start again</button>
+      <p>The owned bootstrap stopped. Package-manager or elevation operations may have continued outside it, and dependencies may be partially installed. Recheck them before continuing.</p>
+      <button disabled={!inventory || checkingDependencies || (!!inventory.previous_outcome && inventory.previous_outcome !== 'completed' && !dependenciesReviewed)} onclick={startInstall}>Resume reviewed bootstrap</button>
       {@render supportDetails()}
     </section>
   {/if}

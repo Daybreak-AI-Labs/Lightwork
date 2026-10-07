@@ -116,7 +116,10 @@ def _directory(identifier: str) -> Path:
 
 
 def _write(path: Path, record: dict) -> None:
-    file_lock.atomic_write_text(path, json.dumps(backup._authenticate_for_write(record, _key())))
+    encoded = json.dumps(backup._authenticate_for_write(record, _key()))
+    if len(encoded.encode("utf-8")) > 128 * 1024:
+        raise MaintenanceError("The saved recovery details, including separate key files, exceed this installation's record limit. Existing recovery points have been kept.")
+    file_lock.atomic_write_text(path, encoded)
 
 
 def _read(path: Path) -> dict:
@@ -501,6 +504,7 @@ def repair_capability(
         ),
         "product_code": registered["product_code"],
         "package_code": registered["package_code"],
+        "publisher_thumbprint": anchor["publisher_thumbprint"],
         "retained_installer_available": anchor["retained_installer_available"],
     }
 
@@ -553,7 +557,7 @@ def _check_transition_installers(record, old, new, *, admit=False):
 
 def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
               rollback_id: str | None = None, identity_transition=None, transition_sha256: str | None = None,
-              confirm_identity_transition: bool = False) -> dict:
+              confirm_identity_transition: bool = False, review_id: str | None = None) -> dict:
     if not isolated or confirm_all_workspaces is not True or not actor:
         raise MaintenanceError("A global administrator must explicitly review all local workspaces in recovery mode.")
     runtime = _runtime()
@@ -569,6 +573,8 @@ def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
                 raise MaintenanceError("Rollback requires the matching completed upgrade on this computer.")
             _verify_runtime(record, "new")
         else:
+            if review_id is None:
+                raise MaintenanceError("Review the exact release in the native app before authorizing an upgrade.")
             if _usable_point_count() >= MAX_TICKETS:
                 raise MaintenanceError("The installation recovery store is full. Review and retire unused authorizations or obsolete recovery points in Workspace recovery.")
             identifier = secrets.token_hex(16)
@@ -576,6 +582,9 @@ def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
             record = {"schema": 1, "target": _target(), "id": identifier, "status": "authorized",
                       "old_version": workspace_recovery.version(), "old_runtime_sha256": backup._sha256(runtime),
                       "installed_runtime": str(runtime), "created_at": time.time(), **_native_channel(runtime)}
+            if review_id is not None:
+                from .installation_handoff import reviewed_release
+                record["reviewed_new"] = reviewed_release(review_id)
             if identity_transition is not None:
                 if confirm_identity_transition is not True:
                     raise MaintenanceError("Explicitly confirm the reviewed change to installation signing trust.")
@@ -712,7 +721,8 @@ def inspect_grant(token: str) -> dict:
         directory, record = _grant(token)
         return {"id": record["id"], "directory": str(directory), "old_version": record["old_version"],
                 "operation": record["operation"], "helper": str(directory / "maverick.exe"),
-                "identity_transition": record.get("identity_transition")}
+                "identity_transition": record.get("identity_transition"),
+                "reviewed_new": record.get("reviewed_new")}
 
 
 def _installer(directory: Path, metadata: dict, label: str) -> dict:
@@ -738,7 +748,8 @@ def _snapshot(directory: Path, name: str, runtime_sha256: str) -> dict:
                               "target": _target(), "runtime_sha256": runtime_sha256,
                               "coverage": "all-local-workspaces-and-shared-administration"})
         manifest = backup.verify_backup(destination)
-    return {"name": destination.name, "sha256": backup._sha256(destination), "files": len(manifest["files"])}
+    return {"name": destination.name, "sha256": backup._sha256(destination), "files": len(manifest["files"]),
+            "withheld_key_files": manifest.get("withheld_key_files")}
 
 
 def _retained_identity(info: os.stat_result) -> tuple[int, int, int]:
@@ -973,6 +984,11 @@ def prepare(token: str) -> dict:
                 raise MaintenanceError("The native application changed after authorization.")
             old = _installer(directory, metadata, "old")
             new = _installer(directory, metadata, "new")
+            reviewed = record.get("reviewed_new")
+            if reviewed and any(new.get(key) != reviewed.get(key) for key in ("version", "runtime_sha256", "signature")):
+                raise MaintenanceError("The staged release differs from the administrator's exact native review.")
+            if reviewed and not hmac.compare_digest(new["sha256"], reviewed["installer_sha256"]):
+                raise MaintenanceError("The staged installer differs from the administrator's exact native review.")
             _check_transition_installers(record, old, new, admit=True)
             if old["version"] != record["old_version"] or tuple(map(int, new["version"].split("."))) <= tuple(map(int, old["version"].split("."))):
                 raise MaintenanceError("The retained installers do not match the reviewed upgrade.")
@@ -1518,6 +1534,8 @@ def status() -> dict:
                     continue
                 reason = _retirement_blocker(record, active_id, installed)
                 records.append(row | {"new_version": record.get("new", {}).get("version"),
+                                      "snapshot_saved": bool(record.get("before")),
+                                      "withheld_key_files": (record.get("before") or {}).get("withheld_key_files"),
                                       "pending_finalization": record.get("id") == active_id,
                                       "can_retire": reason is None, "retirement_blocker": reason,
                                       "record_sha256": record.get("retirement_sha256") or _record_sha256(record),

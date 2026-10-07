@@ -15,10 +15,10 @@ The product decisions, made conservatively:
   * **Model + refresh:** a :class:`BackoffTransitionModel` fit from the
     trajectory store, cached and rebuilt when the corpus grows materially.
 
-Posture: governed default-on, fail-open. With ``[rehearsal]`` explicitly
-disabled, no captured data yet, or any error, ``gate_tool`` returns ``proceed``
-and the tool runs exactly as today. When enabled and a model exists, a
-confident-poor or unvouchable high-risk action is held.
+Posture: default-on predictions, observed by the agent without a hold. With
+``[rehearsal]`` explicitly disabled, no captured data yet, or any error,
+``gate_tool`` returns ``proceed``. Only the explicit experimental hold mode
+lets a poor or unvouchable verdict stop a high-risk action.
 """
 from __future__ import annotations
 
@@ -63,7 +63,16 @@ def _build_model(store=None):
 
             store = shared()
 
-        steps = list(store.iter_steps())
+        # Older records did not distinguish an executed tool failure from a
+        # pre-dispatch refusal. Those ambiguous failed rows can contain the
+        # rehearsal gate's own holds, so exclude them rather than teach the
+        # model that an unexecuted action produced the task outcome. New rows
+        # explicitly mark execution and retain real tool failures.
+        steps = [
+            step for step in store.iter_steps()
+            if not step.tool or step.tool_executed is True
+            or (step.tool_executed is None and step.tool_succeeded is not False)
+        ]
         if not steps:
             return None
 

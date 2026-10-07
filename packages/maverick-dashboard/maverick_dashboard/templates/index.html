@@ -2,36 +2,52 @@
 {% block title %}Overview · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {# A read-only role counts the whole workspace, totals only (value_views). #}
+  {% set workspace_view = value_view is defined and value_view.scope == 'workspace' %}
   {% call hero('Your AI workforce', 'Overview',
                subtitle='The operating picture',
-               lede='Everything your workforce is doing right now — goals in
+               lede='Everything your workforce is doing right now — tasks in
                      flight, work delivered, and anything waiting on you.
                      Start new work from <a href="/chat">chat</a>, or manage
-                     the teams on <a href="/workforce">Workforce</a>.') %}
+                     the teams on <a href="/workforce">Workforce</a>.' | safe) %}
     {{ state('Current state',
-             counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record',
+             counts.total ~ ' task' ~ ('' if counts.total == 1 else 's') ~ ' on record'
+               ~ (' in this workspace' if workspace_view else ''),
              badge=(counts.active ~ ' active') if counts.active else 'idle',
              badge_class='ok' if counts.active else 'idle',
-             copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked.
-                   Every goal runs inside the budget and guardrails you
-                   set.') }}
+             copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked. '
+               ~ ('Totals for the whole workspace; task titles are not shown here.'
+                  if workspace_view else
+                  'Spending and time limits apply when an administrator sets them.')) }}
   {% endcall %}
 
-  {% if counts.total == 0 %}
+  {% if counts.total == 0 and value_view is defined and not value_view.can_operate %}
+    {# Never tell a role that cannot start goals to start one. #}
     <div class="panel empty">
-      <h2 class="empty__title">Start your first goal</h2>
+      <h2 class="empty__title">No tasks have run in this workspace yet</h2>
+      <p class="muted" style="max-width: 540px; margin: 0 auto;">
+        The totals appear here as soon as people start work. Your role can follow
+        the results but not start tasks; ask an administrator if you need to.
+      </p>
+    </div>
+  {% elif counts.total == 0 %}
+    <div class="panel empty">
+      <h2 class="empty__title">Start your first task</h2>
       <p class="muted" style="max-width: 540px; margin: 0 auto 1.75rem;">
         Describe the outcome you want. Lightwork plans the work across a team
-        of AI agents, runs it within your budget, and streams results back here.
+        of AI agents, uses this installation’s current settings, and streams results back here.
       </p>
-      <form method="post" action="/chat/send" style="display: flex; gap: 0.5rem; max-width: 580px; margin: 0 auto; flex-wrap: wrap;">
-        <input type="text" name="title" required autofocus
-               aria-label="Describe a task for Lightwork to do"
-               placeholder="Plan a 2-week trip to Japan"
-               class="input" style="flex: 1 1 320px;" />
-        <button type="submit" class="btn btn--primary">
-          Start goal
-        </button>
+      <form method="post" action="/chat/send" data-product-validation style="max-width: 580px; margin: 0 auto; text-align: left;">
+        <input type="hidden" name="composer_mode" value="message">
+        <textarea name="title" required autofocus lang="und" dir="auto" data-user-content
+                  aria-label="Describe a task for Lightwork to do" aria-describedby="first-goal-hint"
+                  placeholder="Plan a 2-week trip to Japan"
+                  class="textarea" rows="3"
+                  style="box-sizing: border-box; min-height: 6rem; max-height: 14rem; resize: none; overflow-y: auto;"></textarea>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.5rem; flex-wrap: wrap;">
+          <span id="first-goal-hint" class="muted" style="font-size: 0.8rem;">Enter to start · Shift+Enter for a new line · Up to 16,000 characters</span>
+          <button type="submit" class="btn btn--primary">Start task</button>
+        </div>
       </form>
       <p id="goal-error" role="alert" aria-live="assertive"
          style="display: none; margin: 0.75rem auto 0; max-width: 580px; color: var(--danger); font-size: 0.85rem;"></p>
@@ -40,33 +56,41 @@
         or browse <a href="/skills">skills</a>.
       </p>
     </div>
+    <script>
+    (function () {
+      var field = document.querySelector('form[action="/chat/send"] textarea[name="title"]');
+      function fit() { field.style.height = 'auto'; field.style.height = Math.min(field.scrollHeight, 224) + 'px'; }
+      field.addEventListener('input', fit); window.addEventListener('pageshow', fit); fit();
+      field.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+        event.preventDefault(); field.form.requestSubmit();
+      });
+    })();
+    </script>
   {% else %}
     <div class="bd-toolbar">
       <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
         <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
-      <div class="bd-slicer" role="group" aria-label="Time range">
-        <button type="button" data-days="30" aria-pressed="false">30d</button>
-        <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
-        <button type="button" data-days="180" aria-pressed="false">180d</button>
-        <button type="button" data-days="365" aria-pressed="false">1y</button>
-      </div>
+      {% from "_tabs.html" import panel_tabs %}
+      {{ panel_tabs('Time range', [('30', '30d'), ('90', '90d'), ('180', '180d'), ('365', '1y')], '90', id='bd-range', data='days', controls=false, activation='manual', hash='range-') }}
     </div>
 
-    <div class="bd-kpis" id="bd-kpis"></div>
+    {% from "_board_kpis.html" import kpi_row %}
+    {{ kpi_row(['Total tasks', 'Active now', 'Delivered', 'Blocked']) }}
 
     <div class="viz-grid">
       <div class="panel viz-card viz-card--wide">
         <h2>Momentum</h2>
-        <p class="viz-sub">Goals started vs delivered over time (weekly at longer ranges). Hover for exact numbers.</p>
+        <p class="viz-sub">Tasks started vs delivered over time (weekly at longer ranges). Hover for exact numbers.</p>
         <div id="bd-momentum"></div>
       </div>
       <div class="panel viz-card">
-        <h2>Where goals stand</h2>
-        <p class="viz-sub">Every goal on record. Click a slice to filter the recent list.</p>
+        <h2>Where tasks stand</h2>
+        <p class="viz-sub">Every task on record. Click a slice to filter the recent list.</p>
         <div id="bd-mix"></div>
       </div>
       <div class="panel viz-card viz-card--wide">
-        <h2>Recent goals <span class="bd-chip flat" id="bd-recent-filter" hidden></span></h2>
+        <h2>Recent tasks <span class="bd-chip flat" id="bd-recent-filter" hidden></span></h2>
         <p class="viz-sub">The latest work, newest first.</p>
         <div id="bd-recent"></div>
         <p class="muted" style="margin: var(--space-3) 0 0;">
@@ -98,7 +122,7 @@
           <p><strong>{{ s.name }}</strong> <span class="muted">· {{ s.triggers|length }} trigger(s)</span></p>
         {% endfor %}
       {% else %}
-        <p class="muted">No skills yet. Lightwork turns finished work into reusable skills — they appear after the first multi-step goal completes.</p>
+        <p class="muted">No skills yet. Lightwork turns finished work into reusable skills — they appear after the first multi-step task finishes.</p>
       {% endif %}
     </div>
 
@@ -109,6 +133,7 @@
       var B = window.LWBoard, DATA = null, statusFilter = '';
 
       function rel(ts) {
+        if (window.mvTimeRelative) return window.mvTimeRelative(ts);
         var secs = Math.floor(Date.now() / 1000 - ts);
         if (secs < 60) return 'just now';
         if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
@@ -127,9 +152,11 @@
           return !statusFilter || g.status === statusFilter;
         });
         if (!rows.length) {
-          B.empty(box, statusFilter
-            ? 'No recent goals with status "' + statusFilter + '".'
-            : 'No goals yet.');
+          B.empty(box, DATA.scope === 'workspace'
+            ? 'Task titles are not shown in the whole-workspace view. The counts above cover everyone\'s tasks.'
+            : statusFilter
+              ? 'No recent tasks with status "' + statusFilter + '".'
+              : 'No tasks yet. Start one in Chat and it appears here.');
           return;
         }
         box.textContent = '';
@@ -156,7 +183,7 @@
           a.textContent = g.title;
           td3.appendChild(a);
           var td4 = B.el('td', 'muted', rel(g.updated_at));
-          td4.title = new Date(g.updated_at * 1000).toLocaleString();
+          td4.title = (window.mvTimeAbsolute ? window.mvTimeAbsolute(g.updated_at) : new Date(g.updated_at * 1000).toLocaleString());
           tr.appendChild(td1); tr.appendChild(td2);
           tr.appendChild(td3); tr.appendChild(td4);
           tbody.appendChild(tr);
@@ -169,7 +196,7 @@
         DATA = D;
         var k = document.getElementById('bd-kpis');
         k.textContent = '';
-        k.appendChild(B.kpi({ label: 'Total goals', value: D.totals.total,
+        k.appendChild(B.kpi({ label: 'Total tasks', value: D.totals.total,
           sub: 'all time on record',
           spark: D.daily.map(function (r) { return r.started; }) }));
         k.appendChild(B.kpi({ label: 'Active now', value: D.totals.active,
@@ -187,26 +214,46 @@
           x: 'd',
           series: [{ key: 'started', label: 'Started', cls: 'brand' },
                    { key: 'delivered', label: 'Delivered', cls: 'ok' }],
-          aria: 'Goals started and delivered per ' + (weekly ? 'week' : 'day') +
+          aria: 'Tasks started and delivered per ' + (weekly ? 'week' : 'day') +
                 ' over the last ' + D.days + ' days.',
           tipHead: function (r) { return (weekly ? 'Week of ' : '') + r.d; },
           xTick: function (r, i, n) {
             return i % Math.ceil(n / 8) === 0 ? r.d.slice(5) : '';
           } });
 
+        // Each slice counts exactly the status its click filters on. Queued is
+        // only 'pending'; failed and cancelled goals get their own slices and
+        // anything else (drafts, say) is shown as Other rather than as queued.
+        var BS = D.by_status || null;
+        var mix = [
+          { label: 'Done', value: D.totals.done, cls: 'ok', status: 'done' },
+          { label: 'Active', value: D.totals.active, cls: 'brand', status: 'active' },
+          { label: 'Blocked', value: D.totals.blocked, cls: 'danger', status: 'blocked' }];
+        var rest = D.totals.total - D.totals.done - D.totals.active - D.totals.blocked;
+        var mixAria = D.totals.done + ' done, ' + D.totals.active + ' active, ' +
+                      D.totals.blocked + ' blocked';
+        if (BS) {
+          var queued = BS.pending || 0, failed = BS.failed || 0, cancelled = BS.cancelled || 0;
+          mix.push({ label: 'Queued', value: queued, cls: 'idle', status: 'pending' },
+                   { label: 'Failed', value: failed, cls: 'warn', status: 'failed' },
+                   { label: 'Cancelled', value: cancelled, cls: 'info', status: 'cancelled' });
+          rest -= queued + failed + cancelled;
+          mixAria += ', ' + queued + ' queued, ' + failed + ' failed, ' + cancelled + ' cancelled';
+          if (rest > 0) {
+            mix.push({ label: 'Other', value: rest, cls: 'idle', status: '' });
+            mixAria += ', ' + rest + ' other';
+          }
+        } else {
+          // A server that does not report per-status counts: the old remainder.
+          mix.push({ label: 'Queued', value: rest, cls: 'idle', status: 'pending' });
+          mixAria += ', ' + rest + ' queued';
+        }
         B.donut(document.getElementById('bd-mix'), {
-          segments: [
-            { label: 'Done', value: D.totals.done, cls: 'ok', status: 'done' },
-            { label: 'Active', value: D.totals.active, cls: 'brand', status: 'active' },
-            { label: 'Blocked', value: D.totals.blocked, cls: 'danger', status: 'blocked' },
-            { label: 'Queued',
-              value: D.totals.total - D.totals.done - D.totals.active - D.totals.blocked,
-              cls: 'idle', status: 'pending' }],
-          center: D.totals.total, centerSub: 'goals',
-          aria: 'Goal mix: ' + D.totals.done + ' done, ' + D.totals.active +
-                ' active, ' + D.totals.blocked + ' blocked of ' +
-                D.totals.total + ' total.',
+          segments: mix,
+          center: D.totals.total, centerSub: 'tasks',
+          aria: 'Task mix: ' + mixAria + ' of ' + D.totals.total + ' total.',
           onSlice: function (seg) {
+            if (!seg.status) return;  // "Other" has no single status to filter on
             statusFilter = statusFilter === seg.status ? '' : seg.status;
             renderRecent();
           } });
@@ -219,9 +266,9 @@
               return { label: r.label, value_text: r.done + ' of ' + r.total,
                        pct: r.done / dmax * 100, pct_bg: r.total / dmax * 100,
                        title: r.label + ' — ' + r.done + ' delivered of ' + r.total };
-            }), 'Goals by department: delivered against taken on.');
+            }), 'Tasks by department: delivered against taken on.');
         } else {
-          B.empty(document.getElementById('bd-domains'), 'No departmental work yet.');
+          B.empty(document.getElementById('bd-domains'), 'No departmental work yet.', 'Work appears here once a deployed team starts tasks.');
         }
         renderRecent();
       }

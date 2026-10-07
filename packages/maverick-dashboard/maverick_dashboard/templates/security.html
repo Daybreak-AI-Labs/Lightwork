@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Security &amp; GRC · Lightwork{% endblock %}
 {% block content %}
+{% from "_tabs.html" import panel_tabs, tab_panel %}
 <style>
   /* The live board below supersedes the workspace chassis' static hero
      tiles on this page; the shared include still renders them elsewhere. */
@@ -9,19 +10,17 @@
   .sec-grid > .panel { min-width:0; }
   .sec-heat { display:flex; gap:var(--space-2); flex-wrap:wrap; margin-top:var(--space-3); }
   .sec-heat__cell { min-width:7rem; padding:var(--space-3); border:1px solid var(--border);
-                    border-radius:8px; background:var(--surface-2); }
+                    border-radius: var(--radius-md); background:var(--surface-2); }
   .sec-heat__n { display:block; font-size:var(--text-xl); font-weight:var(--font-bold); }
   .sec-frameworks { display:grid; grid-template-columns:repeat(3,minmax(9rem,1fr));
                     gap:var(--space-2); margin-top:var(--space-3); }
   .sec-framework { padding:var(--space-2); border:1px solid var(--border);
-                   border-radius:8px; background:var(--surface-2); }
+                   border-radius: var(--radius-md); background:var(--surface-2); }
   .sec-framework strong { display:block; }
-  .sec-tabs { display:flex; gap:var(--space-2); flex-wrap:wrap; margin-bottom:var(--space-3); }
-  .sec-tab[hidden] { display:none; }
   .sec-scroll { overflow-x:auto; }
   .sec-form { display:grid; grid-template-columns:repeat(3,minmax(10rem,1fr));
               gap:var(--space-3); padding:var(--space-3); margin-bottom:var(--space-4);
-              border:1px dashed var(--border); border-radius:8px; }
+              border:1px dashed var(--border); border-radius: var(--radius-md); }
   .sec-form label { display:flex; flex-direction:column; gap:var(--space-1); }
   .sec-form .wide { grid-column:1 / -1; }
   .sec-form__actions { grid-column:1 / -1; display:flex; gap:var(--space-2); align-items:center; }
@@ -30,14 +29,14 @@
   .sec-action input,.sec-action select,.sec-action textarea { max-width:22rem; }
   .sec-action textarea { min-height:4rem; }
   .sec-details { min-width:24rem; }
-  .sec-details summary { cursor:pointer; color:var(--link); }
+  .sec-details summary { cursor:pointer; color:var(--brand); }
   .sec-empty { color:var(--muted); font-size:var(--text-sm); }
   .sec-overdue { color:var(--danger); font-weight:var(--font-semibold); }
   .sec-hunters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
                  gap:var(--space-3); margin-top:var(--space-3); }
   .sec-hunter { display:flex; flex-direction:column; gap:var(--space-2);
                 padding:var(--space-3); border:1px solid var(--border);
-                border-radius:8px; background:var(--surface-2); }
+                border-radius: var(--radius-md); background:var(--surface-2); }
   .sec-hunter__head { display:flex; justify-content:space-between;
                       align-items:center; gap:var(--space-2); }
   .sec-hunter__switch { display:flex; align-items:center; gap:var(--space-2);
@@ -48,11 +47,11 @@
   .sec-link-group { display:flex; gap:var(--space-2); flex-wrap:wrap; align-items:center; }
   .sec-link-group strong { min-width:8rem; }
   .sec-links { flex-direction:column; align-items:stretch; }
-  .sec-pick { border:1px solid var(--border); border-radius:8px; padding:var(--space-2); min-width:0; }
+  .sec-pick { border:1px solid var(--border); border-radius: var(--radius-md); padding:var(--space-2); min-width:0; }
   .sec-pick__list { display:flex; flex-direction:column; gap:.2rem; max-height:10rem; overflow:auto; }
   .sec-buttons { display:flex; gap:var(--space-2); flex-wrap:wrap; }
   .sec-stat { display:inline-block; min-width:9rem; }
-  @media (max-width:900px) {
+  @media (max-width:880px) {
     .sec-grid,.sec-form,.sec-frameworks,.sec-hunters { grid-template-columns:minmax(0,1fr); }
   }
 </style>
@@ -65,7 +64,7 @@
   'pending_review': 'Waiting for review', 'review required': 'Waiting for review',
   'present': 'Found', 'missing': 'Not found', 'open': 'Open', 'in_progress': 'In progress',
   'blocked': 'Blocked', 'complete': 'Complete', 'accepted': 'Accepted', 'closed': 'Closed',
-  'draft': 'Draft', 'review': 'In review', 'attested': 'Signed off', 'retired': 'Retired',
+  'draft': 'Draft', 'review': 'In review', 'attested': 'Confirmed', 'retired': 'Retired',
   'mitigate': 'Reduce it', 'accept': 'Accept it', 'transfer': 'Transfer it', 'avoid': 'Avoid it',
   'unassigned': 'Not decided', 'planning': 'Planning', 'fieldwork': 'Testing', 'submitted': 'Submitted',
   'resolved': 'Resolved', 'remediated': 'Fixed', 'pass': 'Passed', 'fail': 'Failed', 'needs_review': 'Needs review',
@@ -97,7 +96,7 @@
 <fieldset class="sec-pick"><legend>{{ label }}</legend>
   {% if help %}<p class="sec-empty">{{ help }}</p>{% endif %}
   {% if items %}<div class="sec-pick__list">{% for item in items %}<label><input type="checkbox" name="{{ name }}" value="{{ item.value }}"{% if item.value in selected %} checked{% endif %}> {{ item.label }}</label>{% endfor %}</div>
-  {% else %}<p class="sec-empty">None yet.</p>{% endif %}
+  {% else %}<p class="sec-empty">None yet. Add them in their own section first, then choose them here.</p>{% endif %}
 </fieldset>
 {%- endmacro %}
 
@@ -105,11 +104,13 @@
 {%- if value is number -%}{{ value }} of 25 ({{ 'Critical' if value >= 20 else 'High' if value >= 12 else 'Medium' if value >= 6 else 'Low' }}){%- else -%}—{%- endif -%}
 {%- endmacro %}
 
-{% call hero('Governed workspaces', 'Security &amp; GRC',
+{% set security_actions %}<a class="btn btn--primary" href="#pw-start">Start an assessment</a>{% endset %}
+{% call hero('Governed workspaces', 'Security & GRC',
              subtitle='Your security program',
              lede='One place for security assessments, controls and their evidence, risks and exceptions, fix plans
-                   (POA&amp;M), vendors, policies, incidents and audits. Lightwork prepares the records; people decide
-                   what applies, accept evidence and approve exceptions.') %}
+                   (POA&M), vendors, policies, incidents and audits. Lightwork prepares the records; people decide
+                   what applies, accept evidence and approve exceptions.',
+             actions=security_actions) %}
   {{ state('Current state', 'Lightwork prepares, people decide',
            badge='Every decision is recorded', badge_class='ok',
            copy='Each record points to its evidence, and every decision names the person who made it.') }}
@@ -124,8 +125,7 @@
   <div class="sec-link-group"><strong>AI assurance</strong>
     <a class="btn btn--ghost" href="/security/assurance">Model risk and AI assurance</a>
     <a class="btn btn--ghost" href="/governance-agents">Governance agents</a>
-    <a class="btn btn--ghost" href="/ai-evidence-analysis">AI evidence analysis</a>
-    <a class="btn btn--ghost" href="/assurance/cloud-agents">Cloud assistant governance</a></div>
+    <a class="btn btn--ghost" href="/ai-evidence-analysis">AI evidence analysis</a></div>
   <div class="sec-link-group"><strong>Threat hunting</strong>
     <a class="btn btn--ghost" href="/security/threats">Lightwork threat check</a>
     <a class="btn btn--ghost" href="/security/soc">Threat monitoring</a></div>
@@ -136,7 +136,8 @@
     <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">Loading…</span></span>
 </div>
 
-<div class="bd-kpis" id="bd-kpis"></div>
+{% from "_board_kpis.html" import kpi_row %}
+{{ kpi_row(['Assessments', 'Open', 'Approved', 'Due for another review']) }}
 
 <div class="viz-grid">
   <div class="panel viz-card viz-card--wide">
@@ -163,9 +164,7 @@
   {% if security_can_manage_hunters %}
   <p class="muted">Two checks look for attacks: one in Lightwork’s own activity, one in the systems you connect. Each only
     reads, and any containment goes to the approvals queue. Turn each one on or off here; it takes effect right away.</p>
-  <div class="sec-hunters" id="sec-hunters" aria-label="Threat hunting switches">
-    <p class="sec-empty">Loading…</p>
-  </div>
+  <div class="sec-hunters" id="sec-hunters" role="group" aria-label="Threat hunting switches"></div>
   <p class="muted" id="sec-hunters-status" role="status" aria-live="polite"></p>
   {% else %}
   <p class="muted">An administrator turns threat hunting on or off. You can keep working on the security records below.</p>
@@ -177,7 +176,7 @@
   <h2>Security records are turned off</h2>
   <p>Controls, evidence, risks and incidents are not being tracked. Assessments above still work.</p>
   {% if security_can_manage_hunters %}
-  <button type="button" class="btn btn--primary" id="sec-records-on">Turn on security records</button>
+  <button type="button" class="btn" id="sec-records-on">Turn on security records</button>
   <span class="muted" id="sec-records-on-msg" role="status" aria-live="polite"></span>
   {% else %}
   <p class="muted">Ask an administrator to turn them on.</p>
@@ -190,7 +189,7 @@
     <h3>Control coverage</h3>
     <p class="muted">Controls in place out of all your controls. This shows readiness, not a certification.</p>
     <div class="stat sec-stat">
-      <div class="num">{{ insights.coverage_percent }}%</div>
+      <div class="num">{{ insights.coverage_percent | percent }}</div>
       <div class="label">In place</div>
     </div>
     <div class="sec-heat" aria-label="Controls by status">
@@ -208,11 +207,11 @@
       {% for framework in insights.framework_coverage %}
       <div class="sec-framework">
         <strong>{{ framework.label }}</strong>
-        <span>{{ framework.coverage_percent }}%</span><br>
+        <span>{{ framework.coverage_percent | percent }}</span><br>
         <span class="muted">{{ framework.controls_implemented }} in place, {{ framework.controls_partial }} partly, of
           {{ framework.controls_applicable }} that apply</span>
       </div>
-      {% else %}<p class="sec-empty">No controls yet.</p>{% endfor %}
+      {% else %}<p class="sec-empty">No controls yet. Set them up under Controls below.</p>{% endfor %}
     </div>
   </section>
   <section class="panel">
@@ -222,7 +221,9 @@
       <div class="num">{{ insights.crosswalk_links }}</div>
       <div class="label">Matches between frameworks</div>
     </div>
-    <div class="sec-scroll">
+    {# Scroll boxes are named regions a keyboard can focus and scroll
+       (axe scrollable-region-focusable; WCAG 2.1.1). #}
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Controls matched across frameworks">
       <table aria-label="Controls matched across frameworks">
         <thead><tr><th scope="col">Control</th>{% for framework in insights.crosswalk_frameworks %}<th scope="col">{{ framework.label }}</th>{% endfor %}</tr></thead>
         <tbody>
@@ -233,7 +234,7 @@
               <td>{{ references | join(', ') if references else '—' }}</td>
             {% endfor %}
           </tr>
-        {% else %}<tr><td colspan="10" class="sec-empty">No matches yet.</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="10" class="sec-empty">No matches yet. Matches appear here once your controls are set up.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -263,7 +264,7 @@
           <td>{{ (ends | datetime) if ends is number else (ends or '—') }}</td>
           <td><span class="badge {{ 'blocked' if row.get('exception_expired') else 'warn' }}">
             {{ 'Ended' if row.get('exception_expired') else 'Ending soon' }}</span></td></tr>
-      {% else %}<tr><td colspan="4" class="sec-empty">No exceptions ending soon.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="4" class="sec-empty">No exceptions ending soon. Exceptions due within 30 days appear here.</td></tr>{% endfor %}
       </tbody>
     </table>
   </section>
@@ -271,24 +272,23 @@
 
 <div class="section-head"><h2>Security records</h2></div>
 <div class="panel">
-  <div class="sec-tabs" role="tablist" aria-label="Security record types">
-    <button class="btn btn--primary" id="sec-tab-controls" role="tab" aria-selected="true" aria-controls="sec-panel-controls" tabindex="0" data-sec-tab="controls" type="button">Controls ({{ records.controls|length }})</button>
-    <button class="btn" id="sec-tab-evidence" role="tab" aria-selected="false" aria-controls="sec-panel-evidence" tabindex="-1" data-sec-tab="evidence" type="button">Evidence ({{ records.evidence|length }})</button>
-    <button class="btn" id="sec-tab-risks" role="tab" aria-selected="false" aria-controls="sec-panel-risks" tabindex="-1" data-sec-tab="risks" type="button">Risks ({{ records.risks|length }})</button>
-    <button class="btn" id="sec-tab-poams" role="tab" aria-selected="false" aria-controls="sec-panel-poams" tabindex="-1" data-sec-tab="poams" type="button">Fix plans ({{ records.poams|length }})</button>
-    <button class="btn" id="sec-tab-vendors" role="tab" aria-selected="false" aria-controls="sec-panel-vendors" tabindex="-1" data-sec-tab="vendors" type="button">Vendors ({{ records.vendors|length }})</button>
-    <button class="btn" id="sec-tab-policies" role="tab" aria-selected="false" aria-controls="sec-panel-policies" tabindex="-1" data-sec-tab="policies" type="button">Policies ({{ records.policies|length }})</button>
-    <button class="btn" id="sec-tab-incidents" role="tab" aria-selected="false" aria-controls="sec-panel-incidents" tabindex="-1" data-sec-tab="incidents" type="button">Incidents ({{ records.incidents|length }})</button>
-    <button class="btn" id="sec-tab-audits" role="tab" aria-selected="false" aria-controls="sec-panel-audits" tabindex="-1" data-sec-tab="audits" type="button">Audits ({{ records.audits|length }})</button>
-  </div>
+  {{ panel_tabs('Security record types', [
+       ('controls', 'Controls (%d)' % records.controls|length),
+       ('evidence', 'Evidence (%d)' % records.evidence|length),
+       ('risks', 'Risks (%d)' % records.risks|length),
+       ('poams', 'Fix plans (%d)' % records.poams|length),
+       ('vendors', 'Vendors (%d)' % records.vendors|length),
+       ('policies', 'Policies (%d)' % records.policies|length),
+       ('incidents', 'Incidents (%d)' % records.incidents|length),
+       ('audits', 'Audits (%d)' % records.audits|length)], 'controls', id='sec', hash='sec-') }}
 
-  <section class="sec-tab" id="sec-panel-controls" role="tabpanel" aria-labelledby="sec-tab-controls" data-sec-panel="controls">
+  <section {{ tab_panel('controls', 'controls', id='sec') }}>
     <span id="sec-controls"></span>
     {% if not records.controls %}
     <form class="sec-form" data-control-initialize>
       <p class="wide">Start with Lightwork’s standard set of controls, matched across SOC 2, ISO 27001, NIST and more. You can change any of them later.</p>
       {{ owner_field('owner', 'Who owns these controls', required=true) }}
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Set up standard controls</button><span role="status" class="muted"></span></div>
+      <div class="sec-form__actions"><button class="btn" type="submit">Set up standard controls</button><span role="status" class="muted"></span></div>
     </form>
     {% endif %}
     <details>
@@ -307,10 +307,10 @@
         <label>Status<select class="select" name="implementation_status">{% for s in ['not_started','not_implemented','planned','not_applicable'] %}<option value="{{ s }}">{{ status_words[s] }}</option>{% endfor %}</select></label>
         <label>Applies to you?<select class="select" name="applicable"><option value="true">Yes</option><option value="false">No</option></select></label>
         <label class="wide">Why it does or does not apply<input class="input" name="applicability_rationale" maxlength="2000" placeholder="Needed when it does not apply"></label>
-        <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add control</button><span role="status" class="muted"></span></div>
+        <div class="sec-form__actions"><button class="btn" type="submit">Add control</button><span role="status" class="muted"></span></div>
       </form>
     </details>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Control</th><th scope="col">Framework</th><th scope="col">Status</th><th scope="col">Owner</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Controls table"><table><thead><tr><th scope="col">Control</th><th scope="col">Framework</th><th scope="col">Status</th><th scope="col">Owner</th></tr></thead><tbody>
     {% for row in records.controls %}
       {% set impl = row.get('implementation_status') or 'not_started' %}
       <tr><td>{{ row.get('title') or row.get('control_id') }}<br><span class="muted">{{ row.get('control_id') or '' }}</span>
@@ -327,14 +327,14 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No controls yet. Use “Set up standard controls” above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-evidence" role="tabpanel" aria-labelledby="sec-tab-evidence" data-sec-panel="evidence" hidden>
+  <section {{ tab_panel('evidence', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/evidence">
       <label>Title<input class="input" name="title" required maxlength="300"></label>
       <label>Where it came from<select class="select" name="source"><option value="paste">Typed or pasted</option><option value="upload">From a file</option><option value="email">From an email</option><option value="ticket">From a ticket</option></select></label>
       <label>Or load a text file<input class="input" type="file" data-text-into="text" accept=".txt,.md,.csv,.json,.log,text/plain"></label>
       {{ pick_list('control_ids', 'Controls it supports', control_items, help='Lightwork checks the text against these controls.') }}
       <label class="wide">Evidence text<textarea class="textarea" name="text" required rows="6" maxlength="2000000"></textarea></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Check this evidence</button><span role="status" class="muted"></span></div>
+      <div class="sec-form__actions"><button class="btn" type="submit">Check this evidence</button><span role="status" class="muted"></span></div>
     </form>
     <div class="sec-form sec-doc-search">
       <label class="wide">Find a document in your connected sources
@@ -348,7 +348,7 @@
       <div class="wide" id="sec-evidence-hits"></div>
     </div>
     <p class="muted">What Lightwork finds in evidence is only a suggestion. A reviewer must approve or reject it before it can change a control.</p>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Evidence</th><th scope="col">Where from</th><th scope="col">What was found</th><th scope="col">Review</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Evidence table"><table><thead><tr><th scope="col">Evidence</th><th scope="col">Where from</th><th scope="col">What was found</th><th scope="col">Review</th></tr></thead><tbody>
     {% for row in records.evidence %}
       <tr>
         <td>{{ row.get('title') or 'Evidence' }}</td>
@@ -386,7 +386,7 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No evidence yet. Add some above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-risks" role="tabpanel" aria-labelledby="sec-tab-risks" data-sec-panel="risks" hidden>
+  <section {{ tab_panel('risks', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/risks">
       <label class="wide">Risk<input class="input" name="title" required maxlength="300"></label>
       <label>How likely<select class="select" name="likelihood">{% for v, l in likelihood_words %}<option value="{{ v }}"{% if v == 3 %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
@@ -396,9 +396,9 @@
       <label class="wide">Why that likelihood<textarea class="textarea" name="likelihood_rationale" required rows="2" maxlength="4000"></textarea></label>
       <label class="wide">Why that impact<textarea class="textarea" name="impact_rationale" required rows="2" maxlength="4000"></textarea></label>
       {{ pick_list('evidence_ids', 'Evidence behind it', evidence_items, help='Choose at least one.') }}
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add risk</button><span role="status" class="muted"></span></div>
+      <div class="sec-form__actions"><button class="btn" type="submit">Add risk</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Risk</th><th scope="col">Before fixes</th><th scope="col">After fixes</th><th scope="col">Plan</th><th scope="col">Owner</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Risks table"><table><thead><tr><th scope="col">Risk</th><th scope="col">Before fixes</th><th scope="col">After fixes</th><th scope="col">Plan</th><th scope="col">Owner</th></tr></thead><tbody>
     {% for row in records.risks %}<tr><td>{{ row.get('title') or 'Risk' }}<details class="sec-details"><summary>Manage this risk</summary>
       <form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/treatment">
         <label>Plan<select class="select" name="treatment">{% for t in ['mitigate','accept','transfer','avoid'] %}<option value="{{ t }}">{{ status_words[t] }}</option>{% endfor %}</select></label>
@@ -424,66 +424,66 @@
     {% else %}<tr><td colspan="5" class="sec-empty">No risks yet. Add one above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-poams" role="tabpanel" aria-labelledby="sec-tab-poams" data-sec-panel="poams" hidden>
+  <section {{ tab_panel('poams', 'controls', id='sec') }}>
     <p class="muted">Fix plans (sometimes called a plan of action and milestones, or POA&amp;M) track problems until they are fixed.</p>
     <form class="sec-form" data-endpoint="/api/v1/security/poams">
       <label class="wide">Problem to fix<input class="input" name="finding" required maxlength="1000"></label>
       {{ owner_field(required=true) }}
       <label>Due<input class="input" name="due_at" type="datetime-local" data-epoch required></label>
       {{ pick_list('control_ids', 'Related controls', control_items) }}
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add fix plan</button><span role="status" class="muted"></span></div>
+      <div class="sec-form__actions"><button class="btn" type="submit">Add fix plan</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Problem</th><th scope="col">Owner</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Fix plans table"><table><thead><tr><th scope="col">Problem</th><th scope="col">Owner</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead><tbody>
     {% for row in records.poams %}<tr><td>{{ row.get('finding') or 'Fix plan' }}<details class="sec-details"><summary>Update</summary>
       <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}" data-method="PATCH"><label>Status<select class="select" name="status">{% for st in ['open','in_progress','blocked','complete','accepted','closed'] %}<option value="{{ st }}"{% if st == row.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label><label>Note<input class="input" name="note" maxlength="2000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>
       <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}/review"><label>Why it needs another look<input class="input" name="reason" required maxlength="1000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Ask for a review</button><span role="status" class="muted"></span></form></details></td>
       <td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td><td class="{{ 'sec-overdue' if row.get('overdue') else '' }}">{{ (row.get('due_at') | datetime) if row.get('due_at') is number else (row.get('due_at') or '—') }}{% if row.get('overdue') %} (overdue){% endif %}</td><td>{{ status_words.get(row.get('status','open')) or (row.get('status') | humanize) }}</td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No fix plans yet.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No fix plans yet. Add one above for each gap you plan to close.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-vendors" role="tabpanel" aria-labelledby="sec-tab-vendors" data-sec-panel="vendors" hidden>
+  <section {{ tab_panel('vendors', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/vendors">
       <label>Vendor name<input class="input" name="name" required maxlength="300"></label>
       <label>How important<select class="select" name="criticality">{% for c in ['low','medium','high','critical'] %}<option value="{{ c }}"{% if c == 'medium' %} selected{% endif %}>{{ status_words[c] }}</option>{% endfor %}</select></label>
       {{ owner_field() }}
       <label class="wide">What they do for you<textarea class="textarea" name="services" maxlength="2000"></textarea></label>
       {% for key,label in [('independent_assurance','Independent audit report (for example SOC 2)'),('encryption','Encrypts your data'),('mfa','Second sign-in step and limited access'),('incident_sla','Promises to report incidents quickly'),('subprocessors','Controls their own suppliers'),('vulnerability_management','Fixes security flaws'),('business_continuity','Plans for outages'),('data_deletion','Deletes your data when you leave')] %}<label>{{ label }}<select class="select" name="posture.{{ key }}"><option value="null">Not checked</option><option value="true">Yes</option><option value="false">No</option></select></label>{% endfor %}
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Assess vendor</button><span role="status" class="muted"></span></div>
+      <div class="sec-form__actions"><button class="btn" type="submit">Assess vendor</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Vendor</th><th scope="col">Risk</th><th scope="col">Decision</th><th scope="col">Owner</th></tr></thead><tbody>{% for row in records.vendors %}<tr><td>{{ row.get('name') or 'Vendor' }}</td><td>{{ status_words.get(row.get('residual_risk')) or (row.get('residual_risk') | humanize) or '—' }}</td><td><span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ status_words.get(row.get('status','pending_review')) or (row.get('status') | humanize) }}</span>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Vendors table"><table><thead><tr><th scope="col">Vendor</th><th scope="col">Risk</th><th scope="col">Decision</th><th scope="col">Owner</th></tr></thead><tbody>{% for row in records.vendors %}<tr><td>{{ row.get('name') or 'Vendor' }}</td><td>{{ status_words.get(row.get('residual_risk')) or (row.get('residual_risk') | humanize) or '—' }}</td><td><span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ status_words.get(row.get('status','pending_review')) or (row.get('status') | humanize) }}</span>
       <form class="sec-action" data-endpoint="/api/v1/security/vendors/{{ row.id }}/decision"><label>Decision<select class="select" name="decision"><option value="approved">Approve</option><option value="needs_work">Needs more work</option><option value="rejected">Reject</option></select></label><label>Why<input class="input" name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save decision</button><span role="status" class="muted"></span></form></td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td></tr>{% else %}<tr><td colspan="4" class="sec-empty">No vendors assessed yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-policies" role="tabpanel" aria-labelledby="sec-tab-policies" data-sec-panel="policies" hidden>
+  <section {{ tab_panel('policies', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/policies">
       <label>Policy name<input class="input" name="title" required maxlength="300"></label>
       {{ owner_field(required=true) }}
       <label>Review every<select class="select" name="review_cadence_days"><option value="90">3 months</option><option value="180">6 months</option><option value="365" selected>Year</option><option value="730">2 years</option></select></label>
       <label class="wide">Link to the policy document<input class="input" name="content_ref" type="url" maxlength="2000" placeholder="https://"></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add policy</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Policy</th><th scope="col">Status</th><th scope="col">Owner</th><th scope="col">Actions</th></tr></thead><tbody>
+      <div class="sec-form__actions"><button class="btn" type="submit">Add policy</button><span role="status" class="muted"></span></div></form>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Policies table"><table><thead><tr><th scope="col">Policy</th><th scope="col">Status</th><th scope="col">Owner</th><th scope="col">Actions</th></tr></thead><tbody>
     {% for row in records.policies %}
       {% set policy_status = row.get('status','draft') %}
       <tr><td>{% if row.get('content_ref') and (row.get('content_ref').startswith('https://') or row.get('content_ref').startswith('http://')) %}<a href="{{ row.get('content_ref') }}" rel="noopener">{{ row.get('title') or 'Policy' }}</a>{% else %}{{ row.get('title') or 'Policy' }}{% endif %}</td><td>{{ status_words.get(policy_status) or (policy_status | humanize) }}</td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td><td>
         {% if policy_status != 'retired' %}
-        <details class="sec-details"><summary>Review, approve, sign off or retire</summary>
+        <details class="sec-details"><summary>Review, approve, confirm or retire</summary>
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/transition">
             <label>Note<input class="input" name="note" required maxlength="2000"></label>
             <input type="hidden" name="target_status" value="">
             <input type="hidden" name="expected_revision" value="{{ row.revision }}">
             <span class="sec-buttons">
             {% if policy_status == 'draft' %}<button class="btn" type="submit" data-set="target_status=review">Send for review</button>{% endif %}
-            {% if policy_status == 'review' %}<button class="btn btn--primary" type="submit" data-set="target_status=approved">Approve</button><button class="btn" type="submit" data-set="target_status=draft">Back to draft</button>{% endif %}
+            {% if policy_status == 'review' %}<button class="btn" type="submit" data-set="target_status=approved">Approve</button><button class="btn" type="submit" data-set="target_status=draft">Back to draft</button>{% endif %}
             {% if policy_status in ['approved','attested'] %}<button class="btn" type="submit" data-set="target_status=review">Review again</button>{% endif %}
-            <button class="btn btn--danger" type="submit" data-set="target_status=retired" data-confirm="Retire this policy? It can no longer be changed.">Retire</button>
+            <button class="btn btn--danger" type="submit" data-set="target_status=retired" data-confirm="Retire this policy? It can no longer be changed.">Retire policy</button>
             </span><span role="status" class="muted"></span>
           </form>
           {% if policy_status in ['approved','attested'] %}
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/attest">
-            {{ owner_field('subject', 'Who is signing off', required=true) }}
+            {{ owner_field('subject', 'Who is confirming', required=true) }}
             <label>What they confirm<input class="input" name="statement" required maxlength="2000" value="I have read and will follow this policy."></label>
             <input type="hidden" name="expected_revision" value="{{ row.revision }}">
-            <button class="btn" type="submit">Record sign-off</button><span role="status" class="muted"></span>
+            <button class="btn" type="submit">Record confirmation</button><span role="status" class="muted"></span>
           </form>
           {% endif %}
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/review">
@@ -494,10 +494,10 @@
         </details>
         {% else %}<span class="muted">Retired. No further changes.</span>{% endif %}
       </td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No policies yet.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No policies yet. Add your first policy above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-incidents" role="tabpanel" aria-labelledby="sec-tab-incidents" data-sec-panel="incidents" hidden>
+  <section {{ tab_panel('incidents', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/incidents">
       <label>What happened<input class="input" name="title" required maxlength="300"></label>
       <label>How serious<select class="select" name="severity">{% for c in ['low','medium','high','critical'] %}<option value="{{ c }}"{% if c == 'medium' %} selected{% endif %}>{{ status_words[c] }}</option>{% endfor %}</select></label>
@@ -505,8 +505,8 @@
       <label class="wide">Details<textarea class="textarea" name="description" maxlength="8000"></textarea></label>
       {{ pick_list('clock_ids', 'Reporting deadlines that might apply', clocks, help='Lightwork tracks each deadline once you confirm it applies.') }}
       {{ pick_list('mitre_techniques', 'Kind of attack (if known)', attack_techniques) }}
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Open incident</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Incident</th><th scope="col">Seriousness and status</th><th scope="col">Reporting deadlines</th><th scope="col">Response</th></tr></thead><tbody>
+      <div class="sec-form__actions"><button class="btn" type="submit">Open incident</button><span role="status" class="muted"></span></div></form>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Incidents table"><table><thead><tr><th scope="col">Incident</th><th scope="col">Seriousness and status</th><th scope="col">Reporting deadlines</th><th scope="col">Response</th></tr></thead><tbody>
     {% for row in records.incidents %}
       {% set contained = row.get('timeline',[]) | selectattr('phase','equalto','containment') | list %}
       {% set eradicated = row.get('timeline',[]) | selectattr('phase','equalto','eradication') | list %}
@@ -527,15 +527,15 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No incidents.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-audits" role="tabpanel" aria-labelledby="sec-tab-audits" data-sec-panel="audits" hidden>
+  <section {{ tab_panel('audits', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/audits">
       <label>Audit name<input class="input" name="name" required maxlength="300"></label>
       <label>Framework<select class="select" name="framework" data-other-select required>{% for framework in insights.crosswalk_frameworks %}<option value="{{ framework.label }}">{{ framework.label }}</option>{% endfor %}<option value="__other__">Another framework…</option></select><input class="input" data-other-input hidden maxlength="120" aria-label="Name of the framework"></label>
       {{ owner_field(required=true) }}
       <label class="wide">What it covers<textarea class="textarea" name="scope" required maxlength="4000"></textarea></label>
       <label>Due<input class="input" name="due_at" type="datetime-local" data-epoch data-omit-empty></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add audit</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Audit</th><th scope="col">Status</th><th scope="col">Work so far</th><th scope="col">Actions</th></tr></thead><tbody>
+      <div class="sec-form__actions"><button class="btn" type="submit">Add audit</button><span role="status" class="muted"></span></div></form>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Audits table"><table><thead><tr><th scope="col">Audit</th><th scope="col">Status</th><th scope="col">Work so far</th><th scope="col">Actions</th></tr></thead><tbody>
     {% for row in records.audits %}
       {% set audit_status = row.get('status','planned') %}
       <tr><td>{{ row.get('name') or 'Audit' }}<br><span class="muted">{{ row.get('framework') or '' }}</span></td><td>{{ status_words.get(audit_status) or (audit_status | humanize) }}</td><td>{{ row.get('evidence_requests',[])|length }} evidence requests<br>{{ row.get('control_tests',[])|length }} tests<br>{{ row.get('findings',[])|length }} findings</td><td><details class="sec-details"><summary>Manage this audit</summary>
@@ -548,7 +548,7 @@
         {% for finding in row.get('findings',[]) %}<form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/findings" data-method="PATCH"><input type="hidden" name="finding_id" value="{{ finding.id }}"><p>{{ finding.get('title') or 'Finding' }}</p><label>Status<select class="select" name="status">{% for st in ['open','in_progress','resolved','remediated','accepted','closed'] %}<option value="{{ st }}"{% if st == finding.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>{% endfor %}
         {% else %}<p class="muted">This audit is finished, so its work is locked. Set it back to “In review” to change anything.</p>{% endif %}
       </details></td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No audits yet.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No audits yet. Record one above when an audit starts.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 </div>
 {% endif %}
@@ -567,35 +567,8 @@
     }
     return window.mvErrorText(response, action);
   }
-  var buttons = document.querySelectorAll('[data-sec-tab]');
-  function activateTab(button, focus) {
-    buttons.forEach(function (b) {
-      var selected = b === button;
-      b.classList.toggle('btn--primary', selected);
-      b.setAttribute('aria-selected', selected ? 'true' : 'false');
-      b.tabIndex = selected ? 0 : -1;
-    });
-    document.querySelectorAll('[data-sec-panel]').forEach(function (panel) {
-      panel.hidden = panel.dataset.secPanel !== button.dataset.secTab;
-    });
-    if (focus) button.focus();
-  }
-  buttons.forEach(function (button) {
-    button.addEventListener('click', function () { activateTab(button, false); });
-    button.addEventListener('keydown', function (event) {
-      var list = Array.prototype.slice.call(buttons);
-      var index = list.indexOf(button);
-      var next = null;
-      if (event.key === 'ArrowRight') next = list[(index + 1) % list.length];
-      if (event.key === 'ArrowLeft') next = list[(index - 1 + list.length) % list.length];
-      if (event.key === 'Home') next = list[0];
-      if (event.key === 'End') next = list[list.length - 1];
-      if (next) { event.preventDefault(); activateTab(next, true); }
-    });
-  });
-  if (location.hash === '#sec-controls' && document.getElementById('sec-tab-controls')) {
-    activateTab(document.getElementById('sec-tab-controls'), false);
-  }
+  // The record tabs, their keys and their #sec-… addresses are the shared tab
+  // bar's (_tabs.html, lightwork-tabs.js).
 
   // "Someone else…" / "Another framework…" reveal a text field.
   document.querySelectorAll('select[data-owner-select], select[data-other-select]').forEach(function (sel) {
@@ -632,7 +605,7 @@
         })
         .then(function (body) {
           if (!body.enabled) {
-            status.textContent = 'No document source is connected yet. ';
+            status.textContent = 'No document source is connected yet. Connect one in Connections to import policies. ';
             var link = document.createElement('a');
             link.className = 'btn btn--ghost'; link.href = '/connections'; link.textContent = 'Connect a document source';
             status.appendChild(link);
@@ -737,26 +710,30 @@
       });
       return card;
     };
-    fetch('/api/v1/features/switches')
-      .then(function (response) { if (!response.ok) throw response; return response.json(); })
-      .then(function (body) {
-        var rows = (body.switches || []).filter(function (row) {
-          return Object.prototype.hasOwnProperty.call(hunterConsoles, row.section);
-        });
-        huntersHost.textContent = '';
-        if (!rows.length) {
-          var none = document.createElement('p');
-          none.className = 'sec-empty';
-          none.textContent = 'Threat hunting is not available on this installation.';
-          huntersHost.appendChild(none);
-          return;
-        }
-        rows.forEach(function (row) { huntersHost.appendChild(renderHunter(row)); });
-      })
-      .catch(function (error) {
-        huntersHost.textContent = '';
-        huntersStatus.textContent = window.mvErrorText(error, 'load the threat hunting switches');
-      });
+    var loadHunters = function () {
+      // mvLoading shows its words only if the switches take over 300 ms.
+      var wait = window.mvLoading(huntersHost, {text: 'Loading threat hunting switches…', action: 'load the threat hunting switches', retry: loadHunters});
+      huntersStatus.textContent = '';
+      window.mvFetchJSON('/api/v1/features/switches', {}, 'load the threat hunting switches')
+        .then(async function (body) {
+          await wait.done();
+          var rows = (body.switches || []).filter(function (row) {
+            return Object.prototype.hasOwnProperty.call(hunterConsoles, row.section);
+          });
+          huntersHost.textContent = '';
+          if (!rows.length) {
+            var none = document.createElement('p');
+            none.className = 'sec-empty';
+            none.textContent = 'Threat hunting is not available on this installation. Ask your administrator if you need it.';
+            huntersHost.appendChild(none);
+            return;
+          }
+          rows.forEach(function (row) { huntersHost.appendChild(renderHunter(row)); });
+        })
+        .catch(function (error) { wait.fail(error); });
+    };
+    // lightwork-ui.js (mvLoading) loads at the end of the page.
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadHunters); else loadHunters();
   }
   var recordsOn = document.getElementById('sec-records-on');
   if (recordsOn) {
@@ -885,7 +862,11 @@
 (function () {
   'use strict';
   var B = window.LWBoard;
-  var EMPTY = 'No security assessments yet. Start one from the list below.';
+  // Empty charts say what fills them and point at the worklist's start form.
+  function empty(id) {
+    B.empty(document.getElementById(id), 'No security assessments yet',
+      'Assessments appear here once they are on record. Start one from the worklist below.');
+  }
 
   function render(D) {
     var k = document.getElementById('bd-kpis');
@@ -909,7 +890,7 @@
         tipHead: function (r) { return r.d; },
         xTick: function (r, i, n) { return i % 2 === 0 ? r.d.slice(2) : ''; } });
     } else {
-      B.empty(document.getElementById('bd-flow'), EMPTY);
+      empty('bd-flow');
     }
 
     B.donut(document.getElementById('bd-risk'), {
@@ -938,7 +919,7 @@
                           r.total };
         }), 'Assessments by framework: approved against total.');
     } else {
-      B.empty(document.getElementById('bd-frameworks'), EMPTY);
+      empty('bd-frameworks');
     }
   }
 

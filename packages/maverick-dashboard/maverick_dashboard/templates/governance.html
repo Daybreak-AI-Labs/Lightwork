@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Governance workspace · Lightwork{% endblock %}
+{% from "_module_gate.html" import module_gate %}
+{% block title %}AI governance · Lightwork{% endblock %}
 {% block content %}
 <style>
   .gov-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr)); gap:var(--space-4); }
@@ -13,12 +14,15 @@
   .gov-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; }
   .gov-table { overflow-x:auto; }
   .gov-table caption { text-align:left; color:var(--muted); padding:0 0 var(--space-2); }
-  .gov-cite { color:var(--muted); font-size:var(--text-sm); font-weight:400; }
+  .gov-cite { color:var(--muted); font-size:var(--text-sm); font-weight: var(--font-normal); }
   .gov-element { margin:var(--space-3) 0; }
   .gov-element textarea, .gov-element input { width:100%; }
-  .gov-render { max-height:28rem; overflow:auto; padding:var(--space-3); border:1px solid var(--border); border-radius:8px; }
+  .gov-render { max-height:28rem; overflow:auto; padding:var(--space-3); border:1px solid var(--border); border-radius: var(--radius-md); }
   .gov-trainings { display:grid; gap:var(--space-2); }
   .gov-training-row { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto; gap:var(--space-2); align-items:end; }
+  .gov-role-choices { max-height:16rem; overflow:auto; margin:var(--space-2) 0; }
+  .gov-role-choices label { overflow-wrap:anywhere; }
+  .gov-role-choices label[hidden] { display:none; }
 </style>
 
 {% set ASSET_NAMES = {} %}{% for a in governed_assets %}{% set _ = ASSET_NAMES.update({a.asset_id: a.display_name or 'Unnamed AI system'}) %}{% endfor %}
@@ -33,9 +37,6 @@
     {% if not governed_assets %}<a class="btn btn--ghost" href="/security/assurance">Register an AI system</a>{% endif %}
   </label>
 {% endmacro %}
-{% macro turned_off(what) %}
-  <p class="muted">{{ what }} is turned off for this workspace. Ask an administrator to turn it on in the setup wizard.</p>
-{% endmacro %}
 {% set STATUS = {'draft': 'In progress', 'completed': 'Complete', 'outdated': 'Reopened — needs updating', 'recorded': 'Recorded', 'reassessment_required': 'Needs a new assessment', 'declared': 'Declared — nothing filed yet', 'initial_reported': 'First report filed', 'complete_reported': 'Full report filed', 'withdrawn': 'Withdrawn', 'pending': 'Waiting to send', 'dispatching': 'Sending', 'dispatch_unconfirmed': 'Sent — not confirmed', 'delivered_unconfirmed': 'Delivered — not confirmed', 'delivered': 'Delivered', 'failed': 'Failed', 'current': 'Up to date', 'expired': 'Expired', 'missing': 'Not done'} %}
 {% set ROUTE = {'internal_control_annex_vi': 'Internal check by your organisation (no outside body)', 'notified_body_annex_vii': 'Assessment by an independent body', 'sectoral_annex_i': 'Covered by product-specific EU law'} %}
 {% set ANNEX_III = {1: 'Biometrics', 2: 'Critical infrastructure', 3: 'Education and training', 4: 'Employment and managing workers', 5: 'Access to essential services', 6: 'Law enforcement', 7: 'Migration, asylum and border control', 8: 'Justice and democratic processes'} %}
@@ -44,21 +45,23 @@
 {% set DUTY = {'technical_documentation': 'Technical documentation of the model', 'downstream_information': 'Information for companies building on the model', 'copyright_policy': 'Copyright policy', 'training_content_summary': 'Public summary of training content', 'model_evaluation': 'Model evaluation and adversarial testing', 'systemic_risk_mitigation': 'Assessing and reducing systemic risks', 'incident_reporting': 'Tracking and reporting serious incidents', 'cybersecurity_protection': 'Cybersecurity protection', 'use_per_instructions': "Used as the provider's instructions say", 'operation_monitoring': 'Operation is monitored', 'log_retention': 'Logs are kept long enough', 'affected_person_information': 'People affected are told', 'authority_cooperation': 'Cooperation with authorities', 'input_data_control': 'Input data is relevant and representative', 'worker_information': 'Workers are informed', 'registration_check': 'Registration was checked', 'dpia_information': 'Information for the data protection impact assessment'} %}
 {% macro duty_list(keys) %}{% for key in keys %}{{ DUTY.get(key, key|humanize) }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}{% endmacro %}
 
-{{ hero('Legal, privacy and compliance', 'Governance workspace', lede='Keep the records the EU AI Act asks for: impact assessments, technical documentation, approval routes, registrations, staff AI training and serious-incident reports. Every entry is saved under your name. Lightwork records filings you make with authorities; it does not send them for you.') }}
+{{ hero('Legal, privacy and compliance', 'AI governance', lede='Keep the records the EU AI Act asks for: impact assessments, technical documentation, approval routes, registrations, staff AI training and serious-incident reports. Every entry is saved under your name. Lightwork records filings you make with authorities; it does not send them for you.') }}
 
 <p id="gov-flash" role="status" aria-live="polite" class="muted"></p>
+
+{% include "_runtime_enforcement.html" %}
 
 <section class="panel" aria-labelledby="gov-attention-title">
   <div class="section-head"><h2 id="gov-attention-title">Needs attention</h2>
     <button class="btn btn--ghost" type="button" id="gov-refresh-attention">Refresh</button></div>
   <p id="gov-attention-status" role="status" aria-live="polite" class="muted"></p>
   <div id="gov-attention-summary">
+  {% set incidents = attention.sections.serious_incidents %}
   {% if attention.attention_count %}
   <p class="gov-actions">
-    {% set incidents = attention.sections.serious_incidents %}
     {% if incidents and incidents.enabled %}
-    {% if incidents.overdue %}<span class="badge failed">{{ incidents.overdue|length }} incident report{{ 's' if incidents.overdue|length != 1 }} overdue</span>{% endif %}
-    {% if incidents.due_soon %}<span class="badge warn">{{ incidents.due_soon|length }} incident report{{ 's' if incidents.due_soon|length != 1 }} due soon</span>{% endif %}
+    {% if incidents.overdue_count %}<span class="badge failed">{{ incidents.overdue_count }} incident report{{ 's' if incidents.overdue_count != 1 }} overdue</span>{% endif %}
+    {% if incidents.due_soon_count %}<span class="badge warn">{{ incidents.due_soon_count }} incident report{{ 's' if incidents.due_soon_count != 1 }} due soon</span>{% endif %}
     {% endif %}
     {% set lit = attention.sections.ai_literacy %}
     {% if lit and lit.enabled %}
@@ -82,8 +85,10 @@
     {% endif %}
   </p>
   {% else %}
-  <p class="muted">Nothing needs attention right now.</p>
+  <p class="muted">{% if incidents and not incidents.complete %}No alerts were found in the records that could be read. Incident reporting needs a current check.{% else %}Nothing needs attention in the available records right now. Items appear here when a control fails or a review is due.{% endif %}</p>
   {% endif %}
+  {% if incidents and incidents.unavailable_registers %}<p class="badge warn" role="status">Incident reporting is incomplete. {% for register in incidents.unavailable_registers %}{{ 'Serious-incident declarations' if register == 'declarations' else 'Article 73 incident records' }} could not be read.{% if not loop.last %} {% endif %}{% endfor %} Refresh to check again; unavailable records may contain deadlines.</p>{% endif %}
+  {% if incidents and incidents.enabled %}<p class="muted">{{ incidents.notice }}{% if incidents.listed_ids_truncated %} Totals include every supported retained record; detailed alert references show the first 50 in deadline order.{% endif %}</p>{% endif %}
   {% for name, section in attention.sections.items() %}{% if section.error %}
   <p class="muted">{{ name|humanize }} alerts could not be loaded. The other alerts are shown above.</p>
   {% endif %}{% endfor %}
@@ -93,7 +98,7 @@
 <section class="panel" aria-labelledby="fria-title">
   <h2 id="fria-title">Impact on people's rights <span class="gov-cite">Fundamental rights impact assessment, EU AI Act Art. 27</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Record how an AI system may affect people’s rights.') }}
   {% else %}
   {% if fria_error %}<p class="muted">{{ fria_error }}</p>{% endif %}
   {% if fria_records %}
@@ -108,14 +113,14 @@
       <td><button class="btn btn--ghost" type="button" data-fria-open-record="{{ row.id }}" data-revision="{{ row.revision }}" aria-label="Work on the assessment for {{ ASSET_NAMES.get(row.asset_id, 'this AI system') }}">Work on it</button></td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">No assessments yet. Starting one takes under a minute.</p>{% endif %}
+  {% else %}<p class="muted">No assessments yet. Start one below; it takes under a minute.</p>{% endif %}
   <form id="fria-open" class="gov-form">
     {{ asset_select('Which AI system is being assessed?') }}
     <label>Where will it be used?
       <input class="input" name="context" required maxlength="120" placeholder="For example: Loan application triage">
       <span class="muted">The process or team that will use it.</span>
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Start an assessment</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Start an assessment</button>
       <span id="fria-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <div id="fria-editor" hidden>
@@ -123,7 +128,7 @@
     <p class="muted">Answer each question in your own words. The assessment can be marked complete once all six are answered.</p>
     <div id="fria-elements"></div>
     <div class="gov-actions">
-      <button class="btn btn--primary" type="button" id="fria-save">Save answers</button>
+      <button class="btn" type="button" id="fria-save">Save answers</button>
       <button class="btn" type="button" id="fria-complete">Mark complete</button>
       <button class="btn" type="button" id="fria-outdate">Something changed — reopen it</button>
       <button class="btn" type="button" id="fria-notify">Record that you told the authority</button>
@@ -139,11 +144,11 @@
 <section class="panel" aria-labelledby="annex-title">
   <h2 id="annex-title">Technical documentation <span class="gov-cite">Annex IV checklist</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Keep links to each AI system’s technical documentation.') }}
   {% else %}
   <form id="annex-open" class="gov-form">
     {{ asset_select('Which AI system?', help='Opens its nine-item documentation checklist.') }}
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Open the checklist</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Open the checklist</button>
       <span id="annex-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <div id="annex-editor" hidden>
@@ -163,7 +168,7 @@
 <section class="panel" aria-labelledby="route-title">
   <h2 id="route-title">Approval route before launch <span class="gov-cite">Conformity assessment, Art. 43</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Record the approval route chosen before launch.') }}
   {% else %}
   {% if art43_routes %}
   <div class="gov-table"><table>
@@ -198,7 +203,7 @@
     </label>
     <label class="gov-check"><input type="checkbox" name="harmonised"> Harmonised standards were applied</label>
     <label class="gov-check"><input type="checkbox" name="common_specs"> Common specifications were applied</label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the route</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the route</button>
       <span id="route-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <p id="route-modify-status" class="muted" role="status" aria-live="polite"></p>
@@ -208,7 +213,7 @@
 <section class="panel" aria-labelledby="market-title">
   <h2 id="market-title">After launch <span class="gov-cite">Monitoring plan Art. 72, registration Art. 49, instructions for use Art. 13</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Keep monitoring plans and registration records here.') }}
   {% else %}
   <h3>Monitoring plan</h3>
   {% if pmm_plans %}
@@ -221,13 +226,13 @@
       <td><button class="btn btn--ghost" type="button" data-pmm-review="{{ row.asset_id }}" data-revision="{{ row.revision }}" aria-label="Record a review of the plan for {{ ASSET_NAMES.get(row.asset_id, 'this AI system') }}">Record a review</button></td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">No monitoring plans recorded yet.</p>{% endif %}
+  {% else %}<p class="muted">No monitoring plans recorded yet. Record one below for each AI system you watch after launch.</p>{% endif %}
   <form id="pmm-record" class="gov-form">
     {{ asset_select('Which AI system?') }}
     <label>Link to the plan
       <input class="input" name="plan_reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the plan</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the plan</button>
       <span id="pmm-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <p id="pmm-review-status" class="muted" role="status" aria-live="polite"></p>
@@ -243,7 +248,7 @@
       <td>{{ REGISTRY.get(row.registry, row.registry|humanize) }}</td><td>{{ row.reference }}</td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">No registrations recorded yet.</p>{% endif %}
+  {% else %}<p class="muted">No registrations recorded yet. Record one below when an AI system is registered with a regulator.</p>{% endif %}
   <form id="registration-record" class="gov-form">
     {{ asset_select('Which AI system?') }}
     <label>Why is it registered?
@@ -257,14 +262,14 @@
     <label>Registration number
       <input class="input" name="reference" required maxlength="512" placeholder="The number the registry gave you">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the registration</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the registration</button>
       <span id="registration-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
 
   <h3>Instructions for use</h3>
   <form id="ifu-open" class="gov-form">
     {{ asset_select('Which AI system?', help='Opens the six-item checklist of what the instructions must cover.') }}
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Open the checklist</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Open the checklist</button>
       <span id="ifu-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <div id="ifu-editor" hidden>
@@ -285,7 +290,7 @@
 <section class="panel" aria-labelledby="gpai-title">
   <h2 id="gpai-title">General-purpose AI models you provide <span class="gov-cite">Art. 53 and Art. 55</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Track the duties that apply to models you provide.') }}
   {% else %}
   {% if gpai_registers %}
   <div class="gov-table"><table>
@@ -316,7 +321,7 @@
     <label>Link to the evidence
       <input class="input" name="reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the evidence</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the evidence</button>
       <span id="gpai-assert-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   {% else %}<p class="muted">No models tracked yet. Add each general-purpose model you provide below.</p>{% endif %}
@@ -333,7 +338,7 @@
 <section class="panel" aria-labelledby="deployer-title">
   <h2 id="deployer-title">High-risk AI systems you use <span class="gov-cite">Deployer duties, Art. 26</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Track duties for high-risk AI systems your organisation uses.') }}
   {% else %}
   {% if deployer_registers %}
   <div class="gov-table"><table>
@@ -362,7 +367,7 @@
     <label>Link to evidence of their training and authority
       <input class="input" name="reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Name the overseers</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Name the overseers</button>
       <span id="deployer-oversight-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <form id="deployer-assert" class="gov-form">
@@ -382,7 +387,7 @@
     <label>Link to the evidence
       <input class="input" name="reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the evidence</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the evidence</button>
       <span id="deployer-assert-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   {% else %}<p class="muted">No systems tracked yet. Add each high-risk system you use below.</p>{% endif %}
@@ -402,9 +407,13 @@
 <section class="panel" aria-labelledby="literacy-title">
   <h2 id="literacy-title">Staff AI training <span class="gov-cite">AI literacy, Art. 4</span></h2>
   {% if not ai_literacy_enabled %}
-  {{ turned_off('Staff AI training tracking') }}
+  {{ module_gate('ai_literacy', 'Staff AI training tracking', detail='Record the training each role needs and the evidence that staff completed it.') }}
   {% else %}
-  {% if literacy_error %}<p class="muted">{{ literacy_error }}</p>{% endif %}
+  {% if literacy_error %}
+  <p role="status"><strong>Training status is unknown.</strong> Lightwork could not check the complete training record. A complete evidence download is unavailable. Review the records before relying on this report.</p>
+  <p class="muted">This view supports up to 500 roles, 2,000 people and 2,000 training completions.</p>
+  <a class="btn btn--ghost" href="/security/governance#literacy-title">Check the records again</a>
+  {% else %}
   {% if literacy_plane_status.reconciliation_required %}
   <p class="muted"><strong>Evidence review needed.</strong> These training records are not yet compliance evidence. Add the training provider, course version, expiry date and certificate for each one before relying on them.</p>
   {% else %}
@@ -442,7 +451,7 @@
       <legend>Trainings this role needs</legend>
     </fieldset>
     <div class="gov-form__wide gov-actions"><button class="btn btn--ghost" type="button" id="literacy-add-training">Add a training</button>
-      <button class="btn btn--primary" type="submit">Save the role's training</button>
+      <button class="btn" type="submit">Save the role's training</button>
       <span id="literacy-require-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
 
@@ -459,9 +468,15 @@
     </label>
     <fieldset class="gov-form__wide">
       <legend>Roles</legend>
-      {% for role in literacy_roles %}<label class="gov-check"><input type="checkbox" name="roles" value="{{ role }}"> {{ role|humanize }}</label>{% else %}<p class="muted">Add a role above first.</p>{% endfor %}
+      {% if literacy_roles %}
+      <label>Find a role<input class="input" type="search" id="literacy-role-search" maxlength="128" aria-describedby="literacy-role-count" placeholder="Type part of its name"></label>
+      <p class="muted" id="literacy-role-count" role="status" aria-live="polite"></p>
+      <div class="gov-role-choices" id="literacy-role-choices">
+      {% for role in literacy_roles %}<label class="gov-check"><input type="checkbox" name="roles" value="{{ role }}"> <span>{{ role|humanize }}</span></label>{% endfor %}
+      </div>
+      {% else %}<p class="muted">Add a role above first.</p>{% endif %}
     </fieldset>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit"{% if not literacy_roles %} disabled{% endif %}>Save roles</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit"{% if not literacy_roles %} disabled{% endif %}>Save roles</button>
       <span id="literacy-assign-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
 
@@ -472,28 +487,35 @@
         {% for person in tracked_people %}<option value="{{ person.person }}">{{ person.person }}</option>{% else %}<option value="">Give someone a role first</option>{% endfor %}
       </select>
     </label>
+    <label>Find a training
+      <input class="input" id="literacy-training-search" type="search" maxlength="256" placeholder="Type part of its name" aria-describedby="literacy-training-count">
+    </label>
     <label>Training
-      <select class="select" name="training" required>
-        {% for training in literacy_training_keys %}<option value="{{ training.key }}">{{ training.title or training.key|humanize }}</option>{% else %}<option value="">Add a training to a role first</option>{% endfor %}
+      <select class="select" id="literacy-training-choice" name="training" required aria-describedby="literacy-training-count">
+        <option value="">{% if literacy_training_keys %}Choose a training{% else %}Add a training to a role first{% endif %}</option>
+        {% for training in literacy_training_keys[:100] %}<option value="{{ training.key }}">{{ training.title or training.key|humanize }}</option>{% endfor %}
       </select>
     </label>
+    <p class="muted gov-form__wide" id="literacy-training-count" role="status" aria-live="polite">{% if literacy_training_keys|length > 100 %}Showing the first 100 of {{ literacy_training_keys|length }} trainings. Type more of the name to find another training.{% endif %}</p>
+    <script type="application/json" id="literacy-training-choices">{{ literacy_training_keys|tojson }}</script>
     <label>Finished on
       <input class="input" name="completed_at" type="date" required>
     </label>
     <label>Link to the certificate or course record
       <input class="input" name="evidence_ref" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record it</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record it</button>
       <button class="btn btn--ghost" type="button" id="literacy-download">Download the training evidence</button>
       <span id="literacy-complete-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
+  {% endif %}
   {% endif %}
 </section>
 
 <section class="panel" id="serious-incidents" aria-labelledby="incident-title">
   <h2 id="incident-title">Serious incidents <span class="gov-cite">Reporting deadlines, Art. 73</span></h2>
   {% if not ai_incident_enabled %}
-  {{ turned_off('Serious-incident reporting') }}
+  {{ module_gate('ai_incident_reporting', 'Serious-incident reporting', detail='Track deadlines and record reports your team makes to authorities.') }}
   {% else %}
   {% if ai_incident_error %}<p class="muted">{{ ai_incident_error }}</p>{% endif %}
   {% if ai_incident_declarations %}
@@ -505,7 +527,7 @@
       <th scope="row">{{ ai_incident_categories.get(row.category, {}).get('label') or row.category|humanize }}</th>
       <td>{{ row.member_state }}</td>
       <td>{{ STATUS.get(row.status, row.status|humanize) }}</td>
-      <td>{% if row.overdue %}<span class="badge failed">Overdue</span>{% else %}{{ row.clock_label|replace('d left', ' days left') }}{% endif %}</td>
+      <td>{% if row.status == 'initial_reported' %}First report filed; full report to follow{% elif row.status == 'complete_reported' %}Full report filed{% elif row.status == 'withdrawn' %}Withdrawn{% elif row.overdue %}<span class="badge failed">Overdue</span>{% else %}{{ row.clock_label|replace('d left', ' days left') }}{% endif %}</td>
       <td class="gov-actions">{% if row.status in ('declared', 'initial_reported') %}
         {% if row.status == 'declared' %}<button class="btn btn--ghost" type="button" data-incident-submit="{{ row.id }}" data-kind="initial" data-revision="{{ row.revision }}">Record first report</button>{% endif %}
         <button class="btn btn--ghost" type="button" data-incident-submit="{{ row.id }}" data-kind="complete" data-revision="{{ row.revision }}">Record full report</button>
@@ -549,7 +571,7 @@
       </select>
     </label>
     <label class="gov-check"><input type="checkbox" name="widespread"> It is widespread (shortens the deadline to 2 days)</label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit"{% if not assurance_incidents %} disabled{% endif %}>Declare serious incident</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit"{% if not assurance_incidents %} disabled{% endif %}>Declare serious incident</button>
       <span id="incident-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   {% endif %}
@@ -586,7 +608,7 @@
   <h2 id="grc-title">Sending records to your GRC system</h2>
   {% if not grc_sync_enabled %}
   <p class="muted">Sending to an outside governance, risk and compliance system (such as ServiceNow) is not set up. When it is, findings, accepted risks and incidents are copied there with a link back to Lightwork.</p>
-  <p><a class="btn" href="/get-started">Set up a connection</a></p>
+  <p><a class="btn" href="/start">Set up a connection</a></p>
   {% else %}
   {% if grc_error %}<p class="muted">{{ grc_error }}</p>{% endif %}
   {% if grc_status and grc_status.outbound %}
@@ -606,14 +628,14 @@
       <td>{{ row.remote_id or "—" }}</td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted">Nothing has been sent yet.</p>{% endif %}
+  {% else %}<p class="muted">Nothing has been sent yet. Records sent with the form below are listed here.</p>{% endif %}
   <form id="gov-grc-run" class="gov-form">
     <details class="gov-form__wide"><summary>Options</summary>
       <label>Most records to send this time<input class="input" type="number" name="limit" min="1" max="200" step="1" value="50" required></label>
     </details>
     <label class="gov-form__wide gov-check"><input type="checkbox" name="confirm_dispatch" required>
       I agree to send eligible findings, accepted risks and incidents to the outside system.</label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Send records now</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Send records now</button>
       <span class="muted">Only an administrator can send. Anything that might have been sent twice is held for a check.</span></div>
   </form>
   <p id="gov-grc-status" role="status" aria-live="polite"></p>
@@ -635,7 +657,7 @@
     <div class="gov-form__wide" id="gov-grc-comparison" tabindex="-1"></div>
     <label class="gov-form__wide">Note<textarea class="textarea" name="note" required maxlength="2000" rows="3"></textarea></label>
     <div class="gov-form__wide gov-actions">
-      <button class="btn btn--primary" type="button" id="gov-grc-confirm" disabled>Confirm it was delivered</button>
+      <button class="btn" type="button" id="gov-grc-confirm" disabled>Confirm it was delivered</button>
       <button class="btn" type="button" id="gov-grc-keep-held">Save note and keep it held</button>
     </div>
     <p class="gov-form__wide" id="gov-grc-recovery-status" role="status" aria-live="polite"></p>
@@ -652,25 +674,12 @@
   const IFU_ITEMS = {{ ifu_items|tojson }};
   const ASSET_NAMES = {{ ASSET_NAMES|tojson }};
   const nameOf = assetId => ASSET_NAMES[assetId] || "this AI system";
-  const status = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-  // A failed request becomes one plain sentence; call sites add what failed.
-  const reason = failure => (typeof window.mvErrorText === "function"
-    ? window.mvErrorText(failure)
-    : "Something went wrong. Please try again.");
-  const say = (id, error, action) => status(id, "Could not " + action + ". " + ((error && error.message) || "Please try again."));
-  const failure = response => {
-    const error = new Error(reason(response));
-    error.status = response.status;
-    return error;
-  };
-  const send = async (url, options) => {
-    let response;
-    try { response = await fetch(url, Object.assign({credentials: "same-origin"}, options)); }
-    catch (networkError) { throw new Error(reason(networkError)); }
-    if (!response.ok) throw failure(response);
-    try { return await response.json(); }
-    catch { throw new Error("Lightwork sent back something unexpected. Refresh the page and try again."); }
-  };
+  const status = (id, text) => { const el = document.getElementById(id); if (el && window.mvStatus) window.mvStatus(el, text); else if (el) el.textContent = text; };
+  const say = (id, error, action) => status(id, "Could not " + action + ". " + ((error && error.message) || "Try again."));
+  // Requests go through the shell's mvFetchJSON (lightwork-ui.js), which loads
+  // after the page content; a failure is one plain sentence without the action.
+  const shellReady = window.mvFetchJSON ? Promise.resolve() : new Promise(done => document.addEventListener("DOMContentLoaded", done));
+  const send = async (url, options) => { await shellReady; return window.mvFetchJSON(url, options); };
   const post = (base, path, body) => send(base + path, {
     method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
   });
@@ -699,10 +708,12 @@
       const summary = document.getElementById("gov-attention-summary");
       summary.replaceChildren();
       const count = document.createElement("p");
-      count.textContent = result.attention_count ? `${result.attention_count} item${result.attention_count === 1 ? "" : "s"} need attention.` : "Nothing needs attention right now.";
+      const incidents = result.sections.serious_incidents;
+      const incomplete = incidents && incidents.complete === false;
+      count.textContent = result.attention_count ? `${result.attention_count} item${result.attention_count === 1 ? "" : "s"} need attention.` : incomplete ? "No alerts were found in the records that could be read. Incident reporting needs a current check." : "Nothing needs attention in the available records right now.";
       summary.appendChild(count);
       const labels = {
-        serious_incidents: {label:"Serious incidents",fields:{overdue:"reports overdue",due_soon:"reports due soon"}},
+        serious_incidents: {label:"Serious incidents",fields:{overdue_count:"reports overdue",due_soon_count:"reports due soon"}},
         ai_literacy: {label:"Staff AI training",fields:{missing:"trainings not done",expired:"trainings expired",expiring_soon:"trainings expiring soon"}},
         eu_conformity: {label:"EU AI Act",fields:{outdated_frias:"assessments reopened",reassessment_required:"systems needing a new assessment"}},
         vendors: {label:"Suppliers",fields:{contracts_overdue:"contracts past renewal",contracts_due_soon:"contracts renewing soon"}},
@@ -711,6 +722,11 @@
       Object.entries(labels).forEach(([name, definition]) => {
         const section = result.sections[name];
         if (!section) return;
+        if (name === "serious_incidents" && section.unavailable_registers && section.unavailable_registers.length) {
+          const warning = document.createElement("p"); warning.className = "badge warn";
+          warning.textContent = "Incident reporting is incomplete. " + section.unavailable_registers.map(value => value === "declarations" ? "Serious-incident declarations could not be read." : "Article 73 incident records could not be read.").join(" ") + " Refresh to check again; unavailable records may contain deadlines.";
+          summary.appendChild(warning);
+        }
         if (section.error) {
           const warning = document.createElement("p"); warning.className = "muted";
           warning.textContent = `${definition.label} alerts could not be loaded. The other alerts are shown.`;
@@ -721,10 +737,15 @@
           if (!number) return;
           const item = document.createElement("p"); item.textContent = `${definition.label}: ${number} ${label}.`; summary.appendChild(item);
         });
+        if (name === "serious_incidents" && section.enabled) {
+          const notice = document.createElement("p"); notice.className = "muted";
+          notice.textContent = section.notice + (section.listed_ids_truncated ? " Totals include every supported retained record; detailed alert references show the first 50 in deadline order." : "");
+          summary.appendChild(notice);
+        }
       });
       status("gov-attention-status", "Alerts refreshed.");
     }
-    catch (error) { status("gov-attention-status", error.message || "Alerts could not be refreshed."); }
+    catch (error) { status("gov-attention-status", error.message || "Alerts could not be refreshed. Refresh the page and try again."); }
     finally { refreshAttention.disabled = false; }
   });
   const grcRun = document.getElementById("gov-grc-run");
@@ -1082,6 +1103,43 @@
   });
 
   // ---- Staff AI training ----------------------------------------------------
+  const roleSearch = document.getElementById("literacy-role-search");
+  const roleChoices = document.getElementById("literacy-role-choices");
+  if (roleSearch && roleChoices) {
+    const labels = [...roleChoices.querySelectorAll("label")];
+    const filterRoles = () => {
+      const query = roleSearch.value.trim().toLocaleLowerCase(); let matching = 0, selected = 0;
+      labels.forEach(label => {
+        const input = label.querySelector('input[name="roles"]');
+        const matches = label.textContent.toLocaleLowerCase().includes(query) || input.value.toLocaleLowerCase().includes(query);
+        if (matches) matching++; if (input.checked) selected++;
+        label.hidden = !matches && !input.checked;
+      });
+      status("literacy-role-count", matching + " of " + labels.length + " roles match. " + selected + " selected. Selected roles stay visible.");
+    };
+    roleSearch.addEventListener("input", filterRoles); roleChoices.addEventListener("change", filterRoles); filterRoles();
+  }
+  const trainingSearch = document.getElementById("literacy-training-search");
+  const trainingChoice = document.getElementById("literacy-training-choice");
+  const trainingData = document.getElementById("literacy-training-choices");
+  if (trainingSearch && trainingChoice && trainingData) {
+    const choices = JSON.parse(trainingData.textContent);
+    const trainingLabel = item => item.title || item.key.replace(/[_-]+/g, " ");
+    const filterTrainings = () => {
+      const selected = choices.find(item => item.key === trainingChoice.value);
+      const query = trainingSearch.value.trim().toLocaleLowerCase();
+      const matches = choices.filter(item => trainingLabel(item).toLocaleLowerCase().includes(query) || item.key.toLocaleLowerCase().includes(query));
+      const shown = matches.slice(0, 100);
+      trainingChoice.replaceChildren(new Option(choices.length ? "Choose a training" : "Add a training to a role first", ""));
+      if (selected && !shown.some(item => item.key === selected.key)) trainingChoice.append(new Option(trainingLabel(selected), selected.key));
+      shown.forEach(item => trainingChoice.append(new Option(trainingLabel(item), item.key)));
+      if (selected) trainingChoice.value = selected.key;
+      status("literacy-training-count", matches.length > 100
+        ? "Showing the first 100 of " + matches.length + " matching trainings. Type more of the name to find another training."
+        : matches.length + " matching " + (matches.length === 1 ? "training." : "trainings.") + (selected ? " Your selected training is kept." : ""));
+    };
+    trainingSearch.addEventListener("input", filterTrainings); filterTrainings();
+  }
   const slug = text => String(text || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
   const trainingRows = document.getElementById("literacy-training-rows");
   const addTrainingRow = () => {
@@ -1105,7 +1163,7 @@
   const literacyRequire = document.getElementById("literacy-require");
   if (literacyRequire) literacyRequire.addEventListener("submit", async event => {
     event.preventDefault();
-    const role = slug(literacyRequire.elements.role_choice.value || literacyRequire.elements.role_new.value);
+    const role = literacyRequire.elements.role_choice.value || slug(literacyRequire.elements.role_new.value);
     if (!role) { status("literacy-require-status", "Choose a role or type a new role name."); return; }
     const trainings = [...trainingRows.querySelectorAll(".gov-training-row")].map(row => {
       const title = row.querySelector('[data-field="title"]').value.trim();
@@ -1315,7 +1373,7 @@
         status("agent-check-result", human(action) + ": " + (DECISION[verdict.decision] || "Unknown.") + (verdict.reason ? " " + verdict.reason : ""));
       } catch (error) { say("agent-check-result", error, "check the action"); }
     });
-    const CHAIN = {valid: "The record is complete and has not been changed.", broken: "Warning: this record has been changed since it was written.", missing: "No actions were recorded for this task.", unavailable: "The record could not be read."};
+    const CHAIN = {valid: "The record is complete and has not been changed.", broken: "Warning: this record has been changed since it was written.", missing: "No actions were recorded for this task.", unavailable: "The record could not be read. Refresh the page and try again."};
     const listInto = (id, lines, note) => {
       const holder = document.getElementById(id); holder.replaceChildren();
       if (note) { const p = document.createElement("p"); p.textContent = note; holder.appendChild(p); }
@@ -1351,4 +1409,5 @@
 })();
 </script>
 <script src="/static/lightwork-grc-recovery.js" defer></script>
+<script src="/static/lightwork-runtime-enforcement.js" defer></script>
 {% endblock %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Branches · Lightwork{% endblock %}
+{% block title %}{{ 'Branches · Task replay' if tab_host else 'Branches' }} · Lightwork{% endblock %}
 {% block content %}
 <style>
   /* Branches — scoped. The nesting is a plain <ul>/<li> so the tree reads in
@@ -13,8 +13,15 @@
   .rt-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: var(--space-3); align-items: end; }
 </style>
 
+  {% if tab_host %}
+  {% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+  <div {{ panel_attrs(tab_host.selected) }}>
+  <h2>Branches</h2>
+  <p class="muted">See what the agent chose next to what another way would have done. A branch starts a task again from one of its steps and keeps both versions side by side for review.</p>
+  {% else %}
   <h1 class="page-title">Branches</h1>
   <p class="page-subtitle">See what the agent chose next to what another way would have done. A branch starts a task again from one of its steps and keeps both versions side by side for review.</p>
+  {% endif %}
 
   <div class="panel">
     <p style="margin: 0;">
@@ -82,7 +89,7 @@
       <tbody>
         {% for r in roots %}
         <tr>
-          <td><a href="/run-tree?goal={{ r.goal_id }}"><strong>{{ r.title or 'Untitled task' }}</strong></a></td>
+          <td><a href="{{ branches_href | default('/run-tree?') }}goal={{ r.goal_id }}"><strong>{{ r.title or 'Untitled task' }}</strong></a></td>
           <td>{{ (r.owner | identity).name if r.owner else '—' }}</td>
           <td><span class="badge">{{ r.status | humanize }}</span></td>
           <td>{{ r.forks }}</td>
@@ -135,11 +142,12 @@
   <div class="panel">
     <div class="mv-empty">
       <p class="mv-empty__title">No tasks have branches yet</p>
-      <p class="mv-empty__body">Choose a task and a step above and select Create branch, or open a task’s step-by-step history and choose “Branch from here” on the step you want to question.</p>
+      <p class="mv-empty__body">Choose a task and a step above and select Create branch. Or open a task’s step-by-step history and choose “Branch from here” on the step you want to question.</p>
       <a class="btn btn--ghost" href="/goals">Open your tasks</a>
     </div>
   </div>
   {% endif %}
+  {% if tab_host %}</div>{% endif %}
 
 {% if can_operate %}
 <script>
@@ -191,7 +199,7 @@
       var j = await r.json();
       msg.textContent = 'Branch created. ';
       var a = document.createElement('a'); a.href = '/chat/goal/' + encodeURIComponent(j.goal_id); a.textContent = 'Open the branch';
-      var b = document.createElement('a'); b.href = '/run-tree?goal=' + encodeURIComponent(task.value); b.textContent = 'Compare branches';
+      var b = document.createElement('a'); b.href = {{ (branches_href | default('/run-tree?')) | tojson }} + 'goal=' + encodeURIComponent(task.value); b.textContent = 'Compare branches';
       msg.append(a, ' · ', b);
     } catch (e) { msg.textContent = plain(e, 'create the branch'); }
     finally { forkBtn.disabled = !enabled; }

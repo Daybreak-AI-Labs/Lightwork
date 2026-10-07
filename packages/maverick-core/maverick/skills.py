@@ -17,7 +17,7 @@ import re
 import stat
 import urllib.error
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .blackboard import Blackboard
@@ -115,6 +115,10 @@ class Skill:
     # PBAC: purposes this skill may be recalled FOR (empty = any purpose).
     # Enforced default-open by relevant_skills via maverick.access_policy.
     purposes: tuple[str, ...] = ()
+    source: str = ""
+    source_goal_ids: tuple[int, ...] = ()
+    _runtime_binding: tuple[str | None, str, str, str, str] | None = field(
+        default=None, repr=False, compare=False)
 
     @classmethod
     def parse(cls, text: str, path: Path) -> Skill:
@@ -178,6 +182,9 @@ class Skill:
             sig=sig if isinstance(sig, str) else None,
             pubkey=pubkey if isinstance(pubkey, str) else None,
             purposes=tuple(meta["purposes"]) if isinstance(meta.get("purposes"), list) else (),
+            source=str(meta.get("source", "")),
+            source_goal_ids=tuple(int(v) for v in str(meta.get("source_goal_ids", "")).split()
+                                  if v.isdecimal() and int(v) > 0),
         )
 
 
@@ -270,10 +277,81 @@ def load_skills(skills_dir: Path | None = None) -> list[Skill]:
     out = []
     for p in target_dir.glob("*.md"):
         try:
-            out.append(Skill.parse(p.read_text(encoding="utf-8"), p))
+            with p.open("rb") as stream:
+                raw = stream.read(MAX_SKILL_DOWNLOAD_BYTES + 1)
+            if len(raw) > MAX_SKILL_DOWNLOAD_BYTES:
+                continue
+            skill = Skill.parse(raw.decode("utf-8").replace("\r\n", "\n"), p)
+            _bind_learned_snapshot(skill, raw)
+            if _source_readable(skill):
+                out.append(skill)
         except Exception:
             continue
     return out
+
+
+def _bind_learned_snapshot(skill: Skill, raw: bytes) -> None:
+    if skill.source in {"auto-distilled-provider-v1", _REVIEWED_LOCAL_SOURCE}:
+        from .paths import current_tenant
+
+        skill._runtime_binding = (
+            current_tenant(), str(skill.path.resolve()), hashlib.sha256(raw).hexdigest(),
+            learned_skill_use_key(skill), hashlib.sha256(_canonical_signed_bytes(skill)).hexdigest(),
+        )
+
+
+def _learned_snapshot_current(skill: Skill) -> bool:
+    """A removed/replaced learned artifact cannot survive a slow recall."""
+    if (skill._runtime_binding is None
+            and skill.source not in {"auto-distilled-provider-v1", _REVIEWED_LOCAL_SOURCE}):
+        return True
+    try:
+        from .file_lock import ensure_private_file
+        from .paths import current_tenant
+
+        tenant, path, digest, use_key, instructions = skill._runtime_binding
+        if (current_tenant() != tenant or str(skill.path.resolve()) != path
+                or learned_skill_use_key(skill) != use_key
+                or hashlib.sha256(_canonical_signed_bytes(skill)).hexdigest() != instructions):
+            return False
+        ensure_private_file(skill.path)
+        with skill.path.open("rb") as stream:
+            raw = stream.read(MAX_SKILL_DOWNLOAD_BYTES + 1)
+        return (len(raw) <= MAX_SKILL_DOWNLOAD_BYTES
+                and hashlib.sha256(raw).hexdigest() == digest
+                and current_tenant() == tenant)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _source_readable(skill: Skill) -> bool:
+    """Generated text retains source authority, including after exclusion.
+
+    Installed human-authored and packaged skills are explicit shared resources.
+    Automatically distilled skills without verifiable lineage stay unavailable.
+    """
+    # The original learned binding cannot be downgraded by changing a mutable
+    # classification field on an already loaded object.
+    if skill._runtime_binding is not None and not _learned_snapshot_current(skill):
+        return False
+    if not skill.source.startswith("auto-distilled"):
+        return True
+    if not skill.source_goal_ids:
+        return False
+    try:
+        from .memory_ownership import current_owner, source_allowed
+        # Provider-distilled skills live in the tenant-wide installed-skill
+        # directory. Older private-source files may still be present there;
+        # retain them for review but never serve them to any employee. A
+        # personal skill needs a separate owner-scoped store and recall path.
+        if skill.source in {"auto-distilled-provider-v1", _REVIEWED_LOCAL_SOURCE}:
+            return (all(source_allowed(gid, "") for gid in skill.source_goal_ids)
+                    and _learned_snapshot_current(skill))
+        owner = current_owner()
+        return all(source_allowed(gid, owner) or source_allowed(gid, "")
+                   for gid in skill.source_goal_ids)
+    except Exception:
+        return False
 
 
 def builtin_skills_dir() -> Path:
@@ -337,6 +415,23 @@ def available_skills(skills_dir: Path | None = None) -> list[Skill]:
     return list(by_name.values())
 
 
+def learned_skill_use_key(skill: Skill) -> str:
+    """Version-bound use counter for a reviewed or provider-distilled skill.
+
+    The ordinary name counter still drives ranking. This separate key lets the
+    Skills page prove that this exact learned instruction set was recalled on
+    a later run, even if a withdrawn name was reused for another skill.
+    """
+    if skill.source not in {_REVIEWED_LOCAL_SOURCE, "auto-distilled-provider-v1"}:
+        return ""
+    payload = json.dumps({
+        "name": skill.name, "source": skill.source,
+        "sources": skill.source_goal_ids, "triggers": skill.triggers,
+        "tools": skill.tools_needed, "body": skill.body,
+    }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "learned:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _decay_weights(names: list[str]) -> dict[str, float]:
     """Track-record multipliers for ``names`` (neutral 1.0 on any failure).
 
@@ -398,7 +493,7 @@ def relevant_skills(goal: str, all_skills: list[Skill], max_n: int = 3) -> list[
     ``[skills].embed_threshold`` (default 0.35) and the lexical fallback only
     at/above ``[skills].lexical_min_relevance`` (default a real two-word/phrase
     match). This gives the "warm is never worse than cold" property."""
-    all_skills = _purpose_allowed(all_skills)  # PBAC: purpose-scope before relevance
+    all_skills = _purpose_allowed([s for s in all_skills if _source_readable(s)])
     try:
         from . import config as _config
         cfg = _config.get_skills()
@@ -410,14 +505,16 @@ def relevant_skills(goal: str, all_skills: list[Skill], max_n: int = 3) -> list[
         from .skill.embeddings import relevant_skills_embed
         result = relevant_skills_embed(goal, all_skills, max_n=max_n, threshold=embed_threshold)
         if result is not None:
-            return result
+            return [s for s in result if _source_readable(s)]
     except Exception as e:
         log.debug("embedding retrieval failed; falling back to lexical: %s", e)
-    return _relevant_skills_lexical(goal, all_skills, max_n=max_n, min_score=lexical_min)
+    return [s for s in _relevant_skills_lexical(
+        goal, all_skills, max_n=max_n, min_score=lexical_min) if _source_readable(s)]
 
 
 def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
-                      max_total_chars: int | None = None) -> str:
+                      max_total_chars: int | None = None,
+                      rendered_skills: list[Skill] | None = None) -> str:
     """Render recalled skills for the system prompt, BOUNDED.
 
     Bodies ride every agent's system prompt at every swarm depth, and the only
@@ -428,6 +525,9 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     the relevance-ranked tail once spent (the first skill always renders).
     0 disables either cap.
     """
+    if rendered_skills is not None:
+        rendered_skills.clear()
+    skills = [s for s in skills if _source_readable(s)]
     if not skills:
         return ""
     from .env_setting import env_or_config_int
@@ -437,19 +537,31 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     if max_total_chars is None:
         max_total_chars = env_or_config_int(
             "MAVERICK_SKILL_RENDER_TOTAL_CHARS", "skills", "render_total_chars", 10_000)
-    parts = ["# Relevant skills from past runs", ""]
+    entries = []
     total = 0
     for s in skills:
+        from .plugin_execution_pins import check_skill
+        check_skill(s)
+        if not _source_readable(s):
+            continue
         body = s.body or ""
         if max_body_chars > 0 and len(body) > max_body_chars:
             body = (body[:max_body_chars].rstrip()
                     + f"\n... [skill body {len(s.body)}B truncated to {max_body_chars}B]")
         if max_total_chars > 0 and total and total + len(body) > max_total_chars:
             break  # combined budget spent; skills are relevance-ranked
-        parts.append(f"## {s.name}")
-        parts.append(body)
-        parts.append("")
+        entries.append((s, body))
         total += len(body)
+    # Configuration, plugin checks, and source-authority reads can block.
+    # Re-read the actual admitted bytes at the last prompt-delivery boundary.
+    entries = [(s, body) for s, body in entries if _source_readable(s)]
+    if not entries:
+        return ""
+    parts = ["# Relevant skills from past runs", ""]
+    for s, body in entries:
+        parts.extend((f"## {s.name}", body, ""))
+        if rendered_skills is not None:
+            rendered_skills.append(s)
     return "\n".join(parts)
 
 
@@ -703,6 +815,8 @@ def _verify_skill_signature(parsed: Skill, *, require_signature: bool = False) -
 def _validate_and_write(
     content: str, skills_dir: Path, *, require_signature: bool = False,
     before_save: Callable[[], None] | None = None,
+    replace_existing: bool = True,
+    internal_distillation: bool = False,
 ) -> Skill:
     """Parse + shield-scan skill content, then write it. Shared by
     ``install_skill`` (free-text source) and ``install_from_catalog``
@@ -725,6 +839,13 @@ def _validate_and_write(
     ensure_private_directory(skills_dir)
     tmp_path = skills_dir / ".validating"
     parsed = Skill.parse(content, tmp_path)
+    # Source/provenance fields control future shared recall. Remote or manually
+    # authored skills cannot claim the authority of the internal distillers.
+    if not internal_distillation and (
+        parsed.source.startswith("auto-distilled")
+        or re.search(r"(?m)^candidate_sha256:", content)
+    ):
+        raise ValueError("reserved learning provenance is only set by Lightwork")
 
     # A skill MUST declare `name:` in its frontmatter. Skill.parse falls back to
     # path.stem when it's absent -- fine when LOADING an existing skill (the
@@ -760,6 +881,8 @@ def _validate_and_write(
         except FileNotFoundError:
             info = None
         if info is not None:
+            if not replace_existing:
+                raise ValueError("a skill already has this name; choose another name")
             reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
             is_reparse = bool(
                 getattr(info, "st_file_attributes", 0) & reparse
@@ -796,9 +919,263 @@ def _validate_and_write(
         if before_save is not None:
             before_save()
         atomic_write_text(target, content, mode=0o600)
+        # Windows text publication may use CRLF. Bind the exact saved bytes,
+        # not a hash guessed from the pre-publication string.
+        raw = target.read_bytes()
     result = Skill.parse(content, target)
     result.verified = verified
+    _bind_learned_snapshot(result, raw)
     return result
+
+
+# Local distillation writes proposals to a different store. An administrator
+# reviews one exact version before it can enter the installed-skill recall path.
+_LEARNED_CANDIDATE_MAX_BYTES = 32 * 1024
+_REVIEWED_LOCAL_SOURCE = "auto-distilled-reviewed-local-v1"
+
+
+@dataclass(frozen=True)
+class LearnedSkillCandidate:
+    name: str
+    triggers: tuple[str, ...]
+    tools_needed: tuple[str, ...]
+    body: str
+    source_goal_ids: tuple[int, ...]
+    fingerprint: str
+    validation: SkillValidation
+    path: Path
+    text: str
+
+
+def _learned_candidate(name: str, *, store: Path | None = None) -> LearnedSkillCandidate:
+    """Read only a tenant-local proposal with currently shared provenance."""
+    from .file_lock import atomic_read_bytes, ensure_private_file
+    from .memory_ownership import source_allowed
+    from .skill.distillation_local import _default_store
+
+    if not isinstance(name, str) or len(name) > 96 or not _KEBAB_RE.fullmatch(name):
+        raise ValueError("Choose a suggested skill from the current list.")
+    path = (Path(store) if store is not None else _default_store()) / f"{name}.md"
+    try:
+        ensure_private_file(path)
+        before = path.lstat()
+        if before.st_size > _LEARNED_CANDIDATE_MAX_BYTES:
+            raise ValueError("This suggestion is too long to review here.")
+        raw = atomic_read_bytes(path)
+        after = path.lstat()
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise ValueError("This suggestion changed. Refresh it before review.")
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        raise ValueError("This suggestion is no longer available.") from exc
+    if len(raw) > _LEARNED_CANDIDATE_MAX_BYTES:
+        raise ValueError("This suggestion is too long to review here.")
+    try:
+        text = raw.decode("utf-8").replace("\r\n", "\n")
+        skill = Skill.parse(text, path)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("This suggestion cannot be reviewed.") from exc
+    if (skill.name != name or skill.source != "auto-distilled-local-v2"
+            or not skill.source_goal_ids or len(skill.source_goal_ids) > 16
+            or not all(source_allowed(gid, "") for gid in skill.source_goal_ids)):
+        raise ValueError("This suggestion has no current shared task sources.")
+    return LearnedSkillCandidate(
+        name=name, triggers=tuple(skill.triggers), tools_needed=tuple(skill.tools_needed),
+        body=skill.body, source_goal_ids=skill.source_goal_ids,
+        fingerprint=hashlib.sha256(raw).hexdigest(),
+        validation=validate_skill_text(text, path), path=path, text=text,
+    )
+
+
+def learned_skill_candidates(*, store: Path | None = None,
+                             skills_dir: Path | None = None) -> list[LearnedSkillCandidate]:
+    """Reviewable, shared-source proposals not already admitted at this hash."""
+    from .skill.distillation_local import _default_store
+
+    root = Path(store) if store is not None else _default_store()
+    if not root.is_dir():
+        return []
+    installed = _admitted_candidate_hashes(skills_dir)
+    out = []
+    for path in sorted(root.glob("*.md"))[:200]:
+        try:
+            candidate = _learned_candidate(path.stem, store=root)
+        except ValueError:
+            continue  # stale, unowned and malformed files stay private on disk
+        if candidate.fingerprint not in installed:
+            out.append(candidate)
+    return out
+
+
+def _admitted_candidate_hashes(skills_dir: Path | None = None) -> set[str]:
+    root = _resolved_skills_dir(skills_dir)
+    if not root.is_dir():
+        return set()
+    hashes: set[str] = set()
+    for path in root.glob("*.md"):
+        try:
+            text = path.read_text(encoding="utf-8")
+            skill = Skill.parse(text, path)
+            if skill.source != _REVIEWED_LOCAL_SOURCE:
+                continue
+            match = re.search(r"(?m)^candidate_sha256: ([a-f0-9]{64})$", text)
+            if match:
+                hashes.add(match.group(1))
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+    return hashes
+
+
+def admit_learned_skill(
+    name: str, fingerprint: str, *, publish_name: str = "",
+    store: Path | None = None, skills_dir: Path | None = None,
+    before_save: Callable[[LearnedSkillCandidate], None] | None = None,
+    effect_guard: Callable[[], None] | None = None,
+) -> Skill:
+    """Promote one reviewed proposal through ordinary signing/shield checks.
+
+    Re-read its exact bytes and shared-source authority inside the proposal
+    lock and again immediately before the installed-skill write. No proposal
+    is silently recalled, and a name collision never overwrites a skill.
+    """
+    from .file_lock import cross_process_lock
+    from .learning_guard import check_learning_halt
+    from .skill.distillation_local import _default_store, enabled
+
+    if not enabled():
+        raise ValueError("Learning from completed work is turned off. Turn it on in Learning settings first.")
+    if not re.fullmatch(r"[a-f0-9]{64}", str(fingerprint)):
+        raise ValueError("Check this suggestion again before adding it.")
+    chosen = publish_name or name
+    if len(chosen) > 96 or not _KEBAB_RE.fullmatch(chosen):
+        raise ValueError("Choose a short name using letters, numbers and dashes.")
+    root = Path(store) if store is not None else _default_store()
+    path = root / f"{name}.md"
+    with cross_process_lock(path):
+        candidate = _learned_candidate(name, store=root)
+        if candidate.fingerprint != fingerprint:
+            raise ValueError("This suggestion changed. Check it again before adding it.")
+        if not candidate.validation.ok:
+            raise ValueError("This suggestion did not pass the skill safety checks.")
+        if chosen in {s.name for s in load_builtin_skills()}:
+            raise ValueError("A built-in skill already has this name; choose another name.")
+        if fingerprint in _admitted_candidate_hashes(skills_dir):
+            raise ValueError("This exact suggestion has already been added.")
+        # Preserve lineage and bind the installed text to the reviewed proposal.
+        # Candidate-generated skills are unsigned; signed-only policy is still
+        # enforced by _validate_and_write and may refuse this promotion.
+        text = re.sub(r"(?m)^name: .+$", f"name: {chosen}", candidate.text, count=1)
+        text = text.replace("\n---\n", f"\ncandidate_sha256: {fingerprint}\n"
+                            f"source: {_REVIEWED_LOCAL_SOURCE}\n---\n", 1)
+        text = re.sub(r"(?m)^source: auto-distilled-local-v2\n", "", text, count=1)
+        if not validate_skill_text(text).ok:
+            raise ValueError("This suggestion did not pass the skill safety checks.")
+
+        def _authorize() -> None:
+            check_learning_halt("skill_distillation", "admit")
+            latest = _learned_candidate(name, store=root)
+            if latest.fingerprint != fingerprint:
+                raise ValueError("This suggestion changed. Check it again before adding it.")
+            if before_save is not None:
+                before_save(latest)
+            # The activity writer may block, and source ownership may change
+            # while it does. Check once more at the last in-process boundary;
+            # recall itself rechecks every source on every subsequent task.
+            last = _learned_candidate(name, store=root)
+            if last.fingerprint != fingerprint:
+                raise ValueError("This suggestion changed. Check it again before adding it.")
+            if effect_guard is not None:
+                effect_guard()
+
+        return _validate_and_write(text, _resolved_skills_dir(skills_dir),
+                                   before_save=_authorize, replace_existing=False,
+                                   internal_distillation=True)
+
+
+@dataclass(frozen=True)
+class AdmittedLearnedSkill:
+    name: str
+    fingerprint: str
+    candidate_fingerprint: str
+    source_goal_ids: tuple[int, ...]
+    source_shared: bool = False
+
+
+def _admitted_learned_skill(path: Path) -> AdmittedLearnedSkill:
+    from .file_lock import atomic_read_bytes, ensure_private_file
+
+    try:
+        ensure_private_file(path)
+        raw = atomic_read_bytes(path)
+        text = raw.decode("utf-8").replace("\r\n", "\n")
+        skill = Skill.parse(text, path)
+    except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("This saved skill is no longer available.") from exc
+    if skill.source != _REVIEWED_LOCAL_SOURCE or skill.name != path.stem:
+        raise ValueError("This is not a reviewed suggested skill.")
+    match = re.search(r"(?m)^candidate_sha256: ([a-f0-9]{64})$", text)
+    if not match:
+        raise ValueError("This saved skill has no review record.")
+    return AdmittedLearnedSkill(
+        name=skill.name, fingerprint=hashlib.sha256(raw).hexdigest(),
+        candidate_fingerprint=match.group(1), source_goal_ids=skill.source_goal_ids,
+    )
+
+
+def admitted_learned_skills(*, skills_dir: Path | None = None) -> list[AdmittedLearnedSkill]:
+    """Installed reviewed skills, including those paused by private sources.
+
+    Administrators must be able to withdraw a skill even after its source
+    loses sharing authority. Agent recall still uses ``_source_readable`` and
+    refuses that skill while the source is unavailable.
+    """
+    from .memory_ownership import source_allowed
+
+    root = _resolved_skills_dir(skills_dir)
+    if not root.is_dir():
+        return []
+    out = []
+    for path in sorted(root.glob("*.md"))[:500]:
+        try:
+            item = _admitted_learned_skill(path)
+        except ValueError:
+            continue
+        try:
+            shared = bool(item.source_goal_ids) and all(
+                source_allowed(gid, "") for gid in item.source_goal_ids
+            )
+        except Exception:
+            shared = False
+        out.append(AdmittedLearnedSkill(
+            name=item.name, fingerprint=item.fingerprint,
+            candidate_fingerprint=item.candidate_fingerprint,
+            source_goal_ids=item.source_goal_ids, source_shared=shared,
+        ))
+    return out
+
+
+def withdraw_admitted_learned_skill(
+    name: str, fingerprint: str, *, skills_dir: Path | None = None,
+    before_delete: Callable[[AdmittedLearnedSkill], None] | None = None,
+    effect_guard: Callable[[], None] | None = None,
+) -> AdmittedLearnedSkill:
+    """Withdraw one exact reviewed skill; stale reviews never delete updates."""
+    from .file_lock import cross_process_lock
+
+    if not isinstance(name, str) or len(name) > 96 or not _KEBAB_RE.fullmatch(name):
+        raise ValueError("Choose a saved suggested skill from the current list.")
+    if not re.fullmatch(r"[a-f0-9]{64}", str(fingerprint)):
+        raise ValueError("Review this saved skill again before removing it.")
+    target = _resolved_skills_dir(skills_dir) / f"{name}.md"
+    with cross_process_lock(target):
+        item = _admitted_learned_skill(target)
+        if item.fingerprint != fingerprint:
+            raise ValueError("This saved skill changed. Refresh it before removing it.")
+        if before_delete is not None:
+            before_delete(item)
+        if effect_guard is not None:
+            effect_guard()
+        target.unlink()
+    return item
 
 
 def _fetch_skill_source(source: str) -> str:
@@ -930,13 +1307,56 @@ def _fetch_skill_source_bytes(source: str) -> bytes:
     )
 
 
-def remove_skill(name: str, skills_dir: Path | None = None) -> bool:
+def _manual_skill_snapshot(target: Path) -> tuple[Skill, str]:
+    """Exact readable regular-file version; learned skills use their own review."""
+    from .governed_operations import digest
+    before = target.lstat()
+    if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+            or getattr(before, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+        raise ValueError("This skill's storage is unavailable for ordinary removal.")
+    with target.open("rb") as stream:
+        raw = stream.read(MAX_SKILL_DOWNLOAD_BYTES + 1)
+    if len(raw) > MAX_SKILL_DOWNLOAD_BYTES:
+        raise ValueError("This skill is too large for a complete removal review.")
+    item = Skill.parse(raw.decode("utf-8").replace("\r\n", "\n"), target)
+    if item.source.startswith("auto-distilled"):
+        raise ValueError("Remove this learned skill under Suggestions from completed work, where its source review is preserved.")
+    after = target.lstat()
+    def identity(value):
+        return [value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns]
+    if identity(before) != identity(after):
+        raise ValueError("This skill changed while it was read. Review it again.")
+    return item, digest([str(target.absolute()), str(target.parent.resolve()), identity(after), hashlib.sha256(raw).hexdigest()])
+
+
+def manual_skill_snapshot(name: str, skills_dir: Path | None = None) -> tuple[Skill, str]:
+    from .file_lock import cross_process_lock
+    target = _resolved_skills_dir(skills_dir) / f"{_safe_name(name)}.md"
+    with cross_process_lock(target, strict=True):
+        return _manual_skill_snapshot(target)
+
+
+def remove_skill(name: str, skills_dir: Path | None = None, *, expected_revision: str | None = None,
+                 before_delete: Callable[[Skill], None] | None = None,
+                 effect_guard: Callable[[], None] | None = None) -> bool:
+    from .file_lock import cross_process_lock
     target_dir = _resolved_skills_dir(skills_dir)
     target = target_dir / f"{_safe_name(name)}.md"
-    if target.exists():
+    with cross_process_lock(target, strict=True):
+        if not target.exists():
+            return False
+        if expected_revision is not None:
+            item, revision = _manual_skill_snapshot(target)
+            if revision != expected_revision:
+                raise ValueError("This saved skill changed. Review its current version before removing it.")
+            if before_delete is not None:
+                before_delete(item)
+        elif before_delete is not None:
+            raise ValueError("A complete current skill review is required before recording removal.")
+        if effect_guard is not None:
+            effect_guard()
         target.unlink()
         return True
-    return False
 
 
 def distill(
@@ -946,9 +1366,19 @@ def distill(
     llm: LLM,
     budget: Budget | None = None,
     skills_dir: Path | None = None,
+    source_world=None,
 ) -> Skill | None:
     from .learning_guard import learning_write_allowed
     if not learning_write_allowed("skill_distillation", "provider_distill"):
+        return None
+    from .logging_config import current_goal_id
+    from .memory_ownership import source_allowed
+    source_id = current_goal_id()
+    # The destination is shared by a tenant. An absent/private/excluded source
+    # must not reach the model or land in that shared directory, even when an
+    # operator opted into provider distillation. Recheck after model work too.
+    if not source_id or not source_allowed(source_id, "", world=source_world):
+        log.info("shared skill distillation skipped: source goal is not shared")
         return None
     target_dir = _resolved_skills_dir(skills_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -973,6 +1403,17 @@ def distill(
         text = text.removeprefix("markdown")
         text = text.strip()
     try:
+        # The model cannot choose provenance. Retain the server's exact source
+        # before storing generated text in the shared installed-skill directory.
+        match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
+        if match:
+            front = "\n".join(line for line in match[1].splitlines()
+                              if not line.startswith(("source:", "source_goal_ids:")))
+            lineage = f"\nsource_goal_ids: {source_id}" if source_id else ""
+            text = f"---\n{front}\nsource: auto-distilled-provider-v1{lineage}\n---\n{match[2]}"
+        generated = Skill.parse(text, target_dir / ".validating")
+        if generated.name in {skill.name for skill in load_builtin_skills()}:
+            raise ValueError("automatic learning cannot replace a built-in skill")
         # Route distilled skills through the SAME validation + shield scan
         # as install_skill (#396 quality gate). A skill distilled from a
         # trajectory can inherit injected content from tool output, and its
@@ -980,7 +1421,29 @@ def distill(
         # render_for_prompt -- so it must be frontmatter-validated and
         # shield-scanned, and (unlike the old raw write_text) must NOT land
         # on disk if it fails. _validate_and_write parses before writing.
-        return _validate_and_write(text, target_dir)
+        def _authorize_write() -> None:
+            from .audit import EventKind, audit_event
+            from .learning_guard import check_learning_halt
+
+            check_learning_halt("skill_distillation", "save")
+            if not source_allowed(source_id, "", world=source_world):
+                raise ValueError("source goal is no longer shared")
+            # This receipt records an authorized, validated candidate. It
+            # deliberately does not claim publication, which happens next.
+            if not audit_event(
+                EventKind.SKILL_DISTILL_PREPARED,
+                agent="skill_distillation",
+                goal_id=source_id,
+                # atomic_write_text currently uses text mode, which expands
+                # LF to CRLF on Windows. Commit to the persisted bytes.
+                content_sha256=hashlib.sha256(
+                    text.replace("\n", os.linesep).encode("utf-8")
+                ).hexdigest(),
+            ):
+                raise ValueError("learning audit unavailable")
+
+        return _validate_and_write(text, target_dir, before_save=_authorize_write,
+                                   replace_existing=False, internal_distillation=True)
     except Exception as e:
         log.warning("distilled skill rejected (not written): %s", e)
         return None

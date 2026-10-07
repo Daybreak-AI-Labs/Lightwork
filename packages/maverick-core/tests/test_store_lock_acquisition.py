@@ -12,7 +12,7 @@ STORES = [
     ("maverick.agent_trust", "_managed_locked", "_MANAGED_LOCK", False, True),
     ("maverick.external_agents", "_sidecar_locked", None, False, True),
     ("maverick.tenant.registry", "_locked", "_REGISTRY_LOCK", False, True),
-    ("maverick.suite_grants", "_locked", "_GRANTS_LOCK", True, False),
+    ("maverick.suite_grants", "_locked", "_GRANTS_LOCK", True, True),
     ("maverick.marketplace.federation", "_import_locked", "_IMPORT_LOCK", True, False),
     ("maverick.voice_macros", "_locked", "_MACROS_LOCK", True, False),
     ("maverick.channel_federation", "OutboundQueue", "_rmw_lock", False, False),

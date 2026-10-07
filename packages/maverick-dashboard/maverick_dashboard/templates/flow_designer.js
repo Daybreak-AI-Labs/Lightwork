@@ -36,6 +36,16 @@
     if (sec % 60 === 0) return (sec / 60) + (sec === 60 ? ' minute' : ' minutes');
     return sec + (sec === 1 ? ' second' : ' seconds');
   }
+  function retryWaitOptions(value) {
+    var options = [{ v: '0', t: 'No wait' }, { v: '10', t: '10 seconds' }, { v: '30', t: '30 seconds' }];
+    var saved = Number(value) || 0;
+    if (!options.some(function (option) { return Number(option.v) === saved; })) {
+      options.push({ v: String(saved), t: saved > 30
+        ? 'Saved request: ' + durationText(saved) + ' (first wait: 30 seconds)'
+        : 'Saved request: ' + durationText(saved) });
+    }
+    return options;
+  }
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
@@ -48,10 +58,13 @@
   var runCursor = null; // node a paused run is waiting on
   var flowInputs = [];  // declared manual-run inputs [{key,type,label,required,default}]
   var toolCatalog = {}; // tool name -> {description, params[], category} for the action picker
+  var actionFieldsChecking = false;
   var toolCategories = [];   // display-ordered category names from the server
   var toolFilterCategory = ''; // '' = all; else browse one category in the picker
   var flowSchema = {};  // output key -> {type, keys[]} learned from real runs (nested pills)
   var toolQuery = '';   // the action search box's text
+  var toolResults = [], toolTotal = 0, toolNext = null, toolLoading = false, toolError = '';
+  var toolRequest = 0;
   var people = [];      // [{ref, label}] who can be asked to approve
   var savedFlows = [];  // [{id, name, inputs}] other saved flows (for "Run another flow")
   var flowNames = {};   // flow id -> name
@@ -66,6 +79,7 @@
   var runGen = 0;           // bumped per run so a superseded watch stops painting
   var activeES = null;      // the live run's EventSource, closed when a new run starts
 
+  var fd = document.querySelector('.fd');
   var canvas = document.getElementById('fd-canvas');
   var vp = document.getElementById('fd-viewport');
   var gNodes = document.getElementById('fd-nodes');
@@ -80,8 +94,14 @@
   var cleanDraft = null;
   var saveInFlight = false;
   var publishInFlight = false;
+  var retireInFlight = false;
   var runInFlight = false;
   var applyInFlight = false;
+  var unconfirmedApply = null;
+  function unresolvedApply(node) {
+    return unconfirmedApply && unconfirmedApply.flow === rootFlow.id &&
+      unconfirmedApply.node === node.id && unconfirmedApply.version === rootFlow.version;
+  }
   var draftGeneration = 0;
   var pendingDraft = null;
   var draftRecovery = null;
@@ -95,11 +115,11 @@
     if (!payload || payload.format !== 1 || !payload.editor || !payload.editor.flow || !Array.isArray(payload.editor.flow.nodes) || !payload.base) throw new Error('This recovery copy is not a supported flow draft.');
     var state = payload.editor, source = payload.base;
     if (!Number.isInteger(source.version) || source.version < 0 || typeof source.id !== 'string' || typeof source.revision !== 'string' ||
-        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This flow recovery copy has invalid editor fields. Current work was kept.');
+        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This saved copy of the flow is missing some of its fields, so it was not restored. Current work was kept.');
     var pending = [state.flow];
     while (pending.length) {
       var graph = pending.pop();
-      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This flow recovery copy has invalid steps. Current work was kept.');
+      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This saved copy of the flow has steps that could not be read, so it was not restored. Current work was kept.');
       graph.nodes.forEach(function (node) { if (node.body) pending.push(node.body); });
     }
     var before = JSON.stringify(recoveryPayload());
@@ -108,9 +128,10 @@
       var current = response.ok && await (typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
         ? FDRecipeInputs.responseJson(response) : response.json());
       if (!current || current.id !== source.id || current.revision !== source.revision || current.version !== source.version) throw new Error('The saved flow changed after this recovery copy. Current work was kept. Compare the copies and copy your edits into the latest flow before saving.');
+      FDRecipeInputs.inheritEvidence(state.flow, current);
     }
     if (before !== JSON.stringify(recoveryPayload())) throw new Error('Your newer canvas edits were kept. Review the recovery copy again.');
-    if (state.flow.learned_recipe != null) FDRecipeInputs.flowText(state.flow);
+    FDRecipeInputs.flowText(state.flow);
     pushHistory();
     rootFlow = JSON.parse(JSON.stringify(state.flow)); flow = rootFlow;
     rootFlow.version = source.version; rootFlow.revision = source.revision;
@@ -121,6 +142,7 @@
       var field = document.getElementById(pair[0]); if (field) field.value = state[pair[1]];
     });
     var notify = document.getElementById('fd-notify'); if (notify) notify.checked = !!state.notify;
+    if (document.getElementById('fd-notify-on')) document.getElementById('fd-notify-on').value = state.notify_on || 'all';
     var brief = document.getElementById('fd-nl'); if (brief) brief.value = payload.brief || '';
     proposals = {}; impacts = {}; runState = {}; runCursor = null;
     renderCrumbs(); syncScheduleControls(); render(); renderProps();
@@ -140,6 +162,20 @@
     // version/publication metadata is excluded so a successful save can update
     // CAS tokens without making an otherwise unchanged canvas look dirty.
     var editableFlow = JSON.parse(JSON.stringify(rootFlow));
+    (function removeEmptyActionBuffers(graph) {
+      (Array.isArray(graph.nodes) ? graph.nodes : Object.values(graph.nodes || {})).forEach(function (node) {
+        ['_actionRaw', '_actionErrors', '_actionKinds'].forEach(function (key) {
+          if (node[key] && !Object.keys(node[key]).length) delete node[key];
+        });
+        if (!node._actionRaw && !node._actionErrors && FDActionFields.validDetails(node)) delete node._actionKinds;
+        if (!node._actionRaw && !node._actionErrors && !node._actionKinds) delete node._actionTool;
+        if (node.body) removeEmptyActionBuffers(node.body);
+        (node.branches || []).forEach(removeEmptyActionBuffers);
+      });
+    }(editableFlow));
+    // Absent evidence custody is the same draft whether it was loaded as null
+    // or restored from history (which drops an empty custody record).
+    if (editableFlow._fdEvidence == null) delete editableFlow._fdEvidence;
     delete editableFlow.version;
     delete editableFlow.revision;
     delete editableFlow.published;
@@ -151,6 +187,7 @@
       name: nameInput.value,
       inputs: flowInputs,
       notify: !!((document.getElementById('fd-notify') || {}).checked),
+      notify_on: ((document.getElementById('fd-notify-on') || {}).value || 'all'),
       max_seconds: ((document.getElementById('fd-maxsec') || {}).value || ''),
       max_dollars: ((document.getElementById('fd-maxdollars') || {}).value || ''),
       schedule: ((document.getElementById('fd-schedule') || {}).value || ''),
@@ -161,16 +198,27 @@
   function markClean(snapshot) { cleanDraft = snapshot || draftSnapshot(); }
   function draftIsDirty() { return cleanDraft !== null && cleanDraft !== draftSnapshot(); }
   function syncSaveButtons() {
-    saveButton.disabled = saveInFlight || publishInFlight || applyInFlight;
-    publishButton.disabled = saveInFlight || publishInFlight || applyInFlight;
+    var busy = saveInFlight || publishInFlight || applyInFlight || retireInFlight || actionFieldsChecking;
+    saveButton.disabled = busy;
+    publishButton.disabled = busy;
+    var more = document.getElementById('fd-more');
+    if (more) more.hidden = !rootFlow.id || (!rootFlow.version && !canvas.getAttribute('data-flow-id'));
+    var off = document.getElementById('fd-turn-off');
+    if (off) off.disabled = busy || !rootFlow.published;
+    var del = document.getElementById('fd-delete-flow');
+    if (del) del.disabled = busy;
     props.querySelectorAll('[data-apply-node]').forEach(function (button) {
-      button.disabled = saveInFlight || publishInFlight || applyInFlight ||
-        button.getAttribute('data-apply-blocked') === 'true' || !proposals[button.getAttribute('data-apply-node')];
+      var nodeId = button.getAttribute('data-apply-node');
+      button.disabled = busy || !proposals[nodeId] || !!unresolvedApply({id: nodeId});
     });
   }
   function canonicalizeSavedFlow(id) {
-    var path = '/flows/designer/' + encodeURIComponent(id);
-    if (window.location.pathname !== path || window.location.search) {
+    // The workflow builder's Steps mode keeps the saved flow in its own address,
+    // so a reload, Back and Copilot's flow controls stay on this tab.
+    var path = window.location.pathname === '/workflow-builder'
+      ? '/workflow-builder?mode=steps&flow=' + encodeURIComponent(id)
+      : '/flows/designer/' + encodeURIComponent(id);
+    if (window.location.pathname + window.location.search !== path) {
       window.history.replaceState(window.history.state, '', path);
     }
     canvas.setAttribute('data-flow-id', id);
@@ -209,7 +257,8 @@
     });
     var notify = document.getElementById('fd-notify');
     snapshot._editorSettings.notify = !!(notify && notify.checked);
-    return snapshot.learned_recipe == null ? JSON.stringify(snapshot) : FDRecipeInputs.flowText(snapshot);
+    snapshot._editorSettings.notify_on = (document.getElementById('fd-notify-on') || {}).value || 'all';
+    return FDRecipeInputs.flowText(snapshot);
   }
   // An explicit creation receipt can bind the exact unsaved history that
   // preceded that request. Empty revisions alone never match saved history.
@@ -261,6 +310,7 @@
       if (field) field.value = settings[pair[1]] == null ? '' : settings[pair[1]];
     });
     var notify = document.getElementById('fd-notify'); if (notify) notify.checked = !!settings.notify;
+    if (document.getElementById('fd-notify-on')) document.getElementById('fd-notify-on').value = settings.notify_on || 'all';
     syncScheduleControls();
     var samplePanel = document.getElementById('fd-test-data');
     if (samplePanel) samplePanel.hidden = rootFlow.learned_recipe != null;
@@ -285,7 +335,7 @@
   }
   function nodeById(id) { for (var i = 0; i < flow.nodes.length; i++) if (flow.nodes[i].id === id) return flow.nodes[i]; return null; }
   function newId() { var id; do { id = 'n' + (idSeq++); } while (nodeById(id)); return id; }
-  function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
+  function say(t, err) { if (window.mvStatus) window.mvStatus(msg, t || '', {error: !!err}); else msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
   function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
   function summary(n) {
@@ -350,15 +400,19 @@
         if (p.label) gEdges.appendChild(el('text', { class: 'fd-edge-label', x: px + 4, y: py + 14 }, p.label));
       });
     });
+    var unreachable = flow.start && FDCore.unreachableNodeIds
+      ? FDCore.unreachableNodeIds(flow) : [];
     // nodes
     flow.nodes.forEach(function (n) {
       var g = el('g', { class: 'fd-node' + ((n.id === selected || multiSel[n.id]) ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
                         transform: 'translate(' + n.x + ',' + n.y + ')' });
+      if (unreachable.indexOf(n.id) >= 0) g.setAttribute('opacity', '0.45');
       g.setAttribute('data-node', n.id);
       g.setAttribute('tabindex', '0');
       g.setAttribute('role', 'button');
       g.setAttribute('aria-label', (n.label || summary(n)) + ', ' + kindLabel(n.kind)
         + ' step' + (n.id === flow.start ? ', first step' : '')
+        + (unreachable.indexOf(n.id) >= 0 ? ', not connected and will never run' : '')
         + '. Press Enter to edit; use arrow keys to move.');
       g.setAttribute('aria-pressed', n.id === selected ? 'true' : 'false');
       g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
@@ -678,7 +732,14 @@
     flow.nodes.push(copy); selectNode(copy.id); render();
     say('Duplicated ' + stepName(src) + '.');
   }
-  function selectNode(id) { selected = id; if (id) selectedEdge = null; renderProps(); render(); }
+  function selectNode(id) {
+    selected = id; if (id) selectedEdge = null; renderProps(); render();
+    if (flow === rootFlow && rootFlow.id) {
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {
+        selection: id ? {kind: 'flow', id: rootFlow.id, node_id: id} : {kind: 'flow', id: rootFlow.id}
+      }}));
+    }
+  }
   var clipboard = null;    // serialized node (Ctrl+C), pasted with Ctrl+V
   function copyNode(id) {
     var n = nodeById(id); if (!n) return;
@@ -686,7 +747,7 @@
     say('Copied ' + stepName(n) + ' — press Ctrl+V to paste it.');
   }
   function pasteNode() {
-    if (!clipboard) { say('Nothing copied yet.'); return; }
+    if (!clipboard) { say('Nothing copied yet. Select a step and choose Copy first.'); return; }
     pushHistory();
     var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
     flow.nodes.push(copy); selectNode(copy.id); render();
@@ -889,27 +950,48 @@
     var head = document.createElement('div'); head.style.fontWeight = '600'; head.style.marginBottom = 'var(--space-3)';
     head.textContent = (KIND_ICON[n.kind] || '') + ' ' + kindLabel(n.kind);
     props.appendChild(head);
+    if (flow === rootFlow && n.kind === 'agent' && n.learned_operator && n.learned_fallback === false) {
+      var tryStep = document.createElement('button'); tryStep.type = 'button'; tryStep.className = 'btn btn--ghost';
+      tryStep.textContent = 'Try only this step';
+      tryStep.addEventListener('click', function () {
+        if (window.LWWorkflowStepChecks) void window.LWWorkflowStepChecks.openSelected();
+        else say('The step controls could not be opened. Refresh this page; your work is kept.', true);
+      });
+      props.appendChild(tryStep);
+    }
     props.appendChild(field('Step name (optional)', input(n.label, function (v) { n.label = v; render(); }, 'Shown on the step')));
     if (n.kind === 'agent') {
       var briefTa = textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize the customer request and draft a reply');
       props.appendChild(withPills(n.id, field('Brief (what the agent should do)', briefTa), briefTa));
       if (n.learned_operator != null) {
-        props.appendChild(hint('Learned computation attached. The original agent handles inputs the learned rules cannot resolve. Remove this attachment before changing the brief or output.'));
+        props.appendChild(hint(n.learned_fallback === false
+          ? 'Taught local rules are attached. An answer is produced only when all retained rules agree. Remove the rules before changing the brief or output.'
+          : 'Taught local rules are attached. The AI task handles inputs these rules cannot resolve. Remove the rules before changing the brief or output.'));
         var removeLearned = document.createElement('button');
         removeLearned.className = 'btn btn--ghost'; removeLearned.type = 'button';
-        removeLearned.textContent = 'Remove learned computation';
+        removeLearned.textContent = 'Remove taught rules';
         removeLearned.addEventListener('click', function () {
           pushHistory(); delete n.learned_operator; renderProps(); render();
         });
         props.appendChild(removeLearned);
       }
     }
+    if (n.kind === 'action' && FDActionFields.boundRecipeAction(flow, n)) {
+      props.appendChild(field('Reviewed action', hint(human(n.tool))));
+      props.appendChild(hint('The reviewed examples supply this action’s details when the workflow runs. Each proposed action still requires its own approval. Use Teach to change the learned rules.'));
+      var teachLink = document.createElement('a'); teachLink.className = 'btn btn--ghost';
+      teachLink.href = '/flows/' + encodeURIComponent(rootFlow.id) + '/teach'; teachLink.textContent = 'Review or improve in Teach';
+      props.appendChild(teachLink);
+      return;
+    }
     if (n.kind === 'action') {
       if (toolCategories.length) {
         var catOpts = [{ v: '', t: 'All kinds of actions' }].concat(
           toolCategories.map(function (c) { return { v: c, t: human(c) }; }));
         var catSel = select(toolFilterCategory, catOpts, function (v) {
+          if (toolSearchTimer) clearTimeout(toolSearchTimer);
           toolFilterCategory = v;
+          toolQuery = '';
           loadTools('', v);
         });
         props.appendChild(field('Kind of action', catSel));
@@ -918,16 +1000,25 @@
       var toolSearch = input(toolQuery, function (v) { toolQuery = v; scheduleToolSearch(v); }, 'Search actions, for example “Slack”');
       toolSearch.id = 'fd-tool-input';
       props.appendChild(field('Find an action', toolSearch));
-      var names = Object.keys(toolCatalog).filter(function (name) {
-        var meta = toolCatalog[name];
-        return !toolFilterCategory || meta.category === toolFilterCategory || name === n.tool;
-      }).sort(function (x, y) { return human(x).localeCompare(human(y)); });
+      var names = toolResults.slice();
       if (n.tool && names.indexOf(n.tool) < 0) names.unshift(n.tool);
       var toolOpts = [{ v: '', t: names.length ? 'Choose an action…' : 'No matching actions — try another search' }]
         .concat(names.map(function (name) { return { v: name, t: human(name) }; }));
       var toolSel = select(n.tool || '', toolOpts, function (v) { n.tool = v; render(); renderProps(); });
       toolSel.id = 'fd-tool-select';
       props.appendChild(field('Action', toolSel));
+      var toolStatus = hint(toolLoading ? 'Finding actions…' : toolError ||
+        (toolResults.length + ' of ' + toolTotal + ' actions shown.'));
+      toolStatus.setAttribute('role', 'status');
+      props.appendChild(toolStatus);
+      if (toolError || toolNext !== null) {
+        var moreTools = addButton(toolError ? 'Try again' : 'Show more actions', function () {
+          loadTools(toolQuery.trim().length >= 2 ? toolQuery.trim() : '', toolFilterCategory,
+            toolError ? (toolResults.length ? toolNext : 0) : toolNext);
+        });
+        moreTools.disabled = toolLoading;
+        props.appendChild(moreTools);
+      }
       var meta = toolCatalog[n.tool];
       if (meta && meta.description) { var th = document.createElement('p'); th.className = 'toolhint'; th.textContent = meta.description; props.appendChild(th); }
       n.params = n.params || {};
@@ -935,20 +1026,28 @@
         try { var parsedRaw = JSON.parse(n._paramsRaw || '{}'); if (parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)) n.params = parsedRaw; delete n._paramsRaw; }
         catch (e) { /* keep the buffered text; Save explains which step needs attention */ }
       }
-      var known = (meta && meta.params) || [];
-      if (known.length) {
-        known.forEach(function (pk) {
-          var pin = input(n.params[pk] != null ? String(n.params[pk]) : '',
-            function (v) { if (v === '') delete n.params[pk]; else n.params[pk] = v; }, '');
-          props.appendChild(withPills(n.id, field(human(pk), pin), pin));
-        });
-        props.appendChild(hint('Use the buttons under a box to insert a result from an earlier step.'));
-      } else if (n.tool) {
-        var pw = document.createElement('div'); pw.className = 'field';
-        var pl0 = document.createElement('div'); pl0.className = 'fd__label'; pl0.textContent = 'Action settings'; pw.appendChild(pl0);
-        pairRows(pw, n.params, { keyPlaceholder: 'Setting', valuePlaceholder: 'Value', keyAria: 'Setting', valueAria: 'Value for' });
-        pw.appendChild(addButton('Add a setting', function () { var key = 'setting_' + (Object.keys(n.params).length + 1); n.params[key] = ''; renderProps(); }));
-        props.appendChild(pw);
+      if (n.tool) {
+        var actionHost = document.createElement('div'); actionHost.className = 'fd-action-fields';
+        actionHost.textContent = 'Loading this action’s details…'; props.appendChild(actionHost);
+        var requestedTool = n.tool;
+        function showActionFields(refresh) {
+          FDActionFields.load(requestedTool, refresh).then(function (contract) {
+            if (!actionHost.isConnected || selected !== n.id || n.tool !== requestedTool) return;
+            FDActionFields.mount(actionHost, n, contract, function () { render(); }, {
+              sources: availableKeys(n.id).map(function (key) { return { key: key, label: human(key) }; })
+            });
+          }).catch(function (error) {
+            if (!actionHost.isConnected || n.tool !== requestedTool) return;
+            actionHost.replaceChildren(hint(error.message));
+            if (error.message.indexOf('protected connection information') >= 0) {
+              var connectionLink = document.createElement('a'); connectionLink.href = '/connections';
+              connectionLink.className = 'btn btn--ghost'; connectionLink.textContent = 'Open Connections';
+              actionHost.appendChild(connectionLink);
+            }
+            actionHost.appendChild(addButton('Try loading action details again', function () { showActionFields(true); }));
+          });
+        }
+        showActionFields(false);
       }
     }
     if (n.kind === 'branch') {
@@ -985,7 +1084,8 @@
       props.appendChild(hint('The repeated steps can change the information this question checks, so the repeat ends on its own.'));
     }
     if (n.kind === 'wait_event') {
-      props.appendChild(field('Waiting for (shown while paused)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: the payment to be confirmed')));
+      var waitPrompt = input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: the payment to be confirmed');
+      props.appendChild(withPills(n.id, field('Waiting for (shown while paused)', waitPrompt), waitPrompt));
       props.appendChild(hint('The flow pauses here until the connected app sends a signal. Anything the app sends is added to the flow’s information.'));
     }
     if (n.kind === 'scope') {
@@ -996,18 +1096,19 @@
     }
     if (n.kind === 'foreach') {
       props.appendChild(field('Repeat for each item in', select(n.items || '', keyChoices(n, n.items, 'Choose a list…'), function (v) { n.items = v; render(); })));
-      props.appendChild(field('At most', numberSelect(n.limit || '', [{ v: '', t: 'Every item' }, { v: '10', t: 'First 10 items' }, { v: '50', t: 'First 50 items' }, { v: '100', t: 'First 100 items' }],
+      props.appendChild(field('At most', numberSelect(n.limit || '', [{ v: '', t: 'Every item (maximum 1,000)' }, { v: '10', t: 'First 10 items' }, { v: '50', t: 'First 50 items' }, { v: '100', t: 'First 100 items' }],
         function (v) { n.limit = parseInt(v, 10) || 0; })));
+      props.appendChild(hint('If there are more than 1,000 items, this step stops before processing them. Choose a specific limit to process a smaller batch. Earlier steps may have completed.'));
       var bodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
       props.appendChild(field('Steps for each item', addButton('Edit these steps (' + bodyN + ')', function () { enterSub(n, 'foreach'); })));
       var conc = document.createElement('label'); conc.className = 'fd__check';
       var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!n.concurrent;
-      cb.addEventListener('change', function () { n.concurrent = cb.checked; if (cb.checked && !(n.concurrency > 1)) n.concurrency = 4; render(); renderProps(); });
+      cb.addEventListener('change', function () { n.concurrent = cb.checked; if (cb.checked && !(n.concurrency > 0)) n.concurrency = 4; render(); renderProps(); });
       conc.appendChild(cb); conc.appendChild(document.createTextNode('Handle several items at once'));
       props.appendChild(conc);
       if (n.concurrent) {
-        props.appendChild(field('How many at once', numberSelect(n.concurrency || 4, [{ v: '2', t: '2' }, { v: '4', t: '4' }, { v: '8', t: '8' }],
-          function (v) { n.concurrency = parseInt(v, 10) || 1; })));
+        props.appendChild(field('How many at once', numberSelect(n.concurrency || '', [{ v: '', t: 'Shared workflow limit' }, { v: '2', t: '2' }, { v: '4', t: '4' }, { v: '8', t: '8' }],
+          function (v) { n.concurrency = parseInt(v, 10) || 0; })));
       }
       props.appendChild(hint('Each item is available to the repeated steps as “Item”.'));
     }
@@ -1029,7 +1130,8 @@
       props.appendChild(hint('Each path runs on its own at the same time; their results are combined afterwards.'));
     }
     if (n.kind === 'approval') {
-      props.appendChild(field('What should the person approve?', input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: Send this reply?')));
+      var approvalPrompt = input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: Send this reply?');
+      props.appendChild(withPills(n.id, field('What should the person approve?', approvalPrompt), approvalPrompt));
       var who = [{ v: '', t: 'Anyone who can approve' }].concat(people.map(function (pp) { return { v: pp.ref, t: pp.label }; }));
       if (n.assignee && !people.some(function (pp) { return pp.ref === n.assignee; })) who.push({ v: n.assignee, t: human(n.assignee) });
       props.appendChild(field('Who should be asked', select(n.assignee || '', who, function (v) { n.assignee = v; })));
@@ -1048,6 +1150,7 @@
       props.appendChild(chWrap);
       props.appendChild(field('Stop waiting after', select(String(Math.round(n.expires_after || 0)), durationOptions(n.expires_after, 'Never — wait until someone decides'),
         function (v) { n.expires_after = parseFloat(v) || 0; render(); renderProps(); })));
+      if (!n.expires_after) props.appendChild(hint('This step keeps waiting. A review window lasts seven days; the owner can request a fresh review without repeating completed steps.'));
       if (n.expires_after) {
         props.appendChild(field('When time runs out', select(n.on_expire || '', stepChoices(n, 'Reject the request').map(function (o) {
           return o.v ? { v: o.v, t: 'Go to ' + o.t } : o;
@@ -1117,11 +1220,24 @@
       if (n.kind !== 'subflow') {
         fails.appendChild(field('Try again', numberSelect(n.retries || 0, [{ v: '0', t: 'Don’t try again' }, { v: '1', t: 'Once' }, { v: '2', t: 'Twice' }, { v: '3', t: '3 times' }],
           function (v) { n.retries = parseInt(v, 10) || 0; })));
-        fails.appendChild(field('Wait between tries', select(String(Math.round(n.retry_backoff || 0)), [{ v: '0', t: 'No wait' }, { v: '10', t: '10 seconds' }].concat(DURATIONS.slice(0, 3)).concat(
-          (n.retry_backoff && [0, 10, 60, 300, 900].indexOf(Math.round(n.retry_backoff)) < 0) ? [{ v: String(Math.round(n.retry_backoff)), t: durationText(n.retry_backoff) }] : []),
-          function (v) { n.retry_backoff = parseFloat(v) || 0; })));
-        fails.appendChild(field('Give up after', select(String(Math.round(n.timeout || 0)), durationOptions(n.timeout, 'No time limit'),
+        var retryHelp = document.createElement('p'); retryHelp.className = 'muted'; retryHelp.id = 'fd-retry-wait-help';
+        function describeRetryWait() {
+          var requested = Number(n.retry_backoff) || 0, effective = Math.min(30, Math.max(0, requested));
+          retryHelp.textContent = (requested > 30 ? 'The saved request is ' + durationText(requested) + ', but each wait is limited to 30 seconds. Choose a supported wait to change it. ' : requested < 0 ? 'The saved request is ' + durationText(requested) + '; no wait is used. Choose a supported wait to change it. ' : '') +
+            (effective ? 'When another try is allowed, the first wait is ' + durationText(effective) + '; later waits double, up to 30 seconds. ' : 'When another try is allowed, no wait is requested. ') +
+            'The run’s time limit can stop work sooner. AI tasks and actions that are unsafe to repeat or have an uncertain result are not repeated automatically.';
+        }
+        var retryChoice = select(String(Number(n.retry_backoff) || 0), retryWaitOptions(n.retry_backoff),
+          function (v) { pushHistory(); n.retry_backoff = parseFloat(v) || 0; describeRetryWait(); });
+        retryChoice.setAttribute('aria-describedby', retryHelp.id);
+        fails.appendChild(field('First wait between tries', retryChoice)); describeRetryWait(); fails.appendChild(retryHelp);
+        fails.appendChild(field(n.kind === 'action' ? 'Expected wait' : 'Give up after', select(String(Math.round(n.timeout || 0)), durationOptions(n.timeout, n.kind === 'action' ? 'No wait target' : 'No time limit'),
           function (v) { n.timeout = parseFloat(v) || 0; })));
+        if (n.kind === 'action') {
+          var timeoutHelp = document.createElement('p'); timeoutHelp.className = 'muted';
+          timeoutHelp.textContent = 'This does not stop an action already in progress. Lightwork waits for its recorded outcome so a completed action is not mistaken for a failure and repeated.';
+          fails.appendChild(timeoutHelp);
+        }
       }
       fails.appendChild(field('Then go to', select(n.on_error || '', stepChoices(n, 'Stop the run'), function (v) { n.on_error = v || null; render(); })));
       if (n.retries || n.timeout || n.on_error) fails.open = true;
@@ -1171,15 +1287,10 @@
       pl.textContent = '💡 ' + prop.reason;
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
       pb.setAttribute('data-apply-node', n.id);
-      pb.setAttribute('data-apply-blocked', String(prop.applicable === false));
-      pb.disabled = saveInFlight || publishInFlight || applyInFlight;
+      pb.disabled = saveInFlight || publishInFlight || applyInFlight || !!unresolvedApply(n);
       pb.textContent = prop.to_kind === 'action'
-        ? 'Apply: always use ' + (prop.inferred_tool ? human(prop.inferred_tool) : 'a fixed action')
-        : 'Apply: let the AI handle this step';
-      if (prop.applicable === false) {
-        pb.disabled = true;
-        pb.title = prop.blocking_reason || 'Check this step’s settings before applying.';
-      }
+        ? 'Review action and inputs'
+        : 'Review: let the AI handle this step';
       pb.addEventListener('click', function () { applyProposal(n, prop, pb); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
@@ -1256,50 +1367,99 @@
   }
   function jsonOr(v) { try { return v && (typeof v === 'object') ? JSON.stringify(v, null, 2) : (v || ''); } catch (e) { return ''; } }
 
-  // ---- structured condition builder (key / op / value) with a raw fallback ----
-  // Grammar lives in FDCore (the unit-tested shared module) -- no copy here.
+  // Ordinary grouped questions use the exact native condition grammar.
   var COND_OPS = FDCore.COND_OPS;
-  var COND_RE = FDCore.COND_RE;
   var OP_WORDS = { '==': 'is', '!=': 'is not', '>': 'is more than', '<': 'is less than',
     '>=': 'is at least', '<=': 'is at most', 'contains': 'contains' };
   function conditionText(c) {
-    var m = COND_RE.exec(c || '');
-    if (!m || / (and|or) /.test(c)) return String(c || '');
-    return human(m[1]) + ' ' + (OP_WORDS[m[2]] || m[2]) + ' ' + m[3];
+    if (!c) return '';
+    try {
+      return FDCore.parseCondition(c).map(function (group) {
+        return group.map(function (question) {
+          return human(question.key) + ' ' + (question.op === 'truthy' ? 'is yes or non-empty' :
+            (OP_WORDS[question.op] || question.op) + ' ' + (question.kind === 'boolean' ? (question.value === 'true' ? 'Yes' : 'No') : question.value));
+        }).join(' and ');
+      }).join(' — or — ');
+    } catch (_) { return 'Saved question — open its settings to review editing options'; }
   }
   function conditionField(n, label) {
     var wrap = document.createElement('div'); wrap.className = 'field';
     var l = document.createElement('div'); l.className = 'fd__label'; l.textContent = label;
     var conditionLabelId = 'fd-condition-label-' + (++fieldSeq);
     l.id = conditionLabelId; wrap.appendChild(l);
-    var complex = / (and|or) /.test(n.condition || '') || (!COND_RE.test(n.condition || '') && !!(n.condition || '').trim());
-    if (complex) {
-      // A combined question written earlier (several parts): keep it, shown in
-      // words, with a way to start over using the builder.
-      var shownText = document.createElement('p'); shownText.className = 'fd__empty'; shownText.textContent = n.condition;
-      wrap.appendChild(shownText);
-      wrap.appendChild(addButton('Replace with a simple question', function () { n.condition = ''; renderProps(); render(); }));
+    var groups;
+    try { groups = n._conditionQuestions || FDCore.parseCondition(n.condition); }
+    catch (error) {
+      wrap.appendChild(hint(error.message));
+      wrap.appendChild(addButton('Replace with new questions', function () {
+        n.condition = ''; delete n._conditionQuestions; delete n._conditionProblem; renderProps(); render();
+      }));
       return wrap;
     }
-    var m = COND_RE.exec(n.condition || '');
-    var cur = { key: m ? m[1] : '', op: m ? m[2] : '==', value: m ? m[3] : '' };
-    function commit() { n.condition = cur.key ? (cur.key + ' ' + cur.op + ' ' + (cur.value || '')).trim() : ''; render(); }
-    var row = document.createElement('div'); row.className = 'fd__pair';
-    var keySel = select(cur.key, keyChoices(n, cur.key, 'Choose information…'), function (v) { cur.key = v; commit(); });
-    keySel.setAttribute('aria-label', label + ': information to check');
-    var opSel = select(cur.op, COND_OPS.map(function (o) { return { v: o, t: OP_WORDS[o] || o }; }), function (v) { cur.op = v; commit(); });
-    opSel.setAttribute('aria-label', label + ': comparison');
-    var valIn = input(cur.value, function (v) { cur.value = v; commit(); }, 'Value');
-    valIn.setAttribute('aria-label', label + ': value');
-    row.appendChild(keySel); row.appendChild(opSel); row.appendChild(valIn);
-    wrap.appendChild(row);
+    var mode = groups.length > 1 ? 'any' : 'all';
+    var editor = document.createElement('div'); editor.className = 'fd__condition-groups'; wrap.appendChild(editor);
+    var notice = document.createElement('p'); notice.className = 'muted'; notice.setAttribute('role', 'status'); wrap.appendChild(notice);
+    function blank() { return {key: '', op: '==', kind: 'text', value: ''}; }
+    function commit() {
+      n._conditionQuestions = groups;
+      try { n.condition = FDCore.conditionQuestions(groups); delete n._conditionProblem; notice.textContent = ''; }
+      catch (error) { n._conditionProblem = error.message; notice.textContent = error.message + ' Finish these questions before saving.'; }
+      render();
+    }
+    function draw() {
+      editor.replaceChildren();
+      var match = select(mode, [{v: 'all', t: 'Match all of these questions'}, {v: 'any', t: 'Match any of these groups'}], function (value) {
+        mode = value;
+        if (mode === 'all') groups = [groups.flat()];
+        else if (groups.length === 1) groups = groups[0].map(function (question) { return [question]; });
+        commit(); draw();
+      });
+      match.setAttribute('aria-label', label + ': which questions must match'); editor.appendChild(match);
+      groups.forEach(function (group, groupIndex) {
+        var section = document.createElement('fieldset'); section.className = 'fd__condition-group'; section.style.minWidth = '0';
+        var legend = document.createElement('legend'); legend.textContent = mode === 'all' ? 'Every question must match' : 'Group ' + (groupIndex + 1) + ' — every question must match';
+        section.appendChild(legend); editor.appendChild(section);
+        group.forEach(function (question, questionIndex) {
+          var row = document.createElement('div'); row.className = 'fd__pair'; row.style.flexWrap = 'wrap';
+          row.dataset.conditionQuestion = String(groupIndex + 1) + '-' + String(questionIndex + 1);
+          var name = label + ', group ' + (groupIndex + 1) + ', question ' + (questionIndex + 1);
+          var keySel = select(question.key, keyChoices(n, question.key, 'Choose information…'), function (value) { question.key = value; commit(); });
+          keySel.setAttribute('aria-label', name + ': information to check'); row.appendChild(keySel);
+          var opSel = select(question.op, COND_OPS.map(function (operator) { return {v: operator, t: OP_WORDS[operator] || operator}; }).concat([{v: 'truthy', t: 'is yes or non-empty'}]), function (value) { question.op = value; commit(); draw(); });
+          opSel.setAttribute('aria-label', name + ': comparison'); row.appendChild(opSel);
+          if (question.op !== 'truthy') {
+            var kindSel = select(question.kind, [{v: 'text', t: 'Text'}, {v: 'number', t: 'Number'}, {v: 'boolean', t: 'Yes or No'}], function (value) {
+              question.kind = value; delete question.literal; if (value === 'boolean') question.value = 'true'; commit(); draw();
+            });
+            kindSel.setAttribute('aria-label', name + ': value type'); row.appendChild(kindSel);
+            var valueInput = question.kind === 'boolean'
+              ? select(question.value, [{v: 'true', t: 'Yes'}, {v: 'false', t: 'No'}], function (value) { question.value = value; delete question.literal; commit(); })
+              : input(question.value, function (value) { question.value = value; delete question.literal; commit(); }, question.kind === 'number' ? 'Number to compare' : 'Text to compare');
+            valueInput.setAttribute('aria-label', name + ': value'); row.appendChild(valueInput);
+          }
+          var remove = addButton('Remove question', function () {
+            group.splice(questionIndex, 1); if (!group.length) groups.splice(groupIndex, 1); if (!groups.length) groups = [[blank()]]; commit(); draw();
+          });
+          remove.setAttribute('aria-label', name + ': remove question'); row.appendChild(remove); section.appendChild(row);
+        });
+        var add = addButton('Add question to this group', function () { group.push(blank()); commit(); draw(); });
+        add.disabled = groups.reduce(function (count, item) { return count + item.length; }, 0) >= 64; section.appendChild(add);
+      });
+      if (mode === 'any') {
+        var addGroup = addButton('Add another matching group', function () { groups.push([blank()]); commit(); draw(); });
+        addGroup.disabled = groups.length >= 32 || groups.reduce(function (count, item) { return count + item.length; }, 0) >= 64; editor.appendChild(addGroup);
+      }
+    }
+    draw();
+    if (n._conditionProblem) notice.textContent = n._conditionProblem + ' Finish these questions before saving.';
+    wrap.appendChild(hint('Groups give you alternative paths. Within a group, every question must match. Zero, No and empty text do not match “is yes or non-empty”.'));
     if (!availableKeys(n.id).length) wrap.appendChild(hint('Name an earlier step’s result, or add a question asked at start, to choose it here.'));
     return wrap;
   }
 
   // ---- serialize / api ----
   function commitRawFields() {
-    return FDCore.commitRawParams(rootFlow);
+    return FDCore.commitRawParams(rootFlow).concat(FDActionFields.check(rootFlow), FDCore.conditionProblems(rootFlow));
   }
   var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
@@ -1307,8 +1467,9 @@
     var out = serializeFlow({ id: (idInput.value || rootFlow.id || '').trim(),
       name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes,
       learned_recipe: rootFlow.learned_recipe, recipe_lineage: rootFlow.recipe_lineage,
-      recipe_teaching: rootFlow.recipe_teaching });
+      recipe_teaching: rootFlow.recipe_teaching, _fdEvidence: rootFlow._fdEvidence });
     out.notify = !!(notifyEl && notifyEl.checked);
+    out.notify_on = (document.getElementById('fd-notify-on') || {}).value || 'all';
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
     out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
     out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
@@ -1326,11 +1487,18 @@
     return (hour % 12 || 12) + (mm === '00' ? '' : ':' + mm) + (hour < 12 ? ' am' : ' pm');
   }
   function ordinalWords(n) { n = Number(n); var t = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (t[(v - 20) % 10] || t[v] || t[0]); }
+  var SCHEDULE_HOURS = [1, 2, 3, 4, 6, 8, 12];
+  function scheduleHours(hour) {
+    if (hour === '*') return 1;
+    var match = /^\*\/(\d+)$/.exec(hour);
+    return match && SCHEDULE_HOURS.indexOf(Number(match[1])) >= 0 ? Number(match[1]) : null;
+  }
   function scheduleWords(cron) {
     var f = String(cron || '').trim().split(/\s+/);
     if (f.length !== 5) return 'a custom timetable';
     var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
-    if (/^\d+$/.test(mi) && hr === '*' && dom === '*' && mon === '*' && dow === '*') return 'every hour at ' + ('0' + mi).slice(-2) + ' minutes past';
+    var every = scheduleHours(hr);
+    if (/^\d+$/.test(mi) && every && dom === '*' && mon === '*' && dow === '*') return (every === 1 ? 'every hour' : 'every ' + every + ' hours') + ' at ' + Number(mi) + (Number(mi) === 1 ? ' minute past' : ' minutes past');
     if (!/^\d+$/.test(mi) || !/^\d+$/.test(hr) || mon !== '*') return 'a custom timetable';
     var at = ' at ' + clockWords(hr, mi);
     if (dom === '*' && dow === '*') return 'every day' + at;
@@ -1345,14 +1513,15 @@
     if (!cron || !String(cron).trim()) return { freq: '' };
     if (f.length !== 5) return { freq: 'custom' };
     var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
-    if (mon !== '*' || !/^\d+$/.test(mi)) return { freq: 'custom' };
-    if (hr === '*' && dom === '*' && dow === '*') return { freq: 'hourly', minute: mi };
-    if (!/^\d+$/.test(hr)) return { freq: 'custom' };
+    if (mon !== '*' || !/^\d+$/.test(mi) || Number(mi) > 59) return { freq: 'custom' };
+    var every = scheduleHours(hr);
+    if (every && dom === '*' && dow === '*') return { freq: 'hourly', minute: mi, every: every };
+    if (!/^\d+$/.test(hr) || Number(hr) > 23) return { freq: 'custom' };
     var time = ('0' + hr).slice(-2) + ':' + ('0' + mi).slice(-2);
     if (dom === '*' && dow === '*') return { freq: 'daily', time: time };
     if (dom === '*' && dow === '1-5') return { freq: 'weekdays', time: time };
     if (dom === '*' && /^[0-7](,[0-7])*$/.test(dow)) return { freq: 'weekly', time: time, days: dow.split(',').map(function (d) { return String(Number(d) % 7); }) };
-    if (/^\d+$/.test(dom) && Number(dom) >= 1 && Number(dom) <= 28 && dow === '*') return { freq: 'monthly', time: time, dom: dom };
+    if (/^\d+$/.test(dom) && Number(dom) >= 1 && Number(dom) <= 31 && dow === '*') return { freq: 'monthly', time: time, dom: dom };
     return { freq: 'custom' };
   }
   function buildSchedule() {
@@ -1361,7 +1530,10 @@
     var hr = String(Number(time[0]) || 0), mi = String(Number(time[1]) || 0);
     if (freq === '') return '';
     if (freq === 'custom') return ((schedEl('fd-schedule') || {}).value || '').trim();
-    if (freq === 'hourly') return String(Number((schedEl('fd-sched-minute') || {}).value) || 0) + ' * * * *';
+    if (freq === 'hourly') {
+      var every = Number((schedEl('fd-sched-every') || {}).value) || 1;
+      return String(Number((schedEl('fd-sched-minute') || {}).value) || 0) + ' ' + (every === 1 ? '*' : '*/' + every) + ' * * *';
+    }
     if (freq === 'daily') return mi + ' ' + hr + ' * * *';
     if (freq === 'weekdays') return mi + ' ' + hr + ' * * 1-5';
     if (freq === 'weekly') {
@@ -1375,12 +1547,21 @@
   function showScheduleParts() {
     var freq = (schedEl('fd-sched-freq') || {}).value || '';
     var rows = { 'fd-sched-days': freq === 'weekly', 'fd-sched-dom-row': freq === 'monthly',
-      'fd-sched-minute-row': freq === 'hourly',
+      'fd-sched-minute-row': freq === 'hourly', 'fd-sched-every-row': freq === 'hourly',
       'fd-sched-time-row': ['daily', 'weekdays', 'weekly', 'monthly'].indexOf(freq) >= 0,
       'fd-sched-tz-row': freq !== '' };
     Object.keys(rows).forEach(function (id) { var e = schedEl(id); if (e) e.hidden = !rows[id]; });
     var words = schedEl('fd-sched-words'), cron = ((schedEl('fd-schedule') || {}).value || '').trim();
     if (words) words.textContent = cron ? 'Runs ' + scheduleWords(cron) + '. Publish to turn schedule changes on.' : 'Runs only when started by hand or by another app.';
+    var note = schedEl('fd-sched-note');
+    if (note) {
+      var parsed = parseSchedule(cron);
+      note.textContent = parsed.freq === 'monthly' && Number(parsed.dom) > 28
+        ? 'Months without this date are skipped. Choose a day from 1 to 28 if it must run every month.'
+        : parsed.freq === 'hourly'
+          ? 'Uses clock times in the selected time zone, starting at midnight. Clock changes may skip or repeat a run.' : '';
+      note.hidden = !note.textContent;
+    }
   }
   function syncScheduleControls() {
     var schedule = schedEl('fd-schedule'), freqSel = schedEl('fd-sched-freq');
@@ -1389,6 +1570,7 @@
     var customOpt = freqSel.querySelector ? freqSel.querySelector('option[value="custom"]') : null;
     if (customOpt) customOpt.hidden = parsed.freq !== 'custom';
     freqSel.value = parsed.freq;
+    if (parsed.every != null && schedEl('fd-sched-every')) schedEl('fd-sched-every').value = String(parsed.every);
     if (parsed.time && schedEl('fd-sched-time')) schedEl('fd-sched-time').value = parsed.time;
     if (parsed.minute != null && schedEl('fd-sched-minute')) schedEl('fd-sched-minute').value = String(Number(parsed.minute));
     if (parsed.dom && schedEl('fd-sched-dom')) schedEl('fd-sched-dom').value = String(Number(parsed.dom));
@@ -1399,7 +1581,10 @@
   }
   function chooseSchedule() {
     var schedule = schedEl('fd-schedule');
-    if ((schedEl('fd-sched-freq') || {}).value !== 'custom') schedule.value = buildSchedule();
+    if ((schedEl('fd-sched-freq') || {}).value !== 'custom') {
+      var next = buildSchedule();
+      if (schedule.value !== next) { pushHistory(); schedule.value = next; }
+    }
     var tz = schedEl('fd-tz');
     if (tz && !tz.value && schedule.value) { try { tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* keep UTC */ } }
     showScheduleParts();
@@ -1465,9 +1650,11 @@
       learned_recipe: f.learned_recipe == null ? null : JSON.parse(JSON.stringify(f.learned_recipe)),
       recipe_lineage: f.recipe_lineage == null ? null : JSON.parse(JSON.stringify(f.recipe_lineage)),
       recipe_teaching: f.recipe_teaching == null ? null : JSON.parse(JSON.stringify(f.recipe_teaching)),
+      _fdEvidence: f._fdEvidence == null ? null : JSON.parse(JSON.stringify(f._fdEvidence)),
       published_version: parseInt(f.published_version, 10) || 0,
       published_revision: String(f.published_revision || '') };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
+    if (document.getElementById('fd-notify-on')) document.getElementById('fd-notify-on').value = f.notify_on || 'all';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
     syncScheduleControls();
@@ -1483,6 +1670,7 @@
     autoLayout();
     nameInput.value = flow.name; idInput.value = flow.id;
     selected = null; selectedEdge = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
+    syncSaveButtons();
     if (savedSnapshot) markClean();
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function')
       window.dispatchEvent(new Event('lightwork:flow-loaded'));
@@ -1511,12 +1699,22 @@
   }
   var ACTION_WORDS = { Save: 'save the flow', Publish: 'publish the flow', Run: 'start the run',
     Draft: 'draft the flow', Apply: 'apply the suggestion' };
+  function workflowsOff(response) {
+    var headers = response && response.headers;
+    return headers && typeof headers.get === 'function'
+      ? headers.get('X-Lightwork-Feature-Off') === 'workflows'
+      : fd.dataset.flowEngineOn !== 'true';
+  }
   function failText(response, action) {
     var what = ACTION_WORDS[action] || String(action || 'do that').toLowerCase();
+    if (response && response.status === 403 && workflowsOff(response))
+      return 'Workflows are turned off. ' + (fd.dataset.canManageFlows === 'true'
+        ? 'Turn them on in Learning, then try again.'
+        : 'Ask the person who manages this installation to turn them on.');
     if (window.mvErrorText) return window.mvErrorText(response, what);
     var status = response && response.status;
     if (status === 409) return 'Could not ' + what + '. This flow was changed since you opened it. Reload it and try again.';
-    return 'Could not ' + what + '. Please try again.';
+    return 'Could not ' + what + '. Try again.';
   }
   // Problems in words, naming the step ("The step “Send to Slack” needs an action chosen.").
   function problemText(f) {
@@ -1562,9 +1760,19 @@
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   }
   async function save(forApply) {
-    if (saveInFlight || (applyInFlight && forApply !== true)) return false;
+    if (saveInFlight || actionFieldsChecking || retireInFlight || (applyInFlight && forApply !== true)) return false;
+    var checkedFlow = rootFlow, checkedSnapshot = draftSnapshot();
+    actionFieldsChecking = true; syncSaveButtons();
+    say('Checking the workflow’s current action details…');
+    try { await FDActionFields.ready(rootFlow, true); }
+    catch (error) { say(error.message, true); return false; }
+    finally { actionFieldsChecking = false; syncSaveButtons(); }
+    if (rootFlow !== checkedFlow || draftSnapshot() !== checkedSnapshot) {
+      say('The workflow changed while its action details loaded. Your newer edits are kept; review them and save again.', true);
+      return false;
+    }
     var bad = commitRawFields();
-    if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return false; }
+    if (bad.length) { say(FDActionFields.check(rootFlow)[0] || 'Some action settings aren’t filled in correctly. Check the steps and try again.', true); renderProps(); return false; }
     var body = toApiFlow();
     if (!body.id) { body.id = slugify(body.name); idInput.value = body.id; }   // auto-id from the name
     if (!body.id) { say('Give the flow a name (top-left).', true); return false; }
@@ -1580,8 +1788,7 @@
     say('Saving…');
     try {
       var response = await apiFetch('/api/v1/flows', {
-        method: 'POST', body: body.learned_recipe == null ? JSON.stringify({ flow: body })
-          : '{"flow":' + FDRecipeInputs.flowText(body) + '}'
+        method: 'POST', body: '{"flow":' + FDRecipeInputs.flowText(body) + '}'
       });
       var result = await readMutationResult(response, 'Save');
       if (result.id !== body.id || !Number.isInteger(result.version) || result.version < 1 ||
@@ -1601,7 +1808,10 @@
       }
       markClean(savedDraftSnapshot);
       canonicalizeSavedFlow(rootFlow.id);
-      say('Saved ✓');
+      var disconnected = FDCore.unreachableNodeIds ? FDCore.unreachableNodeIds(body) : [];
+      say(disconnected.length ? 'Saved draft. ' + disconnected.length +
+        ' step' + (disconnected.length === 1 ? ' is' : 's are') +
+        ' not connected and will not run until connected.' : 'Saved ✓', !!disconnected.length);
       if (window.__fdStepsRefresh) window.__fdStepsRefresh();
       return true;
     } catch (e) {
@@ -1611,12 +1821,16 @@
     }
   }
   async function publishFlow() {
-    if (publishInFlight || saveInFlight || applyInFlight) return;
+    if (publishInFlight || saveInFlight || applyInFlight || retireInFlight) return;
     publishInFlight = true; syncSaveButtons();
     // Publish is the explicit activation authority. Save the reviewed canvas as
     // a draft, then bind activation to the exact CAS tokens the save returned.
     try {
       if (!(await save())) return;
+      if (FDCore.unreachableNodeIds && FDCore.unreachableNodeIds(rootFlow).length) {
+        say('Before publishing: ' + problemText(rootFlow), true);
+        return;
+      }
       var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/publish', {
         method: 'POST', body: JSON.stringify({
           version: rootFlow.version, revision: rootFlow.revision
@@ -1637,6 +1851,31 @@
       publishInFlight = false; syncSaveButtons();
     }
   }
+  async function retireFlow(action, button) {
+    if (retireInFlight || saveInFlight || publishInFlight || applyInFlight ||
+        !rootFlow.id || (!rootFlow.version && !canvas.getAttribute('data-flow-id'))) return;
+    retireInFlight = true; syncSaveButtons();
+    try {
+      await window.LightworkFlowRetirement.change(rootFlow.id, action, {
+        button: button, dirty: draftIsDirty(), name: rootFlow.name,
+        onDone: function () {
+          if (action === 'delete') {
+            markClean();
+            window.location.assign('/workflows');
+          } else {
+            rootFlow.published = false;
+            rootFlow.published_version = 0;
+            rootFlow.published_revision = '';
+            say('Turned off. New automatic starts have stopped; existing runs may continue.');
+          }
+        }
+      });
+    } finally {
+      retireInFlight = false; syncSaveButtons();
+      var more = document.getElementById('fd-more');
+      if (more) more.open = false;
+    }
+  }
   function inputFields(definitions) {
     // The declared manual-run inputs as an mvForm field spec.
     return (definitions || flowInputs).filter(function (s) { return (s.key || '').trim(); }).map(function (s) {
@@ -1645,8 +1884,9 @@
     });
   }
   var learnedInputPending = false;
-  function run(dryRun) {
-    if (runInFlight || learnedInputPending) return;
+  function run(dryRun, expected) {
+    if (runInFlight || learnedInputPending) return Promise.resolve({status: 'busy'});
+    if (expected && rootFlow.id !== expected.flowId) return Promise.resolve({status: 'stale'});
     var data = {};
     var learnedPlan = null;
     var pinnedDraft = JSON.stringify(rootFlow), pinnedSnapshot = draftSnapshot(), selectedFlow = rootFlow, releaseId = '';
@@ -1655,8 +1895,11 @@
       if (runInFlight) return;
       var url, payload;
       if (dryRun) {
+        try { await FDActionFields.ready(rootFlow, true); }
+        catch (error) { say(error.message, true); return; }
+        if (runInFlight) return;
         var bad = commitRawFields();
-        if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
+        if (bad.length) { say(FDActionFields.check(rootFlow)[0] || 'Some action settings aren’t filled in correctly. Check the steps and try again.', true); renderProps(); return; }
         var draftBody = toApiFlow();
         if (!draftBody.id) draftBody.id = slugify(draftBody.name);
         if (!draftBody.id) { say('Give the flow a name (top-left).', true); return; }
@@ -1675,7 +1918,7 @@
       buttons.forEach(function (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
       try {
         var response = await apiFetch(url, { method: 'POST',
-          body: learnedPlan ? FDRecipeInputs.payloadText(learnedPlan, payload) : JSON.stringify(payload) });
+          body: FDRecipeInputs.payloadText(learnedPlan, payload) });
         var result = await readMutationResult(response, 'Run');
         if (typeof result.run_id !== 'string' || !result.run_id.trim() ||
             typeof result.status !== 'string' || !result.status.trim() || result.dry_run !== dryRun) {
@@ -1685,8 +1928,10 @@
         say(dryRun ? 'Test started — nothing is sent to other apps.' : 'Run started.');
         document.getElementById('fd-legend').classList.add('on');
         watchRun(result.run_id);
+        return {status: 'started', run_id: result.run_id};
       } catch (e) {
         say(e.message || unconfirmedMutation('Run'), true);
+        return {status: 'unconfirmed'};
       } finally {
         runInFlight = false;
         buttons.forEach(function (button) { button.disabled = false; button.removeAttribute('aria-busy'); });
@@ -1697,40 +1942,54 @@
     }
     async function prepare() {
       if (!dryRun) {
-        if (!rootFlow.id) { say('Publish the reviewed workflow before running it.', true); return; }
+        if (!rootFlow.id) { say('Publish the reviewed workflow before running it.', true); return {status: 'refused'}; }
         say('Loading the published workflow…');
         var previewResponse = await apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/published');
         var preview = await readMutationResult(previewResponse, 'Published workflow');
         if (!preview.flow || preview.flow.id !== rootFlow.id || !Array.isArray(preview.flow.nodes) ||
             typeof preview.release_id !== 'string' || !/^[0-9a-f]{64}$/.test(preview.release_id))
           throw new Error('The published workflow could not be confirmed. Reload it before trying again.');
+        if (expected && preview.release_id !== expected.releaseId) {
+          say('The published workflow changed. Refresh and review it again.', true);
+          return {status: 'stale'};
+        }
         selectedFlow = preview.flow; releaseId = preview.release_id;
       }
-      if (!unchanged()) { say('The workflow changed. Open the input form again.', true); return; }
+      if (!unchanged()) { say('The workflow changed. Open the input form again.', true); return {status: 'stale'}; }
       var title = (dryRun ? 'Test' : 'Run published') + ' “' + (selectedFlow.name || selectedFlow.id || 'workflow') + '”';
+      if (expected && selectedFlow.learned_recipe == null) return {status: 'stale'};
       if (selectedFlow.learned_recipe != null) {
         learnedPlan = FDRecipeInputs.plan(selectedFlow.learned_recipe);
         data = await FDRecipeInputs.prompt(learnedPlan, {title: title, okText: dryRun ? 'Test workflow' : 'Run published',
           restoreFocus: document.getElementById(dryRun ? 'fd-run' : 'fd-run-real')});
-        if (data === null) { say('Run cancelled.'); return; }
+        if (data === null) { say('Run cancelled.'); return {status: 'cancelled'}; }
       } else {
         data = typeof sampleData === 'function' ? sampleData().data : {};
         var fields = inputFields(dryRun ? flowInputs : (selectedFlow.inputs || []));
         if (fields.length) {
           var values = await window.mvForm(title, fields, {okText: dryRun ? 'Test workflow' : 'Run published'});
-          if (values === null) { say('Run cancelled.'); return; }
+          if (values === null) { say('Run cancelled.'); return {status: 'cancelled'}; }
           Object.keys(values).forEach(function (key) { data[key] = values[key]; });
         } else if (!dryRun && !(await window.mvConfirm('Run the published version? This starts real work and uses connected services.', {okText: 'Run published'}))) {
-          say('Run cancelled.'); return;
+          say('Run cancelled.'); return {status: 'cancelled'};
         }
       }
-      if (!unchanged()) { say('The workflow changed while entering inputs. Open the form again.', true); return; }
-      await proceed();
+      if (!unchanged()) { say('The workflow changed while entering inputs. Open the form again.', true); return {status: 'stale'}; }
+      return await proceed();
     }
     learnedInputPending = true;
-    prepare().catch(function (error) { say(error.message || 'Could not open workflow inputs.', true); })
-      .finally(function () { learnedInputPending = false; });
+    return prepare().catch(function (error) {
+      say(error.message || 'Could not open workflow inputs. Refresh the page and try again.', true);
+      return {status: 'unconfirmed'};
+    }).finally(function () { learnedInputPending = false; });
   }
+  window.LightworkFlowRun = Object.freeze({
+    open: function (flowId, releaseId) {
+      if (typeof flowId !== 'string' || !/^[0-9a-f]{64}$/.test(releaseId || ''))
+        return Promise.resolve({status: 'refused'});
+      return run(false, {flowId: flowId, releaseId: releaseId});
+    }
+  });
   function runUrl(runId) {
     return '/flows/' + encodeURIComponent(rootFlow.id) + '/runs/' + encodeURIComponent(runId);
   }
@@ -1825,9 +2084,12 @@
     var ok = 0, err = 0, ns = run.nodes || {};
     for (var k in ns) { if (ns[k].outcome === 1) ok++; else if (ns[k].outcome === 0) err++; }
     var head = run.status === 'completed' ? '✓ Finished' : (run.status === 'rejected' ? '✋ Rejected' : '⚠ The run stopped with a problem');
-    var cost = run.cost_dollars ? ' · $' + Number(run.cost_dollars).toFixed(2) : '';
+    var cost = run.cost_dollars ? ' · ' + (window.mvMoney ? window.mvMoney(run.cost_dollars) : '$' + Number(run.cost_dollars).toFixed(2)) : '';
     var ORIGINS = { webhook: 'started by another app', schedule: 'started on schedule', event_trigger: 'started by a new item' };
-    var origin = (run.origin && run.origin !== 'manual') ? ' · ' + (ORIGINS[run.origin] || human(run.origin)) : '';
+    var origin = (run.origin && run.origin !== 'manual')
+      ? ' · ' + (run.origin.indexOf('event:v2:') === 0
+        ? 'Started by ' + human(run.origin.split(':').slice(4).join(':'))
+        : (ORIGINS[run.origin] || human(run.origin))) : '';
     return head + ' · ' + ok + ' step' + (ok === 1 ? '' : 's') + ' worked' + (err ? ', ' + err + ' failed' : '') + cost + origin;
   }
   async function draft() {
@@ -1842,6 +2104,8 @@
     var generation = ++draftGeneration;
     pendingDraft = { description: desc, flowId: flowId, snapshot: snapshot };
     var button = document.getElementById('fd-draft');
+    var retry = document.getElementById('fd-draft-retry');
+    if (retry) retry.hidden = true;
     if (button) button.setAttribute('aria-busy', 'true');
     say('Drafting… (a few seconds)');
     try {
@@ -1855,6 +2119,7 @@
       if (draftSnapshot() !== snapshot || document.getElementById('fd-nl').value.trim() !== desc ||
           saveInFlight || publishInFlight || applyInFlight) {
         say('The draft was not loaded because the workflow or description changed. Your edits were kept; draft again when ready.', true);
+        if (retry) retry.hidden = false;
         return;
       }
       var draftedFlow = result.flow;
@@ -1866,10 +2131,15 @@
       }
       pushHistory();                    // the pre-draft canvas is one Ctrl+Z away
       fromApiFlow(draftedFlow);
-      say(Array.isArray(result.notes) && typeof result.notes[0] === 'string'
-        ? result.notes[0] : 'Drafted ✓ — review the steps, then save.');
+      var draftNotes = Array.isArray(result.notes) ? result.notes : [];
+      say(typeof draftNotes[0] === 'string'
+        ? draftNotes[0] : 'Drafted ✓ — review the steps, then save.', !!draftNotes.length);
+      if (retry) retry.hidden = !draftNotes.length;
     } catch (e) {
-      if (generation === draftGeneration) say(e.message || 'Could not draft the flow. Please try again.', true);
+      if (generation === draftGeneration) {
+        say(e.message || 'Could not draft the flow. Try again.', true);
+        if (retry) retry.hidden = false;
+      }
     } finally {
       if (generation === draftGeneration) {
         pendingDraft = null;
@@ -1937,26 +2207,27 @@
       if (selected) renderProps();
     }).catch(function () {});
   }
-  async function applyProposal(n, prop, button) {
-    // Persisted apply: save the current graph, then enact the swap server-side so
-    // it becomes a new version and its before/after impact is measured. Hardening
-    // needs a tool: the node's own, else the one the loop inferred it keeps calling.
-    if (applyInFlight || saveInFlight || publishInFlight || prop.applicable === false) return;
+  async function applyProposal(n, prop, button, expectedReview) {
+    // Persisted apply: save the current graph, review the current action and
+    // inputs, then enact the swap as a new measured draft version.
+    if (applyInFlight || saveInFlight || publishInFlight || retireInFlight) return;
     // Proposal IDs address root nodes only; nested bodies may reuse those IDs.
     if (flow !== rootFlow || rootFlow.nodes.indexOf(n) < 0) {
       say('Select the current step in the main flow before applying its suggestion.', true); return;
     }
-    var tool = n.tool || (prop.inferred_tool || '');
-    if (prop.to_kind === 'action' && !tool) {
-      say('Choose an action for this step first, then apply.', true); return;
+    if (unresolvedApply(n)) {
+      say('Read Earlier versions and reload the saved flow before trying another change. The earlier save is not confirmed here.', true); return;
     }
-    var applyingFlow = rootFlow, fromKind = n.kind, confirmed = false;
-    var body = { node_id: n.id, to_kind: prop.to_kind, tool: tool, brief: n.brief || n.label || '' };
+    if (prop.to_kind === 'agent' && draftIsDirty()) {
+      say('Your entered workflow was kept. Save its current draft before reviewing replacement instructions.', true); return;
+    }
+    var applyingFlow = rootFlow, fromKind = n.kind, confirmed = false, applySent = false, uncertain = false;
+    var body = { node_id: n.id, to_kind: prop.to_kind, tool: n.tool || prop.inferred_tool || '', brief: n.brief || n.label || '' };
     applyInFlight = true;
     if (button) button.disabled = true;
     syncSaveButtons();
     try {
-      if (!(await save(true))) return;
+      if (prop.to_kind !== 'agent' && !(await save(true))) return;
       if (rootFlow !== applyingFlow || draftIsDirty()) {
         say('The workflow changed while saving. Your edits were kept; review the suggestion and apply again.', true);
         return;
@@ -1964,7 +2235,20 @@
       var flowId = rootFlow.id, snapshot = draftSnapshot();
       body.version = rootFlow.version;
       body.revision = rootFlow.revision;
+      if (prop.to_kind === 'action' || prop.to_kind === 'agent') {
+        if (!window.LightworkFlowRewrite) {
+          say('The action review is unavailable. Refresh the designer and try again.', true); return;
+        }
+        var reviewed = await window.LightworkFlowRewrite.prepare(flowId, prop, body.tool, expectedReview);
+        if (!reviewed) { say('Review cancelled. The flow was not changed.'); return; }
+        if (rootFlow !== applyingFlow || draftSnapshot() !== snapshot ||
+            reviewed.version !== body.version || reviewed.revision !== body.revision) {
+          say('The flow changed during review. Your edits were kept; review the suggestion again.', true); return;
+        }
+        body = reviewed;
+      }
       say('Applying suggestion…');
+      applySent = true;
       var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
         method: 'POST', body: JSON.stringify(body)
       });
@@ -1982,13 +2266,41 @@
       say('Applied ✓ — now version ' + result.version + '. Results appear as new runs finish.');
       await load(flowId, snapshot);                  // retain edits made during the refresh too
     } catch (e) {
-      say(e.message || unconfirmedMutation('Apply'), true);
+      uncertain = applySent && (!response || response.status >= 500 || response.ok);
+      if (uncertain) unconfirmedApply = {flow: flowId, node: body.node_id, version: body.version};
+      say(uncertain ? 'The replacement save result could not be confirmed. Read Earlier versions and reload the saved flow before trying another change. Your entered instructions were kept; do not apply this request again.' : (e.message || unconfirmedMutation('Apply')), true);
     } finally {
       applyInFlight = false;
-      if (button) button.disabled = confirmed || prop.applicable === false;
+      if (button) button.disabled = confirmed || uncertain;
+      if (uncertain && selected) renderProps();
       syncSaveButtons();
     }
   }
+  async function receiveSofteningHandoff(query) {
+    query = query || new URLSearchParams(location.search);
+    var step = query.get('review_softening');
+    if (!step) return;
+    var binding = query.get('review_binding'), context = query.get('review_context');
+    if (!/^[a-f0-9]{64}$/.test(binding || '') || !/^[a-f0-9]{64}$/.test(context || '') || draftIsDirty()) {
+      say('Your current work was kept. Reopen the current suggestion before reviewing replacement instructions.', true); return;
+    }
+    var node = rootFlow.nodes.find(function (item) { return item.id === step; });
+    if (!node || node.kind !== 'action') {
+      say('The selected action changed. Open its current suggestions.', true); return;
+    }
+    selectNode(step);
+    await applyProposal(node, {node_id: step, to_kind: 'agent'}, null, {binding: binding, context: context});
+  }
+  document.addEventListener('click', function (event) {
+    var anchor = event.target.closest && event.target.closest('a[href]');
+    if (!anchor) return;
+    var target;
+    try { target = new URL(anchor.href, location.href); } catch (_) { return; }
+    if (target.origin !== location.origin || target.pathname !== location.pathname ||
+        !target.searchParams.has('review_softening')) return;
+    event.preventDefault();
+    receiveSofteningHandoff(target.searchParams);
+  });
   function showHistory() {
     if (!rootFlow.id) { say('Save the flow first.', true); return; }
     if (window.__fdShowProps) window.__fdShowProps();
@@ -2058,7 +2370,7 @@
     if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
     var body = toApiFlow();
     var wire;
-    try { wire = body.learned_recipe == null ? JSON.stringify(body, null, 2) : FDRecipeInputs.flowText(body); }
+    try { wire = FDRecipeInputs.flowText(body); }
     catch (error) { say(error.message, true); return; }
     var blob = new Blob([wire], { type: 'application/json' });
     var a = document.createElement('a');
@@ -2108,16 +2420,20 @@
           copy.addEventListener('click', function () { if (window.mvCopy) window.mvCopy(address); });
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
-          rm.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove' }))) return;
-            apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
-              .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
-              .catch(function (e) { say(failText(e, 'remove it'), true); });
+          rm.addEventListener('click', function () {
+            // One action with a way back (CTL-1): removed when Undo ends.
+            row.hidden = true;
+            window.mvUndo('“{name}” removed. The other app can no longer start this flow.', { values: {name: t.name},
+              action: 'remove it',
+              run: function (keepalive) { return apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE', keepalive: keepalive }); },
+              undo: function () { row.hidden = false; rm.focus(); },
+              done: function () { showTriggers(); }
+            });
           });
           row.appendChild(nm); row.appendChild(copy); row.appendChild(rm); wl.appendChild(row);
         });
         if (mine.length) wl.appendChild(hint('In the other app, send a web request to the copied address and include the start’s name.'));
-        else wl.appendChild(hint('None yet.'));
+        else wl.appendChild(hint('None yet. Use “Let another app start this flow” below.'));
         wl.appendChild(addButton('Let another app start this flow', function () {
           apiFetch('/api/v1/triggers', { method: 'POST', body: JSON.stringify({ flow: rootFlow.id }) })
             .then(function (r) { return r.json().catch(function () { return {}; }).then(function (jj) { return { ok: r.ok, r: r, j: jj }; }); })
@@ -2157,10 +2473,16 @@
         if (r.status === 403) {
           var msg = document.getElementById('fd-msg');
           if (msg && !msg.textContent) {
-            msg.textContent = 'Workflows are turned off. You can design a flow and download a copy, '
-              + 'but saving and running need an administrator to turn workflows on.';
-            var on = document.createElement('a'); on.href = '/learning'; on.textContent = ' Turn on workflows';
-            msg.appendChild(on);
+            if (!workflowsOff(r)) {
+              msg.textContent = 'You do not have access to workflows. Ask an administrator.';
+            } else {
+              msg.textContent = 'Workflows are turned off. You can design a flow and download a copy, '
+                + 'but saving and running need the person who manages this installation to turn workflows on.';
+              if (fd.dataset.canManageFlows === 'true') {
+                var on = document.createElement('a'); on.href = '/learning#lrn-flows-on'; on.textContent = ' Turn on workflows';
+                msg.appendChild(on);
+              }
+            }
           }
         }
         return r.ok ? r.json() : { flows: [] };
@@ -2239,9 +2561,7 @@
       body = { message: text, flow: toApiFlow(), history: chatHistory.concat([{ role: 'user', content: text }]).slice(-12), run_id: lastRunId || '' };
       // Preserve retained evidence's exact numbers in both directions, just as
       // Save/Test do. JSON.stringify alone changes integral floats into ints.
-      wire = body.flow.learned_recipe == null ? JSON.stringify(body)
-        : '{"message":' + JSON.stringify(text) + ',"flow":' + FDRecipeInputs.flowText(body.flow) +
-          ',"history":' + JSON.stringify(body.history) + ',"run_id":' + JSON.stringify(body.run_id) + '}';
+      wire = FDRecipeInputs.payloadText(null, body);
     } catch (e) {
       say('This workflow could not be prepared for Copilot. Save your changes, reopen it, and try again.', true);
       return null;
@@ -2311,7 +2631,7 @@
           // Copilot edits do not save or publish. Never let its response replace
           // the current server-issued compare-and-set/publication metadata.
           chatSavedKeys.forEach(function (key) { j.flow[key] = rootFlow[key]; });
-          if (j.flow.learned_recipe != null) FDRecipeInputs.flowText(j.flow);
+          FDRecipeInputs.flowText(j.flow);
           pushHistory();                                      // "undo what the AI did" is one Ctrl+Z
           placeNewNodes(j.flow);
           var keep = { x: view.x, y: view.y, k: view.k };
@@ -2349,25 +2669,42 @@
     }
   }
 
-  function loadTools(q, category) {
+  function loadTools(q, category, offset) {
+    q = q || ''; category = category || ''; offset = offset || 0;
+    var request = ++toolRequest;
+    toolLoading = true; toolError = '';
+    if (!offset) { toolResults = []; toolTotal = 0; toolNext = null; }
+    if (selected) renderProps();
     var params = [];
     if (q) params.push('q=' + encodeURIComponent(q));
     if (category) params.push('category=' + encodeURIComponent(category));
+    if (offset) params.push('offset=' + offset);
     var url = '/api/v1/flows/tools' + (params.length ? ('?' + params.join('&')) : '');
-    apiFetch(url).then(function (r) { return r.ok ? r.json() : { tools: [] }; })
+    apiFetch(url).then(function (r) { if (!r.ok) throw r; return r.json(); })
       .then(function (j) {
+        if (request !== toolRequest) return;
         if (j.categories && j.categories.length) toolCategories = j.categories;
         // A search replaces the choices (keeping the step's current action).
         var keep = {};
-        if (q || category) {
+        if (!offset) {
           flow.nodes.forEach(function (n) { if (n.tool && toolCatalog[n.tool]) keep[n.tool] = toolCatalog[n.tool]; });
           toolCatalog = keep;
         }
         (j.tools || []).forEach(function (t) {
           toolCatalog[t.name] = { description: t.description || '', params: t.params || [], category: t.category || '' };
+          if (toolResults.indexOf(t.name) < 0) toolResults.push(t.name);
         });
+        toolTotal = Number.isInteger(j.total) ? j.total : toolResults.length;
+        toolNext = Number.isInteger(j.next_offset) ? j.next_offset : null;
+        toolLoading = false;
+        FDActionFields.ready(rootFlow, false).catch(function () { /* The selected action shows its own recovery control. */ });
         if (selected) renderProps();
-      }).catch(function () {});
+      }).catch(function () {
+        if (request !== toolRequest) return;
+        toolLoading = false; toolNext = offset || null;
+        toolError = 'Could not load actions. Your current step is unchanged. Try again.';
+        if (selected) renderProps();
+      });
   }
   // Debounced registry search: typing in an action node's tool field searches
   // EVERY live connector (built-ins + enabled enterprise connectors), narrowed
@@ -2376,6 +2713,9 @@
   var toolSearchTimer = null;
   function scheduleToolSearch(q) {
     if (toolSearchTimer) clearTimeout(toolSearchTimer);
+    // A prior response must not replace the results for text just entered.
+    toolRequest++;
+    toolNext = null; toolLoading = true;
     toolSearchTimer = setTimeout(function () {
       loadTools((q || '').trim().length >= 2 ? q.trim() : '', toolFilterCategory);
     }, 250);
@@ -2386,7 +2726,11 @@
     b.addEventListener('click', function () { addNode(b.getAttribute('data-add')); });
   });
   document.getElementById('fd-draft').addEventListener('click', draft);
-  ['fd-sched-freq', 'fd-sched-time', 'fd-sched-dom', 'fd-sched-minute'].forEach(function (id) {
+  document.getElementById('fd-draft-retry').addEventListener('click', draft);
+  document.getElementById('fd-nl').addEventListener('input', function () {
+    document.getElementById('fd-draft-retry').hidden = true;
+  });
+  ['fd-sched-freq', 'fd-sched-time', 'fd-sched-dom', 'fd-sched-minute', 'fd-sched-every'].forEach(function (id) {
     var e = document.getElementById(id); if (e) e.addEventListener('change', chooseSchedule);
   });
   Array.prototype.forEach.call(document.querySelectorAll('#fd-sched-days input[type=checkbox]'), function (c) {
@@ -2416,6 +2760,24 @@
     }).catch(function () {});
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
   document.getElementById('fd-publish').addEventListener('click', publishFlow);
+  document.getElementById('fd-turn-off').addEventListener('click', function () { retireFlow('off', this); });
+  document.getElementById('fd-delete-flow').addEventListener('click', function () { retireFlow('delete', this); });
+  document.addEventListener('lightwork:product-operation-complete', function (event) {
+    var outcome = event.detail || {};
+    if (outcome.status !== 'confirmed') return;
+    if (outcome.operation === 'learning.workflow_delete') {
+      markClean(); window.location.assign('/workflows');
+    } else if (outcome.operation === 'learning.workflow_harden') {
+      say('New draft version saved. Review and publish it when ready.');
+      if (!draftIsDirty()) load(rootFlow.id);
+    } else if (outcome.operation === 'learning.workflow_turn_off') {
+      rootFlow.published = false;
+      rootFlow.published_version = 0;
+      rootFlow.published_revision = '';
+      syncSaveButtons();
+      say('Turned off. New automatic starts have stopped; existing runs may continue.');
+    }
+  });
   document.getElementById('fd-run').addEventListener('click', function () { run(true); });
   document.getElementById('fd-run-real').addEventListener('click', function () { run(false); });
   document.getElementById('fd-history').addEventListener('click', showHistory);
@@ -2475,15 +2837,15 @@
       sessionStorage.removeItem('lightwork.authoring-handoff');
       if (!raw) return;
       handoff = JSON.parse(raw);
-    } catch (e) { say('The saved draft could not be read. Return to Chat and prepare it again.', true); return; }
+    } catch (e) { say('The prepared draft could not be read. Go back and prepare it again.', true); return; }
     if (!handoff || handoff.kind !== 'flow' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
         Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
         !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
-      say('This saved draft is invalid or expired. Return to Chat and prepare a brief of 8,000 characters or fewer.', true); return;
+      say('This prepared draft cannot be used or has expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
     }
     var brief = document.getElementById('fd-nl');
     function hasDraft() { return brief.value.trim() || draftIsDirty() || rootFlow.id || rootFlow.name || rootFlow.nodes.length; }
-    if (blocked || hasDraft()) { say('Your existing draft was kept. The draft from Chat was not loaded.'); return; }
+    if (blocked || hasDraft()) { say('Your existing draft was kept. The suggestion was not loaded.'); return; }
     var touched = false;
     function markTouched() { touched = true; }
     ['input', 'change', 'click'].forEach(function (event) { document.addEventListener(event, markTouched, true); });
@@ -2491,11 +2853,27 @@
       var response = await fetch('/api/v1/templates/draft-context');
       var current = await response.json();
       if (!response.ok || !current || current.context !== handoff.context) throw new Error('workspace mismatch');
-      if (touched || hasDraft()) { say('Your current work was kept. The draft from Chat was not loaded.'); return; }
+      if (touched || hasDraft()) { say('Your current work was kept. The suggestion was not loaded.'); return; }
+      if (handoff.flow !== undefined) {
+        var suggested = handoff.flow;
+        var nodes = suggested && suggested.nodes;
+        var first = Array.isArray(nodes) && nodes.find(function (node) { return node && node.id === suggested.start; });
+        if (!suggested || typeof suggested !== 'object' || Array.isArray(suggested) ||
+            !Array.isArray(nodes) || !nodes.length ||
+            nodes.some(function (node) { return !node || typeof node !== 'object' || Array.isArray(node); }) ||
+            !first || first.kind !== 'approval' || !first.next ||
+            FDCore.validateFlow(suggested).length) {
+          say('The suggested workflow could not be loaded. Return to Ekko and prepare it again.', true); return;
+        }
+        fromApiFlow(suggested);
+        brief.value = handoff.brief;
+        say('Suggested steps ready. Review them, then save when ready.');
+        return;
+      }
       brief.value = handoff.brief;
       say('Brief ready. Review it, then choose Draft when you are ready.');
     } catch (e) {
-      say('The saved draft could not be verified in this workspace. Return to Chat and prepare it again.', true);
+      say('The prepared draft could not be verified in this workspace. Go back and prepare it again.', true);
     } finally {
       ['input', 'change', 'click'].forEach(function (event) { document.removeEventListener(event, markTouched, true); });
     }
@@ -2512,7 +2890,8 @@
   // replaces this with its server snapshot; gallery/import/AI drafts remain
   // dirty and therefore receive the unload warning until saved.
   markClean();
-  if (editId) load(editId).then(initializeRecovery);
+  if (editId) load(editId, new URLSearchParams(location.search).has('review_softening') ? draftSnapshot() : undefined)
+    .then(function () { initializeRecovery(); return receiveSofteningHandoff(); });
   else if (seed && seed.nodes) {   // ?from_template= -> the template as a 1-node flow
     fromApiFlow(seed);
     say('Loaded the template as a flow — add branches, approvals, or loops around it.');
@@ -2549,22 +2928,70 @@
     autoLayoutForce(); render(); return true;
   }
   function autoLayoutForce() { flow.nodes.forEach(function (n) { n.x = 0; n.y = 0; }); autoLayout(); }
-  function addStepAtEnd(kind) {
+  // The steps a run can reach from the first step, over every way out of a step.
+  function reachableIds() {
+    var seen = {}, unreachable = FDCore.unreachableNodeIds(rootFlow);
+    rootFlow.nodes.forEach(function (n) { if (unreachable.indexOf(n.id) < 0) seen[n.id] = true; });
+    return seen;
+  }
+  // Where a new step can still be attached: the end of each path that leads nowhere.
+  // A Decision whose Yes/No paths are unset continues to its `next`, so it is open
+  // only while both are unset.
+  function openEnds() {
+    var reach = reachableIds(), ends = [];
+    linearOrder().forEach(function (n) {
+      if (!reach[n.id]) return;
+      if (n.kind === 'branch') {
+        if (n.next) return;
+        if (!n.if_true) ends.push({ id: n.id, port: 'if_true', label: 'If yes, after “' + stepName(n) + '”' });
+        if (!n.if_false) ends.push({ id: n.id, port: 'if_false', label: 'If no, after “' + stepName(n) + '”' });
+      } else if (!n.next) ends.push({ id: n.id, port: 'next', label: 'After “' + stepName(n) + '”' });
+    });
+    return ends;
+  }
+  function addStepAtEnd(kind, end) {
     if (flow !== rootFlow) exitToDepth(0);
-    var order = linearOrder(), last = null;
-    for (var k = order.length - 1; k >= 0; k--) { if (ports(order[k]).length === 1 && !order[k].next) { last = order[k]; break; } }
-    selected = last ? last.id : null; selectedEdge = null;
+    var ends = openEnds(), at = null;
+    if (end) ends.forEach(function (e) { if (!at && e.id === end.id && e.port === end.port) at = e; });
+    if (!at) at = ends[0] || null;
+    if (!at && rootFlow.start && rootFlow.nodes.length) {
+      say('Every step already leads somewhere. Use the Advanced canvas to connect a new step.', true);
+      return null;
+    }
+    var target = at && nodeById(at.id);
+    selected = target ? target.id : null; selectedEdge = null;
     addNode(kind);
+    // addNode only chains a plain step; a Decision's Yes/No path is wired here so the
+    // new step is never left disconnected.
+    if (target && at.port !== 'next') {
+      var added = nodeById(selected);
+      target[at.port] = added.id;
+      added.x = target.x + (at.port === 'if_true' ? -1 : 1) * Math.round(W * 0.6);
+      render();
+    }
     return selected;
   }
+  // Which way each Decision path leads, by step id (a path left unset continues to `next`).
+  function pathsOf(n) {
+    return n.kind === 'branch'
+      ? [{ label: 'Yes', to: n.if_true || n.next || null }, { label: 'No', to: n.if_false || n.next || null }] : [];
+  }
   window.__fdEngine = {
-    order: function () { return linearOrder().map(function (n) { return { id: n.id, kind: n.kind, title: stepName(n), summary: summary(n), start: n.id === rootFlow.start }; }); },
+    order: function () {
+      var reach = reachableIds();
+      return linearOrder().map(function (n) {
+        return { id: n.id, kind: n.kind, title: stepName(n), summary: summary(n), start: n.id === rootFlow.start,
+          reachable: !!reach[n.id], paths: pathsOf(n) };
+      });
+    },
+    ends: openEnds,
     select: function (id) { if (flow !== rootFlow) exitToDepth(0); multiSel = {}; selectNode(id); },
     remove: function (id) { if (flow !== rootFlow) exitToDepth(0); deleteNode(id); },
     move: moveStep,
     add: addStepAtEnd,
     selected: function () { return selected; },
-    kindLabel: kindLabel
+    kindLabel: kindLabel,
+    conditionText: conditionText
   };
   var _render = render;
   render = function () { _render(); if (window.__fdStepsRefresh) window.__fdStepsRefresh(); };

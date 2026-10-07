@@ -150,6 +150,7 @@ async function cohort(page,pilotId,headers){
 }
 
 test('real admitted pilot cohorts remain isolated and withhold ROI without human-time evidence',async({page,context,baseURL},info)=>{
+  test.setTimeout(90000); // Eight real admissions, independent cohort reads, baseline correction and exact export.
   await localOnly(context,baseURL);
   // Run as a dedicated synthetic owner: the portfolio, pilot pagination and
   // accounting summary assert exact counts, and earlier journeys admit

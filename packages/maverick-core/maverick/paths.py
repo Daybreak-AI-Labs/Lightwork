@@ -185,14 +185,33 @@ def _tenant_claim_owner(
         ) from exc
 
 
-def bind_tenant_namespace(tenant: str) -> str:
+def tenant_namespace_reserved(tenant: str) -> bool:
+    """Read durable name history without claiming or adopting a namespace."""
+    canonical = canonical_tenant_id(tenant)
+    key = _tenant_namespace_key(canonical)
+    home = maverick_home()
+    path = _tenant_claim_path(home, key)
+    if path.exists():
+        _tenant_claim_owner(_read_tenant_claim(path), key, path)
+        return True
+    root = home / "tenants"
+    if root.exists():
+        from .file_lock import ensure_private_directory
+        ensure_private_directory(root)
+        return any(entry.name.rstrip(" .").casefold() == key for entry in root.iterdir())
+    return False
+
+
+def bind_tenant_namespace(tenant: str, *, require_new: bool = False) -> str:
     """Atomically reserve and validate a tenant's portable path namespace.
 
     NFC/NFD spellings of the same id share one claim. A distinct spelling that
     aliases under case-insensitive or Win32 path rules is refused before any
     tenant data is opened. Existing exact-cased directories are adopted for
     backward compatibility; an existing differently-cased legacy directory is
-    treated as a collision and never opened through the new id.
+    treated as a collision and never opened through the new id. Provisioning
+    uses ``require_new``: any earlier claim/directory, including the same owner,
+    refuses re-adoption. Ordinary retained-data reads remain unchanged.
     """
     canonical = canonical_tenant_id(tenant)
     segment = _tenant_segment(canonical)
@@ -203,7 +222,7 @@ def bind_tenant_namespace(tenant: str) -> str:
 
     with _tenant_namespace_lock:
         owner = _tenant_namespace_cache.get(cache_key)
-        if owner is not None:
+        if owner is not None and not require_new:
             if owner != canonical:
                 raise TenantNamespaceCollision(
                     f"tenant id {tenant!r} aliases namespace owned by {owner!r}"
@@ -230,6 +249,8 @@ def bind_tenant_namespace(tenant: str) -> str:
                 raise TenantNamespaceCollision(
                     f"tenant id {tenant!r} aliases namespace owned by {owner!r}"
                 )
+            if require_new:
+                raise TenantNamespaceCollision("Workspace identifier was used before; choose a new identifier. Retained data requires the recovery workflow.")
             _remember_tenant_namespace(cache_key, owner)
             return canonical
 
@@ -237,6 +258,8 @@ def bind_tenant_namespace(tenant: str) -> str:
         # not let a new casing adopt an existing legacy tenant directory.
         for entry in tenants_root.iterdir():
             entry_key = entry.name.rstrip(" .").casefold()
+            if require_new and entry_key == namespace_key:
+                raise TenantNamespaceCollision("Workspace identifier has retained legacy data; choose a new identifier or use the recovery workflow.")
             if entry_key == namespace_key and entry.name != segment:
                 raise TenantNamespaceCollision(
                     f"tenant id {tenant!r} aliases existing namespace {entry.name!r}"
@@ -260,6 +283,8 @@ def bind_tenant_namespace(tenant: str) -> str:
             # authoritative; only the same canonical identity may proceed.
             claim = _read_tenant_claim(claim_path)
             owner = _tenant_claim_owner(claim, namespace_key, claim_path)
+            if require_new:
+                raise TenantNamespaceCollision("Workspace identifier was concurrently reserved; choose a new identifier.") from None
         if owner != canonical:
             raise TenantNamespaceCollision(
                 f"tenant id {tenant!r} aliases namespace owned by {owner!r}"
@@ -274,6 +299,21 @@ def explicit_tenant_id() -> str | None:
     if t:
         return t
     return os.environ.get("MAVERICK_TENANT", "").strip() or None
+
+
+def implicit_tenant_id() -> str | None:
+    """The deployment's own default tenant: the ``MAVERICK_TENANT`` process
+    binding or the ``[client] id`` floor, ignoring any per-request scope.
+
+    This is the tenant every task ran in before an operator created the first
+    named workspace, so the tenant registry keeps it admitted rather than
+    treating it as an unknown tenant once a roster exists.
+    """
+    env = os.environ.get("MAVERICK_TENANT", "").strip()
+    if env:
+        return env
+    from .client import client_id
+    return client_id()
 
 
 def current_tenant_id() -> str | None:
@@ -480,4 +520,5 @@ __all__ = [
     "tenant_scope",
     "canonical_tenant_id",
     "bind_tenant_namespace",
+    "tenant_namespace_reserved",
 ]

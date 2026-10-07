@@ -1115,10 +1115,14 @@ def stock_workspace(web, monkeypatch):
 
     from maverick import connections
     from maverick.paths import tenant_scope
+    from maverick.tenant import registry
     from maverick_dashboard import rbac, workspace_tenants
     from maverick_dashboard import vendor_onboarding_composition as composition
 
     _, original, ctx, tickets = web
+    # Native provisioning precedes membership and retained workflow data;
+    # the lifecycle guard correctly refuses adopting a previously used name.
+    registry.create_tenant(ctx.tenant)
     rbac.set_role(ctx.actor, "operator")
     rbac.set_tenant_role(ctx.tenant, ctx.actor, "operator")
     workspace_tenants.set_selection(ctx.actor, ctx.tenant)
@@ -1144,6 +1148,74 @@ def stock_workspace(web, monkeypatch):
         row["operation"]["approval_card"]["binding_sha256"],
     )
     return service, current, row, tickets, request
+
+
+@pytest.mark.parametrize("revoke_reviewer", [False, True])
+def test_distinct_authorized_reviewer_can_approve_and_preparer_can_execute(
+    stock_workspace, web, monkeypatch, revoke_reviewer,
+):
+    from maverick_dashboard import auth, rbac, workspace_tenants
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    client, _, _, tickets = web
+    service, preparer, _, _, _ = stock_workspace
+    reviewer = "user:second-reviewer"
+    rbac.set_role(reviewer, "operator")
+    rbac.set_tenant_role(preparer.tenant, reviewer, "viewer")
+    workspace_tenants.set_selection(reviewer, preparer.tenant)
+
+    def principal(request):
+        return "user:" + request.headers.get("X-Test-User", "reviewer")
+    monkeypatch.setattr(auth, "caller_principal", principal)
+    monkeypatch.setattr(composition, "caller_principal", principal)
+
+    def binding(request):
+        result = composition.bind_request(request)
+        result.service.documents = service.documents
+        result.service.tickets = tickets
+        result.service.clock = service.clock
+        return result
+
+    monkeypatch.setattr(app.state, "vendor_onboarding_binding_factory", binding)
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(client, row, "review", decision="approved", rationale="Reviewed evidence")
+    row = _step(client, row, "prepare-action")
+    approval_body = {
+        "expected_revision": row["revision"], "confirm": True,
+        "approval_binding_sha256": row["operation"]["approval_card"]["binding_sha256"],
+    }
+    endpoint = f"{BASE}/{row['id']}/approve-action"
+    denied = client.post(endpoint, json=approval_body, headers={"X-Test-User": "second-reviewer"})
+    assert denied.status_code == 403
+    assert client.get(f"{BASE}/{row['id']}").json()["operation"]["state"] == "prepared"
+
+    rbac.set_tenant_role(preparer.tenant, reviewer, "operator")
+    approved = client.post(endpoint, json=approval_body, headers={"X-Test-User": "second-reviewer"})
+    assert approved.status_code == 200, approved.text
+    operation = approved.json()["operation"]
+    assert operation["state"] == "approved"
+    assert operation["context"]["actor"] == preparer.actor
+    assert operation["approval"]["reviewer"] == reviewer
+    assert operation["approval"]["reviewer_context"]["actor"] == reviewer
+
+    if revoke_reviewer:
+        rbac.remove_tenant_role(preparer.tenant, reviewer)
+        rbac.set_role(reviewer, "viewer")
+    executed = client.post(f"{BASE}/{row['id']}/execute", json={
+        "expected_revision": approved.json()["revision"], "confirm": True,
+    })
+    if revoke_reviewer:
+        assert executed.status_code == 409
+        assert executed.json()["detail"]["code"] == "approval_authority_changed"
+        rbac.set_tenant_role(preparer.tenant, reviewer, "operator")
+        retired = client.get(f"{BASE}/{row['id']}").json()
+        assert retired["operation"] is None
+        assert retired["operation_history"][-1]["invalidated_reason"] == "approval_authority_changed"
+        assert tickets.creates == 0
+        return
+    assert executed.status_code == 200, executed.text
+    assert executed.json()["operation"]["state"] == "verified"
+    assert tickets.creates == 1
 
 
 @pytest.mark.parametrize("timing", ["before_claim", "after_claim"])
@@ -1178,7 +1250,6 @@ def test_stock_worker_denies_suspended_tenant(stock_workspace):
     from maverick_dashboard import vendor_onboarding_composition as composition
 
     service, ctx, row, tickets, request = stock_workspace
-    registry.create_tenant(ctx.tenant)
     registry.suspend_tenant(ctx.tenant)
     with tenant_scope(tenant=ctx.tenant), pytest.raises(HTTPException):
         composition._context(request)
@@ -1348,21 +1419,49 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     client, *_ = web
     response = client.get("/third-party/vendor-onboarding")
     assert response.status_code == 200, response.text
-    assert "Human review" in response.text
-    assert "Approve this exact Jira task" in response.text
-    assert "What this request delivers" in response.text
-    assert "Cancel local work" in response.text
-    assert "any Jira ticket already created remains" in response.text
-    from test_support.plain_language import developer_terms
+    from test_support.plain_language import developer_terms, visible_text
 
+    page_text = visible_text(response.text)
+    assert "Human review" in page_text
+    assert "Approve this exact Jira task" in page_text
+    assert "What this request delivers" in page_text
+    assert "Cancel local work" in page_text
+    assert "any Jira ticket already created remains" in page_text
     assert developer_terms(response.text) == []
     for gone in ("file IDs", "SHA-256", "JSON export", "No OCR", "MiB"):
-        assert gone not in response.text
+        assert gone not in page_text
     assert "no-store" in response.headers["cache-control"]
     asset = client.get("/static/lightwork-vendor-onboarding.js")
     assert asset.status_code == 200
     assert "textContent" in asset.text
     assert "innerHTML" not in asset.text
+
+
+def test_vendor_page_gives_local_operator_an_individual_signin_path(web, monkeypatch):
+    client, *_ = web
+    monkeypatch.setattr("maverick_dashboard.vendor_onboarding_page.caller_principal", lambda _request: None)
+    monkeypatch.setattr("maverick_dashboard.vendor_onboarding_page.local_owner_setup_available", lambda _request: True)
+    response = client.get("/third-party/vendor-onboarding")
+    assert response.status_code == 200
+    assert 'data-named-signin="false"' in response.text
+    assert "Set up individual sign-ins for vendor reviews" in response.text
+    assert 'href="/auth/local-owner"' in response.text
+    assert 'href="/users"' in response.text
+
+
+def test_vendor_page_without_workspace_shows_workspace_picker(web, monkeypatch):
+    client, *_ = web
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(
+        "maverick_dashboard.vendor_onboarding_page.current_tenant_id_strict",
+        lambda: None,
+    )
+    response = client.get(
+        "/third-party/vendor-onboarding", headers={"Accept": "text/html"}
+    )
+    assert response.status_code == 409
+    assert "Choose a workspace" in response.text
+    assert "Refresh before continuing" not in response.text
 
 
 def test_vendor_page_has_one_main_landmark_and_labelled_decision_fields(web):

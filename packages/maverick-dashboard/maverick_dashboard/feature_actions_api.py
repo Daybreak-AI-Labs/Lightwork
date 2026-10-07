@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -121,14 +121,50 @@ def _account(request: Request) -> dict[str, Any]:
     for permission, label in (("view", "See work and results"), ("operate", "Start and run tasks"),
                               ("audit", "Read the activity record"), ("admin", "Change settings and manage people")):
         abilities.append({"label": label, "allowed": bool(has_permission(request, permission))})
-    cap = capability_from_config(principal or "user:local")
-    tools = "Every tool" if not cap.allow_tools else f"{len(cap.allow_tools)} chosen tools"
+    execution_user = auth.execution_user_id_from_request(request)
+    cap = capability_from_config(principal or "user:local",
+        channel="dashboard" if execution_user else None, user_id=execution_user)
+    policy_unavailable = any("\x00" in name for name in cap.allow_tools)
+    tools = "Unavailable: tools denied" if policy_unavailable else "No named allow-list; remaining ceilings still apply" if not cap.allow_tools else f"{len(cap.allow_tools)} names in the allowed set"
     blocked = len(cap.deny_tools)
     suites = auth.caller_suites(request)
+    from maverick.enterprise import enterprise_enabled
+    from maverick.profile import active_profile
+
+    from . import scim_groups, suite_grants
+    from .access_explanations import role as explain_role
+
+    provenance = explain_role(principal)
+    department_source = "Configured department default"
+    if principal is None or auth.is_dashboard_admin(principal):
+        department_source = "Installation authority"
+    elif suite_grants.get_grant(principal) is not None:
+        department_source = "Explicit account department grant"
+    elif scim_groups.suites_for_principal(principal) is not None:
+        department_source = "Verified sign-in group mapping"
+    from maverick.safety.tool_risk import tool_risk
+    examples = []
+    for name, label in (("read_file", "Read an allowed file"), ("write_file", "Change an allowed file"), ("shell", "Run a command")):
+        permitted = cap.permits(name)
+        reason = "Within this base grant; task, resource, consent and provider checks still apply."
+        if not has_permission(request, "operate"):
+            reason, permitted = "Your current workspace role does not allow starting tool actions.", False
+        elif not permitted:
+            if cap.is_expired():
+                reason = "The effective capability expired."
+            elif name in cap.deny_tools:
+                reason = "The effective tool policy explicitly blocks this tool."
+            elif cap.allow_tools and name not in cap.allow_tools:
+                reason = "This tool is outside the effective allowed-tool set."
+            else:
+                reason = f"This tool's {tool_risk(name)} risk exceeds the effective {cap.max_risk} ceiling."
+        examples.append({"name": name, "label": label, "allowed": permitted, "reason": reason})
+    profile = active_profile()
+    boundary = enterprise_enabled()
     return {
         "signed_in": signed_in,
         "name": humanize_principal(principal).name if signed_in else "You (this computer)",
-        "role": (role_label(role) or "No role yet") if signed_in else "Full access (sign-in is off)",
+        "role": (role_label(role) or "No role yet") if signed_in else "Local installation authority (unowned content only)",
         "installation_admin": bool(has_global_permission(request, "admin")),
         "workspace": _workspace_name(),
         "abilities": abilities,
@@ -138,6 +174,18 @@ def _account(request: Request) -> dict[str, Any]:
         "blocked_tools": blocked,
         "risk": _RISK_LABELS.get(cap.max_risk or "", "No limit"),
         "limits_enforced": bool(capability_enforced()),
+        "role_source": provenance["source"],
+        "access_owner": provenance["owner"],
+        "department_source": department_source,
+        "tool_examples": examples,
+        "allowed_tool_names": sorted(name for name in cap.allow_tools if "\x00" not in name and cap.permits(name)),
+        "allowed_tool_summary": "No tools: policy resolution failed closed." if policy_unavailable else "No named allow-list; remaining ceilings still apply." if not cap.allow_tools else "No listed tool passes the remaining ceilings.",
+        "blocked_tool_names": sorted(cap.deny_tools),
+        "tool_policy_source": "Effective dashboard-channel and current-user root grant: installation/workspace ACL, runtime blocks, assigned capability role and regulatory ceilings. Individual tasks may narrow it further.",
+        "profile": profile,
+        "enterprise_boundary": boundary,
+        "profile_overridden": profile == "enterprise" and not boundary,
+        "privacy_scope": "Employee tasks, chats and companion conversations are private to their owner. Administrators manage policy and audit metadata. Specific task reads or subject exports require an independent, expiring content-access approval; shared result packets retain their explicit reviewer access.",
         "can": {name: bool(has_permission(request, name)) for name in ("view", "operate", "audit", "admin")}
         | {"installation_admin": bool(has_global_permission(request, "admin"))},
     }
@@ -164,6 +212,18 @@ _INSIGHT_LIMIT = 256 * 1024
 
 def _plain_insight_problem(reason: str) -> str:
     text = reason.lower()
+    if "learning halted" in text:
+        return "Learning is paused. No lessons were added. Ask an administrator to resume it, then try again."
+    if "replay claim could not be released" in text:
+        return "No lessons were added, and this file cannot be retried. Ask for a new lesson file."
+    if "learning audit" in text:
+        return "Lightwork could not record the required activity entry. No lessons were added. Try again after activity recording is restored."
+    if "bundle replay rejected" in text:
+        return "This lesson file has already been used. Ask for a new file to share more lessons."
+    if "sanitization unavailable" in text:
+        return "The safety check is unavailable. No lessons were added. Try again when it is restored."
+    if "no insight change was published" in text:
+        return "This file contained no new lesson to add."
     if "untrusted" in text or "trust anchor" in text or "trusted_insight_pubkeys" in text:
         return ("This file comes from an installation you have not chosen to trust yet. "
                 "Whoever installed Lightwork can add it to the trusted list.")
@@ -255,17 +315,36 @@ async def learning_exchange_import(request: Request) -> dict:
     raw = await _body(request, _INSIGHT_LIMIT)
     from maverick.insight_exchange import import_insights
     from maverick.orchestrator import _build_shield
+    principal = auth.caller_principal(request)
 
     def _do() -> tuple[int, str]:
         with tempfile.TemporaryDirectory(prefix="lw-insights-") as folder:
             path = Path(folder) / "lessons.json"
             path.write_bytes(raw)
-            return import_insights(path, shield=_build_shield())
+            return import_insights(
+                path, shield=_build_shield(),
+                operator_ref=principal or "local administrator",
+                operator_basis="dashboard_session" if principal else "local_mode",
+            )
     imported, reason = await run_in_threadpool(_do)
+    if reason == "import published but completion audit is unavailable":
+        return JSONResponse(status_code=202, content={
+            "added": int(imported), "audit_complete": False,
+            "message": ("The lessons were added, but their final activity entry could not be recorded. "
+                        "Do not add this file again. Ask an administrator to review the activity record."),
+        })
+    if reason == "insight write outcome is uncertain; replay claim retained":
+        return JSONResponse(status_code=202, content={
+            "added": 0, "outcome": "unconfirmed",
+            "message": ("Lightwork could not confirm whether these lessons were saved. "
+                        "Do not add this file again. Check the Learning page and activity record first."),
+        })
     if reason != "ok":
-        raise HTTPException(409, _plain_insight_problem(reason))
-    await run_in_threadpool(lambda: _record(request, "insights_import", installation=True, lessons=imported))
-    return {"added": int(imported)}
+        operational = any(token in reason for token in ("learning halted", "learning audit", "sanitization unavailable"))
+        raise HTTPException(503 if operational else 409, _plain_insight_problem(reason))
+    # The shared importer recorded the caller identity basis and both learning phases
+    # before this endpoint can report a clean success.
+    return {"added": int(imported), "audit_complete": True}
 
 
 # ---- Move customizations (overrides export / load) --------------------------
@@ -363,7 +442,7 @@ def _customizations_preview(raw: bytes) -> dict[str, Any]:
                 errors, _ = lint_profile(load_domain(path))
             except Exception as exc:  # noqa: BLE001 -- a bad file is a finding
                 errors = [str(exc)]
-            items.append({"kind": "Specialist", "name": label, "ok": not errors})
+            items.append({"kind": "Agent or specialist", "name": label, "ok": not errors})
             technical += [f"domains/{path.name}: {e}" for e in errors[:3]]
         roles_file = root / "roles.toml"
         if roles_file.is_file():

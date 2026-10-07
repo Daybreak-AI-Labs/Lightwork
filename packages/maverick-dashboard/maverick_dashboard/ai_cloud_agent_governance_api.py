@@ -312,7 +312,7 @@ class CloudAgentGovernanceDependencies:
             if dependency is not None and not callable(dependency):
                 raise TypeError("cloud-agent governance dependency must be callable")
         self.runtime_for = runtime_for
-        self.enabled_probe = enabled_probe or (lambda _tenant_id: False)
+        self.enabled_probe = enabled_probe
 
 
 class CloudAgentGovernanceOperatorRuntime:
@@ -698,15 +698,20 @@ def create_ai_cloud_agent_governance_router(  # noqa: C901
         route_class=_BoundedJSONRoute,
     )
 
-    def capability(request: Request, tenant_id: str) -> bool:
-        if any(key in _SERVER_OWNED_QUERY_FIELDS for key in request.query_params):
-            raise _http(422, "server_owned_selector_rejected")
+    def selected_probe(request: Request) -> Callable[[str], bool] | None:
         selected = getattr(
             request.app.state,
             "ai_cloud_agent_governance_enabled_probe",
             None,
         )
-        probe = selected if callable(selected) else deps.enabled_probe
+        return selected if callable(selected) else deps.enabled_probe
+
+    def capability(request: Request, tenant_id: str) -> bool:
+        if any(key in _SERVER_OWNED_QUERY_FIELDS for key in request.query_params):
+            raise _http(422, "server_owned_selector_rejected")
+        probe = selected_probe(request)
+        if probe is None:
+            raise _http(503, "cloud_agent_governance_not_connected")
         try:
             result = probe(tenant_id)
         except (KeyboardInterrupt, SystemExit):
@@ -722,6 +727,8 @@ def create_ai_cloud_agent_governance_router(  # noqa: C901
     ) -> tuple[object, str, str, CloudAgentGovernanceOperatorRuntimeLike]:
         from maverick import ai_cloud_agent_governance as cloud
 
+        if selected_probe(request) is None:
+            raise _http(503, "cloud_agent_governance_not_connected")
         tenant = _tenant_id()
         if not capability(request, tenant):
             raise _http(403, "cloud_agent_governance_disabled")
@@ -791,6 +798,27 @@ def create_ai_cloud_agent_governance_router(  # noqa: C901
     @router.get("/status")
     async def status(request: Request):
         require_permission(request, "view")
+        runtime_factory = getattr(request.app.state, "ai_cloud_agent_governance_runtime_factory", None)
+        if selected_probe(request) is None or (
+            not callable(runtime_factory) and deps.runtime_for is None
+        ):
+            if any(key in _SERVER_OWNED_QUERY_FIELDS for key in request.query_params):
+                raise _http(422, "server_owned_selector_rejected")
+            return _response(
+                {
+                    "schema": "lightwork.cloud-agent-governance-api-status.v1",
+                    "enabled": False,
+                    "available": False,
+                    "reason": "not_connected",
+                    "complete": False,
+                    "runtime_constructed": False,
+                    "production_durability_configured": False,
+                    "production_runtime_available": False,
+                    "live_provider_inventory_acceptance_verified": False,
+                    "live_provider_write_acceptance_verified": False,
+                    "live_customer_acceptance_verified": False,
+                }
+            )
         tenant = _tenant_id()
         if not capability(request, tenant):
             return _response(

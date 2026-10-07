@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Preference Questions · Lightwork{% endblock %}
+{% block title %}Preference questions · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set pd_on = consent_profile_data_enabled %}
 {% set pd_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set pd_audit = consent_can_audit if consent_can_audit is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Profile data', 'Preference Questions',
+  {{ hero('Profile data', 'Preference questions',
           lede='Ask people a few extra questions over time, such as how often they want to hear from you, and keep their answers with their consent record.') }}
   {% include "_consent_nav.html" %}
   {% if not pd_on %}
@@ -61,7 +61,7 @@
     <section class="panel" aria-labelledby="cpd-journeys-heading">
       <div class="section-head">
         <h2 id="cpd-journeys-heading">Asking plans</h2>
-        <button class="btn btn--primary" type="button" id="cpd-journey-new"{% if not pd_admin %} disabled{% endif %}>New asking plan</button>
+        <button class="btn btn--primary" type="button" id="cpd-journey-new"{% if not pd_admin %} disabled{% endif %}>Create asking plan</button>
       </div>
       <p class="muted">A plan asks a few questions at a time and never more often than you allow.</p>
       <div id="cpd-journeys"><p class="muted">Loading…</p></div>
@@ -119,18 +119,13 @@
 (function () {
   "use strict";
   var API = "/api/v1/consent/profile-data";
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function request(path, options) {
-    var opts = Object.assign({cache: "no-store"}, options || {});
-    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("cpd-root")) start();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (CW && document.getElementById("cpd-root")) { if (window.mvFetchJSON) start(); else document.addEventListener("DOMContentLoaded", start); }
 
   function start() {
     var $ = function (id) { return document.getElementById(id); };

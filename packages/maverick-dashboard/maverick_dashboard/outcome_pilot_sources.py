@@ -4,7 +4,13 @@ from __future__ import annotations
 import math
 from dataclasses import asdict
 
-from .auth import caller_principal, can_access_goal, goal_owner_filter, suite_allowed
+from .auth import (
+    caller_principal,
+    can_access_goal,
+    domain_suites_allowed,
+    goal_owner_filter,
+    suite_allowed,
+)
 from .outcome_pilots import digest
 
 PREPARED = "Prepared for a workflow pilot. Start this task after the pilot plan is frozen."
@@ -26,14 +32,30 @@ def _provider_receipts(work_item_id: str) -> tuple[list[dict], str]:
     return [asdict(receipt) for receipt in catalogue.receipts], catalogue.version
 
 
-def goal_source(request, reference):
-    from maverick.domain import suite_for
+def _can_read_source(request, goal, *, independent_review=False):
+    if can_access_goal(request, goal):
+        return True
+    if not independent_review or getattr(request.state, "paired_device_id", None):
+        return False
+    # An independent decision mutates the pilot, not its underlying task.
+    # Its read-only resolver still requires the same exact expiring content
+    # grant and confirmed per-read audit receipt as a GET. Never change the
+    # request method or grant the reviewer task mutation/publication authority.
+    from .auth import has_global_permission
+    from .content_access import may_read_employee_content
 
+    if not has_global_permission(request, "admin"):
+        return False
+    return may_read_employee_content(request, goal.owner or "",
+                                     resource_kind="goal", resource_id=str(goal.id))
+
+
+def goal_source(request, reference, *, independent_review=False):
     from .app import _world
 
     world = _world()
     goal = world.get_goal(int(reference))
-    if goal is None or not can_access_goal(request, goal) or not suite_allowed(request, suite_for(goal.domain)):
+    if goal is None or not _can_read_source(request, goal, independent_review=independent_review) or not domain_suites_allowed(request, goal.domain):
         raise LookupError("Task unavailable.")
     episodes = world.list_episodes(goal_id=goal.id, limit=2001)
     if len(episodes) > 2000:
@@ -130,17 +152,15 @@ def vendor_source(request, reference):
     return source
 
 
-def resolve(request, kind, reference):
+def resolve(request, kind, reference, *, independent_review=False):
     if kind == "goal":
-        return goal_source(request, reference)
+        return goal_source(request, reference, independent_review=independent_review)
     if kind == "vendor":
         return vendor_source(request, reference)
     raise ValueError("Choose a task or vendor case.")
 
 
 def choices(request):
-    from maverick.domain import suite_for
-
     from .app import _deliverable_specs, _world
     from .vendor_onboarding_api import _binding, _call
 
@@ -149,7 +169,7 @@ def choices(request):
         world = _world()
         goals = world.list_goals(owner=goal_owner_filter(request), limit=201, order="desc")
         for goal in goals[:200]:
-            if can_access_goal(request, goal) and suite_allowed(request, suite_for(goal.domain)):
+            if can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain):
                 if _is_prepared(goal, world.list_episodes(goal_id=goal.id, limit=1)):
                     items.append({"kind": "goal", "reference": str(goal.id), "label": goal.title})
         coverage.append({"kind": "goal", "status": "partial" if len(goals) > 200 else "current"})
@@ -163,21 +183,24 @@ def choices(request):
         coverage.append({"kind": "vendor", "status": "partial" if len(rows) > 200 else "current"})
     except Exception:
         coverage.append({"kind": "vendor", "status": "unavailable"})
-    specialists = [{"domain": s["domain"], "label": s.get("name") or s["domain"]}
-                   for s in _deliverable_specs() if s.get("gate") and suite_allowed(request, s.get("suite"))]
+    specialists = [{"domain": s["domain"], "label": s.get("name") or s["domain"].replace("_", " ").title()}
+                   for s in _deliverable_specs() if s.get("gate") and domain_suites_allowed(request, s["domain"])]
     return {"items": items, "coverage": coverage, "specialists": specialists}
 
 
-def prepare_task(request, body, context):
-    from maverick.domain import enabled_domains, suite_for
+def prepare_task(request, body, context, *, before_write=None):
+    from maverick.domain import enabled_domains, suites_for_domain
 
     from .app import _deliverable_specs, _world
 
     domain = body["domain"]
-    if domain not in enabled_domains() or not suite_allowed(request, suite_for(domain)):
-        raise PermissionError("Choose an enabled specialist in your permitted departments.")
+    profile = enabled_domains().get(domain)
+    if profile is None or any(
+        not suite_allowed(request, suite) for suite in suites_for_domain(domain, profile)
+    ):
+        raise PermissionError("Choose an agent or specialist that is turned on in your permitted departments.")
     if not any(s["domain"] == domain and s.get("gate") for s in _deliverable_specs()):
-        raise ValueError("Choose a specialist whose deliverable requires sign-off.")
+        raise ValueError("Choose an agent or specialist whose result requires approval.")
     world, actor = _world(), caller_principal(request) or ""
     channel, key = "outcome-pilot-preparation", digest([context, body["operation_id"]])
 
@@ -192,6 +215,20 @@ def prepare_task(request, body, context):
     identifier = world.lookup_processed_message(channel, key)
     if identifier is not None:
         return previous(identifier)
+    if before_write is not None:
+        from maverick.attachment_submissions import SubmissionStore
+
+        # The existing admission writer retains goal, blocked state, original
+        # marker and receipt in one native SQLite/PostgreSQL transaction.
+        receipt = SubmissionStore(world).create(
+            token="outcome-pilot-preparation:" + key,
+            fingerprint=digest([context, actor, body]), owner=actor,
+            title=body["title"], description=body["description"], domain=domain,
+            manifest=[], kind="outcome-pilot-preparation",
+            initial_status="blocked", initial_result=PREPARED,
+            processed_message={"channel": channel, "key": key},
+            before_create=lambda _connection: before_write())
+        return previous(receipt["goal_id"])
     identifier = world.create_goal(body["title"], body["description"], owner=actor, domain=domain)
     world.set_goal_status(identifier, "blocked", result=PREPARED)
     if not world.mark_message_processed(channel, key, goal_id=identifier):

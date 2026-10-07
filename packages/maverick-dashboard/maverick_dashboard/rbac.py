@@ -598,8 +598,21 @@ def _write_tenant(data: dict[str, dict[str, str]]) -> None:
                       json.dumps(data, indent=2, sort_keys=True))
 
 
+def _tenant_removed(tenant: str) -> bool:
+    from maverick.tenant.registry import tenant_retired
+
+    if not (tenant or "").strip():
+        return False
+    try:
+        return tenant_retired(tenant)
+    except Exception as exc:
+        raise RbacStoreError("workspace membership authority is unavailable") from exc
+
+
 def get_tenant_role(tenant: str, principal: str) -> str | None:
     """The principal's role within ``tenant``, or None if no membership."""
+    if _tenant_removed(tenant):
+        return None
     members = _load_tenant().get((tenant or "").strip(), {})
     return members.get((principal or "").strip())
 
@@ -613,6 +626,8 @@ def set_tenant_role(tenant: str, principal: str, role: str, *,
     if not is_known_role(role):
         raise ValueError("unknown role")
     with _locked(tenant_store_path()):
+        if _tenant_removed(tenant):
+            raise ValueError("removed workspace cannot receive members")
         data = _load_tenant()
         old = data.get(tenant, {}).get(principal)
         if old == role:
@@ -658,7 +673,29 @@ def remove_tenant_role(tenant: str, principal: str, *, actor: str = "") -> None:
 
 def list_tenant_roles(tenant: str) -> dict[str, str]:
     """All {principal: role} memberships within ``tenant``."""
+    if _tenant_removed(tenant):
+        return {}
     return dict(_load_tenant().get((tenant or "").strip(), {}))
+
+
+def clear_tenant_roles(tenant: str) -> int:
+    """Revoke every direct membership when a workspace is removed.
+
+    Tombstone admission closes access before this cleanup. Keep the old
+    records in the workspace directory; only the global access roster changes.
+    """
+    from maverick.paths import _tenant_namespace_key
+
+    key = _tenant_namespace_key(tenant)
+    with _locked(tenant_store_path()):
+        data = _load_tenant()
+        names = [name for name in data if _tenant_namespace_key(name) == key]
+        count = sum(len(data[name]) for name in names)
+        if names:
+            for name in names:
+                del data[name]
+            _write_tenant(data)
+        return count
 
 
 __all__ = [
@@ -666,7 +703,7 @@ __all__ = [
     "store_path", "default_role",
     "permissions_for", "list_users", "get_stored_role", "set_role", "remove_user",
     "tenant_store_path", "get_tenant_role", "set_tenant_role",
-    "remove_tenant_role", "list_tenant_roles",
+    "remove_tenant_role", "list_tenant_roles", "clear_tenant_roles",
     "custom_roles_path", "list_custom_roles", "known_roles", "is_known_role",
     "most_privileged", "set_custom_role", "delete_custom_role",
 ]

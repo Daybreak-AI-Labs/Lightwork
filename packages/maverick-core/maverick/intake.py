@@ -18,19 +18,25 @@ on top of it, supplying the ``propose`` callable and the human-approval step.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import logging
 import secrets
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .domain import (
+    _DOMAIN_ID_RE,
     DomainProfile,
     OutputContract,
     WorkflowStep,
     _coerce_output,
     _coerce_workflow,
+    builtin_domains,
+    load_domain,
+    load_domains,
     user_dir,
 )
 
@@ -56,8 +62,15 @@ class IntakeSpec:
 
 
 def _slug(name: str) -> str:
-    s = "".join(c if c.isalnum() else "_" for c in (name or "").lower())
-    return "_".join(filter(None, s.split("_"))) or "business"
+    original = unicodedata.normalize("NFC", name or "").casefold()
+    folded = unicodedata.normalize("NFKD", original)
+    ascii_name = "".join(c for c in folded if not unicodedata.combining(c))
+    s = "".join(c if c.isascii() and c.isalnum() else "_" for c in ascii_name)
+    base = "_".join(filter(None, s.split("_"))) or "business"
+    # Different original names can fold to the same ASCII spelling. Keep
+    # identities stable and distinct without writing non-ASCII pack filenames.
+    suffix = "_" + hashlib.sha256(original.encode("utf-8")).hexdigest()[:8] if not original.isascii() else ""
+    return base[:128 - len(suffix)].rstrip("_") + suffix
 
 
 def _pending_collection(name: str) -> str:
@@ -278,6 +291,9 @@ def generate_profile(spec: IntakeSpec, propose=None) -> DomainProfile:
     ``validate_profile``, so the result is safe regardless of what the model
     returned (or if it failed)."""
     name = _slug(spec.name)
+    if name in builtin_domains():
+        suffix = hashlib.sha256((spec.name or "").encode("utf-8")).hexdigest()[:8]
+        name = f"business_{name[:110]}_{suffix}"
     proposed: dict = {}
     if propose is not None:
         try:
@@ -400,10 +416,25 @@ def save_profile(profile: DomainProfile, *, approved: bool,
             "(license enforcement is on and this deployment is not entitled)")
     if not approved:
         raise PermissionError("refusing to save an unapproved generated pack")
+    if not _DOMAIN_ID_RE.fullmatch(profile.name):
+        raise ValueError("specialist name cannot be used as a saved identity")
+    if profile.name in builtin_domains():
+        raise FileExistsError("specialist name belongs to a built-in specialist")
     d = Path(dest_dir) if dest_dir else user_dir()
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{profile.name}.toml"
-    path.write_text(_to_toml(profile), encoding="utf-8")
+    if profile.name in load_domains(d):
+        raise FileExistsError("specialist name belongs to an existing workspace specialist")
+    created = False
+    try:
+        with path.open("x", encoding="utf-8") as target:
+            created = True
+            target.write(_to_toml(profile))
+        load_domain(path)
+    except Exception:
+        if created:
+            path.unlink(missing_ok=True)
+        raise
     return str(path)
 
 

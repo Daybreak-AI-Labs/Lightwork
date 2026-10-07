@@ -48,10 +48,16 @@ def test_headless_first_run_journey(monkeypatch, tmp_path):
     from maverick import config, providers, world_model
     from maverick.cli import main
 
+    # A clean home runs on effective defaults, so the missing piece before
+    # setup is the AI provider, not the configuration file itself.
+    for name in config.PROVIDER_KEY_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
     before = CliRunner().invoke(main, ["preflight", "--json"])
     assert before.exit_code == 1
-    assert json.loads(before.output)["checks"][0]["id"] == "config"
+    checks = {check["id"]: check["status"] for check in json.loads(before.output)["checks"]}
+    assert checks["config"] == "ready" and checks["provider"] == "blocked"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-present")
 
     installed_result = CliRunner().invoke(
         main,
@@ -82,7 +88,9 @@ def test_headless_first_run_journey(monkeypatch, tmp_path):
 
     started = client.get("/start")
     assert started.status_code == 200, started.text
-    assert "Your selected AI services are configured." in started.text
+    # A saved key that never passed a connection test is "not tested yet",
+    # never "configured": the same truth every readiness page tells.
+    assert "not tested yet" in started.text
     assert "Your setup checklist is complete" not in started.text
     assert "Installation checks" in started.text
 

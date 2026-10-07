@@ -101,17 +101,31 @@ def publish_batch(world, goal_id, records):
 
 
 async def submit(world, files, *, token, owner, title, description, parent_id=None, domain="", project_id=None,
-                 chat_text=None, chat_root_id=None):
+                 chat_text=None, chat_root_id=None, connection_references=None, task_selection=None,
+                 specialist_selection=None, effect_guard=None):
     async with stage_uploads(files) as records:
         files_manifest = manifest(records)
-        fingerprint = hashlib.sha256(json.dumps([title, description, parent_id, domain, project_id, files_manifest],
+        fingerprint_values = [title, description, parent_id, domain, project_id, files_manifest]
+        if connection_references:
+            fingerprint_values.append(connection_references)
+        if task_selection is not None:
+            fingerprint_values.append({"task_model_selection": task_selection})
+        if specialist_selection is not None:
+            fingerprint_values.append({"specialist_selection": specialist_selection})
+        fingerprint = hashlib.sha256(json.dumps(fingerprint_values,
                                                 sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         store = SubmissionStore(world)
+        detail = {"task_model_selection": task_selection} if task_selection is not None else {}
+        if specialist_selection is not None:
+            detail["specialist_selection"] = specialist_selection
         try:
             receipt = await run_in_threadpool(store.create, token=token, fingerprint=fingerprint, owner=owner,
                                               title=title, description=description, manifest=files_manifest,
                                               parent_id=parent_id, domain=domain, project_id=project_id,
-                                              chat_text=chat_text, chat_root_id=chat_root_id)
+                                              chat_text=chat_text, chat_root_id=chat_root_id,
+                                              connection_references=connection_references,
+                                              submission_detail=detail or None,
+                                              effect_guard=effect_guard)
         except SubmissionConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if receipt["state"] in {"dispatching", "dispatched"}:
@@ -127,7 +141,7 @@ async def submit(world, files, *, token, owner, title, description, parent_id=No
             raise HTTPException(status_code=409, detail=f"Submission retained as draft /chat/goal/{receipt['goal_id']}; no work started.") from exc
 
 
-def prepare(world, receipt):
+def prepare(world, receipt, *, effect_guard=None):
     """Serialize best-effort derivation and make every missing derivative visible."""
     from maverick.attachments import companion_coverage
 
@@ -159,11 +173,21 @@ def prepare(world, receipt):
         message = (f"Attachments admitted; {missing} text companion(s) unavailable. Their source text has not been read."
                    if missing else "Attachments and available evidence are ready.")
         store.update(receipt["key"], state="ready", message=message, coverage=coverage)
-        return store.claim_dispatch(receipt["key"])
+        return store.claim_dispatch(receipt["key"], **({"effect_guard": effect_guard} if effect_guard is not None else {}))
 
 
-async def dispatch(world, receipt, run, goal_id, **kwargs):
+async def dispatch(world, receipt, run, goal_id, *, effect_guard=None, **kwargs):
     intent = {key: (sorted(value) if isinstance(value, frozenset) else value) for key, value in kwargs.items()}
-    await run_in_threadpool(SubmissionStore(world).record_dispatch_intent, receipt["key"], intent)
-    if await run_in_threadpool(prepare, world, receipt):
+    store = SubmissionStore(world)
+    guard_options = {"effect_guard": effect_guard} if effect_guard is not None else {}
+    try:
+        await run_in_threadpool(store.record_dispatch_intent, receipt["key"], intent, **guard_options)
+        admitted = await run_in_threadpool(prepare, world, receipt, **guard_options)
+    except HTTPException as exc:
+        if effect_guard is None or exc.status_code not in {401, 403, 409}:
+            raise
+        await run_in_threadpool(store.update, receipt["key"], state="draft",
+            message=f"Work has not started. {exc.detail}")
+        return
+    if admitted:
         await run(goal_id, **kwargs)

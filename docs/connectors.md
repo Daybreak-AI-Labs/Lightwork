@@ -10,8 +10,12 @@ endpoint/version of the upstream service.
   a saved connection authorized for that principal; they do not borrow the
   operator's process credentials. Dedicated integrations may have their own
   documented authentication modes.
-- **Writes are confirm-gated.** Any state-changing call (POST/PUT/PATCH/DELETE,
-  GraphQL mutations, non-read SQL) is a dry run until you pass `confirm=true`.
+- **External changes require a person.** A connector change is presented in
+  Approvals with every request field and non-secret value, plus a digest binding
+  the exact request. It is sent once after a fresh decision and a durable
+  preparation record. The agent's own `confirm=true` cannot approve it.
+  SQL beyond a constant `SELECT 1` check also takes this path because a query
+  can invoke effects that a generic SQL parser cannot prove safe.
 - **Fail closed, fail loud.** Missing config or an API error returns an
   `ERROR:`-prefixed message. A completed HTTP request alone does not establish a
   completed business operation.
@@ -19,8 +23,12 @@ endpoint/version of the upstream service.
 For the generic REST/GraphQL factories, small successful responses retain the
 legacy JSON body. Set `response_format="metadata"` to receive `status_code`,
 `body`, `truncated`, and the allowlisted `etag`, `last-modified`, and `retry-after`
-headers. Read the remote ETag before a conditional PUT/PATCH/DELETE and pass it as
-`if_match`; review the current record again after a conflict.
+headers. For PUT/PATCH/DELETE, pass the current remote ETag as `if_match` when
+available. If you omit it, Lightwork cannot verify whether the service offers
+an ETag. A signed-in reviewer can approve the exact request after an explicit
+warning that newer remote work could be overwritten. A direct connector call
+without an ETag or this fresh approval is refused. Review the current record
+again after a conflict.
 
 HTTP 202 returns `pending=true`; obtain a later result before claiming completion.
 Redirects and conditional 3xx responses are refused. Responses exceeding the
@@ -60,17 +68,50 @@ SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates, NWS/NOAA
 weather, EPA, Climatiq, ...) — GET-only, low-risk, and auto-granted to analyst
 packs by suite (see **Primary-source data grounding** below).
 
-## Enabling a connector
+## Connect from Lightwork
 
-Set the connector's environment variables in `~/.maverick/.env` (chmod 600) or
-your process environment. The interactive installer can do this for you:
+Open **Connections** from Integrations. Search for the service by its business
+name. The catalog describes the authentication method and prerequisites; being
+listed is not evidence of live provider qualification.
 
-```
-maverick init        # advanced flow → "Connect any enterprise systems now?"
-```
+For an approved renewable account, choose **Connect an account**, choose the
+profile, and review its fixed permissions before signing in with the provider.
+An administrator registers the provider application once. When **Let employees
+connect their own approved accounts** is enabled in Settings, employees with
+operate permission can connect their own approved profiles. The account stays
+owner-only; sharing and application registration need an administrator. If an
+application is missing, ask the installation administrator to register it in
+Connections; this external provider prerequisite cannot be bypassed.
 
-Pick the systems by name and the wizard prompts for each one's URL and token.
-You can also add or edit them in `~/.maverick/.env` at any time.
+For a service using a key, an administrator chooses the service, gives the
+connection a distinct name, enters the API service address supplied by that
+service, and saves the key in the protected field. Basic authentication adapters
+need the provider's username/API-key format. Services marked **dedicated setup**
+have additional prerequisites; the simple key form cannot complete them. Do not
+substitute another adapter or a connection name for its tool binding.
+
+**Credential saved** confirms storage only. **Check service access** performs a
+harmless GET and records exactly when, on which credential revision, and with
+what result authentication was checked. A public service address may be reachable
+without proving authentication. Exact folder, storage or ticket permissions need
+the corresponding source or workflow check. Privacy sources link to **Privacy
+scanning** for that check. No connection check authorizes a business write.
+
+Choose **Change** on the saved row to edit its metadata. A blank key preserves the
+saved credential (including its AWS region); enter all AWS credential fields only
+when rotating it. A conflict retains your draft without its secret and requires
+a fresh review of the current record. **Remove** deletes the local sealed record;
+it does not revoke consent at the provider. Review connected apps in the provider's
+account settings separately. An unavailable list disables changes; refresh it
+before creating a replacement so an outage does not produce duplicate setup.
+
+### Operator reference
+
+The installer can collect connector prerequisites during advanced setup. Legacy
+single-user installations may use the documented environment-variable names in
+the catalog below. Authenticated enterprise work still requires the current
+principal's saved connection; operator credentials do not grant employee access.
+Normal customer setup and credential editing take place in Connections.
 
 ## Primary-source data grounding
 
@@ -3042,6 +3083,26 @@ AWS (`s3`, `lambda`, `dynamodb`, `ses`, `sns`) and a few others (`airtable`,
 `asana`, `clickup`, `vercel`, `gdrive`) can use ambient host credentials, so
 they register only when `MAVERICK_ENABLE_CRED_TOOLS=1`. See
 [env-vars.md](env-vars.md).
+
+## Enterprise mode and the hand-written connectors
+
+In Enterprise mode (the `enterprise` profile, or a compliance profile that
+requires the egress lock such as HIPAA), a task run by a signed-in person or
+agent cannot use operator-global environment credentials. The REST and GraphQL
+connectors in `enterprise_connectors.py` honour that: they use only a saved
+connection that admits the person (see **Connections** in the dashboard). The
+hand-written connectors, such as `salesforce`, `servicenow`, `workday`, `sap`,
+`msgraph`, `slack_bot`, `jira`, `confluence`, `notion`, `hubspot`, `snowflake`,
+`gmail` and `stripe`, still read environment credentials directly, so in that
+situation the registry refuses them with `REFUSED (credentials)`, even when a
+saved connection of the same name exists. Tasks with no signed-in person, and
+deployments outside Enterprise mode, are unaffected.
+
+The dashboard **Tools** page marks every affected tool as "Not available in
+Enterprise mode yet", so an administrator can see the list before rollout. The
+list is the `AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES` set in
+`maverick/tools/__init__.py`; a connector leaves it once it resolves its
+credentials from a principal-authorized saved connection.
 
 ## Don't see your system?
 

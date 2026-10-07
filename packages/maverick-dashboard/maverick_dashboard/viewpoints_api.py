@@ -12,9 +12,12 @@ created or changed; each run is recorded in the activity log.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+from maverick import crypto_at_rest
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -89,7 +92,7 @@ def _plain_turn(text: str) -> str:
 
 
 def _run(question: str, rounds: int, principal: str, actor: str,
-         stances: tuple[str | None, str | None] = (None, None)) -> dict:
+         stances: tuple[str | None, str | None] = (None, None), *, model=None, guard=None) -> dict:
     from maverick.budget import BudgetExceeded
     from maverick.debate import DebateParticipant, run_debate
     from maverick.llm import LLM, model_for_role
@@ -106,14 +109,19 @@ def _run(question: str, rounds: int, principal: str, actor: str,
     except Exception as exc:
         settlement.record()
         raise _Refused("The activity log couldn't record this request, so nothing was started.") from exc
-    llm = LLM(model=model_for_role("analyst"))
+    llm = LLM(model=model or model_for_role("analyst"))
+    def complete(*args, **kwargs):
+        if guard is not None:
+            guard()
+            kwargs.update(dispatch_guard=guard, max_physical_attempts=1, _no_failover=True)
+        return llm.complete(*args, **kwargs)
     participants = [DebateParticipant(name=name, persona=(" ".join((chosen or "").split()) or persona),
-                                      llm_complete=llm.complete)
+                                      llm_complete=complete)
                     for (name, _, persona), chosen in zip(SIDES, stances, strict=True)]
     outcome = "failed"
     try:
         with run_scope(budget, principal):
-            result = run_debate(question, participants, judge_complete=llm.complete,
+            result = run_debate(question, participants, judge_complete=complete,
                                 rounds=rounds, budget=budget)
         outcome = "finished"
     except SpendingLimitReached as exc:
@@ -169,22 +177,70 @@ def _prepare(request: Request, body: ViewpointsIn) -> tuple[str, str, str]:
 @router.post("/api/v1/viewpoints/jobs", status_code=202)
 async def start_viewpoints_job(request: Request, body: ViewpointsIn) -> dict:
     """Start the same debate in the background; the page polls for the result."""
-    from .ops_jobs import JOBS, Busy, identity
+    # Legacy clients use the same durable request custody and current worker
+    # guards. The ordinary product adds an explicit complete human review.
+    from . import viewpoints_requests as native
+    prepared = native.prepare(request, body.model_dump())
+    operation = native.operation()
+    result = await run_in_threadpool(native.start, request, prepared, operation)
+    return {"job": operation, "operation": operation, "original": result}
 
-    question, principal, actor = _prepare(request, body)
-    stances = (body.for_side, body.against_side)
 
-    def work() -> dict:
-        try:
-            return _run(question, body.rounds, principal, actor, stances)
-        except _Refused as exc:
-            return {"ran": False, "message": str(exc)}
+class ReviewIn(ViewpointsIn):
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
-    owner, tenant = identity(request)
+
+class ApplyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str = Field(min_length=1, max_length=262144)
+    confirmed: bool
+
+
+def _response(value):
+    return JSONResponse(value, headers={"Cache-Control": "no-store, private"})
+
+
+@router.get("/api/v1/viewpoints")
+def current_viewpoints(request: Request):
+    from . import viewpoints_requests as native
+    native.authority(request, request.headers.get("X-Lightwork-Viewpoints-Context"))
+    return _response(native.listing(request))
+
+
+@router.get("/api/v1/viewpoints/requests/{operation}")
+def original_viewpoints(request: Request, operation: str):
+    from . import viewpoints_requests as native
+    native.authority(request, request.headers.get("X-Lightwork-Viewpoints-Context"))
+    return _response(native.original(request, operation))
+
+
+@router.post("/api/v1/viewpoints/review")
+def review_viewpoints(request: Request, body: ReviewIn):
+    from . import viewpoints_requests as native
+    prepared = native.prepare(request, body.model_dump(exclude={"context", "revision"}), context=body.context, revision=body.revision)
+    operation = native.operation()
+    token = native.seal({"purpose": native.PURPOSE, "prepared": prepared, "operation": operation})
+    if len(token) > 262144:
+        raise HTTPException(422, "This full viewpoints review is too large. Shorten the question or positions and review again.")
+    return _response({"context": prepared["state"]["context"], "operation": operation, "token": token, "changes": native.review_rows(prepared)})
+
+
+@router.post("/api/v1/viewpoints/apply")
+async def apply_viewpoints(request: Request, body: ApplyIn):
+    from . import viewpoints_requests as native
+    native.authority(request, write=True)
+    if not body.confirmed:
+        raise HTTPException(422, "Review the full question, both positions, connected model and spending before starting.")
     try:
-        return {"job": JOBS.start(owner=owner, tenant=tenant, kind="viewpoints", work=work)}
-    except Busy as exc:
-        raise HTTPException(429, "You already have viewpoints being prepared. Wait for them to finish.") from exc
+        if not crypto_at_rest.is_sealed_str(body.token):
+            raise ValueError
+        value = json.loads(crypto_at_rest.unseal_from_str(body.token))
+        if set(value) != {"purpose", "prepared", "operation"} or value["purpose"] != native.PURPOSE:
+            raise ValueError
+    except Exception as exc:
+        raise HTTPException(409, "This viewpoints review is unavailable. Read the original request without repeating AI work.") from exc
+    return _response(await run_in_threadpool(native.start, request, value["prepared"], value["operation"]))
 
 
 @router.get("/api/v1/viewpoints/jobs/{job_id}")
@@ -202,14 +258,7 @@ async def viewpoints_job(request: Request, job_id: str) -> dict:
 @router.post("/api/v1/viewpoints")
 async def get_viewpoints(request: Request, body: ViewpointsIn) -> dict:
     """Run one two-sided debate for the signed-in person and return it."""
-    question, principal, actor = _prepare(request, body)
-    try:
-        return await run_in_threadpool(_run, question, body.rounds, principal, actor,
-                                       (body.for_side, body.against_side))
-    except _Refused as exc:
-        return {"ran": False, "message": str(exc)}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log.warning("viewpoints: debate failed", exc_info=True)
-        raise HTTPException(503, "The viewpoints couldn't be finished. Try again in a moment.") from exc
+    require_permission(request, "operate")
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    raise HTTPException(409, "Open Get two viewpoints in Chat to review this AI request and retain its original outcome.")

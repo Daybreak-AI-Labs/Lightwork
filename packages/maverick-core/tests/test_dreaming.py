@@ -12,6 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from maverick import dreaming, reflexion
 
+# A real dream cycle records signed start/completion receipts.
+pytestmark = pytest.mark.usefixtures("signed_audit")
+
 
 class _Profile:
     def __init__(self, description: str = "", persona: str = ""):
@@ -65,7 +68,7 @@ class TestDepartmentAttribution:
 class TestFailureClustering:
     def _failure(self, goal: str, cls: str = "agent_error", ts: float = 1.0) -> dict:
         return {"goal_text": goal, "failure_class": cls,
-                "reflection": "plan first", "domain": None, "ts": ts}
+                "reflection": "plan first", "domain": None, "ts": ts, "owner": ""}
 
     def test_singletons_are_dropped(self):
         clusters = dreaming.cluster_failures(
@@ -218,7 +221,7 @@ class TestInsightRecall:
         dreaming.append_insights([dreaming.DreamInsight(
             ts=1.0, kind="failure_pattern", domain="finance_sox",
             text="Recurring failure (budget, seen 3x) on goals about ledger totals.",
-            evidence=3,
+            evidence=3, owner="",
         )], path=path)
         # Goal wording shares no content tokens with the insight: only the
         # department link surfaces it.
@@ -251,7 +254,7 @@ class TestInsightRecall:
         dreaming.append_insights([dreaming.DreamInsight(
             ts=1.0, kind="failure_pattern", domain="finance_sox",
             text="Recurring failure (budget, seen 2x) on goals about ledger.",
-            evidence=2, channel="api", user_id="attacker",
+            evidence=2, channel="api", user_id="attacker", owner="",
         )], path=path)
 
         assert dreaming.recall_insights(
@@ -355,7 +358,7 @@ class TestSuccessToolAttribution:
 class TestSharedPromotion:
     def _failure(self, goal: str, domain: str | None, ts: float = 1.0) -> dict:
         return {"goal_text": goal, "failure_class": "agent_error",
-                "reflection": "connector timed out", "domain": domain, "ts": ts}
+                "reflection": "connector timed out", "domain": domain, "ts": ts, "owner": ""}
 
     def test_pattern_across_two_departments_is_not_promoted(self):
         promoted = dreaming.promote_shared_insights([
@@ -587,10 +590,10 @@ class TestRehearsal:
         return [
             {"goal_text": "reconcile the quarterly ledger totals",
              "failure_class": "budget", "reflection": "r",
-             "domain": "finance_sox", "ts": 2.0},
+             "domain": "finance_sox", "ts": 2.0, "owner": ""},
             {"goal_text": "reconcile the monthly ledger totals",
              "failure_class": "budget", "reflection": "r",
-             "domain": "finance_sox", "ts": 1.0},
+             "domain": "finance_sox", "ts": 1.0, "owner": ""},
         ]
 
     def test_cases_built_from_biggest_clusters(self):
@@ -782,9 +785,11 @@ class TestInsightLifecycle:
 
 
 class TestCritiqueMining:
-    def test_low_confidence_critiques_become_failures(self, tmp_path):
+    def test_low_confidence_critiques_become_failures(self, tmp_path, monkeypatch):
+        from maverick import memory_ownership
+        monkeypatch.setattr(memory_ownership, "current_owner", lambda **kw: "")
         import json
-        rec = {"ts": 1.0, "task_brief_text": "summarize the 10-K filing",
+        rec = {"ts": 1.0, "goal_id": 1, "task_brief_text": "summarize the 10-K filing",
                "verifier_critique": "missed the segment data",
                "verifier_confidence": 0.4}
         (tmp_path / "d1.json").write_text(json.dumps(rec), encoding="utf-8")
@@ -1072,6 +1077,9 @@ class TestLearningGovernance:
         )
         assert rows and rows[0]["kind"] == "learning_update"
         assert "insights_written" in rows[0]
+        assert [row["phase"] for row in rows] == ["started", "completed"]
+        assert rows[0]["cycle_id"] == rows[1]["cycle_id"]
+        assert all(row["_require_signed"] is True for row in rows)
 
 
 class TestTenantIsolation:

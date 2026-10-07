@@ -6,7 +6,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
-from maverick import backup, provider_cost_cap, workspace_recovery
+from maverick import backup, practice_costs, provider_cost_cap, workspace_recovery
 from maverick import provider_spending_recovery as spending
 from maverick.governed_operations import digest
 from maverick.privacy_ops import RecordConflict
@@ -75,14 +75,34 @@ class ApplyIn(BaseModel):
     confirm: bool = Field(strict=True)
 
 
+def _freshness() -> tuple[bool, float | None]:
+    """Whether the ledger is the shared database (which has no readable time)
+    and, if not, when spending was last recorded. File and database reads, so
+    the page runs this off the event loop."""
+    try:
+        shared = provider_cost_cap._shared_world() is not None
+    except provider_cost_cap.ProviderAccountingUnavailable:
+        shared = True
+    return shared, None if shared else provider_cost_cap.recorded_at()
+
+
 @router.get("/provider-spending")
 async def page(request: Request):
     _admit(request)
+    from starlette.concurrency import run_in_threadpool
+
     from . import settings_store
     from .app import templates
+
+    shared, recorded_at = await run_in_threadpool(_freshness)
     response = templates.TemplateResponse(request, "provider_spending.html", {
         "recovery_mode": enabled(request.app),
         "provider_options": [{"name": p["name"], "label": p["label"]} for p in settings_store.PROVIDERS],
+        # A shared database ledger has no readable time: say nothing rather than guess.
+        "spend_freshness_known": not shared,
+        "spend_recorded_at": recorded_at,
+        "practice_cost": ((await run_in_threadpool(practice_costs.provider_share, provider_cost_cap.period_key()))
+                          or {}).get("text", ""),
     })
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -101,7 +121,11 @@ async def status(request: Request, period: str | None = Query(default=None, patt
                  provider: str | None = Query(default=None, max_length=128),
                  offset: int = Query(default=0, ge=0, le=100000), limit: int = Query(default=100, ge=1, le=100)):
     _, context = _admit(request)
-    return _json({**await _call(spending.status, period, provider=provider, offset=offset, limit=limit), "context": context,
+    report = await _call(spending.status, period, provider=provider, offset=offset, limit=limit)
+    # Practice calls are real provider charges already in these totals; say how much.
+    report["practice"] = await run_in_threadpool(practice_costs.provider_share, report.get("period") or period
+                                                 or provider_cost_cap.period_key())
+    return _json({**report, "context": context,
                   "isolated": isolated(request.app),
                   "expected_tenant": getattr(request.state, "workspace_expected_tenant", "")})
 

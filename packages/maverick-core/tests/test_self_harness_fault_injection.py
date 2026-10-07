@@ -85,7 +85,7 @@ def _promote(store, *, model="M", n=4):
     """A pass that WOULD promote one line (passes mine/propose/validate/gate)."""
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False,
                                         ledger=si.PromotionLedger())
-    recs = [{"model_id": model, "failure_class": "timeout",
+    recs = [{"owner": "", "goal_id": 0, "model_id": model, "failure_class": "timeout",
              "goal_text": f"do the thing {i}", "failure_msg": "timed out"}
             for i in range(n)]
     return sh.run_self_harness(
@@ -177,7 +177,7 @@ def test_proposer_raising_is_swallowed(tmp_path):
 def _promote_with(store, **kw):
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False,
                                         ledger=si.PromotionLedger())
-    recs = [{"model_id": "M", "failure_class": "timeout",
+    recs = [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": "timeout",
              "goal_text": f"do the thing {i}", "failure_msg": "timed out"}
             for i in range(4)]
     return sh.run_self_harness(

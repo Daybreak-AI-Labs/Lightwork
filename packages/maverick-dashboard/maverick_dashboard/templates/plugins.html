@@ -154,7 +154,7 @@
     </div>
   {% endfor %}
 
-  <div class="section-head"><h2 id="install">Install a Plugin</h2></div>
+  <div class="section-head"><h2 id="install">Install a plugin</h2></div>
   <div class="panel">
     {% if installable %}
       <p class="muted">
@@ -177,8 +177,8 @@
                 <button type="submit" class="btn btn--primary"
                         data-plugin-action="install" data-plugin-target="{{ pkg }}"
                         data-plugin-label="{{ plabel }}"
-                        aria-label="Install {{ plabel }}"
-                        {% if not install_enabled %}disabled{% endif %}>Install</button>
+                        aria-label="Install plugin {{ plabel }}"
+                        {% if not install_enabled %}disabled{% endif %}>Install plugin</button>
               </form>
             </td>
           </tr>
@@ -196,7 +196,7 @@
     {% endif %}
   </div>
 
-  <div class="section-head"><h2 id="to-versions-title">Approved Versions</h2></div>
+  <div class="section-head"><h2 id="to-versions-title">Approved versions</h2></div>
   <section class="panel" aria-labelledby="to-versions-title">
     <p class="muted plg-flush">Pin the add-on versions you have checked, and Lightwork tells you when an
       installed add-on no longer matches. Reload an add-on after its files were updated, without restarting.</p>
@@ -205,13 +205,13 @@
     <p><button type="button" class="btn btn--primary" id="to-versions-pin">Pin current versions</button></p>
   </section>
 
-  <div class="section-head"><h2 id="to-plugin-usage-title">How Often Add-on Tools Are Used</h2></div>
+  <div class="section-head"><h2 id="to-plugin-usage-title">How often add-on tools are used</h2></div>
   <section class="panel" aria-labelledby="to-plugin-usage-title">
     <p id="to-plugin-usage-status" class="muted" role="status" aria-live="polite">Loading…</p>
     <div id="to-plugin-usage"></div>
   </section>
 
-  <div class="section-head"><h2 id="to-starter-title">Start a New Plugin</h2></div>
+  <div class="section-head"><h2 id="to-starter-title">Start a new plugin</h2></div>
   <section class="panel" aria-labelledby="to-starter-title">
     <p class="muted plg-flush">Download the starting files for a new add-on, ready for a developer to build on.
       Nothing is installed or changed on this server.</p>
@@ -234,7 +234,7 @@
   {% if plugins_can_admin %}
   <div class="section-head"><h2 id="plg-admin">Administration</h2></div>
   <div class="panel">
-    <h3 class="plg-flush">Approved Plugins</h3>
+    <h3 class="plg-flush">Approved plugins</h3>
     <p class="muted">
       Only plugins on this list can be installed from this page. Approve only
       plugins you trust: installing one runs its own setup on this computer.
@@ -262,7 +262,7 @@
       </div>
     </form>
 
-    <h3 class="plg-gap">Installing From This Page</h3>
+    <h3 class="plg-gap">Installing from this page</h3>
     {% if install_env_forced_off %}
     <p class="muted plg-flush">
       Installing is <strong>locked off by this server's setup</strong>, so it can't be
@@ -286,6 +286,14 @@
     {% endif %}
   </div>
   {% endif %}
+  <section id="plugin-workbench" class="panel" aria-labelledby="plugin-workbench-title">
+    <h2 id="plugin-workbench-title">Qualification workbench</h2>
+    <p>Review exact installed versions and declared access, then check synthetic inputs in a restricted local container. Starting a process is not acceptance by an external service. No credentials, network access, or host execution are permitted in these checks.</p>
+    <p><a class="btn btn--ghost" href="/settings/all?id=plugins.workbench_image">Choose a practice environment</a>. Choose from approved environments already installed on this computer. Loading the list does not download anything or start a check.</p>
+    <button type="button" class="btn" data-workbench-refresh>Refresh qualification evidence</button>
+    <button type="button" class="btn" data-workbench-cancel>Cancel active check</button>
+    <p role="status" aria-live="polite"></p><div data-workbench-list></div>
+  </section>
   <style>
     .plg-flush { margin: 0; }
     .plg-gap { margin-top: var(--space-5); }
@@ -302,5 +310,8 @@
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-plugins.js" defer></script>
+  <script>{% include "flow_designer_action_fields.js" %}</script>
+  <script src="/static/lightwork-plugin-practice.js" defer></script>
+  <script src="/static/lightwork-plugin-workbench.js" defer></script>
   <script src="/static/lightwork-tool-ops.js" defer></script>
 {% endblock %}

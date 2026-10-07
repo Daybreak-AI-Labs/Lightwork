@@ -105,6 +105,7 @@ def test_bluesky_channel_env_vars():
     "pick_retention",
     "pick_persona",
     "pick_notifications",
+    "pick_deadline_alerts",
     "pick_webhooks",
     "pick_self_learning",
     "pick_ekko",
@@ -668,7 +669,8 @@ def test_pick_notifications_skipped(monkeypatch):
     _StubQ(monkeypatch)
     from maverick_installer.wizard import pick_notifications
     cfg, envs = pick_notifications()
-    assert cfg == {}
+    assert cfg == {"personal_alerts": False, "personal_critical_bypass": False, "personal_background": False,
+                   "metric_alerts": False}
     assert envs == []
 
 
@@ -710,6 +712,23 @@ def test_write_config_tools_block_coexists(tmp_path: Path, monkeypatch):
     assert parsed["tools"]["deferred_loading"] is True
     assert parsed["tools"]["output_cache"] is True
     assert parsed["tools"]["hardware_sensors"] is True
+
+
+def test_write_config_emits_full_tool_exposure_only_when_chosen(tmp_path: Path, monkeypatch):
+    # [tools] exposure defaults to "core" in the kernel; the wizard writes the
+    # key only when the operator picked "show every tool".
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        capabilities={"computer_use": False, "tool_exposure": "full"},
+    )
+    assert parsed["tools"]["exposure"] == "full"
+    assert "tool_exposure" not in parsed.get("capabilities", {})
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        capabilities={"computer_use": False, "tool_exposure": "core"},
+    )
+    assert "exposure" not in parsed.get("tools", {})
+    assert "tool_exposure" not in parsed.get("capabilities", {})
 
 
 def test_write_config_emits_consequence_when_enabled(tmp_path: Path, monkeypatch):
@@ -1326,7 +1345,9 @@ def test_pick_notifications_writes_the_keys_the_kernel_reads(monkeypatch):
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_k: next(answers))
     monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_k: "my-alerts")
     cfg, _ = wizard.pick_notifications()
-    assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts"}
+    assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts", "delivery_receipts": True,
+                   "personal_alerts": True, "personal_critical_bypass": True, "personal_background": True,
+                   "personal_external": True, "personal_dashboard_url": "my-alerts", "metric_alerts": True}
     for choice, key in (("slack     - incoming webhook", "slack_webhook"),
                         ("discord   - webhook URL", "discord_webhook")):
         monkeypatch.setattr(wizard, "_q_select", lambda *_a, choice=choice, **_k: choice)

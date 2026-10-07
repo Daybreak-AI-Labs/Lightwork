@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Banner Experiments · Lightwork{% endblock %}
+{% block title %}Banner experiments · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set ce_on = consent_experiments_enabled %}
 {% set ce_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set ce_audit = consent_can_audit if consent_can_audit is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Consent experiments', 'Banner Experiments',
+  {{ hero('Consent experiments', 'Banner experiments',
           lede='Test different layouts of your consent banner to see which one helps more people make a choice. A second person must approve every experiment, and you can stop it at any time.') }}
   {% include "_consent_nav.html" %}
   {% if not ce_on %}
@@ -22,7 +22,7 @@
     <section class="panel" aria-labelledby="ce-list-heading">
       <div class="section-head">
         <h2 id="ce-list-heading">Experiments</h2>
-        <button class="btn btn--primary" type="button" id="ce-new"{% if not ce_admin %} disabled{% endif %}>New experiment</button>
+        <button class="btn btn--primary" type="button" id="ce-new"{% if not ce_admin %} disabled{% endif %}>Create experiment</button>
       </div>
       <p class="muted">The person who creates an experiment cannot approve it; a second person must.</p>
       <div id="ce-table"><p class="muted">Loading experiments…</p></div>
@@ -119,9 +119,9 @@
       <details class="governance-details">
         <summary>About this page’s safeguards</summary>
         <ul>
-          <li>Visitors whose browser asks not to be tracked, uses that must always be on, and layouts that fail accessibility or equal-button checks always get the original version.</li>
+          <li>Visitors whose browser asks not to be tracked always get the original version. So do uses that must always be on, and layouts that fail accessibility or equal-button checks.</li>
           <li>An experiment compares 2 to 10 versions and can be checked at most 20 times; visitor records are kept at most 90 days.</li>
-          <li>A statistical winner is not a legal or accessibility sign-off. Review the result before changing your published banner.</li>
+          <li>A statistical winner is not a legal or accessibility approval. Review the result before changing your published banner.</li>
         </ul>
       </details>
     </section>
@@ -132,18 +132,13 @@
 (function () {
   "use strict";
   var API = "/api/v1/consent/experiments";
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path, options) {
-    var opts = Object.assign({cache: "no-store"}, options || {});
-    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("ce-root")) start();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (CW && document.getElementById("ce-root")) { if (window.mvFetchJSON) start(); else document.addEventListener("DOMContentLoaded", start); }
 
   function start() {
     var $ = function (id) { return document.getElementById(id); };
@@ -172,7 +167,7 @@
           {label: "Experiment", value: nameOf},
           {label: "Status", value: function (x) { var s = STATES[x.state] || [CW.human(x.state), "idle"]; return CW.badge(s[0], s[1]); }},
           {label: "Versions", value: function (x) { return x.definition.variants.map(layoutOf).join(" vs "); }},
-          {label: "Runs", value: function (x) { return CW.when(x.definition.starts_at) + " to " + CW.when(x.definition.ends_at); }},
+          {label: "Dates", value: function (x) { return CW.when(x.definition.starts_at) + " to " + CW.when(x.definition.ends_at); }},
         ],
         actions: [
           {label: "Approve", when: function (x) { return can.admin && x.state === "draft"; }, run: function (x, b) { lifecycle(x, "approve", b); }},

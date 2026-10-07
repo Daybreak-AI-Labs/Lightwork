@@ -93,6 +93,24 @@ apply` does **not** wait for the ECS service to go healthy (no
 `wait_for_steady_state`), so it returns well before tasks are actually
 running — that's expected, not a failure.
 
+### Database protection on an existing deployment
+
+Before applying a change to an existing stack, inspect the plan for
+`aws_db_instance.main`. The safety update should enable AWS deletion
+protection and configure a final snapshot **in place**. Stop and review any
+plan that replaces or destroys the database; `prevent_destroy` is meant to
+block that apply. A plain `terraform destroy` will also be blocked. An
+intentional retirement needs a separately reviewed plan, a verified backup,
+and explicit removal of both the Terraform and AWS deletion guards; the
+final snapshot must then complete before the database is removed. The snapshot
+name stays stable during normal plans and must be changed before another
+retirement if a previous final snapshot already uses it.
+
+The database still runs in one availability zone with seven days of automated
+backup retention. Deletion protection does not add failover or prove restore
+readiness; decide separately whether the higher ongoing cost of Multi-AZ is
+warranted and periodically verify a restore.
+
 ### 3. Build and push the image via CodeBuild
 
 Can run in parallel with step 2 (kick it off right after `terraform apply`

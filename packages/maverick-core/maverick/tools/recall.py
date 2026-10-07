@@ -124,7 +124,7 @@ def _rank_with_jaccard(query: str, goals: list) -> list[tuple[float, Any]]:
     return scored
 
 
-def _list_candidate_goals(world: WorldModel, include_running: bool) -> list:
+def _list_candidate_goals(world: WorldModel, include_running: bool, *, owner: str) -> list:
     """Pull goals that have meaningful text to compare against.
 
     Routes through the locked, backend-portable ``candidate_goals`` helper
@@ -133,7 +133,7 @@ def _list_candidate_goals(world: WorldModel, include_running: bool) -> list:
     filtered on ``succeeded``/``failed`` statuses the orchestrator never writes
     (so every failed/``blocked`` past goal was silently missed).
     """
-    return world.candidate_goals(include_running, limit=500)
+    return world.candidate_goals(include_running, limit=500, owner=owner)
 
 
 def recall_past_goals(
@@ -143,6 +143,7 @@ def recall_past_goals(
     num_results: int = 5,
     include_running: bool = False,
     world: WorldModel | None = None,
+    owner: str | None = None,
 ) -> list[tuple[float, Any]]:
     """Library entry point. Returns scored matches.
 
@@ -157,7 +158,10 @@ def recall_past_goals(
         world = open_world(db_path)
         own_world = True
     try:
-        candidates = _list_candidate_goals(world, include_running)
+        from ..memory_ownership import current_owner, source_allowed
+        owner = current_owner(world=world) if owner is None else owner
+        candidates = [goal for goal in _list_candidate_goals(world, include_running, owner=owner)
+                      if goal.owner == owner and source_allowed(goal.id, owner, world=world)]
         if not candidates:
             return []
         scored = _rank_with_embeddings(query, candidates)

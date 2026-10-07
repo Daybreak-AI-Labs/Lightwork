@@ -56,4 +56,6 @@ def test_polling_fallback_stops_on_deleted_goal(monkeypatch, tmp_path):
     from maverick import world_model
     gid = world_model.WorldModel(tmp_path / "world.db").create_goal("g", "d")
     r = _client().get(f"/chat/goal/{gid}")
-    assert "resp.status === 404" in r.text
+    assert "[401, 403, 404].includes(resp.status)" in r.text
+    assert "Task access is no longer available." in r.text
+    assert "lightwork:task-access-lost" in r.text

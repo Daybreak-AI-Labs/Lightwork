@@ -252,10 +252,11 @@ def trust_verify_cmd(agent_id, tools, risk, direction) -> None:
 
 @main.group("client")
 def client_group() -> None:
-    """Inspect / export / erase THIS deployment's bound client (one per Lightwork).
+    """Inspect, export, or erase this installation's bound local client data.
 
-    Since one deployment serves exactly one client, the client's whole data set
-    lives under one root — so export and right-to-erasure are provably complete."""
+    Export and erase cover the bound tenant folder on this computer. Stop
+    Lightwork before erasing; other workspaces, connected services, and saved
+    copies need separate review and removal."""
 
 
 @client_group.command("status")
@@ -289,26 +290,29 @@ def client_export_cmd(out) -> None:
 @click.option("--keep-audit", is_flag=True,
               help="Preserve the signed audit chain (legal retention).")
 def client_erase_cmd(confirm, keep_audit) -> None:
-    """Erase ALL of this client's data (offboarding / right-to-erasure).
+    """Erase this client's bound local folder while Lightwork is stopped.
 
-    Wipes the client's data root (world DB, memory, fleet, trust registry, and
-    — unless --keep-audit — the audit chain). Refuses unless a client is bound
-    so it can never target the shared root. Irreversible: export first."""
-    from ..client import ClientBindingError, client_id, erase_client
+    Removes the bound tenant's world DB, memory, fleet, trust registry, and
+    — unless --keep-audit — activity record. Other workspaces, connected
+    services, and saved exports or backups are outside this command's scope.
+    A signed operation receipt survives outside the folder. Irreversible:
+    stop every writer and export first."""
+    from ..client import ClientBindingError, ClientErasureError, client_id, erase_client
     cid = client_id()
     if not cid:
         raise click.ClickException("no client bound — refusing to erase the shared root")
     if not confirm:
         raise click.ClickException(
-            f"this ERASES all data for client {cid!r} and is irreversible. "
+            f"this ERASES the local tenant folder for client {cid!r} and is irreversible. "
             "Re-run with --confirm (and consider `maverick client export` first).")
     try:
         res = erase_client(keep_audit=keep_audit)
-    except ClientBindingError as e:
+    except (ClientBindingError, ClientErasureError) as e:
         raise click.ClickException(str(e)) from e
     click.echo(click.style(
-        f"erased client {res['client_id']!r}: {res['removed']} path(s) removed"
+        f"erased local data for client {res['client_id']!r}: {res['removed']} path(s) removed"
         + (" (audit kept)" if res["kept_audit"] else ""), fg="yellow"))
+    click.echo(f"Activity receipt: {res['audit_event_id']} ({res['receipt_path']})")
 
 
 @main.group("backup")
@@ -333,7 +337,7 @@ def backup_group() -> None:
                    "instead of storing them next to the data they unlock.")
 def backup_create_cmd(out, include_keys) -> None:
     """Create a consistent backup of this client's data."""
-    from ..backup import BackupError, create_backup
+    from ..backup import BackupError, create_backup, withheld_key_files
     if include_keys:
         click.echo(click.style(
             "WARNING: --include-keys bundles the at-rest encryption and audit "
@@ -346,6 +350,18 @@ def backup_create_cmd(out, include_keys) -> None:
         path = create_backup(out, include_keys=include_keys)
     except BackupError as e:
         raise click.ClickException(str(e)) from e
+    if not include_keys:
+        try:
+            left_out = withheld_key_files()
+        except OSError:  # the list is advice; the backup itself is already written
+            left_out = []
+        if left_out:
+            click.echo(click.style(
+                "Key files left out of this backup. Keep a separate, safe copy "
+                "of each: the encryption keys among them are needed to open "
+                "this backup's protected data:", fg="yellow"))
+            for name in left_out:
+                click.echo(f"  {name}")
     click.echo(click.style(f"backup written: {path}", fg="green"))
 
 

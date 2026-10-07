@@ -14,14 +14,14 @@ operator has actually enabled, not the full catalog.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from .domain import SUITE_PREFIXES, DomainProfile, enabled_domains, suite_for
+from .domain import SUITE_PREFIXES, DomainProfile, enabled_domains, suites_for_domain
 
-# Human-facing label + one-line charter per suite key (the value side of
-# ``SUITE_PREFIXES``). A suite missing here still resolves to a derived title
-# (``key.replace("_", " ").title()``), so adding a suite prefix never crashes
-# this layer — it just reads better once a charter is authored.
+# Human-facing label + one-line charter per shipped suite key (the value side
+# of ``SUITE_PREFIXES``). Unknown extension keys retain a derived-title fallback;
+# every shipped suite is covered by the catalog invariant test.
 SUITE_LABELS: dict[str, tuple[str, str]] = {
     "finance": ("Finance",
                 "Close the books, forecast, and control spend — FP&A, "
@@ -114,6 +114,48 @@ SUITE_LABELS: dict[str, tuple[str, str]] = {
                  "Shopper and merchant agents over a governed storefront — "
                  "search, compare, cart, product Q&A, and staged store "
                  "changes; checkout and every store write stay human."),
+    "aerospace_defense": ("Aerospace & Defense",
+                          "Prepare aircraft safety reviews, engineering changes, supplier-quality checks, and export-control work."),
+    "agriculture": ("Agriculture",
+                    "Plan crops and farm operations, monitor supply risks, and prepare market decisions."),
+    "automotive": ("Automotive",
+                   "Support vehicle programs, dealer sales and service, warranty claims, and connected-car risks."),
+    "chemicals": ("Chemicals",
+                  "Review batch records, plant safety, product stewardship, and supply performance."),
+    "crypto_digital_assets": ("Crypto & Digital Assets",
+                              "Review digital-asset custody, transaction risk, compliance, and fund operations."),
+    "enterprise_risk": ("Enterprise Risk",
+                        "Map business risks to controls, continuity plans, insurance coverage, and board reporting."),
+    "esg_sustainability": ("ESG & Sustainability",
+                           "Assemble emissions and supplier evidence, prepare sustainability disclosures, and track improvement plans."),
+    "food_beverage_cpg": ("Food, Beverage & Consumer Goods",
+                          "Support product quality, food safety, demand planning, and retailer trade programs."),
+    "knowledge_management": ("Knowledge Management",
+                             "Turn scattered documents and lessons into findable, maintained answers for teams."),
+    "maritime": ("Maritime",
+                 "Prepare vessel, cargo, port, and crew work, including shipping documents and maintenance plans."),
+    "medical_devices": ("Medical Devices",
+                        "Prepare device design and quality records, complaint reviews, and post-market follow-up."),
+    "mining_metals": ("Mining & Metals",
+                      "Support exploration, mine planning, plant performance, equipment upkeep, and commodity reporting."),
+    "oil_gas": ("Oil & Gas",
+                "Support drilling plans, production, pipeline scheduling, safety, and environmental reporting."),
+    "private_equity_vc": ("Private Equity & Venture Capital",
+                          "Assess deals, coordinate diligence and portfolio plans, and prepare investor reporting."),
+    "process_automation": ("Process Automation",
+                           "Find repeatable work to automate, map its data and checks, and monitor the automations."),
+    "public_sector": ("Public Sector",
+                      "Support public programs, benefits and case work, budgeting, and constituent service."),
+    "renewables_cleantech": ("Renewables & Clean Tech",
+                             "Plan and monitor clean-energy projects, assets, grid connections, and performance."),
+    "semiconductors": ("Semiconductors",
+                       "Support chip design, fabrication yield, failure analysis, supply planning, and export compliance."),
+    "travel_aviation": ("Travel & Aviation",
+                        "Support airline and airport operations, bookings, baggage, cargo, and traveler service."),
+    "trust_safety": ("Trust & Safety",
+                     "Review abuse and harmful content, account integrity, appeals, and escalation to people."),
+    "water_utilities": ("Water Utilities",
+                        "Support water and wastewater assets, field work, treatment, billing, and compliance."),
 }
 
 
@@ -157,11 +199,9 @@ def _group(cfg: dict | None) -> dict[str, list[str]]:
     Packs with no recognized suite prefix (legacy/generic) are skipped — a
     department is a suite, and those packs belong to no suite."""
     by_suite: dict[str, list[str]] = {}
-    for name in enabled_domains(cfg):
-        suite = suite_for(name)
-        if suite is None:
-            continue
-        by_suite.setdefault(suite, []).append(name)
+    for name, profile in enabled_domains(cfg).items():
+        for suite in suites_for_domain(name, profile):
+            by_suite.setdefault(suite, []).append(name)
     for names in by_suite.values():
         names.sort()
     return by_suite
@@ -247,6 +287,17 @@ def department_entitled(key: str, *, tenant: str | None = None) -> bool:
             or feature_allowed(f"department:{key}", tenant=tenant))
 
 
+def department_entitlements(keys: Iterable[str], *, tenant: str | None = None) -> dict[str, bool]:
+    """Current catalog availability from one plan read, without caching authority."""
+    from .billing import feature_availability
+
+    requested = tuple(keys)
+    available = feature_availability(
+        (DEPARTMENTS_FEATURE, *(f"department:{key}" for key in requested)), tenant=tenant,
+    )
+    return {key: available[DEPARTMENTS_FEATURE] or available[f"department:{key}"] for key in requested}
+
+
 def _owner_slug(owner: str) -> str:
     """A fleet-name-safe, collision-resistant slug for an owner principal.
 
@@ -298,6 +349,28 @@ def fleet_from_department(dept: Department, owner: str, *,
                  owner=owner, agents=agents)
 
 
+def merge_department_fleet(candidate, existing, *, known_members: list[str]):
+    """Keep an edited team intact and append only specialists not offered before.
+
+    Older team files have no deployment marker. On their first update we treat
+    the current catalog as already offered, so a specialist the customer removed
+    cannot be silently recreated. A later release's genuinely new members can
+    then be added on the next update.
+    """
+    from dataclasses import replace
+
+    if existing is None:
+        return replace(candidate, department_members_added=tuple(a.name for a in candidate.agents)), len(candidate.agents)
+    if existing.name != candidate.name or existing.owner != candidate.owner:
+        raise ValueError("the existing team belongs to another owner")
+    seen = set(existing.department_members_added) if existing.department_members_added else set(known_members)
+    names = {agent.name for agent in existing.agents}
+    added = tuple(agent for agent in candidate.agents if agent.name not in seen and agent.name not in names)
+    seen.update(agent.name for agent in candidate.agents)
+    return replace(existing, agents=(*existing.agents, *added),
+                   department_members_added=tuple(sorted(seen))), len(added)
+
+
 def deploy_department(key: str, owner: str, *, cfg: dict | None = None,
                       tenant: str | None = None, name: str | None = None,
                       save: bool = True):
@@ -320,6 +393,13 @@ def deploy_department(key: str, owner: str, *, cfg: dict | None = None,
     ensure_suite_allowed(owner, key)
     fleet = fleet_from_department(dept, owner, cfg=cfg, name=name)
     if save:
-        from .fleet import save_fleet
-        save_fleet(fleet, tenant=tenant or "__active__")
+        from .file_lock import cross_process_lock
+        from .fleet import fleets_dir, load_fleet, save_fleet
+
+        target_tenant = tenant or "__active__"
+        with cross_process_lock(fleets_dir(tenant=target_tenant) / f"{fleet.name}.json"):
+            fleet, _added = merge_department_fleet(
+                fleet, load_fleet(fleet.name, tenant=target_tenant), known_members=dept.members,
+            )
+            save_fleet(fleet, tenant=target_tenant)
     return fleet

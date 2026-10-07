@@ -29,7 +29,7 @@ def _process_renew(entered, release, counter, results, *, crash=""):
             raise TimeoutError("test release did not arrive")
         return {"access_token": "process-fixture-token", "expires_in": 3600}
 
-    def identity(*args):
+    def identity(*args, **_identity_inputs):
         if crash == "consumed":
             os._exit(18)
         return {"provider": "google", "subject": "fixture-account", "display_name": "Fixture",

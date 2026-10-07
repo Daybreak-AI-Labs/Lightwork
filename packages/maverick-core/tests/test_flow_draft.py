@@ -77,7 +77,18 @@ def test_non_json_falls_back_to_single_agent():
                              flow_id="fb")
     assert flow.is_single_agent() and flow.id == "fb"
     assert flow.nodes["n0"].brief == "summarize the news"
-    assert notes and "single agent" in notes[0]
+    assert notes and "Only one AI task was drafted" in notes[0]
+
+
+def test_fallback_names_missing_approval_and_schedule_without_an_exception_name():
+    brief = "Every weekday at 9am check payments, then ask the finance lead to approve before posting"
+    flow, notes = draft_flow(brief, complete=_complete("not a flow"))
+    assert flow.is_single_agent()
+    assert flow.schedule == ""
+    assert "schedule and approval step" in notes[0]
+    assert "were not included" in notes[0]
+    assert "ValueError" not in notes[0]
+    assert flow.name in brief and len(flow.name) <= 60
 
 
 def test_invalid_graph_falls_back():

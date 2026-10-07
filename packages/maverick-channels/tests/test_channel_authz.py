@@ -456,37 +456,41 @@ def test_voice_allowlist_blocks_unauthorized_caller(monkeypatch):
         return "ran"
 
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
-    chan = VoiceChannel(_handler, api_key="vapi-test-key",
+    chan = VoiceChannel(_handler, api_key="vapi-test-key", assistant_id="fixture-assistant",
                         allowed_callers=["+12025550111"])
     client = TestClient(chan._app)
     hdr = {"Authorization": "Bearer voice-secret"}
 
     def _post(number):
         return client.post("/webhook/voice", headers=hdr, json={
-            "message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1"},
-            "call": {"id": "call1", "customer": {"number": number}},
+            "message": {"type": "tool-calls", "call": {"id": "call1", "assistantId": "fixture-assistant",
+                        "customer": {"number": number}}, "toolCallList": [{"id": "event1", "name": "lightwork_request",
+                        "parameters": {"request": "hi"}}]},
         })
 
     # Unauthorized caller: rejected, handler never runs.
     resp = _post("+19998887777")
-    assert resp.status_code == 200
-    assert "authorized" in resp.json()["response"].lower()
+    assert resp.status_code == 403
+    assert "not permitted" in resp.json()["detail"].lower()
     assert seen == []
 
     # Authorized caller: handler runs.
     resp = _post("+12025550111")
     assert resp.status_code == 200
-    assert resp.json() == {"response": "ran"}
+    assert resp.json() == {"results": [{"name": "lightwork_request", "toolCallId": "event1", "result": "ran"}]}
     assert seen == ["+12025550111"]
 
 
 @pytest.mark.skipif(not _have_voice_deps(), reason="fastapi+httpx not installed")
-def test_voice_without_allowlist_allows_any_authenticated_caller(monkeypatch):
-    """Back-compat: with no allowlist, the bearer is the gate (any caller)."""
+def test_voice_without_allowlist_refuses_authenticated_caller(monkeypatch):
+    """The webhook bearer authenticates the provider, not its phone caller."""
     from fastapi.testclient import TestClient
     from maverick_channels.voice import VoiceChannel
 
-    async def _handler(_):
+    seen = []
+
+    async def _handler(message):
+        seen.append(message)
         return "ran"
 
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
@@ -497,5 +501,31 @@ def test_voice_without_allowlist_allows_any_authenticated_caller(monkeypatch):
         "message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1"},
         "call": {"id": "call1", "customer": {"number": "+19998887777"}},
     })
-    assert resp.status_code == 200
-    assert resp.json() == {"response": "ran"}
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "voice caller list is not configured"
+    assert seen == []
+
+
+@pytest.mark.skipif(not _have_voice_deps(), reason="fastapi+httpx not installed")
+@pytest.mark.parametrize("number", [None, "", "202-555-0111", "+012025550111", "+12025550111 "])
+def test_voice_refuses_missing_or_noncanonical_number_even_with_valid_bearer(monkeypatch, number):
+    from fastapi.testclient import TestClient
+    from maverick_channels.voice import VoiceChannel
+
+    seen = []
+
+    async def _handler(message):
+        seen.append(message)
+        return "ran"
+
+    monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
+    chan = VoiceChannel(_handler, api_key="vapi-test-key", assistant_id="fixture-assistant", allowed_callers=["+12025550111"])
+    call = {"id": "call1", "assistantId": "fixture-assistant", "customer": {}}
+    if number is not None:
+        call["customer"]["number"] = number
+    resp = TestClient(chan._app).post("/webhook/voice", headers={"Authorization": "Bearer voice-secret"},
+        json={"message": {"type": "tool-calls", "call": call, "toolCallList": [
+              {"id": "event1", "name": "lightwork_request", "parameters": {"request": "hi"}}]}})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "This caller number is not permitted to start work."
+    assert seen == []

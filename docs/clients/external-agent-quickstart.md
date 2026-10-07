@@ -96,7 +96,9 @@ Semantics worth knowing:
   logical run and a retried report returns the original record instead of
   double-counting spend.
 - `start()` returns `{goal_id, heartbeat_seconds}`; call `heartbeat()` at
-  least that often. `False` is the **kill switch** — stop working now.
+  least that often. The recommended interval is shorter than stale-run
+  recovery's deadline, leaving room for request delay. `False` is the
+  **kill switch** — stop working now.
 - `memory_ingest(kind, goal_text, ...)` (`kind` is `success` / `failure` /
   `lesson`) and `memory_recall(query)` reach the governed learning plane
   when `[fleet_memory]` is enabled; an empty `context` with a `reason` is a
@@ -104,126 +106,70 @@ Semantics worth knowing:
 
 ## TypeScript helper
 
-The same class over `fetch` (Node 18+, Bun, Deno, edge runtimes):
+Use the maintained [thin TypeScript client](examples/lightwork.ts) with Node 18+
+(or another Fetch runtime with streaming responses). It has a 15-second owned
+deadline, a 1-MiB streamed response bound, disposal, safe typed errors and no
+automatic retries. No credential or response body is included in an error.
 
 ```ts
-// lightwork.ts — screen-then-act, report-after
-export class Lightwork {
-  private base: string;
-  private headers: Record<string, string>;
-
-  constructor(baseUrl: string, token: string) {
-    this.base = baseUrl.replace(/\/+$/, "") + "/api/v1/external";
-    this.headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
+import { Lightwork, LightworkRequestError } from "./lightwork.js";
+const lw = new Lightwork("https://lightwork.example.com", token);
+try {
+  const verdict = await lw.screen("send_email", JSON.stringify(reviewedEmail), "medium");
+  // Do not act here: branch on allowed / requires_approval / denied, and poll
+  // the exact approval binding as in the maintained Python example below.
+} catch (error) {
+  if (error instanceof LightworkRequestError) {
+    console.error(error.kind, error.status, error.requestId);
+    // authentication/permission: repair access; rate_limit: inspect retryAfterSeconds.
+    // unknown_effect: reconcile the original operation; never automatically replay it.
   }
-
-  private async post(path: string, body: unknown): Promise<any> {
-    const r = await fetch(this.base + path, {
-      method: "POST", headers: this.headers, body: JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-    return r.json();
-  }
-
-  async screen(tool: string, detail = "", risk = "low") {
-    const v = await this.post("/screen", { tool, detail, risk });
-    if (!v.allowed && !v.requires_approval)
-      throw new Error(`denied (${v.rule}): ${v.reason}`);
-    return v;
-  }
-
-  async report(title: string, outcome: "success" | "failure",
-               fields: Record<string, unknown> = {}) {
-    return this.post("/runs", { title, outcome, ...fields });
-  }
-
-  async start(title: string, fields: Record<string, unknown> = {}) {
-    return this.post("/runs/start", { title, ...fields });
-  }
-
-  async heartbeat(goalId: number): Promise<boolean> {
-    return (await this.post(`/runs/${goalId}/heartbeat`, {})).continue === true;
-  }
-
-  async finish(goalId: number, outcome: "success" | "failure",
-               fields: Record<string, unknown> = {}) {
-    return this.post(`/runs/${goalId}/finish`, { outcome, ...fields });
-  }
-
-  async memoryIngest(kind: "success" | "failure" | "lesson",
-                     goalText: string, fields: Record<string, unknown> = {}) {
-    return this.post("/memory/ingest", { kind, goal_text: goalText, ...fields });
-  }
-
-  async memoryRecall(query: string, domain = "") {
-    return this.post("/memory/recall", { query, domain });
-  }
-
-  async approval(approvalId: number, bindingSha256: string) {
-    const query = new URLSearchParams({ binding_sha256: bindingSha256 });
-    const r = await fetch(`${this.base}/approvals/${approvalId}?${query}`,
-                          { headers: this.headers });
-    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-    return r.json();
-  }
-}
+} finally { lw.dispose(); }
 ```
+
+A timeout or lost response after a POST is `unknown_effect`. An approval 409 is
+`stale`; it never authorizes an external effect. `Retry-After` describes a possible
+later deliberate attempt, not permission to repeat an uncertain write. Keep the
+original report/execution key and reconcile existing receipts first.
 
 ## Wiring it into an OpenAI tool-loop
 
-Screen inside the tool dispatch, heartbeat once per model turn, finish at
-the end. A governance deny becomes the *tool result*, so the model can
-re-plan instead of crashing:
+Use the maintained [approval-aware loop](examples/external_agent_loop.py)
+alongside `lightwork_client.py` above. It screens the complete copied input,
+waits only for its exact approval binding, checks expiry and heartbeat, and
+performs zero actions for pending, denied, expired or stale approval. Waiting is
+bounded. Exceptions and halt requests finish as `failure` with a separate reason;
+only a normal completed loop finishes as `success`. Finalization is called once
+with a stable report key. This remains advisory; use governed execution when the
+gateway must enforce the write atomically.
 
 ```python
-import json
 from openai import OpenAI
 from lightwork_client import Lightwork
+from external_agent_loop import run_tool_loop
 
 lw = Lightwork("https://lightwork.example.com", "lw-rest-EXAMPLE")
 client = OpenAI()
-
 TOOLS = [{"type": "function", "function": {
-    "name": "send_email",
-    "description": "Send an email.",
+    "name": "send_email", "description": "Send a reviewed email.",
     "parameters": {"type": "object", "properties": {
         "to": {"type": "string"}, "body": {"type": "string"}},
-        "required": ["to", "body"]}}}]
+        "required": ["to", "body"], "additionalProperties": False}}}]
+
+def complete(messages):
+    return client.chat.completions.create(
+        model="gpt-4o", messages=messages, tools=TOOLS).choices[0].message
 
 def send_email(to: str, body: str) -> str:
-    ...  # your actual integration
+    raise NotImplementedError("Connect your authorized email integration")
 
-messages = [{"role": "user", "content": "Send the Q3 summary to finance."}]
-goal_id = lw.start("Q3 summary email", department="finance")["goal_id"]
-tool_calls = 0
-
-while True:
-    resp = client.chat.completions.create(
-        model="gpt-4o", messages=messages, tools=TOOLS)
-    msg = resp.choices[0].message
-    if not msg.tool_calls:
-        break
-    messages.append(msg)
-    for call in msg.tool_calls:
-        args = json.loads(call.function.arguments)
-        try:
-            lw.screen(call.function.name,                       # ask FIRST
-                      detail=f"email to {args.get('to', '?')}", risk="medium")
-            result = send_email(**args)
-        except PermissionError as e:
-            result = f"blocked by governance: {e}"              # let it re-plan
-        tool_calls += 1
-        messages.append({"role": "tool", "tool_call_id": call.id,
-                         "content": result})
-    if not lw.heartbeat(goal_id):                               # kill switch
-        break
-
-lw.finish(goal_id, "success", summary=msg.content or "",
-          tool_calls=tool_calls, idempotency_key=f"q3-email-{goal_id}")
+receipt = run_tool_loop(lw, complete, send_email, [
+    {"role": "user", "content": "Send the Q3 summary to finance."}])
 ```
+
+The finalizer and external action are never automatically retried after an
+uncertain response. Preserve the goal ID and report key for reconciliation.
+Local cancellation does not prove a remote side effect stopped.
 
 For a fire-and-forget job that reports only after the fact, skip the
 start/heartbeat/finish trio and end with a single
@@ -275,10 +221,13 @@ raw = json.dumps({"tool": "send_email", "risk": "medium"}).encode()
 ts = str(int(time.time()))
 mac = hmac.new(SECRET.encode(), f"{ts}.".encode() + raw, hashlib.sha256)
 headers = {"X-Lightwork-Agent-Id": "sf-quotebot",
-           "X-Maverick-Timestamp": ts,
-           "X-Maverick-Signature": "sha256=" + mac.hexdigest(),
+           "X-Lightwork-Timestamp": ts,
+           "X-Lightwork-Signature": "sha256=" + mac.hexdigest(),
            "Content-Type": "application/json"}
 ```
+
+The original `X-Maverick-Timestamp` and `X-Maverick-Signature` names still
+work. If both names are supplied, each pair must contain identical values.
 
 ```python
 # Ed25519: sign the domain-separated envelope with your private key
@@ -288,7 +237,7 @@ digest = hashlib.sha256(raw).hexdigest()
 msg = (f"lightwork-external-request-v1|sf-quotebot|{ts}|{nonce}|"
        f"{digest}".encode())
 headers = {"X-Lightwork-Agent-Id": "sf-quotebot",
-           "X-Maverick-Timestamp": ts,
+           "X-Lightwork-Timestamp": ts,
            "X-Lightwork-Nonce": nonce,
            "X-Lightwork-Request-Signature": private_key.sign(msg).hex(),
            "Content-Type": "application/json"}

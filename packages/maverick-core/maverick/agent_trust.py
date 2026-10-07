@@ -845,7 +845,7 @@ def attenuate_agent(
         return persisted, created_overlay
 
 
-def put_agent(entry: dict) -> TrustedAgent:
+def put_agent(entry: dict, *, preserve_existing_identity: bool = False) -> TrustedAgent:
     """Add or replace a managed agent (by ``id``). Returns the parsed agent.
 
     Validates via :func:`_agent_from_entry`; raises :class:`AgentTrustError` on a
@@ -861,14 +861,36 @@ def put_agent(entry: dict) -> TrustedAgent:
         )
     agent = _agent_from_entry(entry)
     if agent is None:
-        raise AgentTrustError(f"invalid agent entry: {entry!r}")
+        raise AgentTrustError("invalid agent entry")
     with _managed_locked():
-        entries = [e for e in _load_managed() if str(e.get("id") or "") != agent.id]
+        loaded = _load_managed()
+        prior = next((e for e in loaded if str(e.get("id") or "") == agent.id), None)
         clean = {k: v for k, v in entry.items() if v not in (None, "", [], {})}
         clean["id"] = agent.id
+        if preserve_existing_identity and prior is not None:
+            # Re-enrollment edits reach, never identity or lifecycle. Merge
+            # under the same lock as revocation and token rotation so an edit
+            # cannot race either operation and silently re-enable the agent.
+            for field in (
+                "pubkey", "a2a_token", "grpc_token", "mcp_token", "rest_token",
+                "jwt_issuer", "jwt_audience", "jwks_file", "hmac_secret_ref",
+                "not_before", "expires_at", "revoked",
+            ):
+                if field in prior:
+                    clean[field] = prior[field]
+                else:
+                    clean.pop(field, None)
+        if prior is not None and prior.get("revoked") is True:
+            # Generic trust edits must not be an unguarded restore path either.
+            # Only the explicit revocation workflow may clear this flag.
+            clean["revoked"] = True
+        persisted = _agent_from_entry(clean)
+        if persisted is None:
+            raise AgentTrustError("updated agent entry is invalid")
+        entries = [e for e in loaded if str(e.get("id") or "") != agent.id]
         entries.append(clean)
         _save_managed(entries)
-    return agent
+    return persisted
 
 
 def remove_agent(agent_id: str) -> bool:

@@ -26,6 +26,8 @@
              copy='Work runs ' ~ where ~ '. Network access is ' ~ network ~
                   '. Allowed tools still need their connections and setup checked.') }}
   {% endcall %}
+  {% if permission_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Permissions views', permission_tabs, '') }}<div {{ panel_attrs('') }}>
+  {% elif can_open_page('/discovery') %}<p><a href="/discovery">See everything Lightwork can use here</a>: actions, tool servers, AI providers, chat channels and outside agents.</p>{% endif %}
 
   {% if perm.error %}
     <div class="panel" role="alert"><p>Some permission details could not be loaded. Reload the page to try again.</p>
@@ -53,6 +55,12 @@
     <div id="sbx-rows" aria-live="polite"><p class="muted">Checking the container services…</p></div>
     <p id="sbx-err" class="perm-error" role="alert" aria-live="assertive"></p>
   </div>
+  <div id="file-work-card" class="panel" hidden>
+    <h3>Finish file work setup</h3>
+    <p id="file-work-explanation" class="muted"></p>
+    <button id="file-work-enable" class="btn btn--primary" type="button" hidden>Allow file work</button>
+    <p id="file-work-result" role="status" aria-live="polite"></p>
+  </div>
   <script>
   (function () {
     'use strict';
@@ -61,6 +69,58 @@
     var canManageSandbox = {{ 'true' if permissions_can_manage_sandbox else 'false' }};
     var switching = false;
     var labels = { local: 'This computer', docker: 'Docker container', podman: 'Podman container' };
+    var fileCard = document.getElementById('file-work-card');
+    var fileExplanation = document.getElementById('file-work-explanation');
+    var fileButton = document.getElementById('file-work-enable');
+    var fileResult = document.getElementById('file-work-result');
+
+    function showFileWork(state) {
+      var blocked = state.file_work && state.file_work.blocked_tools || [];
+      var other = state.file_work && state.file_work.other_policy_blocks || [];
+      fileCard.hidden = blocked.length === 0 && other.length === 0;
+      fileButton.hidden = true;
+      if (!blocked.length) {
+        if (other.length) fileExplanation.textContent = 'File work is still limited by other organization rules. Review the affected tools below or ask an administrator.';
+        return;
+      }
+      if (state.backend === 'local') {
+        fileExplanation.textContent = 'File work is off while work runs directly on this computer. Start Docker or Podman, then choose its container above.';
+        return;
+      }
+      if (!((state.backends || {})[state.backend] || {}).available) {
+        fileExplanation.textContent = 'Start the selected container service, then reload this page to finish file work setup.';
+        return;
+      }
+      fileExplanation.textContent = 'File work is still blocked by the setup-wide tool rules. Allowing it lets Lightwork run programs and change files inside the selected container. Other organization rules may still apply.';
+      fileButton.textContent = 'Allow file work in ' + (labels[state.backend] || 'the container');
+      fileButton.hidden = !canManageSandbox;
+      if (!canManageSandbox) fileExplanation.textContent += ' Ask an administrator to finish this step.';
+    }
+
+    fileButton.addEventListener('click', async function () {
+      if (fileButton.disabled) return;
+      if (!(await mvConfirm('Allow Lightwork to run programs and change files inside the selected container?', { okText: 'Allow file work' }))) return;
+      fileButton.disabled = true;
+      fileResult.textContent = 'Checking file work setup…';
+      try {
+        var response = await fetch('/api/v1/sandbox/file-work/enable', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true }),
+        });
+        if (!response.ok) throw new Error(typeof mvErrorText === 'function'
+          ? mvErrorText(response, 'allow file work') : 'Could not allow file work. Try again.');
+        var result = await response.json();
+        if (!result || !result.file_work || !Array.isArray(result.file_work.blocked_tools) ||
+            result.file_work.blocked_tools.length ||
+            !['docker', 'podman'].includes(result.backend)) {
+          throw new Error('Could not confirm file work is allowed. Reload this page before retrying.');
+        }
+        location.reload();
+      } catch (error) {
+        fileResult.textContent = error.message || 'Could not reach Lightwork. Try again.';
+        fileButton.disabled = false;
+      }
+    });
 
     async function pick(backend) {
       if (!canManageSandbox || switching) return;
@@ -88,7 +148,7 @@
         }
         if (!r.ok) {
           return r.json().catch(function () { return {}; }).then(function (b) {
-            throw new Error(typeof mvErrorText === 'function' ? mvErrorText(r, 'change where work runs') : 'Could not change where work runs. Please try again.');
+            throw new Error(typeof mvErrorText === 'function' ? mvErrorText(r, 'change where work runs') : 'Could not change where work runs. Try again.');
           });
         }
         return r.json().catch(function () {
@@ -100,7 +160,7 @@
           location.reload();
         });
       }).catch(function (e) {
-        err.textContent = (e && e.message) || 'Could not reach the server.';
+        err.textContent = (e && e.message) || 'Could not reach the server. Check your connection and try again.';
       }).finally(function () {
         switching = false;
         controls.forEach(function (state) {
@@ -147,6 +207,7 @@
       return r.json();
     }).then(function (d) {
       rows.textContent = '';
+      showFileWork(d);
       ['docker', 'podman', 'local'].forEach(function (name) {
         rows.appendChild(row(name, (d.backends || {})[name] || {}, d.backend));
       });
@@ -188,15 +249,18 @@
     <p class="muted" role="status">
       Showing {{ perm.tool_page.returned }} of {{ perm.tool_page.filtered_total }} matching tools
       ({{ perm.tool_page.catalog_total }} in the catalog).
+      {% if permissions_can_manage_tools and perm.tool_page.filtered_total > perm.tool_page.returned and perm.tool_page.filtered_total <= 100 %}
+      <a href="/permissions?q={{ perm.tool_page.query | urlencode }}&amp;state={{ perm.tool_page.state }}&amp;per_page=100">Show all {{ perm.tool_page.filtered_total }} matching tools on one page</a> to change them together.
+      {% endif %}
     </p>
     {% if perm.tools %}
       <p class="muted">An allowed tool may still need its AI service, a saved connection or
         another feature turned on. Open "Details" on a tool to see what has been checked.</p>
       <table>
         <thead><tr><th scope="col">Tool</th><th scope="col">Status</th><th scope="col">Access</th></tr></thead>
-        <tbody>
+        <tbody id="perm-tool-rows">
         {% for t in perm.tools %}
-          <tr data-tool-name="{{ t.name }}" data-tool-usable="{{ 'true' if t.usable else 'false' }}"
+          <tr data-tool-name="{{ t.name }}"{% if permissions_can_manage_tools and (t.overlay_blocked or t.base_acl_allowed) %} data-bulk-id="{{ t.name }}" data-bulk-label="{{ t.name | humanize }}"{% endif %} data-tool-usable="{{ 'true' if t.usable else 'false' }}"
               data-provider-state="{{ t.prerequisites.provider.status }}"
               data-connection-state="{{ t.prerequisites.connection.status }}"
               data-feature-policy-state="{{ t.prerequisites.feature_policy.status }}"
@@ -270,7 +334,7 @@
         <tr><td>Where work runs</td><td>{{ where[0] | upper }}{{ where[1:] }}</td></tr>
         <tr><td>Internet access</td><td>{{ network[0] | upper }}{{ network[1:] }}</td></tr>
         <tr><td>Limit for each task</td><td>
-          {%- if perm.budget.max_dollars is defined and perm.budget.max_dollars %}${{ '%.2f' | format(perm.budget.max_dollars | float) }}{% else %}No spending limit{% endif %}
+          {%- if perm.budget.max_dollars is defined and perm.budget.max_dollars %}{{ perm.budget.max_dollars | float | money }}{% else %}No spending limit{% endif %}
           {%- if perm.budget.max_wall_seconds is defined and perm.budget.max_wall_seconds %} and {{ ((perm.budget.max_wall_seconds | float) / 60) | round(0) | int }} minutes{% endif %}</td></tr>
       </tbody>
     </table>
@@ -329,92 +393,151 @@
   <script>
     (function() {
       const msg = document.getElementById('perm-msg');
+      function bad() { return new Error('Could not confirm the updated tool permissions. Reload this page before retrying.'); }
+      // One tool's change, shared by its own button and by the bulk bar: the
+      // request, the check of what the server says is now in force, and the
+      // row's badges and button. Throws when the change was not confirmed.
+      async function toggle(btn, action) {
+        const name = btn.dataset.name;
+        const label = btn.dataset.label || name;
+        const r = await fetch('/api/v1/permissions/tools/' + encodeURIComponent(name) + '/' + action, {
+          method: 'POST',
+        });
+        const result = r.status === 204 ? {} : await r.json().catch(function() {
+          if (r.ok) throw bad();
+          return {};
+        });
+        if (!r.ok) throw r;
+        const effective = result && result.tool || {};
+        if ((action === 'disable' && r.status !== 204) ||
+            (action === 'enable' && (effective.name !== name || effective.overlay_blocked !== false ||
+              typeof effective.base_acl_allowed !== 'boolean' || typeof effective.usable !== 'boolean' ||
+              typeof effective.state !== 'string'))) {
+          throw bad();
+        }
+        const row = btn.closest('tr');
+        const baseAllowed = action === 'disable'
+          ? row && row.dataset.baseAclState === 'ready'
+          : effective.base_acl_allowed === true;
+        const usable = action === 'enable' && effective.usable === true;
+        if (row) {
+          const baseBadge = row.querySelector('.perm-base-acl');
+          const overrideBadge = row.querySelector('.perm-override');
+          const overallBadge = row.querySelector('.perm-overall');
+          if (action === 'enable' && baseBadge) {
+            baseBadge.className = 'badge perm-base-acl ' + (baseAllowed ? 'active' : 'blocked');
+            baseBadge.textContent = baseAllowed ? 'Ready' : 'Blocked';
+          }
+          if (overrideBadge) {
+            overrideBadge.className = 'badge perm-override ' + (action === 'disable' ? 'blocked' : 'active');
+            overrideBadge.textContent = action === 'disable' ? 'Blocked' : 'Ready';
+          }
+          if (overallBadge) {
+            overallBadge.className = 'badge perm-overall ' + (usable ? 'active' : (effective.state === 'readiness_unknown' && action === 'enable' ? '' : 'blocked'));
+            overallBadge.textContent = usable
+              ? 'Ready to use'
+              : (effective.state === 'readiness_unknown' && action === 'enable' ? 'Not checked yet' : 'Blocked');
+          }
+          row.dataset.toolUsable = usable ? 'true' : 'false';
+          row.dataset.baseAclState = baseAllowed ? 'ready' : 'blocked';
+        }
+        if (action === 'disable') {
+          btn.dataset.action = 'enable';
+          btn.textContent = 'Allow';
+          btn.setAttribute('aria-label', 'Allow the ' + label + ' tool');
+          btn.disabled = false;
+        } else if (baseAllowed) {
+          btn.dataset.action = 'disable';
+          btn.textContent = 'Block';
+          btn.setAttribute('aria-label', 'Block the ' + label + ' tool');
+          btn.disabled = false;
+        } else {
+          btn.removeAttribute('data-action');
+          btn.textContent = 'Set by your organization';
+          btn.setAttribute('aria-label', label + ' is set by your organization');
+          btn.disabled = true;
+        }
+        return {usable: usable};
+      }
+      // What blocking would have stopped in the last 30 days, from the
+      // activity record (ADM-3). Report only; "" when it can't be worked out.
+      async function blockPreview(names) {
+        try {
+          const data = await window.mvFetchJSON('/api/v1/policy-preview/tools?tools=' + encodeURIComponent(names.join(',')),
+            {}, 'work out what blocking changes');
+          if (!data.recorded) return 'There is no tool use in the activity record for the last 30 days to compare with.';
+          if (!data.calls) return 'In the last 30 days ' + (names.length === 1 ? 'it was' : 'they were') + ' not used.';
+          return 'In the last 30 days ' + (names.length === 1 ? 'it was' : 'they were') + ' used ' + data.calls +
+            (data.calls === 1 ? ' time' : ' times') + ' in ' + data.tasks + (data.tasks === 1 ? ' task' : ' tasks') +
+            ' by ' + data.agents + (data.agents === 1 ? ' agent or specialist' : ' agents and specialists') +
+            ' for ' + data.people + (data.people === 1 ? ' person' : ' people') + '.';
+        } catch (_) { return ''; }
+      }
       document.querySelectorAll('button.perm-toggle').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           if (btn.disabled) return;
-          const name = btn.dataset.name;
-          const label = btn.dataset.label || name;
+          const label = btn.dataset.label || btn.dataset.name;
           const action = btn.dataset.action;  // "disable" | "enable"
+          if (action === 'disable' && window.mvConfirm) {
+            btn.disabled = true;
+            const foresee = await blockPreview([btn.dataset.name]);
+            btn.disabled = false;
+            const ok = await window.mvConfirm('Block ' + label + '? ' + (foresee ? foresee + ' ' : '') +
+              'Tasks stop using it at once. Nothing changes until you confirm.', {okText: 'Block ' + label, danger: true});
+            if (!ok) { msg.style.color = 'var(--muted)'; msg.textContent = 'Nothing was changed.'; return; }
+          }
           btn.disabled = true;
           msg.style.color = 'var(--muted)';
           msg.textContent = action === 'disable'
             ? 'Blocking ' + label + '…'
             : 'Allowing ' + label + '…';
           try {
-            const r = await fetch('/api/v1/permissions/tools/' + encodeURIComponent(name) + '/' + action, {
-              method: 'POST',
-            });
-            const result = r.status === 204 ? {} : await r.json().catch(function() {
-              if (r.ok) throw new Error('Could not confirm the updated tool permissions. Reload this page before retrying.');
-              return {};
-            });
-            if (r.ok) {
-              const effective = result && result.tool || {};
-              if ((action === 'disable' && r.status !== 204) ||
-                  (action === 'enable' && (effective.name !== name || effective.overlay_blocked !== false ||
-                    typeof effective.base_acl_allowed !== 'boolean' || typeof effective.usable !== 'boolean' ||
-                    typeof effective.state !== 'string'))) {
-                throw new Error('Could not confirm the updated tool permissions. Reload this page before retrying.');
-              }
-              const row = btn.closest('tr');
-              const baseAllowed = action === 'disable'
-                ? row && row.dataset.baseAclState === 'ready'
-                : effective.base_acl_allowed === true;
-              const usable = action === 'enable' && effective.usable === true;
-              msg.style.color = 'var(--accent)';
-              msg.textContent = action === 'disable'
-                ? label + ' is now blocked. Tasks can no longer use it.'
-                : label + ' is allowed again.' +
-                  (usable ? ' It is ready to use.' : ' Its setup has not been checked yet.');
-              if (row) {
-                const baseBadge = row.querySelector('.perm-base-acl');
-                const overrideBadge = row.querySelector('.perm-override');
-                const overallBadge = row.querySelector('.perm-overall');
-                if (action === 'enable' && baseBadge) {
-                  baseBadge.className = 'badge perm-base-acl ' + (baseAllowed ? 'active' : 'blocked');
-                  baseBadge.textContent = baseAllowed ? 'Ready' : 'Blocked';
-                }
-                if (overrideBadge) {
-                  overrideBadge.className = 'badge perm-override ' + (action === 'disable' ? 'blocked' : 'active');
-                  overrideBadge.textContent = action === 'disable' ? 'Blocked' : 'Ready';
-                }
-                if (overallBadge) {
-                  overallBadge.className = 'badge perm-overall ' + (usable ? 'active' : (effective.state === 'readiness_unknown' && action === 'enable' ? '' : 'blocked'));
-                  overallBadge.textContent = usable
-                    ? 'Ready to use'
-                    : (effective.state === 'readiness_unknown' && action === 'enable' ? 'Not checked yet' : 'Blocked');
-                }
-                row.dataset.toolUsable = usable ? 'true' : 'false';
-                row.dataset.baseAclState = baseAllowed ? 'ready' : 'blocked';
-              }
-              if (action === 'disable') {
-                btn.dataset.action = 'enable';
-                btn.textContent = 'Allow';
-                btn.setAttribute('aria-label', 'Allow the ' + label + ' tool');
-                btn.disabled = false;
-              } else if (baseAllowed) {
-                btn.dataset.action = 'disable';
-                btn.textContent = 'Block';
-                btn.setAttribute('aria-label', 'Block the ' + label + ' tool');
-                btn.disabled = false;
-              } else {
-                btn.removeAttribute('data-action');
-                btn.textContent = 'Set by your organization';
-                btn.setAttribute('aria-label', label + ' is set by your organization');
-                btn.disabled = true;
-              }
-            } else {
-              btn.disabled = false;
-              msg.style.color = 'var(--danger)';
-              msg.textContent = typeof mvErrorText === 'function' ? mvErrorText(r, 'change this tool') : 'Could not change this tool. Please try again.';
-            }
+            const done = await toggle(btn, action);
+            msg.style.color = 'var(--accent)';
+            msg.textContent = action === 'disable'
+              ? label + ' is now blocked. Tasks can no longer use it.'
+              : label + ' is allowed again.' +
+                (done.usable ? ' It is ready to use.' : ' Its setup has not been checked yet.');
           } catch (e) {
             btn.disabled = false;
             msg.style.color = 'var(--danger)';
-            msg.textContent = e.message || 'Could not reach the server. Reload this page before retrying.';
+            msg.textContent = typeof e.status === 'number' && typeof mvErrorText === 'function'
+              ? mvErrorText(e, 'change this tool')
+              : (e.message || 'Could not reach the server. Reload this page before retrying.');
           }
         });
       });
+      // Block or allow many tools at once (ADM-7): the filter above picks the
+      // matching tools, the bar selects them all, one confirmation states the
+      // count, and the report can undo every change.
+      // This page's script runs before the shared helpers (lightwork-ui.js at
+      // the end of the page), so the bar is wired once they have loaded.
+      function wireBulk() {
+      const list = document.getElementById('perm-tool-rows');
+      if (!list || !window.mvBulk || !list.querySelector('tr[data-bulk-id]')) return;
+      function change(action) {
+        return async function (item) {
+          const btn = item.row.querySelector('button.perm-toggle');
+          if (!btn || btn.dataset.action !== action) {
+            throw {status: 409, detail: action === 'disable' ? 'It is already blocked.' : 'It is already allowed or set by your organization.'};
+          }
+          await toggle(btn, action);
+          return {undo: async function () { await toggle(btn, action === 'disable' ? 'enable' : 'disable'); }};
+        };
+      }
+      window.mvBulk({
+        list: list, rows: 'tr[data-bulk-id]', noun: 'tool', nouns: 'tools',
+        actions: [
+          {label: 'Block', verb: 'Block', danger: true, note: 'Tasks stop using them at once. You can undo this from the report.',
+           preview: function (items) { return blockPreview(items.map(function (i) { return i.id; })); }, run: change('disable')},
+          {label: 'Allow', verb: 'Allow', run: change('enable')}
+        ]
+      });
+      }
+      if (window.mvBulk) wireBulk(); else document.addEventListener('DOMContentLoaded', wireBulk, {once: true});
     })();
   </script>
+  {% if comments_enabled() and permissions_can_manage_tools %}{% from "_comments.html" import comments %}{{ comments('policy', 'tools', 'Comments on the tool permissions') }}
+  <script src="/static/lightwork-comments.js" defer></script>{% endif %}
+  {% if permission_tabs %}</div>{% endif %}
 {% endblock %}

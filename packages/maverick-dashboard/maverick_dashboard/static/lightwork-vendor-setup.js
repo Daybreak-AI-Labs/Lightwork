@@ -3,6 +3,7 @@
   'use strict';
   var el = function (id) { return document.getElementById('vs-' + id); };
   if (!el('panel')) return;
+  if (document.getElementById('vendor-onboarding').dataset.namedSignin === 'false') return;
   var state = null, context = null, busy = false, locked = false, draft = null, names = {};
   // People are shown by name from the workspace member list; a sign-in handle
   // is shown only when no name is known.
@@ -80,7 +81,7 @@
     var labels = data && Array.isArray(data.detail) ? data.detail.map(function (error) {
       return error && Array.isArray(error.loc) && error.loc.length === 2 && error.loc[0] === 'body' && fields[error.loc[1]];
     }).filter(function (label) { return typeof label === 'string'; }) : [];
-    return labels.length ? 'Check ' + Array.from(new Set(labels)).join(', ') + '.' : 'Setup could not be confirmed.';
+    return labels.length ? 'Check ' + Array.from(new Set(labels)).join(', ') + '.' : 'Setup could not be confirmed. Refresh the page and try again.';
   }
   function renderReadiness(readiness) {
     var links = ['/connections', '/users', '#vs-resource-owner', '#vs-ticket', '#vs-enable', '#vs-confirm', '#vs-save', '#vs-deployment'];
@@ -124,7 +125,8 @@
       var headers = {'Accept': 'application/json', 'Content-Type': 'application/json'};
       if (context) headers['X-Lightwork-Setup-Context'] = context;
       response = await fetch('/api/v1/vendor-setup' + (suffix || ''), {method: method, headers: headers, credentials: 'same-origin', cache: 'no-store', body: body ? JSON.stringify(body) : undefined});
-      if (response.status === 401 || response.status === 403) { clear('Sign in as an administrator and select a workspace to manage setup.', true); return; }
+      if (response.status === 401) { clear('Your sign-in ended. Sign in again to manage setup.', true); return; }
+      if (response.status === 403) { clear('This account cannot change vendor setup. Ask an installation administrator to check your role and workspace access.', true); return; }
       if (method === 'GET' && response.status === 409) { clear('Your account, workspace or setup access changed. Reload the page to review current setup.', true); return; }
       try { data = await response.json(); }
       catch (_) { if (response.ok) { clear('Setup response was incomplete. Refresh setup before making changes.', false); return; } }
@@ -135,7 +137,7 @@
       else draft = null;
     } catch (error) {
       if (response && response.ok) clear(error.message || 'Setup response was incomplete. Refresh setup.', false);
-      else requireRefresh('Setup is unavailable.');
+      else requireRefresh('Setup is unavailable. Refresh the page and try again.');
     }
     finally { busy = false; controls(); }
   }

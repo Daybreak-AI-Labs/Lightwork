@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
+const { fetchHelpers } = require("./_shell");
 
 // The third-party lifecycle, collaboration and intelligence pages now load
 // their records through lightwork-record-workflows.js (LwRecords.call), which
@@ -28,8 +29,14 @@ const JSON_CLIENTS = [
 ];
 
 // Pages rebuilt for non-technical readers say the same thing in plain words.
+const UNREADABLE_REPLY = "Lightwork's reply could not be read. Refresh the page and try again.";
 const MALFORMED_MESSAGE = {
   "ekko.html": "Lightwork sent back a reply this page could not read. Try again.",
+  "compliance_scoping.html": UNREADABLE_REPLY,
+  "compliance_scope_actions.html": UNREADABLE_REPLY,
+  "privacy_rights_consumer_delivery.html": UNREADABLE_REPLY,
+  "privacy_notice_governance.html": UNREADABLE_REPLY,
+  "privacy_rights_orchestration.html": UNREADABLE_REPLY,
 };
 
 const TEXT_CLIENTS = [
@@ -133,6 +140,7 @@ function harness(file, functionName, args) {
       querySelectorAll() { return []; },
       querySelector() { return element(`${id}:query`); },
       replaceChildren() {},
+      add() {},
       appendChild() {},
       append() {},
       setAttribute() {},
@@ -151,6 +159,7 @@ function harness(file, functionName, args) {
     async json() { return {}; },
     async text() { return "{}"; },
   };
+  const helpers = fetchHelpers(() => context.fetch);
   const context = {
     console,
     crypto: webcrypto,
@@ -158,13 +167,22 @@ function harness(file, functionName, args) {
     TextDecoder,
     Uint8Array,
     document: {
+      readyState: "complete",
       getElementById: element,
       querySelector() { return element("document:query"); },
       querySelectorAll() { return []; },
       createElement() { return element("document:created"); },
+      // Page-level event wiring (draft loaded, recording status) is inert here.
+      addEventListener(type, listener) { listeners.set(`document:${type}`, listener); },
     },
+    // agents.html watches its drafts list for changes; nothing changes here.
+    MutationObserver: class { observe() {} disconnect() {} },
+    // agents.html builds its AI model choices as <option> elements.
+    Option: class { constructor(text, value) { this.text = text; this.value = value; this.disabled = false; } },
     window: {
       confirm() { return true; },
+      // The shell's fetch helper, sending through the context's fetch.
+      mvFetchJSON: (...args) => helpers.mvFetchJSON(...args),
       // Pages show a server message only when it is already a plain sentence.
       mvPlainDetail(detail) { return typeof detail === "string" && /^[A-Z][^_{}<>]*[.!?]$/.test(detail) ? detail : ""; },
     },
@@ -186,6 +204,12 @@ function harness(file, functionName, args) {
   }
   const source = instrument(extractScript(file, functionName), functionName, file);
   vm.runInContext(source, context, { filename: file });
+  // The consent pages' clients are the shared consent client (CW.client),
+  // loaded after the page script so the page itself does not start here.
+  if (/LightworkConsentWorkbench\.client\(/.test(source)) {
+    vm.runInContext(fs.readFileSync(path.resolve(__dirname,
+      "../../maverick_dashboard/static/lightwork-consent-workbench.js"), "utf8"), context);
+  }
   return {
     invoke(response) {
       context.fetch = async () => response;
@@ -210,14 +234,15 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
     };
 
     await assert.rejects(harness(file, functionName, args).invoke(response), (error) => {
-      assert.equal(error.message, MALFORMED_MESSAGE[file] || "Request failed: the server returned an invalid JSON response.");
+      assert.equal(error.message, MALFORMED_MESSAGE[file] || "The reply from the server could not be read. Try again.");
       assert.equal(error.message.includes(secret), false);
       return true;
     });
   });
 
   test(`${file} preserves a valid JSON error detail`, async () => {
-    const detail = `Reviewed conflict for ${file}.`;
+    // A readable sentence (pages filter out code-like server text).
+    const detail = `Reviewed conflict for ${file.replace(/[^a-z]+/g, " ").trim()}.`;
     const response = {
       ok: false,
       status: 409,
@@ -269,7 +294,7 @@ test("redact.html marks malformed 2xx as failed without exposing its body", asyn
   });
 
   const message = client.element("proof-badge").textContent;
-  assert.equal(message, "Could not read the result. Please try again.");
+  assert.equal(message, "Could not read the result. Try again.");
   assert.equal(message.includes(secret), false);
   assert.equal(client.element("proof-badge").className, "badge failure");
 });
@@ -282,6 +307,6 @@ test("redact.html shows a plain sentence instead of the server detail", async ()
     async json() { return { detail: "Reviewed redaction error." }; },
   });
 
-  assert.equal(client.element("proof-badge").textContent, "Could not check the text. Please try again.");
+  assert.equal(client.element("proof-badge").textContent, "Could not check the text. Try again.");
   assert.equal(client.element("proof-badge").className, "badge failure");
 });

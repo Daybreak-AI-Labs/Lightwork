@@ -1,0 +1,389 @@
+{
+  "status": "Unresolved original full-suite stall; focused passes are not closure.",
+  "original_source": "2a765aa3e93cc7775090f574f027bd855b33aef5",
+  "test_diagnostic_commit": "95aa61e3e9c00e5ca902a5ca905fcd3164530172",
+  "original_failure": {
+    "nodeid": "packages/maverick-channels/tests/test_transport_supervision.py::test_bounded_queue_overflow_is_durable_serial_and_in_intake_order",
+    "call_seconds": 12.090017599999555,
+    "wait_timeout_seconds": 5,
+    "full_suite": {
+      "passed": 40072,
+      "failed": 1,
+      "skipped": 590,
+      "warnings": 22,
+      "pytest_seconds": 3281.79
+    },
+    "durable_state": [
+      {
+        "external_id": "0",
+        "execution": "completed",
+        "delivery": "sending",
+        "revision": 5,
+        "created_seconds_after_first": 0.0,
+        "updated_seconds_after_first": 1.705178
+      },
+      {
+        "external_id": "1",
+        "execution": "received",
+        "delivery": "not_ready",
+        "revision": 2,
+        "created_seconds_after_first": 0.334725,
+        "updated_seconds_after_first": 0.428434
+      },
+      {
+        "external_id": "2",
+        "execution": "received",
+        "delivery": "not_ready",
+        "revision": 2,
+        "created_seconds_after_first": 0.517684,
+        "updated_seconds_after_first": 0.631307
+      },
+      {
+        "external_id": "3",
+        "execution": "received",
+        "delivery": "not_ready",
+        "revision": 2,
+        "created_seconds_after_first": 0.710055,
+        "updated_seconds_after_first": 0.809445
+      },
+      {
+        "external_id": "4",
+        "execution": "received",
+        "delivery": "not_ready",
+        "revision": 2,
+        "created_seconds_after_first": 0.88909,
+        "updated_seconds_after_first": 0.983407
+      },
+      {
+        "external_id": "5",
+        "execution": "received",
+        "delivery": "not_ready",
+        "revision": 2,
+        "created_seconds_after_first": 1.070031,
+        "updated_seconds_after_first": 1.158939
+      },
+      {
+        "external_id": "6",
+        "execution": "received",
+        "delivery": "not_ready",
+        "revision": 2,
+        "created_seconds_after_first": 1.242378,
+        "updated_seconds_after_first": 1.342207
+      },
+      {
+        "external_id": "7",
+        "execution": "received",
+        "delivery": "not_ready",
+        "revision": 2,
+        "created_seconds_after_first": 1.436188,
+        "updated_seconds_after_first": 1.537764
+      }
+    ],
+    "last_audit_seconds_after_first": 1.735575,
+    "interpretation": "All eight admissions completed; only the first handler completed. Its receipt remains sending revision 5 with a corresponding audit event and cleared outbox. Persistence does not establish that journal.change returned, since it also flushes audit metadata before returning. No original active coroutine/native frame was captured.",
+    "junit_counts_verified": {
+      "tests": 40663,
+      "failed": 1,
+      "errors": 0,
+      "skipped": 590,
+      "passed": 40072
+    },
+    "audit_outboxes_empty_verified": true
+  },
+  "historical_blob_comparison": {
+    "passing_source": "500fc87363a492def69722ef19d2cc518d171286",
+    "files": [
+      {
+        "path": "packages/maverick-channels/maverick_channels/transport_worker.py",
+        "identical_blob": "cabb34703302e48b5b529f226b1f2185401c45c4"
+      },
+      {
+        "path": "packages/maverick-channels/maverick_channels/delivery.py",
+        "identical_blob": "5276a6a4ee0ec76811b1646077e01d0a8932f8da"
+      },
+      {
+        "path": "packages/maverick-core/maverick/governed_records.py",
+        "identical_blob": "cd80f6a51d4b9e353bb403618421c209bc9e32ea"
+      },
+      {
+        "path": "packages/maverick-core/maverick/privacy_ops.py",
+        "identical_blob": "71c406f8da73e71ebebf8694ebff81374c9d1b19"
+      },
+      {
+        "path": "packages/maverick-core/maverick/file_lock.py",
+        "identical_blob": "48e482d459f5f7ce7b369c364cde87cc049679e5"
+      },
+      {
+        "path": "packages/maverick-core/maverick/world_model.py",
+        "identical_blob": "ac85a65c9f8ce23ebde7accac5fd545c9f4a28af"
+      },
+      {
+        "path": "conftest.py",
+        "identical_blob": "0b81c6036e540d5ecb6604875834f2deef4d060d"
+      },
+      {
+        "path": "packages/maverick-channels/tests/test_transport_supervision.py",
+        "identical_blob": "8957c56cc116948e56e85e715f840a29684ab475"
+      }
+    ]
+  },
+  "predecessor_attribution": {
+    "worker": "gw1",
+    "method": "Retained worker-specific pytest fixture creation timestamps, matched to streamed test names; stream itself did not record worker IDs.",
+    "ordered_modules": [
+      "apps/installer-cli/tests/test_wizard_copilot_operations.py",
+      "packages/maverick-channels/tests/test_base.py",
+      "packages/maverick-channels/tests/test_transport_supervision.py"
+    ]
+  },
+  "focused_cohorts": [
+    {
+      "label": "transport-2a765aa-ordinary-01",
+      "posture": "ordinary",
+      "source_head": "2a765aa3e93cc7775090f574f027bd855b33aef5",
+      "test_file_sha256": "0ef128ca52aeeedd734430dbd795c6f251da4036bfe2bc3e6eaa51c620e0ebea",
+      "tests": 11,
+      "passed": 11,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "target_case_total_seconds": 4.335,
+      "pytest_seconds": 12.233,
+      "helper_seconds": 13.396164655685425,
+      "probe_sha256": "9524e70a7ba9124f04d7a644a8e497179bbc0b18643a128cb8ed28880c56a3e6",
+      "runner_sha256": "a3b50409d13ccf5ec53010488058d48f7e55fb46c2be6906d9e1d07b528225ba"
+    },
+    {
+      "label": "transport-2a765aa-secure-01",
+      "posture": "secure",
+      "source_head": "2a765aa3e93cc7775090f574f027bd855b33aef5",
+      "test_file_sha256": "0ef128ca52aeeedd734430dbd795c6f251da4036bfe2bc3e6eaa51c620e0ebea",
+      "tests": 11,
+      "passed": 11,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "target_case_total_seconds": 3.472,
+      "pytest_seconds": 10.711,
+      "helper_seconds": 11.883944272994995,
+      "probe_sha256": "9524e70a7ba9124f04d7a644a8e497179bbc0b18643a128cb8ed28880c56a3e6",
+      "runner_sha256": "a3b50409d13ccf5ec53010488058d48f7e55fb46c2be6906d9e1d07b528225ba"
+    },
+    {
+      "label": "transport-2a765aa-native-ordinary-02",
+      "posture": "ordinary",
+      "source_head": "2a765aa3e93cc7775090f574f027bd855b33aef5",
+      "test_file_sha256": "0ef128ca52aeeedd734430dbd795c6f251da4036bfe2bc3e6eaa51c620e0ebea",
+      "tests": 11,
+      "passed": 11,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "target_case_total_seconds": 3.498,
+      "pytest_seconds": 10.154,
+      "helper_seconds": 11.412333488464355,
+      "probe_sha256": "9e773a550b61ad1dac3069d2caf8fcdf55e3679908a14aae5473289354e8de71",
+      "runner_sha256": "a24cf244585648f989e4e3eee8a97c5c0d187589d5a3d5b9a368897134c569b7"
+    },
+    {
+      "label": "transport-ordered-ordinary-03",
+      "posture": "ordinary",
+      "source_head": "2a765aa3e93cc7775090f574f027bd855b33aef5",
+      "test_file_sha256": "327558561ec53e77069ee8a868c86364aa1212f15119ad4e97db10be5897770b",
+      "tests": 36,
+      "passed": 36,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "target_case_total_seconds": 3.007,
+      "pytest_seconds": 9.768,
+      "helper_seconds": 10.824364185333252,
+      "probe_sha256": "9e773a550b61ad1dac3069d2caf8fcdf55e3679908a14aae5473289354e8de71",
+      "runner_sha256": "7974ab607e5f2bd5c9d007f9728f737abaab0b032cc0b64b2ec2c17db9639e41"
+    },
+    {
+      "label": "transport-ordered-secure-04",
+      "posture": "secure",
+      "source_head": "2a765aa3e93cc7775090f574f027bd855b33aef5",
+      "test_file_sha256": "327558561ec53e77069ee8a868c86364aa1212f15119ad4e97db10be5897770b",
+      "tests": 36,
+      "passed": 36,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "target_case_total_seconds": 3.21,
+      "pytest_seconds": 9.78,
+      "helper_seconds": 10.806543350219727,
+      "probe_sha256": "9e773a550b61ad1dac3069d2caf8fcdf55e3679908a14aae5473289354e8de71",
+      "runner_sha256": "7974ab607e5f2bd5c9d007f9728f737abaab0b032cc0b64b2ec2c17db9639e41"
+    }
+  ],
+  "runtime_stopped": true,
+  "static_checks": {
+    "ruff": "passed",
+    "ast": "passed",
+    "git_diff_check": "passed"
+  },
+  "change_scope": "Test-only timeout diagnostics and two diagnostic regressions; original five-second wait, task ordering, queue bound, serial execution and durability assertions unchanged. No product fix asserted.",
+  "limits": [
+    "No original stack/native-operation trace exists; focused traces did not reproduce a stall.",
+    "Passing the two immediate predecessor modules does not reconstruct the entire long-lived worker process.",
+    "A native lock/rename stall and earlier process-global contamination remain hypotheses, not established causes.",
+    "Diagnostics capture only stack file basenames/function names/line numbers and queue counts/flags, no message bodies or frame locals."
+  ],
+  "artifacts": [
+    {
+      "path": "audit/transport-2a765aa-native-ordinary-02.json",
+      "bytes": 2580,
+      "sha256": "8a15760868cd3b34a6f916816cc963f3b54a39bd799c27c0899d8267189ea56c"
+    },
+    {
+      "path": "audit/transport-2a765aa-native-ordinary-02.log",
+      "bytes": 3271,
+      "sha256": "2379147fa85f7eb3a3fd6fb94093f0289f5d3680afdb41f4137fd771a7a38598"
+    },
+    {
+      "path": "audit/transport-2a765aa-native-ordinary-02.trace.json",
+      "bytes": 256523,
+      "sha256": "b5eca6ba6d66f6b5ad7e6dd821fd3ca0d7dd0282ccf8d6e16546f7ba984040a6"
+    },
+    {
+      "path": "audit/transport-2a765aa-native-ordinary-02.xml",
+      "bytes": 2160,
+      "sha256": "81e4d6abdf5f716465835c941698699346314dd2bfbf78227e764d9316e3f5db"
+    },
+    {
+      "path": "audit/transport-2a765aa-ordinary-01.json",
+      "bytes": 2573,
+      "sha256": "5ddf0ebb690e285ae2a5c0c2260480309c63b35a33ec688c0f38246a66bbe813"
+    },
+    {
+      "path": "audit/transport-2a765aa-ordinary-01.log",
+      "bytes": 2838,
+      "sha256": "7b5abe9e7eb6cad0c73b13ed12216ddc662914da29a8d0d23d4cde3594e53ab5"
+    },
+    {
+      "path": "audit/transport-2a765aa-ordinary-01.trace.json",
+      "bytes": 49185,
+      "sha256": "d2f18bc66219812054185c508d44bc84a607f4315febd63597cc8b90784ec8f7"
+    },
+    {
+      "path": "audit/transport-2a765aa-ordinary-01.xml",
+      "bytes": 2160,
+      "sha256": "24627d36dea629ff9ffa2cd9a740a161966e136bbf72952638e11b22904bb5ad"
+    },
+    {
+      "path": "audit/transport-2a765aa-secure-01.json",
+      "bytes": 2569,
+      "sha256": "3a2006c747a6e89f5c10de0ab7b02dcde7cd11a74b9cb8c4deb12267aced7e06"
+    },
+    {
+      "path": "audit/transport-2a765aa-secure-01.log",
+      "bytes": 2565,
+      "sha256": "e0af7cc593ea08e97e29dde66681e8a8e7d28043b6d03001f66d63d68c1fba34"
+    },
+    {
+      "path": "audit/transport-2a765aa-secure-01.trace.json",
+      "bytes": 49238,
+      "sha256": "1c01c7b658554119d3f7c09ff2de4d53333b0704472add2d991a058b94cf990d"
+    },
+    {
+      "path": "audit/transport-2a765aa-secure-01.xml",
+      "bytes": 2160,
+      "sha256": "56f24ad8e8c416f8daa8cf60e14b0d13a69319833041ce36315708192dc67b73"
+    },
+    {
+      "path": "audit/transport-diagnostic-label-05.json",
+      "bytes": 2650,
+      "sha256": "053f1b3de0ff6c80fb860daf27c19f4d0127d70a08c253603eb1bc0668264ad0"
+    },
+    {
+      "path": "audit/transport-diagnostic-label-05.log",
+      "bytes": 412,
+      "sha256": "e6689df35697a5a6bb15dd2d7cb3a153b102bb95659e6054d4fa696a1c20ad41"
+    },
+    {
+      "path": "audit/transport-diagnostic-label-05.xml",
+      "bytes": 617,
+      "sha256": "02dc70467ac1a405cedcc40e858c0b5ad11154378c80d2fee33793e20751f5b3"
+    },
+    {
+      "path": "audit/transport-ordered-ordinary-03.json",
+      "bytes": 2694,
+      "sha256": "a0ed75f9f9f4e323ff45e7947cc362559f437f5fe1ec08860951e758b60590ce"
+    },
+    {
+      "path": "audit/transport-ordered-ordinary-03.log",
+      "bytes": 2923,
+      "sha256": "dbc85f36cd6cd486f4e3aeca4298e9bbafc76b4a8980175d220d059652153aa3"
+    },
+    {
+      "path": "audit/transport-ordered-ordinary-03.trace.json",
+      "bytes": 256273,
+      "sha256": "37a3c589cb7f53c83c992b16a22bfcf2ea142c6d3a13b897b0f1c35423bbfcbf"
+    },
+    {
+      "path": "audit/transport-ordered-ordinary-03.xml",
+      "bytes": 5775,
+      "sha256": "2eb1cd06ac3d21e777a52d42308fdd1c01bcab6292039ee27e818d15a2d06057"
+    },
+    {
+      "path": "audit/transport-ordered-secure-04.json",
+      "bytes": 2690,
+      "sha256": "4d56c27d1598d0531d4e120e6e333de5b15f3a313edc5a7222693a7db65abdb5"
+    },
+    {
+      "path": "audit/transport-ordered-secure-04.log",
+      "bytes": 2923,
+      "sha256": "72fa148bfb94f65f17074b524371f6db8711517b04c7760a477d4123a3748578"
+    },
+    {
+      "path": "audit/transport-ordered-secure-04.trace.json",
+      "bytes": 259326,
+      "sha256": "8941f6dc4c264881c1b2b4495c4cec5446a0842b175620dd0805f7a2e9cfce18"
+    },
+    {
+      "path": "audit/transport-ordered-secure-04.xml",
+      "bytes": 5775,
+      "sha256": "3d99fd01c37f65575ed273796a51a35808cd572a669cc269c5f10906e320a521"
+    },
+    {
+      "path": "audit/transport-original-full07-failure.json",
+      "bytes": 1947,
+      "sha256": "cd889d125f992d6a6d808d838bf296a7dbede05ada084e59d3b7b63009ddc86c"
+    },
+    {
+      "path": "audit/transport-original-full07-fixture-metadata.json",
+      "bytes": 19335,
+      "sha256": "a17e15e6532c4a12ef797a05ef6bf171dbd8dea1aa026dd06a5fd0a8a3427abc"
+    },
+    {
+      "path": "audit/transport-original-full07-predecessor-directories.json",
+      "bytes": 3134,
+      "sha256": "fb7ffc270507546acdb24a32d6475436a72f513c705d342c851935668f14d185"
+    },
+    {
+      "path": "audit/qualification-final-07-ordinary.xml",
+      "bytes": 6646418,
+      "sha256": "85560c11f7f23fd24ea8e39c4b006cf81e14e840d45a90960b7753182c7311c5"
+    },
+    {
+      "path": "audit/qualification-final-07-ordinary.source.json",
+      "bytes": 1869,
+      "sha256": "8cf1c428e0f56cb5f4a2d281645a5b598d967ac004e9be307a498f75761cab74"
+    }
+  ],
+  "diagnostic_label_commit": "9bf17003a997098164ced948509a65d17a06cb0d",
+  "label_only_validation": {
+    "source": "9bf17003a997098164ced948509a65d17a06cb0d",
+    "tests": 2,
+    "passed": 2,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "helper_seconds": 0.5226156711578369,
+    "test_file_working_sha256": "790cc9413cde56ff2361abbe5a310d2050b614e10f73455ddcd1d3b7141c1cd5"
+  },
+  "final_test_blob": "ec76ca9463734fb1e7bd45820ba1fdddb9dd08ec",
+  "final_test_git_content_sha256": "de2e6d2f2eb3c77c373a0e7cdcc492d3b76178518232a5d03974d5e06bcb3975"
+}

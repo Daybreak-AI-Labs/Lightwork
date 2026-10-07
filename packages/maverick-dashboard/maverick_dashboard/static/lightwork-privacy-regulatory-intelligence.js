@@ -22,7 +22,7 @@
     enforcement_action: 'Enforcement action', regulatory_update: 'Regulatory update', standard: 'Standard',
   };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function place(code) { return PLACE[code] || code; }
   function ticked(name) {
@@ -52,7 +52,7 @@
       { label: 'Approve use', kind: 'primary', when: function (s) { return canAdmin && s.state === 'pending'; }, run: function (s) { reviewSource(s, true); } },
       { label: 'Reject', when: function (s) { return canAdmin && s.state === 'pending'; }, run: function (s) { reviewSource(s, false); } },
       { label: 'Stop using', kind: 'danger', when: function (s) { return canAdmin && s.state === 'active'; }, run: revokeSource },
-    ], { text: 'No sources yet.' });
+    ], { text: 'No sources yet. Add a source above to follow it.' });
 
     R.table(document.getElementById('pri-documents'), [
       { label: 'Title', value: function (d) { return d.title; } },
@@ -62,7 +62,7 @@
       { label: 'Version', value: function (d) { return d.version; } },
     ], data.documents, [
       { label: 'Send alerts about it', run: alertDocument },
-    ], { text: 'No legal texts yet.' });
+    ], { text: 'No legal texts yet. Texts appear here after a source is read.' });
 
     R.table(document.getElementById('pri-trackers'), [
       { label: 'Question', value: function (t) { return t.query; } },

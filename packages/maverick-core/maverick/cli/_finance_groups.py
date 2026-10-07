@@ -6,6 +6,7 @@ __init__ so the @main.group decorators fire on package import.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -93,41 +94,42 @@ def _run_self_harness_nightly(world) -> None:
     Each model's pass auto-builds its live A/B from ``[self_harness]
     eval_corpus`` when configured (else it is a dry inspection + stale-line
     retirement + canary review). With ``corpus_harvest`` on, hindsight pairs
-    feed the corpus too. Never breaks dreaming."""
+    feed the corpus too. Refusal or failure stops the combined run visibly;
+    earlier dreaming changes may already have been retained."""
+    from ..learning_guard import Halted
+
     try:
         from .. import self_harness
+        from ..config import config_source_errors
         st = self_harness.settings()
+        if not st.get("_config_valid", True) or config_source_errors(include_tenant=True):
+            raise ValueError("Nightly learning settings could not be read")
         if not (self_harness.enabled() and st.get("auto_run")):
             return
         from .. import self_improvement_runner as si_runner
-        for mid, (rep, retired) in sorted(si_runner.run_self_harness_all_models().items()):
+        report = si_runner.run_nightly_self_harness(world)
+        if report:
             click.echo(
-                f"[self-harness] {mid}: mined={rep.mined} "
-                f"promoted={rep.promoted} demoted={len(rep.demoted)} "
-                f"retired={retired} relapsed={len(rep.relapsed)}")
-        # Cross-model transfer on the same beat (opt-in, [self_harness]
-        # transfer_auto): the tried-memory makes it near-free once caught up.
-        if st.get("transfer_auto"):
-            sweep = si_runner.run_self_harness_transfer_sweep()
-            for src in sorted(sweep):
-                for tgt in sorted(sweep[src]):
-                    res = sweep[src][tgt]
-                    if res.get("attempted"):
-                        click.echo(
-                            f"[self-harness transfer] {src} -> {tgt}: "
-                            f"attempted={len(res['attempted'])} "
-                            f"promoted={len(res['promoted'])}")
-        # Corpus bootstrapping on the same beat: run_corpus_harvest owns the
-        # whole policy (mode gate, corpus default, limits); ``mode`` is read
-        # here only to word the echo.
-        n = si_runner.run_corpus_harvest(world)
-        if n:
-            verb = ("merged into the corpus"
-                    if st.get("corpus_harvest") == "auto"
-                    else "staged for review")
-            click.echo(f"[self-harness corpus] {n} candidate case(s) {verb}")
-    except Exception:  # pragma: no cover -- the harness must never break dreaming
-        pass
+                f"[self-harness] models={report['models_reviewed']} "
+                f"mined={report['patterns_found']} "
+                f"promoted={report['improvements_adopted']} "
+                f"retired={report['improvements_retired']} "
+                f"held_back={report['reviews_held_back']} "
+                f"examples={report['examples_prepared']}")
+    except Halted as exc:
+        raise click.ClickException(
+            "Nightly learning review was stopped by the learning safety policy. "
+            "Earlier learning changes may already be saved. Review Learning "
+            "before starting another pass."
+        ) from exc
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Nightly learning review could not finish (%s).", type(exc).__name__
+        )
+        raise click.ClickException(
+            "Nightly learning review could not finish. Earlier learning changes "
+            "may already be saved. Review Learning before trying again."
+        ) from exc
 
 
 @main.command()
@@ -206,57 +208,66 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
         )
         click.echo("(dry run -- nothing written) " + report.summary())
         return
-    # Learning rollback, half 1: snapshot every learned store before this
-    # cycle mutates anything, so `--rollback latest` can undo it wholesale.
     cfg = dreaming.settings()
-    if cfg.get("snapshots", True):
-        snap = dreaming.snapshot_learning_state(
-            keep_last=int(cfg.get("snapshot_keep_last", 5)),
+    with dreaming.learning_mutation_scope() as snap:
+        click.echo(f"[snapshot: {snap.name}]")
+        # LLM-in-the-loop consolidation (two-key opt-in: the dreaming algorithm
+        # knob plus the independent learning provider-egress authority):
+        # wire the SAME configured LLM the platform runs on (cheap summarizer role)
+        # into insight consolidation, metered by its own small budget and scanned by
+        # the shield. Fail-open: with the knob off this stays the deterministic path.
+        dream_llm = dream_budget = dream_shield = None
+        if dreaming._llm_consolidation_authorized(cfg):
+            from ..budget import Budget
+            from ..llm import LLM, model_for_role
+            dream_llm = LLM(model=model_for_role("summarizer"))
+            dream_budget = Budget(
+                max_dollars=float(cfg.get("llm_consolidation_budget", 1.0)),
+            )
+            try:
+                from maverick_shield import Shield
+                dream_shield = Shield.from_config()
+            except Exception:  # pragma: no cover -- kernel runs without the shield
+                dream_shield = None
+        report = _run_dreaming_guarded(
+            lambda: dreaming.dream_cycle(
+                world, max_goals=max_goals, donations_dir=donations_dir,
+                llm=dream_llm, budget=dream_budget, shield=dream_shield,
+            ),
         )
-        if snap is not None:
-            click.echo(f"[snapshot: {snap.name}]")
-    # LLM-in-the-loop consolidation (two-key opt-in: the dreaming algorithm
-    # knob plus the independent learning provider-egress authority):
-    # wire the SAME configured LLM the platform runs on (cheap summarizer role)
-    # into insight consolidation, metered by its own small budget and scanned by
-    # the shield. Fail-open: with the knob off this stays the deterministic path.
-    dream_llm = dream_budget = dream_shield = None
-    if dreaming._llm_consolidation_authorized(cfg):
-        from ..budget import Budget
-        from ..llm import LLM, model_for_role
-        dream_llm = LLM(model=model_for_role("summarizer"))
-        dream_budget = Budget(
-            max_dollars=float(cfg.get("llm_consolidation_budget", 1.0)),
-        )
+        click.echo(report.summary())
+        # Cognitive Data Engine: turn the flywheel as part of the nightly cycle --
+        # triage failures by causal impact, mine self-correcting guardrails,
+        # consolidate beneficial habits, propose improvements, all grounded in real
+        # outcomes. No-op unless [data_engine] is enabled; incomplete work is visible.
+        from ..learning_guard import Halted
         try:
-            from maverick_shield import Shield
-            dream_shield = Shield.from_config()
-        except Exception:  # pragma: no cover -- kernel runs without the shield
-            dream_shield = None
-    report = _run_dreaming_guarded(
-        lambda: dreaming.dream_cycle(
-            world, max_goals=max_goals, donations_dir=donations_dir,
-            llm=dream_llm, budget=dream_budget, shield=dream_shield,
-        ),
-    )
-    click.echo(report.summary())
-    # Cognitive Data Engine: turn the flywheel as part of the nightly cycle --
-    # triage failures by causal impact, mine self-correcting guardrails,
-    # consolidate beneficial habits, propose improvements, all grounded in real
-    # outcomes. No-op unless [data_engine] is enabled; never breaks dreaming.
-    try:
-        from .. import data_engine
-        if data_engine.enabled():
-            from ..flywheel import maybe_run
-            fw = maybe_run()
-            if fw.acted:
-                click.echo(
-                    f"[flywheel] {len(fw.guardrails)} guardrails, {len(fw.memories)} "
-                    f"habits, {len(fw.hypotheses)} improvements "
-                    f"(recoverable lift ~{fw.predicted_lift:.2f})")
-    except Exception:  # pragma: no cover -- the flywheel must never break dreaming
-        pass
-    _run_self_harness_nightly(world)
+            from .. import data_engine
+            if data_engine.enabled():
+                from ..flywheel import maybe_run
+                fw = maybe_run()
+                if not fw.complete:
+                    raise RuntimeError("The improvement cycle did not finish")
+                if fw.acted:
+                    click.echo(
+                        f"[flywheel] {len(fw.guardrails)} guardrails, {len(fw.memories)} "
+                        f"habits, {len(fw.hypotheses)} improvements "
+                        f"(recoverable lift ~{fw.predicted_lift:.2f})")
+        except Halted as exc:
+            raise click.ClickException(
+                "The improvement cycle was stopped by the learning safety policy. "
+                "Earlier learning changes may already be saved. Review Learning "
+                "before starting another cycle."
+            ) from exc
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "The improvement cycle could not finish (%s).", type(exc).__name__
+            )
+            raise click.ClickException(
+                "The improvement cycle could not finish. Earlier learning changes "
+                "may already be saved. Review Learning before trying again."
+            ) from exc
+        _run_self_harness_nightly(world)
     if not rehearse:
         return
     cases = dreaming.load_rehearsals()
@@ -414,6 +425,9 @@ def demo_cmd() -> None:
             user_notes_path=tmp / "user_notes.ndjson",
             settings_override={"enable": True, "min_cluster": 2,
                                "prune": False, "user_notes": False},
+            # Like the dry run: throwaway stores in a temp directory, so no
+            # learning receipt belongs in the installation's activity record.
+            audit=False,
         )
         click.echo("   " + report.summary())
         click.echo("\n2) HINDSIGHT -- did learning help on the failures?")
@@ -718,7 +732,10 @@ def savings_cmd(ctx, days: int, as_json: bool) -> None:
         import json as _json
         click.echo(_json.dumps(savings_mod.to_dict(r), indent=2))
         return
-    click.echo(f"Savings — last {r.window_days} days ({r.currency})")
+    click.echo(f"Savings - last {r.window_days} days ({r.currency})")
+    if not r.available:
+        click.echo(r.unavailable_reason)
+        return
     click.echo("=" * 44)
     click.echo(f"Deliverables completed : {r.deliverables}")
     click.echo(f"Human hours given back : {r.human_hours:,.1f}h")

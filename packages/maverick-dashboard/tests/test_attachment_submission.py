@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
+from html import unescape
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -65,6 +67,34 @@ def test_same_submission_key_replays_one_goal_attachment_and_run(environment):
     assert mismatch.status_code == 409 and len(world.list_goals()) == 1
 
 
+def test_no_file_preparation_is_not_an_answer_on_page_or_refreshed_panel(environment):
+    client, world, runs = environment
+    response = client.post("/chat/send", data={"title": "Draft a plan"}, follow_redirects=False)
+    assert response.status_code == 303 and len(runs) == 1
+    goal_id, receipt, _ = runs[0]
+    assert receipt["detail"]["coverage"] == []
+    assert not world.get_goal(goal_id).result
+
+    page = client.get(f"/chat/goal/{goal_id}")
+    assert page.status_code == 200
+    assert 'id="submission-status"' not in page.text
+    assert re.search(r'id="result-section"[^>]*display: none', page.text)
+
+    # Older builds stored this preparation notice as goals.result. The live
+    # answer-panel refresh must apply the same suppression as the full page.
+    world.set_goal_status(goal_id, "pending", result=receipt["detail"]["message"])
+    legacy_page = client.get(f"/chat/goal/{goal_id}")
+    panel = client.get(f"/chat/goal/{goal_id}/answer-panel")
+    assert legacy_page.status_code == panel.status_code == 200
+    assert re.search(r'id="result-section"[^>]*display: none', legacy_page.text)
+    assert re.search(r'id="result-section"[^>]*display: none', panel.text)
+
+    world.set_goal_status(goal_id, "pending", result="Here is the plan.")
+    answer_panel = client.get(f"/chat/goal/{goal_id}/answer-panel")
+    assert re.search(r'id="result-section"[^>]*display: block', answer_panel.text)
+    assert "Here is the plan." in answer_panel.text
+
+
 def test_missing_companion_is_explicit_before_runner_and_in_model_context(environment):
     client, world, runs = environment
     response = client.post("/chat/send", data={"title": "Read recording"},
@@ -76,8 +106,19 @@ def test_missing_companion_is_explicit_before_runner_and_in_model_context(enviro
     assert "has not been read" in receipt["detail"]["message"]
     assert any("Do not imply that its contents were read" in block.get("text", "") for block in blocks)
     page = client.get(f"/chat/goal/{goal_id}")
-    assert "could not be read (unavailable)" in page.text
+    status_panel = re.search(r'<section[^>]*id="submission-status"[^>]*>(.*?)</section>', page.text, re.DOTALL)
+    assert status_panel is not None
+    # Translation spans and bidi-isolated parameters preserve the readable text.
+    visible = unescape(re.sub(r"<[^>]+>", "", status_panel.group(1))).lower()
+    assert "recording.wav" in visible and "could not be read (unavailable)" in visible
     assert world.get_goal(goal_id).status == "pending"
+    assert not world.get_goal(goal_id).result
+    assert re.search(r'id="result-section"[^>]*display: none', page.text)
+    # Existing installs may already have stored the preparation message in
+    # goals.result. Keep it in the status panel, never in the answer panel.
+    world.set_goal_status(goal_id, "pending", result=receipt["detail"]["message"])
+    legacy_page = client.get(f"/chat/goal/{goal_id}")
+    assert re.search(r'id="result-section"[^>]*display: none', legacy_page.text)
 
 
 def test_storage_failure_is_recoverable_draft_and_retry_deduplicates(environment, monkeypatch):

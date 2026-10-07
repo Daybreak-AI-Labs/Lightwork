@@ -92,13 +92,13 @@
     protected_containment: "This agent is isolated. An administrator must end the isolation first.",
     dependency_unavailable: "Part of Lightwork needed for this is not available right now. Try again in a minute.",
     not_applied: "The change did not take effect.",
-    containment_failed: "The agent could not be fully isolated.",
-    schedule_unavailable: "The automatic end of isolation could not be scheduled.",
+    containment_failed: "The agent could not be fully isolated. Try again.",
+    schedule_unavailable: "The automatic end of isolation could not be scheduled. End the isolation yourself when it is no longer needed.",
     concurrent_containment: "Someone else changed this agent at the same time. Check the list and try again.",
     already_released: "This agent was already released from isolation.",
     superseded: "A newer isolation replaced this one, so it was left in place.",
-    release_failed: "The isolation could not be ended.",
-    action_error: "The change could not be completed.",
+    release_failed: "The isolation could not be ended. Try again.",
+    action_error: "The change could not be completed. Try again.",
     concurrent_halt: "Someone else changed the emergency stop at the same time. Check its state and try again.",
     idempotent_replay: "This exact change had already been applied.",
     recovered: "An earlier unfinished change was completed."
@@ -131,7 +131,7 @@
     return Math.round(value / 86400) + " days";
   }
 
-  function plainFailure(status, detail) {
+  function plainFailure(status, detail, headers) {
     if (detail === "control_plane_disabled") {
       return "Agent controls are turned off. Ask an administrator to turn them on.";
     }
@@ -139,11 +139,12 @@
       return "This changed since you last looked. The list has been refreshed; check it and try again.";
     }
     if (typeof window.mvErrorText === "function") {
-      return window.mvErrorText({ status: status }, "finish this");
+      // Headers carry the turned-off reason, so "off" is never read as "no permission".
+      return window.mvErrorText({ status: status, headers: headers }, "finish this");
     }
     if (status === 403) { return "You do not have permission to do this. Ask an administrator."; }
     if (status === 400 || status === 422) { return "Some of the details need fixing. Check them and try again."; }
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   function boundedError(error) {
@@ -158,7 +159,7 @@
     if (Array.isArray(detail)) {
       var entries = detail.slice(0, 8).map(function (entry) {
         if (typeof entry === "string") { return entry.slice(0, 250); }
-        if (!entry || typeof entry !== "object") { return "Invalid request value."; }
+        if (!entry || typeof entry !== "object") { return "One of the values sent was not accepted."; }
         var location = Array.isArray(entry.loc)
           ? entry.loc.filter(function (part) {
             return part !== "body" && part !== "query" && part !== "path";
@@ -166,7 +167,7 @@
           : "";
         var message = typeof entry.msg === "string" && entry.msg
           ? entry.msg
-          : "Invalid request value.";
+          : "One of the values sent was not accepted.";
         return (location ? location + ": " : "") + message.slice(0, 250);
       });
       if (detail.length > entries.length) {
@@ -178,7 +179,7 @@
         typeof detail.message === "string" && detail.message) {
       return detail.message;
     }
-    return "Control plane request failed.";
+    return "That didn't work. Refresh the page and try again.";
   }
 
   function utf8ByteLength(value) {
@@ -238,10 +239,10 @@
     var text = await boundedResponseText(response);
     var payload;
     try { payload = text ? JSON.parse(text) : {}; }
-    catch (_error) { throw failServer("The reply could not be read."); }
+    catch (_error) { throw failServer("The reply could not be read. Refresh the page and try again."); }
     if (!response.ok) {
       var detail = responseDetail(payload);
-      var responseError = fail(plainFailure(response.status, detail));
+      var responseError = fail(plainFailure(response.status, detail, response.headers));
       responseError.technical = detail;
       responseError.status = response.status;
       responseError.payload = payload;
@@ -290,7 +291,7 @@
         if (typeof item.detail === "string" && item.detail) { text += ": " + boundedError(item.detail); }
         lines.push((when ? when + " — " : "") + text);
       });
-      if (!lines.length) { lines.push("No history has been recorded yet."); }
+      if (!lines.length) { lines.push("No history has been recorded yet. Actions on this agent appear here."); }
       return lines;
     }
     if (Array.isArray(payload.results)) {
@@ -320,7 +321,7 @@
           ? "It was recorded in the history."
           : payload.audit_written === false
             ? "Warning: it was not recorded in the history."
-            : "Lightwork could not confirm it was recorded in the history.");
+            : "Lightwork could not confirm it was recorded in the history. Refresh the page to see the latest.");
       }
     }
     var announced = parts.map(function (part) {
@@ -512,7 +513,7 @@
   }
 
   function fleetScopeFromForm() {
-    if (!fleetForm) { throw fail("Group actions are unavailable."); }
+    if (!fleetForm) { throw fail("Group actions are unavailable. Refresh the page and try again."); }
     var form = new FormData(fleetForm);
     var scope = String(form.get("scope") || "");
     if (scope === "workspace" && workspaceScopeKnown) {
@@ -575,7 +576,7 @@
   }
 
   function fleetActionFromForm() {
-    if (!fleetForm || !fleetVerb) { throw fail("Group actions are unavailable."); }
+    if (!fleetForm || !fleetVerb) { throw fail("Group actions are unavailable. Refresh the page and try again."); }
     var form = new FormData(fleetForm);
     var verb = String(fleetVerb.value || "");
     var allowed = (verb === "suspend" || verb === "resume") ? canOperate : canAdmin;
@@ -825,7 +826,7 @@
     parts.push(row.max_risk ? "Highest risk: " + human(row.max_risk) : "No risk limit");
     parts.push(row.max_dollars === null || row.max_dollars === undefined
       ? "No spending limit"
-      : "Spending limit: $" + row.max_dollars);
+      : "Spending limit: " + (window.mvMoney ? window.mvMoney(row.max_dollars) : "$" + row.max_dollars));
     if (row.deny_tools && row.deny_tools.length) {
       parts.push("Blocked tools: " + row.deny_tools.map(human).join(", "));
     }
@@ -841,27 +842,27 @@
   function validateToolList(value, field) {
     if (!Array.isArray(value) || value.length > 256 ||
         value.some(function (name) { return !toolPattern.test(name); })) {
-      throw failServer("The list contained an invalid " + field + " tool list.");
+      throw failServer("The list had a " + field + " tool list that could not be read.");
     }
     return value.slice();
   }
 
   function validateRosterRow(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw failServer("The list contained an invalid roster row.");
+      throw failServer("The list had a row that could not be read.");
     }
     var row = Object.assign({}, value);
     row.principal = checkPrincipal(row.principal);
     if (row.kind !== "native" && row.kind !== "external") {
-      throw failServer("The list contained an invalid roster principal kind.");
+      throw failServer("The list had a row whose kind of agent or person is not recognized.");
     }
     if (typeof row.state !== "string" || !row.state || row.state.length > 64 ||
         /[\u0000-\u001f\u007f-\u009f]/.test(row.state)) {
-      throw failServer("The list contained an invalid roster state.");
+      throw failServer("The list had a row with a state that is not recognized.");
     }
     if (!isNonNegativeInteger(row.running_goals) ||
         typeof row.revoked !== "boolean" || typeof row.contained !== "boolean") {
-      throw failServer("The list contained invalid roster control state.");
+      throw failServer("The list had a row whose controls could not be read.");
     }
     if (row.label !== undefined && (typeof row.label !== "string" || row.label.length > 512)) {
       row.label = "";
@@ -869,21 +870,21 @@
     if (row.platform !== undefined &&
         (typeof row.platform !== "string" || row.platform.length > 128 ||
          /[\u0000-\u001f\u007f-\u009f]/.test(row.platform))) {
-      throw failServer("The list contained an invalid roster platform label.");
+      throw failServer("The list had a row whose platform name could not be read.");
     }
     if (row.revoked_reason !== undefined &&
         (typeof row.revoked_reason !== "string" || row.revoked_reason.length > 500 ||
          /[\u0000-\u001f\u007f-\u009f]/.test(row.revoked_reason))) {
-      throw failServer("The list contained an invalid roster incident summary.");
+      throw failServer("The list had a row whose incident summary could not be read.");
     }
     if (row.max_risk !== null && row.max_risk !== undefined &&
         !["low", "medium", "high"].includes(row.max_risk)) {
-      throw failServer("The list contained an invalid roster risk ceiling.");
+      throw failServer("The list had a row whose risk limit could not be read.");
     }
     ["max_dollars", "max_wall_seconds"].forEach(function (field) {
       if (row[field] !== null && row[field] !== undefined &&
           (typeof row[field] !== "number" || !Number.isFinite(row[field]) || row[field] <= 0)) {
-        throw failServer("The list contained an invalid roster numeric ceiling.");
+        throw failServer("The list had a row whose number limit could not be read.");
       }
     });
     row.allow_tools = validateToolList(row.allow_tools || [], "allowed");
@@ -961,6 +962,11 @@
 
   function renderRow(row) {
     var tr = document.createElement("tr");
+    if (canOperate && !row.contained) {
+      tr.dataset.bulkId = row.principal;
+      tr.dataset.bulkLabel = displayName(row);
+      tr.dataset.bulkPaused = row.revoked ? "true" : "false";
+    }
     var principal = document.createElement("th");
     principal.scope = "row";
     principal.textContent = displayName(row);
@@ -1142,7 +1148,7 @@
 
   function applyRoster(payload) {
     if (!payload || !Array.isArray(payload.items)) {
-      throw failServer("The list contained an invalid bounded roster page.");
+      throw failServer("The list page was larger than allowed or could not be read.");
     }
     var validatedItems = payload.items.map(validateRosterRow);
     var focus = currentRosterFocus();
@@ -1159,7 +1165,7 @@
         end > total || payload.has_more !== expectedHasMore ||
         (expectedHasMore && suppliedNext !== end) ||
         (!expectedHasMore && suppliedNext !== null)) {
-      throw failServer("The list contained invalid roster pagination metadata.");
+      throw failServer("The details for moving between list pages could not be read.");
     }
     rosterOffset = offset;
     rosterNextOffset = expectedHasMore ? suppliedNext : null;
@@ -1183,6 +1189,65 @@
     rosterNext.disabled = payload.has_more !== true || rosterNextOffset === null;
     restoreRosterFocus(focus);
     updateRuntimeControls();
+    refreshBulk();
+  }
+
+  // Pause or resume many agents and people at once (ADM-7): filter the list,
+  // select all matching, one confirmation states the count, and the report
+  // undoes each change (resume undoes a pause and pause undoes a resume).
+  var bulk = null;
+  function bulkChange(verb) {
+    return async function (item, extra) {
+      if (!controlPlaneReady) {
+        throw { bulkReason: "Lightwork has not confirmed the current state of your agents yet. Refresh and try again." };
+      }
+      var paused = item.row.dataset.bulkPaused === "true";
+      if (verb === "suspend" && paused) { throw { bulkReason: "It is already paused." }; }
+      if (verb === "resume" && !paused) { throw { bulkReason: "It is not paused." }; }
+      async function send(how, reason) {
+        var body = { principal: item.id };
+        if (reason) { body.reason = reason; }
+        var result;
+        try {
+          result = await request("/principals/" + how, { method: "POST", body: JSON.stringify(body) });
+        } catch (error) {
+          throw { bulkReason: (error && error.message) || "It could not be changed." };
+        }
+        if (!result || result.ok !== true) {
+          throw { bulkReason: (result && typeof result.detail === "string" && result.detail) || "Lightwork could not confirm the change." };
+        }
+        item.row.dataset.bulkPaused = how === "suspend" ? "true" : "false";
+      }
+      await send(verb, extra.reason);
+      return {
+        note: verb === "suspend" ? "paused" : "resumed",
+        undo: function () {
+          return verb === "suspend" ? send("resume") : send("suspend", "Undo of a resume made from the agent list");
+        }
+      };
+    };
+  }
+  function refreshBulk() {
+    if (!canOperate || typeof window.mvBulk !== "function") { return; }
+    if (bulk) { bulk.refresh(); return; }
+    if (!rows.querySelector("tr[data-bulk-id]")) { return; }
+    bulk = window.mvBulk({
+      list: rows, rows: "tr[data-bulk-id]", noun: "agent or person", nouns: "agents and people", filter: true,
+      actions: [
+        { label: "Pause", verb: "Pause", danger: true,
+          ask: async function () {
+            if (typeof window.mvForm !== "function") { return null; }
+            var values = await window.mvForm("Pause the selected agents and people", [{
+              key: "reason", label: "Reason", type: "text", required: true,
+              placeholder: "Why is this needed?", help: "The reason is saved in each one's history."
+            }], { okText: "Pause them" });
+            var reason = values ? String(values.reason || "").trim().slice(0, 500) : "";
+            return reason ? { reason: reason } : null;
+          },
+          run: bulkChange("suspend"), after: function () { refresh(); } },
+        { label: "Resume", verb: "Resume", run: bulkChange("resume"), after: function () { refresh(); } }
+      ]
+    });
   }
 
   function renderRosterError(error) {
@@ -1263,7 +1328,7 @@
     document.getElementById("acp-health-title").textContent =
       "Checking your agents…";
     document.getElementById("acp-health-detail").textContent =
-      "Actions are unavailable until Lightwork has confirmed the current state.";
+      "Actions are unavailable until Lightwork has confirmed the current state. Refresh the page to see the latest.";
     planeRequested += 1;
     if (!planeRefreshPromise) {
       planeRefreshPromise = drainPlaneRefreshes().finally(function () {

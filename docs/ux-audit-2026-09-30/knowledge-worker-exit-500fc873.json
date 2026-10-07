@@ -1,0 +1,90 @@
+{
+  "source_head": "500fc87363a492def69722ef19d2cc518d171286",
+  "product_and_test_changes": false,
+  "original_exit_cause": "Not directly observed; deadline termination under contention is supported but remains an inference.",
+  "installed_versions": {
+    "pytest": "9.1.1",
+    "pytest-timeout": "2.4.0",
+    "pytest-xdist": "3.8.0",
+    "execnet": "2.1.2"
+  },
+  "focused_unchanged_case": {
+    "passed": 1,
+    "test_cap_seconds": 180,
+    "call_seconds": 86.21075050000218,
+    "setup_seconds": 0.2626382000016747,
+    "dataset_registration_seconds": 54.68877540004905,
+    "dataset_count": 306,
+    "synthetic_retrieval": {
+      "registry_versions": 306,
+      "labeled_queries": 8,
+      "recall_at_1": 1.0,
+      "source_coverage": 1.0,
+      "false_abstention": 0,
+      "content_resolution_calls": 40,
+      "lookup_p50_ms": 3253.4318000034546,
+      "lookup_p95_ms": 5676.947400002973,
+      "p95_method": "nearest rank; eight local samples",
+      "scope": "synthetic lexical retrieval, no model calls"
+    }
+  },
+  "secure_full04_same_source": {
+    "complete_file_passed_calls": 66,
+    "failed_calls": 0,
+    "large_corpus_call_seconds": 108.25970219999726,
+    "purpose_inventory_call_seconds": 96.32867780000379,
+    "full_suite_still_running_when_recorded": true
+  },
+  "original_failed_fixture": {
+    "creation_utc": "2026-10-01T01:57:51.4587908Z",
+    "last_registered_dataset_write_utc": "2026-10-01T01:59:50.345666Z",
+    "registration_elapsed_seconds_approx": 118.8868752,
+    "files": 621,
+    "registered_rows": 306
+  },
+  "controlled_timeout_probe": {
+    "timeout_seconds": 0.3,
+    "worker_exit": "Not properly terminated",
+    "timeout_or_fatal_text_in_captured_log": false,
+    "direct_timer_receipt": true,
+    "original_timer_retained_when_receipt_io_fails": true,
+    "expected_probe_failure": true
+  },
+  "source_hashes": {
+    "packages/maverick-core/tests/test_knowledge_access.py": "f1be922f1ea359a340ca20fa7fb018942ea7836558ba21575e153519d8df1065",
+    "packages/maverick-core/maverick/knowledge_access.py": "cb742bbdec4a9ab66de03813c2451ff6b65d74ff07a73d4c285697ab8d5bba8c",
+    "packages/maverick-core/maverick/research_registry.py": "062e305f0abd31a1cccc20fa30de3a76ca4f95fc06a5ffee2ebccadd2f5850c6",
+    "packages/maverick-core/maverick/governed_records.py": "b8bb50350a71cee45ad62198aeebcf990cfce9a01edda7855b746fd5c5a678b5"
+  },
+  "artifact_hashes": {
+    "audit/knowledge-exit-500fc87-knowledge.log": "132a84fb38354d1b4974db4b68a2e3de5703751409d166117b94f7b920772c67",
+    "audit/knowledge-exit-500fc87-knowledge.observations.jsonl": "1ee2d3dac228e1273933dd922363cbf0e4d8ab984933b37d12c27c10f91ee495",
+    "audit/knowledge-exit-500fc87-knowledge.result.json": "66ba652fb8fc9ae168152964a4d8e8b7ef8c3ce7f206f2be2b7c07a44db0435e",
+    "audit/knowledge-exit-500fc87-knowledge.source.json": "8ddf2d4b0edd9f9747d124194dd58d71d22b18e875ca0672fec203189a1dad51",
+    "audit/knowledge-exit-500fc87-knowledge.xml": "883a06c94394a26ecacc0f7dbdeb8467c2eaa34e837745ea8bcf49f41e42037a",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.failures.jsonl": "632763a1f668b0186c41b0a7994608ef23dd8eade1207e58d3cfff713d6539fb",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.failures.jsonl.gw0.timeout-events.jsonl": "d2450244778b7a5577bd2c5190d46c7d9d8d5d2b481332280039491bf0e69810",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.failures.jsonl.reports": "5138d4704116ddeec80eb47dce3ed8ac60e8bfbb1dee464b2a59d42d99f4e3e1",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.log": "c66099edd5ab33340778f177ed4062d29f577ea6cb2692695e5c0a518296686e",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.observations.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.result.json": "16f42ac9672dc6feb3817f9f6b8ea213b79e65b53fca6d33c124ce02e6207556",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.source.json": "e462e9d297f012e80402cc3b11b7821fd67e05851b402b8fc4d1525c40e91db3",
+    "audit/knowledge-exit-500fc87-probe-reporter-candidate.xml": "22c681b8ba63022a63ecf1d4de996615bd41fbed8fd67d283da7fa7ac303700d",
+    "audit/knowledge-exit-500fc87-probe.log": "f8b5afdb165d1ce1ca36194c4d51f566515eb479dbe5457b13d5ee0c50c6486a",
+    "audit/knowledge-exit-500fc87-probe.observations.jsonl": "5d5030d25f42643d5c75e3833bac22ad96c3288d507069d4eaa8109206a6308d",
+    "audit/knowledge-exit-500fc87-probe.result.json": "3fe0eb52c66ecbbb022c1a445fc9b09bf69e9fae0f17e7b4dd0a7602ccee045c",
+    "audit/knowledge-exit-500fc87-probe.source.json": "b79dcc303da40b6b6c29d392bd1e76a54c35eaa3b8b05a5b6115071c925f4b0f",
+    "audit/knowledge-exit-500fc87-probe.xml": "78e908b054f1457e95e218626f55dd111f7b5a9442bd0dddc552efe8517cadfd",
+    "audit/audit_local_failure_reporter_timeout_candidate.py": "876de7bb39c503d805c25c237a83cedf8b963cb6d8ebf2c3e04648b0fbc18fa5",
+    "audit/knowledge_exit_observer.py": "e417104414984a29d5c3b36f0e673458a5befe5b8873fe6b970e953a712a0158",
+    "audit/run_knowledge_exit_probe.py": "2f67230291d2a3abcb01cb695f8cb008c10d0433e9905b800023d868dfdda8d8",
+    "audit/knowledge-timeout-reporter.patch": "b97070912067663077c54bd02989a00ab39386cfc9dd52cfaff7f5dab16484d2"
+  },
+  "qualification_limits": [
+    "No direct timer receipt or native exit code was retained for the original worker.",
+    "Focused reproduction ran alongside four secure-suite workers; this was not a quiet-host latency benchmark.",
+    "Test fixture uses local governed storage and explicitly disables at-rest encryption in both postures.",
+    "No live provider/model call or production data was used.",
+    "The incomplete ordinary full04 result remains failed/incomplete; the focused pass does not replace a complete rerun."
+  ]
+}

@@ -62,6 +62,7 @@ _KEEP_SNAPSHOTS = 50
 #: EVICTED id becomes a floor, so forgetting can only ever refuse — never
 #: let an aged-out approval authorize a second refinement.
 _MAX_CONSUMED_APPROVALS = 200
+_MAX_DECISIONS = 512
 _STORE_VERSION = 1
 _APPROVAL_ROLE = "harness_refinement_operator"
 _APPROVAL_AUTHORITY_VERSIONS = {
@@ -133,7 +134,7 @@ def snapshots_dir() -> Path:
 
 def _empty_store() -> dict:
     return {"version": _STORE_VERSION, "proposals": {},
-            "consumed_approvals": [], "approval_floor": 0}
+            "consumed_approvals": [], "approval_floor": 0, "decisions": {}}
 
 
 def _load_store() -> dict:
@@ -166,6 +167,13 @@ def _load_store() -> dict:
         store["approval_floor"] = int(data.get("approval_floor") or 0)
     except (TypeError, ValueError):
         store["approval_floor"] = 0
+    decisions = data.get("decisions", {})
+    if (not isinstance(decisions, dict) or len(decisions) > _MAX_DECISIONS
+            or any(not re.fullmatch(r"[0-9a-f]{32}", key) or not isinstance(row, dict)
+                   or row.get("status") not in {"reserved", "confirmed"}
+                   for key, row in decisions.items())):
+        raise RefineError("the original instruction decision records are unreadable; refusing")
+    store["decisions"] = decisions
     return store
 
 
@@ -179,7 +187,7 @@ def _save_store(store: dict) -> None:
 
 def _locked():
     from .file_lock import cross_process_lock
-    return cross_process_lock(store_path())
+    return cross_process_lock(store_path(), strict=True)
 
 
 def _load_refinements() -> dict[str, dict]:
@@ -613,8 +621,198 @@ def _apply_change(entry: dict) -> None:
         _write_refinements(overlay)
 
 
+def _state_digest(value: dict) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _decision_binding(proposal_id, operation_id, actor, context, revision, *, undo):
+    if (not re.fullmatch(r"[0-9a-f]{32}", str(operation_id or ""))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(context or ""))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(revision or ""))):
+        raise RefineError("an exact original instruction request and review are required")
+    actor = _approval_actor(actor)
+    return {"request": operation_id, "actor": actor, "context": context,
+            "workspace": _current_approval_authority(actor)["workspace"],
+            "proposal": proposal_id, "revision": revision,
+            "action": "restore" if undo else "apply"}
+
+
+def _decision_admission(store, operation_id):
+    # An incomplete native attempt cannot be repeated under a new request,
+    # including legacy callers. The overlay and its ledger are separate files.
+    if any(row["status"] == "reserved" and not row.get("resolved") for row in store["decisions"].values()):
+        raise RefineError("an original instruction decision is unconfirmed; read its result before another change")
+    if operation_id is None:
+        return
+    if operation_id in store["decisions"]:
+        raise RefineError("this original instruction request already exists; read its result without applying again")
+    if len(store["decisions"]) >= _MAX_DECISIONS:
+        raise RefineError("the retained instruction decision history is full; no change was started")
+
+
+def _reserve_decision(store, record, operation_id, actor, context, revision, *, undo, snapshot):
+    _decision_admission(store, operation_id)
+    if operation_id is None:
+        return
+    binding = _decision_binding(record["id"], operation_id, actor, context, revision, undo=undo)
+    store["decisions"][operation_id] = {**binding, "source": record["digest"], "name": record["name"],
+                                       "status": "reserved", "started_at": time.time(), "snapshot": snapshot}
+    _save_store(store)
+
+
+def _confirm_decision(store, operation_id, completed_at):
+    if operation_id is not None:
+        store["decisions"][operation_id].update(
+            status="confirmed", completed_at=completed_at,
+            after=_state_digest(_load_refinements()))
+
+
+def decision_receipt(proposal_id, operation_id, *, actor, context, revision,
+                     undo=False, before_read=None):
+    """Read only this actor's exact native request; current state is separate.
+
+    A reservation is not acceptance. There is deliberately no repair/replay
+    here when a write happened before its completion metadata could be saved.
+    """
+    binding = _decision_binding(proposal_id, operation_id, actor, context, revision, undo=undo)
+    with _locked():
+        store = _load_store()
+        record = store["proposals"].get(proposal_id)
+        if record is None:
+            raise RefineError("unknown refinement proposal")
+        if before_read:
+            before_read(record)
+        row = store["decisions"].get(operation_id)
+        if row is None:
+            return None
+        if any(row.get(key) != value for key, value in binding.items()) or row.get("source") != record.get("digest"):
+            raise RefineError("the original instruction decision does not match this actor, source or review")
+        result = dict(row)
+        result["current_matches"] = None
+        if row["status"] == "confirmed":
+            try:
+                result["current_matches"] = row.get("after") == _state_digest(_load_refinements())
+            except RefineError:
+                pass  # Original acceptance does not depend on today's overlay.
+        return result
+
+
+def decision_history(*, actor, context):
+    actor = _approval_actor(actor)
+    workspace = _current_approval_authority(actor)["workspace"]
+    with _locked():
+        return [dict(row) for row in sorted(_load_store()["decisions"].values(),
+                                           key=lambda row: row["started_at"], reverse=True)
+                if row["actor"] == actor and row["context"] == context and row["workspace"] == workspace][:20]
+
+
+def shared_decision_holds(*, actor):
+    """References only: a successor cannot read another person's original request."""
+    actor = _approval_actor(actor)
+    workspace = _current_approval_authority(actor)["workspace"]
+    with _locked():
+        return [{"operation_id": row["request"], "started_at": row["started_at"]}
+                for row in _load_store()["decisions"].values()
+                if row["workspace"] == workspace and row["status"] == "reserved" and not row.get("resolved")]
+
+
+def _reconciliation_binding(row, binding, *, successor):
+    if row is None or row.get("workspace") != binding["workspace"]:
+        raise RefineError("this instruction hold is unavailable in the current workspace")
+    if not successor and any(row.get(key) != value for key, value in binding.items()):
+        raise RefineError("the original instruction decision does not match this actor and review")
+
+
+def _reconciliation_review(store, row):
+    current = _load_refinements()
+    for entry in current.values():
+        source = store["proposals"].get(entry.get("proposal_id"))
+        if source is None or _digest(entry.get("target", ""), entry.get("name", ""), entry.get("change", "")) != source.get("digest"):
+            raise RefineError("current instruction source material is unavailable; refusing reconciliation")
+        reserved = any(decision["proposal"] == source["id"] and decision["source"] == source["digest"]
+                       and decision["status"] == "reserved" for decision in store["decisions"].values())
+        aid = source.get("approval_id")
+        approved = aid is not None and (aid in store["consumed_approvals"] or int(aid) <= store["approval_floor"])
+        if ((source.get("status") != "applied" and not reserved)
+                or entry.get("digest") != source["digest"]
+                or (_settings()["require_approval"] and not approved)):
+            raise RefineError("current instructions lack their native applied or spent-approval evidence; refusing reconciliation")
+    material = {"original": row, "current": current, "proposals": store["proposals"]}
+    return {"revision": _state_digest(material), "current": current, "proposals": store["proposals"]}
+
+
+def reconciliation_review(operation_id, *, actor, context, revision, proposal_id, undo, before_read=None, successor=False):
+    binding = _decision_binding(proposal_id, operation_id, actor, context, revision, undo=undo)
+    with _locked():
+        store = _load_store()
+        row = store["decisions"].get(operation_id)
+        _reconciliation_binding(row, binding, successor=successor)
+        if row["status"] != "reserved" or row.get("resolved"):
+            raise RefineError("the instruction hold is no longer awaiting a separate current-state decision")
+        review = _reconciliation_review(store, row)
+        if before_read:
+            before_read(review["current"], review["proposals"])
+        return review
+
+
+def reconcile_decision(operation_id, *, actor, context, revision, proposal_id, undo,
+                       expected_revision, recovery_id, before_write, successor=False):
+    """Accept reviewed current guidance separately; never complete the unknown request."""
+    from .file_lock import cross_process_lock
+    binding = _decision_binding(proposal_id, operation_id, actor, context, revision, undo=undo)
+    if not re.fullmatch(r"[0-9a-f]{32}", recovery_id):
+        raise RefineError("an exact new reconciliation request is required")
+    with _locked(), cross_process_lock(refinements_path(), strict=True):
+        store = _load_store()
+        row = store["decisions"].get(operation_id)
+        _reconciliation_binding(row, binding, successor=successor)
+        if row.get("resolved"):
+            if any(row["resolved"].get(key) != value for key, value in
+                   {"request": recovery_id, "actor": binding["actor"], "context": context}.items()):
+                raise RefineError("this hold was already resolved by another request")
+            return {**row["resolved"], "replayed": True}
+        if row["status"] != "reserved":
+            raise RefineError("this original result is already confirmed; no reconciliation is needed")
+        review = _reconciliation_review(store, row)
+        if review["revision"] != expected_revision:
+            raise RefineError("the current instruction reconciliation review no longer matches; review again")
+        before_write(review["current"], review["proposals"])
+        now = time.time()
+        for source in store["proposals"].values():
+            current = next((entry for entry in review["current"].values() if entry.get("proposal_id") == source["id"]), None)
+            if current:
+                source.update(status="applied", applied_at=current.get("applied_at"),
+                              applied_by=current.get("applied_by", ""))
+                if source["id"] == row["proposal"] and row["action"] == "apply":
+                    source["snapshot"] = row["snapshot"]
+            elif source.get("status") == "applied" or source["id"] == row["proposal"]:
+                source.update(status="reconciled_absent", reconciled_at=now)
+        row["resolved"] = {"request": recovery_id, "actor": binding["actor"], "context": context, "recorded_at": now,
+                           "review": expected_revision, "current": _state_digest(review["current"])}
+        _save_store(store)
+        return dict(row["resolved"])
+
+
+def shared_hold_receipt(operation_id, recovery_id, *, actor, context):
+    """Read the exact new acceptance, without attributing the old uncertain action."""
+    binding = _decision_binding("0" * 16, operation_id, actor, context, "0" * 64, undo=False)
+    with _locked():
+        row = _load_store()["decisions"].get(operation_id)
+        _reconciliation_binding(row, binding, successor=True)
+        if row["status"] != "reserved":
+            raise RefineError("this original decision is confirmed and has no uncertain hold")
+        resolved = row.get("resolved")
+        if not resolved:
+            return None
+        if any(resolved.get(key) != value for key, value in
+               {"request": recovery_id, "actor": binding["actor"], "context": context}.items()):
+            raise RefineError("this hold was closed by another acceptance; it is not this request's result")
+        return dict(resolved)
+
+
 def apply(proposal_id: str, *, applied_by: str = "",
-          approval_id: int | None = None) -> dict:
+          approval_id: int | None = None, expected_revision: str | None = None,
+          operation_id: str | None = None, context: str = "", before_write=None) -> dict:
     """Apply one approved proposal, snapshotted and audited.
 
     Refuses unless the proposal is pending, its stored change still matches
@@ -632,6 +830,9 @@ def apply(proposal_id: str, *, applied_by: str = "",
 
     with _locked():
         store = _load_store()
+        _decision_admission(store, operation_id)
+        if expected_revision is not None and _change_review_unlocked(proposal_id, store)["revision"] != expected_revision:
+            raise RefineError("the instruction review no longer matches the current state; review again")
         record = store["proposals"].get(str(proposal_id))
         if record is None:
             raise RefineError(f"unknown refinement proposal {proposal_id!r}")
@@ -647,6 +848,10 @@ def apply(proposal_id: str, *, applied_by: str = "",
                 f"proposal {proposal_id!r} no longer matches the digest it "
                 "was approved under; the stored change was edited underneath "
                 "— refusing")
+        if before_write:
+            before_write(record, _change_review_unlocked(proposal_id, store)["after"], store["proposals"])
+        if operation_id is None:
+            _decision_admission(store, None)
         if cfg["require_approval"]:
             wanted = (approval_id if approval_id is not None
                       else record.get("approval_id"))
@@ -655,10 +860,14 @@ def apply(proposal_id: str, *, applied_by: str = "",
                 store, record, wanted, applied_by=applied_actor,
             )
             # Burn the approval before the effect, not after.
-            _save_store(store)
+            if operation_id is None:
+                _save_store(store)
         else:
             applied_actor = str(applied_by or "")[:200]
         snapshot = _take_snapshot()
+        if before_write:
+            before_write(record, _change_review_unlocked(proposal_id, store)["after"], store["proposals"])
+        _reserve_decision(store, record, operation_id, applied_by, context, expected_revision, undo=False, snapshot=snapshot)
         entry = {
             "target": record["target"], "name": record["name"],
             "change": record["change"], "rationale": record["rationale"],
@@ -682,6 +891,7 @@ def apply(proposal_id: str, *, applied_by: str = "",
                 f"harness was restored from snapshot {snapshot}") from e
         record.update(status="applied", applied_at=entry["applied_at"],
                       applied_by=entry["applied_by"], snapshot=snapshot)
+        _confirm_decision(store, operation_id, entry["applied_at"])
         _save_store(store)
 
     from .audit import EventKind, audit_event
@@ -702,7 +912,50 @@ def apply(proposal_id: str, *, applied_by: str = "",
 
 # ---- revert ---------------------------------------------------------------
 
-def revert(proposal_id: str, *, reverted_by: str = "") -> bool:
+def _change_review_unlocked(proposal_id: str, store: dict) -> dict:
+    """Exact overlay before/after, including everything a whole restore affects."""
+    record = store["proposals"].get(str(proposal_id))
+    if record is None:
+        raise RefineError(f"unknown refinement proposal {proposal_id!r}")
+    before = _load_refinements()
+    after = dict(before)
+    if record.get("status") == "applied":
+        from . import dreaming
+        from .file_lock import cross_process_lock
+        base = snapshots_dir()
+        with cross_process_lock(base / dreaming._SNAPSHOT_TRANSACTION, strict=True):
+            name = str(record.get("snapshot") or "")
+            if name not in dreaming.list_snapshots(base):
+                raise RefineError("the restore snapshot is no longer retained; refusing to undo")
+            directory = base / name
+            dreaming._harden_private_tree(directory)
+            path = directory / "refinements.json"
+            try:
+                after = json.loads(dreaming._read_stable_private_file(path)) if path.exists() else {}
+                if not isinstance(after, dict) or any(not isinstance(row, dict) for row in after.values()):
+                    raise ValueError("invalid overlay")
+            except (OSError, ValueError, UnicodeError) as exc:
+                raise RefineError("the restore snapshot is unreadable; refusing to undo") from exc
+    elif record.get("status") == "pending":
+        after[_key(record["target"], record["name"])] = {
+            "target": record["target"], "name": record["name"], "change": record["change"],
+            "proposal_id": record["id"], "digest": record["digest"],
+        }
+    material = {"proposal": record, "before": before, "after": after, "settings": _settings()}
+    revision = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    changes = [{"key": key, "before": before.get(key), "after": after.get(key)}
+               for key in sorted(set(before) | set(after)) if before.get(key) != after.get(key)]
+    return {"revision": revision, "proposal": dict(record), "changes": changes, "after": after}
+
+
+def change_review(proposal_id: str) -> dict:
+    """Read a fresh, exact review without changing instructions or approvals."""
+    with _locked():
+        return _change_review_unlocked(proposal_id, _load_store())
+
+
+def revert(proposal_id: str, *, reverted_by: str = "", expected_revision: str | None = None,
+           operation_id: str | None = None, context: str = "", before_write=None) -> bool:
     """Restore the snapshot this proposal was applied over.
 
     Returns False when there is nothing applied to undo, so reverting twice is
@@ -716,30 +969,55 @@ def revert(proposal_id: str, *, reverted_by: str = "") -> bool:
     from . import dreaming
     with _locked():
         store = _load_store()
+        _decision_admission(store, operation_id)
         record = store["proposals"].get(str(proposal_id))
         if record is None or record.get("status") != "applied":
             return False
+        reviewed = _change_review_unlocked(proposal_id, store)
+        if expected_revision is not None and reviewed["revision"] != expected_revision:
+            raise RefineError("the instruction review no longer matches the current state; review again")
         snapshot = str(record.get("snapshot") or "")
         if snapshot not in dreaming.list_snapshots(snapshots_dir()):
             raise RefineError(
                 f"snapshot {snapshot!r} for proposal {proposal_id!r} is no "
                 "longer retained; the harness cannot be restored "
                 "automatically")
+        if before_write:
+            before_write(record, reviewed["after"], store["proposals"])
+        _reserve_decision(store, record, operation_id, reverted_by, context, expected_revision, undo=True, snapshot=snapshot)
         try:
             _restore_snapshot(snapshot)
+            if _load_refinements() != reviewed["after"]:
+                raise RefineError("the restored instructions no longer match the reviewed snapshot; current state needs review")
         except Exception as e:
             raise RefineError(
                 f"restoring snapshot {snapshot!r} failed ({e}); the "
                 "refinement stays marked applied") from e
         record.update(status="reverted", reverted_at=time.time(),
                       reverted_by=str(reverted_by or "")[:200])
+        # A restore changes the complete overlay. Keep the decision list in
+        # agreement with the bytes actually restored, including later changes
+        # removed and earlier changes brought back by this restore point.
+        retained = {str(row.get("proposal_id") or "") for row in reviewed["after"].values()}
+        removed_proposals = []
+        for other in store["proposals"].values():
+            if other["id"] in retained:
+                other["status"] = "applied"
+            elif other.get("status") == "applied":
+                removed_proposals.append(other["id"])
+                other.update(status="reverted", reverted_at=record["reverted_at"],
+                             reverted_by=record["reverted_by"], reverted_with=record["id"])
+        _confirm_decision(store, operation_id, record["reverted_at"])
         _save_store(store)
 
     from .audit import EventKind, audit_event
     audit_event(EventKind.LEARNING_UPDATE, agent="harness_refine",
                 content="harness_refinement_reverted", proposal=record["id"],
                 target=record["target"], name=record["name"],
-                snapshot=snapshot, reverted_by=record["reverted_by"])
+                snapshot=snapshot, reverted_by=record["reverted_by"],
+                restored_proposals=sorted(retained),
+                removed_proposals=sorted(set(removed_proposals) | {record["id"]}),
+                reviewed_state=reviewed["revision"])
     return True
 
 
@@ -747,4 +1025,7 @@ __all__ = [
     "PROVENANCE", "TARGETS", "RefineError", "apply", "enabled",
     "list_proposals", "propose", "refinements", "refinements_path", "revert",
     "snapshots_dir", "store_path",
+    "change_review",
+    "decision_receipt",
+    "decision_history", "reconciliation_review", "reconcile_decision",
 ]

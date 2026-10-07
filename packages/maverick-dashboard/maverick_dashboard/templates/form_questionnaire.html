@@ -2,7 +2,7 @@
 {% block title %}Questionnaire · Lightwork{% endblock %}
 {% block content %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
-  .fq-wrap { max-width: 46rem; margin: 0 auto; }
+  .fq-page { width: 100%; max-width: 46rem; margin: 0 auto; }
   .fq-q { padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
   .fq-q fieldset { border: 0; padding: 0; margin: 0; }
   .fq-q legend { font-weight: var(--font-medium); margin-bottom: var(--space-1); }
@@ -13,12 +13,14 @@
   .fq-actions { margin-top: var(--space-4); display: flex; gap: var(--space-3);
                 align-items: center; }
 </style>
+{% from "_hero.html" import hero %}
+<div class="fq-page">
+{{ hero('', questionnaire.vendor ~ ' — security & risk questionnaire', compact=true,
+        lede='Requested by your customer through their Lightwork
+              governance platform. Answer each question honestly; you can add context
+              in the notes box at the end. Your answers are recorded against this
+              link only.') }}
 <section class="panel fq-wrap">
-  <h1>{{ questionnaire.vendor }} — security &amp; risk questionnaire</h1>
-  <p class="muted">Requested by your customer through their Lightwork
-    governance platform. Answer each question honestly; you can add context
-    in the notes box at the end. Your answers are recorded against this
-    link only.</p>
   <form id="fq-form">
     {% for q in questionnaire.questions %}
     <div class="fq-q">
@@ -42,6 +44,7 @@
     </div>
   </form>
 </section>
+</div>
 <script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
   (function () {
     'use strict';

@@ -8,14 +8,34 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
-  <meta name="theme-color" content="#0e1320" />
+  <meta name="lightwork-preference-context" content="{{ display_preference_context }}">
+  <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
+  <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
+  <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
+  <meta name="theme-color" content="{{ theme_color or '#04050A' }}" />
   {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
+  {% set _session = page_session(request) if request is defined and page_session is defined else none %}
+  {% include "_session_meta.html" %}
   <title>{% block title %}Lightwork{% endblock %}</title>
+  {#- One stylesheet holds the whole shell (a phone pays one round trip before
+      the first paint). The Copilot and its native controls never take part in
+      the first paint: lightwork-ui.js loads them when the page is idle, or
+      when the Copilot is first opened (that press is kept, see _copilot.html). -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  {#- The two parser-blocking scripts at the end of the page are requested
+      next, so a slow phone link carries them before the font
+      (test_shell_first_paint). -#}
+  <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
+  {% include "_journey_i18n.html" %}
+  <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
+  {#- Page features (not the Copilot), deferred: they bind their own panels.
+      The Copilot reads LWSpecialistDrafts when it renders, after these. -#}
+  <script src="{{ asset('lightwork-specialist-drafts.js') }}" defer></script>
+  <script src="{{ asset('lightwork-human-conversation-handoffs.js') }}" defer></script>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
     /* Operator-defined themes ([dashboard] themes in config.toml). Values
@@ -29,58 +49,19 @@
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
   <link rel="apple-touch-icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
-<body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+<body class="{% if practice_mode %}is-practice {% endif %}theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+  {# The skip link is the first keyboard stop on every page. #}
   <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
-  <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
-    <defs>
-      <symbol id="i-chat" viewBox="0 0 16 16"><path d="M13 8.4A2.2 2.2 0 0 1 10.8 10.6H6.4L3 13V5.2A2.2 2.2 0 0 1 5.2 3h5.6A2.2 2.2 0 0 1 13 5.2z"/></symbol>
-      <symbol id="i-target" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><circle cx="8" cy="8" r="2"/></symbol>
-      <symbol id="i-agents" viewBox="0 0 16 16"><rect x="3.4" y="5" width="9.2" height="7" rx="2.2"/><path d="M8 2.6V5M6.4 8.2v.9M9.6 8.2v.9"/></symbol>
-      <symbol id="i-roles" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="2.2"/><circle cx="8" cy="6.6" r="1.6"/><path d="M5.4 11.4a2.7 2.7 0 0 1 5.2 0"/></symbol>
-      <symbol id="i-builder" viewBox="0 0 16 16"><path d="M3.5 12.5 10 6"/><path d="M11 2.6l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z"/></symbol>
-      <symbol id="i-workflow" viewBox="0 0 16 16"><rect x="2.5" y="2.6" width="4.6" height="3.4" rx="1"/><rect x="8.9" y="10" width="4.6" height="3.4" rx="1"/><path d="M4.8 6v3.2a1.2 1.2 0 0 0 1.2 1.2h2.9"/></symbol>
-      <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.4 1.5"/></symbol>
-      <symbol id="i-graph" viewBox="0 0 16 16"><circle cx="4" cy="4.2" r="1.7"/><circle cx="12" cy="5" r="1.7"/><circle cx="7" cy="12" r="1.7"/><path d="M5.5 4.7 10.5 5M5.3 5.6 6.4 10.4M8.4 11 10.8 6.5"/></symbol>
-      <symbol id="i-fleets" viewBox="0 0 16 16"><path d="M8 2.6 14 5.6 8 8.6 2 5.6z"/><path d="M2.6 8.6 8 11.4 13.4 8.6"/></symbol>
-      <symbol id="i-overview" viewBox="0 0 16 16"><rect x="2.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="2.6" y="8.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="8.6" width="4.8" height="4.8" rx="1.2"/></symbol>
-      <symbol id="i-eye" viewBox="0 0 16 16"><path d="M1.8 8S4 3.9 8 3.9 14.2 8 14.2 8 12 12.1 8 12.1 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.8"/></symbol>
-      <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></symbol>
-      <symbol id="i-spend" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><path d="M8 4.8v6.4M9.5 6.1a1.7 1.7 0 0 0-1.5-.9c-.9 0-1.6.5-1.6 1.2 0 1.7 3.2 1 3.2 2.7 0 .7-.7 1.2-1.6 1.2a1.8 1.8 0 0 1-1.5-.9"/></symbol>
-      <symbol id="i-providers" viewBox="0 0 16 16"><path d="M5.6 2.6v3M10.4 2.6v3"/><rect x="4" y="5.6" width="8" height="4" rx="1.6"/><path d="M8 9.6v3.8"/></symbol>
-      <symbol id="i-bench" viewBox="0 0 16 16"><path d="M2.4 13.4h11.2"/><path d="M4.4 13.4V8.4M7.4 13.4V4.2M10.4 13.4V6.6M13 13.4V9.4" /></symbol>
-      <symbol id="i-learned" viewBox="0 0 16 16"><path d="M8 2.4a4 4 0 0 0-2.4 7.2c.4.3.6.7.6 1.1v.3h3.6v-.3c0-.4.2-.8.6-1.1A4 4 0 0 0 8 2.4z"/><path d="M6.6 13.4h2.8"/></symbol>
-      <symbol id="i-cube" viewBox="0 0 16 16"><path d="M8 2.5 13.5 5.5V10.5L8 13.5 2.5 10.5V5.5z"/><path d="M2.7 5.7 8 8.6 13.3 5.7M8 8.6v4.8"/></symbol>
-      <symbol id="i-check" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><path d="M5.6 8.2 7.2 9.8 10.5 6.3"/></symbol>
-      <symbol id="i-key" viewBox="0 0 16 16"><circle cx="6" cy="6" r="2.5"/><path d="M7.9 7.9 13 13M11.2 11.2l1.3-1.3M10 10l1.4-1.4"/></symbol>
-      <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 2.5 13 4.2V8c0 3-2.2 4.8-5 5.5-2.8-.7-5-2.5-5-5.5V4.2z"/></symbol>
-      <symbol id="i-compliance" viewBox="0 0 16 16"><rect x="3.5" y="3" width="9" height="10.5" rx="1.6"/><path d="M6 3V2.2h4V3"/><path d="M6.2 8.2 7.4 9.4 10 6.7"/></symbol>
-      <symbol id="i-compartments" viewBox="0 0 16 16"><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="1.6"/><path d="M8 2.6v10.8M2.6 8h10.8"/></symbol>
-      <symbol id="i-audit" viewBox="0 0 16 16"><path d="M5.4 4h7.2M5.4 8h7.2M5.4 12h4.8"/><circle cx="3.3" cy="4" r=".7"/><circle cx="3.3" cy="8" r=".7"/><circle cx="3.3" cy="12" r=".7"/></symbol>
-      <symbol id="i-skills" viewBox="0 0 16 16"><path d="M8 2.4 9.2 6.2 13 7.4 9.2 8.6 8 12.4 6.8 8.6 3 7.4 6.8 6.2z"/></symbol>
-      <symbol id="i-store" viewBox="0 0 16 16"><path d="M4.4 5.6h7.2l-.5 7a1.1 1.1 0 0 1-1.1 1H6a1.1 1.1 0 0 1-1.1-1z"/><path d="M6 5.6V4.9a2 2 0 0 1 4 0v.7"/></symbol>
-      <symbol id="i-templates" viewBox="0 0 16 16"><rect x="5.6" y="5.6" width="7" height="7" rx="1.6"/><path d="M3.4 9.6V4.4A1.6 1.6 0 0 1 5 2.8h5"/></symbol>
-      <symbol id="i-tools" viewBox="0 0 16 16"><path d="M11.4 2.6a3 3 0 0 0-3.8 3.7l-4.6 4.6a1.4 1.4 0 0 0 1.9 1.9l4.6-4.6a3 3 0 0 0 3.7-3.8l-1.7 1.7-1.6-.4-.4-1.6z"/></symbol>
-      <symbol id="i-plugins" viewBox="0 0 16 16"><path d="M6.2 3.4h1.2a1.1 1.1 0 1 1 2.2 0h1.2a.8.8 0 0 1 .8.8v1.2a1.1 1.1 0 1 0 0 2.2v1.6a.8.8 0 0 1-.8.8H9.6a1.1 1.1 0 1 0-2.2 0H5.8a.8.8 0 0 1-.8-.8V8.6a1.1 1.1 0 1 1 0-2.2V4.2a.8.8 0 0 1 .8-.8z"/></symbol>
-      <symbol id="i-mcp" viewBox="0 0 16 16"><circle cx="8" cy="8" r="1.9"/><path d="M8 2.5v3.6M8 9.9v3.6M2.5 8h3.6M9.9 8h3.6"/></symbol>
-      <symbol id="i-channels" viewBox="0 0 16 16"><circle cx="8" cy="8" r="1.4"/><path d="M5.3 5.3a4 4 0 0 0 0 5.4M10.7 5.3a4 4 0 0 1 0 5.4M3.5 3.5a6.4 6.4 0 0 0 0 9M12.5 3.5a6.4 6.4 0 0 1 0 9"/></symbol>
-      <symbol id="i-settings" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/><path d="M8 1.9v1.7M8 12.4v1.7M14.1 8h-1.7M3.6 8H1.9M12.3 3.7l-1.2 1.2M4.9 11.1l-1.2 1.2M12.3 12.3l-1.2-1.2M4.9 4.9 3.7 3.7"/></symbol>
-      <symbol id="i-users" viewBox="0 0 16 16"><circle cx="6" cy="6" r="2.2"/><path d="M2.6 13a3.5 3.5 0 0 1 6.8 0"/><path d="M10.4 4.2a2.2 2.2 0 0 1 0 4.2M11 13a3.5 3.5 0 0 0-1.3-2.7"/></symbol>
-      <symbol id="i-tenants" viewBox="0 0 16 16"><rect x="3.5" y="2.6" width="9" height="10.8" rx="1.2"/><path d="M6 5.2h1.4M9 5.2h1.4M6 7.6h1.4M9 7.6h1.4M6.6 13.4v-2.2h2.8v2.2"/></symbol>
-      <symbol id="i-cache" viewBox="0 0 16 16"><ellipse cx="8" cy="4.2" rx="4.4" ry="1.8"/><path d="M3.6 4.2v7.6c0 1 2 1.8 4.4 1.8s4.4-.8 4.4-1.8V4.2"/><path d="M3.6 8c0 1 2 1.8 4.4 1.8s4.4-.8 4.4-1.8"/></symbol>
-      <symbol id="i-facts" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><path d="M8 7.4v3.2M8 5.3v.8"/></symbol>
-      <symbol id="i-walkthroughs" viewBox="0 0 16 16"><path d="M5.6 3 3 4.2v9l2.6-1.2 4.8 2 2.6-1.2v-9l-2.6 1.2-4.8-2z"/><path d="M5.6 3v8.8M10.4 5v8.8"/></symbol>
-      <symbol id="i-embed" viewBox="0 0 16 16"><path d="M5.6 5.4 3 8l2.6 2.6M10.4 5.4 13 8l-2.6 2.6M9 4l-2 8"/></symbol>
-      <symbol id="i-dot" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/></symbol>
-    </defs>
-  </svg>
+  {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut('Translation coverage') }}" lang="{{ ul('Translation coverage') }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
+  {% include "_icon_sprite.html" %}
   <header class="topbar">
     <button type="button" class="topbar__menu" id="nav-toggle"
-            aria-label="Toggle sidebar" aria-expanded="false" aria-controls="sidebar">
+            aria-label="{{ ut('Toggle sidebar') }}" lang="{{ ul('Toggle sidebar') }}" aria-expanded="false" aria-controls="sidebar">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <path d="M2 4.5h14M2 9h14M2 13.5h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
       </svg>
     </button>
-    <a class="brand" href="/" aria-label="Lightwork by Daybreak Labs — home">
+    <a class="brand" href="/" aria-label="{{ ut('Lightwork by Daybreak Labs - home') }}" lang="{{ ul('Lightwork by Daybreak Labs - home') }}">
       <span class="brand__plate">
         <img class="brand__logo" src="{{ asset('daybreak-mark.png') }}" alt="Daybreak Labs"
              width="35" height="24" />
@@ -89,114 +70,59 @@
     </a>
     <span class="topbar__controls">
       {% if can_halt %}
-      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="Emergency stop: stop or resume work">
+      {# #halt-label becomes a polite live region only after the first status
+         read (lightwork-ui.js), so loading a page never announces it. #}
+      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="{{ ut('Emergency stop: stop or resume work') }}" lang="{{ ul('Emergency stop: stop or resume work') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">checking</span>
+        <span id="halt-label">{{ ui('checking') }}</span>
       </a>
       {% else %}
+      {# A plain status, not a control: aria-label is not allowed on a <span>,
+         so the explanation is visually hidden text that is read with it. #}
       <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
-            aria-label="Emergency stop status. Halt permission is required to change it."
-            title="You do not have permission to stop or resume this work.">
+            title="{{ ut('You do not have permission to stop or resume this work.') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">checking</span>
+        <span class="sr-only" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}">{{ ut('Emergency stop status. Halt permission is required to change it.') }}</span>
+        <span id="halt-label">{{ ui('checking') }}</span>
       </span>
       {% endif %}
       {% if show_settings_link is not defined or show_settings_link %}
-      <a class="iconbtn" href="/settings" aria-label="Settings" title="Settings">
+      <a class="iconbtn" href="/settings" aria-label="{{ ut('Settings') }}" title="{{ ut('Settings') }}" lang="{{ ul('Settings') }}">
         <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-settings"></use></svg>
       </a>
       {% endif %}
-      <a class="iconbtn" href="/help" aria-label="Help and diagnostics" title="Help and diagnostics"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
-      <details class="prefs" id="prefs-menu">
-        <summary class="iconbtn" aria-label="Display preferences" title="Display preferences">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5h3.4M10.4 5h3.1M2.5 11h6.3M13.1 11h.4"/><circle cx="7.7" cy="5" r="1.7"/><circle cx="10.8" cy="11" r="1.7"/></svg>
-        </summary>
-        <div class="prefs__panel" role="group" aria-label="Display preferences">
-          <label class="prefs__row"><span>Theme</span>
-      <select class="ctl" id="theme-select" data-ui-preference="theme" aria-label="Theme">
-        <option value="">Theme</option>
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
-        <option value="solarized" {% if theme == 'solarized' %}selected{% endif %}>Solarized</option>
-        <option value="hicontrast" {% if theme == 'hicontrast' %}selected{% endif %}>High contrast</option>
-        {% for name in custom_theme_names %}
-        <option value="{{ name }}" {% if theme == name %}selected{% endif %}>{{ name }}</option>
-        {% endfor %}
-      </select>
-          </label>
-          <label class="prefs__row"><span>Density</span>
-      <select class="ctl" id="density-select" data-ui-preference="density" aria-label="Density">
-        <option value="">Density</option>
-        <option value="comfortable" {% if density == 'comfortable' %}selected{% endif %}>Comfortable</option>
-        <option value="compact" {% if density == 'compact' %}selected{% endif %}>Compact</option>
-      </select>
-          </label>
-          <label class="prefs__row"><span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('label.font') }}</span>
-      <select class="ctl" id="font-select" data-ui-preference="font" aria-label="{{ t('label.font') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
-        <option value="">{{ t('label.font') }}</option>
-        <option value="default" {% if font == 'default' %}selected{% endif %}>{{ t('font.default') }}</option>
-        <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
-      </select>
-          </label>
-        </div>
-      </details>
-      <a class="iconbtn" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
-        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.75"/><path d="M2.75 14a5.25 5.25 0 0 1 10.5 0"/></svg>
-      </a>
-      {% if show_logout %}
-      <a class="iconbtn" href="/auth/logout" aria-label="{{ t('chrome.sign_out') }}" title="{{ t('chrome.sign_out') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
-        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14H3.5A1.5 1.5 0 0 1 2 12.5v-9A1.5 1.5 0 0 1 3.5 2H6"/><path d="M10.5 11 14 8l-3.5-3"/><path d="M14 8H6"/></svg>
+      {% if show_personal_notifications %}
+      <a class="iconbtn iconbtn--notifications personal-notification-link" id="personal-notification-link" href="/notifications"
+         data-enabled="{{ 'true' if personal_notifications_enabled else 'false' }}"
+         aria-label="Your notifications" title="Your notifications">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-bell"></use></svg>
+        <span class="notification-count" id="personal-notification-count" aria-hidden="true" hidden></span>
       </a>
       {% endif %}
+      {% include "_topbar_utilities.html" %}
     </span>
   </header>
   <div class="nav-backdrop" id="nav-backdrop"></div>
   <aside class="sidebar" id="sidebar">
-    <nav aria-label="Primary">
+    {# The workspace this page works in, at the top of the sidebar (the chat
+       shell shows it in its sidebar too). As a loose child of <body> the grid
+       placed it after the footer, behind the sidebar, as the first Tab stop. #}
+    <p class="muted active-workspace-banner">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
+    <nav aria-label="{{ ut('Primary') }}" lang="{{ ul('Primary') }}">
       {% if can_create_goal %}
       <a class="btn btn--primary navquick" href="/chat">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        <span class="nav-label">New task</span>
+        <span class="nav-label">{{ ui("New task") }}</span>
       </a>
       {% endif %}
       <button type="button" class="navfinder__open" id="navfinder-open"
               aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.25" stroke="currentColor" stroke-width="1.4"/><path d="m10.25 10.25 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <span class="nav-label">Find a page</span>
+        <span class="nav-label">{{ ui('Search') }}</span>
         <kbd aria-hidden="true">Ctrl K</kbd>
       </button>
-      {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
-      {% set _path = request.url.path if request else '' %}
-      {# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
-      {% set _active_path = '/chat' if _path == '/' else _path %}
-      {# nav_groups comes from the _nav_context context processor: the page
-         registry (maverick_dashboard.ui_visibility.PAGES) filtered to what the
-         caller's RBAC role may see. Auth off -> the full nav, as before. #}
-      {# Prefer the most-specific visible route so nested pages do not expose
-         more than one aria-current="page" landmark. #}
-      {% set _active_nav = namespace(href='') %}
-      {% for _group in nav_groups %}
-        {% for _link in _group.links %}
-          {% if (_active_path == _link.href or _active_path.startswith(_link.href ~ '/')) and (_link.href|length > _active_nav.href|length) %}
-            {% set _active_nav.href = _link.href %}
-          {% endif %}
-        {% endfor %}
-      {% endfor %}
-      {% for _group in nav_groups %}
-        <div class="navgrp">
-          <button type="button" class="navgrp__toggle" data-grp="{{ _group.label }}"
-                  aria-expanded="true" aria-controls="navgrp-{{ loop.index0 }}">
-            <span class="navgrp__label">{{ _group_labels.get(_group.label, _group.label) }}</span>
-            <svg class="navgrp__caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <ul class="navgrp__items" id="navgrp-{{ loop.index0 }}">
-            {% for _link in _group.links %}
-              {% set _active = (_active_nav.href == _link.href) %}
-              <li><a href="{{ _link.href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ _link.label }}</span></a></li>
-            {% endfor %}
-          </ul>
-        </div>
-      {% endfor %}
+      {% include "_shortcuts_open.html" %}
+      {% include "_sidebar_nav.html" %}
     </nav>
   </aside>
   {# The finder is rendered from the same role-filtered registry as the
@@ -206,11 +132,30 @@
      JavaScript filters these existing links; it never manufactures a
      destination. #}
   {% include "_navfinder.html" %}
+  {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
+    {% include "_halt_banner.html" %}
+    {% include "_practice_banner.html" %}
+    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% else %}{% include "_where_crumbs.html" %}{% endif %}
+    {# The page's own tools: its documentation, and pinning it to the
+       sidebar (only on a page the person may open, when they can pin). #}
+    {% set _page_personal = nav_personal() if nav_personal is defined and nav_personal else none %}
+    {% set _page_pin = _page_personal and _page_personal.current %}
+    {% if docs_learn_more or _page_pin %}
+    <div class="page-tools">
+    {% if docs_learn_more %}
+    <p class="page-docs"><a href="{{ docs_learn_more.url }}" target="_blank" rel="noopener noreferrer">Learn more about {{ docs_learn_more.label }} in the documentation<span class="sr-only"> (opens in a new tab)</span></a></p>
+    {% endif %}
+    {% if _page_pin %}
+    <button type="button" class="btn btn--ghost page-pin" id="page-pin-toggle" data-nav-pin-toggle="{{ _page_personal.current }}"
+            aria-pressed="{{ 'true' if _page_personal.current_pinned else 'false' }}"><svg class="page-pin__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M9.6 2.4 13.6 6.4 11.4 7.2 8.8 9.8l.4 3.2-6.2-6.2 3.2.4 2.6-2.6z"/><path d="M5.6 10.4 2.6 13.4" stroke-linecap="round"/></svg>{{ ui('Pin to sidebar') }}</button>
+    {% endif %}
+    </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer>
-    <span class="muted">Lightwork by Daybreak Labs · <span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('footer.local') }}</span> · proprietary software</span>
+    <span class="muted">Lightwork by Daybreak Labs</span>
   </footer>
 
   <!-- Reusable toast regions + confirm dialog (window.mvToast / window.mvConfirm).
@@ -219,12 +164,16 @@
     <div id="mv-toasts-alert" class="mv-toasts__list" role="alert" aria-live="assertive" aria-atomic="false"></div>
     <div id="mv-toasts" class="mv-toasts__list" aria-live="polite" aria-atomic="false"></div>
   </div>
+  <!-- Status lines (window.mvStatus) speak through these: they exist from the
+       first paint, so even a page's first message is announced. -->
+  <div id="mv-announce" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="mv-announce-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
   <dialog id="mv-confirm" class="mv-confirm" aria-labelledby="mv-confirm-msg">
     <div class="mv-confirm__body">
       <p class="mv-confirm__msg" id="mv-confirm-msg"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">Cancel</button>
-        <button type="button" class="btn btn--primary" id="mv-confirm-ok">Confirm</button>
+        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">{{ ui("Cancel") }}</button>
+        <button type="button" class="btn btn--primary" id="mv-confirm-ok">{{ ui("Confirm") }}</button>
       </div>
     </div>
   </dialog>
@@ -234,21 +183,32 @@
       <div id="mv-form-fields"></div>
       <p class="mv-form__err" id="mv-form-err" aria-live="polite"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-form-cancel">Cancel</button>
-        <button type="submit" class="btn btn--primary" id="mv-form-ok">OK</button>
+        <button type="button" class="btn btn--ghost" id="mv-form-cancel">{{ ui("Cancel") }}</button>
+        <button type="submit" class="btn btn--primary" id="mv-form-ok">{{ ui('OK') }}</button>
       </div>
     </form>
   </dialog>
   {% include "_copilot.html" %}
-  <script src="{{ asset('lightwork-copilot.js') }}"></script>
   <script src="{{ asset('lightwork-ui.js') }}"></script>
-  <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
+  {% include "_journey_i18n_scripts.html" %}
   <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
   <link rel="stylesheet" href="{{ asset('lightwork-guided-actions.css') }}">
+  <link rel="stylesheet" href="{{ asset('lightwork-product-tour.css') }}">
+  <script src="{{ asset('lightwork-product-tour.js') }}" defer></script>
   <script src="{{ asset('lightwork-guided-actions.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
+  <script src="{{ asset('lightwork-pins.js') }}" defer></script>
+  <script src="{{ asset('lightwork-help-menu.js') }}" defer></script>
+  <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
+  {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
+  <script src="{{ asset('lightwork-practice.js') }}" defer></script>
+  {% if usage_measures_on %}<script src="{{ asset('lightwork-usage-measures.js') }}"></script>{% endif %}
+  {% if _session %}<script src="{{ asset('lightwork-session.js') }}" defer></script>{% endif %}
+  {% if usability_survey_on %}<script src="{{ asset('lightwork-usability-survey.js') }}" defer></script>{% endif %}
+  {% if web_vitals_on %}<script src="{{ asset('lightwork-web-vitals.js') }}" data-sample-rate="{{ web_vitals_sample_rate }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>
 </html>

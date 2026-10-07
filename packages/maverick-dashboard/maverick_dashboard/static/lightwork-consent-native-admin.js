@@ -329,7 +329,7 @@
         { value: "other", label: "Other" },
       ],
     }];
-    var answers = await window.mvForm("Remove device access", fields, { okText: "Continue" });
+    var answers = await window.mvForm("Remove device access", fields, { okText: "Review removal" });
     if (!answers) { return; }
     var ok = await CW.confirm(
       "Remove " + shortName(device.device_id) + " from " + app.application_id + "? This cannot be undone. The device will stop saving consent choices until the app is set up on it again.",

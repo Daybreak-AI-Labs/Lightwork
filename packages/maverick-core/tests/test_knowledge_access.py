@@ -7,10 +7,13 @@ import base64
 import hashlib
 import json
 import statistics
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
-from maverick import config, governed_records
+from maverick import config, governed_records, knowledge_access
 from maverick.knowledge_access import (
     TRAINING_PERMISSION_NOTICE,
     WEIGHT_INFLUENCE_NOTICE,
@@ -18,6 +21,7 @@ from maverick.knowledge_access import (
     KnowledgeAccessService,
     KnowledgeActorAuthority,
     KnowledgeDocument,
+    KnowledgeRequestCapacity,
     KnowledgeRequestConflict,
 )
 from maverick.paths import tenant_scope
@@ -48,6 +52,49 @@ def test_knowledge_access_feature_gate_is_explicit_and_strict(monkeypatch):
     assert config.knowledge_access_enabled({"knowledge_access": []}) is False
     monkeypatch.setenv("MAVERICK_KNOWLEDGE_ACCESS", "0")
     assert config.knowledge_access_enabled({"knowledge_access": {"enable": True}}) is False
+
+
+def test_purpose_inventory_pages_past_250_and_omits_revoked_sources(access):
+    service, registry, rights, calls = access
+    _dataset(registry, rights, "tenant-a", "oldest-authorized-source")
+    for index in range(251):
+        asset = f"newer-revoked-{index:03d}"
+        _dataset(registry, rights, "tenant-a", asset)
+        rights[("tenant-a", asset)]["allowed"] = False
+    assert service.available_purposes("tenant-a", "user:employee") == [PURPOSE]
+    assert ("tenant-a", "oldest-authorized-source") in calls
+    rights[("tenant-a", "oldest-authorized-source")]["allowed"] = False
+    assert service.available_purposes("tenant-a", "user:employee") == []
+
+
+def test_employee_feedback_is_exact_authorized_source_and_owner_only_receipt(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "policy-source")
+    receipt = service.submit_feedback(
+        "tenant-a", "user:employee", source, purpose=PURPOSE,
+        request_type="correction", reason="The delivery time changed.",
+        request_key="employee-correction", proposed_correction="Delivery takes two days.",
+    )
+    assert receipt["schema"] == "lightwork.knowledge-feedback.v1"
+    assert receipt["status"] == "submitted"
+    assert "derivatives" not in receipt and "retention_hold" not in receipt
+    with tenant_scope(tenant="tenant-a"):
+        persisted = service.request_store.get(receipt["id"])
+        assert persisted is not None and not persisted.get("_audit_pending")
+        correction_id = "knowledge-fix-" + receipt["id"].removeprefix("knowledge-req-")
+        correction_source = service.correction_store.get(correction_id)
+        assert correction_source is not None and not correction_source.get("_audit_pending")
+    assert service.feedback_requests("tenant-a", "user:employee")[0]["id"] == receipt["id"]
+    assert service.feedback_requests("tenant-a", "user:other") == []
+    assert service.feedback_requests("tenant-b", "user:employee") == []
+    assert registry.inspect("tenant-a", source)["state"] == "approved"
+    rights[("tenant-a", "policy-source")]["allowed"] = False
+    with pytest.raises((ResearchRegistryDenied, KnowledgeAccessDenied)):
+        service.submit_feedback(
+            "tenant-a", "user:other", source, purpose=PURPOSE,
+            request_type="exclusion", reason="Not visible.", request_key="denied-feedback",
+        )
+    assert service.feedback_requests("tenant-a", "user:other") == []
 
 
 @pytest.fixture
@@ -506,7 +553,7 @@ def test_expired_source_is_absent_from_search_and_cache_is_evicted(access):
     result = service.search("tenant-a", "user:reader", query="inference", purpose=PURPOSE)
 
     assert result["items"] == []
-    assert result["omitted_ineligible"] == 1
+    assert result["omitted_ineligible"] == 0  # denied records contribute no public count
     assert "inference" not in str(result["items"])
     rights[("tenant-a", "inference")]["expires_at"] = FUTURE
     service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
@@ -950,7 +997,14 @@ def test_complete_catalogue_rejects_earlier_expiry_during_final_later_check(
         monkeypatch.setattr(registry, "knowledge_candidate_page", lambda *_args, **_kwargs: {
             "items": rows, "snapshot": None, "last": None, "has_more": False,
         })
-    rights[("tenant-a", first.asset_id)]["expires_at"] = time.time() + 0.25
+    expiry = rights[("tenant-a", first.asset_id)]["expires_at"]
+    authoritative_time = registry.store.authoritative_time
+    clock = {"after_final_later_check": False}
+    monkeypatch.setattr(
+        registry.store,
+        "authoritative_time",
+        lambda: expiry + 1 if clock["after_final_later_check"] else authoritative_time(),
+    )
     original = registry.resolve_dataset
     counts = {first.asset_id: 0, second.asset_id: 0}
 
@@ -958,7 +1012,7 @@ def test_complete_catalogue_rejects_earlier_expiry_during_final_later_check(
         counts[reference.asset_id] += 1
         admission = original(tenant, reference, **kwargs)
         if reference == second and counts[reference.asset_id] == 4:
-            time.sleep(0.35)
+            clock["after_final_later_check"] = True
         return admission
 
     monkeypatch.setattr(registry, "resolve_dataset", expire_first_during_final_sweep)
@@ -982,6 +1036,7 @@ def test_complete_catalogue_rejects_earlier_expiry_during_final_later_check(
 
     with pytest.raises(KnowledgeAccessDenied, match="expired during knowledge access"):
         call()
+    assert clock["after_final_later_check"] is True
     assert counts == {first.asset_id: 4, second.asset_id: 4}
 
 
@@ -1182,6 +1237,312 @@ def test_approved_deletion_retires_source_and_surfaces_all_derivative_work(acces
         service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
     with pytest.raises(ResearchRegistryDenied):
         registry.resolve_model("tenant-a", model, purpose=PURPOSE)
+
+
+def test_full_rights_ledger_has_admin_recovery_without_losing_source_restrictions(
+    access, monkeypatch,
+):
+    service, registry, rights, _calls = access
+    monkeypatch.setattr(knowledge_access, "_MAX_REQUESTS", 2)
+    retired = _dataset(registry, rights, "tenant-a", "archive-retired")
+    active = _dataset(registry, rights, "tenant-a", "archive-active")
+    next_source = _dataset(registry, rights, "tenant-a", "archive-next")
+    completed = service.submit_request(
+        "tenant-a", "user:admin", retired, request_type="exclusion",
+        reason="Retire this version.", request_key="archive-complete",
+    )
+    completed = service.decide_request(
+        "tenant-a", "user:admin", completed["id"],
+        expected_revision=completed["revision"], decision="approve",
+        evidence_sha256=_sha("archive approval"),
+    )
+    pending = service.submit_request(
+        "tenant-a", "user:admin", active, request_type="exclusion",
+        reason="Needs review.", request_key="archive-pending",
+    )
+    assert service.request_capacity("tenant-a") == {
+        "active_count": 2, "active_limit": 2, "archive_available": True,
+    }
+    assert service.detail("tenant-a", "user:reader", active, purpose=PURPOSE)
+    before = service.search("tenant-a", "user:reader", query="archive-retired", purpose=PURPOSE)
+    assert all(item["reference"]["asset_id"] != "archive-retired"
+               for item in before["items"])
+    with pytest.raises(KnowledgeRequestCapacity, match="archive finished requests"):
+        service.submit_request(
+            "tenant-a", "user:admin", next_source, request_type="exclusion",
+            reason="Another exact source.", request_key="archive-next",
+        )
+    assert completed["archive_ready"] is True
+    moved = service.archive_request(
+        "tenant-a", "user:admin", completed["id"],
+        expected_revision=completed["revision"],
+    )
+    assert moved["archived_at"] is not None
+    assert moved["archive_ready"] is False
+    assert service.get_request("tenant-a", completed["id"])["archived_at"] is not None
+    assert service.list_requests("tenant-a", archived=True)[0]["id"] == completed["id"]
+    assert [item["id"] for item in service.list_requests("tenant-a")] == [pending["id"]]
+    assert service.submit_request(
+        "tenant-a", "user:admin", retired, request_type="exclusion",
+        reason="Retire this version.", request_key="archive-complete",
+    )["archived_at"] is not None
+    after = service.search("tenant-a", "user:reader", query="archive-retired", purpose=PURPOSE)
+    assert {item["reference"]["asset_id"] for item in after["items"]} == {
+        item["reference"]["asset_id"] for item in before["items"]
+    }
+    with pytest.raises(ResearchRegistryDenied):
+        service.detail("tenant-a", "user:reader", retired, purpose=PURPOSE)
+    assert service.submit_request(
+        "tenant-a", "user:admin", next_source, request_type="exclusion",
+        reason="Another exact source.", request_key="archive-next",
+    )["status"] == "submitted"
+
+
+def test_legacy_overfill_scans_later_finished_request_before_archiving(access, monkeypatch):
+    service, registry, rights, _calls = access
+    monkeypatch.setattr(knowledge_access, "_MAX_REQUESTS", 3)
+    sources = []
+    finished = None
+    for index in range(3):
+        source = _dataset(registry, rights, "tenant-a", f"overfill-{index}")
+        sources.append(source)
+        submitted = service.submit_request(
+            "tenant-a", "user:admin", source, request_type="exclusion",
+            reason="Review this version.", request_key=f"overfill-{index}",
+        )
+        if index == 0:
+            finished = service.decide_request(
+                "tenant-a", "user:admin", submitted["id"],
+                expected_revision=submitted["revision"], decision="deny",
+                evidence_sha256=_sha("overfill denial"),
+            )
+    # The finished record is older than the two pending ones and therefore
+    # beyond the fixed list window after a restore or external import.
+    with tenant_scope(tenant="tenant-a"):
+        assert finished["id"] not in {row["id"] for row in service.request_store.list(limit=2)}
+    monkeypatch.setattr(knowledge_access, "_MAX_REQUESTS", 2)
+    with pytest.raises(KnowledgeAccessDenied, match="request boundary"):
+        service.detail("tenant-a", "user:reader", sources[0], purpose=PURPOSE)
+    assert service.list_requests("tenant-a", ready_to_archive=True) == []
+
+    cursor, seen, candidates = "", set(), []
+    for _ in range(4):
+        page = service.recovery_candidates("tenant-a", cursor=cursor, limit=1)
+        assert len(page["items"]) <= 1
+        candidates.extend(page["items"])
+        if page["next_cursor"] is None:
+            break
+        assert page["next_cursor"] not in seen
+        seen.add(page["next_cursor"])
+        cursor = page["next_cursor"]
+    assert [item["id"] for item in candidates] == [finished["id"]]
+    assert service.archive_request(
+        "tenant-a", "user:admin", finished["id"],
+        expected_revision=finished["revision"],
+    )["archived_at"] is not None
+    assert service.request_capacity("tenant-a")["active_count"] == 2
+    assert service.detail("tenant-a", "user:reader", sources[0], purpose=PURPOSE)
+
+
+def test_archive_refuses_legal_hold_and_undelivered_audit_without_deleting_live_request(
+    access, monkeypatch,
+):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "held-archive")
+    request = service.submit_request(
+        "tenant-a", "user:admin", source, request_type="deletion",
+        reason="Customer requested deletion.", request_key="held-archive",
+    )
+    held = service.place_retention_hold(
+        "tenant-a", "user:counsel", request["id"],
+        expected_revision=request["revision"], hold_id="matter-one",
+        basis="Preserve for litigation.", expires_at=FUTURE,
+        evidence_sha256=_sha("hold evidence"),
+    )
+    approved = service.decide_request(
+        "tenant-a", "user:admin", request["id"],
+        expected_revision=held["revision"], decision="approve",
+        evidence_sha256=_sha("deletion approval"),
+    )
+    assert approved["archive_ready"] is False
+    with pytest.raises(KnowledgeRequestConflict, match="released legal holds"):
+        service.archive_request(
+            "tenant-a", "user:admin", request["id"],
+            expected_revision=approved["revision"],
+        )
+    with tenant_scope(tenant="tenant-a"):
+        assert service.request_store.get(request["id"]) is not None
+    released = service.release_retention_hold(
+        "tenant-a", "user:counsel", request["id"],
+        expected_revision=approved["revision"], reason="Preservation ended.",
+        evidence_sha256=_sha("release evidence"),
+    )
+    from maverick import audit
+
+    record_audit = audit.record
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: False)
+    with pytest.raises(KnowledgeRequestConflict, match="audit record is still syncing"):
+        service.archive_request(
+            "tenant-a", "user:admin", request["id"],
+            expected_revision=released["revision"],
+        )
+    with tenant_scope(tenant="tenant-a"):
+        assert service.request_store.get(request["id"]) is not None
+    monkeypatch.setattr(audit, "record", record_audit)
+    archived = service.archive_request(
+        "tenant-a", "user:admin", request["id"],
+        expected_revision=released["revision"],
+    )
+    assert archived["archived_at"] is not None
+    assert registry.inspect("tenant-a", source)["state"] == "revoked"
+
+
+def test_archive_retry_after_interrupted_live_row_removal_keeps_one_request(
+    access, monkeypatch,
+):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "archive-retry")
+    request = service.submit_request(
+        "tenant-a", "user:admin", source, request_type="exclusion",
+        reason="Review this source.", request_key="archive-interrupted",
+    )
+    finished = service.decide_request(
+        "tenant-a", "user:admin", request["id"],
+        expected_revision=request["revision"], decision="deny",
+        evidence_sha256=_sha("denial rationale"),
+    )
+    remove = service.request_store.delete
+
+    def interrupted(*args, **kwargs):
+        raise RuntimeError("injected stop before hot-row removal")
+
+    monkeypatch.setattr(service.request_store, "delete", interrupted)
+    with pytest.raises(RuntimeError, match="injected stop"):
+        service.archive_request(
+            "tenant-a", "user:admin", request["id"],
+            expected_revision=finished["revision"],
+        )
+    assert service.get_request("tenant-a", request["id"])["archived_at"] is None
+    assert service.list_requests("tenant-a", archived=True) == []
+    monkeypatch.setattr(service.request_store, "delete", remove)
+    replay = service.archive_request(
+        "tenant-a", "user:admin", request["id"],
+        expected_revision=finished["revision"],
+    )
+    assert replay["archived_at"] is not None
+    assert service.archive_request(
+        "tenant-a", "user:admin", request["id"],
+        expected_revision=finished["revision"],
+    )["archived_at"] == replay["archived_at"]
+
+
+def test_delayed_submit_retry_cannot_resurrect_archived_denial(access, monkeypatch):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "delayed-denial")
+    request = service.submit_request(
+        "tenant-a", "user:admin", source, request_type="exclusion",
+        reason="Review this exact version.", request_key="delayed-denial",
+    )
+    denied = service.decide_request(
+        "tenant-a", "user:admin", request["id"],
+        expected_revision=request["revision"], decision="deny",
+        evidence_sha256=_sha("denial rationale"),
+    )
+    original_get = service.request_store.get
+    original_create = service.request_store.create
+    retry_at_create = threading.Event()
+    release_retry = threading.Event()
+    archive_started = threading.Event()
+    archive_write = threading.Event()
+    retry_thread = None
+    missed_live_once = False
+
+    def delayed_get(record_id):
+        nonlocal missed_live_once
+        if (threading.get_ident() == retry_thread and record_id == request["id"]
+                and not missed_live_once):
+            missed_live_once = True
+            return None
+        return original_get(record_id)
+
+    def delayed_create(*args, **kwargs):
+        if threading.get_ident() == retry_thread:
+            retry_at_create.set()
+            assert release_retry.wait(5), "retry was not released"
+        return original_create(*args, **kwargs)
+
+    original_archive_create = service.archive_store.create
+
+    def observed_archive_create(*args, **kwargs):
+        archive_write.set()
+        return original_archive_create(*args, **kwargs)
+
+    monkeypatch.setattr(service.request_store, "get", delayed_get)
+    monkeypatch.setattr(service.request_store, "create", delayed_create)
+    monkeypatch.setattr(service.archive_store, "create", observed_archive_create)
+
+    def retry():
+        nonlocal retry_thread
+        retry_thread = threading.get_ident()
+        return service.submit_request(
+            "tenant-a", "user:admin", source, request_type="exclusion",
+            reason="Review this exact version.", request_key="delayed-denial",
+        )
+
+    def archive():
+        archive_started.set()
+        return service.archive_request(
+            "tenant-a", "user:admin", request["id"],
+            expected_revision=denied["revision"],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        retry_result = pool.submit(retry)
+        assert retry_at_create.wait(5)
+        archive_result = pool.submit(archive)
+        assert archive_started.wait(5)
+        try:
+            assert not archive_write.wait(0.2), "archive passed the delayed submission"
+        finally:
+            release_retry.set()
+        assert retry_result.result(timeout=5)["status"] == "denied"
+        assert archive_result.result(timeout=5)["archived_at"] is not None
+
+    assert service.submit_request(
+        "tenant-a", "user:admin", source, request_type="exclusion",
+        reason="Review this exact version.", request_key="delayed-denial",
+    )["archived_at"] is not None
+    with tenant_scope(tenant="tenant-a"):
+        assert original_get(request["id"]) is None
+    assert registry.inspect("tenant-a", source)["state"] == "approved"
+    assert service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+
+
+def test_shared_backend_refuses_two_store_archive_and_preserves_rights(access, monkeypatch):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "shared-retirement")
+    request = service.submit_request(
+        "tenant-a", "user:admin", source, request_type="exclusion",
+        reason="Review the source.", request_key="shared-retirement",
+    )
+    denied = service.decide_request(
+        "tenant-a", "user:admin", request["id"],
+        expected_revision=request["revision"], decision="deny",
+        evidence_sha256=_sha("shared denial"),
+    )
+    with monkeypatch.context() as shared:
+        shared.setattr(service.archive_store, "_backend", lambda: SimpleNamespace(kind="postgres"))
+        assert service.request_capacity("tenant-a")["archive_available"] is False
+        assert service.get_request("tenant-a", request["id"])["archive_ready"] is False
+        with pytest.raises(KnowledgeRequestConflict, match="unavailable on this installation"):
+            service.archive_request(
+                "tenant-a", "user:admin", request["id"],
+                expected_revision=denied["revision"],
+            )
+    assert service.get_request("tenant-a", request["id"])["status"] == "denied"
+    assert service.get_request("tenant-a", request["id"])["archived_at"] is None
+    assert service.list_requests("tenant-a", archived=True) == []
+    assert registry.inspect("tenant-a", source)["state"] == "approved"
 
 
 def test_crash_after_source_retirement_recovers_by_exact_replay(access):
@@ -1778,7 +2139,7 @@ def test_revoking_one_source_keeps_other_sources_lexical_projections(access):
     result = service.search("tenant-a", "user:reader", query="policy", purpose=PURPOSE)
 
     assert [item["reference"]["asset_id"] for item in result["items"]] == ["policy-kept"]
-    assert result["omitted_ineligible"] == 1
+    assert result["omitted_ineligible"] == 0  # denied records contribute no public count
     # Only the revoked source's derived terms go; the others are the same objects.
     survivors = {identity: service._lexical[identity] for identity in service._lexical}
     assert len(survivors) == 2

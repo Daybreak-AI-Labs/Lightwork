@@ -86,6 +86,7 @@ def _read_rows() -> list[dict]:
 
 
 def history(*, name: str | None = None, owner: str | None = None,
+            owners: frozenset[str] | None = None,
             tenant: str | None = None, limit: int = 50) -> list[dict]:
     """Recent firing/error rows, newest first. ``owner=None`` (admin/auth-off)
     sees all; a specific owner sees only its own. ``name`` filters to one
@@ -93,6 +94,8 @@ def history(*, name: str | None = None, owner: str | None = None,
     rows = _read_rows()
     if owner is not None:
         rows = [r for r in rows if r.get("owner", "") == owner]
+    if owners is not None:
+        rows = [r for r in rows if r.get("owner", "") in owners]
     if tenant is not None:
         # Legacy rows had no tenant field and belong only to the shared floor;
         # never blend them into a named tenant with the same owner/name.

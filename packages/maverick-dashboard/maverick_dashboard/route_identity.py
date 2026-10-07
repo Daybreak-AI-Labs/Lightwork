@@ -59,44 +59,17 @@ def iter_compatible_route_contexts(
         yield route
 
 
-def _iter_routers(router: APIRouter) -> Iterator[APIRouter]:
-    """Yield each router in a lazy include tree once."""
-    pending = [router]
-    seen: set[int] = set()
-    while pending:
-        current = pending.pop()
-        if id(current) in seen:
-            continue
-        seen.add(id(current))
-        yield current
-        for route in current.routes:
-            included = getattr(route, "original_router", None)
-            if isinstance(included, APIRouter):
-                pending.append(included)
+def _include_prefix(route: Any) -> str:
+    """The path prefix a lazy include wrapper adds to its router's routes."""
+    context = getattr(route, "include_context", None)
+    prefix = getattr(context, "prefix", "")
+    return prefix if isinstance(prefix, str) else ""
 
 
-def _route_owners(router: APIRouter) -> dict[int, APIRouter]:
-    owners: dict[int, APIRouter] = {}
-    for current in _iter_routers(router):
-        for route in current.routes:
-            if not isinstance(getattr(route, "original_router", None), APIRouter):
-                owners[id(route)] = current
-    return owners
-
-
-def _effective_value(context: Any, original_route: BaseRoute, attribute: str) -> Any:
-    value = getattr(context, attribute, None)
-    if value:
-        return value
-    starlette_route = getattr(context, "starlette_route", None)
-    value = getattr(starlette_route, attribute, None)
-    if value:
-        return value
-    return getattr(original_route, attribute, None)
-
-
-def _endpoint_identity(context: Any, original_route: BaseRoute) -> tuple[str, str]:
-    endpoint = _effective_value(context, original_route, "endpoint")
+def _endpoint_identity(route: BaseRoute) -> tuple[str, str]:
+    endpoint = getattr(route, "endpoint", None)
+    if endpoint is None:
+        endpoint = route
     module = getattr(endpoint, "__module__", type(endpoint).__module__)
     qualname = getattr(endpoint, "__qualname__", type(endpoint).__qualname__)
     if module.startswith(_DASHBOARD_MODULE_PREFIX):
@@ -105,29 +78,45 @@ def _endpoint_identity(context: Any, original_route: BaseRoute) -> tuple[str, st
 
 
 def _effective_routes(app: FastAPI) -> list[_EffectiveRoute]:
-    owners = _route_owners(app.router)
+    """Every effective leaf route, read from the include tree by plain
+    attribute access.
+
+    FastAPI 0.141 materialises an included router's effective contexts on
+    first traversal (``effective_route_contexts``), which rebuilds every
+    route's dependant and pydantic adapters; on this dashboard that is
+    thousands of routes and seconds of import time.  A route's effective
+    identity (name, methods, endpoint, prefixed path) is fully determined by
+    the original route object and the prefixes of the includes above it, so
+    it is computed here without touching those lazy caches.  Older FastAPI
+    releases flatten includes into ``router.routes`` with the prefix already
+    applied, which this walk reads identically.
+    """
     effective: list[_EffectiveRoute] = []
-    for context in iter_compatible_route_contexts(app.routes):
-        original_route = getattr(context, "original_route", context)
-        name = str(_effective_value(context, original_route, "name") or "route")
-        path = str(_effective_value(context, original_route, "path") or "")
-        methods = tuple(
-            sorted(_effective_value(context, original_route, "methods") or ())
-        )
-        endpoint_module, endpoint_qualname = _endpoint_identity(
-            context, original_route
-        )
-        effective.append(
-            _EffectiveRoute(
-                original_route=original_route,
-                owner=owners[id(original_route)],
-                name=name,
-                path=path,
-                methods=methods,
-                endpoint_module=endpoint_module,
-                endpoint_qualname=endpoint_qualname,
+    pending: list[tuple[APIRouter, str]] = [(app.router, "")]
+    while pending:
+        router, prefix = pending.pop()
+        for route in reversed(router.routes):
+            included = getattr(route, "original_router", None)
+            if isinstance(included, APIRouter):
+                pending.append((included, prefix + _include_prefix(route)))
+                continue
+            name = getattr(route, "name", None)
+            if not isinstance(name, str):
+                continue
+            path = prefix + str(getattr(route, "path", "") or "")
+            methods = tuple(sorted(getattr(route, "methods", None) or ()))
+            endpoint_module, endpoint_qualname = _endpoint_identity(route)
+            effective.append(
+                _EffectiveRoute(
+                    original_route=route,
+                    owner=router,
+                    name=name or "route",
+                    path=path,
+                    methods=methods,
+                    endpoint_module=endpoint_module,
+                    endpoint_qualname=endpoint_qualname,
+                )
             )
-        )
     return effective
 
 
@@ -204,9 +193,11 @@ def stabilize_effective_route_names(app: FastAPI) -> None:
         route.original_route.name = target
         changed_owners[id(route.owner)] = route.owner
 
-    # Collecting effective contexts above populated FastAPI's lazy include
-    # caches.  Bump only routers whose route names changed so the next traversal
-    # rebuilds those contexts from the now-canonical original route objects.
+    # Nothing above touched FastAPI's lazy include caches, so a first request
+    # (or the warm-up thread) builds each effective context exactly once, from
+    # the now-canonical original route objects.  Bump the routers whose route
+    # names changed anyway: a caller that traversed effective contexts before
+    # stabilizing must not keep stale names.
     for owner in changed_owners.values():
         mark_routes_changed = getattr(owner, "_mark_routes_changed", None)
         if callable(mark_routes_changed):

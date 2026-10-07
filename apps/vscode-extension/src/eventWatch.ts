@@ -12,6 +12,15 @@ type Options = {
   onStop: (reason: string, terminal: boolean) => void;
 };
 
+/** Consent cannot override the authenticated HTTPS-or-loopback boundary. */
+export function assertDashboardTransport(url: URL, authenticated: boolean): void {
+  const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname.toLowerCase());
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
+      (authenticated && url.protocol !== "https:" && !local)) {
+    throw new Error("Use HTTPS for a remote dashboard with an access token, or an HTTP loopback address for this computer. Address consent cannot override this rule.");
+  }
+}
+
 /** One owner for connection, retry and idle deadlines, including disposal. */
 export function watchEvents(options: Options): () => void {
   let stopped = false, ticket = 0, cursor = options.cursor, backoff = 1000;
@@ -43,9 +52,8 @@ export function watchEvents(options: Options): () => void {
   }
   function connect() {
     if (stopped) return;
-    if (!["http:", "https:"].includes(options.url.protocol) || options.url.username || options.url.password) {
-      stop("Dashboard URL must use HTTP(S) without embedded credentials."); return;
-    }
+    try { assertDashboardTransport(options.url, Object.entries(options.headers).some(([name, value]) => name.toLowerCase() === "authorization" && Boolean(value))); }
+    catch (error) { stop(error instanceof Error ? error.message : "Dashboard transport is not permitted."); return; }
     const mine = ++ticket;
     const url = new URL(options.url);
     url.searchParams.set("since", String(cursor));

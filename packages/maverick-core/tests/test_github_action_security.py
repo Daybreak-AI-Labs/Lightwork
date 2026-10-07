@@ -57,7 +57,11 @@ def test_action_never_streams_raw_agent_output_to_github() -> None:
     assert 'rm -f -- "$raw_file"' in run
     assert '--write-secret-file-snapshot "$secret_snapshot"' in run
     assert '--secret-file-snapshot "$secret_snapshot"' in run
-    assert '"$raw_file" "$secret_snapshot"' in run
+    # The raw capture, the native signed result, its key and the secret
+    # snapshot are all discarded right after sanitization, before exposure.
+    discard = 'rm -f -- "$raw_file" "$native_result" "$result_key" "$secret_snapshot"'
+    assert discard in run
+    assert '--run-result "$native_result"' in run and '--result-key "$result_key"' in run
     assert "::stop-commands::%s" in run
     assert 'cat -- "$out_file"' in run
     assert 'cat -- "$summary_file"' in run
@@ -68,7 +72,7 @@ def test_action_never_streams_raw_agent_output_to_github() -> None:
     sanitize = run.index('--input "$raw_file"')
     exposed_log = run.index('cat -- "$out_file"')
     exposed_output = run.index('result<<$result_delimiter')
-    assert snapshot < capture < sanitize < exposed_log < exposed_output
+    assert snapshot < capture < sanitize < run.index(discard) < exposed_log < exposed_output
 
 
 def test_action_uses_the_reviewed_setup_python_release() -> None:

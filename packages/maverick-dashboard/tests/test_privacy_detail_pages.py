@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from markupsafe import escape
 from maverick_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
@@ -72,17 +73,66 @@ def test_vendor_detail_renders_record_without_form_tokens():
     assert "contracts/acme-dpa.pdf" in body
     assert "Data processing agreement" in body
     # The hosted-form token addresses a public endpoint; it never renders.
-    token = record["questionnaires"][0]["token"]
+    token = record["form_path"].removeprefix("/form/")
     assert token not in body
     # Every section has its button; no raw IDs or lowercase keys to read.
+    # A new vendor starts under review: activation goes through its
+    # assessment, so the page offers that instead of a no-op status button.
     for label in ("Add contract", "Send a questionnaire", "Link a record", "Add a note",
-                  "Mark as under review", "Stop using this vendor"):
+                  "Review assessment before activation", "Stop using this vendor"):
         assert label in body
+    assert "Mark as under review" not in body
     assert f'data-revision="{record["revision"]}"' in body
     assert "window.confirm" not in body
     from test_support.plain_language import developer_terms
 
     assert developer_terms(body) == []
+
+
+def test_vendor_detail_shows_checked_reply_state_and_read_failure(monkeypatch):
+    from maverick import form_store
+
+    record = _vendor()
+    token = record["form_path"].removeprefix("/form/")
+    form_store.append(token, {"vr_q1": "yes"})
+    answered = client.get(f"/privacy/vendors/{record['id']}")
+    assert answered.status_code == 200
+    assert "Answered</span>" in answered.text
+    assert token not in answered.text
+
+    def fail_read(_token, _cursor):
+        raise OSError("private storage detail")
+
+    monkeypatch.setattr(form_store, "since", fail_read)
+    unavailable = client.get(f"/privacy/vendors/{record['id']}")
+    assert unavailable.status_code == 200
+    assert "can't check questionnaire replies right now" in unavailable.text
+    assert "Replies unavailable</span>" in unavailable.text
+    assert "Answered</span>" not in unavailable.text
+    assert token not in unavailable.text
+    assert "private storage detail" not in unavailable.text
+
+
+def test_vendor_detail_offers_link_replacement_without_exposing_old_address():
+    from maverick import form_store
+    from maverick import vendor_management as vm
+
+    sent = _vendor()
+    old_token = sent["form_path"].removeprefix("/form/")
+    form_store.append(old_token, {"vr_q1": "yes"})
+    replaced = vm.replace_questionnaire_link(
+        sent["id"], vm.lookup_digest(old_token), actor="ops",
+        expected_revision=sent["revision"],
+    )
+    new_token = replaced["form_path"].removeprefix("/form/")
+    page = client.get(f"/privacy/vendors/{sent['id']}")
+    assert page.status_code == 200
+    assert "Replace link" in page.text
+    assert "Copy link" in page.text
+    assert "View replies" in page.text
+    assert "1 earlier reply retained" in page.text
+    assert old_token not in page.text
+    assert new_token not in page.text
 
 
 def test_vendor_detail_404_and_403(tmp_path):
@@ -92,6 +142,49 @@ def test_vendor_detail_404_and_403(tmp_path):
     (tmp_path / "config.toml").write_text("", encoding="utf-8")
     config.reset_config_cache()
     assert client.get("/privacy/vendors/vend-nope").status_code == 403
+
+
+@pytest.mark.parametrize("field", ["name", "category", "registered_by"])
+@pytest.mark.parametrize("value", [
+    '<xprobe title="quotes">Café & 東京</xprobe>',
+    '</h1><svg data-probe="alternate">Résumé</svg>',
+])
+def test_vendor_detail_escapes_stored_hero_fields(field, value, monkeypatch):
+    from maverick_dashboard import api
+    from maverick_dashboard.identity_format import humanize, humanize_principal
+
+    payload = {
+        "name": "Synthetic vendor", "category": "analytics",
+        "criticality": "high", "owner": "procurement",
+    }
+    if field == "registered_by":
+        monkeypatch.setattr(api, "_request_actor", lambda request: value)
+    else:
+        payload[field] = value
+    created = client.post("/api/v1/vendors", json=payload)
+    assert created.status_code == 201, created.text
+    record = created.json()
+    assert record[field] == value
+
+    page = client.get(f"/privacy/vendors/{record['id']}")
+    assert page.status_code == 200
+    displayed = humanize(value) if field == "category" else (
+        str(humanize_principal(value)) if field == "registered_by" else value
+    )
+    assert str(escape(displayed)) in page.text
+    assert "<xprobe" not in page.text.lower()
+    assert '<svg data-probe="alternate">' not in page.text.lower()
+
+
+def test_vendor_detail_preserves_unicode_and_literal_punctuation():
+    value = 'Café & 東京 <Research> "Partners"'
+    created = client.post("/api/v1/vendors", json={
+        "name": value, "category": "analytics", "criticality": "low", "owner": "ops",
+    })
+    assert created.status_code == 201, created.text
+    page = client.get(f"/privacy/vendors/{created.json()['id']}")
+    assert page.status_code == 200
+    assert f'id="page-hero-title">{escape(value)}</h1>' in page.text
 
 
 def test_dsar_detail_shows_fulfillment_trail_without_tokens():
@@ -179,3 +272,92 @@ def test_microsoft365_collection_needs_operate_and_plain_errors(monkeypatch):
     rbac.set_role("user:v", "viewer")
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:v")
     assert client.post(url, json={"revision": record["revision"]}).status_code == 403
+
+
+def _main(html: str) -> str:
+    return html.split("<main", 1)[-1].split("</main>", 1)[0]
+
+
+def test_dsar_page_counts_only_sent_notices_and_explains_unsent_ones():
+    from maverick import privacy_ops
+    from maverick import public_rights_form as prf
+
+    request = privacy_ops.open_dsar("lee@example.com", "access", opened_by="ops")
+    prf.set_mail_sender(lambda *_: (False, "no sending account configured ([email] / EMAIL_USER)"))
+    try:
+        prf.send_notice(request["id"], "acknowledgement", actor="ops")
+    finally:
+        prf.set_mail_sender(None)
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert "Notices sent (" not in main
+    assert "Notices: 0 sent · 1 not sent" in main
+    assert "Lightwork has no email account to send from." in main
+    plain, technical = main.split("Technical details", 1)
+    assert "EMAIL_USER" not in plain and "EMAIL_USER" in technical
+    assert 'href="/settings/all?id=email.user"' in main  # the fix, for an administrator
+
+
+def test_dsar_page_says_whether_an_answer_is_on_record():
+    import datetime
+
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("max@example.com", "erasure", opened_by="ops")
+    privacy_ops.close_dsar(request["id"], closed_by="ops")
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert "Closed without a recorded answer" in main
+    assert 'id="dsar-record-outcome"' in main
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    privacy_ops.close_dsar(request["id"], closed_by="ops", outcome={
+        "kind": "answered", "answered_on": today, "reference": "CRM ticket 77",
+        "erasure": "erased"})
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert f'Answered on <time datetime="{today}" data-mv-time="{today}"' in main
+    assert "Their data was erased" in main
+    assert "CRM ticket 77" in main
+    assert 'id="dsar-record-outcome"' not in main
+
+
+def test_a_request_marked_answered_then_closed_still_shows_its_answer():
+    import datetime
+
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("ola@example.com", "opt_out", opened_by="ops")
+    # An opt-out is answered by recording what was stopped, when, and the proof;
+    # a bare "mark answered" click no longer counts as an answer.
+    with pytest.raises(ValueError, match="Record what was changed or stopped"):
+        privacy_ops.fulfill_dsar(request["id"], fulfilled_by="ops")
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    privacy_ops.close_dsar(request["id"], closed_by="ops", outcome={
+        "kind": "answered", "answered_on": today, "reference": "Ticket 77",
+        "note": "Stopped the sale of their data in the CRM"})
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert f'Answered on <time datetime="{today}" data-mv-time="{today}"' in main
+    assert "Closed without a recorded answer" not in main
+    assert 'id="dsar-record-outcome"' not in main  # nothing left to record
+
+
+def test_completion_notice_points_at_a_step_that_exists():
+    from maverick import config, privacy_ops
+
+    request = privacy_ops.open_dsar("ana@example.com", "access", opened_by="ops")
+    page = client.get(f"/privacy/dsar/{request['id']}").text
+    assert 'data-fulfillment-state="not_started"' in page
+    (config.config_path()).write_text("[privacy_ops]\nenable = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    page = client.get(f"/privacy/dsar/{request['id']}").text
+    assert 'data-fulfillment-state="off"' in page
+
+
+def test_a_closed_request_without_an_answer_is_flagged_in_the_list_and_on_its_page():
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("noor@example.com", "access", source="public_form",
+                                    status="unverified", opened_by="ops")
+    privacy_ops.close_dsar(request["id"], closed_by="ops")
+    listing = _main(client.get("/privacy").text)
+    assert "No answer on record" in listing
+    page = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert "never confirmed" in page and "not recorded on the request" not in page
+    assert 'data-identity="unverified"' in client.get(f"/privacy/dsar/{request['id']}").text

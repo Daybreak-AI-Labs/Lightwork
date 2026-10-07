@@ -23,7 +23,11 @@ def test_learning_mutations_confirm_targets_and_recover_for_retry():
     assert "sw.label + '” for this deployment? ' + impact" in source
     assert "Scheduled and triggered workflows may start running" in source
     assert "Disable automatic rollback of workflow regressions?" in source
-    assert "Disable automatic application of workflow improvements?" in source
+    # Automatic application of workflow improvements was retired: suggestions
+    # now wait for complete human review, so no unconfirmed toggle may return.
+    assert "lrn-auto-apply" not in source
+    assert "wire('lrn-auto-evolve', 'auto_evolve');" in source
+    assert "Workflow suggestions require your review." in source
     assert "Stop these experiments? Results so far are kept." in source
     assert source.count("if (btn.dataset.inFlight === 'true') return;") >= 5
     assert source.count("btn.setAttribute('aria-busy', 'true')") >= 5
@@ -35,36 +39,51 @@ def test_learning_mutations_confirm_targets_and_recover_for_retry():
 
 def test_workforce_deploy_is_single_flight_and_surfaces_response_details():
     source = _source("workforce.html")
+    teams = _static("lightwork-department-team-updates.js")
 
     deploy = source[source.index('if (act === "deploy")') : source.index("openModal(", source.index('if (act === "deploy")'))]
-    assert 'if (btn.dataset.inFlight === "true") return;' in deploy
-    assert '"Deploy the " + deptTitle + " team?' in deploy
-    assert "btn.disabled = true" in deploy
-    assert 'btn.setAttribute("aria-busy", "true")' in deploy
-    # Failures read as plain sentences (status mapped by mvErrorText), never
-    # a raw server detail or an HTTP code.
-    assert 'window.mvErrorText(res, "deploy the " + deptTitle + " team")' in deploy
-    assert "HTTP" not in deploy and "res.body.detail" not in deploy
-    assert "check your connection and try again" in deploy
-    assert "finally" in deploy
-    assert "delete btn.dataset.inFlight" in deploy
+    # The button opens the shared before-and-after review; nothing saves on click.
+    assert "await window.LWDepartmentTeamUpdates.open(key, btn);" in deploy
+    assert "fetch(" not in deploy
+    # Single flight: a second open or save while one is running is ignored,
+    # and the save button stays disabled while busy.
+    assert "async function open(key,source){if(busy||invalid)" in teams
+    assert "async function saveReviewed(){if(!active||busy||invalid||!active.token)return;" in teams
+    assert "function controls(){save.disabled=busy||invalid;" in teams
+    assert "finally{if(started===generation){busy=false;controls();}}" in teams
+    # Failures read as the server's plain sentence, never an HTTP code.
+    # (mvFetchJSON's serverDetail: the server's sentence, else the page's.)
+    assert "var F='This team review is unavailable. Reload and check current access.'" in teams
+    assert "serverDetail:F" in teams
+    assert "HTTP" not in teams
+    assert "Check the original result before another save. No save will be repeated automatically." in teams
 
 
 def test_agent_factory_deploy_and_reset_mutations_are_guarded():
     source = _source("agents.html")
+    overrides = _static("lightwork-agent-override-changes.js")
+    drafts = _static("lightwork-specialist-drafts.js")
+    from maverick_dashboard import specialist_drafts
 
-    assert "if (dlgDeploy.dataset.inFlight === 'true') return;" in source
-    assert "if (btn.dataset.inFlight === 'true') return;" in source
-    assert source.count("This adds its specialists so you can give the team work") >= 2
-    assert source.count(".finally(function ()") >= 2
+    # Both team buttons use the reviewed, single-flight team client.
+    assert source.count("await window.LWDepartmentTeamUpdates.open(") == 2
     assert "function beginMutation(button)" in source
-    assert "if (!beginMutation(saveBtn)) return;" in source
-    assert "if (!name || !beginMutation(resetBtn)) return;" in source
-    assert "Its allowed actions and steps take effect for everyone who uses it" in source
-    assert "Your changes to its allowed actions and steps will be removed" in source
-    assert "throw new Error(plainError(error, 'reach Lightwork'))" in source
-    assert "finishMutation(saveBtn)" in source
-    assert "finishMutation(resetBtn)" in source
+    assert "if (button.dataset.inFlight === 'true') return false;" in source
+    assert "if (failure.unreadable) throw new Error('The result could not be confirmed. Refresh the page to check.');" in source
+    assert "plainError(failure, 'reach Lightwork')" in source
+    # Save has no direct write path: it opens the complete reviewed draft
+    # decision, and refuses outright when that client is unavailable.
+    assert "if (window.LWSpecialistDrafts) { await window.LWSpecialistDrafts.reviewEntered('save'); return; }" in source
+    assert "The complete draft controls are unavailable. Refresh Agent Factory before saving." in source
+    assert "I reviewed every setting and consequence above." in drafts
+    assert "if (!consent.checked || busy || reviewed !== value || current !== generation) return;" in drafts
+    assert "lock(true); apply.disabled = true;" in drafts
+    assert "Publishing or restoring changes new work" in specialist_drafts.NOTICE
+    # Reset and removal go through a reviewed, consented, single-flight change.
+    assert "'Review reset to the built-in definition'" in overrides
+    assert "if (busy || !consent.checked || started !== generation) return" in overrides
+    assert "request('/apply', {token:checked.token, confirmed:true})" in overrides
+    assert "finally { if (started === generation) lock(false)" in overrides
 
 
 def test_other_global_or_executable_deployments_have_the_same_safety_contract():
@@ -112,7 +131,9 @@ def test_tenant_policy_and_notice_publication_are_confirmed_and_retryable():
     assert "New requests will be decided with it straight away." in data_use
     assert "expected_revision: policy.revision" in data_use
     assert "error.status === 409" in data_use
-    assert "Request failed: the server returned an invalid JSON response." in data_use
+    # Replies are read by the shared consent client, which fails closed on an
+    # unreadable one (consent_workbench.test.js).
+    assert "window.LightworkConsentWorkbench.client(API)(path, options)" in data_use
 
     assert "if (noticeBtn.dataset.inFlight === 'true') return;" in privacy
     assert "Publish privacy notice version “' + version + '”? It cannot be changed afterwards" in privacy

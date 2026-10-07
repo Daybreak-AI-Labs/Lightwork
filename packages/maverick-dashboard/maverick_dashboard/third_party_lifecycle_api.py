@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from ._shared import authenticated_subject
-from .auth import require_global_permission, require_permission
+from .auth import caller_principal, require_global_permission, require_permission
 
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
 _OP_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$"
@@ -155,6 +155,8 @@ class LifecycleCreateIn(_StrictModel):
 
 
 class LifecycleTransitionIn(RevisionIn):
+    assessment_id: OpaqueId | None = None
+    assessment_revision: int | None = Field(default=None, ge=1)
     target_stage: Literal["active", "suspended"]
     reason_code: OpaqueId
 
@@ -278,6 +280,14 @@ def _principal_ref_for(tenant_id: str, subject: str) -> str:
         (f"lightwork.third-party-lifecycle.identity.v1:{tenant_id}:{subject}").encode()
     ).hexdigest()
     return f"tpl-principal-{digest[:32]}"
+
+
+def _unattributed_author(tenant_id: str, principal_ref: str) -> bool:
+    """Old local and shared-token records cannot establish two real people."""
+    return principal_ref in {
+        _principal_ref_for(tenant_id, "authorized-local-operator"),
+        _principal_ref_for(tenant_id, "static-dashboard-operator"),
+    }
 
 
 def _jsonable(value: Any) -> Any:
@@ -418,13 +428,23 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
                  for row in rows]
         if not any(item["value"] == me for item in items):
             items.insert(0, {"value": me, "label": "Me"})
-        return {"me": me, "items": items}
+        from .local_owner import available as local_owner_setup_available
+
+        return {
+            "me": me,
+            "items": items,
+            "named_signin": bool((caller_principal(request) or "").startswith("user:")),
+            "local_owner_setup_available": local_owner_setup_available(request),
+        }
 
     @router.get("/templates")
     async def list_templates(request: Request) -> dict[str, Any]:
         require_permission(request, "view")
         ops, tenant, _principal_ref, store = authority(request)
-        return {"items": _jsonable(await call(ops, store.list_templates, tenant, limit=500))}
+        items = _jsonable(await call(ops, store.list_templates, tenant, limit=500))
+        for item in items:
+            item["needs_named_author"] = _unattributed_author(tenant, item["authored_by"])
+        return {"items": items}
 
     @router.get("/assessments")
     async def list_assessments(request: Request) -> dict[str, Any]:
@@ -442,11 +462,16 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
     async def list_offboarding(request: Request) -> dict[str, Any]:
         require_permission(request, "view")
         ops, tenant, _principal_ref, store = authority(request)
-        return {"items": _jsonable(await call(ops, store.list_offboarding_plans, tenant, limit=500))}
+        items = _jsonable(await call(ops, store.list_offboarding_plans, tenant, limit=500))
+        for item in items:
+            item["needs_named_initiator"] = _unattributed_author(tenant, item["initiated_by"])
+        return {"items": items}
 
     @router.put("/templates/{template_id}")
     async def create_template(request: Request, template_id: ObjectPath, body: TemplateCreateIn):
         require_permission(request, "operate")
+        if not (caller_principal(request) or "").startswith("user:"):
+            raise HTTPException(403, "Set up individual sign-ins before writing a questionnaire for approval.")
         ops, tenant, _principal_ref, store = authority(request)
         return _jsonable(
             await call(ops, store.create_template_version, tenant, template_id, **body.model_dump())
@@ -463,7 +488,15 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
         request: Request, template_id: ObjectPath, version: int, body: ApprovalIn
     ):
         require_global_permission(request, "admin")
+        if not (caller_principal(request) or "").startswith("user:"):
+            raise HTTPException(403, "Sign in with an individual account to approve a questionnaire.")
         ops, tenant, _principal_ref, store = authority(request)
+        record = await call(ops, store.get_template_version, tenant, template_id, version)
+        if _unattributed_author(tenant, record.authored_by):
+            raise HTTPException(
+                409,
+                "This questionnaire was written before individual sign-ins. Write a new version while signed in, then ask another administrator to approve it.",
+            )
         return _jsonable(
             await call(
                 ops,
@@ -481,8 +514,11 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
     ):
         require_permission(request, "operate")
         ops, tenant, _principal_ref, store = authority(request)
+        from .vendor_profile import effect_guard, registered_vendor
+        registered_vendor(tenant, body.vendor_ref)
         return _jsonable(
-            await call(ops, store.create_assessment, tenant, assessment_id, **body.model_dump())
+            await call(ops, store.create_assessment, tenant, assessment_id, **body.model_dump(),
+                effect_guard=effect_guard(request, tenant, _principal_ref, family="lifecycle"))
         )
 
     @router.get("/assessments/{assessment_id}")
@@ -534,8 +570,11 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
     async def create_lifecycle(request: Request, lifecycle_id: ObjectPath, body: LifecycleCreateIn):
         require_permission(request, "operate")
         ops, tenant, _principal_ref, store = authority(request)
+        from .vendor_profile import effect_guard, registered_vendor
+        registered_vendor(tenant, body.vendor_ref)
         return _jsonable(
-            await call(ops, store.create_lifecycle, tenant, lifecycle_id, **body.model_dump())
+            await call(ops, store.create_lifecycle, tenant, lifecycle_id, **body.model_dump(),
+                effect_guard=effect_guard(request, tenant, _principal_ref, family="lifecycle"))
         )
 
     @router.get("/lifecycles/{lifecycle_id}")
@@ -555,8 +594,10 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
         ops, tenant, _principal_ref, store = authority(request)
         payload = body.model_dump()
         target = payload.pop("target_stage")
+        from .vendor_profile import effect_guard
         return _jsonable(
-            await call(ops, store.transition_lifecycle, tenant, lifecycle_id, target, **payload)
+            await call(ops, store.transition_lifecycle, tenant, lifecycle_id, target, **payload,
+                effect_guard=effect_guard(request, tenant, _principal_ref, family="lifecycle", admin=target == "suspended"))
         )
 
     @router.post("/lifecycles/{lifecycle_id}/offboarding/{plan_id}")
@@ -564,6 +605,8 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
         request: Request, lifecycle_id: ObjectPath, plan_id: ObjectPath, body: BeginOffboardingIn
     ):
         require_global_permission(request, "admin")
+        if not (caller_principal(request) or "").startswith("user:"):
+            raise HTTPException(403, "Set up individual sign-ins before starting offboarding approval.")
         ops, tenant, _principal_ref, store = authority(request)
         return _jsonable(
             await call(
@@ -602,7 +645,15 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
         request: Request, plan_id: ObjectPath, body: IndependentCompletionIn
     ):
         require_global_permission(request, "admin")
+        if not (caller_principal(request) or "").startswith("user:"):
+            raise HTTPException(403, "Sign in with an individual account to approve offboarding.")
         ops, tenant, _principal_ref, store = authority(request)
+        plan = await call(ops, store.get_offboarding_plan, tenant, plan_id)
+        if _unattributed_author(tenant, plan.initiated_by):
+            raise HTTPException(
+                409,
+                "This offboarding plan began before individual sign-ins. Start a new plan while signed in, then ask another administrator to approve completion.",
+            )
         return _jsonable(
             await call(
                 ops, store.approve_offboarding_completion, tenant, plan_id, **body.model_dump()

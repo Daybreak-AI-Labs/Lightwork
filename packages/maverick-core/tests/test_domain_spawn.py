@@ -27,6 +27,30 @@ def _ctx(tmp_path):
     )
 
 
+@pytest.mark.parametrize("allow_tools,max_risk", [
+    ([], None),
+    (["read_file"], None),
+    ([], "low"),
+    (["read_file"], "unlimited"),
+])
+def test_agent_from_profile_rejects_missing_or_invalid_envelope(allow_tools, max_risk):
+    with pytest.raises(ValueError, match="Domain .* (allow_tools|max_risk)"):
+        agent_from_profile(
+            DomainProfile(name="unsafe", allow_tools=allow_tools, max_risk=max_risk),
+            None,
+            "work",
+        )
+
+
+def test_agent_from_profile_rejects_malformed_deny_list_before_spawn():
+    with pytest.raises(ValueError, match="deny_tools"):
+        agent_from_profile(
+            DomainProfile(name="unsafe", allow_tools=["shell"],
+                          deny_tools="shell", max_risk="high"),
+            None, "work",
+        )
+
+
 def test_agent_from_profile_sets_domain_persona_and_capability(tmp_path):
     ctx = _ctx(tmp_path)
     profile = DomainProfile(
@@ -49,7 +73,7 @@ def test_agent_from_profile_uses_active_handoff_grant_for_parent(tmp_path):
     parent = agent_from_profile(
         DomainProfile(
             name="parent",
-            allow_tools=["shell", "spawn_specialist"],
+            allow_tools=["shell", "spawn_specialist"], max_risk="high",
         ),
         ctx,
         "parent task",
@@ -61,7 +85,7 @@ def test_agent_from_profile_uses_active_handoff_grant_for_parent(tmp_path):
     profile = DomainProfile(
         name="finance",
         compartment="finance",
-        allow_tools=["shell", "spawn_specialist"],
+        allow_tools=["shell", "spawn_specialist"], max_risk="high",
     )
 
     child = agent_from_profile(profile, ctx, "Analyze Q3 revenue", parent=parent, depth=1)
@@ -71,12 +95,55 @@ def test_agent_from_profile_uses_active_handoff_grant_for_parent(tmp_path):
     assert child.capability.permits("shell") is False
 
 
+def test_root_specialist_is_bounded_by_the_run_capability(tmp_path):
+    """The depth-0 specialist root runs under the pack's envelope AND the run's
+    own grant (``ctx.capability``: for a fleet agent, its role + the caller's
+    grant). It used to mint the pack's envelope alone, so a narrower run grant
+    was silently widened back out to everything the pack allows. The run's
+    principal is kept, so the oversight control plane still governs the work
+    as the agent that was dispatched."""
+    ctx = _ctx(tmp_path)
+    ctx.capability = Capability(
+        principal="agent:dept-ops.finance",
+        allow_tools=frozenset({"read_file"}),
+        max_risk="low",
+    )
+    profile = DomainProfile(
+        name="finance", compartment="finance",
+        persona="You are a finance specialist. Cite every figure.",
+        allow_tools=["read_file", "web_search", "write_file"],
+        deny_tools=["shell"], max_risk="high",
+    )
+
+    root = agent_from_profile(profile, ctx, "Analyze Q3 revenue")
+
+    assert root.capability.permits("read_file") is True
+    assert root.capability.permits("web_search") is False  # pack allows it, run grant does not
+    assert root.capability.permits("write_file") is False
+    assert root.capability.max_risk == "low"
+    assert root.capability.principal == "agent:dept-ops.finance"
+
+
+def test_root_specialist_without_a_run_capability_keeps_its_own_envelope(tmp_path):
+    ctx = _ctx(tmp_path)
+    assert ctx.capability is None
+    profile = DomainProfile(
+        name="finance", compartment="finance",
+        allow_tools=["read_file", "web_search"], max_risk="medium",
+    )
+
+    root = agent_from_profile(profile, ctx, "Analyze Q3 revenue")
+
+    assert root.capability.permits("web_search") is True
+    assert root.capability.principal == "agent:finance-0"
+
+
 def test_agent_from_profile_no_autonomy_block_uses_own_suite_default(tmp_path):
     ctx = _ctx(tmp_path)
     parent = agent_from_profile(
         DomainProfile(
             name="parent",
-            allow_tools=["read_file"],
+            allow_tools=["read_file"], max_risk="low",
             autonomy=AutonomyProfile(default=AutonomyLevel.AUTO, onboarding=False),
         ),
         ctx,
@@ -84,7 +151,7 @@ def test_agent_from_profile_no_autonomy_block_uses_own_suite_default(tmp_path):
     )
     profile = DomainProfile(
         name="bank_wire_review",
-        allow_tools=["read_file"],
+        allow_tools=["read_file"], max_risk="low",
         autonomy=None,
     )
 
@@ -100,7 +167,7 @@ def test_children_inherit_parent_domain(tmp_path):
 
     ctx = _ctx(tmp_path)
     profile = DomainProfile(name="finance", compartment="finance",
-                            allow_tools=["read_file"])
+                            allow_tools=["read_file"], max_risk="low")
     parent = agent_from_profile(profile, ctx, "parent task")
 
     child = Agent(ctx=ctx, role="researcher", brief="sub", depth=1, parent=parent)
@@ -111,7 +178,7 @@ def test_children_inherit_parent_domain(tmp_path):
 def test_agent_from_profile_sets_knowledge_sources(tmp_path):
     ctx = _ctx(tmp_path)
     profile = DomainProfile(name="finance", knowledge_sources=["finance"],
-                            allow_tools=["read_file"])
+                            allow_tools=["read_file"], max_risk="low")
     agent = agent_from_profile(profile, ctx, "task")
     assert agent.knowledge_sources == ["finance"]
 
@@ -122,7 +189,7 @@ def test_agent_from_profile_depth_zero_root_is_goal_root(tmp_path):
     # e.g. "finance_controller", never "orchestrator". Every kernel
     # mechanic gated on "is this the goal's root" must still fire for it.
     ctx = _ctx(tmp_path)
-    profile = DomainProfile(name="finance_controller", allow_tools=["read_file"])
+    profile = DomainProfile(name="finance_controller", allow_tools=["read_file"], max_risk="low")
     root = agent_from_profile(profile, ctx, "close the books")
     assert root.role == "finance_controller"
     assert root._is_goal_root is True
@@ -142,7 +209,7 @@ def test_domain_routed_root_gets_orchestrator_template_with_persona(tmp_path):
     profile = DomainProfile(
         name="finance_controller",
         persona="You are the finance controller. Cite every figure.",
-        allow_tools=["read_file"],
+        allow_tools=["read_file"], max_risk="low",
     )
     root = agent_from_profile(profile, ctx, "close the books")
     assert "You are the orchestrator of a Lightwork swarm" in root.system
@@ -184,7 +251,7 @@ async def test_domain_routed_root_invokes_the_final_verifier(tmp_path, monkeypat
             thinking=None, tool_calls=[], stop_reason="end_turn",
         ),
     ])
-    profile = DomainProfile(name="finance_controller", allow_tools=["read_file"])
+    profile = DomainProfile(name="finance_controller", allow_tools=["read_file"], max_risk="low")
     root = agent_from_profile(profile, ctx, "close the books")
 
     result = await root.run()

@@ -160,3 +160,89 @@ def test_shared_singleton_and_reset():
         assert lc.shared() is not a
     finally:
         lc.reset_shared()
+
+
+def test_native_goal_reuse_rechecks_original_source_and_exact_tenant(monkeypatch):
+    from maverick import orchestrator, pilot_learning
+    from maverick.paths import tenant_scope
+    from maverick.world_model import open_world
+
+    monkeypatch.setenv("MAVERICK_LEARNING_CACHE", "1")
+    lc.reset_shared()
+    try:
+        with tenant_scope(tenant="source-cache-a"):
+            world = open_world()
+            def task(title, owner="user:source-owner"):
+                return world.get_goal(world.create_goal(title, "", owner=owner))
+
+            source, later = task("Synthetic repeat process"), task("Synthetic repeat process")
+            cache = lc.shared()
+            # A verifier label alone cannot qualify legacy cached text.
+            cache.put(orchestrator._learning_cache_task(source), "Unbound synthetic answer", verified_by=f"verifier:goal-{source.id}")
+            assert orchestrator._maybe_learning_cache_block(later, None) is None
+            orchestrator._maybe_store_learning_cache(source, "Synthetic checked answer", 0.99)
+            assert "Synthetic checked answer" in orchestrator._maybe_learning_cache_block(later, None)
+
+            with tenant_scope(tenant="source-cache-b"):
+                other_world = open_world()
+                other = other_world.get_goal(other_world.create_goal(source.title, "", owner=source.owner))
+                assert other.id == source.id
+                assert lc.shared() is not cache
+                assert orchestrator._maybe_learning_cache_block(other, None) is None
+
+            pilot_learning.protect(source.id, pilot_id="PLE-synthetic-reuse", plan_version=1,
+                                   input_version=1, actor=source.owner)
+            assert pilot_learning.excluded(source.id) and not pilot_learning.excluded(later.id)
+            assert orchestrator._maybe_learning_cache_block(later, None) is None
+
+            deleted, next_deleted = task("Synthetic erased source"), task("Synthetic erased source")
+            orchestrator._maybe_store_learning_cache(deleted, "Synthetic erased answer", 0.99)
+            assert orchestrator._maybe_learning_cache_block(next_deleted, None)
+            with world._writing() as connection:
+                connection.execute("DELETE FROM goals WHERE id=?", (deleted.id,))
+            assert orchestrator._maybe_learning_cache_block(next_deleted, None) is None
+
+            unowned, next_unowned = task("Synthetic claimed source", ""), task("Synthetic claimed source", "")
+            orchestrator._maybe_store_learning_cache(unowned, "Synthetic formerly shared answer", 0.99)
+            assert orchestrator._maybe_learning_cache_block(next_unowned, None)
+            assert world.bind_goal_owner(unowned.id, "user:new-owner")
+            assert orchestrator._maybe_learning_cache_block(next_unowned, None) is None
+
+            screened, next_screened = task("Synthetic screened source"), task("Synthetic screened source")
+            orchestrator._maybe_store_learning_cache(screened, "Synthetic checked during screening", 0.99)
+            class Shield:
+                def scan_output(self, _text):
+                    from types import SimpleNamespace
+                    pilot_learning.protect(screened.id, pilot_id="PLE-synthetic-screening", plan_version=1,
+                                           input_version=1, actor=screened.owner)
+                    return SimpleNamespace(allowed=True)
+            assert orchestrator._maybe_learning_cache_block(next_screened, Shield()) is None
+
+            expired, next_expired = task("Synthetic expired source"), task("Synthetic expired source")
+            orchestrator._maybe_store_learning_cache(expired, "Synthetic expired answer", 0.99)
+            assert orchestrator._maybe_learning_cache_block(next_expired, None)
+            expires_at = cache.get(orchestrator._learning_cache_task(expired))["expires_at"]
+            monkeypatch.setattr(cache, "_clock", lambda: expires_at + 1)
+            assert orchestrator._maybe_learning_cache_block(next_expired, None) is None
+    finally:
+        lc.reset_shared()
+
+
+def test_shared_tenant_instances_are_bounded(monkeypatch):
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setattr(lc, "_MAX_SHARED_INSTANCES", 2)
+    lc.reset_shared()
+    try:
+        with tenant_scope(tenant="cache-bound-a"):
+            first = lc.shared()
+            assert lc.shared() is first
+        with tenant_scope(tenant="cache-bound-b"):
+            assert lc.shared() is not first
+        with tenant_scope(tenant="cache-bound-c"):
+            lc.shared()
+        assert len(lc._shared) == 2
+        with tenant_scope(tenant="cache-bound-a"):
+            assert lc.shared() is not first
+    finally:
+        lc.reset_shared()

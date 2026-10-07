@@ -24,19 +24,14 @@ class _Markup(HTMLParser):
         self.tags.append((tag, dict(attrs)))
 
 
-def _templates(*, custom_theme_css: str = "") -> Jinja2Templates:
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css=custom_theme_css,
-        custom_theme_names=["custom"] if custom_theme_css else [],
-        dir="ltr",
-        nav_groups=[],
-        t=lambda key: key,
+def _templates() -> Jinja2Templates:
+    from maverick_dashboard.app import _theme_context
+
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     return templates
 
 
@@ -75,7 +70,7 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
     ):
         assert directive in csp
     assert "style-src 'self' 'nonce-" in csp
-    assert "Contracts and Engagements" in response.text
+    assert "Contracts and engagements" in response.text
     assert 'id="tpc-operations" disabled' in response.text
     assert "Checking that contracts are available" in response.text
     assert "Record the key facts here, not the full contract text." in response.text
@@ -194,26 +189,25 @@ def test_page_rejects_query_material_and_requires_tenant(
 
 
 def test_custom_theme_uses_same_csp_nonce(monkeypatch: pytest.MonkeyPatch) -> None:
+    import maverick.config as config
+
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "dashboard": {"themes": {"custom": {
+            "bg": "#000", "panel": "#111", "text": "#fff", "accent": "#0f0",
+        }}},
+    })
     monkeypatch.setattr(page, "_tenant_selected", lambda: None)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
     monkeypatch.setattr(page, "has_global_permission", lambda _request, _permission: True)
     app = FastAPI()
-    app.include_router(
-        page.create_third_party_contracts_page_router(
-            _templates(
-                custom_theme_css=(
-                    "body.theme-custom { --bg:#000; --panel:#111; "
-                    "--text:#fff; --accent:#0f0; }"
-                )
-            )
-        )
-    )
+    app.include_router(page.create_third_party_contracts_page_router(_templates()))
     response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
     parser = _Markup()
     parser.feed(response.text)
     nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]
     assert len(nonces) == 2
+    assert "body.theme-custom { --bg: #000; --panel: #111;" in response.text
     assert len(set(nonces)) == 1
     assert nonces[0]
     assert f"'nonce-{nonces[0]}'" in response.headers["content-security-policy"]
@@ -288,3 +282,24 @@ def test_contract_client_parses_as_strict_javascript() -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("enabled", (False, True))
+def test_turned_off_module_shows_its_gate_instead_of_loaders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, enabled: bool,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "module_activation_enabled", lambda _section: enabled)
+    text = client.get(ROUTE).text
+    main = text[text.index('<div id="third-party-contracts-shell"'):text.index('<script src="/static/lightwork-record-workflows.js"')]
+    assert f'data-module-enabled="{"true" if enabled else "false"}"' in main
+    if enabled:
+        assert "data-module-gate" not in main and "Loading…" in main
+        return
+    # The gate follows the title; the availability box is hidden (the banner
+    # already says it is off) and no loader says "Loading".
+    assert main.index('class="page-title hero-title"') < main.index("data-module-gate")
+    assert '<div class="hero-statebox" aria-live="polite" hidden>' in main
+    assert "Loading" not in main
+    assert "Contracts and engagements appear here once this is turned on." in main

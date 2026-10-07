@@ -73,7 +73,7 @@ def test_identity_transition_review_and_grant_preserve_admin_context_and_explici
             raise recovery_api.installation_recovery.MaintenanceError("explicit trust review required")
         return {"authorization": "synthetic-test-only"}
     monkeypatch.setattr(recovery_api.installation_recovery, "authorize", authorize)
-    body = {"confirm": True, "confirm_all_workspaces": True, "identity_transition": "synthetic-public-envelope", "transition_sha256": "a" * 64}
+    body = {"confirm": True, "confirm_all_workspaces": True, "review_id": "a" * 32, "identity_transition": "synthetic-public-envelope", "transition_sha256": "a" * 64}
     assert client.post("/api/v1/recovery/installation/authorize", headers=headers, json=body).status_code == 409
     body["confirm_identity_transition"] = True
     assert client.post("/api/v1/recovery/installation/authorize", headers=headers, json=body).status_code == 200
@@ -389,16 +389,16 @@ def test_installation_authorization_needs_admin_context_and_strict_whole_home_re
         return {"authorization": "a" * 32 + ":" + "b" * 64}
     monkeypatch.setattr(recovery_api.installation_recovery, "authorize", authorize)
     endpoint = "/api/v1/recovery/installation/authorize"
-    assert client.post(endpoint, json={"confirm": True, "confirm_all_workspaces": True}).status_code == 409
+    assert client.post(endpoint, json={"confirm": True, "confirm_all_workspaces": True, "review_id": "a" * 32}).status_code == 409
     assert client.post(endpoint, headers=headers, json={"confirm": True, "confirm_all_workspaces": "true"}).status_code == 422
-    response = client.post(endpoint, headers=headers, json={"confirm": True, "confirm_all_workspaces": True})
+    response = client.post(endpoint, headers=headers, json={"confirm": True, "confirm_all_workspaces": True, "review_id": "a" * 32})
     assert response.status_code == 200 and response.headers["cache-control"] == "private, no-store"
     assert calls[0]["isolated"] is False  # the core must reject normal mode
     assert calls[0]["actor"] == headers["X-Lightwork-Recovery-Context"]
     def deny(*_):
         raise HTTPException(403, "global admin required")
     monkeypatch.setattr(recovery_api, "require_global_permission", deny)
-    assert client.post(endpoint, headers=headers, json={"confirm": True, "confirm_all_workspaces": True}).status_code == 403
+    assert client.post(endpoint, headers=headers, json={"confirm": True, "confirm_all_workspaces": True, "review_id": "a" * 32}).status_code == 403
     assert client.get("/api/v1/recovery/installation").status_code == 403
     assert len(calls) == 1
 
@@ -406,7 +406,7 @@ def test_installation_authorization_needs_admin_context_and_strict_whole_home_re
 def test_real_installation_core_refuses_normal_dashboard_authorization():
     client = api_client()
     response = client.post("/api/v1/recovery/installation/authorize", headers=context(client),
-                           json={"confirm": True, "confirm_all_workspaces": True})
+                           json={"confirm": True, "confirm_all_workspaces": True, "review_id": "a" * 32})
     assert response.status_code == 409
     assert "recovery mode" in response.json()["detail"]
 
@@ -567,3 +567,30 @@ def test_existing_control_plane_lease_is_not_recovery_authority(tmp_path, other_
         with api_client():
             pass
     assert control_plane_lease.current() is not None
+
+
+def test_checkpoint_lookup_requires_context_and_rechecks_current_permission(monkeypatch):
+    client = api_client()
+    headers = context(client)
+    monkeypatch.setattr(recovery_api, "isolated", lambda app: True)
+    calls = []
+    def lookup(item, **kwargs):
+        calls.append((item, kwargs))
+        return {"available": False, "candidates": [], "notice": "Source unavailable; no position guessed."}
+    monkeypatch.setattr(recovery_api.recovery, "channel_checkpoint_lookup", lookup)
+    body = {"item_id": "a" * 32, "expected_review_token": "b" * 64, "before": None}
+    endpoint = "/api/v1/recovery/operations/channel-source-lookup"
+    assert client.post(endpoint, json=body).status_code == 409
+    assert calls == []
+    result = client.post(endpoint, headers=headers, json=body)
+    assert result.status_code == 200 and result.headers["cache-control"] == "private, no-store"
+    assert result.json()["available"] is False
+    assert calls[0][1]["actor"] == headers["X-Lightwork-Recovery-Context"]
+    seen = []
+    def revoked(*args):
+        seen.append(1)
+        if len(seen) == 2:
+            raise HTTPException(403, "access revoked during lookup")
+    monkeypatch.setattr(recovery_api, "require_global_permission", revoked)
+    result = client.post(endpoint, headers=headers, json=body)
+    assert result.status_code == 403

@@ -20,7 +20,8 @@ def modules(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["rejected", "accepted", "missing-claim", "timeout", "malformed"])
-def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_path, modules, mode):
+@pytest.mark.parametrize("landing_path", ["/start", "/auth/local-owner"])
+def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_path, modules, mode, landing_path):
     module, _ = modules
     journey = module.Journey.__new__(module.Journey)
     journey.directory = journey.state = tmp_path
@@ -28,14 +29,14 @@ def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_p
     journey.report = {"checks": []}
     if mode == "accepted":
         (tmp_path / "dashboard-owner.json").write_text("synthetic claim", encoding="utf-8")
-    screenshots, observations = [], []
+    screenshots, observations, clicks = [], [], []
 
     class View:
         session = "/session/synthetic"
 
         def call(self, method, path, payload=None):
             if method == "GET":
-                return "http://127.0.0.1:8765/start"
+                return "http://127.0.0.1:8765" + landing_path
             assert path.endswith("/execute/sync") and payload["args"] == []
             observations.append(True)
             if mode == "malformed":
@@ -52,8 +53,8 @@ def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_p
         def navigate(self, _address):
             pass
 
-        def click(self, _selector):
-            pass
+        def click(self, selector):
+            clicks.append(selector)
 
         def fill(self, _selector, _value):
             pass
@@ -73,6 +74,7 @@ def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_p
             journey.first_owner()
         assert journey.password not in str(error.value)
         assert screenshots == [] and journey.report["checks"] == []
+    assert ('a[href="/auth/local-owner"]' in clicks) == (landing_path == "/start")
     diagnostic = journey.report["owner_setup"]
     assert set(diagnostic) == {"ready", "path", "form_rejected", "rejection", "claim_exists"}
     assert diagnostic["claim_exists"] == (mode == "accepted")

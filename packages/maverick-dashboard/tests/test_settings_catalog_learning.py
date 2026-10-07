@@ -17,6 +17,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_learning as learning_rows
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import save_catalog
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 
@@ -107,7 +109,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False, http=client):
-    return http.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(http, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -464,12 +466,15 @@ def test_each_learning_system_has_its_own_switch(audit_rows):
     from maverick import reflexion
 
     parts = _components()
-    assert all(c["on"] and c["wanted"] and not c["managed"] for c in parts.values())
+    assert all(c["on"] and c["wanted"] and not c["managed"]
+               for key, c in parts.items() if key != "budget_tuning")
+    assert parts["budget_tuning"]["on"] is False
+    assert parts["budget_tuning"]["wanted"] is False
     r = client.post(LEARNING, json={"enabled": False, "subsystem": "reflexion"})
     assert r.status_code == 200, r.text
     parts = {c["key"]: c for c in r.json()["components"]}
     assert parts["reflexion"]["on"] is False and parts["reflexion"]["wanted"] is False
-    assert sum(1 for c in parts.values() if not c["on"]) == 1
+    assert sum(1 for c in parts.values() if not c["on"]) == 2
     assert reflexion.enabled() is False
     assert audit_rows[-1]["kind"] == "learning_control_changed"
     assert audit_rows[-1]["control"] == "reflexion" and audit_rows[-1]["enabled"] is False

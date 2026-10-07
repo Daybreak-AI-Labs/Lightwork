@@ -48,9 +48,8 @@ def _rollback(c, body: dict, fid="f"):
     })
 
 
-def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path):
-    # B9: with auto_evolve + auto_apply on, a chronically-failing action node is
-    # autonomously softened to an agent -- the forward arrow, gated + soften-only.
+def test_auto_apply_leaves_a_failing_action_for_complete_review(monkeypatch, tmp_path):
+    # Failure measurements do not supply complete replacement instructions.
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
     monkeypatch.setattr("maverick.config.get_flows",
@@ -64,12 +63,13 @@ def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
     aq._handle_flow_evolve()
-    assert store.load_flow("fa").nodes["a"].kind == "agent"  # softened autonomously
-    from maverick.flow import evolution_log
-    assert evolution_log.last_apply("fa", "a")["source"] == "auto-apply"
+    assert store.load_flow("fa").nodes["a"].kind == "action"
+    from maverick.flow import evolution_log, evolve
+    assert evolution_log.last_apply("fa", "a") is None
+    assert evolve.maybe_propose(store.load_flow("fa"))[0].to_kind == "agent"
 
 
-def test_auto_apply_replaces_the_exact_active_release(monkeypatch, tmp_path):
+def test_auto_apply_preserves_the_exact_active_release(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
     monkeypatch.setattr(
@@ -98,10 +98,10 @@ def test_auto_apply_replaces_the_exact_active_release(monkeypatch, tmp_path):
 
     draft = store.load_flow(saved.id)
     active, after = store.load_published_bundle(saved.id)
-    assert draft.nodes["a"].kind == "agent"
-    assert active.nodes["a"].kind == "agent"
-    assert after["release_id"] != before["release_id"]
-    assert after["release_digest"] != before["release_digest"]
+    assert draft.nodes["a"].kind == "action"
+    assert active.nodes["a"].kind == "action"
+    assert after["release_id"] == before["release_id"]
+    assert after["release_digest"] == before["release_digest"]
 
 
 def test_auto_apply_skips_a_published_flow_with_diverged_human_draft(
@@ -217,9 +217,53 @@ def test_apply_hardens_agent_to_action_and_bumps_version(monkeypatch, tmp_path):
     assert node_a["kind"] == "action" and node_a["tool"] == "web_search"
 
 
-def test_apply_softens_action_to_agent_without_a_brief(monkeypatch, tmp_path):
-    # The one-click "Apply this improvement" path for a soften: no brief supplied,
-    # so the node's own label/brief becomes the agent brief (no human input needed).
+def test_hardening_review_uses_live_action_contract_and_current_flow_inputs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import evolve, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import api
+
+    saved = store.save_flow(Flow(
+        id="review", name="Customer lookup", start="agent",
+        inputs=[{"key": "customer", "label": "Customer name", "type": "text"}],
+        nodes={"agent": FlowNode(id="agent", kind="agent", brief="Look up a customer",
+                                 label="Look up customer")},
+    ))
+    monkeypatch.setattr(evolve, "maybe_propose", lambda _flow: [evolve.NodeProposal(
+        "agent", "agent", "action", "Past successful runs used one action", 12, 1.0,
+        inferred_tool="web_search", applicable=False,
+        blocking_reason="parameters need review",
+    )])
+    monkeypatch.setattr(api, "_TOOL_INDEX_CACHE", [
+        {"name": "web_search", "description": "Search public pages", "params": ["query"]},
+    ])
+    monkeypatch.setattr(api, "_TOOL_SCHEMA_CACHE", {
+        "web_search": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "What to search for"},
+        }, "required": ["query"]},
+    })
+    client = _client()
+    response = client.get("/api/v1/flows/review/apply-review?node_id=agent")
+    assert response.status_code == 200, response.text
+    review = response.json()
+    assert (review["version"], review["revision"]) == (saved.version, saved.revision)
+    assert review["tool"] == "web_search"
+    assert review["fields"] == [{"name": "query", "label": "Query", "type": "string",
+                                 "required": True, "description": "What to search for"}]
+    assert review["sources"] == [{"key": "customer", "label": "Customer name", "origin": "input"}]
+    assert store.load_flow("review").version == saved.version
+    monkeypatch.setattr(api, "_TOOL_INDEX_CACHE", [])
+    unavailable = client.get("/api/v1/flows/review/apply-review?node_id=agent")
+    assert unavailable.status_code == 200 and unavailable.json()["tool"] == ""
+    unavailable_choice = client.get(
+        "/api/v1/flows/review/apply-review?node_id=agent&tool=web_search",
+    )
+    assert unavailable_choice.status_code == 409
+    assert store.load_flow("review").nodes["agent"].kind == "agent"
+
+
+def test_apply_refuses_action_to_agent_without_replacement_review(monkeypatch, tmp_path):
+    # A node label is not evidence for the replacement work instructions.
     _isolate(monkeypatch, tmp_path)
     c = _client()
     from maverick.flow import store
@@ -228,9 +272,10 @@ def test_apply_softens_action_to_agent_without_a_brief(monkeypatch, tmp_path):
                          nodes={"a": FlowNode(id="a", kind="action", tool="t",
                                               label="reconcile the ledger")}))
     r = _apply(c, {"node_id": "a", "to_kind": "agent"})
-    assert r.status_code == 200
+    assert r.status_code == 409
     node_a = next(n for n in c.get("/api/v1/flows/f").json()["nodes"] if n["id"] == "a")
-    assert node_a["kind"] == "agent" and node_a["brief"] == "reconcile the ledger"
+    assert node_a["kind"] == "action" and node_a["tool"] == "t"
+    assert not node_a.get("brief")
 
 
 def test_apply_without_tool_is_400(monkeypatch, tmp_path):

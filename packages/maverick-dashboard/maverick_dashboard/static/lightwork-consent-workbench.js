@@ -6,7 +6,7 @@
 (function (root) {
   'use strict';
   var doc = root.document;
-  var INVALID = 'Request failed: the server returned an invalid JSON response.';
+  var INVALID = 'The reply from the server could not be read. Try again.';
 
   function el(tag, cls, text) {
     var node = doc.createElement(tag);
@@ -15,37 +15,28 @@
     return node;
   }
 
-  // One JSON client per API base. A non-2xx response throws an Error whose
-  // .status drives the plain sentence; malformed bodies never count as success.
+  // One JSON client per API base (mvFetchJSON). A non-2xx response throws an
+  // Error whose .status drives the plain sentence; malformed bodies never
+  // count as success.
   function client(base) {
     return async function jsonClient(path, options) {
       var opts = Object.assign({ cache: 'no-store' }, options || {});
-      if (opts.json !== undefined) {
-        opts.body = JSON.stringify(opts.json);
-        opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-        delete opts.json;
-      }
-      var response = await root.fetch(base + path, opts);
-      var body;
-      try { body = await response.json(); }
-      catch (_error) {
+      if (opts.json !== undefined) { opts.body = opts.json; delete opts.json; }
+      try { return await root.mvFetchJSON(base + path, opts); }
+      catch (error) {
+        // A refusal without a plain detail keeps the pages' own next step.
+        if (!error.unreadable && error.status && typeof error.detail !== 'string') error.message = 'That didn\'t work. Refresh the page and try again.';
+        if (!error.unreadable) throw error;
         var bad = new Error(INVALID);
-        bad.status = response.ok ? 0 : response.status;
+        bad.status = 0;
         throw bad;
       }
-      if (!response.ok) {
-        var failure = new Error(body && typeof body.detail === 'string' ? body.detail : 'Request failed.');
-        failure.status = response.status;
-        failure.detail = body ? body.detail : undefined;
-        throw failure;
-      }
-      return body;
     };
   }
 
   function errorText(failure, action) {
     if (typeof root.mvErrorText === 'function') return root.mvErrorText(failure, action);
-    return (action ? 'Could not ' + action + '. ' : '') + 'Something went wrong. Please try again.';
+    return (action ? 'Could not ' + action + '. ' : '') + 'Something went wrong. Try again.';
   }
 
   // Write a message into a status line; errors switch it to an alert.
@@ -95,7 +86,7 @@
   function when(seconds) {
     if (typeof root.mvWhen === 'function') return root.mvWhen(Number(seconds));
     if (!seconds || !Number.isFinite(Number(seconds))) return '';
-    return new Date(Number(seconds) * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(Number(seconds)) : new Date(Number(seconds) * 1000).toLocaleString());
   }
   function human(value) {
     if (typeof root.mvHuman === 'function') return root.mvHuman(value);
@@ -224,7 +215,7 @@
   }
 
   function confirm(message, okText) {
-    if (typeof root.mvConfirm === 'function') return root.mvConfirm(message, { okText: okText || 'Confirm' });
+    if (typeof root.mvConfirm === 'function') return root.mvConfirm(message, { okText: okText || 'Save this change' });
     return Promise.resolve(false);
   }
 

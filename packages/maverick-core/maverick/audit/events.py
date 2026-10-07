@@ -30,6 +30,8 @@ Payload shapes (kind -> required fields, all events also carry
   secret_redacted:   tool_name:str, pattern:str, count:int
   erase:             channel:str, erasure_id:str (random token, never subject-derived)
   halt:              source:str (file|signal|manual), detail:str|None
+  content_update:    content:str, version:int, year:int, publisher:str
+                     (signed publisher content metadata; no tax table bodies)
   federation_delegate: peer_node:str (absent when the caller was unauthenticated),
                      correlation_id:str, direction:str (sent|received),
                      accepted:bool, reason:str ("" when accepted) — one half of a
@@ -226,7 +228,11 @@ class EventKind:
     # with (or be attributed only to) the selected tenant's audit chain.
     # TENANT_CREATED payload: tenant, plan, max_daily_dollars, actor.
     # WORKSPACE_SELECTED payload: actor, previous_tenant, tenant, source.
+    # TENANT_DEFAULT_REGISTERED payload: tenant, trigger ("first_workspace" |
+    # "repair"), actor. The deployment's implicit default tenant was added to
+    # the roster so creating the first named workspace never locks it out.
     TENANT_CREATED = "tenant_created"
+    TENANT_DEFAULT_REGISTERED = "tenant_default_registered"
     WORKSPACE_SELECTED = "workspace_selected"
     # A user's dashboard access changed: privilege role (global or per-tenant),
     # department (suite) grant, or one atomic SCIM group-authority mutation.
@@ -263,6 +269,16 @@ class EventKind:
     # RUN_INGESTED payload: external_agent, outcome, cost_dollars, steps,
     # over_budget (goal_id column carries the Operating Record row).
     # ACTION_SCREENED payload: external_agent, tool, allowed, rule, reason.
+    # Personal / service-account API keys (maverick_dashboard.api_keys).
+    # API_KEY_CHANGED payload: action (created|rotated|revoked), key_id,
+    # prefix, owner, scopes, workspace, expires_at, actor -- never the secret.
+    # SERVICE_ACCOUNT_CHANGED payload: action (created|disabled), account,
+    # role, actor. BREAK_GLASS_TOKEN_USED: the static dashboard token (not a
+    # personal key) authenticated an API request; payload: path, client,
+    # rate-limited to one row per process per hour.
+    API_KEY_CHANGED = "api_key_changed"  # pragma: allowlist secret - an event name
+    SERVICE_ACCOUNT_CHANGED = "service_account_changed"
+    BREAK_GLASS_TOKEN_USED = "break_glass_token_used"  # pragma: allowlist secret - an event name
     EXTERNAL_AGENT_ENROLLED = "external_agent_enrolled"
     EXTERNAL_CREDENTIAL_MINTED = "external_credential_minted"
     EXTERNAL_RUN_INGESTED = "external_run_ingested"
@@ -309,6 +325,15 @@ class EventKind:
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.
     LEARNING_UPDATE = "learning_update"
+    # Signed publisher content was applied, distinct from learned-state writes.
+    CONTENT_UPDATE = "content_update"
+    # A validated, shared-source provider skill was authorized for an atomic
+    # write. Contains source goal ID and exact output-byte digest, but makes
+    # no claim that the subsequent filesystem publication succeeded.
+    SKILL_DISTILL_PREPARED = "skill_distill_prepared"
+    # A per-run shared-skill attempt was skipped because its source was not
+    # explicitly shared. No goal title or trajectory content is logged.
+    SKILL_DISTILL_SKIPPED = "skill_distill_skipped"
     # Deployment-global operator control over learning gates. Kept distinct
     # from learned-state writes so an auditor can identify who armed DGM.
     # payload: control, enabled, actor, acknowledged, previous_requested,
@@ -361,6 +386,21 @@ class EventKind:
     # approval_id:int, status:str (approved|denied), decided_by:str,
     # occurred_at:float (when the vote and outbox row committed).
     APPROVAL_DECISION = "approval_decision"
+    # A vote taken from a chat channel (maverick.channel_approvals): the
+    # signed APPROVAL_DECISION above stays the authority; this note says
+    # WHICH channel carried the decision. payload: approval_id:int,
+    # decision:str, channel:str (slack|teams|email), decided_by:str,
+    # effective:bool, approval_event_id:str.
+    CHANNEL_APPROVAL_DECISION = "channel_approval_decision"
+    # Identity linking (maverick.channel_identities): a chat account was tied
+    # to / cut from a Lightwork person. payload: channel:str,
+    # external_id:str, principal:str, actor:str, method:str (admin|code).
+    CHANNEL_IDENTITY_LINKED = "channel_identity_linked"
+    CHANNEL_IDENTITY_UNLINKED = "channel_identity_unlinked"
+    # A daily summary was sent (maverick.daily_digest). No content: only the
+    # recipient, the channel and item counts. payload: recipient:str,
+    # channel:str, approvals:int, results:int, questions:int, ok:bool.
+    DIGEST_SENT = "digest_sent"
     # Earned Autonomy (maverick.earned_autonomy): a consequence card pinned a
     # prediction for a high-stakes action BEFORE it ran, so predicted-vs-actual
     # accuracy is provable from the chain. payload: card:str, principal:str,

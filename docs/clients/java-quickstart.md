@@ -28,7 +28,7 @@ the patched Jackson 3.1 LTS BOM in the application build:
     <dependency>
       <groupId>tools.jackson</groupId>
       <artifactId>jackson-bom</artifactId>
-      <version>3.1.6</version>
+      <version>3.1.7</version>
       <type>pom</type>
       <scope>import</scope>
     </dependency>
@@ -42,7 +42,7 @@ the patched Jackson 3.1 LTS BOM in the application build:
 </dependency>
 ```
 
-(Gradle: add `implementation(platform("tools.jackson:jackson-bom:3.1.6"))`,
+(Gradle: add `implementation(platform("tools.jackson:jackson-bom:3.1.7"))`,
 then `implementation("io.modelcontextprotocol.sdk:mcp:1.1.3")`.)
 The checked example and CI use JDK 21. Set your provider key the same way the CLI expects
 (e.g. `export ANTHROPIC_API_KEY=…`).

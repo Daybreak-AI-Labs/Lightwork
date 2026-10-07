@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
 const markup = fs.readFileSync(path.join(folder, "templates/privacy_drop_management.html"), "utf8")
@@ -54,6 +55,7 @@ async function fixture({ intercept = () => undefined, roles = { canOperate: "tru
     const status = reply && reply.__status ? reply.__status : 200;
     return new Response(JSON.stringify(reply), { status, headers: { "Content-Type": "application/json" } });
   };
+  loadShell(window);
   window.eval(helpers);
   window.eval(source);
   async function settle() { for (let i = 0; i < 30; i++) await new Promise((done) => setImmediate(done)); }
@@ -108,10 +110,16 @@ test("closing uses the approved result and the request's revision", async (t) =>
 });
 
 test("administrators cannot approve their own change; others approve with one click after confirming", async (t) => {
-  const ui = await fixture(); t.after(() => ui.window.close());
+  // Approval first reads the complete current change and shows it for review.
+  const review = { proposal: { proposal_id: "p-other", kind: "import_record", revision: 1, retained_until: 9 },
+    proposed_by_you: false, contents: { drop_id: 41003, request_type: "DataDeletion" } };
+  const ui = await fixture({ intercept: (c) => (c.method === "GET" && c.url.pathname.endsWith("/proposals/p-other/review") ? review : undefined) });
+  t.after(() => ui.window.close());
   assert.equal(ui.rowButton("drop-waiting", "Other broker", "Approve"), undefined);
   assert.match(ui.el("drop-waiting").textContent, /You/);
   ui.rowButton("drop-waiting", "41003", "Approve").click(); await ui.settle();
+  assert.equal(ui.confirms.length, 1);
+  assert.match(ui.confirms[0], /DROP request: 41003/);
   const post = ui.calls.find((c) => c.url.pathname.endsWith("/proposals/p-other/approve"));
   assert.equal(JSON.parse(post.body).expected_revision, 1);
 });

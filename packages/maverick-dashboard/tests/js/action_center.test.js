@@ -3,6 +3,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require("./_shell");
 const script = fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-action-center.js"),"utf8");
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 function value(extra={}) {
@@ -38,7 +39,7 @@ async function setup(replies) {
     if (typeof result === "function") return result();
     return {ok:true, status:200, json:async()=>result};
   };
-  w.eval(script); await tick();
+  shell(w); w.eval(script); await tick();
   return {dom,w,d,calls,button:text=>[...d.querySelectorAll("button")].find(el=>el.textContent===text)};
 }
 
@@ -156,7 +157,7 @@ test("read preference is an explicit context/version-bound action and repeated c
 });
 
 test("lost preference acknowledgement keeps the action visible and never retries automatically", async () => {
-  const ui = await setup([value(),new Error("Connection lost; refresh before retrying.")]);
+  const ui = await setup([value(),new TypeError("Failed to fetch")]);  // how a browser reports a lost connection
   ui.button("Snooze for one day").click(); await tick();
   assert.equal(ui.calls.length,2);
   assert.match(ui.d.getElementById("ac-status").textContent,/could not be reached/);
@@ -204,4 +205,12 @@ test('keyboard position follows the acknowledged updated preference control',asy
 test('removing the final filtered item focuses the empty result status',async()=>{
   const ui=await setup([value(),{revision:4},value({items:[],total:0})]);ui.button('Mark read').focus();ui.button('Mark read').click();await tick();await tick();
   assert.equal(ui.d.activeElement,ui.d.getElementById('ac-status'));ui.w.close();
+});
+
+test("a module that is turned off is not reported as a load error", async () => {
+  const ui = await setup([value({coverage:[{kind:"assessment",status:"current"},{kind:"connection_attention",status:"disabled"}],
+    items:[], counts:{unread:0,overdue:0,snoozed:0}, total:0})]);
+  assert.equal(ui.d.getElementById("ac-coverage").textContent, "");
+  assert.match(ui.d.getElementById("ac-items").textContent, /all caught up/);
+  ui.dom.window.close();
 });

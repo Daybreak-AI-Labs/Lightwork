@@ -37,7 +37,7 @@ def test_triage_ranks_causally_harmful_action_first():
     top = classes[0]
     assert top.action == "X"
     assert top.causal_effect < 0 and top.ci_high < 0   # confidently harmful
-    assert top.trustworthy
+    assert not top.trustworthy  # observational triage ranks hypotheses, not proven causes
     assert top.count > 0 and top.exemplars              # failing exemplars for the fix-miner
 
 

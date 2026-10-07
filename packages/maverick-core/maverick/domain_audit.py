@@ -91,8 +91,8 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
     denied = [t for t in _IRREVERSIBLE if t in set(profile.deny_tools)]
     runtime = domain_capability(profile, None, f"agent:{profile.name}")
     refusals = refusals_for(profile.name, profile.refuse)
-    from .agent_autonomy import default_profile_for
-    _auto = profile.autonomy or default_profile_for(profile.name)
+    from .agent_autonomy import effective_profile
+    _auto = effective_profile(profile.name, profile.autonomy)
     declared = declared_prompt_gate(profile)
     enforced = enforced_gate(profile)
     return PackAudit(

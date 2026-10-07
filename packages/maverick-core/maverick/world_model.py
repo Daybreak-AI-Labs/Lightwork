@@ -28,8 +28,16 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
+from .approval_checks import SQLITE_SCHEMA as _APPROVAL_CHECK_SCHEMA
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from .deadline_alerts import SQLITE_SCHEMA as _DEADLINE_ALERT_SCHEMA
 from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
+from .event_admission import (
+    EventRegistryUnavailable,
+    LegacyEventGoalHeld,
+    compatible_event_goal,
+    execution_binding_lock,
+)
 from .file_lock import (
     atomic_create_bytes,
     cross_process_lock,
@@ -37,7 +45,11 @@ from .file_lock import (
     ensure_private_file,
     prepare_private_directory,
 )
+from .goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
+from .metadata_history import SQLITE_INDEXES as _HISTORY_INDEXES
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
+from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
+from .webhook_subscriptions import SQLITE_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCHEMA
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +61,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 50
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -421,7 +433,46 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 """
 
 
+def _bootstrap_schema(conn: sqlite3.Connection) -> str:
+    """Do not recreate v49's retired derived index from the immutable v1 seed."""
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+    ).fetchone():
+        row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+        if row and row[0] >= 49:
+            start = SCHEMA.index("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts")
+            end = SCHEMA.index("-- Q1 2026 index audit", start)
+            return SCHEMA[:start] + SCHEMA[end:]
+    return SCHEMA
+
+
 MIGRATIONS: dict[int, list[str]] = {
+    # v50: ordered per-task question reads avoid scanning unrelated history.
+    50: ["CREATE INDEX IF NOT EXISTS idx_questions_goal_id ON questions(goal_id, id)"],
+    # v49: retire only unused derived message-search storage. Authoritative
+    # messages and conversation turns are untouched; the exact SQL is governed.
+    49: [
+        "DROP TRIGGER IF EXISTS messages_ai",
+        "DROP TRIGGER IF EXISTS messages_ad",
+        "DROP TRIGGER IF EXISTS messages_au",
+        "DROP TABLE IF EXISTS messages_fts",
+    ],
+    # v48: one row per approval-gate decision (no content), for previewing a
+    # threshold change later (maverick.approval_checks).
+    48: _APPROVAL_CHECK_SCHEMA,
+    # Reconcile both draft histories without changing their earlier fingerprints.
+    # The teardown draft used v42 for these tables, so its databases may have
+    # skipped the companion draft's v42 receipt table. Ensure both sets at v47.
+    47: [
+        _GOAL_MUTATION_SCHEMA,
+        *_WEBHOOK_SUBSCRIPTION_SCHEMA,
+        *_DEADLINE_ALERT_SCHEMA,
+    ],
+    46: ["ALTER TABLE goals ADD COLUMN connection_selection TEXT NOT NULL DEFAULT ''"],
+    45: _HISTORY_INDEXES,
+    44: _PERSONAL_ALERT_MIGRATION,
+    43: ["ALTER TABLE facts ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"],
+    42: [_GOAL_MUTATION_SCHEMA],
     40: [statement for statement in _EVENT_ADMISSION_SCHEMA.split(";") if statement.strip()],
     41: [
         "ALTER TABLE event_goal_admissions ADD COLUMN request_digest TEXT",
@@ -677,6 +728,7 @@ class Goal:
     execution_principal: str = ""
     domain: str = ""
     project_id: int | None = None
+    completed_at: float | None = None
 
 
 @dataclass
@@ -740,16 +792,33 @@ def _approval_audit_event_id(
     approval_id: int,
     status: str,
     decided_by: str,
+    undo_round: int = 0,
 ) -> str:
-    """Stable, unambiguous id for retrying one supervisor's exact vote."""
-    parts = (
+    """Stable, unambiguous id for retrying one supervisor's exact vote.
+
+    ``undo_round`` counts how many times the approval was undone: a vote
+    cast after an undo is a new decision and gets a new identity, so the
+    signed audit chain records it instead of treating it as a replay of the
+    retracted vote. Round 0 keeps the historical id.
+    """
+    parts = [
         (tenant_id or "").encode("utf-8"),
         str(int(approval_id)).encode("ascii"),
         status.encode("ascii"),
         decided_by.encode("utf-8"),
-    )
+    ]
+    if int(undo_round) > 0:
+        parts.append(f"undo-round:{int(undo_round)}".encode("ascii"))
     framed = b"".join(len(part).to_bytes(4, "big") + part for part in parts)
     return "approval-v1-" + hashlib.sha256(framed).hexdigest()
+
+
+APPROVAL_UNDO_STATUS = "undone"
+
+
+def _approval_undo_marker_id(tenant_id: str | None, approval_id: int, undo_round: int) -> str:
+    """Outbox row id for one undo of an approval (never delivered; a counter)."""
+    return _approval_audit_event_id(tenant_id, approval_id, APPROVAL_UNDO_STATUS, "", undo_round)
 
 
 @dataclass
@@ -857,8 +926,13 @@ def _enc_field(text: str | None) -> str | None:
 _UNSEALED_WITHHELD = "‹withheld: unsealed value in an encrypted store›"
 
 
-def _dec_field(text: str | None) -> str | None:
+def _dec_field(text: str | None, *, at_rest: bool | None = None) -> str | None:
     """Unseal a stored field from a sealed column when at-rest encryption is on.
+
+    ``at_rest`` lets a caller that already resolved :func:`at_rest_enabled`
+    for a whole result set pass it down: the policy check walks the compliance
+    profile configuration each time (~90 us), and a 200-row page read it 400
+    times.
 
     When encryption is disabled, fields are raw plaintext (which may legitimately
     begin with the public seal marker), so they pass through untouched.
@@ -877,7 +951,9 @@ def _dec_field(text: str | None) -> str | None:
         strict_at_rest,
         unseal_from_str,
     )
-    if not at_rest_enabled():
+    if at_rest is None:
+        at_rest = at_rest_enabled()
+    if not at_rest:
         return text
     if is_sealed_str(text):
         return unseal_from_str(text)
@@ -953,14 +1029,26 @@ def _question_from_row(row) -> Question:
     return Question(**_row_for(Question, d))
 
 
-def _goal_from_row(row) -> Goal:
+def _goal_from_row(row, *, at_rest: bool | None = None) -> Goal:
     """Build a Goal from a row, decrypting the sealed content fields."""
+    from .crypto_at_rest import at_rest_enabled
+
+    if at_rest is None:
+        at_rest = at_rest_enabled()
     d = dict(row)
-    d["title"] = _dec_field(d.get("title"))
-    d["description"] = _dec_field(d.get("description"))
+    d["title"] = _dec_field(d.get("title"), at_rest=at_rest)
+    d["description"] = _dec_field(d.get("description"), at_rest=at_rest)
     if "result" in d:
-        d["result"] = _dec_field(d.get("result"))
+        d["result"] = _dec_field(d.get("result"), at_rest=at_rest)
     return Goal(**_row_for(Goal, d))
+
+
+def _goals_from_rows(rows) -> list[Goal]:
+    """Build Goals from a result set with one at-rest policy check per query."""
+    from .crypto_at_rest import at_rest_enabled
+
+    at_rest = at_rest_enabled()
+    return [_goal_from_row(r, at_rest=at_rest) for r in rows]
 
 
 def _goal_event_from_row(row) -> GoalEvent:
@@ -989,6 +1077,17 @@ def _episode_spend_from_row(row) -> EpisodeSpend:
     return EpisodeSpend(**_row_for(EpisodeSpend, d))
 
 
+def _notify_approval_created(world, approval_id: int, provenance: str | None) -> None:
+    """Best-effort chat notification (Slack and Teams approval cards); never
+    raises. Called once, after the approval row is committed."""
+    try:
+        from .approval_notify import approval_created
+
+        approval_created(int(approval_id), provenance=provenance, world=world)
+    except Exception:  # noqa: BLE001 -- the queue row is already durable
+        logging.getLogger(__name__).warning("approval notification failed", exc_info=True)
+
+
 def _approval_from_row(row) -> Approval:
     """Build an Approval from a row, decrypting the sealed action/scope/detail."""
     d = dict(row)
@@ -998,15 +1097,37 @@ def _approval_from_row(row) -> Approval:
     return Approval(**_row_for(Approval, d))
 
 
+def _single_approver(approval, approvers: list[str]) -> list[str]:
+    """A one-approver request keeps no sign-off rows: its approver is the decider."""
+    if (
+        not approvers
+        and approval.status == "approved"
+        and max(1, int(approval.approvals_required or 1)) <= 1
+        and approval.decided_by
+    ):
+        return [approval.decided_by]
+    return approvers
+
+
 def _approval_audit_event_from_row(row) -> ApprovalAuditEvent:
     return ApprovalAuditEvent(**_row_for(ApprovalAuditEvent, dict(row)))
 
 
 def default_db_path() -> Path:
-    """Return the active tenant's world path unless explicitly overridden."""
+    """Return the active tenant's world path unless explicitly overridden.
+
+    While practice mode is on (:mod:`maverick.practice`), the practice world
+    beside it, so practised tasks never mix with real records."""
+    from . import practice
+
     if DEFAULT_DB is not _INITIAL_DEFAULT_DB:
-        return Path(DEFAULT_DB).expanduser()
+        override = Path(DEFAULT_DB).expanduser()
+        if practice.active():
+            return override.with_name(override.stem + ".practice" + override.suffix)
+        return override
     tenant = current_tenant_id()
+    if practice.active():
+        return practice.world_path(bind_tenant_namespace(tenant) if tenant else None)
     if tenant:
         tenant = bind_tenant_namespace(tenant)
         return data_dir("world.db", tenant=tenant)
@@ -1242,7 +1363,7 @@ class WorldModel:
         deadline = time.monotonic() + WAL_SWITCH_RETRY_SECONDS
         while True:
             try:
-                self.conn.executescript(SCHEMA)
+                self.conn.executescript(_bootstrap_schema(self.conn))
                 self._init_schema_version()
                 self._apply_migrations()
                 self.conn.commit()
@@ -1389,7 +1510,11 @@ class WorldModel:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    def reclaim_orphan_goals(self, *, max_age_seconds: float = 60.0) -> int:
+    def reclaim_orphan_goals(
+        self, *, max_age_seconds: float = 60.0,
+        statuses: tuple[str, ...] = ("active", "pending"),
+        resolved_window_seconds: float | None = None,
+    ) -> int:
         """Mark goals stuck in 'active' or 'pending' as 'blocked'.
 
         Called on startup to recover from SIGKILL / OOM / crash mid-run.
@@ -1412,9 +1537,19 @@ class WorldModel:
         goal, even when its monotonic review timestamp is ahead of the wall
         clock. Positive windows continue to require the full stale interval.
 
+        A periodic sweep passes only ``("active",)``; queued ``pending`` goals
+        may legitimately wait longer than the stale window.
+
         Returns rows reclaimed.
         """
-        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
+        statuses = tuple(statuses)
+        if not statuses or not set(statuses) <= {"active", "pending"}:
+            raise ValueError("orphan reclaim statuses must be active and/or pending")
+        marks = ", ".join("?" for _ in statuses)
+        max_age_seconds = (reclaim_window_seconds(default=max_age_seconds)
+                           if resolved_window_seconds is None else float(resolved_window_seconds))
+        if not math.isfinite(max_age_seconds) or max_age_seconds < 0:
+            raise ValueError("orphan reclaim window must be nonnegative and finite")
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"
@@ -1425,8 +1560,8 @@ class WorldModel:
                     "UPDATE goals SET status = 'blocked', "
                     "result = COALESCE(result, '') || ?, "
                     "updated_at = MAX(updated_at + 0.000001, ?) "
-                    "WHERE status IN ('active', 'pending') AND (? = 0 OR updated_at <= ?)",
-                    (marker, now, max_age_seconds, cutoff),
+                    f"WHERE status IN ({marks}) AND (? = 0 OR updated_at <= ?)",
+                    (marker, now, *statuses, max_age_seconds, cutoff),
                 )
                 return cur.rowcount
             # At-rest encryption on: `result` is sealed ciphertext. Appending the
@@ -1437,10 +1572,11 @@ class WorldModel:
             # is negligible.
             rows = conn.execute(
                 "SELECT id, result FROM goals "
-                "WHERE status IN ('active', 'pending') AND (? = 0 OR updated_at <= ?)",
-                (max_age_seconds, cutoff),
+                f"WHERE status IN ({marks}) AND (? = 0 OR updated_at <= ?)",
+                (*statuses, max_age_seconds, cutoff),
             ).fetchall()
             from .crypto_at_rest import EncryptionUnavailable
+            reclaimed = 0
             for row in rows:
                 try:
                     dec = _dec_field(row["result"])
@@ -1461,18 +1597,23 @@ class WorldModel:
                     # mode -- must not abort crash-recovery for every other
                     # stuck goal. Reclaim the status; leave the result intact
                     # rather than corrupting or dropping it.
-                    conn.execute(
+                    cur = conn.execute(
                         "UPDATE goals SET status = 'blocked', updated_at = MAX(updated_at + 0.000001, ?) "
-                        "WHERE id = ?",
-                        (now, row["id"]),
+                        f"WHERE id = ? AND status IN ({marks}) "
+                        "AND (? = 0 OR updated_at <= ?)",
+                        (now, row["id"], *statuses, max_age_seconds, cutoff),
                     )
+                    reclaimed += cur.rowcount
                     continue
-                conn.execute(
+                cur = conn.execute(
                     "UPDATE goals SET status = 'blocked', result = ?, "
-                    "updated_at = MAX(updated_at + 0.000001, ?) WHERE id = ?",
-                    (new_result, now, row["id"]),
+                    "updated_at = MAX(updated_at + 0.000001, ?) "
+                    f"WHERE id = ? AND status IN ({marks}) "
+                    "AND (? = 0 OR updated_at <= ?)",
+                    (new_result, now, row["id"], *statuses, max_age_seconds, cutoff),
                 )
-            return len(rows)
+                reclaimed += cur.rowcount
+            return reclaimed
 
     def _init_schema_version(self) -> None:
         # Fast path: an already-initialized DB only needs a read. WAL readers
@@ -1633,7 +1774,8 @@ class WorldModel:
     # ----- goals -----
     def create_goal(self, title: str, description: str = "", parent_id: int | None = None,
                     *, owner: str = "", execution_principal: str = "",
-                    domain: str = "", project_id: int | None = None) -> int:
+                    domain: str = "", project_id: int | None = None,
+                    connection_references: list | None = None) -> int:
         if execution_principal is None:
             execution_principal = ""
         if not isinstance(execution_principal, str):
@@ -1643,16 +1785,29 @@ class WorldModel:
 
             if not valid_principal(execution_principal):
                 raise ValueError("invalid execution principal")
+        from .template_connections import packed
+        selection = packed(owner, connection_references or [])
         now = time.time()
         with self._writing() as conn:
             cur = conn.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
-                "created_at, updated_at, owner, execution_principal, domain, project_id) "
-                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
+                "created_at, updated_at, owner, execution_principal, domain, project_id, connection_selection) "
+                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
                 (parent_id, _enc_field(title), _enc_field(description), now, now,
-                 owner, execution_principal, domain or "", project_id),
+                 owner, execution_principal, domain or "", project_id, _enc_field(selection)),
             )
-            return cur.lastrowid
+            goal_id = cur.lastrowid
+        # Register after the goal transaction commits: background observation
+        # may start immediately, and notification availability must not decide
+        # whether a customer's task is accepted.
+        from .personal_notification_recipients import enroll_task_owner
+
+        enroll_task_owner(owner)
+        return goal_id
+
+    def goal_connection_selection(self, goal_id: int) -> str:
+        row = self._read_one("SELECT connection_selection FROM goals WHERE id=?", (goal_id,))
+        return _dec_field(row[0]) if row and row[0] else ""
 
     def record_goal_origin(self, goal_id: int, kind: str, ref: str) -> None:
         """Record which automation spawned a goal, so the Automations page can
@@ -1673,7 +1828,7 @@ class WorldModel:
             "WHERE o.kind = ? AND o.ref = ? ORDER BY g.id DESC LIMIT ?",
             (str(kind), str(ref), max(1, int(limit))),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def origin_status_counts(self, kind: str, ref: str) -> dict[str, int]:
         """An automation's spawned-goal counts keyed by status (run summary)."""
@@ -1687,7 +1842,7 @@ class WorldModel:
 
     def record_signoff(self, goal_id: int, decision: str, *,
                        decided_by: str = "", note: str | None = None,
-                       expected_updated_at: float | None = None) -> bool:
+                       expected_updated_at: float | None = None, _cursor=None) -> bool:
         """Record a human's certify/reject decision on a finished deliverable --
         the sign-off a pack's output gate calls for. One authoritative row per
         goal (a later decision replaces an earlier one); the note is encrypted
@@ -1704,7 +1859,7 @@ class WorldModel:
         """
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be 'approved' or 'rejected'")
-        with self._writing() as conn:
+        with (self._writing() if _cursor is None else contextlib.nullcontext(_cursor)) as conn:
             sql = (
                 "INSERT INTO signoffs(goal_id, decision, decided_by, "
                 "note, created_at) SELECT id, ?, ?, ?, ? FROM goals "
@@ -1720,7 +1875,8 @@ class WorldModel:
             sql += (
                 " ON CONFLICT(goal_id) DO UPDATE SET "
                 "decision=excluded.decision, decided_by=excluded.decided_by, "
-                "note=excluded.note, created_at=excluded.created_at "
+                "note=excluded.note, created_at=CASE WHEN excluded.created_at > signoffs.created_at "
+                "THEN excluded.created_at ELSE signoffs.created_at + 0.000001 END "
                 "WHERE signoffs.decision <> excluded.decision"
             )
             cur = conn.execute(sql, tuple(params))
@@ -1935,11 +2091,13 @@ class WorldModel:
     # ---- share links: revocable, expiring read-only access to a goal --------
 
     def create_share_link(self, goal_id: int, *, created_by: str = "",
-                          ttl_seconds: float | None = None) -> tuple[int, str]:
+                          ttl_seconds: float | None = None, token_prefix: str = "") -> tuple[int, str]:
         """Mint a read-only share link for a goal. Returns ``(id, clear_token)``;
         only the token's SHA-256 is persisted, so the clear token is shown to the
         creator exactly once and the DB never holds anything that grants access."""
-        token = secrets.token_urlsafe(32)
+        if token_prefix not in {"", "r1_"}:
+            raise ValueError("Unsupported share token version")
+        token = token_prefix + secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = time.time()
         exp = now + float(ttl_seconds) if ttl_seconds else None
@@ -2040,20 +2198,52 @@ class WorldModel:
         # coarse/repeated or backwards wall time cannot reauthorize stale
         # bytes, even when independent connections mutate the same goal.
         now = time.time()
-        with self._writing() as conn:
-            cur = conn.execute(
+        legacy_refused = False
+        binding_scope = (execution_binding_lock(self, goal_id)
+                         if status in {"active", "running"}
+                         else contextlib.nullcontext(False))
+        with binding_scope as binding_locked, self._writing() as conn:
+            if status in {"active", "running"}:
+                prior = conn.execute(
+                    "SELECT g.status,g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                    "JOIN goal_origins o ON o.goal_id=g.id "
+                    "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                    "WHERE g.id=? AND o.kind IN ('event','event_v2')", (int(goal_id),),
+                ).fetchone()
+                if prior is None and binding_locked:
+                    current = conn.execute("SELECT status FROM goals WHERE id=?", (int(goal_id),)).fetchone()
+                    if current is not None and current[0] not in {"active", "running"}:
+                        raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not binding_locked):
+                    raise EventRegistryUnavailable("Event binding changed during execution claim")
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not compatible_event_goal(prior[2], prior[3], prior[1], prior[4])):
+                    legacy_refused = True
+                    if prior[0] == "pending":
+                        conn.execute(
+                            "UPDATE goals SET status='blocked', completed_at=NULL, "
+                            "updated_at=MAX(updated_at + 0.000001, ?), result=? "
+                            "WHERE id=? AND status='pending'",
+                            (now, _enc_field("Earlier event request held for review"), int(goal_id)),
+                        )
+                        conn.execute("DELETE FROM signoffs WHERE goal_id=?", (int(goal_id),))
+            if not legacy_refused:
+                cur = conn.execute(
                 "UPDATE goals SET completed_at = CASE WHEN ? <> 'done' THEN NULL "
                 "WHEN status = 'done' THEN completed_at "
                 "ELSE MAX(updated_at + 0.000001, ?) END, "
                 "status = ?, updated_at = MAX(updated_at + 0.000001, ?), "
                 "result = COALESCE(?, result) WHERE id = ?",
                 (status, now, status, now, _enc_field(result), goal_id),
-            )
+                )
             # A sign-off is authority over one immutable terminal payload, not
             # over a goal id forever.  Reruns, failures, and any result rewrite
             # revoke it atomically so old approval cannot authorize new bytes.
-            if cur.rowcount == 1 and (status != "done" or result is not None):
+            if not legacy_refused and cur.rowcount == 1 and (status != "done" or result is not None):
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
+        if legacy_refused:
+            raise LegacyEventGoalHeld("Earlier event request held for review")
 
     def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
         """Record a pre-dispatch refusal without replacing a terminal outcome."""
@@ -2088,13 +2278,13 @@ class WorldModel:
             )
             return cur.rowcount == 1
 
-    def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
+    def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
         """Complete department totals in one read snapshot, without a row cap."""
         from .shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
 
         row = self._read_one(
-            AGGREGATE_SQL + f" WHERE domain = ? AND {EVENT_TIME_SQL} >= ? AND {EVENT_TIME_SQL} <= ?",
-            (department, since, until),
+            AGGREGATE_SQL + f" WHERE domain = ? AND {EVENT_TIME_SQL} >= ? AND {EVENT_TIME_SQL} <= ?" + (" AND owner = ?" if owner is not None else ""),
+            (department, since, until, *([owner] if owner is not None else [])),
         )
         return measurements(row)
 
@@ -2161,7 +2351,37 @@ class WorldModel:
         if expected_owner is not None:
             sql += " AND owner = ?"
             params += (str(expected_owner),)
-        with self._writing() as conn:
+        with execution_binding_lock(self, goal_id) as binding_locked, self._writing() as conn:
+            owner_clause = " AND g.owner=?" if expected_owner is not None else ""
+            legacy = conn.execute(
+                "SELECT g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                "JOIN goal_origins o ON o.goal_id=g.id "
+                "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                "WHERE g.id=? AND g.status='pending' "
+                "AND o.kind IN ('event','event_v2')" + owner_clause,
+                (int(goal_id), *((str(expected_owner),) if expected_owner is not None else ())),
+            ).fetchone()
+            if legacy is None and binding_locked:
+                eligible = conn.execute(
+                    "SELECT 1 FROM goals WHERE id=? AND status='pending'" +
+                    (" AND owner=?" if expected_owner is not None else ""),
+                    (int(goal_id), *((str(expected_owner),) if expected_owner is not None else ())),
+                ).fetchone()
+                if eligible is not None:
+                    raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+            if legacy is not None and not binding_locked:
+                raise EventRegistryUnavailable("Event binding changed during execution claim")
+            if legacy is not None and not compatible_event_goal(
+                    legacy[1], legacy[2], legacy[0], legacy[3]):
+                conn.execute(
+                    "UPDATE goals SET status='blocked', completed_at=NULL, "
+                    "updated_at=MAX(updated_at + 0.000001, ?), result=? "
+                    "WHERE id=? AND status='pending'",
+                    (time.time(), _enc_field("Earlier event request held for review"),
+                     int(goal_id)),
+                )
+                conn.execute("DELETE FROM signoffs WHERE goal_id=?", (int(goal_id),))
+                return False
             cur = conn.execute(sql, params)
             return cur.rowcount == 1
 
@@ -2192,6 +2412,35 @@ class WorldModel:
         row = self._read_one("SELECT * FROM goals WHERE id = ?", (goal_id,))
         return _goal_from_row(row) if row else None
 
+    def recent_goals_by_domain(self, domains: list[str], *, owner: str | None = None,
+                               per_domain: int = 5) -> dict[str, list[Goal]]:
+        """The newest ``per_domain`` goals of each listed domain, newest first.
+
+        The same answer as one ``list_goals(domain=..., limit=per_domain,
+        order="desc")`` per domain, from one grouped query per 500 domains
+        (the Results page asks about every deliverable pack, 2,031 of them on a
+        full catalog). A domain with no goals is absent from the result.
+        """
+        wanted = sorted({str(d) for d in domains if d})
+        keep = max(1, int(per_domain))
+        found: dict[str, list[Goal]] = {}
+        for chunk in self._chunks(wanted):
+            where = f"domain IN ({','.join('?' * len(chunk))})"
+            params: list[Any] = list(chunk)
+            if owner is not None:
+                where += " AND owner = ?"
+                params.append(owner)
+            rows = self._read_all(
+                "SELECT * FROM goals WHERE id IN (SELECT id FROM ("
+                "SELECT id, ROW_NUMBER() OVER (PARTITION BY domain ORDER BY id DESC) AS n "
+                f"FROM goals WHERE {where}) WHERE n <= ?) ORDER BY id DESC",
+                (*params, keep),
+            )
+            for row in rows:
+                goal = _goal_from_row(row)
+                found.setdefault(goal.domain, []).append(goal)
+        return found
+
     def list_goals(
         self,
         status: str | None = None,
@@ -2202,6 +2451,7 @@ class WorldModel:
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
+        before_id: int | None = None,
     ) -> list[Goal]:
         """List goals, optionally filtered + paginated.
 
@@ -2211,7 +2461,13 @@ class WorldModel:
         ``order='desc'`` lets the most-recent slice be fetched cheaply.
         ``domain`` scopes to one department (the pack a goal ran as) -- the
         ``domain`` column is plaintext, so it filters in SQL.
+        ``before_id`` excludes that immutable ID and all newer IDs without
+        reading an anchor row. Use descending order for continuation; in
+        ascending order it remains only an upper ID bound. Existing offset
+        callers retain their historical behavior.
         """
+        if before_id is not None and not 0 < int(before_id) <= 2**63 - 1:
+            raise ValueError("before_id must be a positive signed 64-bit goal ID")
         direction = "DESC" if order.lower() == "desc" else "ASC"
         sql = "SELECT * FROM goals"
         clauses: list[str] = []
@@ -2228,6 +2484,9 @@ class WorldModel:
         if project_id is not None:
             clauses.append("project_id = ?")
             params = params + (int(project_id),)
+        if before_id is not None:
+            clauses.append("id < ?")
+            params = params + (int(before_id),)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += f" ORDER BY id {direction}"
@@ -2235,7 +2494,34 @@ class WorldModel:
             sql += " LIMIT ? OFFSET ?"
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
+
+    def list_goal_results(self, *, owner: str, limit: int = 26,
+                          offset: int = 0) -> list[Goal]:
+        """Completed root tasks with saved output for the owner's Results page.
+
+        Results are encrypted at rest, so filter on presence in SQL and let
+        ``_goals_from_rows`` decrypt only the requested page. Subtasks stay in
+        their parent conversation instead of crowding out customer work.
+        """
+        rows = self._read_all(
+            "SELECT * FROM goals WHERE owner=? AND parent_id IS NULL "
+            "AND status='done' AND result IS NOT NULL "
+            "ORDER BY id DESC LIMIT ? OFFSET ?",
+            (owner, max(1, min(int(limit), 100)), max(0, int(offset))),
+        )
+        return _goals_from_rows(rows)
+
+    def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,
+                             limit: int = 250) -> list[tuple]:
+        """Page all current problems and recent changes, scoped before the limit."""
+        rows = self._read_all(
+            "SELECT * FROM goals WHERE owner=? AND id>? AND "
+            "(status NOT IN ('done','cancelled') OR updated_at>=? OR "
+            "EXISTS(SELECT 1 FROM questions q WHERE q.goal_id=goals.id AND q.answer IS NULL)) "
+            "ORDER BY id LIMIT ?", (owner, after_id, since, max(1, min(500, limit))))
+        return [(_goal_from_row(row), int(row["alert_state_revision"]),
+                 int(row["alert_result_revision"])) for row in rows]
 
     def conversation_summaries(self, *, owner: str | None = None,
                                limit: int = 25, before_id: int | None = None):
@@ -2333,7 +2619,7 @@ class WorldModel:
         )
         return _goal_from_row(row) if row else None
 
-    def candidate_goals(self, include_running: bool, limit: int = 500) -> list[Goal]:
+    def candidate_goals(self, include_running: bool, limit: int = 500, *, owner: str = "") -> list[Goal]:
         """Goals with comparable text, for cross-run recall. Locked read.
 
         ``include_running`` widens to in-flight goals too; otherwise only
@@ -2350,11 +2636,11 @@ class WorldModel:
         rows = self._read_all(
             "SELECT id, parent_id, title, description, status, created_at, "
             f"updated_at, deadline, result, owner, execution_principal "
-            f"FROM goals {where} "
+            f"FROM goals {where} AND owner = ? "
             "ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
+            (owner, limit),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def subgoals(self, parent_id: int, limit: int = 50) -> list[Goal]:
         """Immediate children of a goal, oldest first. Locked read."""
@@ -2365,7 +2651,7 @@ class WorldModel:
             "ORDER BY created_at ASC LIMIT ?",
             (parent_id, limit),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     # ----- episodes -----
     def start_episode(self, goal_id: int) -> int:
@@ -2471,6 +2757,36 @@ class WorldModel:
         rows = self._read_all(sql, tuple(params))
         return [_episode_spend_from_row(r) for r in rows]
 
+    def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
+        """Finished runs that ended at or after ``since``, oldest first, as
+        ``(owner, ended_at, cost_dollars)``. Read-only history for previewing a
+        spending limit before it is saved."""
+        rows = self._read_all(
+            "SELECT COALESCE(g.owner, '') AS owner, e.ended_at AS ended_at, "
+            "COALESCE(e.cost_dollars, 0) AS cost FROM episodes e JOIN goals g ON e.goal_id = g.id "
+            "WHERE e.ended_at IS NOT NULL AND e.ended_at >= ? ORDER BY e.ended_at ASC, e.id ASC LIMIT ?",
+            (float(since), int(limit)),
+        )
+        return [(str(r["owner"] or ""), float(r["ended_at"]), float(r["cost"] or 0.0)) for r in rows]
+
+    def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
+                       limit: int = 500, owner: str = "") -> list[float]:
+        """What the most recent finished tasks run by one specialist (``domain``)
+        or one agent (``execution_principal``), or started by one person
+        (``owner``), cost, newest first: the sum of each task's finished runs.
+        Read-only history for "typical cost"."""
+        column, value = (("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+                         if execution_principal else ("g.owner", owner))
+        if not value:
+            return []
+        rows = self._read_all(
+            "SELECT SUM(COALESCE(e.cost_dollars, 0)) AS cost, MAX(e.ended_at) AS ended "
+            f"FROM episodes e JOIN goals g ON e.goal_id = g.id WHERE {column} = ? "
+            "AND e.ended_at IS NOT NULL GROUP BY e.goal_id ORDER BY ended DESC LIMIT ?",
+            (str(value), int(limit)),
+        )
+        return [float(r["cost"] or 0.0) for r in rows]
+
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         """True if ``episode_id`` belongs to ``goal_id``. A single indexed
         lookup -- callers must not scan list_episodes to check existence."""
@@ -2481,7 +2797,7 @@ class WorldModel:
         return row is not None
 
     def purge_episodes_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete completed episodes older than an absolute cutoff.
 
@@ -2502,6 +2818,12 @@ class WorldModel:
         """
         predicate = "ended_at IS NOT NULL AND ended_at < ?"
         with self._writing() as conn:
+            if review_binding is not None:
+                from .retention_review_bindings import guard_sql
+
+                guard_sql(conn, "episodes", predicate, (float(cutoff_ts),), review_binding, dry_run=dry_run)
+                if dry_run:
+                    return int(review_binding["count"])
             if dry_run:
                 row = conn.execute(
                     f"SELECT COUNT(*) FROM episodes WHERE {predicate}",
@@ -2525,9 +2847,12 @@ class WorldModel:
             )
             return int(cur.rowcount or 0)
 
-    def total_spend(self, owner: str | None = None) -> dict[str, float]:
+    def total_spend(self, owner: str | None = None, *,
+                    since: float | None = None) -> dict[str, float]:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal); ``None`` is the deployment-wide admin / auth-off view.
+        ``since`` keeps only runs that started at or after that time (the
+        "this month" figure on the My work page and in the daily summary).
         """
         join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id "
                 if owner is not None else "FROM episodes e ")
@@ -2536,6 +2861,9 @@ class WorldModel:
         if owner is not None:
             where += " AND g.owner = ?"
             params = (owner,)
+        if since is not None:
+            where += " AND e.started_at >= ?"
+            params = (*params, float(since))
         row = self._read_one(
             "SELECT COALESCE(SUM(e.cost_dollars), 0) AS dollars, "
             "COALESCE(SUM(e.input_tokens), 0) AS in_tok, "
@@ -2597,11 +2925,17 @@ class WorldModel:
             return cur.rowcount
 
     def purge_goal_events_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete goal events older than an absolute cutoff."""
         predicate = "ts IS NOT NULL AND ts < ?"
         with self._writing() as conn:
+            if review_binding is not None:
+                from .retention_review_bindings import guard_sql
+
+                guard_sql(conn, "goal_events", predicate, (float(cutoff_ts),), review_binding, dry_run=dry_run)
+                if dry_run:
+                    return int(review_binding["count"])
             if dry_run:
                 row = conn.execute(
                     f"SELECT COUNT(*) FROM goal_events WHERE {predicate}",
@@ -2615,7 +2949,7 @@ class WorldModel:
             return int(cur.rowcount or 0)
 
     def purge_messages_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete conversation messages older than an absolute cutoff.
 
@@ -2625,6 +2959,12 @@ class WorldModel:
         """
         predicate = "ts IS NOT NULL AND ts < ?"
         with self._writing() as conn:
+            if review_binding is not None:
+                from .retention_review_bindings import guard_sql
+
+                guard_sql(conn, "messages", predicate, (float(cutoff_ts),), review_binding, dry_run=dry_run)
+                if dry_run:
+                    return int(review_binding["count"])
             if dry_run:
                 row = conn.execute(
                     f"SELECT COUNT(*) FROM messages WHERE {predicate}",
@@ -2658,7 +2998,8 @@ class WorldModel:
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
-    ) -> None:
+        expected_revision: int | None = None, tags: list[str] | None = None,
+    ) -> int:
         """Write the current value of ``key``.
 
         ``source``/``trust_tier``/``sensitivity`` are Memory Guard provenance
@@ -2668,9 +3009,16 @@ class WorldModel:
         ``fact_history`` and closes the prior open window -- non-destructive
         evolution. An unchanged value refreshes provenance without a new version.
         """
+        from .fact_revision import normalize_tags
+        encoded_tags = json.dumps(normalize_tags(tags)) if tags is not None else None
         now = time.time()
         enc = _enc_field(value)
+        from .fact_revision import check_expected_revision
         with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()
+            check_expected_revision(expected_revision, int(current[0]) if current else 0)
             if self._temporal_memory:
                 prior = self._open_temporal_fact(conn, key)
                 # A new version is recorded when the value changes OR the trust
@@ -2706,13 +3054,65 @@ class WorldModel:
                 "INSERT INTO facts(key, value, source_episode_id, updated_at, "
                 "source, trust_tier, sensitivity) VALUES(?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET "
-                "id = (SELECT COALESCE(MAX(id), 0) + 1 FROM facts), "
+                "id = excluded.id, "
                 "value = excluded.value, "
                 "source_episode_id = excluded.source_episode_id, "
                 "updated_at = excluded.updated_at, source = excluded.source, "
                 "trust_tier = excluded.trust_tier, sensitivity = excluded.sensitivity",
                 (key, enc, episode_id, now, source, int(trust_tier), sensitivity),
             )
+            if encoded_tags is not None:
+                conn.execute("UPDATE facts SET tags_json = ? WHERE key = ?", (encoded_tags, key))
+            return int(conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()[0])
+
+    def fact_record(self, key: str) -> dict | None:
+        row = self._read_one(
+            "SELECT key, value, id AS revision, updated_at, source, source_episode_id, "
+            "trust_tier, sensitivity, tags_json FROM facts WHERE key = ?", (key,),
+        )
+        if not row:
+            return None
+        result = dict(row)
+        result["value"] = _dec_field(result["value"])
+        result["tags"] = json.loads(result.pop("tags_json"))
+        return result
+
+    def fact_records(self, *, query: str = "", source: str = "", tag: str = "",
+                     updated_before: float | None = None, limit: int = 50,
+                     offset: int = 0, shared_only: bool = False) -> list[dict]:
+        """Bounded metadata-filtered page; encrypted values are not indexed."""
+        clauses, params = [], []
+        if shared_only:
+            clauses.extend(("LOWER(key) NOT LIKE 'goal:%'", "LOWER(key) NOT LIKE 'user:%'"))
+        for column, value in (("key", query), ("source", source)):
+            if value:
+                clauses.append(f"{column} LIKE ? ESCAPE '\\'")
+                params.append("%" + self._like_escape(value) + "%")
+        if updated_before is not None:
+            clauses.append("updated_at < ?")
+            params.append(float(updated_before))
+        if tag:
+            clauses.append("EXISTS (SELECT 1 FROM json_each(facts.tags_json) WHERE value = ?)")
+            params.append(tag.strip().casefold())
+        sql = ("SELECT key, value, id AS revision, updated_at, source, "
+               "source_episode_id, trust_tier, sensitivity, tags_json FROM facts")
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY key LIMIT ? OFFSET ?"
+        rows = self._read_all(sql, (*params, max(1, min(limit, 101)), max(0, offset)))
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["value"] = _dec_field(item["value"])
+            item["tags"] = json.loads(item.pop("tags_json"))
+            result.append(item)
+        return result
+
+    def fact_catalog_revision(self) -> str:
+        """Metadata clock for shared facts; never decrypt or count private namespaces."""
+        row = self._read_one("SELECT COUNT(*), COALESCE(MAX(id),0) FROM facts "
+                             "WHERE LOWER(key) NOT LIKE 'goal:%' AND LOWER(key) NOT LIKE 'user:%'")
+        return f"{row[0]}:{row[1]}"
 
     def get_facts(self) -> dict[str, str]:
         """All current facts as ``{key: value}``, newest first."""
@@ -2796,7 +3196,8 @@ class WorldModel:
         row = self._read_one("SELECT value FROM facts WHERE key = ? LIMIT 1", (key,))
         return _dec_field(row["value"]) if row else None
 
-    def fact_history(self, key: str, *, limit: int = 50) -> list[FactVersion]:
+    def fact_history(self, key: str, *, limit: int = 50,
+                     owned_only: bool = False) -> list[FactVersion]:
         """Every recorded version of ``key``, newest first (requires ``[memory]
         temporal``). The entry whose ``valid_to is None`` is the current value;
         the rest are superseded values with the window they were believed in."""
@@ -2843,13 +3244,18 @@ class WorldModel:
             ))
         return out
 
-    def delete_fact(self, key: str) -> int:
+    def delete_fact(self, key: str, *, expected_revision: int | None = None) -> int:
         """Delete one fact by exact key; return rows removed (0 or 1).
 
         When ``[memory] temporal`` is on, the open ``fact_history`` window is
         closed (valid_to = now) rather than erased, so the record that the fact
         existed until this moment survives the delete."""
+        from .fact_revision import check_expected_revision
         with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()
+            check_expected_revision(expected_revision, int(current[0]) if current else 0)
             if self._temporal_memory:
                 open_row = self._open_temporal_fact(conn, key)
                 closed_at = self._temporal_write_time(time.time(), open_row)
@@ -2977,6 +3383,39 @@ class WorldModel:
             )
         return [_question_from_row(r) for r in rows]
 
+    def open_channel_questions(
+        self, conversation_id: int, owner: str, execution_principal: str,
+    ) -> list[Question]:
+        """Only questions from blocked goals started in this exact conversation."""
+        rows = self._read_all(
+            "SELECT q.* FROM questions q JOIN goals g ON g.id = q.goal_id "
+            "WHERE q.answer IS NULL AND g.status = 'blocked' "
+            "AND g.owner = ? AND g.execution_principal = ? "
+            "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+            "AND t.conversation_id = ? AND t.role = 'user') ORDER BY q.id",
+            (owner, execution_principal, conversation_id),
+        )
+        return [_question_from_row(r) for r in rows]
+
+    def answer_open_channel_question(
+        self, question_id: int, goal_id: int, answer: str, *,
+        conversation_id: int, owner: str, execution_principal: str,
+    ) -> bool:
+        """Claim an exact open question once, with its conversation and owner."""
+        with self._writing() as conn:
+            changed = conn.execute(
+                "UPDATE questions SET answer = ?, answered_at = ? "
+                "WHERE id = ? AND goal_id = ? AND answer IS NULL "
+                "AND EXISTS (SELECT 1 FROM goals g WHERE g.id = questions.goal_id "
+                "AND g.status = 'blocked' AND g.owner = ? "
+                "AND g.execution_principal = ? "
+                "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+                "AND t.conversation_id = ? AND t.role = 'user'))",
+                (_enc_field(answer), time.time(), question_id, goal_id,
+                 owner, execution_principal, conversation_id),
+            )
+            return changed.rowcount == 1
+
     def all_questions(self, goal_id: int) -> list[Question]:
         rows = self._read_all(
             "SELECT * FROM questions WHERE goal_id = ? ORDER BY id", (goal_id,)
@@ -3020,7 +3459,23 @@ class WorldModel:
                  (requested_by or None), goal["id"] if goal else None,
                  goal["domain"] if goal else ""),
             )
-            return cur.lastrowid
+            approval_id = cur.lastrowid
+        _notify_approval_created(self, approval_id, provenance)
+        self._emit_approval_event("approval.created", approval_id, {"risk": risk, "action": action})
+        return approval_id
+
+    def _emit_approval_event(self, event: str, approval_id: int, payload: dict) -> None:
+        """Webhook subscribers hear about approvals; never raises, and costs one
+        read of the subscription table when nobody is subscribed."""
+        try:
+            from .webhook_events import emit, record_link
+
+            emit(event, record_type="approval", record_id=str(approval_id),
+                 title=str(payload.get("action") or "approval")[:200],
+                 summary={k: v for k, v in payload.items() if k != "action"},
+                 link=record_link("/approvals"), payload=dict(payload), world=self)
+        except Exception:  # pragma: no cover - webhooks never block an approval
+            pass
 
     def get_approval(self, approval_id: int) -> Approval | None:
         row = self._read_one(
@@ -3055,7 +3510,78 @@ class WorldModel:
             approval_id,
             status,
             (decided_by or "").strip(),
+            self._approval_undo_round(approval_id),
         )
+
+    def _approval_undo_round(self, approval_id: int, conn=None) -> int:
+        """How many times this approval was undone (see ``undo_approval_decision``)."""
+        sql = (
+            "SELECT COUNT(*) FROM approval_audit_outbox "
+            "WHERE approval_id = ? AND status = ?"
+        )
+        params = (int(approval_id), APPROVAL_UNDO_STATUS)
+        row = conn.execute(sql, params).fetchone() if conn is not None else self._read_one(sql, params)
+        return int(row[0]) if row else 0
+
+    def undo_approval_decision(
+        self,
+        approval_id: int,
+        *,
+        undone_by: str,
+        within_seconds: float,
+    ) -> str:
+        """Return a just-decided approval to pending while it can still be undone.
+
+        Outcomes: ``"undone"``, ``"not_found"``, ``"not_decided"`` (still
+        pending, or its final vote is awaiting audit delivery), ``"too_late"``
+        (the window of ``within_seconds`` after ``decided_at`` has passed, so
+        the consumer may already have acted). On success the sign-offs are
+        cleared, the delivered vote rows keep their place in the outbox but no
+        longer carry a final status, and an undo marker row bumps the vote
+        identity round so the next decision is a new signed audit event.
+        """
+        with self._writing() as conn:
+            row = conn.execute(
+                "SELECT status, decided_at FROM approvals WHERE id = ?",
+                (int(approval_id),),
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            if row["status"] == "pending":
+                return "not_decided"
+            decided_at = row["decided_at"]
+            if decided_at is None or time.time() - float(decided_at) > float(within_seconds):
+                return "too_late"
+            conn.execute(
+                "UPDATE approvals SET status = 'pending', decided_at = NULL, "
+                "decided_by = NULL WHERE id = ? AND status = ?",
+                (int(approval_id), row["status"]),
+            )
+            conn.execute(
+                "DELETE FROM approval_signoffs WHERE approval_id = ?",
+                (int(approval_id),),
+            )
+            conn.execute(
+                "UPDATE approval_audit_outbox SET final_status = NULL "
+                "WHERE approval_id = ? AND status IN ('approved', 'denied')",
+                (int(approval_id),),
+            )
+            undo_round = self._approval_undo_round(approval_id, conn) + 1
+            now = time.time()
+            conn.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at) VALUES(?, ?, ?, ?, NULL, ?, ?)",
+                (
+                    _approval_undo_marker_id(current_tenant_id(), approval_id, undo_round),
+                    int(approval_id),
+                    APPROVAL_UNDO_STATUS,
+                    (undone_by or "").strip(),
+                    now,
+                    now,
+                ),
+            )
+            return "undone"
 
     def get_approval_audit_event(
         self,
@@ -3102,12 +3628,19 @@ class WorldModel:
         )
         return row is not None
 
+    @staticmethod
+    def _check_effect_guard(effect_guard):
+        if effect_guard is not None:
+            effect_guard()
+
     def decide_approval_audited(
         self,
         approval_id: int,
         status: str,
         *,
         decided_by: str,
+        reviewed_card: dict | None = None,
+        effect_guard=None,
     ) -> ApprovalAuditEvent | None:
         """Atomically accept a vote and queue its signed-audit delivery.
 
@@ -3126,11 +3659,6 @@ class WorldModel:
         approver = (decided_by or "").strip()
         if not approver:
             return None
-        event_id = self.approval_audit_event_id(
-            approval_id,
-            status,
-            approver,
-        )
         with self._writing() as conn:
             # The no-op write acquires SQLite's cross-process write reservation
             # before any decision read.  A SELECT-first deferred transaction can
@@ -3140,6 +3668,30 @@ class WorldModel:
                 "WHERE id = ? AND status = 'pending'",
                 (int(approval_id),),
             ).rowcount > 0
+            self._check_effect_guard(effect_guard)
+            undo_round = self._approval_undo_round(approval_id, conn)
+            event_id = _approval_audit_event_id(
+                current_tenant_id(), approval_id, status, approver, undo_round,
+            )
+
+            if reviewed_card is not None:
+                from .approval_vote_review import require_locked_vote_review
+
+                locked = conn.execute("SELECT * FROM approvals WHERE id = ?", (int(approval_id),)).fetchone()
+                approval = _approval_from_row(locked) if locked is not None else None
+                signoffs = conn.execute("SELECT approver, decision FROM approval_signoffs WHERE approval_id = ? ORDER BY decided_at", (int(approval_id),)).fetchall()
+                approvers = _single_approver(approval, [row["approver"] for row in signoffs if row["decision"] == "approved"]) if approval is not None else []
+                audit_pending = int(conn.execute("SELECT COUNT(*) FROM approval_audit_outbox WHERE approval_id = ? AND delivered_at IS NULL", (int(approval_id),)).fetchone()[0])
+                content_owner = (approval.requested_by or "") if approval is not None else None
+                if approval is not None and approval.goal_id:
+                    source = conn.execute("SELECT owner,domain FROM goals WHERE id = ?", (approval.goal_id,)).fetchone()
+                    content_owner = (source["owner"] or "") if source is not None else None
+                    source_guard = getattr(effect_guard, "approval_source", None)
+                    if source_guard is not None:
+                        source_guard(approval.goal_id, content_owner, source["domain"] if source is not None else None)
+                require_locked_vote_review(approval, reviewed_card, status=status, actor=approver,
+                                           event_id=event_id, approvers=approvers, audit_pending=audit_pending,
+                                           content_owner=content_owner)
 
             prior = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3205,10 +3757,12 @@ class WorldModel:
                     "ORDER BY decided_at, approver",
                     (int(approval_id),),
                 ).fetchall():
-                    legacy_event_id = self.approval_audit_event_id(
+                    legacy_event_id = _approval_audit_event_id(
+                        current_tenant_id(),
                         approval_id,
                         legacy["decision"],
                         legacy["approver"],
+                        undo_round,
                     )
                     conn.execute(
                         "INSERT OR IGNORE INTO approval_audit_outbox("
@@ -3281,7 +3835,7 @@ class WorldModel:
                     now,
                 ),
             )
-            return ApprovalAuditEvent(
+            result = ApprovalAuditEvent(
                 event_id=event_id,
                 approval_id=int(approval_id),
                 status=status,
@@ -3290,12 +3844,15 @@ class WorldModel:
                 created_at=now,
                 delivered_at=None,
             )
+            self._check_effect_guard(effect_guard)
+            return result
 
     def mark_approval_audit_delivered(
         self,
         event_id: str,
         *,
         delivered_at: float | None = None,
+        effect_guard=None,
     ) -> bool:
         """Acknowledge signed delivery and apply any now-safe final outcome.
 
@@ -3304,7 +3861,11 @@ class WorldModel:
         commit acknowledgement is lost, the caller can safely append the same
         stable ``event_id`` again and retry this method.
         """
+        finalized: tuple[str, str] | None = None
         with self._writing() as conn:
+            if effect_guard is not None:
+                conn.execute("UPDATE approval_audit_outbox SET delivered_at=delivered_at WHERE event_id=?", (str(event_id),))
+                effect_guard()
             event = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
                 "created_at, delivered_at FROM approval_audit_outbox "
@@ -3313,6 +3874,12 @@ class WorldModel:
             ).fetchone()
             if event is None:
                 return False
+            source_guard = getattr(effect_guard, "approval_source", None)
+            if source_guard is not None:
+                source = conn.execute("SELECT g.id,g.owner,g.domain FROM approvals a JOIN goals g ON g.id=a.goal_id WHERE a.id=?", (event["approval_id"],)).fetchone()
+                if source is None:
+                    raise PermissionError("The original approval task is unavailable")
+                source_guard(source[0], source[1] or "", source[2])
             if event["delivered_at"] is None:
                 conn.execute(
                     "UPDATE approval_audit_outbox SET delivered_at = ? "
@@ -3340,7 +3907,7 @@ class WorldModel:
                     (approval_id,),
                 ).fetchone()
                 if final is not None:
-                    conn.execute(
+                    applied = conn.execute(
                         "UPDATE approvals SET status = ?, decided_at = ?, "
                         "decided_by = ? WHERE id = ? AND status = 'pending'",
                         (
@@ -3349,7 +3916,13 @@ class WorldModel:
                             final["decided_by"],
                             approval_id,
                         ),
-                    )
+                    ).rowcount
+                    if applied:
+                        finalized = (final["final_status"], final["decided_by"])
+            if finalized is not None:
+                self._emit_approval_event("approval.decided", approval_id,
+                                          {"status": finalized[0], "decided_by": finalized[1] or ""})
+            self._check_effect_guard(effect_guard)
             return True
 
     def decide_approval(self, approval_id: int, status: str,
@@ -3394,7 +3967,12 @@ class WorldModel:
                         approval_id,
                     ),
                 )
-                return cur.rowcount > 0
+                decided = cur.rowcount > 0
+            if decided:
+                self._emit_approval_event("approval.decided", approval_id,
+                                          {"status": status, "decided_by": decided_by or "",
+                                           "action": appr.action})
+            return decided
 
         approver = (decided_by or "").strip()
         if not approver:
@@ -3463,6 +4041,7 @@ class WorldModel:
             "WHERE approval_id = ? ORDER BY decided_at", (approval_id,),
         )
         approvers = [r["approver"] for r in rows if r["decision"] == "approved"]
+        approvers = _single_approver(appr, approvers)
         audit_pending = int(
             self._read_one(
                 "SELECT COUNT(*) FROM approval_audit_outbox "
@@ -3517,22 +4096,8 @@ class WorldModel:
 
     # ----- messages -----
     def append_message(self, goal_id: int, role: str, content: str) -> None:
-        # W1-53: this trigger the messages_fts virtual table (SCHEMA, applied
-        # via executescript above) into tokenizing every inserted row, INCLUDING
-        # ciphertext once at_rest_enabled() is on (the default) -- >100% storage
-        # overhead measured on 300 messages, for an index that can then only
-        # ever match legacy pre-encryption plaintext. search_messages(), the
-        # index's one reader, has been removed (zero production callers; only
-        # its own definition and tests referenced it -- grep confirmed). The
-        # trigger/table themselves could not be removed in the same pass:
-        # migration_governance.py's additive-only policy for NEW migrations
-        # (old replicas must keep reading the old schema during a rolling
-        # deploy) refuses any DROP TABLE/TRIGGER/INDEX, and SCHEMA itself
-        # (fingerprinted as the governance ladder's version 1) is immutable
-        # once released -- editing it, even to add this comment inline, trips
-        # the same checksum guard. Routed to INFRA_AND_POLICY_DECISIONS.md:
-        # removing the schema objects needs either a policy exception or a
-        # different technical approach (e.g. a new table name), not a code fix.
+        # v49 retires the unused ciphertext-derived FTS index, preserving this
+        # authoritative message log and its existing encryption/read behavior.
         with self._writing() as conn:
             conn.execute(
                 "INSERT INTO messages(goal_id, role, content, ts) VALUES(?, ?, ?, ?)",
@@ -3975,6 +4540,7 @@ class WorldModel:
                         "attachments",
                         "goal_events",
                         "goal_origins",
+                        "goal_mutation_receipts",
                         "messages",
                         "processed_messages",
                         "questions",
@@ -4602,6 +5168,10 @@ def open_world(path: Path | None = None) -> Any:
     from .world_model_backends import is_postgres_configured
 
     if is_postgres_configured():
+        from . import practice
+
+        if practice.active():  # the practice world is a local file; never write practice live
+            raise practice.PracticeUnavailable(practice.POSTGRES_REASON)
         from .world_model_backends import open_postgres_world
 
         return open_postgres_world()
@@ -4665,7 +5235,9 @@ def world_for_tenant(tenant: str | None = None) -> WorldModel:
     """
     if tenant is not None:
         tenant = bind_tenant_namespace(tenant)
-    path = data_dir("world.db", tenant=tenant)
+    from . import practice
+
+    path = practice.world_path(tenant) if practice.active() else data_dir("world.db", tenant=tenant)
     key = _world_cache_key(path)
     shared_key = _world_cache_key(data_dir("world.db", tenant=None))
     with _tenant_worlds_lock:

@@ -392,6 +392,13 @@ class DashboardAIGovernanceLoopRuntime:
         self._project()
         return result
 
+    def discover_sources(self, *, limit: int, after: str = "") -> str:
+        from .ai_governance_native_sources import NativeAuthorityReader, produce
+
+        if not isinstance(self.coordinator.authority_reader, NativeAuthorityReader):
+            return after
+        return produce(self, limit=limit, after=after)
+
     def run_batch(self, *, worker_id: str, limit: int) -> AIGovernanceLoopBatchResult:
         bounded = _integer(limit, "worker batch limit", 1, 500)
         processed = 0
@@ -695,7 +702,8 @@ def install_ai_governance_loop_composition(app: Any) -> None:
     """Install lazy API/scheduler/server-trigger factories on an ASGI app.
 
     No store is opened and no authority is read at install time.  A deployment
-    must separately set ``ai_governance_loop_authority_reader_factory``.
+    may replace ``ai_governance_loop_authority_reader_factory`` with its own
+    validated source adapter; the default reads the native retained authorities.
     """
 
     state = getattr(app, "state", None)
@@ -744,6 +752,11 @@ def install_ai_governance_loop_composition(app: Any) -> None:
             )
 
         return callback
+
+    if getattr(state, "ai_governance_loop_authority_reader_factory", None) is None:
+        from .ai_governance_native_sources import factory
+
+        state.ai_governance_loop_authority_reader_factory = factory
 
     state.ai_governance_loop_enabled_probe = ai_governance_loop_capability_enabled
     state.ai_governance_loop_runtime_factory = runtime_factory

@@ -24,20 +24,17 @@ class _Markup(HTMLParser):
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     monkeypatch.setattr(page, "_tenant_selected", lambda: None)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
         nav_groups=[],
-        t=lambda key: key,
     )
     app = FastAPI()
     app.include_router(page.create_consent_web_publish_settings_page_router(templates))
@@ -60,7 +57,7 @@ def test_page_is_store_free_liquid_glass_and_candid(client: TestClient) -> None:
     ):
         assert directive in csp
     for text in (
-        "Website Banner Settings",
+        "Website banner settings",
         "About this page’s safeguards",
         "never asks for or stores your site’s one-time security codes",
         "stop being used until you save them again",

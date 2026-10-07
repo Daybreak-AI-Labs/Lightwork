@@ -5,7 +5,7 @@ import ast
 import json
 from pathlib import Path
 
-from maverick.recovery_authorities import authority_policy
+from maverick.recovery_authorities import NON_AUTHORIZING_GOVERNED_NAMESPACES, authority_policy
 
 ROOT = Path(__file__).parents[3]
 INVENTORY = ROOT / "docs/operations/persistence-authorities.json"
@@ -79,10 +79,25 @@ def test_all_governed_store_declarations_have_semantic_owner_and_recovery_dispos
                     assert entries[relative]["contract"] == "preferences"
                     assert policy is None  # Read/snooze UI preferences cannot authorize the source work.
                     seen_preferences = True
+                elif namespace in NON_AUTHORIZING_GOVERNED_NAMESPACES:
+                    assert policy is None
+                    assert entries[relative]["contract"] in {"preferences", "mixed_api"}
                 else:
                     assert policy is not None, f"Missing restore disposition: {namespace}"
                 assert declared[namespace]["recovery_policy"] == policy
     assert seen_preferences
+
+
+def test_knowledge_rights_archive_has_an_explicit_retained_owner_and_policy():
+    entries = {entry["path"]: entry for entry in _inventory()["entries"]}
+    knowledge = entries["packages/maverick-core/maverick/knowledge_access.py"]
+    archived = [item for item in knowledge["governed_namespaces"]
+                if item["namespace"] == "knowledge-rights-archive"]
+    assert len(archived) == 1
+    assert archived[0]["recovery_policy"] == "knowledge_access_authority"
+    assert authority_policy("knowledge-rights-archive/recovered.json", is_sqlite=False) == (
+        "knowledge_access_authority"
+    )
 
 
 def test_high_risk_authorities_and_non_authority_counterexamples_stay_distinct():

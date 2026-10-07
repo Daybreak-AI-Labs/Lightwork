@@ -9,8 +9,9 @@ tool adds them in two tiers:
   - inpaint(image, mask, prompt)   — repaint the masked region
   - variation(image[, prompt])     — re-imagine the image
   - upscale(image[, scale])        — super-resolution
-  Default models are operator knobs: ``MAVERICK_INPAINT_MODEL``,
-  ``MAVERICK_VARIATION_MODEL``, ``MAVERICK_UPSCALE_MODEL``. ``image``/``mask``
+  Models are chosen in All settings > AI models > Images; the existing
+  ``MAVERICK_INPAINT_MODEL``, ``MAVERICK_VARIATION_MODEL`` and
+  ``MAVERICK_UPSCALE_MODEL`` environment choices still win. ``image``/``mask``
   accept a workspace image file path (uploaded as a data URI) or an http(s)/
   data URL.
 
@@ -27,7 +28,6 @@ write is arbitrary host write).
 from __future__ import annotations
 
 import base64
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -98,20 +98,13 @@ def _sniff_image_mime(data: bytes) -> str | None:
 
 
 def _model_for(op: str) -> str | None:
+    from ..image_edit_models import current_model
+
     env, default = _DEFAULT_MODELS[op]
-    model = os.environ.get(env, "").strip() or default
-    # Same owner/name[:version] shape check as replicate_tool._op_run — the
-    # model string is interpolated into the API path.
-    owner_name = model.split(":", 1)[0]
-    parts = owner_name.split("/")
-    if (
-        len(parts) != 2
-        or not all(parts)
-        or ".." in owner_name
-        or not all(c.isalnum() or c in "_.-" for p in parts for c in p)
-    ):
+    try:
+        return current_model(op + "_model", env, default)
+    except ValueError:
         return None
-    return model
 
 
 def _predict(model: str, inp: dict[str, Any], wait: bool) -> str:
@@ -151,7 +144,7 @@ def _op_remote(op: str, args: dict[str, Any], sandbox: Any) -> str:
         return f"ERROR: {op} requires image"
     model = _model_for(op)
     if not model:
-        return "ERROR: invalid model (expected owner/name[:version])"
+        return "ERROR: image model choice is invalid. Review Images in All settings."
     try:
         inp: dict[str, Any] = {"image": _image_ref(image, sandbox)}
     except ValueError as e:
@@ -303,8 +296,8 @@ def image_edit(sandbox: Any = None) -> Tool:
         description=(
             "Edit images. Hosted (Replicate, REPLICATE_API_TOKEN): inpaint "
             "(image+mask+prompt), variation, upscale — image inputs are "
-            "bounded workspace image paths or URLs; defaults overridable via "
-            "MAVERICK_{INPAINT,VARIATION,UPSCALE}_MODEL. Local (Pillow, no "
+            "bounded workspace image paths or URLs; model choices are in "
+            "All settings > AI models > Images. Local (Pillow, no "
             "key): crop (box=[l,t,r,b]), resize (width/height), rotate "
             "(degrees). For text-to-image GENERATION use the replicate tool."
         ),

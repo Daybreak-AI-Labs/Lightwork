@@ -12,7 +12,8 @@
   var canAdmin = root.getAttribute("data-can-admin") === "true";
   var canAudit = root.getAttribute("data-can-audit") === "true";
   var statusLine = document.getElementById("tpi-status");
-  var S = { me: "", status: null, sources: [], snapshots: [], vendors: [], runs: [], policies: [], decisions: [], cases: [], monitors: [], alerts: [], consents: [], register: [] };
+  var S = { me: "", status: null, sources: [], snapshots: [], vendors: [], runs: [], policies: [], decisions: [], cases: [], monitors: [], alerts: [], consents: [], register: [], recipients: [], deliveries: [], mailContext: "" };
+  var mailBusy = false, recipientPending = null, lastSavedRecipient = null;
 
   var KINDS = [["sanctions", "Sanctions lists"], ["pep", "Politically exposed people"], ["watchlist", "Watchlists"], ["adverse_media", "Negative news"],
     ["cyber_posture", "Cyber security rating"], ["breach_intelligence", "Data breaches"], ["compliance", "Compliance records"], ["performance", "Performance"]];
@@ -35,7 +36,7 @@
   function label(list, value) { var m = list.filter(function (p) { return p[0] === value; })[0]; return m ? m[1] : R.human(value); }
   function opts(list) { return list.map(function (p) { return { value: p[0], label: p[1] }; }); }
   function badge(value) { var s = STATE[value] || [R.human(value), "idle"]; return R.badge(s[0], s[1]); }
-  function say(text) { statusLine.textContent = text; }
+  function say(text) { window.mvStatus(statusLine, text); }
   function fail(action) { return function (f) { var t = f && f.plain ? f.plain : R.errorText(f, action); say(t); if (window.mvToast) { window.mvToast(t, { error: true }); } }; }
   function plain(text) { var e = new Error("plain"); e.plain = text; return e; }
   function api(method, path, body) { return R.call(method, API + path, body); }
@@ -79,9 +80,11 @@
       load("/sources", "sources"), load("/snapshots", "snapshots"), load("/vendors", "vendors"), load("/screening/runs", "runs"),
       load("/risk/policies", "policies"), load("/risk/decisions", "decisions"), load("/edd/cases", "cases"),
       load("/monitors", "monitors"), load("/monitoring/alerts", "alerts"), load("/exchange/consents", "consents"),
+      api("GET", "/alert-recipients").then(function (d) { S.recipients = d.items || []; S.mailContext = d.context; }).catch(function (e) { if (e.status !== 403) { throw e; } }),
+      load("/outbox", "deliveries"),
       R.call("GET", "/api/v1/vendors").then(function (d) { S.register = d.vendors || []; }).catch(function () { S.register = []; }),
     ]).then(function () {
-      renderStatus(); renderSources(); renderVendors(); renderRuns(); renderPolicies(); renderDecisions(); renderCases(); renderMonitors(); renderConsents();
+      renderStatus(); renderSources(); renderVendors(); renderRuns(); renderPolicies(); renderDecisions(); renderCases(); renderRecipients(); renderMonitors(); renderConsents();
       say("Up to date.");
     }).catch(fail("load the intelligence records"));
   }
@@ -171,7 +174,7 @@
     api("POST", "/provider-runtime/sources/" + encodeURIComponent(s.source_id) + "/readiness").then(function (d) {
       say(d.ready ? "The connection is ready. Lightwork will try it on the next collection." : "The connection isn't ready yet. Ask your IT team to check the connection key.");
     }, function (f) {
-      say(f && f.status === 403 ? "This source isn't approved for watching for changes, so it can't be collected automatically." : R.errorText(f, "test the connection"));
+      say(f && f.status === 403 ? "This source isn't approved for watching for changes, so it can't be collected automatically. Collect it by hand, or ask an administrator to approve it." : R.errorText(f, "test the connection"));
     });
   }
   function recordSnapshot(s) {
@@ -205,6 +208,7 @@
       { label: "Access to our data", value: function (v) { return label(ACCESS, v.data_access_level); } },
       { label: "Latest decision", value: function (v) { var d = latestDecision(v.vendor_id); return d ? badge2(DECISION, d.status) : "None yet"; } },
     ], S.vendors, [
+      { label: "Open registered vendor", when: function (v) { return !!v.register_vendor_id; }, run: function (v) { window.location.href = '/privacy/vendors/' + encodeURIComponent(v.register_vendor_id) + '#vendor-profile'; } },
       { label: "Screen", kind: "primary", run: screen },
       { label: "Decide risk", run: evaluate },
       { label: "Watch for changes", run: watch },
@@ -218,18 +222,20 @@
     return S.decisions.filter(function (d) { return d.vendor_id === vendorId; }).sort(function (a, b) { return b.decided_at - a.decided_at; })[0];
   }
   function addVendor() {
-    var register = S.register.map(function (v) { return { value: v.name, label: v.name }; });
+    var register = S.register.filter(function (v) { return !S.vendors.some(function (profile) { return profile.register_vendor_id === v.id; }); }).map(function (v) { return { value: v.id, label: v.name }; });
+    if (!register.length) { say('Register the vendor in Privacy first, or open its already linked Intelligence identity. Existing separate identities can be linked from the vendor profile.'); return; }
+    var selectedVendor = new URLSearchParams(window.location.search).get('registered_vendor');
     R.form("Add a vendor", [
-      { key: "pick", label: "Vendor", type: "select", default: register.length ? register[0].value : "", options: register.concat([{ value: "", label: "Another vendor (type the name below)" }]) },
-      { key: "typed", label: "Vendor name (if not in the list)" },
+      { key: "pick", label: "Registered vendor", type: "select", default: register.some(function (row) { return row.value === selectedVendor; }) ? selectedVendor : register[0].value, options: register },
       { key: "category", label: "What they do for us", type: "select", default: "software", options: opts(CATEGORIES) },
       { key: "inherent", label: "Inherent risk", type: "select", default: "3", options: opts(LEVELS) },
       { key: "critical", label: "How critical they are to us", type: "select", default: "3", options: opts(LEVELS) },
       { key: "access", label: "Access to our data", type: "select", default: "limited", options: opts(ACCESS) },
     ].concat(regionFields("r")), "Add vendor").then(function (v) {
       if (!v) { return; }
-      var name = String(v.pick || v.typed || "").trim();
-      if (!name) { throw plain("Choose a vendor or type its name."); }
+      var registered = S.register.find(function (row) { return row.id === v.pick; });
+      if (!registered) { throw plain("Choose a current registered vendor."); }
+      var name = registered.name;
       var regions = chosenRegions(v, "r");
       if (!regions.length) { throw plain("Choose at least one region."); }
       var slugName = ref(name, "").toLowerCase();
@@ -239,6 +245,7 @@
           display_label: name, entity_identity_sha256: identity, encrypted_profile_ref: ("profile." + slugName).slice(0, 128), profile_key_ref: "profile-key.default",
           territories: regions, service_categories: [v.category], inherent_risk_level: Number(v.inherent), criticality: Number(v.critical),
           data_access_level: v.access, expected_revision: 0, idempotency_key: R.newKey(),
+          register_vendor_id: registered.id,
         });
       }).then(function () { say("Vendor added."); loadAll(); });
     }).catch(fail("add the vendor"));
@@ -313,7 +320,7 @@
       ], d.items || [], [
         { label: "Review", kind: "primary", when: function (f) { return (!f.disposition || f.disposition === "pending_review") && !mine(f.detected_by); }, run: function (f) { reviewFinding(r, f); } },
       ], { text: "No possible matches recorded." });
-      host.scrollIntoView({ behavior: "smooth" });
+      window.mvReveal(host);
     }, fail("load the possible matches"));
   }
   function recordFinding(r) {
@@ -504,9 +511,9 @@
     ], c.tasks || [], [
       { label: "Mark complete", when: function (t) { return !c.decision && t.status === "open"; }, run: function (t) { caseTask(c, t, "complete"); } },
       { label: "Not needed", when: function (t) { return !c.decision && t.status === "open"; }, run: function (t) { caseTask(c, t, "waived"); } },
-    ], { text: "No tasks yet." });
+    ], { text: "No tasks yet. Tasks appear here when a review asks for follow-up." });
     host.appendChild(R.el("p", "muted", (c.evidence || []).length + " piece(s) of evidence recorded."));
-    host.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(host);
   }
   function caseTask(c, t, status) {
     var fields = t ? [] : [
@@ -557,6 +564,84 @@
   }
 
   // ---- monitoring ------------------------------------------------------------------
+  function recipientStatus(text) { window.mvStatus(document.getElementById("tpi-recipient-result"), text); }
+  function recipientControls() {
+    ["tpi-recipient-name", "tpi-recipient-address"].forEach(function (id) {
+      var input = document.getElementById(id); if (input) { input.readOnly = Boolean(recipientPending); }
+    });
+    var save = document.getElementById("tpi-save-recipient");
+    if (save) { save.disabled = mailBusy; save.textContent = recipientPending ? "Retry this same recipient" : "Review recipient"; }
+    var original = document.getElementById("tpi-recipient-original");
+    if (original) { original.hidden = !recipientPending; original.disabled = mailBusy; }
+  }
+  function recipientSaved(record) {
+    if (!recipientPending || record.recipient_id !== recipientPending.id || record.name !== recipientPending.name || record.address !== recipientPending.address) {
+      throw plain("The saved recipient differs from this form. Keep this request and ask an administrator to review it.");
+    }
+    recipientPending = null; lastSavedRecipient = record.recipient_id;
+    document.getElementById("tpi-recipient-name").value = "";
+    document.getElementById("tpi-recipient-address").value = "";
+    recipientStatus(record.state === "active" ? "Recipient saved. Choose it when you start watching a vendor." : "This recipient was saved, then withdrawn. Add a new recipient before starting a watch.");
+    return loadAll();
+  }
+  function renderRecipients() {
+    if (lastSavedRecipient && S.recipients.some(function (r) { return r.recipient_id === lastSavedRecipient && r.state === "withdrawn"; })) {
+      recipientStatus("That saved recipient was withdrawn. Add a new recipient before starting another watch.");
+    }
+    R.table(document.getElementById("tpi-recipients"), [
+      { label: "Name", value: function (r) { return r.name; } },
+      { label: "Email address", value: function (r) { return r.address; } },
+      { label: "Status", value: function (r) { return r.state === "active" ? R.badge("Available", "ok") : R.badge("Withdrawn", "idle"); } },
+    ], S.recipients, [{ label: "Withdraw", kind: "danger", when: function (r) { return canAdmin && r.state === "active"; }, run: function (r) {
+      if (mailBusy) { return; }
+      mailBusy = true; recipientControls();
+      R.confirm("Withdraw " + r.name + " (" + r.address + ")? Watches using this saved address will stop sending to it. Messages already accepted cannot be recalled. To change an address, withdraw this recipient and add the new one.", "Withdraw recipient").then(function (ok) {
+        if (!ok) { return; }
+        return api("POST", "/alert-recipients/" + encodeURIComponent(r.recipient_id) + "/withdraw", { expected_revision: r.revision, context: S.mailContext, idempotency_key: R.newKey() })
+          .then(function () { say("Recipient withdrawn."); return loadAll(); });
+      }).catch(fail("withdraw the recipient")).finally(function () { mailBusy = false; recipientControls(); });
+    } }], { text: "No saved recipients. An administrator can add the team or person who should receive change alerts." });
+  }
+  var recipientForm = document.getElementById("tpi-recipient-form");
+  if (recipientForm) {
+    recipientForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (mailBusy || !S.mailContext) { return; }
+      var draft = recipientPending || { id: R.newId("recipient"), name: document.getElementById("tpi-recipient-name").value.trim(),
+        address: document.getElementById("tpi-recipient-address").value.trim(), context: S.mailContext, key: R.newKey() };
+      mailBusy = true; recipientControls();
+      R.confirm("Save " + draft.name + " at " + draft.address + "? When you explicitly send waiting alerts, this address receives vendor names, change notices and review references by email outside Lightwork. Source contents are not attached. Only watches that select this saved recipient will use it.", "Save recipient").then(function (ok) {
+        if (!ok) { return; }
+        recipientPending = draft; recipientControls();
+        return api("PUT", "/alert-recipients/" + encodeURIComponent(draft.id), { name: draft.name, address: draft.address, external_use_reviewed: true, context: draft.context, idempotency_key: draft.key }).then(recipientSaved);
+      }).catch(function (e) {
+        if (recipientPending && !recipientPending.uncertain && e.status >= 400 && e.status < 500) {
+          recipientPending = null;
+          recipientStatus(R.errorText(e, "save the recipient") + " Your entries were kept; correct them and review again.");
+        } else {
+          if (recipientPending) { recipientPending.uncertain = true; }
+          recipientStatus(R.errorText(e, "save the recipient") + " Your form and the same request were kept. Read the saved recipient or retry this exact request; do not create a second recipient for an uncertain reply.");
+        }
+      }).finally(function () { mailBusy = false; recipientControls(); });
+    });
+    document.getElementById("tpi-recipient-original").addEventListener("click", function () {
+      if (!recipientPending || mailBusy) { return; }
+      mailBusy = true; recipientControls();
+      api("GET", "/alert-recipients/" + encodeURIComponent(recipientPending.id)).then(recipientSaved).catch(function (e) {
+        recipientStatus(e.status === 404 ? "A saved recipient is not confirmed yet. Your form is kept. Retry this same request when the service is available." : R.errorText(e, "read the saved recipient"));
+      }).finally(function () { mailBusy = false; recipientControls(); });
+    });
+  }
+  window.LightworkThirdPartyAlerts = { openReview: function (context, isCurrent) {
+    if (!canAdmin || mailBusy || !recipientForm || !/^[0-9a-f]{64}$/.test(context || "") || typeof isCurrent !== "function" || !isCurrent()) { return Promise.resolve(false); }
+    mailBusy = true; recipientControls();
+    return api("GET", "/alert-recipients").then(function (d) {
+      if (!isCurrent() || d.context !== context || (S.mailContext && S.mailContext !== context)) { say("Your account or workspace changed. Your current form was kept; reload the current controls before continuing."); return false; }
+      S.mailContext = d.context; S.recipients = d.items || []; renderRecipients();
+      document.getElementById("tpi-recipient-setup").scrollIntoView({ block: "center" });
+      document.getElementById("tpi-recipient-name").focus(); return true;
+    }).catch(function (e) { fail("open alert recipients")(e); return false; }).finally(function () { mailBusy = false; recipientControls(); });
+  } };
   function renderMonitors() {
     R.table(document.getElementById("tpi-monitors"), [
       { label: "Vendor", value: function (m) { return vendorName(m.vendor_id); } },
@@ -564,6 +649,7 @@
       { label: "How often", value: function (m) { var d = Math.round(m.cadence_seconds / 86400); return d >= 1 ? "Every " + d + " day" + (d === 1 ? "" : "s") : "Every " + Math.round(m.cadence_seconds / 3600) + " hours"; } },
       { label: "Next check", value: function (m) { return R.when(m.next_run_at); } },
       { label: "Status", value: function (m) { return badge(m.state); } },
+      { label: "Alerts to", value: function (m) { var r = S.recipients.filter(function (r) { return r.destination_ref === m.destination_ref; })[0]; return r ? r.name + (r.state !== "active" ? " · withdrawn" : "") : "Choose a saved recipient by starting a new watch"; } },
     ], S.monitors, [
       { label: "Stop watching", kind: "danger", when: function (m) { return m.state === "active"; }, run: stopWatching },
     ], { text: "No vendors are being watched. Use Watch for changes on a vendor." });
@@ -571,20 +657,28 @@
       { label: "Vendor", value: function (a) { return vendorName(a.vendor_id); } },
       { label: "Found", value: function (a) { return R.when(a.created_at); } },
       { label: "Source", value: function (a) { return (a.citations || []).map(function (c) { return c.title; }).join(", ") || "—"; } },
-    ], S.alerts.slice().sort(function (a, b) { return b.created_at - a.created_at; }), [], { text: "No changes found yet." });
+    ], S.alerts.slice().sort(function (a, b) { return b.created_at - a.created_at; }), [], { text: "No changes found yet. Changes appear here when a watched source reports one." });
+    var outcomes = { pending: "Waiting to send", leased: "Reserved to send", dispatching: "Send not yet confirmed · will not resend automatically", ambiguous: "Unconfirmed · will not resend automatically", delivered: "Accepted by mail service", cancelled: "Cancelled", dead_letter: "Stopped after unsuccessful attempts" };
+    R.table(document.getElementById("tpi-deliveries"), [
+      { label: "Vendor", value: function (d) { var a = S.alerts.filter(function (a) { return a.alert_id === d.alert_id; })[0]; return a ? vendorName(a.vendor_id) : "Retained alert"; } },
+      { label: "Outcome", value: function (d) { return outcomes[d.state] || "Needs review"; } },
+      { label: "Next try", value: function (d) { return d.state === "pending" ? R.when(d.next_attempt_at) : "—"; } },
+    ], S.deliveries, [], { text: "No emails have been queued yet. An email is queued when a watched vendor has a change and a saved alert recipient." });
   }
   function watch(v) {
     var kinds = availableKinds("monitoring");
     if (!kinds.length) { say("There's no current data approved for watching for changes. Approve a source for that use and record a data update first."); return; }
+    var recipients = S.recipients.filter(function (r) { return r.state === "active"; });
+    if (!recipients.length) { say("Add a saved alert recipient first. An administrator can do this in Alert recipients on this page."); document.getElementById("tpi-recipient-setup").scrollIntoView({ block: "center" }); return; }
     R.form("Watch " + v.display_label + " for changes", kinds.map(function (k, i) { return { key: "k" + i, label: "Watch " + k[1], type: "bool", default: true }; }).concat([
       { key: "every", label: "Check", type: "select", default: "7", options: [{ value: "1", label: "Every day" }, { value: "7", label: "Every week" }, { value: "30", label: "Every month" }] },
-      { key: "to", label: "Send alerts to (the group name your IT team set up)", required: true, default: "vendor-risk-team" },
+      { key: "to", label: "Send alerts to", type: "select", required: true, options: recipients.map(function (r) { return { value: r.destination_ref, label: r.name + " · " + r.address }; }) },
     ]), "Start watching").then(function (vals) {
       if (!vals) { return; }
       var bindings = {};
-      kinds.forEach(function (k, i) { if (vals["k" + i]) { bindings[k[0]] = usableSnapshot(k[0], "monitoring").snapshot_id; } });
+      kinds.forEach(function (k, i) { if (vals["k" + i]) { var snapshot = usableSnapshot(k[0], "monitoring"); if (!snapshot) { throw plain("This source changed. Reload its current data before starting a watch."); } bindings[k[0]] = snapshot.source_id; } });
       if (!Object.keys(bindings).length) { throw plain("Choose at least one check."); }
-      return api("PUT", "/monitors/" + encodeURIComponent(R.newId("watch")), { vendor_id: v.vendor_id, source_bindings: bindings, destination_ref: ref(vals.to, "").toLowerCase(), cadence_seconds: days(vals.every), idempotency_key: R.newKey() })
+      return api("PUT", "/monitors/" + encodeURIComponent(R.newId("watch")), { vendor_id: v.vendor_id, source_bindings: bindings, destination_ref: vals.to, cadence_seconds: days(vals.every), idempotency_key: R.newKey() })
         .then(function () { say("Now watching " + v.display_label + "."); loadAll(); });
     }).catch(fail("start watching"));
   }
@@ -596,15 +690,23 @@
     }).catch(fail("stop watching"));
   }
   document.getElementById("tpi-send-alerts").addEventListener("click", function () {
-    R.confirm("Send the change alerts that are waiting? They go out by email to the recipients your IT team set up.", "Send alerts").then(function (ok) {
-      if (!ok) { return; }
-      return api("POST", "/outbox/run", {}).then(function (d) {
-        var sent = (d.delivered || d.delivered_count || 0);
-        say(typeof sent === "number" ? sent + " alert(s) sent." : "Waiting alerts were sent.");
+    if (mailBusy) { return; }
+    mailBusy = true;
+    document.getElementById("tpi-send-alerts").disabled = true; recipientControls();
+    api("GET", "/outbox/review").then(function (review) {
+      if (!review.items.length) { say("No current alerts are ready to send. Unconfirmed messages remain in Email outcomes and are not repeated."); return; }
+      var content = "Send " + review.items.length + " alert(s) from " + review.sender + "?\n\n" + review.items.map(function (item) {
+        return "To: " + item.recipient + " · " + item.address + "\nSubject: " + item.subject + "\n" + item.body;
+      }).join("\n\n") + "\n\n" + review.external_use;
+      return R.confirm(content, "Send reviewed alerts").then(function (ok) {
+        if (!ok) { return; }
+        return api("POST", "/outbox/run", { context: review.context, review_sha256: review.review_sha256, items: review.items.map(function (item) { return { delivery_id: item.delivery_id, pin: item.pin }; }) }).then(function (d) {
+          return loadAll().then(function () { say(d.acknowledged + " accepted by the mail service; " + d.retry_pending + " waiting for another try; " + d.dead_lettered + " stopped; " + (d.cancelled || 0) + " cancelled; " + d.acknowledgement_ambiguous + " unconfirmed. Accepted does not prove inbox receipt."); });
+        });
       });
     }).catch(function (f) {
-      say(f && f.status === 503 ? "Sending alerts isn't set up yet. Ask your IT team to set up alert recipients." : R.errorText(f, "send the alerts"));
-    });
+      return loadAll().then(function () { say(R.errorText(f, "send the alerts") + " Read Email outcomes before trying again. Unconfirmed sends are kept and are not automatically repeated."); });
+    }).finally(function () { mailBusy = false; document.getElementById("tpi-send-alerts").disabled = false; recipientControls(); });
   });
 
   // ---- sharing with partners ------------------------------------------------------

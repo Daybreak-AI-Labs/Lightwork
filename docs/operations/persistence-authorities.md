@@ -5,13 +5,12 @@ world model or governed records does not make every queue, file, key, approval,
 audit chain and instruction store shared. This inventory does not enable high
 availability or relax deployment guards.
 
-The machine-readable [inventory](persistence-authorities.json) classifies 528
-Python source files: the 521 persistence-seam candidates from a 1,535-file source
-scan, plus the shared A2A store, transaction batch helper, offline migration and
-its CLI delegation, bounded tool-result artifact owner, PostgreSQL I/O primitive
-and explicit learning-key schema helper. The latter changes the keys of the four
-existing learning tables in the owning transaction; it creates no separate
-business namespace. It includes
+The machine-readable [inventory](persistence-authorities.json) classifies 722
+Python source files from the original persistence-seam scan and subsequent
+production-owner reviews, including the shared A2A store, PostgreSQL primitives,
+learning-key schema helper and signed client-erasure receipts. The learning-key
+helper changes the keys of the four existing learning tables in the owning
+transaction; it creates no separate business namespace. The inventory includes
 explicit test/tooling exclusions. Each entry records its purpose, semantic
 contract, owning module or delegated owner, exact source sites, literal path
 hints, observed transaction/schema markers and governed namespace restore policy.
@@ -39,6 +38,7 @@ after base `ea17dc91f14b984d167dd5768ea7543fbda9278f` and will move with edits.
 | Accounting and stop authority | Provider spend, quotas, budget receipts, tenant reservations, shared/local HALT | Preserve spend history, exact stop generation and attempt identity. A partition or lost accounting authority cannot grant new budget or clear a newer stop. |
 | Identity, keys and configuration | Tenant registry/KMS, at-rest keys, connection/OAuth vaults, RBAC, SCIM, invites, replay and revocation files, runtime settings | Authenticate custody and tenant/purpose binding. Restore exact key generations only through the recovery protocol; unsupported identity/config authority stays blocked. |
 | Audit and evidence | Signed bodies, chains, checkpoints, anchors, evidence receipt ledgers and custody state | Transfer signatures, keys, anchors, retention and source coverage together. Indexes can accelerate reads but cannot recreate evidence or erase a reported gap. |
+| Client-erasure receipts | `client_erasure.py`; signed intent, prepared inventory and terminal outcome are retained under the installation home outside the erased tenant root | Preserve the signed chain and public verification key as offboarding evidence. An intent or prepared event is not proof of completion; these receipts cannot restore erased tenant data, and tenant workspace backup does not capture them. |
 | Learning and research | Promotion ledger, evaluator accounting, generated instructions, skill/code artifacts, archives and model pointers | Preserve source/model/evaluator version, confirmation accounting and approval. PostgreSQL's existing four learning tables use the checked [tenant-key migration](learning-store-tenant-keys.md), shared by WorldModel v39 and standalone initialization; table/row and NULL-partition identity are retained, with one caller-owned transaction and refusal on unrecognized constraints. Some logs are explicitly discarded on bootstrap; instruction, routing and promotion state remains protected. Research opt-in does not make authority disposable. |
 | Source documents and customer records | Attachment blobs, knowledge corpus, book of work, assessments and user task data | Preserve source hashes, provenance and record relationships. Migrate canonical source before rebuilding embeddings or projections. Not all persistent data authorizes execution. |
 | Derived state | Exact-key lookup, flow metadata index, recall markers, model discovery and content-bound caches | Rebuild from current canonical sources; preserve removal/incomplete state until reconciled. A derived label never overrides a stricter registry policy. |
@@ -60,6 +60,15 @@ specific policy: authenticated preservation for supported records/credentials,
 safe retirement or transformation for supported work, explicit discard for
 specified derived inputs, or a global startup block. A blocker is not cleared by
 generic administrator confirmation when no supported reconciliation exists.
+
+Public-form `form-recovery` journals and their signed `.accepted` markers are
+execution authority: an older restored absence could run a submission the owner
+decided to stop. A restored copy containing either file is retained as a
+global-start blocker pending current authority reconciliation. At delivery,
+missing or inconsistent journal/marker pairs refuse the submission; a crash
+between initial marker creation and the first journal append can leave a safe
+hold with no automatic repair path. A snapshot from before both files existed
+has no absence proof and can still replay the submission.
 
 Caller-configured paths, such as the optional benchmark coordinator's state file,
 cannot be assigned a safe bootstrap policy from their extension. They require the

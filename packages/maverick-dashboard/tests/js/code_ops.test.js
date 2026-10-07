@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
 const source = fs.readFileSync(path.join(folder, "static/lightwork-code.js"), "utf8");
@@ -45,6 +46,7 @@ async function fixture({ confirm = true, watching = [] } = {}) {
     return json({});
   };
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done)); };
+  shell(window);
   window.eval(source);
   await settle();
   return { window, doc: window.document, calls, confirms, settle };

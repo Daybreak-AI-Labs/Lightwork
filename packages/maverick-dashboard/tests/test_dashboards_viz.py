@@ -46,6 +46,23 @@ def test_overview_board_payload(monkeypatch, tmp_path):
     assert d["recent"][0]["title"] in ("Vendor DPA review", "Access recert")
 
 
+def test_overview_board_reports_every_status_not_just_the_headline_four(monkeypatch, tmp_path):
+    """UX-208: "Queued" used to be total - done - active - blocked, so failed,
+    cancelled and draft goals were counted as queued. The payload now carries
+    the real count per status so the page can show each one on its own."""
+    _isolate(monkeypatch, tmp_path)
+    w = _seed_world()
+    for title, status in (("Waiting", "pending"), ("Broke", "failed"),
+                          ("Stopped", "cancelled"), ("Half-written", "draft")):
+        w.set_goal_status(w.create_goal(title, domain="legal_privacy"), status)
+    d = _client().get("/api/v1/dashboards/overview?days=30").json()
+    assert d["by_status"] == {
+        "done": 1, "blocked": 1, "pending": 1, "failed": 1, "cancelled": 1, "draft": 1,
+    }
+    # The headline totals keep their meaning.
+    assert d["totals"] == {"total": 6, "active": 0, "done": 1, "blocked": 1}
+
+
 def test_spend_board_payload(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _seed_world()
@@ -76,6 +93,31 @@ def test_board_days_clamped_and_unknown_board_404(monkeypatch, tmp_path):
     assert c.get("/api/v1/dashboards/nope").status_code == 404
 
 
+def test_department_scoped_user_cannot_read_unfiltered_company_boards(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _seed_world()
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
+    client = _client()
+    for board in ("overview", "spend", "workforce", "savings", "oversight"):
+        api = client.get(f"/api/v1/dashboards/{board}")
+        page = client.get(f"/{board}", headers={"Accept": "text/html"})
+        assert api.status_code == 200, board
+        assert page.status_code == 200, board
+        assert api.json()["scope"] == "permitted_own"
+        assert "Vendor DPA review" not in api.text
+        assert "Access recert" not in api.text
+        assert "not company totals" in page.text
+    assert client.get("/api/v1/dashboards/overview").json()["totals"]["total"] == 0
+    assert client.get("/api/v1/spend").json()["total"]["runs"] == 0
+    # Department-specific boards retain their existing permission checks.
+    assert client.get("/api/v1/dashboards/finance").status_code == 200
+    monkeypatch.setattr(auth, "caller_suites", lambda request: None)
+    assert client.get("/api/v1/dashboards/overview").status_code == 200
+    assert client.get("/overview", headers={"Accept": "text/html"}).status_code == 200
+
+
 def test_board_payloads_survive_empty_world(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
@@ -95,12 +137,45 @@ def test_pages_ship_the_board_skeleton(monkeypatch, tmp_path):
                          ("/workforce", "bd-depts")):
         t = c.get(path).text
         assert "/static/board.js" in t, path
-        assert 'class="bd-slicer"' in t and 'id="bd-stamp"' in t, path
+        assert 'aria-label="Time range"' in t and 'data-days="90"' in t and 'id="bd-stamp"' in t, path
         assert marker in t, path
 
 
 def test_overview_empty_still_offers_first_goal(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/overview").text
-    assert "Start your first goal" in t
+    assert "Start your first task" in t
     assert "bd-momentum" not in t   # no board over an empty record
+
+
+def test_department_boards_show_practice_cost_apart_from_the_real_totals(monkeypatch, tmp_path):
+    """Practice AI calls cost real provider money: a department board shows
+    them on their own line, scoped like its real figures (this person's tasks
+    in their departments), and never inside the department's totals."""
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    w = _seed_world()
+    real = w.create_goal("Pay the March invoices", domain="finance_ap")
+    w.end_episode(w.start_episode(real), "ok", "success", cost_dollars=2.0)
+    from maverick import practice
+    from maverick.world_model import open_world
+
+    with practice.scope():
+        pw = open_world()
+        for title, domain, cost in (("Practice: pay invoices", "finance_ap", 0.42),
+                                    ("Practice: privacy review", "legal_privacy", 0.30)):
+            pw.end_episode(pw.start_episode(pw.create_goal(title, domain=domain)), "ok", "success", cost_dollars=cost)
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
+    client = _client()
+    for board in ("spend", "workforce", "savings"):
+        data = client.get(f"/api/v1/dashboards/{board}?days=30").json()
+        line = data["practice"]
+        # Only the finance practice run: the legal one is outside this person's departments.
+        assert line["dollars"] == 0.42 and line["runs"] == 1 and line["counted_against_limits"] is False, board
+        assert line["text"] == "Practice: $0.42 in the last 30 days (not counted against limits)", board
+    spend = client.get("/api/v1/dashboards/spend?days=30").json()
+    assert spend["totals"]["dollars"] == 2.0 and spend["all_time"]["dollars"] == 2.0  # real totals unchanged
+    for board in ("overview", "oversight"):
+        assert "practice" not in client.get(f"/api/v1/dashboards/{board}").json(), board

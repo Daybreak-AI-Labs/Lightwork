@@ -1,8 +1,9 @@
 """The DSAR estate worksheet: where a human looks beyond the platform.
 
 The assertions that matter: the worksheet reflects the platform's own
-holdings, surfaces only identifying data-map assets, lists active vendors
-as processors, and degrades every absent module to ``enabled: false``
+holdings, surfaces only identifying data-map assets, lists every vendor
+that is not offboarded as a processor (a newly registered vendor starts
+under review and may already hold the subject's data), and degrades every absent module to ``enabled: false``
 instead of failing.
 """
 from __future__ import annotations
@@ -51,6 +52,14 @@ def test_worksheet_builds_the_estate_search_plan():
         "Acme Analytics", category="analytics", criticality="high",
         owner="procurement", actor="ops",
     )
+    gone = vendor_management.register_vendor(
+        "Retired Mailer", category="email", criticality="low",
+        owner="procurement", actor="ops",
+    )
+    vendor_management.set_vendor_status(
+        gone["id"], "offboarded", actor="ops",
+        expected_revision=gone["revision"],
+    )
 
     plan = privacy_ops.dsar_estate_worksheet(request["id"])
     assert plan["request_id"] == request["id"]
@@ -62,6 +71,10 @@ def test_worksheet_builds_the_estate_search_plan():
     ]
     assert plan["data_map"]["assets"][0]["categories"] == ["email", "phone"]
     assert plan["processors"]["vendors"][0]["name"] == "Acme Analytics"
+    assert [v["name"] for v in plan["processors"]["vendors"]] == [
+        "Acme Analytics"
+    ]
+    assert plan["processors"]["vendors"][0]["status"] == "under_review"
     # Document discovery has no configured sources here: no hits, and
     # discover() contributes nothing rather than erroring.
     assert plan["documents"].get("hits", []) == []
@@ -81,3 +94,65 @@ def test_worksheet_degrades_when_the_estate_modules_are_off(tmp_path):
     assert plan["platform_holdings"]["enabled"] is True
     with pytest.raises(KeyError):
         privacy_ops.dsar_estate_worksheet("DSAR-nope")
+
+
+def _seed_platform_world():
+    """Alice has a conversation and a goal on slack; bob has one too (isolation)."""
+    from maverick.world_model import world_for_tenant
+
+    world = world_for_tenant("__active__")
+    conv = world.get_or_create_conversation("slack", "alice@example.com")
+    goal = world.create_goal("alice's renewal", "renew the contract")
+    world.append_turn(conv.id, "user", "please renew", goal_id=goal)
+    bob = world.get_or_create_conversation("slack", "bob@example.com")
+    bob_goal = world.create_goal("bob's goal", "something else")
+    world.append_turn(bob.id, "user", "hello", goal_id=bob_goal)
+    return world
+
+
+def test_worksheet_counts_the_conversations_and_goals_the_platform_holds():
+    """The estate plan must not tell the officer the platform holds nothing when
+    it holds conversations and goals: it counts the nested world sections and
+    reads them for the request's own channel."""
+    _seed_platform_world()
+    request = privacy_ops.open_dsar(
+        "alice@example.com", kind="access", channel="slack", opened_by="ops",
+    )
+
+    sections = privacy_ops.dsar_estate_worksheet(request["id"])[
+        "platform_holdings"]["sections"]
+
+    assert sections["conversations"] == 1
+    assert sections["turns"] == 1
+    assert sections["goals"] == 1
+    assert "audit" in sections  # the previously reported section is kept
+
+
+def test_worksheet_uses_the_request_channel_when_the_id_is_on_two_channels():
+    """The same id on two channels is ambiguous without the request's channel;
+    the export fails closed and the worksheet used to report an empty estate."""
+    world = _seed_platform_world()
+    world.get_or_create_conversation("telegram", "alice@example.com")
+    request = privacy_ops.open_dsar(
+        "alice@example.com", kind="access", channel="slack", opened_by="ops",
+    )
+
+    holdings = privacy_ops.dsar_estate_worksheet(request["id"])["platform_holdings"]
+
+    assert holdings["sections"]["conversations"] == 1
+    assert holdings["resolved"] is True
+
+
+def test_worksheet_says_so_when_the_account_cannot_be_resolved():
+    """With no channel on the request and the id on two channels, nothing can be
+    counted safely: say that, rather than reporting zero records."""
+    world = _seed_platform_world()
+    world.get_or_create_conversation("telegram", "alice@example.com")
+    request = privacy_ops.open_dsar(
+        "alice@example.com", kind="access", opened_by="ops",
+    )
+
+    holdings = privacy_ops.dsar_estate_worksheet(request["id"])["platform_holdings"]
+
+    assert holdings["enabled"] is True
+    assert holdings["resolved"] is False

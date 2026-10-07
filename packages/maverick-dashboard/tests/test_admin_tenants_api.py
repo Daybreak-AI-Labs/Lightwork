@@ -88,8 +88,116 @@ def test_audit_refusal_rolls_back_tenant_publication(monkeypatch):
     response = client.post("/api/v1/admin/tenants", json={"id": "unlogged"})
 
     assert response.status_code == 503
-    assert "not published" in response.json()["detail"]
+    assert "identifier remains reserved" in response.json()["detail"]
     assert client.get("/api/v1/admin/tenants/unlogged").status_code == 404
+
+    monkeypatch.setattr(audit, "record_global", lambda *args, **kwargs: True)
+    assert client.post("/api/v1/admin/tenants", json={"id": "unlogged"}).status_code == 409
+    retry = client.post("/api/v1/admin/tenants", json={"display_name": "Unlogged"})
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["id"] == "unlogged-2"
+
+
+@pytest.mark.parametrize("purge", [False, True])
+def test_deleted_workspace_cannot_adopt_old_membership_or_payload(purge, monkeypatch):
+    from maverick.paths import data_dir, maverick_home
+    from maverick_dashboard import rbac
+
+    # Exercise the real installation-level role path, including orphan roles.
+    monkeypatch.setattr(rbac, "tenant_store_path", lambda: maverick_home() / "dashboard-tenant-roles.json")
+    assert client.post("/api/v1/admin/tenants", json={"id": "former"}).status_code == 201
+    rbac.set_tenant_role("former", "user:old", "admin")
+    root = data_dir(tenant="former")
+    (root / "synthetic.txt").write_text("old private fixture", encoding="utf-8")
+    if purge:
+        # Remove never erases in one step: erasure is a separate reviewed action.
+        shortcut = client.request("DELETE", "/api/v1/admin/tenants/former?purge=true")
+        assert shortcut.status_code == 409, shortcut.text
+        assert "Review erasure" in shortcut.json()["detail"]
+        assert (root / "synthetic.txt").exists()
+        assert rbac.get_tenant_role("former", "user:old") == "admin"
+    removed = client.request("DELETE", "/api/v1/admin/tenants/former")
+    assert removed.status_code == 204, removed.text
+    if purge:
+        review = client.post("/api/v1/workspace-erasure/review", json={"workspace": "former"})
+        assert review.status_code == 200, review.text
+        erased = client.post("/api/v1/workspace-erasure/apply",
+                             json={"token": review.json()["token"], "confirmed": True})
+        assert erased.status_code == 200, erased.text
+        assert erased.json()["status"] == "confirmed"
+        assert not (root / "synthetic.txt").exists()
+    refused = client.post("/api/v1/admin/tenants", json={"id": "former"})
+    assert refused.status_code == 409
+    assert "history" in refused.json()["detail"]
+    fresh = client.post("/api/v1/admin/tenants", json={"display_name": "Former"})
+    assert fresh.status_code == 201, fresh.text
+    assert fresh.json()["id"] == "former-2"
+    assert rbac.get_tenant_role("former-2", "user:old") is None
+    assert not (data_dir(tenant="former-2") / "synthetic.txt").exists()
+    assert rbac.get_tenant_role("former", "user:old") is None
+    assert "former" not in rbac._load_tenant()
+    removed_list = client.get("/api/v1/admin/tenants/removed/list")
+    assert removed_list.status_code == 200
+    assert removed_list.json()[0]["restorable"] is not purge
+
+
+def test_restore_retained_workspace_is_paused_and_reinvites_members(monkeypatch):
+    from maverick.paths import data_dir, maverick_home
+    from maverick_dashboard import rbac, settings_store, workspace_tenants
+
+    monkeypatch.setattr(rbac, "tenant_store_path", lambda: maverick_home() / "dashboard-tenant-roles.json")
+    assert client.post("/api/v1/admin/tenants", json={"id": "recover", "display_name": "Recover"}).status_code == 201
+    rbac.set_tenant_role("recover", "user:former", "admin")
+    workspace_tenants.set_selection("user:former", "recover")
+    settings_store.set_active_tenant("recover")
+    (data_dir(tenant="recover") / "private.txt").write_text("retained data", encoding="utf-8")
+
+    removed = client.request(
+        "DELETE", "/api/v1/admin/tenants/recover",
+        headers={"x-lightwork-expected-tenant": "recover"},
+    )
+    assert removed.status_code == 204, removed.text
+    assert workspace_tenants.get_selection("user:former") is None
+    assert rbac.get_tenant_role("recover", "user:former") is None
+    assert settings_store.active_tenant() is None
+
+    newer = client.post("/api/v1/admin/tenants", json={"display_name": "Recover"})
+    assert newer.status_code == 201, newer.text
+    assert newer.json()["id"] == "recover-2"
+    assert not (data_dir(tenant="recover-2") / "private.txt").exists()
+    assert client.get("/tenants").status_code == 200
+    assert "Restore as paused" in client.get("/tenants").text
+
+    restored = client.post("/api/v1/admin/tenants/recover/restore")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "suspended"
+    assert restored.json()["display_name"] == "Recover (recovered)"
+    assert (data_dir(tenant="recover") / "private.txt").read_text(encoding="utf-8") == "retained data"
+    assert rbac.get_tenant_role("recover", "user:former") is None
+    assert workspace_tenants.get_selection("user:former") is None
+    assert client.post("/api/v1/admin/tenants", json={"id": "recover"}).status_code == 409
+    assert client.request("DELETE", "/api/v1/admin/tenants/recover").status_code == 204
+    assert client.post("/api/v1/admin/tenants", json={"id": "recover"}).status_code == 409
+
+
+def test_deleted_workspace_cleanup_can_be_retried_after_membership_store_failure(monkeypatch):
+    from maverick.paths import maverick_home
+    from maverick_dashboard import rbac
+
+    monkeypatch.setattr(rbac, "tenant_store_path", lambda: maverick_home() / "dashboard-tenant-roles.json")
+    assert client.post("/api/v1/admin/tenants", json={"id": "retry"}).status_code == 201
+    rbac.set_tenant_role("retry", "user:former", "admin")
+    original = rbac.clear_tenant_roles
+    def refuse_cleanup(_tenant):
+        raise OSError("write failed")
+
+    monkeypatch.setattr(rbac, "clear_tenant_roles", refuse_cleanup)
+    failed = client.request("DELETE", "/api/v1/admin/tenants/retry")
+    assert failed.status_code == 503
+    assert rbac.get_tenant_role("retry", "user:former") is None  # tombstone denies even with stale file
+    monkeypatch.setattr(rbac, "clear_tenant_roles", original)
+    assert client.request("DELETE", "/api/v1/admin/tenants/retry").status_code == 204
+    assert "retry" not in rbac._load_tenant()
 
 
 def test_tenant_has_no_cap_unless_one_is_chosen():
@@ -177,3 +285,94 @@ def test_tenant_admin_cannot_manage_other_tenant_roles(monkeypatch):
 
     assert r.status_code == 403
     assert rbac.get_tenant_role("globex", "user:bob") is None
+
+
+def test_workspace_admin_manages_existing_members_only_in_their_workspace(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    assert client.post("/api/v1/admin/tenants", json={"id": "globex"}).status_code == 201
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    rbac.set_tenant_role("acme", "user:bob", "operator")
+    rbac.set_tenant_role("globex", "user:carol", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    assert client.get("/api/v1/admin/tenants/acme/roles").json() == {
+        "user:alice": "admin", "user:bob": "operator",
+    }
+    assert client.get("/api/v1/admin/tenants/globex/roles").status_code == 403
+    assert client.put("/api/v1/admin/tenants/globex/roles/user:carol",
+                      json={"role": "viewer"}).status_code == 403
+    assert client.delete("/api/v1/admin/tenants/globex/roles/user:carol").status_code == 403
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:new",
+                      json={"role": "viewer"}).status_code == 409
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "viewer"}).status_code == 204
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:bob").status_code == 204
+    assert rbac.get_tenant_role("acme", "user:bob") is None
+    assert rbac.get_tenant_role("globex", "user:carol") == "viewer"
+
+    # Every call rechecks the requested workspace's current membership.
+    rbac.remove_tenant_role("acme", "user:alice")
+    assert client.get("/api/v1/admin/tenants/acme/roles").status_code == 403
+
+
+def test_workspace_admin_scope_requires_active_workspace_and_api_key_admin_scope(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(auth, "api_key_permissions", lambda request: frozenset({"view"}))
+    assert client.get("/api/v1/admin/tenants/acme/roles").status_code == 403
+    monkeypatch.setattr(auth, "api_key_permissions", lambda request: None)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    assert client.post("/api/v1/admin/tenants/acme/suspend").status_code == 200
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+    assert client.get("/api/v1/admin/tenants/acme/roles").status_code == 403
+
+
+def test_workspace_admin_cannot_grant_above_own_role_or_clear_to_broader_fallback(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    rbac.set_custom_role("workspace-lead", ["admin", "view"])
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "workspace-lead")
+    rbac.set_role("user:bob", "operator")
+    rbac.set_tenant_role("acme", "user:bob", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "admin"}).status_code == 409
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "operator"}).status_code == 409
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:bob").status_code == 409
+    assert rbac.get_tenant_role("acme", "user:bob") == "viewer"
+    rbac.set_tenant_role("acme", "user:bob", "operator")
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "viewer"}).status_code == 409
+
+
+def test_workspace_admin_cannot_remove_self_or_last_admin(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:alice",
+                      json={"role": "viewer"}).status_code == 409
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:alice").status_code == 409
+    assert rbac.get_tenant_role("acme", "user:alice") == "admin"
+
+    # Even an installation admin must designate a successor before clearing
+    # the final direct workspace administrator.
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:alice").status_code == 409
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "admin"}).status_code == 204
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:alice").status_code == 204

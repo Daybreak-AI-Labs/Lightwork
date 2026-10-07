@@ -34,9 +34,14 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+from collections import OrderedDict
 from typing import Protocol, runtime_checkable
 
+from ..run_outcome import GoalCancelled
 from .requests import STOP_ERRORS
+
+STOP_ERRORS = (*STOP_ERRORS, GoalCancelled)
 
 log = logging.getLogger(__name__)
 
@@ -125,18 +130,36 @@ _ABSTRACT_TO_LIVE = {
 # strategy, so recording it would only add uniform noise to every arm.
 _HYBRID_RECORD_MIN_CHARS = 16_000
 
-_HYBRID_PICKER = None
+_HYBRID_PICKERS = OrderedDict()
+_HYBRID_PICKERS_LOCK = threading.Lock()
+_HYBRID_PICKERS_LIMIT = 64
 _HYBRID_SHADOWED_WARNED = False
 
 
 def _hybrid_picker():
-    """The shared persistent picker (ledger + optional weights under data_dir)."""
-    global _HYBRID_PICKER
-    if _HYBRID_PICKER is None:
-        from .hybrid import HybridPicker, default_ledger_path, default_weights_path
-        _HYBRID_PICKER = HybridPicker(ledger_path=default_ledger_path(),
-                                      weights_path=default_weights_path())
-    return _HYBRID_PICKER
+    """Reuse a picker only within the current tenant and exact native storage."""
+    from ..paths import canonical_tenant_id, current_tenant_id_strict
+    from .hybrid import HybridPicker, default_ledger_path, default_weights_path
+
+    tenant = current_tenant_id_strict()
+    tenant = canonical_tenant_id(tenant) if tenant is not None else None
+    ledger, weights = default_ledger_path(), default_weights_path()
+    key = (tenant, os.path.normcase(str(ledger.resolve())),
+           os.path.normcase(str(weights.resolve())))
+    with _HYBRID_PICKERS_LOCK:
+        picker = _HYBRID_PICKERS.get(key)
+        if picker is not None:
+            _HYBRID_PICKERS.move_to_end(key)
+            return picker
+    # Native history loading may wait for storage; never hold the cache lock
+    # across it, or across actual compaction/outcome writes.
+    candidate = HybridPicker(ledger_path=ledger, weights_path=weights)
+    with _HYBRID_PICKERS_LOCK:
+        picker = _HYBRID_PICKERS.setdefault(key, candidate)
+        _HYBRID_PICKERS.move_to_end(key)
+        while len(_HYBRID_PICKERS) > _HYBRID_PICKERS_LIMIT:
+            _HYBRID_PICKERS.popitem(last=False)
+        return picker
 
 
 def _warn_hybrid_shadowed_once(name: str) -> None:
@@ -277,7 +300,7 @@ class _StrategyAdapter:
         from .strategies import compact_with_strategy
         allowed = {k: kwargs[k] for k in
                    ("llm", "conversation_id", "keep_recent", "max_tool_bytes",
-                    "budget", "scope")
+                    "budget", "scope", "run_state")
                    if k in kwargs}
         return compact_with_strategy(messages, strategy=self.name, **allowed)
 
@@ -286,7 +309,7 @@ class _StrategyAdapter:
         from .strategies import compact_with_strategy_async
         allowed = {k: kwargs[k] for k in
                    ("llm", "conversation_id", "keep_recent", "max_tool_bytes",
-                    "budget", "scope") if k in kwargs}
+                    "budget", "scope", "run_state") if k in kwargs}
         return await compact_with_strategy_async(messages, strategy=self.name, **allowed)
 
 

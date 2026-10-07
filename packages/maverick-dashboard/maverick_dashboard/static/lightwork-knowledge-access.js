@@ -28,6 +28,17 @@
   var submitRequest = document.getElementById("ka-submit-request");
   var requests = document.getElementById("ka-requests");
   var refreshRequests = document.getElementById("ka-refresh-requests");
+  var showArchived = document.getElementById("ka-show-archived");
+  var showReady = document.getElementById("ka-show-ready");
+  var findArchived = document.getElementById("ka-find-archived");
+  var capacityNote = document.getElementById("ka-capacity");
+  var archivedView = false;
+  var readyView = false;
+  var archiveAvailable = true;
+  var recoveryCursor = null;
+  var requestPageCursor = "";
+  var batchNote = document.getElementById("ka-batch-note");
+  var batchCopilot = document.getElementById("ka-batch-copilot");
   var currentItems = [];
   var selectedReference = null;
   var pending = false;
@@ -53,6 +64,14 @@
   nextButton.type = "button";
   nextButton.hidden = true;
   searchNote.after(nextButton);
+  var recoveryMore = node("button", "btn", "Next batch");
+  if (recoveryMore) {
+    recoveryMore.id = "ka-recovery-more";
+    recoveryMore.type = "button";
+    recoveryMore.hidden = true;
+    requests.after(recoveryMore);
+  }
+  refreshRequests.textContent = "Start over";
 
   // A reply this page could not verify is shown as one plain sentence; the
   // precise reason stays on the error for the technical record. Messages
@@ -102,7 +121,7 @@
         !ID.test(value.asset_id) || !ID.test(value.version) ||
         !SHA.test(value.manifest_sha256) ||
         value.schema !== "lightwork.research-registry-ref.v1") {
-      throw failure("The knowledge response contained an invalid exact source reference.");
+      throw failure("A source in the answer could not be matched to its exact place. Refresh the page and try again.");
     }
     return {
       kind: value.kind,
@@ -165,7 +184,7 @@
         (typeof value.released_by !== "string" || !value.released_by.startsWith("user:") ||
          !SHA.test(value.release_evidence_sha256) ||
          finiteTime(value.released_at, "retention release time", false) < placedAt)) {
-      throw failure("The rights response contained a malformed hold release.");
+      throw failure("The rights response could not be verified. Refresh the page and try again.");
     }
     return {
       schema: value.schema,
@@ -184,6 +203,23 @@
     };
   }
 
+  function feedback(value) {
+    if (!value || value.schema !== "lightwork.knowledge-feedback.v1" || !/^knowledge-req-[a-f0-9]{40}$/.test(value.id) ||
+        ["submitted", "applying", "approved", "denied"].indexOf(value.status) < 0) throw failure("Invalid feedback receipt");
+    return {schema:value.schema, id:value.id, status:value.status,
+      request_type:text(value.request_type, "request type", 20, false),
+      reason:text(value.reason, "request reason", 2000, false),
+      proposed_correction:value.proposed_correction === null ? null : text(value.proposed_correction, "correction", 8192, true),
+      created_at:finiteTime(value.created_at, "request time", false),
+      updated_at:finiteTime(value.updated_at, "request update time", false),
+      notice:text(value.notice, "request notice", 1000, false),
+      source_use_status:text(value.source_use_status, "source use status", 96, false),
+      raw_record_status:text(value.raw_record_status, "record status", 96, false),
+      retention_review_status:text(value.retention_review_status, "retention review", 96, false),
+      archived_at:value.archived_at === undefined || value.archived_at === null ?
+        null : finiteTime(value.archived_at, "archive time", false)};
+  }
+
   function rightsRequest(value) {
     if (!value || typeof value !== "object" ||
         value.schema !== "lightwork.knowledge-rights-request.v1" ||
@@ -198,7 +234,7 @@
       text(value.proposed_correction, "proposed correction", 8192, true);
     var evidence = value.decision_evidence_sha256;
     if (evidence !== null && !SHA.test(evidence)) {
-      throw failure("The rights response contained invalid decision evidence.");
+      throw failure("The access decision could not be read. Refresh the page and try again.");
     }
     if (value.status === "applying" &&
         (value.decision !== "approve" || typeof value.decided_by !== "string" ||
@@ -233,6 +269,9 @@
         128
       ).map(derivative),
       lineage_revalidated_before_return: value.lineage_revalidated_before_return === true,
+      archive_ready: value.archive_ready === true,
+      archived_at: value.archived_at === undefined || value.archived_at === null ?
+        null : finiteTime(value.archived_at, "archive time", false),
       weight_influence_notice: text(value.weight_influence_notice, "weight notice", 1000, false),
       training_permission_notice: text(value.training_permission_notice, "training notice", 1000, false),
       created_at: finiteTime(value.created_at, "request time", false),
@@ -266,7 +305,7 @@
         (boundary && eligibility.actor !== boundary.actor) ||
         (boundary && boundary.authorizationSha256 &&
           eligibility.actor_authorization_sha256 !== boundary.authorizationSha256)) {
-      throw failure("The knowledge response failed its source eligibility contract.");
+      throw failure("The knowledge answer included a source it may not use, so it is not shown. Refresh the page and try again.");
     }
     var history = boundedArray(value.correction_history, "correction history", 50).map(rightsRequest);
     var constraints = boundedArray(source.usage_constraints, "usage constraints", 32).map(function (entry) {
@@ -298,7 +337,7 @@
         fresh_until: finiteTime(eligibility.fresh_until, "freshness time", false),
         consent_until: finiteTime(eligibility.consent_until, "consent time", true),
         approval_sha256: SHA.test(eligibility.approval_sha256) ? eligibility.approval_sha256 :
-          (function () { throw failure("The knowledge response contained invalid approval evidence."); }()),
+          (function () { throw failure("The approval record in the answer could not be read. Refresh the page and try again."); }()),
         requested_action: eligibility.requested_action,
         actor: text(eligibility.actor, "authorized actor", 512, false),
         actor_authorization_sha256: eligibility.actor_authorization_sha256
@@ -322,18 +361,21 @@
   }
 
   function errorDetail(response) {
+    if (response.status === 507) {
+      return "The active request list is full. Ask an administrator to review capacity. Your request was not lost.";
+    }
     if (response.status === 409) {
       return "This changed since you loaded it, or current access couldn't be confirmed. Refresh and try again.";
     }
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status}, "finish this");
-    return "Something went wrong. Please try again.";
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status, headers: response.headers}, "finish this");
+    return "Something went wrong. Try again.";
   }
 
   async function readJson(response, token, path, readScope) {
     access.assertCurrent(token);
     var policy = {forbiddenScope: readScope, contextMessage: /account or workspace changed|active workspace changed/i};
     var meaning = access.observe(response, null, policy);
-    if (meaning.kind === "transient" && path.startsWith("/requests/")) unconfirmedPaths.add(path);
+    if (meaning.kind === "transient" && !readScope && path.startsWith("/requests/")) unconfirmedPaths.add(path);
     if (["session", "scope", "capability"].includes(meaning.kind)) {
       if (meaning.kind === "capability") deniedPaths.add(path);
       var denial = failure(meaning.kind === "capability" ?
@@ -355,7 +397,7 @@
     var payload;
     try { payload = body ? JSON.parse(body) : {}; }
     catch (_error) {
-      var unreadable = failure("The knowledge response could not be verified.");
+      var unreadable = failure("The knowledge response could not be verified. Refresh the page and try again.");
       unreadable.accessKind = meaning.kind;
       throw unreadable;
     }
@@ -392,7 +434,7 @@
 
   function date(value) {
     if (value === null) { return "Not required"; }
-    try { return new Date(value * 1000).toLocaleString(); }
+    try { return (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString()); }
     catch (_error) { return "Unavailable"; }
   }
 
@@ -423,9 +465,14 @@
     pending = value;
     root.setAttribute("aria-busy", value ? "true" : "false");
     value = value || access.blocked;
-    searchButton.disabled = value;
+    searchButton.disabled = value || !searchForm.elements.purpose.value;
     nextButton.disabled = value || !nextCursor;
     refreshRequests.disabled = value;
+    if (recoveryMore) recoveryMore.disabled = value || !recoveryCursor;
+    if (batchCopilot) batchCopilot.disabled = value;
+    if (showArchived) showArchived.disabled = value;
+    if (showReady) showReady.disabled = value || !archiveAvailable;
+    if (findArchived) findArchived.querySelector("button").disabled = value;
     exportButton.disabled = value || !currentItems.length || deniedPaths.has("/export");
     if (submitRequest) { submitRequest.disabled = value || !selectedReference || deniedPaths.has("/requests"); }
     root.querySelectorAll("[data-access-path]").forEach(function (button) {
@@ -447,6 +494,7 @@
 
   function clearRequestInputs() {
     selectedReference = null;
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{}}}));
     if (requestSource) { requestSource.textContent = "Open a source detail to select its exact version."; }
     if (requestForm) {
       requestForm.reset();
@@ -465,6 +513,7 @@
   }
 
   function clearPrivate() {
+    window.dispatchEvent(new CustomEvent("lightwork:knowledge-cleared"));
     resetSearch();
     announce("Private knowledge was cleared. Reload to recheck the current account and workspace.", true);
     currentItems = [];
@@ -472,6 +521,10 @@
     detail.textContent = "";
     detailPanel.hidden = true;
     requests.textContent = "";
+    recoveryCursor = null;
+    requestPageCursor = "";
+    if (batchNote) batchNote.textContent = "";
+    if (recoveryMore) recoveryMore.hidden = true;
     exportButton.disabled = true;
     clearRequestInputs();
     var query = document.getElementById("ka-query");
@@ -531,19 +584,19 @@
         !["matched", "no_match", "incomplete", "unavailable"].includes(payload.status) ||
         !Array.isArray(payload.incomplete_reasons) ||
         payload.incomplete_reasons.some(function (value) {
-          return !["more_matches", "more_candidates", "content_unavailable"].includes(value);
+          return !["more_matches", "more_candidates", "content_unavailable", "partial_source_coverage"].includes(value);
         }) ||
         (payload.next_cursor !== null &&
           (typeof payload.next_cursor !== "string" || !payload.next_cursor.length || payload.next_cursor.length > 2048)) ||
         (payload.complete && (payload.next_cursor !== null || payload.incomplete_reasons.length)) ||
         (!payload.complete && !payload.incomplete_reasons.length)) {
-      throw failure("The knowledge search response failed validation.");
+      throw failure("The knowledge search results could not be checked. Refresh the page and try again.");
     }
     var boundary = {purpose: requestedPurpose, action: "read", actor: actor,
       authorizationSha256: payload.actor_authorization_sha256};
     var clean = payload.items.map(function (entry) { return item(entry, boundary); });
     if (typeof payload.count !== "number" || payload.count !== clean.length) {
-      throw failure("The knowledge search result count did not match its records.");
+      throw failure("The knowledge search results were incomplete. Refresh the page and try again.");
     }
     results.textContent = "";
     currentItems = clean;
@@ -625,9 +678,9 @@
     constraints.appendChild(constraintList);
     detail.appendChild(constraints);
     var history = node("div");
-    history.appendChild(node("h3", "", "Correction and removal history"));
+    history.appendChild(node("h3", "", "Active correction and removal requests"));
     if (!value.correction_history.length) {
-      history.appendChild(node("p", "muted", "No requests are recorded for this exact version."));
+      history.appendChild(node("p", "muted", "No active requests are shown for this version. Review the finished archive for older requests."));
     } else {
       var historyList = node("ul", "ka-detail-list");
       value.correction_history.forEach(function (record) {
@@ -638,7 +691,19 @@
     detail.appendChild(history);
     detail.appendChild(node("p", "ka-honesty", value.training_permission_notice));
     detailPanel.hidden = false;
+    var use = node("button", "btn", "Use in source analysis");
+    use.type = "button";
+    use.addEventListener("click", function () {
+      window.dispatchEvent(new CustomEvent("lightwork:source-selected", {detail: {
+        reference: value.reference, title: value.title, purpose: value.eligibility.purpose,
+        fresh_until: value.eligibility.fresh_until, context: context
+      }}));
+      var composer = document.getElementById("source-analysis");
+      if (composer) composer.scrollIntoView({block: "center"});
+    });
+    detail.appendChild(use);
     selectedReference = value.reference;
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{kind:'knowledge_source',reference:value.reference,purpose:value.eligibility.purpose}}}));
     if (requestSource) {
       requestSource.textContent = value.title + " · version " + value.reference.version;
     }
@@ -663,13 +728,13 @@
         actor: actor
       });
       if (!sameReference(clean.reference, exact)) {
-        throw failure("The detail response did not match the selected source version.");
+        throw failure("The detail response did not match the selected source version. Refresh the page and try again.");
       }
       renderDetail(clean);
       announce("Source detail is current and ready for review.", false);
     } catch (error) {
       clearEligibleResults();
-      announce(error.message || "Could not open this source. Please try again.", true, error);
+      announce(error.message || "Could not open this source. Try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -678,12 +743,44 @@
   function validateRequests(payload) {
     if (payload.schema !== "lightwork.knowledge-rights-requests.v1" ||
         !Array.isArray(payload.items) || payload.items.length > 250 ||
-        typeof payload.can_review !== "boolean") {
-      throw failure("The rights-request response failed validation.");
+        payload.can_review !== canReview) {
+      throw failure("The rights-request list could not be checked. Refresh the page and try again.");
     }
-    var clean = payload.items.map(rightsRequest);
+    var clean = payload.items.map(canReview ? rightsRequest : feedback);
     if (payload.count !== clean.length) {
-      throw failure("The rights-request count did not match its records.");
+      throw failure("The rights-request list was incomplete. Refresh the page and try again.");
+    }
+    if (payload.archived !== undefined && payload.archived !== archivedView) {
+      throw failure("The request view changed. Refresh to see its current status.");
+    }
+    if (payload.ready_to_archive !== undefined && payload.ready_to_archive !== readyView) {
+      throw failure("The request view changed. Refresh to see its current status.");
+    }
+    if (capacityNote && payload.capacity) {
+      var used = payload.capacity.active_count;
+      var maximum = payload.capacity.active_limit;
+      if (!Number.isInteger(used) || !Number.isInteger(maximum) ||
+          used < 0 || maximum < 1 || used > maximum + 1) {
+        throw failure("The request capacity could not be verified. Refresh the page and try again.");
+      }
+      var canArchive = payload.capacity.archive_available !== false;
+      archiveAvailable = canArchive;
+      var overfilled = used > maximum;
+      if (showReady) {
+        showReady.disabled = !canArchive;
+        showReady.title = canArchive ? "" : "Finished-request archiving is unavailable on shared storage. Ask your administrator if you need it.";
+      }
+      capacityNote.textContent = !canArchive && used >= maximum ?
+        "The active request list is full. Archiving is unavailable on this installation. Ask an administrator to review capacity; requests and evidence remain in place." :
+        !canArchive && used >= Math.floor(maximum * 0.9) ?
+          "The active request list is nearly full (" + used + " of " + maximum + "). Ask an administrator to review capacity." :
+        overfilled ?
+        "The active request list is over capacity. Open Ready to archive and scan batches to find finished requests. Records and evidence remain available in the archive." :
+        used >= maximum ?
+        "The active request list is full. Archive finished requests below to make room. Records and evidence remain available in the archive." :
+        used >= Math.floor(maximum * 0.9) ?
+          "The active request list is nearly full (" + used + " of " + maximum + "). Archive finished requests to make room." :
+          used + " active requests; room for " + (maximum - used) + " more.";
     }
     return clean;
   }
@@ -804,7 +901,7 @@
           if (!["capability", "transient"].includes(error.accessKind)) {
             try { await loadRequests(); } catch (_refreshError) { /* retain the decision error */ }
           }
-          announce(error.message || "Could not save your decision. Please try again.", true, error);
+          announce(error.message || "Could not save your decision. Try again.", true, error);
         } finally {
           setBusy(false);
         }
@@ -890,7 +987,7 @@
           if (!["capability", "transient"].includes(error.accessKind)) {
             try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
           }
-          announce(error.message || "Could not place the hold. Please try again.", true, error);
+          announce(error.message || "Could not place the hold. Try again.", true, error);
         } finally {
           setBusy(false);
         }
@@ -944,7 +1041,7 @@
         if (!["capability", "transient"].includes(error.accessKind)) {
           try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
         }
-        announce(error.message || "Could not release the hold. Please try again.", true, error);
+        announce(error.message || "Could not release the hold. Try again.", true, error);
       } finally {
         setBusy(false);
       }
@@ -953,20 +1050,47 @@
     return box;
   }
 
-  function renderRequests(items) {
-    requests.textContent = "";
+  function renderRequests(items, append, recoveryScan) {
+    if (!append || !requests.querySelector(".ka-request")) requests.textContent = "";
     if (!items.length) {
-      requests.appendChild(node("p", "muted", "No correction, exclusion, or deletion requests are recorded in this workspace."));
+      if (requests.querySelector(".ka-request")) return;
+      var empty = recoveryScan ?
+        ["No matching requests in this batch", "Continue to the next batch if one is available."] : archivedView ?
+        ["No finished requests are in the archive yet", "Finished requests appear here once they are archived."] : readyView ?
+        ["No finished requests are ready to archive", "Requests appear here when they can be archived. Complete a review or release a legal hold first."] :
+        ["No correction, exclusion, or deletion requests in this view", "Requests to correct, exclude or delete a source appear here with their status. Open a source with View details, then use the Request a correction or removal section to make one."];
+      requests.appendChild(window.mvEmpty ? window.mvEmpty(empty[0], empty[1], null, { compact: true })
+        : node("p", "muted", empty[0] + ". " + empty[1]));
       return;
     }
     items.forEach(function (record) {
-      var card = node("article", "ka-request");
+      var card = node(canReview ? "details" : "article", "ka-request");
+      if (canReview) {
+        card.appendChild(node("summary", "", friendly(record.request_type) + " request · " +
+          friendly(record.status) + " · " + record.reason.slice(0, 120)));
+      }
+      if (record.schema === "lightwork.knowledge-feedback.v1") {
+        card.appendChild(node("h3", "", friendly(record.request_type) + " request · " + friendly(record.status)));
+        card.appendChild(node("p", "muted", "Request reference: " + record.id));
+        if (record.archived_at !== null) {
+          card.appendChild(node("p", "muted", "Retained in the finished archive " + date(record.archived_at) + "."));
+        }
+        card.appendChild(node("p", "", record.reason));
+        if (record.proposed_correction) card.appendChild(node("p", "", "Your suggested correction: " + record.proposed_correction));
+        card.appendChild(node("p", "muted", "Updated " + date(record.updated_at) + ". Source use: " + friendly(record.source_use_status) + ". Record: " + friendly(record.raw_record_status) + ". Retention review: " + friendly(record.retention_review_status) + "."));
+        card.appendChild(node("p", "muted", record.notice));
+        requests.appendChild(card); return;
+      }
       var head = node("div", "ka-request__head");
       head.appendChild(node("h3", "", friendly(record.request_type) + " request"));
       head.appendChild(node("span", "muted", friendly(record.status).toLowerCase()));
       head.appendChild(badge(friendly(record.status), record.status === "approved" ? "approved" :
         record.status === "denied" ? "denied" : record.status === "applying" ? "warning" : "pending"));
       card.appendChild(head);
+      card.appendChild(node("p", "muted", "Request reference: " + record.id));
+      if (record.archived_at !== null) {
+        card.appendChild(node("p", "muted", "Retained in the finished archive " + date(record.archived_at) + "."));
+      }
       card.appendChild(node("p", "muted", "Source: " + friendly(record.source_reference.asset_id) +
         " (version " + record.source_reference.version + ")"));
       card.appendChild(node("p", "", record.reason));
@@ -1009,29 +1133,125 @@
         card.appendChild(recorded);
       }
       card.appendChild(node("p", "ka-honesty", record.weight_influence_notice));
-      if (canReview && (record.status === "submitted" || record.status === "applying")) {
+      if (canReview && !archivedView && (record.status === "submitted" || record.status === "applying")) {
         card.appendChild(reviewControls(record));
       }
-      if (canReview && record.request_type === "deletion" &&
+      if (canReview && !archivedView && record.request_type === "deletion" &&
           record.status !== "applying" &&
           (!record.retention_hold || record.retention_hold.effective_status !== "released")) {
         card.appendChild(retentionHoldControls(record));
+      }
+      if (canReview) {
+        var copilot = node("button", "btn", "Work on this with Copilot");
+        copilot.type = "button";
+        copilot.addEventListener("click", function () {
+          document.dispatchEvent(new CustomEvent("lightwork:copilot-selection", {
+            detail: {selection: {kind: "knowledge_request", id: record.id}}
+          }));
+          var panel = document.getElementById("mv-copilot");
+          var open = document.getElementById("mv-copilot-fab");
+          if (panel && panel.hidden && open) open.click();
+          announce("Copilot is focused on this request.", false);
+        });
+        card.appendChild(copilot);
+      }
+      if (canReview && !archivedView && record.archive_ready) {
+        var archive = node("button", "btn", "Move to finished archive");
+        archive.type = "button";
+        archive.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/archive";
+        archive.addEventListener("click", async function () {
+          // Archiving keeps the request, its restrictions and evidence: no question.
+          if (pending) return;
+          setBusy(true);
+          try {
+            var saved = await api(archive.dataset.accessPath, {
+              context: context, confirm: true, expected_revision: record.revision
+            });
+            if (rightsRequest(saved).archived_at === null) throw failure("The archive could not be verified. Refresh the page and try again.");
+            await loadRequests();
+            announce("The finished request is retained in the archive. Its source restrictions remain in force.", true);
+          } catch (error) {
+            announce(error.message || "Could not archive this request. It remains in the active list. Try again.", true, error);
+          } finally { setBusy(false); }
+        });
+        card.appendChild(archive);
       }
       requests.appendChild(card);
     });
   }
 
-  async function loadRequests() {
+  function requestView() { return archivedView ? "archive" : readyView ? "ready" : "active"; }
+
+  async function loadRequests(advance, explicitCursor) {
     var token = access.capture();
-    var response = await fetch(apiBase + "/requests?limit=100", {
+    var chosenCursor = explicitCursor === undefined ? (advance ? recoveryCursor || "" : "") : explicitCursor;
+    var path = "/request-batches?limit=25&view=" + requestView() + "&cursor=" + encodeURIComponent(chosenCursor);
+    var response = await fetch(apiBase + path, {
       method: "GET",
       credentials: "same-origin",
       headers: {Accept: "application/json"}
     });
-    var payload = await readJson(response, token, "/requests", true);
-    renderRequests(validateRequests(payload));
+    var payload = await readJson(response, token, "/request-batches", true);
+    var items = validateRequests(payload);
+    {
+      if (payload.next_cursor !== null &&
+          (typeof payload.next_cursor !== "string" || payload.next_cursor.length > 2048 ||
+           !/^[A-Za-z0-9_-]+$/.test(payload.next_cursor))) {
+        throw failure("The next page of requests could not be checked. Refresh the page and try again.");
+      }
+      if (payload.view !== requestView() || typeof payload.complete !== "boolean" ||
+          payload.complete !== (payload.next_cursor === null) ||
+          !Number.isInteger(payload.scanned) || payload.scanned < items.length || payload.scanned > 25 ||
+          typeof payload.notice !== "string" || payload.notice.length > 1000) {
+        throw failure("The current request batch could not be verified.");
+      }
+      requestPageCursor = chosenCursor;
+      recoveryCursor = payload.next_cursor;
+      if (batchNote) batchNote.textContent = "Showing " + items.length + " matching request" +
+        (items.length === 1 ? "" : "s") + " in this batch. " +
+        (payload.complete ? "End of this view. " : "More records can be checked with Next batch. ") + payload.notice;
+    }
+    renderRequests(items, false, chosenCursor !== "" || !payload.complete);
+    if (recoveryMore) recoveryMore.hidden = !recoveryCursor;
     unconfirmedPaths.clear();
   }
+
+  async function openRequestBatch(view, cursor) {
+    if (pending || access.blocked || !["active", "archive", "ready"].includes(view) || (!canReview && view === "ready") ||
+        typeof cursor !== "string" || cursor.length > 2048 || (cursor && !/^[A-Za-z0-9_-]+$/.test(cursor))) return false;
+    var previousArchived = archivedView, previousReady = readyView;
+    archivedView = view === "archive";
+    readyView = view === "ready";
+    setBusy(true);
+    try {
+      await loadRequests(false, cursor);
+      if (showArchived) {
+        showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+        showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+      }
+      if (showReady) showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+      announce("This request batch was checked against current access and source restrictions.", false);
+      var heading = document.getElementById("ka-requests-heading");
+      heading.tabIndex = -1;
+      heading.focus({preventScroll: true});
+      heading.scrollIntoView({block: "start"});
+      return true;
+    } catch (error) {
+      archivedView = previousArchived; readyView = previousReady;
+      announce(error.message || "Could not open this batch. Start this view again.", true, error);
+      return false;
+    } finally { setBusy(false); }
+  }
+  window.LightworkKnowledgeRequests = {openBatch: openRequestBatch};
+  if (batchCopilot) batchCopilot.addEventListener("click", function () {
+    if (pending || access.blocked) return;
+    document.dispatchEvent(new CustomEvent("lightwork:copilot-selection", {
+      detail: {selection: {kind: "knowledge_request_batch", view: requestView(), cursor: requestPageCursor}}
+    }));
+    var panel = document.getElementById("mv-copilot"), open = document.getElementById("mv-copilot-fab");
+    if (panel && panel.hidden && open) open.click();
+    announce("Copilot is focused on this request batch.", false);
+  });
 
   function updateCorrectionField() {
     if (!requestType || !correctionField || !correction) { return; }
@@ -1072,7 +1292,7 @@
       exportButton.disabled = true;
       nextCursor = null;
       nextButton.hidden = true;
-      announce(error.message || "Could not search. Please try again.", true, error);
+      announce(error.message || "Could not search. Try again.", true, error);
     } finally {
       if (generation === searchGeneration || activeSearch === null) { setBusy(false); }
     }
@@ -1133,7 +1353,7 @@
       clean.forEach(function (entry, index) {
         if (!sameReference(entry.reference, expected[index]) ||
             entry.eligibility.requested_action !== "export") {
-          throw failure("The knowledge export did not match the selected source versions.");
+          throw failure("The knowledge export did not match the selected source versions. Choose the sources again, then export.");
         }
       });
       var evidence = payload.authority_evidence;
@@ -1157,7 +1377,7 @@
             source.content_sha256 !== clean[index].source.content_sha256 ||
             source.approval_sha256 !== clean[index].eligibility.approval_sha256 ||
             !SHA.test(source.content_sha256) || !SHA.test(source.approval_sha256)) {
-          throw failure("The knowledge export authority evidence did not match its source versions.");
+          throw failure("The knowledge export did not match its source versions. Refresh the page and try again.");
         }
       });
       var boundEvidence = {
@@ -1176,7 +1396,7 @@
         })
       };
       if ((await sha256(canonicalJson(boundEvidence))) !== evidence.binding_sha256) {
-        throw failure("The knowledge export authority binding did not match its evidence.");
+        throw failure("The knowledge export did not match its evidence. Refresh the page and try again.");
       }
       var blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
       var url = URL.createObjectURL(blob);
@@ -1190,7 +1410,7 @@
       announce("Exported " + clean.length + " currently eligible source" + (clean.length === 1 ? "." : "s."), false);
     } catch (error) {
       if (!["capability", "transient"].includes(error.accessKind)) clearEligibleResults();
-      announce(error.message || "Could not download the results. Please try again.", true, error);
+      announce(error.message || "Could not download the results. Try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -1220,6 +1440,7 @@
         context: context,
         confirm: true,
         reference: selectedReference,
+        purpose: activeSearch ? activeSearch.purpose : searchForm.elements.purpose.value,
         request_type: type,
         reason: reason,
         request_key: requestForm.dataset.requestKey,
@@ -1229,14 +1450,14 @@
       announce("Recording the exact source and its derivative impact…", false);
       try {
         var payload = await api("/requests", body);
-        rightsRequest(payload);
+        (canReview ? rightsRequest : feedback)(payload);
         requestForm.reset();
         delete requestForm.dataset.requestKey;
         updateCorrectionField();
         await loadRequests();
-        announce("The source-rights request and affected derivatives are recorded.", true);
+        announce("Your request is recorded for independent administrator review. Source access and training policy are unchanged.", true);
       } catch (error) {
-        announce((error.message || "Could not send the request.") + " Your answers are still here, so you can try again.", true, error);
+        announce((error.message || "Could not send the request. Try again.") + " Your answers are still here, so you can try again.", true, error);
       } finally {
         setBusy(false);
       }
@@ -1250,16 +1471,161 @@
       await loadRequests();
       announce("Requests are up to date.", false);
     } catch (error) {
-      announce(error.message || "Could not load requests. Please try again.", true, error);
+      announce(error.message || "Could not load requests. Try again.", true, error);
     } finally {
       setBusy(false);
     }
   });
 
-  loadRequests().catch(function (error) {
-    requests.textContent = "";
-    var note = node("p", "muted", error.message || "Requests are not available right now.");
-    if (error && error.technical) { note.dataset.technical = error.technical; }
-    requests.appendChild(note);
+  if (recoveryMore) recoveryMore.addEventListener("click", async function () {
+    if (pending || !recoveryCursor) return;
+    setBusy(true);
+    try {
+      await loadRequests(true);
+      announce(recoveryCursor ? "Showing the next batch. More records remain to check." : "This view reached its last batch.", false);
+    } catch (error) {
+      announce(error.message || "Could not scan the next batch. Try again.", true, error);
+    } finally { setBusy(false); }
   });
+
+  if (showArchived) showArchived.addEventListener("click", async function () {
+    if (pending) return;
+    var priorArchived = archivedView, priorReady = readyView;
+    archivedView = !archivedView;
+    readyView = false;
+    if (showReady) showReady.setAttribute("aria-pressed", "false");
+    showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+    showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+    setBusy(true);
+    try {
+      await loadRequests();
+      announce(archivedView ? "Showing retained finished requests." : "Showing active requests.", false);
+    } catch (error) {
+      archivedView = priorArchived;
+      readyView = priorReady;
+      if (showReady) showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+      showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+      showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+      announce(error.message || "Could not load this request view. Try again.", true, error);
+    } finally { setBusy(false); }
+  });
+
+  if (showReady) showReady.addEventListener("click", async function () {
+    if (pending) return;
+    var priorArchived = archivedView, priorReady = readyView;
+    readyView = !readyView;
+    archivedView = false;
+    if (showArchived) {
+      showArchived.setAttribute("aria-pressed", "false");
+      showArchived.textContent = "View finished archive";
+    }
+    showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+    setBusy(true);
+    try {
+      await loadRequests();
+      announce(readyView ? "Showing finished requests ready to archive." : "Showing active requests.", false);
+    } catch (error) {
+      archivedView = priorArchived;
+      readyView = priorReady;
+      if (showArchived) {
+        showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+        showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+      }
+      showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+      announce(error.message || "Could not load this request view. Try again.", true, error);
+    } finally { setBusy(false); }
+  });
+
+  if (findArchived) findArchived.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    if (pending) return;
+    var requestId = findArchived.elements.request_reference.value.trim();
+    if (!/^knowledge-req-[a-f0-9]{40}$/.test(requestId)) {
+      announce("Paste a full request reference from its receipt or card.", true);
+      return;
+    }
+    setBusy(true);
+    try {
+      var result = await api("/requests/" + encodeURIComponent(requestId), undefined, "GET");
+      if (result.schema !== "lightwork.knowledge-rights-request-detail.v1") {
+        throw failure("The retained request could not be verified. Refresh the page and try again.");
+      }
+      var record = (canReview ? rightsRequest : feedback)(result.item);
+      if (record.id !== requestId || record.archived_at === null) {
+        throw failure("This request is not in the finished archive. Review active requests.");
+      }
+      archivedView = true;
+      readyView = false;
+      if (showArchived) {
+        showArchived.setAttribute("aria-pressed", "true");
+        showArchived.textContent = "View active requests";
+      }
+      if (showReady) showReady.setAttribute("aria-pressed", "false");
+      renderRequests([record]);
+      announce("Showing the retained request you looked up.", true);
+    } catch (error) {
+      announce(error.message || "Could not find that archived request. Check the reference and try again.", true, error);
+    } finally { setBusy(false); }
+  });
+
+  var initialPage = new URLSearchParams(window.location.search);
+  if (initialPage.has("requests_view")) {
+    openRequestBatch(initialPage.get("requests_view"), initialPage.get("requests_page") || "").then(function (opened) {
+      if (!opened) requests.textContent = "This request page could not be opened. Choose a view or use Start over to check current requests.";
+    });
+  } else {
+    setBusy(true);
+    loadRequests().catch(function (error) {
+      requests.textContent = "";
+      var note = node("p", "muted", error.message || "Requests are not available right now. Try again in a minute.");
+      if (error && error.technical) { note.dataset.technical = error.technical; }
+      requests.appendChild(note);
+    }).finally(function () { setBusy(false); });
+  }
+  var purposePicker = document.getElementById("ka-purpose");
+  var retryPurposes = document.getElementById("ka-retry-purposes");
+  if (root.dataset.purposeState === "unavailable") {
+    announce("Approved uses could not be loaded. Your query is still here. Refresh available uses to retry.");
+  }
+  if (retryPurposes) retryPurposes.addEventListener("click", async function () {
+    if (pending) return;
+    var prior = purposePicker.value;
+    setBusy(true);
+    retryPurposes.disabled = true;
+    announce("Loading the uses currently available to your account.");
+    try {
+      var payload = await api("/purposes", undefined, "GET");
+      if (payload.context !== context || !Array.isArray(payload.items)) throw new Error(UNVERIFIED);
+      var options = payload.items.map(function (item) {
+        if (!item || !PURPOSE.test(item.code)) throw new Error(UNVERIFIED);
+        var option = document.createElement("option");
+        option.value = item.code;
+        option.textContent = window.mvHuman ? window.mvHuman(item.code) : item.code;
+        return option;
+      });
+      purposePicker.replaceChildren.apply(purposePicker, options);
+      if (options.some(function (option) { return option.value === prior; })) purposePicker.value = prior;
+      clearEligibleResults();
+      announce(options.length ? "Available uses refreshed. Your query is unchanged." : "No approved uses are currently available to your account. Ask your administrator to review source access.");
+    } catch (error) {
+      announce(error.message || "Approved uses are temporarily unavailable. Retry when ready.");
+    } finally {
+      retryPurposes.disabled = access.blocked;
+      setBusy(false);
+    }
+  });
+  // Finder links carry references only. Opening always calls the native current
+  // authorization/detail service; neither URL state nor a search snippet grants use.
+  if (window.location.hash.startsWith('#source=')) {
+    try {
+      var rawSelection = window.location.hash.slice(8);
+      if (rawSelection.length > 6000) throw new Error('The selected source reference is too long.');
+      var selectedSource = JSON.parse(decodeURIComponent(rawSelection));
+      var exactSource = reference(selectedSource.reference);
+      if (!PURPOSE.test(selectedSource.purpose)) throw new Error('Choose a permitted use again.');
+      if (!Array.from(purposePicker.options).some(function(option){return option.value===selectedSource.purpose;})) throw new Error('This source use is no longer permitted. Choose current evidence.');
+      purposePicker.value=selectedSource.purpose;
+      openDetail(exactSource);
+    } catch(error) { announce(error.message || 'This source cannot be opened. Search current approved evidence.', true); }
+  }
 })();

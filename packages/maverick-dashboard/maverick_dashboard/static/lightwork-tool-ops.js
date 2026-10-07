@@ -14,22 +14,25 @@
   function human(value) { return window.mvHuman ? window.mvHuman(value) : String(value == null ? '' : value); }
   function when(ts) { return ts && window.mvWhen ? window.mvWhen(ts) : (ts ? new Date(ts * 1000).toLocaleString() : 'Never'); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
-  function say(node, text) { if (node) node.textContent = text || ''; }
+  function say(node, text) { window.mvStatus(node, text || ''); }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function failText(failure, action) {
     try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
+      var detail = failure && failure.detail;
+      if (failure && typeof failure.clone === 'function') detail = ((await failure.clone().json()) || {}).detail;
+      var plain = window.mvPlainDetail ? window.mvPlainDetail(detail) : '';
+      if (plain) return plain;
     } catch (ignored) { /* not a readable body */ }
     return errorText(failure, action);
   }
+  // JSON through the shared helper; raw: the Response itself (a download).
   async function request(url, options) {
     options = options || {};
+    if (!options.raw) {
+      return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
+    }
     var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
       headers: {Accept: 'application/json'}};
     if (options.json !== undefined) {
@@ -38,7 +41,7 @@
     }
     var response = await window.fetch(url, init);
     if (!response.ok) throw response;
-    return options.raw ? response : response.json();
+    return response;
   }
   function table(headers, rows, caption) {
     var wrap = el('div', 'to-scroll');
@@ -179,6 +182,216 @@
     });
   }
 
+  // ---- Skills suggested by completed work ---------------------------------
+  function learnedSkills() {
+    var panel = $('to-learned-skills'); if (!panel) return;
+    var status = $('to-learned-status'), suggestions = $('to-learned-list'), added = $('to-learned-added');
+    var preview = $('to-learned-review'), result = $('to-learned-result'), history = $('to-learned-history');
+    var original = $('to-learned-original'), reload = $('to-learned-refresh');
+    var context = null, pending = null, busy = false, generation = 0, reviewGeneration = 0;
+    function lock(value) {
+      busy = value;
+      panel.querySelectorAll('button,input').forEach(function (item) { item.disabled = value; });
+      original.disabled = value || !pending;
+      var confirm = preview.querySelector('[data-confirm]');
+      var checked = preview.querySelector('input[type="checkbox"]');
+      if (confirm) confirm.disabled = value || !checked || !checked.checked;
+    }
+    function invalidate() { reviewGeneration++; preview.replaceChildren(); }
+    function changed() {
+      generation++; invalidate(); context = null; pending = null;
+      suggestions.replaceChildren(); added.replaceChildren(); result.replaceChildren(); history.replaceChildren();
+      lock(false); say(status, 'Your account, workspace or access changed. Refresh suggestions before continuing.');
+    }
+    async function call(url, options) {
+      options = options || {};
+      try {
+        return await window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store',
+          body: options.json, timeout: 30000, onAccess: changed});
+      } catch (failure) {
+        if (failure.status === 409 && String(failure.detail || '').indexOf('Your account or workspace changed.') === 0) changed();
+        throw failure;
+      }
+    }
+    function preserve(operation) {
+      pending = operation;
+      original.disabled = busy || !pending;
+      if (context && pending) {
+        try { sessionStorage.setItem('learned-skill-change:' + context, pending); } catch (_) {}
+        document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {
+          detail: {selection: {kind: 'learned_skill_change', operation: pending}}}));
+      }
+    }
+    function show(row) {
+      result.replaceChildren();
+      result.appendChild(el('h3', null, 'Your original skill change'));
+      result.appendChild(el('p', null, row.message));
+      if (row.current) result.appendChild(el('p', 'muted sk-small', 'Current skills: ' + row.current));
+      if (row.recorded_at) result.appendChild(el('p', 'muted sk-small', 'Recorded ' + when(row.recorded_at)));
+    }
+    async function readOriginal(operation) {
+      if (busy || !context || !/^[a-f0-9]{32}$/.test(operation)) return;
+      var started = generation; invalidate(); lock(true);
+      try {
+        var row = await call('/api/v1/skills/learned-requests/' + encodeURIComponent(operation));
+        if (started !== generation) return;
+        if (row.context !== context) { changed(); return; }
+        preserve(operation); show(row); say(status, 'Read the original result. No skill was added or removed.');
+      } catch (failure) {
+        if (started === generation) say(status, await failText(failure, 'read the original change') + ' Nothing was repeated.');
+      } finally { if (started === generation) lock(false); }
+    }
+    // Keep the page's installed skills list in step with a confirmed change.
+    function syncInstalled(outcome, row) {
+      var done = outcome && outcome.confirmed && outcome.result;
+      if (!done || typeof done.name !== 'string') return;
+      document.querySelectorAll('#installed-skills [data-skill]').forEach(function (card) {
+        if (card.getAttribute('data-skill') === done.name) card.remove();
+      });
+      if (outcome.action === 'admit' && window.lwAppendSkill) {
+        window.lwAppendSkill({name: done.name, triggers: row.triggers || [], tools_needed: row.tools || []});
+      }
+    }
+    async function reviewAction(row, action, chosen, nameInput) {
+      if (busy || !context) return;
+      var started = generation, draft = ++reviewGeneration; preview.replaceChildren(); lock(true);
+      try {
+        var review = await call('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/review',
+          {method: 'POST', json: {action: action, fingerprint: row.fingerprint, publish_name: chosen || '', context: context}});
+        if (started !== generation || draft !== reviewGeneration) return;
+        if (review.context !== context) { changed(); return; }
+        preview.appendChild(el('h3', null, action === 'admit' ? 'Review this skill before adding it' : 'Review this skill removal'));
+        preview.appendChild(el('p', null, review.message));
+        review.changes.forEach(function (change) {
+          preview.appendChild(el('h4', null, change.label));
+          var text = el('p', null, change.after); text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere';
+          preview.appendChild(text);
+        });
+        var label = el('label', 'sk-field'), checked = el('input');
+        checked.type = 'checkbox'; label.appendChild(checked);
+        label.appendChild(el('span', null, 'I reviewed this exact change and all displayed instructions.'));
+        preview.appendChild(label);
+        var apply = button(action === 'admit' ? 'Add reviewed skill' : 'Remove reviewed skill', 'btn--primary');
+        apply.setAttribute('data-confirm', 'true'); apply.disabled = true; preview.appendChild(apply);
+        checked.addEventListener('change', function () { apply.disabled = busy || !checked.checked; });
+        apply.addEventListener('click', async function () {
+          if (busy || !checked.checked || draft !== reviewGeneration || started !== generation) return;
+          if (nameInput && slug(nameInput.value) !== chosen) { invalidate(); say(status, 'The name changed. Review the skill again.'); return; }
+          lock(true); preserve(review.operation);
+          try {
+            var outcome = await call('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/' + action,
+              {method: 'POST', json: {fingerprint: row.fingerprint, confirm: true, review_token: review.token,
+                ...(action === 'admit' ? {publish_name: chosen} : {})}});
+            if (started !== generation) return;
+            if (outcome.context !== context) { changed(); return; }
+            show(outcome); say(status, outcome.message);
+            syncInstalled(outcome, row);
+            invalidate(); lock(false);
+            // Refreshing the lists must not replace the confirmation the person just got.
+            if (await refresh()) say(status, outcome.message);
+          } catch (failure) {
+            if (started === generation) {
+              invalidate();
+              say(status, await failText(failure, 'change this skill') +
+                ' The change may have completed. Check the original result before another decision.');
+            }
+          } finally { if (started === generation) lock(false); }
+        });
+      } catch (failure) {
+        if (started === generation) say(status, await failText(failure, 'review this skill'));
+      } finally { if (started === generation) lock(false); }
+    }
+    function slug(value) {
+      return String(value || '').toLowerCase().normalize('NFKD')
+        .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+    async function refresh() {
+      if (busy) return null;
+      var started = ++generation; invalidate(); lock(true);
+      try {
+        var data = await call('/api/v1/skills/learned-candidates');
+        if (started !== generation) return null;
+        if (context && data.context !== context) { changed(); return null; }
+        context = data.context; suggestions.replaceChildren(); added.replaceChildren(); history.replaceChildren();
+        var rows = data.suggestions || [];
+        say(status, data.blocked || (rows.length ? plural(rows.length, 'suggestion') + ' ready for your review.' :
+          'No new suggestions yet. Repeated shared successes can produce suggestions for review.'));
+        rows.forEach(function (row) {
+          var card = el('article', 'panel to-card'); card.appendChild(el('h3', null, human(row.name)));
+          card.appendChild(el('p', 'muted sk-small', 'Suggested from completed shared tasks. Review its sources and every instruction before adding it.'));
+          var sources = el('p', 'muted sk-small');
+          (row.source_tasks || []).forEach(function (id, index) {
+            if (index) sources.appendChild(document.createTextNode(' · '));
+            var link = el('a', null, 'Task ' + id); link.href = '/chat/goal/' + encodeURIComponent(id); sources.appendChild(link);
+          });
+          card.appendChild(sources);
+          card.appendChild(el('p', null, 'Used when a task mentions: ' + (row.triggers || []).join(', ')));
+          card.appendChild(el('p', null, row.tools.length ? 'Tools requested: ' + row.tools.map(human).join(', ') : 'It requests no tools.'));
+          card.appendChild(el('p', 'muted sk-small', 'Full instructions:'));
+          card.appendChild(el('pre', 'to-text', row.instructions || 'No instructions.'));
+          if (row.problems.length) card.appendChild(list(row.problems));
+          if (row.ok && data.can_add) {
+            var label = el('label', 'sk-field'); label.appendChild(el('span', null, 'Save this skill as'));
+            var name = el('input', 'input'); name.type = 'text'; name.maxLength = 96; name.value = human(row.name);
+            name.setAttribute('aria-label', 'Name for ' + human(row.name)); label.appendChild(name); card.appendChild(label);
+            name.addEventListener('input', invalidate);
+            var add = button('Review adding this skill', 'btn--primary');
+            add.addEventListener('click', function () {
+              var chosen = slug(name.value);
+              if (!chosen || chosen.length > 96) { say(status, 'Choose a short name with letters or numbers.'); name.focus(); return; }
+              reviewAction(row, 'admit', chosen, name);
+            }); card.appendChild(add);
+          }
+          suggestions.appendChild(card);
+        });
+        if ((data.added || []).length) {
+          added.appendChild(el('h3', null, 'Current added suggestions'));
+          added.appendChild(el('p', 'muted sk-small', 'This is the current list. Original change receipts are separate below.'));
+          data.added.forEach(function (row) {
+            var card = el('div', 'sk-actions'); card.appendChild(el('span', null, human(row.name)));
+            if (row.status) card.appendChild(el('span', 'muted sk-small', row.status));
+            if (row.recall_ready === true) card.appendChild(el('span', 'muted sk-small',
+              row.use_tracking === false ? 'Use history is turned off.' :
+                row.uses > 0 ? 'Used on ' + plural(row.uses, 'later task') + '.' : 'No later task has used this skill yet.'));
+            var remove = button('Review removal', 'btn--danger'); remove.setAttribute('aria-label', 'Review removal of ' + human(row.name));
+            remove.addEventListener('click', function () { reviewAction(row, 'withdraw', ''); });
+            card.appendChild(remove); added.appendChild(card);
+          });
+        }
+        var saved = await call('/api/v1/skills/learned-requests');
+        if (started !== generation) return null;
+        if (saved.context !== context) { changed(); return null; }
+        if (saved.requests.length) {
+          history.appendChild(el('h3', null, 'Recent original changes'));
+          saved.requests.forEach(function (row) {
+            var read = button((row.action === 'admit' ? 'Add ' : 'Remove ') + human(row.name) +
+              (row.confirmed ? ' · Read original change' : ' · Result unconfirmed'));
+            read.addEventListener('click', function () { readOriginal(row.operation); });
+            history.appendChild(read);
+          });
+        }
+        if (!pending) {
+          var query = new URL(location.href).searchParams.get('learned_request');
+          try { pending = query || sessionStorage.getItem('learned-skill-change:' + context); } catch (_) { pending = query; }
+          if (!/^[a-f0-9]{32}$/.test(pending || '')) pending = null;
+        }
+        return data;
+      } catch (failure) {
+        if (started === generation) say(status, await failText(failure, 'load suggested skills') + ' Your displayed work is kept.');
+        return null;
+      } finally { if (started === generation) lock(false); }
+    }
+    original.addEventListener('click', function () { if (pending) readOriginal(pending); });
+    reload.addEventListener('click', refresh);
+    document.addEventListener('lightwork:workspace-changed', changed);
+    document.addEventListener('lightwork:account-context-changed', changed);
+    window.addEventListener('lightwork:context-changed', changed);
+    document.addEventListener('lightwork:copilot-context-changed', function (event) {
+      if (!event.detail || event.detail.reason !== 'selection') changed();
+    });
+    refresh();
+  }
+
   // ---- Skills: track record ------------------------------------------------
   function rate(row) { return row.win_rate == null ? 'Not known yet' : Math.round(row.win_rate * 100) + '%'; }
   function priority(row) { return row.weight >= 0.995 ? 'Normal' : 'Lowered to ' + Math.round(row.weight * 100) + '%'; }
@@ -224,7 +437,7 @@
         out.appendChild(table(USAGE_HEAD, usageRows(found), 'Skills that rarely help'));
         var remove = button('Remove ' + plural(found.length, 'skill'), 'btn--danger');
         remove.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Remove ' + plural(found.length, 'skill') + ' that rarely help? Agents stop using them from the next task. This cannot be undone.', {okText: 'Remove'});
+          var ok = await window.mvConfirm('Remove ' + plural(found.length, 'skill') + ' that rarely help? Agents stop using them from the next task. This cannot be undone.', {okText: 'Remove ' + plural(found.length, 'skill')});
           if (!ok) return;
           remove.disabled = true;
           try {
@@ -368,7 +581,7 @@
     var facts = [['Risk of this change', r.risk], ['Needs a person to approve it', r.needs_approval ? 'Yes' : 'No']];
     if (r.read_current_values) {
       facts.push(['Could be undone', r.can_undo ? 'Yes' : 'No']);
-      if (r.money_at_stake) facts.push(['Money at stake', Number(r.money_at_stake).toLocaleString(undefined, {style: 'currency', currency: 'USD'})]);
+      if (r.money_at_stake) facts.push(['Money at stake', window.mvMoney ? window.mvMoney(r.money_at_stake) : Number(r.money_at_stake).toLocaleString(undefined, {style: 'currency', currency: 'USD'})]);
     }
     out.appendChild(table(['Question', 'Answer'], facts, 'What this change would do'));
     if (r.undo_note) out.appendChild(el('p', 'muted', r.undo_note));
@@ -469,6 +682,7 @@
 
   function start() {
     skillInstall();
+    learnedSkills();
     skillUsage();
     skillTidy();
     versions();

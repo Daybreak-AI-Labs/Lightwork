@@ -42,6 +42,41 @@ test("v1 exact input_shape supports mixed fixed lists, empty structures, and col
   assert.equal(new Set(plan.fields.map(field => field.id)).size, plan.fields.length);
   assert.deepEqual(clone(inputs.read(plan, values(plan, expected))), {input: expected});
 });
+test("a retained 65-item list uses ordinary fields without changing its fixed shape", () => {
+  const shape = [{path: [], kind: "object", keys: ["lines"]},
+    {path: ["lines"], kind: "array", length: 65}];
+  for (let index = 0; index < 65; index++) shape.push({path: ["lines", index], kind: "integer"});
+  const plan = inputs.plan({schema: "lightwork.action-recipe.v1", input_shape: shape});
+  assert.equal(plan.fields.length, 65);
+  const data = inputs.read(plan, values(plan, {lines: Array.from({length: 65}, (_, index) => index)}));
+  assert.deepEqual(clone(data), {input: {lines: Array.from({length: 65}, (_, index) => index)}});
+  assert.deepEqual(JSON.parse(inputs.wireData(plan, data)), clone(data));
+  const ui = dom(), pending = ui.api.prompt(ui.api.plan({schema: "lightwork.action-recipe.v1", input_shape: shape}));
+  for (const field of plan.fields) ui.elements.find(element => element.id === field.id).value = String(field.path[1]);
+  ui.elements.find(element => element.tagName === "form").dispatch("submit");
+  return pending.then(result => {
+    assert.deepEqual(clone(result), clone(data));
+    assert.ok(ui.elements.some(element => /Enter 65 values/.test(element.textContent || "")));
+    assert.equal(ui.opener.focused, true);
+  });
+});
+test("bounded nested declared records may have more than 64 actual values", () => {
+  const first = Object.fromEntries(Array.from({length: 64}, (_, index) => [`field_${index}`, integer]));
+  const plan = inputs.plan(artifact(families[0], {first: obj(first), last: integer}));
+  assert.equal(plan.fields.length, 65);
+  const submitted = Object.fromEntries(plan.fields.map(field => [field.id, "2"]));
+  assert.equal(Object.keys(inputs.read(plan, submitted).input.first).length, 64);
+});
+test("legacy form covers the native 512-leaf limit and refuses a larger list", () => {
+  function shape(size) {
+    return [{path: [], kind: "object", keys: ["lines"]}, {path: ["lines"], kind: "array", length: size},
+      ...Array.from({length: size}, (_, index) => ({path: ["lines", index], kind: "integer"}))];
+  }
+  const model = inputs.plan({schema: "lightwork.action-recipe.v1", input_shape: shape(512)});
+  assert.equal(model.fields.length, 512);
+  assert.equal(inputs.read(model, Object.fromEntries(model.fields.map(field => [field.id, "1"]))).input.lines.length, 512);
+  assert.throws(() => inputs.plan({schema: "lightwork.action-recipe.v1", input_shape: shape(513)}), /cannot display safely/);
+});
 test("prototype-like keys stay data, and markup labels are not interpreted", () => {
   const props = JSON.parse('{"__proto__":{"type":"string","maxLength":10},"<img src=x>":{"type":"boolean"}}');
   const plan = inputs.plan(artifact(families[0], props));
@@ -88,7 +123,7 @@ for (const schema of invalidSchemas) test(`unsupported declared schema fails vis
 });
 test("expanded array size is bounded even when the compact schema is small", () => {
   assert.throws(() => inputs.plan(artifact(families[0], {grid: {type: "array", minItems: 64, maxItems: 64,
-    items: {type: "array", minItems: 64, maxItems: 64, items: integer}}})), /more than 64 values/);
+    items: {type: "array", minItems: 64, maxItems: 64, items: integer}}})), /more than 512 values/);
 });
 for (const shape of [
   [{path: [], kind: "object", keys: ["missing"]}],
@@ -104,17 +139,17 @@ test("unknown artifact cannot fall back to manual sample input", () => {
 // Execute the actual designer run function, including its request and receipt checks.
 function runner(prompt) {
   const calls = [], messages = [], watched = [];
-  const rootFlow = {id: "case", name: "Case", published: true, nodes: [{id: "start", kind: "approval", prompt: "Review"}], start: "start", learned_recipe: artifact()};
-  inputs.parseText(JSON.stringify(rootFlow));
+  const rootFlow = inputs.parseText(JSON.stringify({id: "case", name: "Case", published: true, nodes: [{id: "start", kind: "approval", prompt: "Review"}], start: "start", learned_recipe: artifact()}));
   const button = {setAttribute() {}, removeAttribute() {}, focus() {this.focused = true;}};
   const context = {rootFlow, publishedFlow: clone(rootFlow), flowInputs: [], runInFlight: false, FDCore: core,
+    FDActionFields: {async ready() {}, check() { return []; }},
     FDRecipeInputs: {...inputs, prompt}, draftSnapshot: () => JSON.stringify(context.rootFlow),
     document: {getElementById(id) { if (id === "fd-sample") throw new Error("learned flow read hidden JSON");
       if (id === "fd-legend") return {classList: {add() {}}}; return button; }},
     apiFetch: async (url, options) => {calls.push({url, options});
       const result = url.endsWith('/published') ? {flow: context.publishedFlow, release_id: 'a'.repeat(64)} :
         {run_id: "run", status: "paused_approval", dry_run: url.endsWith("dry-run")};
-      return {ok: true, text: async () => JSON.stringify(result)};
+      return {ok: true, text: async () => JSON.stringify(result, (key, value) => key === '_fdEvidence' ? undefined : value)};
     },
     readMutationResult: inputs.responseJson,
     say: (message, error) => messages.push({message, error}), watchRun: id => watched.push(id),
@@ -129,15 +164,27 @@ function runner(prompt) {
 async function turn() { await new Promise(resolve => setImmediate(resolve)); }
 for (const dry of [false, true]) test(`actual ${dry ? "test" : "published"} run submits form values and preserves graph`, async () => {
   const ui = runner(async plan => inputs.read(plan, values(plan, {quantity: 3})));
-  const before = clone(ui.context.rootFlow);
+  const before = JSON.parse(inputs.flowText(ui.context.rootFlow));
   ui.context.run(dry); await turn();
   assert.equal(ui.calls.length, dry ? 1 : 2);
   const body = JSON.parse(ui.calls.at(-1).options.body);
   assert.deepEqual(body.data, {input: {quantity: 3}});
-  assert.deepEqual(ui.context.rootFlow, before);
+  assert.deepEqual(JSON.parse(inputs.flowText(ui.context.rootFlow)), before);
   if (dry) assert.deepEqual(body.flow, before);
   else assert.equal(body.expected_release_id, 'a'.repeat(64));
   assert.deepEqual(ui.watched, ["run"]);
+});
+test("Copilot opens the same learned form and binds it to the reviewed release", async () => {
+  const ui = runner(async plan => inputs.read(plan, values(plan, {quantity: 3})));
+  const accepted = await ui.context.LightworkFlowRun.open('case', 'a'.repeat(64));
+  assert.equal(accepted.status, 'started'); assert.equal(accepted.run_id, 'run');
+  assert.equal(JSON.parse(ui.calls.at(-1).options.body).expected_release_id, 'a'.repeat(64));
+  const changed = runner(async () => { throw new Error('stale release must not open inputs'); });
+  const stale = await changed.context.LightworkFlowRun.open('case', 'b'.repeat(64));
+  assert.equal(stale.status, 'stale'); assert.equal(changed.calls.length, 1);
+  assert.deepEqual(changed.watched, []);
+  const wrongFlow = await changed.context.LightworkFlowRun.open('other-case', 'a'.repeat(64));
+  assert.equal(wrongFlow.status, 'stale'); assert.equal(changed.calls.length, 1);
 });
 test("cancel and duplicate clicks dispatch nothing, then allow a fresh input attempt", async () => {
   let finish, count = 0;

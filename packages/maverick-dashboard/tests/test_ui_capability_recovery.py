@@ -22,7 +22,7 @@ def _button(markup: str, element_id: str) -> str:
 
 def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_path):
     from maverick import config, runtime_overrides, world_model
-    from maverick_dashboard import api
+    from maverick_dashboard import api, auth
     from maverick_dashboard import app as dashboard_app
 
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
@@ -31,6 +31,7 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "overrides.toml")
     monkeypatch.setattr(dashboard_app, "has_global_permission", lambda _r, _p: False)
+    monkeypatch.setattr(auth, "has_global_permission", lambda _r, _p: False)
     monkeypatch.setattr(dashboard_app, "has_permission", lambda _r, _p: True)
     monkeypatch.setattr(api, "_shared_halt_backend", lambda: True)
     config.reset_config_cache()
@@ -48,7 +49,9 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     assert "only an administrator can change learning settings" in learning.text
     assert "Run learning now" not in learning.text
     assert "disabled" in _button(learning.text, "lrn-enable")
-    assert "disabled" in _button(learning.text, "lrn-auto-evolve")
+    # Global learning-policy summaries are unavailable to a tenant operator;
+    # the privileged section is omitted rather than populated with fake zeros.
+    assert 'id="lrn-auto-evolve"' not in learning.text
     assert "only a global administrator can change where work runs" in permissions.text
     assert "var canManageSandbox = false" in permissions.text
     # Tenant operate authority remains truthful and independently enables the
@@ -67,9 +70,9 @@ def test_destructive_clients_confirm_exact_targets_and_recover_single_flight():
     assert "Another operation is already running" in bulk
     assert "operationInFlight = false" in bulk
     assert "delete shell.dataset.operationInFlight" in bulk
-    assert "Run the next part of this job now?" in bulk
-    assert "Allow \" + answers.amount + \" more bulk jobs" in bulk
-    assert "Permanently delete \" + count + \" finished jobs" in bulk
+    assert "Run the next bulk change that is due now? It may change or delete people’s consent records." in bulk
+    assert "Allow \" + answers.amount + \" more consent records to be processed in this workspace?" in bulk
+    assert "Permanently delete \" + count + \" finished bulk changes" in bulk
 
     assert "var destructiveInFlight = false" in reports
     assert "Another report change is already running" in reports
@@ -83,7 +86,7 @@ def test_destructive_clients_confirm_exact_targets_and_recover_single_flight():
     assert "function handle(button, work)" in bulk
     assert "return work(disableControls)" in bulk
     # Every destructive handler confirms before it disables its opener.
-    assert bulk.count("disableControls();") == 7
+    assert bulk.count("disableControls();") == 10
     for confirm_then_disable in bulk.split("await CW.confirm(")[1:]:
         head = confirm_then_disable.split("\n", 2)
         assert "disableControls();" in "\n".join(head[:2]) or "return;" not in head[0]

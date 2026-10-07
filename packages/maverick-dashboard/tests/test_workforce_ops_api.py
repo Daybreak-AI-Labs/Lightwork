@@ -73,7 +73,7 @@ def _configure(body: str) -> None:
 def _wait(client, started, timeout: float = 60.0) -> dict:
     job = started.json()["job"]
     deadline = time.time() + timeout
-    while job["state"] in ("running", "stopping"):
+    while job["state"] in ("admitted", "running", "stopping"):  # an admitted job has not started yet
         assert time.time() < deadline, job
         time.sleep(0.1)
         job = client.get(f"/api/v1/learning-ops/jobs/{job['id']}").json()["job"]
@@ -90,8 +90,12 @@ def test_changes_and_downloads_need_a_workspace_admin(client, monkeypatch):
 
 
 def test_inventory_summarises_every_specialist_in_plain_words(client, monkeypatch, audit_rows):
+    from maverick.departments import department_title
+
     inv = client.get(f"{API}/inventory").json()
     assert inv["specialists"] > 0 and inv["suites"]
+    assert all(row["label"] == department_title(row["value"]) for row in inv["suites"])
+    assert [row["label"] for row in inv["suites"]] == sorted(row["label"] for row in inv["suites"])
     assert inv["can_change_things_while_drafting"] == 0
     suite = inv["suites"][0]["value"]
     one = client.get(f"{API}/inventory", params={"suite": suite}).json()
@@ -102,6 +106,15 @@ def test_inventory_summarises_every_specialist_in_plain_words(client, monkeypatc
     doc = json.loads(down.text)
     assert doc["summary"]["packs"] == one["specialists"] and len(doc["packs"]) == one["specialists"]
     assert [r["verb"] for r in audit_rows] == ["specialist_inventory_download"]
+
+
+def test_inventory_says_whether_independence_levels_are_on(client, monkeypatch):
+    """The per-level split is only meaningful when levels are on, so the page
+    needs to know which it is (it used to list the split either way)."""
+    monkeypatch.delenv("MAVERICK_WORKFORCE_LEVELS", raising=False)
+    assert client.get(f"{API}/inventory").json()["levels_enabled"] is False
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
+    assert client.get(f"{API}/inventory").json()["levels_enabled"] is True
 
 
 def test_setup_check_runs_every_specialist_through_the_lint(client, monkeypatch):
@@ -138,12 +151,16 @@ def test_upcoming_tasks_are_overdue_first_and_scoped_to_the_person(client, monke
     world = open_world()
     now = time.time()
     mine = world.create_goal("Renew the supplier contract", owner="user:ann")
-    late = world.create_goal("File the quarterly return", owner="user:bob", domain="finance_vat")
+    late = world.create_goal("File the quarterly return", owner="user:ann", domain="finance_vat")
+    foreign = world.create_goal("Bob private task", owner="user:bob")
     far = world.create_goal("Plan next year", owner="user:ann")
     with world._writing() as conn:
         conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now + 3 * 86400, mine))
         conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now - 86400, late))
         conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now + 45 * 86400, far))
+        conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now - 2 * 86400, foreign))
+    assert client.get(f"{API}/upcoming", params={"days": 30}).json()["tasks"] == []
+    _as(monkeypatch, "viewer", "user:ann")
     rows = client.get(f"{API}/upcoming", params={"days": 30}).json()["tasks"]
     assert [r["title"] for r in rows] == ["File the quarterly return", "Renew the supplier contract"]
     assert rows[0]["overdue"] is True and rows[0]["department"] == "finance vat"
@@ -151,7 +168,8 @@ def test_upcoming_tasks_are_overdue_first_and_scoped_to_the_person(client, monke
     assert client.get(f"{API}/upcoming", params={"days": 5}).status_code == 422
     _as(monkeypatch, "viewer", "user:ann")
     rows = client.get(f"{API}/upcoming", params={"days": 90}).json()["tasks"]
-    assert sorted(r["title"] for r in rows) == ["Plan next year", "Renew the supplier contract"]
+    assert sorted(r["title"] for r in rows) == [
+        "File the quarterly return", "Plan next year", "Renew the supplier contract"]
 
 
 def test_outside_agents_join_shared_memory_through_the_kernel(client, monkeypatch, audit_rows):
@@ -177,7 +195,7 @@ def test_pages_show_the_new_controls_in_plain_words(client):
         assert f'id="{control}"' in page, control
     own = page.split('id="wo-root"', 1)[1]
     visible = re.sub(r"<[^>]+>", " ", re.sub(r"<style[\s\S]*?</style>|<script[\s\S]*?</script>", " ", own))
-    assert "What each specialist can do" in visible
+    assert "What each agent and specialist can do" in visible
     assert not _BANNED.search(visible), _BANNED.search(visible)
     tasks = client.get("/goals").text
     assert 'id="wo-upcoming-root"' in tasks and 'id="wo-up-days"' in tasks

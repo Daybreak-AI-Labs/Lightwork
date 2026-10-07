@@ -13,7 +13,7 @@
   .timeline li:last-child { border-bottom: 0; }
   .timeline li::before {
     content: ""; position: absolute; left: -2.45rem; top: 1.1rem;
-    width: 10px; height: 10px; border-radius: 50%;
+    width: 10px; height: 10px; border-radius: var(--radius-round);
     background: var(--surface-1); border: 2px solid var(--border);
   }
   .timeline li.tool::before    { border-color: var(--accent); }
@@ -24,9 +24,11 @@
   .ev-kind { color: var(--accent); }
   .ev-content {
     margin-top: 0.4rem; white-space: pre-wrap; word-break: break-word;
-    background: var(--surface-1); padding: 0.4rem 0.6rem; border-radius: 4px;
+    background: var(--surface-1); padding: 0.4rem 0.6rem; border-radius: var(--radius-xs);
   }
   .ev-branch { margin-inline-start: auto; padding: 0.15rem 0.6rem; font-size: var(--text-xs); }
+  .ev-step { margin: 0.35rem 0 0; color: var(--text); }
+  .ev-technical > summary { cursor: pointer; width: max-content; color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; }
   .controls { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
   .controls input[type="range"] { flex: 1; min-width: 8rem; }
   .filters { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
@@ -40,12 +42,18 @@
   'tool': 'Action', 'thinking': 'Thinking', 'thought': 'Thinking', 'handoff': 'Handed over',
   'status': 'Update', 'question': 'Question', 'answer': 'Answer', 'result': 'Result',
 } %}
-<p class="muted"><a href="/goals">← All tasks</a> · <a href="/goals/{{ goal.id }}/plan">Plan</a> · <a href="/chat/goal/{{ goal.id }}">Open the task</a></p>
-<div class="section-head"><h2>Step-by-step history: {{ goal.title }}</h2></div>
+{% from "_task_tabs.html" import task_tabs %}
+{% from "_hero.html" import hero %}
+{{ task_tabs(goal, 'steps') }}
+{{ hero('Task', 'Step-by-step history: ' ~ goal.title, compact=true) }}
 <div class="panel goal-export" id="goal-export" data-goal="{{ goal.id }}" data-can-share="{{ '1' if can_operate else '0' }}">
-  <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/export.json" download="task-{{ goal.id }}.json">Download full history</a>
+  <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/export.json" download="task-{{ goal.id }}.json">Download technical archive</a>
+  <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/handoff.html">Download readable handoff</a>
+  <a class="btn btn--ghost" href="/static/lightwork-archive-viewer.html" download="lightwork-archive-viewer.html">Download offline archive viewer</a>
   {% if can_operate %}<button class="btn btn--ghost" type="button" id="goal-gist">Share a private copy on GitHub</button>{% endif %}
-  <p class="muted" id="goal-export-msg" role="status" aria-live="polite">The download holds this task, every recorded step and its work summaries, as one file you can keep or move to another installation.</p>
+  <p class="muted" id="goal-export-msg" role="status" aria-live="polite">The technical archive includes the task record, recorded steps and work summaries within supported limits; larger histories are refused rather than silently shortened. It excludes attachment contents and is not a resumable task. It is not redacted: review business content before sharing.</p>
+  {% if can_open_page('/redact') %}<p class="muted"><a href="/redact">Check text for passwords and personal details</a> before you share it.</p>{% endif %}
+  {% if can_open_page('/replay') %}<p class="muted"><a href="/replay?goal={{ goal.id }}">Replay this task</a> to see every action in order and check that its record has not been changed.</p>{% endif %}
 </div>
 
 {% if events %}
@@ -64,7 +72,7 @@
     <select id="filter-agent" class="select filter-agent">
       <option value="">Everyone</option>
       {% for agent in events | map(attribute="agent") | unique | sort %}
-        <option value="{{ agent }}">{{ agent | humanize }}</option>
+        <option value="{{ agent }}">{{ agents.get(agent) or (agent | humanize) }}</option>
       {% endfor %}
     </select>
     <label for="filter-severity">Step type</label>
@@ -82,25 +90,27 @@
   <ul class="timeline" id="timeline">
     {% for ev in events %}
       <li data-idx="{{ loop.index0 }}" data-agent="{{ ev.agent }}" data-kind="{{ ev.kind }}" class="{{ ev.kind }}">
+        {% set step = steps.get(ev.id) %}
         <span class="ev-meta">
           <span>{{ ev.ts | datetime }}</span>
-          <span class="ev-agent">{{ ev.agent | humanize }}</span>
+          <span class="ev-agent">{{ agents.get(ev.agent) or (ev.agent | humanize) }}</span>
           <span class="ev-kind">{{ KIND_LABELS.get(ev.kind) or (ev.kind | humanize) }}</span>
           {% if fork_enabled and can_operate %}
           <button type="button" class="btn btn--ghost ev-branch" data-event="{{ ev.id }}"
                   aria-label="Branch from step {{ loop.index }}">Branch from here</button>
           {% endif %}
         </span>
-        {% if ev.content and ev.kind == 'error' %}
-          <p class="ev-content">Something went wrong in this step. <a href="/goals/{{ goal.id }}/errors">See all problems</a></p>
-          <details><summary>Technical details (for support)</summary><div class="ev-content">{{ ev.content }}</div></details>
-        {% elif ev.content %}
+        {# The step in plain words; what Lightwork recorded is folded away. #}
+        <p class="ev-step">{{ step.text if step and step.text else 'Lightwork bookkeeping' }}{% if ev.kind == 'error' %} <a href="/goals/{{ goal.id }}/errors">See all problems</a>{% endif %}</p>
+        {% if ev.content %}
+          <details class="ev-technical"><summary>Technical details</summary>
           {% if ev.content|length > 2000 %}
           <div class="ev-content">{{ ev.content[:2000] }}…</div>
           <details><summary>Show the full step</summary><div class="ev-content">{{ ev.content }}</div></details>
           {% else %}
           <div class="ev-content">{{ ev.content }}</div>
           {% endif %}
+          </details>
         {% endif %}
       </li>
     {% endfor %}
@@ -197,7 +207,7 @@
         compare.href = "/run-tree?goal={{ goal.id }}"; compare.textContent = "Compare branches";
         msg.append(open, " · ", compare);
       } catch (err) {
-        msg.textContent = window.mvErrorText ? mvErrorText(err, "create the branch") : "Could not create the branch.";
+        msg.textContent = window.mvErrorText ? mvErrorText(err, "create the branch") : "Could not create the branch. Try again.";
       } finally { btn.disabled = false; }
     });
   })();

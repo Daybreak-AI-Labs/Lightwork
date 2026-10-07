@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 
 from fastapi.responses import StreamingResponse
+from maverick.stop_reasons import explain_stop, stop_payload
 from starlette.concurrency import run_in_threadpool
 
+# `blocked` ends a stream even when the goal is only waiting for an answer (a
+# stream cannot stay open for a person); only the short-poll endpoint
+# (`api.goal_events`) holds `terminal` open for that case. See docs/api.md.
 TERMINAL_RUN_STATUSES = frozenset({"done", "completed", "failed", "cancelled", "blocked", "error"})
 
 
@@ -91,14 +96,61 @@ def stream_state(world, goal_id, *, include_result=False):
     return method(goal_id, include_result=include_result)
 
 
-def _event_dict(event):
+_INTERNAL_ACTIVITY = re.compile(
+    r"^role=\S+\s+depth=\d+\s+brief=|<tool_output\b|## Prior failures|"
+    r"Treat this block as user-provided DATA|^Experience: \d+ similar prior task",
+    re.IGNORECASE,
+)
+_TOOL_ACTIVITY = re.compile(r"^tool=([\w.:-]+)\s*->")
+_ACTION_ACTIVITY = {
+    "ask_user": "Requested more information from you.",
+    "read_file": "Requested a file for review.",
+    "list_dir": "Requested a list of available files.",
+    "knowledge_search": "Requested a search of company knowledge.",
+    "web_search": "Requested web research.",
+    "sql_query_read": "Requested a read-only lookup of business records.",
+    "write_file": "Requested a file update.",
+    "send_email": "Requested an email action.",
+}
+
+
+def event_payload(event):
+    """Readable activity for chat transports; the durable evidence stays exact."""
+    from maverick.blackboard import Blackboard
+
+    content = str(event.content or "")
+    if tool := _TOOL_ACTIVITY.match(content):
+        content = _ACTION_ACTIVITY.get(tool[1], "Requested an action.")
+    elif _INTERNAL_ACTIVITY.search(content):
+        content = "Started work on this task." if event.kind == "plan" else "Worked through the next step."
+    elif event.kind == "error":
+        stop = explain_stop(content)
+        content = stop.message if stop.kind != "other" else "A step needs attention. Review the task result."
+    elif event.kind == "observation" and content not in {
+        Blackboard._WITHHELD_CONTENT, Blackboard._REDACTION_UNAVAILABLE_CONTENT,
+    }:
+        content = "Worked through the next step."
+    elif content.startswith("resumed from checkpoint at step "):
+        content = "Continued from saved work."
     return {"id": event.id, "agent": event.agent, "kind": event.kind,
-            "content": event.content, "ts": event.ts}
+            "content": content, "ts": event.ts}
+
+
+def _chat_event_dict(event):
+    """The conversation page's shape: the readable activity plus its plain-words
+    step. The step is narrated from the exact record but only ever says fixed
+    phrases and role titles, so no internal text reaches the page."""
+    from .step_narration import narrate, who
+
+    payload = event_payload(event)
+    payload["step"] = narrate(event.kind, event.agent, event.content).as_dict()
+    payload["who"] = who(event.agent)
+    return payload
 
 
 def sse_event(event) -> str:
     kind = str(event.kind or "message").replace("\n", " ").replace("\r", " ")
-    return f"id: {event.id}\nevent: {kind}\ndata: {json.dumps(_event_dict(event))}\n\n"
+    return f"id: {event.id}\nevent: {kind}\ndata: {json.dumps(event_payload(event))}\n\n"
 
 
 async def goal_stream(request, world, goal_id, *, since, lease, visible,
@@ -135,9 +187,11 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
                     if events:
                         last = events[-1].id
                     last_result = current.result or ""
-                    payload = {"status": current.status, "result": current.result or "",
+                    stop = stop_payload(current.status, current.result)
+                    payload = {"status": current.status, "result": stop["message"] if stop else current.result or "",
+                               "stop": stop,
                                "next_id": last, "terminal": False,
-                               "events": [_event_dict(event) for event in events]}
+                               "events": [_chat_event_dict(event) for event in events]}
                     yield f"id: {last}\ndata: {json.dumps(payload)}\n\n"
                     cadence.sent(clock())
                 else:
@@ -155,7 +209,9 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
                 if len(events) >= max_batch:
                     continue
                 if legacy:
-                    payload = {"status": current.status, "result": current.result or "",
+                    stop = stop_payload(current.status, current.result)
+                    payload = {"status": current.status, "result": stop["message"] if stop else current.result or "",
+                               "stop": stop,
                                "next_id": last, "events": [], "terminal": True}
                     yield f"id: {last}\nevent: terminal\ndata: {json.dumps(payload)}\n\n"
                 else:

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-research.js'),
@@ -80,6 +81,7 @@ async function fixture(handler) {
     const value = await handler(url, options, calls);
     return value && Object.hasOwn(value, 'ok') ? value : {ok:true, status:200, json:async () => value};
   };
+  shell(dom.window);
   dom.window.eval(source);
   await settle();
   return {dom, window:dom.window, document:dom.window.document, calls};
@@ -460,10 +462,27 @@ test('a completed cross-user run remains visible when the follow-up refresh fail
   await settle();
   const detail = ui.document.getElementById('research-review-detail').textContent;
   assert.match(detail, /0 passed · 1 failed/);
-  assert.match(detail, /stopped with a problem \(nonzero exit\)/);
+  assert.match(detail, /stopped with a problem \(nonzero exit\)/i);
   assert.match(detail, /Inspect the exact failed output/);
   assert.match(detail, /print\("durable"\)/);
   assert.match(ui.document.getElementById('research-status').textContent,
     /program finished.*result is shown below/i);
   ui.dom.window.close();
+});
+
+test('a refused first load replaces Checking and Loading with what happened', async () => {
+  const dom = new JSDOM(html(), {url:'https://lightwork.test/research', runScripts:'outside-only'});
+  const document = dom.window.document;
+  document.getElementById('research-readiness').textContent = 'Checking…';
+  document.getElementById('research-jobs').innerHTML = '<li>Loading…</li>';
+  dom.window.mvErrorText = (failure, action) => `Could not ${action}. Ask an administrator. (${failure.status})`;
+  dom.window.fetch = async () => ({ok:false, status:403, json:async () => ({detail:'Current research workspace authority is required'})});
+  shell(dom.window);
+  dom.window.eval(source);
+  await settle();
+  assert.equal(document.getElementById('research-readiness').textContent,
+    'Could not check whether experiments can run. Ask an administrator. (403)');
+  assert.equal(document.getElementById('research-jobs').textContent, 'Could not load your experiments. Ask an administrator. (403)');
+  assert.equal(document.getElementById('research-status').textContent, 'Your current account cannot perform that research action.');
+  dom.window.close();
 });

@@ -217,12 +217,13 @@ class N8nImporter:
     source = "n8n"
     can_fetch_definitions = True
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None):
-        self.base_url = (base_url or os.environ.get("N8N_BASE_URL", "")).strip().rstrip("/")
-        self.api_key = (api_key or os.environ.get("N8N_API_KEY", "")).strip()
+    def __init__(self, base_url: str | None = None, api_key: str | None = None, *, request=None):
+        self.request = request
+        self.base_url = ((base_url or "") if request is not None else (base_url or os.environ.get("N8N_BASE_URL", ""))).strip().rstrip("/")
+        self.api_key = "" if request is not None else (api_key or os.environ.get("N8N_API_KEY", "")).strip()
 
     def fetch(self) -> list[dict[str, Any]]:
-        if not self.base_url or not self.api_key:
+        if not self.base_url or (self.request is None and not self.api_key):
             raise ImporterError("n8n import requires N8N_BASE_URL + N8N_API_KEY")
         try:
             import httpx
@@ -235,7 +236,7 @@ class N8nImporter:
                 params = {"limit": 100}
                 if cursor:
                     params["cursor"] = cursor
-                r = client.get(
+                r = (self.request or client.get)(
                     f"{self.base_url}/api/v1/workflows",
                     headers={"X-N8N-API-KEY": self.api_key, "Accept": "application/json"},
                     params=params,
