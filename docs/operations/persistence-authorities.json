@@ -24405,7 +24405,13 @@
       "purpose": "Learning operations; an uploaded factory evidence file is written to a private temporary folder for one review pass and removed with it.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
+      "governed_namespaces": [
+        {
+          "namespace": "learning-case-import-requests",
+          "line": 763,
+          "recovery_policy": "learning_case_import_authority"
+        }
+      ],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
       "source_sites": [
@@ -24414,6 +24420,12 @@
           "function": "_do",
           "kind": "write_bytes",
           "expression": "path.write_bytes(raw)"
+        },
+        {
+          "line": 763,
+          "function": "_import_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-case-import-requests', 'LCI', 'learning_case_import_request')"
         }
       ]
     },

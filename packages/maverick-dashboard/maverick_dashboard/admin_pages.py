@@ -1394,6 +1394,19 @@ def users_delete_custom_role(
     return RedirectResponse("/users?saved=role_deleted", status_code=303)
 
 
+def _existing_account_refusal(request: Request, email: str, **payload) -> HTTPException:
+    """An invitation for someone who can already sign in: recorded and refused."""
+    from .local_passphrases import ACCOUNT_EXISTS
+    from .product_errors import background_save, product_error
+
+    _admin_audit(request, "invite_refused", email=(email or "").strip().lower(),
+                 reason="existing_local_account", **payload)
+    if background_save(request):
+        return product_error(409, "invite_existing_account", ACCOUNT_EXISTS,
+                             field_errors={"email": ACCOUNT_EXISTS})
+    return HTTPException(status_code=409, detail=ACCOUNT_EXISTS)
+
+
 def _invite_refusal(reason: str) -> HTTPException:
     """An invite the store refused, in words for the person who typed it."""
     from .product_errors import product_error
@@ -1442,6 +1455,8 @@ def users_invite(request: Request, email: str = Form(...),
             guard()
             inv, token = invites.create_invite(email, role, created_by=invited_by,
                                               ttl_hours=ttl, before_effect=guard)
+    except invites.ExistingAccountError as exc:
+        raise _existing_account_refusal(request, email) from exc
     except ValueError as exc:
         from .product_errors import background_save
         if background_save(request):
@@ -1527,6 +1542,8 @@ def users_workspace_invite(
                 workspace_admin_invite=not installation_admin,
                 ttl_hours=ttl, before_effect=guard,
             )
+        except invites.ExistingAccountError as exc:
+            raise _existing_account_refusal(request, email, workspace=tenant) from exc
         except ValueError as exc:
             from .product_errors import background_save
             if background_save(request):

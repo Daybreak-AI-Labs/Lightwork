@@ -11,8 +11,9 @@ wrong passphrases the account waits one minute before the next try. The hash
 runs outside the store lock, and each client address may make ten sign-in
 attempts a minute (refused before any hashing). Only the
 hash is stored, in ``~/.maverick/dashboard-passphrases.json`` (0600). There is
-no reset by email: an administrator sends a new invitation, and accepting it
-replaces the passphrase. Any unreadable or malformed store fails closed.
+no reset by email, and an invitation never replaces an existing passphrase:
+otherwise anyone who can invite could set a colleague's passphrase and sign in
+as them. Any unreadable or malformed store fails closed.
 """
 from __future__ import annotations
 
@@ -38,13 +39,20 @@ _MAX_BYTES = 4 * 1024 * 1024
 _DUMMY_SALT = secrets.token_hex(16)
 
 NOT_ACCEPTED = (
-    "The email or passphrase was not accepted. If you joined with an invitation and have "
-    "no passphrase yet, or have forgotten it, ask your administrator for a new invite."
+    "The email or passphrase was not accepted. If you have not set a passphrase yet, ask your "
+    "administrator for an invitation. An invitation cannot replace a passphrase you already "
+    "have; if you have forgotten it, ask the installation owner for help."
 )
 LOCKED = "Wait one minute before trying to sign in again."
 UNAVAILABLE = "Sign-in is unavailable right now. Ask your administrator to check Lightwork."
 NO_ACCESS = ("This account no longer has access to this workspace. "
-             "Ask your administrator for a new invite.")
+             "Ask your administrator to give your account access again.")
+# Refusal shown when an invitation names someone who can already sign in here.
+ACCOUNT_EXISTS = (
+    "This email already has a sign-in on this installation, so it cannot be invited: accepting "
+    "would replace that person's passphrase. They keep signing in with their current passphrase. "
+    "To change their access, change their role on the Users page or add them to the workspace there."
+)
 TOO_MANY = "Too many sign-in attempts. Wait a minute and try again."
 ATTEMPTS_PER_MINUTE = 10  # per client address, owner and colleagues alike
 
@@ -137,16 +145,27 @@ def prepare(email: str, password: str) -> dict:
     return {"email": email, "salt": salt, "password_hash": local_owner._password(password, salt)}
 
 
+def has_account(email: str) -> bool:
+    """Whether ``email`` already has a passphrase here (unreadable store: 503)."""
+    file_lock.ensure_private_directory(maverick_home())
+    with _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        return _normal(email) in _read()
+
+
 def store(prepared: dict, *, tenant: str = "") -> None:
-    """Save or replace one colleague's passphrase hash (and a clean lockout).
+    """Save one new colleague's passphrase hash (and a clean lockout).
 
     Called while the invitation is being consumed, so a link is never used up
-    without the passphrase that lets its colleague return."""
+    without the passphrase that lets its colleague return. An existing
+    passphrase is never replaced (409), even if it appeared after the
+    invitation was checked."""
     file_lock.ensure_private_directory(maverick_home())
     with _LOCK, file_lock.cross_process_lock(path(), strict=True):
         accounts = _read()
         email = prepared["email"]
-        if email not in accounts and len(accounts) >= _MAX_ACCOUNTS:
+        if email in accounts:
+            raise HTTPException(409, ACCOUNT_EXISTS)
+        if len(accounts) >= _MAX_ACCOUNTS:
             raise HTTPException(409, "This workspace has reached its limit of passphrase accounts.")
         accounts[email] = {"salt": prepared["salt"], "password_hash": prepared["password_hash"],
                            "failures": 0, "locked_until": 0, "tenant": (tenant or "").strip(),
@@ -197,7 +216,7 @@ def login(request: Request, *, email: str, password: str) -> str:
         accounts = _read()
         current = accounts.get(email)
         if current is None or current["salt"] != salt or current["password_hash"] != expected:
-            raise HTTPException(401, NOT_ACCEPTED)  # replaced by a new invitation meanwhile
+            raise HTTPException(401, NOT_ACCEPTED)  # changed while the hash ran
         current.update(failures=0, locked_until=0)
         _write(accounts)
     principal = "user:" + email
@@ -244,5 +263,5 @@ def reset_attempt_limit() -> None:
         _ATTEMPTS.reset()
 
 
-__all__ = ["NOT_ACCEPTED", "TOO_MANY", "available", "limit_attempts", "login", "owner_of", "prepare",
-           "require_same_origin", "reset_attempt_limit", "store"]
+__all__ = ["ACCOUNT_EXISTS", "NOT_ACCEPTED", "TOO_MANY", "available", "has_account", "limit_attempts",
+           "login", "owner_of", "prepare", "require_same_origin", "reset_attempt_limit", "store"]

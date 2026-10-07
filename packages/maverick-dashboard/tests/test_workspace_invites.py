@@ -158,12 +158,19 @@ def test_scoped_invite_cannot_remove_last_admin_on_accept(monkeypatch, tmp_path)
     from maverick_dashboard import rbac
 
     registry.create_tenant("acme")
-    principal = _as_workspace_admin(client)
+    from maverick_dashboard import invites
+
+    # A link issued while alice could not yet sign in here...
+    _inv, token = invites.create_invite("alice@example.com", "viewer",
+                                        created_by="local-admin", tenant="acme")
+    principal = _as_workspace_admin(client)  # ...and she is now the only admin.
+    # She cannot invite herself to a lower role, and the old link cannot be
+    # accepted over her account: either would remove the last admin.
     minted = client.post("/users/workspace-invite", data={
         "_expected_tenant": "acme", "tenant": "acme", "email": "alice@example.com", "role": "viewer",
     })
-    assert minted.status_code == 200, minted.text
-    assert _accept(_invitee(client), _invitation_path(minted)).status_code == 410
+    assert minted.status_code == 409, minted.text
+    assert _accept(_invitee(client), f"/auth/invite/{token}").status_code == 410
     assert rbac.get_tenant_role("acme", principal) == "admin"
 
 
@@ -325,3 +332,39 @@ def test_principal_less_and_legacy_invites_keep_their_existing_contract(monkeypa
     _legacy, token = invites.create_invite("legacy@example.com", "viewer", created_by="local-admin")
     assert _accept(_invitee(client), f"/auth/invite/{token}", follow_redirects=False).status_code == 303
     assert rbac.get_stored_role("user:legacy@example.com") == "viewer"
+
+
+def test_scoped_admin_cannot_invite_an_existing_member_to_take_over_their_account(monkeypatch, tmp_path):
+    """Accepting a local invitation sets a passphrase and signs in as the invited
+    email, so an invitation for someone who can already sign in is refused."""
+    import json
+
+    client = _client(monkeypatch, tmp_path)
+    from maverick.tenant import registry
+    from maverick_dashboard import invites, local_passphrases, rbac
+
+    registry.create_tenant("acme", display_name="Acme")
+    _inv, token = invites.create_invite("member@example.com", "operator",
+                                        created_by="local-admin", tenant="acme")
+    assert _accept(_invitee(client), f"/auth/invite/{token}", follow_redirects=False).status_code == 303
+
+    def credential():
+        return json.loads(local_passphrases.path().read_text(encoding="utf-8"))["accounts"]["member@example.com"]
+
+    before = credential()
+    pending = len(invites.list_invites())
+    _as_workspace_admin(client)
+    refused = client.post("/users/workspace-invite", data={
+        "_expected_tenant": "acme", "tenant": "acme", "email": "member@example.com", "role": "viewer",
+    })
+    assert refused.status_code == 409, refused.text
+    assert "already has a sign-in" in refused.text
+    assert "/auth/invite/inv_" not in refused.text
+    assert len(invites.list_invites()) == pending
+    assert credential() == before
+    assert rbac.get_tenant_role("acme", "user:member@example.com") == "operator"
+    # A brand-new person can still be invited by the same admin.
+    minted = client.post("/users/workspace-invite", data={
+        "_expected_tenant": "acme", "tenant": "acme", "email": "newcomer@example.com", "role": "viewer",
+    })
+    assert minted.status_code == 200, minted.text

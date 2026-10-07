@@ -50,6 +50,34 @@ class InviteStoreError(RuntimeError):
     """Invite state exists but cannot be read or validated safely."""
 
 
+class ExistingAccountError(ValueError):
+    """A local invitation would take over an identity that already exists here."""
+
+
+def existing_local_account(email: str) -> bool:
+    """Whether accepting a local invitation for ``email`` would take over an
+    existing identity: a colleague passphrase, the installation owner, a
+    configured bootstrap admin, a stored role or any workspace membership.
+
+    Accepting a local invitation sets a passphrase and signs in as
+    ``user:<email>``, so any of these would let whoever holds the link become
+    that person. Unreadable state counts as existing (fail closed).
+    """
+    from . import local_passphrases, rbac
+
+    email = (email or "").strip().lower()
+    principal = "user:" + email
+    try:
+        from maverick.suite_grants import is_admin_principal
+
+        return bool(local_passphrases.has_account(email) or local_passphrases.owner_of(email)
+                    or is_admin_principal(principal)
+                    or rbac.get_stored_role(principal) is not None
+                    or rbac.has_tenant_membership(principal))
+    except Exception:
+        return True
+
+
 def store_path() -> Path:
     from maverick.paths import maverick_home
 
@@ -277,6 +305,10 @@ def create_invite(email: str, role: str, *, created_by: str,
     tenant = (tenant or "").strip()
     if len(tenant) > 128 or (workspace_admin_invite and not tenant):
         raise ValueError("invalid workspace")
+    if local_login_mode() and existing_local_account(email):
+        from .local_passphrases import ACCOUNT_EXISTS
+
+        raise ExistingAccountError(ACCOUNT_EXISTS)
     token = "inv_" + secrets.token_urlsafe(32)
     inv_id = "invite_" + secrets.token_hex(8)
     now = time.time()

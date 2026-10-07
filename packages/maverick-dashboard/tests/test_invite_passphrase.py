@@ -162,7 +162,8 @@ def test_wrong_passphrases_lock_the_account_like_the_owner_and_never_reveal_who_
     assert unknown.status_code == wrong.status_code == 401
     text = lambda page: re.sub(r"\s+", " ", page.text)  # noqa: E731
     assert "The email or passphrase was not accepted." in text(wrong)
-    assert "ask your administrator for a new invite" in text(wrong)
+    assert "ask your administrator for an invitation" in text(wrong)
+    assert "An invitation cannot replace a passphrase you already have" in text(wrong)
     assert text(unknown).count("not accepted") == text(wrong).count("not accepted")
     for _ in range(4):
         assert _sign_in(browser, password=OTHER).status_code == 401
@@ -179,7 +180,7 @@ def test_a_removed_colleague_cannot_sign_back_in(workspace):
     rbac.remove_user("user:" + COLLEAGUE)
     refused = _sign_in(_remote())
     assert refused.status_code == 403
-    assert "new invite" in refused.text
+    assert "give your account access again" in refused.text
 
 
 def test_workspace_invitation_keeps_its_workspace_role_for_sign_in(workspace):
@@ -217,7 +218,8 @@ def test_sign_in_post_needs_this_sites_origin(workspace):
 
 def test_sign_in_page_offers_a_new_invite_to_people_without_a_passphrase(workspace):
     page = re.sub(r"\s+", " ", _remote().get("/auth/local-login").text)
-    assert "Ask your administrator for a new invite" in page
+    assert "No passphrase yet? Ask your administrator for an invitation" in page
+    assert "An invitation cannot replace a passphrase you already have" in page
     assert "/static/lightwork.css" in page
 
 
@@ -348,3 +350,84 @@ def test_the_owners_sign_in_on_this_computer_keeps_its_own_lockout(workspace, tm
         assert _sign_in(local, email=OWNER, password=OTHER).status_code == 401
     assert _sign_in(local, email=OWNER, password=OWNER_PASS).status_code == 429
     assert not (tmp_path / "dashboard-passphrases.json").exists()
+
+
+# -- an invitation never takes over an account that can already sign in -------
+
+def _audits(monkeypatch):
+    rows = []
+    import maverick.audit as audit
+
+    real = audit.audit_event
+
+    def record(kind, **fields):
+        rows.append({"kind": kind, **fields})
+        return real(kind, **fields)
+
+    monkeypatch.setattr(audit, "audit_event", record)
+    return rows
+
+
+def _passphrase_row(tmp_path, email=COLLEAGUE):
+    data = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))
+    return dict(data["accounts"][email])
+
+
+def test_an_invitation_for_an_existing_colleague_is_refused_and_changes_nothing(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import invites
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    before = _passphrase_row(tmp_path)
+    pending = len(invites.list_invites())
+    audits = _audits(monkeypatch)
+
+    refused = workspace.post("/users/invite", data={"email": COLLEAGUE.upper(), "role": "viewer"})
+    assert refused.status_code == 409
+    assert "already has a sign-in" in refused.text and "/auth/invite/inv_" not in refused.text
+    assert len(invites.list_invites()) == pending
+    assert any(row.get("action") == "invite_refused" and row.get("reason") == "existing_local_account"
+               for row in audits)
+    assert _passphrase_row(tmp_path) == before
+    assert _sign_in(_remote(), password=GOOD).status_code == 303
+
+
+def test_the_owner_cannot_be_invited_to_get_a_remote_passphrase(workspace, tmp_path):
+    refused = workspace.post("/users/invite", data={"email": OWNER, "role": "viewer"})
+    assert refused.status_code == 409
+    assert not (tmp_path / "dashboard-passphrases.json").exists()
+    assert _sign_in(_remote(), email=OWNER, password=OTHER).status_code == 401
+
+
+def test_a_link_issued_before_the_account_existed_cannot_replace_its_passphrase(workspace, tmp_path, monkeypatch):
+    """The attack: a second link for the same person, redeemed by whoever holds it."""
+    from maverick_dashboard import invites, rbac
+
+    first = _invite(workspace)
+    second = _invite(workspace, role="viewer")  # issued while no account existed yet
+    assert _accept(_remote(), first).status_code == 303
+    before = _passphrase_row(tmp_path)
+    audits = _audits(monkeypatch)
+
+    attacker = _remote()
+    refused = _accept(attacker, second, OTHER)
+    assert refused.status_code == 409
+    assert "already has a sign-in" in refused.text
+    assert "mvk_session" not in attacker.cookies                         # no session minted
+    assert _passphrase_row(tmp_path) == before                           # credential unchanged
+    assert invites.peek_invite(second.rsplit("/", 1)[1]) is not None     # link not used up
+    assert rbac.get_stored_role("user:" + COLLEAGUE) == "operator"       # role not changed
+    assert any(row.get("action") == "invite_acceptance_refused"
+               and row.get("reason") == "existing_local_account" for row in audits)
+    assert _sign_in(_remote(), password=OTHER).status_code == 401
+    assert _sign_in(_remote(), password=GOOD).status_code == 303
+
+
+def test_new_colleagues_can_still_be_invited(workspace):
+    from maverick_dashboard import invites
+
+    assert invites.existing_local_account("new@example.test") is False
+    link = _invite(workspace, email="new@example.test")
+    newcomer = _remote()
+    assert _accept(newcomer, link).status_code == 303
+    assert "mvk_session" in newcomer.cookies
+    assert invites.existing_local_account("new@example.test") is True
