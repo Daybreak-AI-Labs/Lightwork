@@ -3691,7 +3691,7 @@ def _dsar_aging_payload(rows: list[dict]) -> dict:
         dl = int(r.get("days_left", 0))
         band = (
             "overdue"
-            if dl < 0
+            if r.get("overdue") is True or dl < 0
             else "d0_7"
             if dl <= 7
             else "d8_14"
@@ -7530,6 +7530,118 @@ async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     return _run_out(_load_owned_run(request, run_id, allow_assignee=True))
+
+
+def _flow_value_version(run) -> str:
+    material = [run.run_id, run.flow_id, run.owner, run.updated, run.data, run.input_data]
+    return hashlib.sha256(json.dumps(material, sort_keys=True, ensure_ascii=False,
+                                    allow_nan=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def _flow_value_at(run, scope: str, path: list[int], part: str):
+    from maverick.flow.redact import redact
+
+    # Preserve key-based masking before traversing into a selected child.
+    value = redact(run.data if scope == "data" else run.input_data, strict=True)
+    name = "Information in this run" if scope == "data" else "What it started with"
+    for index in path:
+        if isinstance(value, dict):
+            keys = sorted(value)
+            if index >= len(keys):
+                raise HTTPException(409, "This saved value changed. Reload the run information.")
+            name = keys[index]
+            value = value[name]
+        elif isinstance(value, list) and index < len(value):
+            value, name = value[index], f"Item {index + 1}"
+        else:
+            raise HTTPException(409, "This saved value changed. Reload the run information.")
+    return redact(name, strict=True) if part == "name" else value
+
+
+def _flow_value_kind(value) -> str:
+    return ("object" if isinstance(value, dict) else "list" if isinstance(value, list)
+            else "text" if isinstance(value, str) else "scalar")
+
+
+def _flow_value_page(value, offset: int) -> dict:
+    from maverick.flow.redact import redact
+
+    kind = _flow_value_kind(value)
+    if kind == "scalar":
+        if offset:
+            raise HTTPException(422, "This value has no further pages.")
+        return {"kind": kind, "text": json.dumps(value, ensure_ascii=False, allow_nan=False),
+                "total": 1, "remaining": 0, "next": None}
+    total = len(value)
+    if offset > total:
+        raise HTTPException(422, "Choose a current page of this saved value.")
+    end = min(total, offset + (4096 if kind == "text" else 20))
+    result = {"kind": kind, "total": total, "remaining": total - end,
+              "next": end if end < total else None}
+    if kind == "text":
+        result["text"] = value[offset:end]
+    else:
+        keys = sorted(value) if kind == "object" else range(total)
+        result["children"] = [{"index": index,
+                               "name": redact(str(keys[index]), strict=True)[:256] if kind == "object" else f"Item {index + 1}",
+                               "name_complete": kind != "object" or len(redact(str(keys[index]), strict=True)) <= 256,
+                               "kind": _flow_value_kind(value[keys[index]])}
+                              for index in range(offset, end)]
+    return result
+
+
+@router.get("/flows/runs/{run_id}/values")
+def flow_run_values_endpoint(
+    request: Request, run_id: str, scope: str = "data", part: str = "value",
+    path: list[int] = Query(default=[]), offset: int = Query(default=0, ge=0, le=16777216),
+    version: str = "", context: str = "", updated: float | None = None,
+) -> dict:
+    """Read bounded pages from the owner's complete, verified native checkpoint."""
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.flow import store
+    from maverick.flow.payloads import FlowPayloadError
+
+    from .auth import fresh_configuration
+    from .draft_api import context_for
+
+    if (scope not in {"data", "input"} or part not in {"value", "name"}
+            or len(path) > 64 or any(index < 0 for index in path)
+            or any(value and re.fullmatch(r"[a-f0-9]{64}", value) is None
+                   for value in (version, context))):
+        raise HTTPException(422, "Choose a current saved value from this run.")
+    with authority_effect_fence(), fresh_configuration():
+        require_permission(request, "operate")
+        _require_flows()
+        current_context = context_for(request)
+        if context and context != current_context:
+            raise HTTPException(409, "Your account or workspace changed. Reopen this run.")
+        try:
+            run = _load_owned_run(request, run_id)
+            current_version = _flow_value_version(run)
+            if ((version and version != current_version)
+                    or (updated is not None and updated != run.updated)):
+                raise HTTPException(409, "The saved values changed. Reload the run information.")
+            result = _flow_value_page(_flow_value_at(run, scope, path, part), offset)
+            # Formatting is available only for a declared answer in the exact
+            # retained definition, never inferred from an arbitrary field name.
+            definition = store.load_flow_snapshot(run.definition_digest) if run.definition_digest else None
+            result["answer"] = bool(scope == "data" and part == "value" and len(path) == 1
+                                    and definition and definition.owner == run.owner
+                                    and definition.id == run.flow_id
+                                    and definition.is_single_agent()
+                                    and any(node.kind == "agent" and node.output == sorted(run.data)[path[0]]
+                                            and (run.nodes.get(node.id) or {}).get("status") == "done"
+                                            for node in definition.nodes.values()))
+            if _flow_value_version(_load_owned_run(request, run_id)) != current_version:
+                raise HTTPException(409, "The saved values changed. Reload the run information.")
+        except (FlowPayloadError, store.FlowSnapshotError, OSError, ValueError) as exc:
+            raise HTTPException(503, "Complete saved values are unavailable. Reopen this run after its retained data is available.") from exc
+        require_permission(request, "operate")
+        _require_flows()
+        if context_for(request) != current_context:
+            raise HTTPException(409, "Your account or workspace changed. Reopen this run.")
+        return {**result, "context": current_context, "version": current_version,
+                "scope": scope, "path": path, "part": part, "offset": offset}
 
 
 @router.get("/flows/runs/{run_id}/events")

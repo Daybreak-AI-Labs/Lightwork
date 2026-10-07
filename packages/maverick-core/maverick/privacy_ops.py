@@ -2794,21 +2794,27 @@ def dsar_clock(record: dict, *, now: float | None = None) -> dict:
     I2) all read the same numbers.
 
     ``effective_due_at`` is ``extended_until`` when an extension was recorded,
-    else ``due_at``; ``days_left`` counts to it; ``overdue`` and ``due_soon``
-    apply while a response is pending, including access/portability data
+    else ``due_at``; ``days_left`` counts UTC calendar dates, matching the
+    displayed deadline; ``overdue`` and ``due_soon`` use the actual timestamp
+    while a response is pending, including access/portability data
     collected without an answer; ``acknowledge_overdue`` fires when
     a regime fixes an acknowledgement deadline that passed unacknowledged."""
+    import datetime
+
     moment = time.time() if now is None else float(now)
     due = float(record.get("extended_until") or record.get("due_at") or moment)
-    days_left = int((due - moment) // 86400)
+    due_day = datetime.datetime.fromtimestamp(due, tz=datetime.timezone.utc).date()
+    today = datetime.datetime.fromtimestamp(moment, tz=datetime.timezone.utc).date()
+    days_left = (due_day - today).days
+    remaining_days = int((due - moment) // 86400)
     active = dsar_response_pending(record)
     ack_by = record.get("acknowledge_by")
     return {
         "effective_due_at": due,
         "days_left": days_left,
         "response_pending": active,
-        "overdue": active and days_left < 0,
-        "due_soon": active and 0 <= days_left <= DSAR_DUE_SOON_DAYS,
+        "overdue": active and moment > due,
+        "due_soon": active and 0 <= remaining_days <= DSAR_DUE_SOON_DAYS,
         "acknowledge_overdue": (
             active and ack_by is not None and moment > float(ack_by)
             and not record.get("acknowledged_at")

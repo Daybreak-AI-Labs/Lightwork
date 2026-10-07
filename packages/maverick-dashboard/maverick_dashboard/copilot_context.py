@@ -1468,12 +1468,14 @@ _CONTEXTS = tuple(
                 "Review vendor paper and supporting evidence beside the governed record.",
                 "Inspect a registered vendor's current assessments, screening, contracts and open tasks together; explicitly link an existing profile or review activation after the latest assessment.",
                 "Inspect program insights, lineage, and bounded privacy records.",
+                "Read the selected privacy request's current response deadline, remaining work and recorded answer, then open its complete native record.",
             ),
             boundaries=(
                 "Generated analysis and redlines are decision support, not legal advice or approval.",
                 "Vendor submissions and local workflow state are not independently verified external facts.",
                 "Vendor activation requires the latest complete evaluated assessment; linking existing identities does not create fresh screening or independent identity verification.",
                 "Final applicability, risk acceptance, and disposition remain human decisions.",
+                "A collected data package is separate from an answer; recorded answers do not independently confirm receipt or deletion by another service.",
             ),
             next_steps=(
                 "Open the work item that needs attention and verify its current evidence revision.",
@@ -1514,6 +1516,7 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Enroll, suspend, reactivate, or revoke an exact source and its schedule.",
                 "Start, retry and inspect scans through stock AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB, and Microsoft Entra adapters.",
+                "Read recent retained scan states in Copilot, then open the same protected scan review without changing the current source selection or drafts.",
                 "Propose and independently approve a classification, then operate its durable remediation outbox and digest-only governed data-map projection.",
                 "Inspect or enable the bounded managed remediation scheduler for workspace-derived retry and exact local ambiguity reconciliation.",
             ),
@@ -2118,9 +2121,9 @@ def context_for_page(page: object) -> CopilotPageContext:
         base = _CONTEXT_BY_PATH["/workflows"]
         return replace(
             base, path=path, title="Flow run",
-            summary="This is a saved flow run. Review its current state and step timeline before choosing a recovery action.",
-            next_steps=("Check this run's current status and step timeline.", "If a step failed or paused, review its native details before retrying or approving."),
-            suggested_questions=("What is this run's status?", "What should I check before retrying this run?"),
+            summary="Review this workflow run's current state, complete permitted result and step timeline. Copilot can read its owned status and open the same complete result controls.",
+            next_steps=("Check this run's current status and step timeline.", "Open Information in this run or What it started with, then expand details or choose Read more to see the complete permitted value.", "If a step failed or paused, review its native details before retrying or approving."),
+            suggested_questions=("What is the status of this workflow run?", "Show this complete workflow result", "What should I check before retrying this run?"),
         )
     if path == "/compliance/scope-actions/mapping":
         return CopilotPageContext(

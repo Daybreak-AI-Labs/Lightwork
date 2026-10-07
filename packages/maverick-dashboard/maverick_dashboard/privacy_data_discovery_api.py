@@ -20,7 +20,14 @@ from fastapi import Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_global_permission, require_permission
+from .auth import (
+    caller_principal,
+    has_global_permission,
+    has_permission,
+    require_global_permission,
+    require_permission,
+    require_principal,
+)
 
 router = APIRouter(
     prefix="/privacy/data-discovery",
@@ -73,7 +80,7 @@ ObjectPath = Annotated[
 
 SourceKind = Literal["structured", "unstructured"]
 SourceState = Literal["active", "suspended", "revoked"]
-JobState = Literal["queued", "leased", "complete", "dead_letter"]
+JobState = Literal["queued", "leased", "complete", "dead_letter", "cancelled"]
 RemediationState = Literal[
     "queued",
     "leased",
@@ -206,6 +213,15 @@ class FailJobIn(_StrictModel):
 class ReplayIn(_StrictModel):
     expected_revision: int = Field(ge=1, le=2**31 - 1)
     idempotency_key: IdempotencyKey
+
+
+class CancelScanIn(ReplayIn):
+    confirmed: Literal[True]
+
+
+class RunScanIn(CancelScanIn):
+    expected_source_revision: int = Field(ge=1, le=2**31 - 1)
+    expected_source_integrity_sha256: Digest
 
 
 class ReviewProposalIn(_StrictModel):
@@ -1329,8 +1345,15 @@ async def list_sources(
 ) -> dict[str, Any]:
     require_permission(request, "view")
     ops, tenant, store = _authority(request)
+    guard = _scan_guard(request, ops, tenant, store, permission="view")
+    guard()
     rows = await _call(ops, store.list_sources, tenant, limit=limit + 1)
-    return _items(rows, limit)
+    guard()
+    return {**_items(rows, limit), "permissions": {
+        "operate": has_permission(request, "operate"),
+        "admin": has_global_permission(request, "admin"),
+        "audit": has_permission(request, "audit"),
+    }}
 
 
 @router.get("/sources/{source_id}")
@@ -1454,6 +1477,123 @@ async def execute_job(request: Request, job_id: ObjectPath) -> dict[str, Any]:
         "live_provider_acceptance_verified": False,
         "deadline_contract": "cooperative_adapter_deadline_checked_between_items",
     }
+
+
+def _scan_original(store, tenant, job_id, guard=None):
+    if guard is not None:
+        guard()
+    job = store.get_job(tenant, job_id)
+    report = store.report_for_job(tenant, job_id) if job.state == "complete" else None
+    if job.state == "complete" and report is None:
+        raise HTTPException(503, "The scan is marked done, but its saved report is unavailable. No scan was repeated.")
+    if guard is not None:
+        guard()
+    return {"job": _jsonable(job), "report": _report_payload(report) if report else None,
+            "scan_repeated": False, "provider_network_io_possible": False,
+            "live_provider_acceptance_verified": False}
+
+
+def _scan_guard(request, ops, tenant, store, *, source_id=None, source_sha256=None, permission="operate"):
+    from . import workspace_tenants
+
+    principal = caller_principal(request)
+    selected = workspace_tenants.get_selection_binding(principal) if principal else None
+    if selected and selected[0] not in {None, tenant}:
+        raise HTTPException(409, "Your selected workspace changed. Reload this page before continuing.")
+
+    def guard():
+        require_principal(request)
+        require_permission(request, permission)
+        ops.require_enabled()
+        if _tenant_id() != tenant or caller_principal(request) != principal:
+            raise HTTPException(409, "Your account or workspace changed. Reload this page before continuing.")
+        if principal and workspace_tenants.get_selection_binding(principal) != selected:
+            raise HTTPException(409, "Your selected workspace changed. Reload this page before continuing.")
+        if source_id is not None:
+            source = store.get_source(tenant, source_id)
+            if source.state != "active" or source.integrity_sha256 != source_sha256:
+                raise ops.PrivacyDataDiscoveryConflict("This source changed or was paused after review. Refresh its selection before scanning.")
+            if source.credential_env.startswith("connection:"):
+                from maverick import connections
+                from maverick.paths import tenant_scope
+                from maverick.privacy_discovery_credentials import connection_present
+
+                with tenant_scope(tenant=tenant), connections.bind_principal(principal):
+                    if not connection_present(source.credential_env):
+                        raise HTTPException(403, "This saved account changed or you no longer have access. Select an available account before scanning.")
+            else:
+                # Deployment-managed credentials retain their existing global
+                # admin floor. Saved accounts use their native current grants.
+                require_global_permission(request, "admin")
+    return guard
+
+
+def _run_reviewed_scan(request, ops, tenant, store, job_id, body):
+    from maverick import connections
+    from maverick.paths import tenant_scope
+
+    current = store.get_job(tenant, job_id)
+    source = store.get_source(tenant, current.source_id)
+    guard = _scan_guard(request, ops, tenant, store, source_id=current.source_id,
+                        source_sha256=body.expected_source_integrity_sha256)
+    result_guard = _scan_guard(request, ops, tenant, store, permission="view")
+    guard()
+    if source.revision != body.expected_source_revision:
+        raise ops.PrivacyDataDiscoveryConflict("This source changed after review. Refresh its selection before scanning.")
+    worker = _worker_ref(request, tenant)
+    coordinator = _coordinator(request, ops, tenant, store)
+    job, first_attempt = store.claim_job(tenant, job_id, worker_id=worker,
+        expected_revision=body.expected_revision, expected_source_revision=body.expected_source_revision,
+        idempotency_key=body.idempotency_key, before_write=guard)
+    if not first_attempt:
+        return _scan_original(store, tenant, job_id, result_guard)
+    try:
+        with tenant_scope(tenant=tenant), connections.bind_principal(caller_principal(request)):
+            coordinator.execute_job(job, worker_id=worker,
+                expected_source_sha256=body.expected_source_integrity_sha256, before_effect=guard)
+    except ops.PrivacyDataDiscoveryReadInterrupted as exc:
+        if isinstance(exc.__cause__, HTTPException):
+            raise exc.__cause__ from None
+        raise
+    except (ops.PrivacyDataDiscoveryConfigError, ops.PrivacyDataDiscoveryAdapterError,
+            ops.PrivacyDataDiscoveryValidationError, ops.PrivacyDataDiscoveryConflict) as exc:
+        code = ("credential_unavailable" if isinstance(exc, ops.PrivacyDataDiscoveryConfigError) else
+                "adapter_error" if isinstance(exc, ops.PrivacyDataDiscoveryAdapterError) else
+                "provider_contract_invalid" if isinstance(exc, ops.PrivacyDataDiscoveryValidationError) else "source_changed")
+        try:
+            store.fail_job(tenant, job_id, worker_id=worker, error_code=code)
+        except ops.PrivacyDataDiscoveryLeaseLost:
+            pass
+        raise
+    except ops.PrivacyDataDiscoveryLeaseLost:
+        return _scan_original(store, tenant, job_id, result_guard)
+    return {**_scan_original(store, tenant, job_id, result_guard), "provider_network_io_possible": True,
+            "raw_data_returned": False}
+
+
+@router.get("/jobs/{job_id}/result")
+async def scan_result(request: Request, job_id: ObjectPath) -> dict[str, Any]:
+    require_permission(request, "view")
+    ops, tenant, store = _authority(request)
+    guard = _scan_guard(request, ops, tenant, store, permission="view")
+    return await _call(ops, _scan_original, store, tenant, job_id, guard)
+
+
+@router.post("/jobs/{job_id}/run")
+async def run_reviewed_scan(request: Request, job_id: ObjectPath, body: RunScanIn) -> dict[str, Any]:
+    require_permission(request, "operate")
+    ops, tenant, store = _authority(request)
+    return await _call(ops, _run_reviewed_scan, request, ops, tenant, store, job_id, body)
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_scan(request: Request, job_id: ObjectPath, body: CancelScanIn) -> dict[str, Any]:
+    require_permission(request, "operate")
+    ops, tenant, store = _authority(request)
+    guard = _scan_guard(request, ops, tenant, store)
+    return _jsonable(await _call(ops, store.cancel_job, tenant, job_id,
+        expected_revision=body.expected_revision, actor_ref=_actor_ref(request, tenant),
+        idempotency_key=body.idempotency_key, before_write=guard))
 
 
 @router.post("/jobs/{job_id}/fail")

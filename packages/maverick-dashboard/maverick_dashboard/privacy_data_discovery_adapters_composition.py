@@ -18,6 +18,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from maverick.paths import canonical_tenant_id, data_dir, tenant_scope
 from maverick.privacy_data_discovery_adapters import (
     DiscoveryAdapterConfigError,
     DiscoveryHTTPTransport,
+    PinnedDiscoveryHTTPTransport,
     StockDiscoveryAdapterRegistry,
     build_stock_discovery_adapter_registry,
     credential_reference_present,
@@ -35,6 +37,30 @@ from maverick.privacy_data_discovery_adapters import (
 from maverick.privacy_discovery_data_map_target import PrivacyDiscoveryDataMapTarget
 
 _MAX_RETENTION_SECONDS = 10 * 366 * 24 * 60 * 60
+_scan_read_guard: ContextVar[Callable[[], None] | None] = ContextVar("privacy_scan_read_guard", default=None)
+
+
+class _ReviewedTransport:
+    def __init__(self, transport):
+        self._transport = transport
+
+    def request(self, request):
+        guard = _scan_read_guard.get()
+
+        def check():
+            if guard is None:
+                return
+            try:
+                guard()
+            except discovery.PrivacyDataDiscoveryError:
+                raise
+            except Exception as exc:
+                raise discovery.PrivacyDataDiscoveryReadInterrupted("Current scan access could not be verified.") from exc
+
+        check()
+        result = self._transport.request(request)
+        check()
+        return result
 
 
 class PrivacyDiscoveryAdapterCompositionError(discovery.PrivacyDataDiscoveryConfigError):
@@ -414,12 +440,10 @@ def snapshot_for_tenant(
     try:
         registry = build_stock_discovery_adapter_registry(config)
         if resolve_transport and registry.enabled:
-            transport = _transport_for(app, tenant)
-            if transport is not None:
-                registry = build_stock_discovery_adapter_registry(
-                    config,
-                    transport=transport,
-                )
+            transport = _transport_for(app, tenant) or PinnedDiscoveryHTTPTransport()
+            registry = build_stock_discovery_adapter_registry(
+                config, transport=_ReviewedTransport(transport),
+            )
     except DiscoveryAdapterConfigError as exc:
         raise PrivacyDiscoveryAdapterCompositionError(
             "privacy discovery stock adapter configuration is invalid"
@@ -473,14 +497,26 @@ class _TenantPinnedCoordinator(discovery.PrivacyDataDiscoveryCoordinator):
         job: discovery.ScanJob,
         *,
         worker_id: str,
+        expected_source_sha256: str | None = None,
+        before_effect=None,
     ) -> discovery.ScanReport:
         if job.tenant_id != self._snapshot.tenant_id:
             raise PrivacyDiscoveryAdapterCompositionError(
                 "privacy discovery job crossed its tenant"
             )
         _same_snapshot(self._app, self._snapshot)
-        with tenant_scope(tenant=self._snapshot.tenant_id):
-            return super().execute_job(job, worker_id=worker_id)
+        def guard():
+            _same_snapshot(self._app, self._snapshot)
+            if before_effect is not None:
+                before_effect()
+
+        token = _scan_read_guard.set(guard if before_effect is not None else None)
+        try:
+            with tenant_scope(tenant=self._snapshot.tenant_id):
+                return super().execute_job(job, worker_id=worker_id,
+                    expected_source_sha256=expected_source_sha256, before_effect=guard)
+        finally:
+            _scan_read_guard.reset(token)
 
     def run_once(
         self,

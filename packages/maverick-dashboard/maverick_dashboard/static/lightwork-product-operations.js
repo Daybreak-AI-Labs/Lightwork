@@ -200,6 +200,16 @@
             } : null);
           return;
         }
+        if (entry[0] === 'privacy_discovery_review') {
+          var discoveryReview = entry[1], discoveryControls = window.LightworkPrivacyDiscovery;
+          if (!discoveryReview || Array.isArray(discoveryReview) ||
+              Object.keys(discoveryReview).join(',') !== 'scope' || discoveryReview.scope !== 'current_page') return;
+          protectedControls(node('dd', undefined, list), 'Open the protected scan controls',
+            '/privacy/data-discovery#pdd-jobs',
+            discoveryControls && typeof discoveryControls.openReview === 'function'
+              ? function (isCurrent) { return discoveryControls.openReview({}, {isCurrent: isCurrent}); } : null);
+          return;
+        }
         if (entry[0] === 'channels_people') {
           var channelPeople = entry[1], channelStarted = generation, channelSelection = JSON.stringify(context());
           if (!channelPeople || Array.isArray(channelPeople) || Object.keys(channelPeople).sort().join(',') !== 'channel,context' ||

@@ -433,13 +433,13 @@ def chat_flow(message: str, *, flow: Flow | None = None, history=(),
             raw_text, label="model output", maximum=_MAX_MODEL_OUTPUT_CHARS,
         )
     except ValueError:
-        out.reply = "I couldn't produce a safe structured answer for that."
-        out.notes.append("model output failed the provider-boundary safety check")
+        out.reply = "The workflow assistant could not prepare a safe reply. No workflow change was prepared."
+        out.notes.append("Try a shorter, clearer request.")
         return out
     raw = _extract_json(raw_text)
     if raw is None:
-        out.reply = "I couldn't produce a structured answer for that -- try rephrasing."
-        out.notes.append("model did not return JSON")
+        out.reply = "The workflow assistant's answer could not be read. No workflow change was prepared."
+        out.notes.append("Describe the change you want, then try again.")
         return out
     out.reply = str(raw.get("reply") or "").strip() or "Done."
     patches = raw.get("patches")
