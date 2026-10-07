@@ -142,8 +142,14 @@
   >{{ prefill_title or '' }}</textarea>
   <details>
     <summary>{{ ui('Work with a specialist') }}</summary>
+    <label for="chat-specialist-search">{{ ui('Find a specialist') }}
+      <input id="chat-specialist-search" class="input" type="search" maxlength="100" autocomplete="off" aria-controls="chat-specialist" aria-describedby="chat-specialist-found">
+    </label>
+    <p class="muted" id="chat-specialist-found" role="status">{{ ui('Type part of a name, then choose from the list below.') }}</p>
     <label for="chat-specialist">{{ ui('Published specialist') }}
-      <select id="chat-specialist" name="domain" class="select" aria-describedby="chat-specialist-help">
+      <select id="chat-specialist" name="domain" class="select" aria-describedby="chat-specialist-help"
+              data-notice="{{ specialist_work_notice }}" data-saved="{{ published_specialists.personal_default or '' }}"
+              data-requested="{{ '' if requested_specialist is none else '1' }}">
         <option value="">{{ ui('Let Lightwork choose the team') }}</option>
         {% for choice in published_specialists.choices %}
         <option value="{{ choice.value }}" data-revision="{{ choice.revision }}"{% if choice.value == requested_specialist %} selected{% endif %}>{{ choice.label }}</option>
@@ -268,21 +274,58 @@
     function selected() {
       revision.value = choice.selectedOptions[0]?.dataset.revision || '';
       if (choice.value && !revision.value) chatCopy(document.getElementById('chat-specialist-help'), 'Your saved specialist is kept but is unavailable here. Choose a current specialist or let Lightwork choose the team before starting.');
-      else if (!unavailable) chatCopy(document.getElementById('chat-specialist-help'), {{ specialist_work_notice | tojson }});
+      else if (!unavailable) chatCopy(document.getElementById('chat-specialist-help'), choice.dataset.notice);
     }
-    var saved = {{ published_specialists.personal_default | default('') | tojson }};
-    if ({{ (requested_specialist is none) | tojson }} && saved && !choice.value && !form.querySelector('[name="title"]').value.trim() && !form.querySelector('[name="description"]').value.trim()) {
+    // Server values travel as data attributes, so this script stays plain JavaScript.
+    var saved = choice.dataset.saved || '';
+    if (!choice.dataset.requested && saved && !choice.value && !form.querySelector('[name="title"]').value.trim() && !form.querySelector('[name="description"]').value.trim()) {
       if (!Array.from(choice.options).some(function (item) { return item.value === saved; })) {
         var missing = document.createElement('option'); missing.value = saved; missing.textContent = chatText('Saved specialist — unavailable'); choice.append(missing);
       }
       choice.value = saved;
     }
     choice.addEventListener('change', selected); selected();
+    // Find a specialist: the roster is searched on the server, never shipped whole.
+    var search = document.getElementById('chat-specialist-search'), found = document.getElementById('chat-specialist-found');
+    var searchTimer = null, searchSeq = 0;
+    function showMatches(items) {
+      var keep = choice.value ? choice.selectedOptions[0] : null;
+      choice.replaceChildren(choice.ownerDocument.createElement('option'));
+      choice.options[0].value = ''; choice.options[0].textContent = chatText('Let Lightwork choose the team');
+      if (keep && keep.value) choice.append(keep);
+      items.forEach(function (row) {
+        if (keep && row.value === keep.value) return;
+        var option = choice.ownerDocument.createElement('option');
+        option.value = row.value; option.textContent = row.label; option.dataset.revision = row.revision;
+        choice.append(option);
+      });
+      if (keep && keep.value) choice.value = keep.value;
+    }
+    async function findSpecialists() {
+      var seq = ++searchSeq, words = search.value.trim();
+      if (!words) { chatCopy(found, 'Type part of a name, then choose from the list below.'); return; }
+      try {
+        var reply = await window.mvFetchJSON('/api/v1/chat/specialists?limit=20&q=' + encodeURIComponent(words), {}, 'find specialists');
+        if (seq !== searchSeq || unavailable) return;
+        if (!reply || reply.context !== form.querySelector('[name="specialist_context"]').value || !Array.isArray(reply.items)) {
+          clear({detail: {reason: 'account'}}); return;
+        }
+        showMatches(reply.items);
+        chatCopy(found, reply.items.length ? 'Matching specialists are listed below. Choose one.' : 'No published specialist matches that name.');
+      } catch (failure) {
+        if (seq !== searchSeq) return;
+        chatCopy(found, 'Specialist search is unavailable right now. Try again, or let Lightwork choose the team.');
+      }
+    }
+    if (search) search.addEventListener('input', function () {
+      clearTimeout(searchTimer); searchTimer = setTimeout(findSpecialists, 250);
+    });
     form.addEventListener('lightwork:task-model-restored', selected);
     function clear(event) {
       if (event.detail?.reason === 'selection') return;
       unavailable = true;
       choice.replaceChildren(); choice.disabled = true; revision.value = '';
+      if (search) { search.value = ''; search.disabled = true; }
       form.querySelector('[name="specialist_context"]').value = '';
       chatCopy(document.getElementById('chat-specialist-help'), 'Your account or workspace changed. Your message is kept; reopen Chat before starting work.');
     }

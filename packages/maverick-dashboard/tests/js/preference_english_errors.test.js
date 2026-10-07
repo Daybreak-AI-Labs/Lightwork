@@ -12,7 +12,7 @@ function load(serverReply) {
   const dom = new JSDOM('<form id="preference-form"><select id="preference-scope"><option value="personal">Personal</option></select>' +
     '<select data-pref="interface_language"><option value="en">English</option></select><select data-pref="output_style"><option value="concise">Concise</option></select>' +
     '<textarea data-pref="custom_style"></textarea><p id="preference-preview" lang="und" data-user-content></p><p id="preference-status"></p>' +
-    '<button type="button" id="preference-compare">Compare</button><button type="submit">Save</button></form>', {url: 'https://lightwork.invalid/preferences', runScripts: 'outside-only'});
+    '<button type="button" id="preference-compare">Compare</button><button type="submit">Save</button></form><section id="preference-original" hidden><button type="button" id="preference-original-read">Check original save</button><button type="button" id="preference-original-new" hidden>Start a fresh review</button><p id="preference-original-status" role="status"></p></section>', {url: 'https://lightwork.invalid/preferences', runScripts: 'outside-only'});
   const w = dom.window, doc = w.document;
   for (const [id, value] of Object.entries({'preference-data': initial, 'preference-thread': null, 'preference-styles': {}, 'lightwork-i18n-data': {language: 'en', locale: 'en'}})) {
     const script = doc.createElement('script'); script.id = id; script.type = 'application/json'; script.textContent = JSON.stringify(value); doc.head.append(script);

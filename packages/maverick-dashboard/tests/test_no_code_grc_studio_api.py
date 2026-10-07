@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from maverick import no_code_grc_studio as studio
+from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard import no_code_grc_studio_api as api
 
 BASE = "/api/v1/compliance/grc-studio"
@@ -97,7 +98,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     @app.middleware("http")
     async def principal(request: Request, call_next):
-        request.state.principal = SimpleNamespace(principal="user:operator")
+        request.state.principal = VerifiedPrincipal(sub=("user:operator").removeprefix("user:"), issuer="https://idp.test", audience="lightwork")
         return await call_next(request)
 
     app.include_router(api.create_no_code_grc_studio_router(dependencies), prefix="/api/v1")
@@ -364,7 +365,7 @@ def _with_collector(collector_id: str, version: int, digest: str) -> dict[str, o
     return value
 
 
-def test_sources_list_linked_collectors_and_adapter_destinations(
+def test_sources_list_approved_collectors_and_adapter_destinations(
     environment, tmp_path: Path, monkeypatch
 ) -> None:
     client, state = environment
@@ -399,10 +400,26 @@ def test_sources_list_linked_collectors_and_adapter_destinations(
     assert listed.status_code == 200, listed.text
     assert listed.headers["cache-control"].startswith("no-store")
     payload = listed.json()
-    assert payload["collectors"] == [
-        {"collector_id": "cloud-scan", "collector_version": 2, "collector_integrity_sha256": digest}
-    ]
+    # A collector merely linked in a blueprint is not offered: only current,
+    # independently approved evidence sources are, and only while continuous
+    # evidence is on.
+    assert payload["collectors"] == []
+    assert payload["collectors_notice"] == "Continuous evidence is turned off. Other blueprint choices remain available."
     assert payload["destinations"] == [] and payload["destinations_listed"] is False
+
+    from maverick import config as maverick_config
+
+    approved = {"collector_id": "cloud-scan", "collector_version": 2, "collector_integrity_sha256": digest,
+                "label": "Cloud scan", "definition_id": "cloud-scan", "outputs": [], "controls": []}
+    asked = []
+    with monkeypatch.context() as on:
+        on.setattr(maverick_config, "load_config", lambda *a, **k: {
+            "tech_risk_compliance": {"enable": True, "continuous_evidence": {"enable": True}}})
+        on.setattr(maverick_config, "config_source_errors", lambda *a, **k: [])
+        on.setattr(api, "_approved_collectors", lambda _request, tenant: asked.append(tenant) or [approved])
+        payload = client.get(f"{BASE}/sources").json()
+    assert payload["collectors"] == [approved] and payload["collectors_notice"] == ""
+    assert asked == ["tenant-a"]  # this workspace's approved sources only
 
     class Resolver:
         def __call__(self, *_args):  # pragma: no cover - not used for listing
