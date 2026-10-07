@@ -167,8 +167,16 @@ def test_required_adapter_refuses_deployment_but_custom_registry_can_provision(c
         return registry
 
     monkeypatch.setattr(Agent, '_build_tools', provisioned)
+    # Provisioned but unrated, the adapter keeps the unrated high floor that
+    # this medium pack refuses at dispatch, so it still cannot deploy.
+    with pytest.raises(ValueError, match='cannot deploy.*customer_ledger.*reviewed risk rating'):
+        domain.agent_from_profile(profile, context, 'read')
+    import importlib
+    risk_module = importlib.import_module('maverick.safety.tool_risk')
+    monkeypatch.setattr(risk_module, '_load_overrides', lambda: {'customer_ledger': 'medium'})
     agent = domain.agent_from_profile(profile, context, 'read')
     assert agent.tools.get('customer_ledger').fn({}) == 'ledger rows'
+    assert agent.capability.permits('customer_ledger')
     assert agent.deployment_prerequisites == []
 
 
