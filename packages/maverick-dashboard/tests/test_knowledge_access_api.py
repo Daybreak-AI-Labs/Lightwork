@@ -247,6 +247,21 @@ def test_search_api_preserves_full_chunk_excerpt_and_partial_coverage_flags(cust
     assert "partial_source_coverage" in partial.json()["incomplete_reasons"]
 
 
+def test_saved_sources_panel_loads_only_when_document_search_is_on(customer, monkeypatch):
+    """Without Document search the panel would only ask its API to refuse."""
+    from maverick import knowledge_sources
+
+    client, *_ = customer
+    monkeypatch.setattr(knowledge_sources, "enabled", lambda: False)
+    off = client.get("/knowledge-access")
+    assert off.status_code == 200, off.text
+    assert "Saved Knowledge sources" in off.text and "data-knowledge-sources" not in off.text
+    assert 'href="/settings/all?id=knowledge.enable"' in off.text
+    monkeypatch.setattr(knowledge_sources, "enabled", lambda: True)
+    on = client.get("/knowledge-access")
+    assert "data-knowledge-sources" in on.text and "data-ks-form" in on.text
+
+
 def test_page_assets_navigation_and_customer_language(customer):
     client, _service, _registry, _rights = customer
     page = client.get("/knowledge-access")

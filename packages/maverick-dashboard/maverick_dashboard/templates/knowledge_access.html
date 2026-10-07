@@ -168,7 +168,14 @@
     <ul id="ka-library-starters"></ul>
   </section>
 
+  {% if knowledge_sources_available %}
   {% include '_knowledge_sources.html' %}
+  {% else %}
+  <section class="panel" id="knowledge-sources" aria-labelledby="knowledge-sources-heading">
+    <h2 id="knowledge-sources-heading">Saved Knowledge sources</h2>
+    <p class="muted">Turn on <a href="/settings/all?id=knowledge.enable">Document search for agents</a> to keep selected company folders and pages current here.</p>
+  </section>
+  {% endif %}
   <noscript><p class="panel">JavaScript is required to revalidate and display governed knowledge sources.</p></noscript>
   {% if knowledge_tabs %}</div>{% endif %}
 </section>
