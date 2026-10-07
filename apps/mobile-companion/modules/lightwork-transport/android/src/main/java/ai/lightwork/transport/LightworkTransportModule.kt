@@ -61,8 +61,10 @@ class LightworkTransportModule : Module() {
                   output.write(chunk, 0, count)
                 }
               }
+              // Only the task list's continuation headers cross into JavaScript.
+              val exposed = RESPONSE_HEADERS.mapNotNull { name -> response.header(name)?.takeIf { it.length <= 32 }?.let { name to it } }.toMap()
               if (call.isCanceled()) promise.reject("E_CANCELLED", "Request cancelled", null)
-              else promise.resolve(mapOf("status" to response.code, "body" to output.toString("UTF-8")))
+              else promise.resolve(mapOf("status" to response.code, "body" to output.toString("UTF-8"), "headers" to exposed))
             }
           } catch (_: Exception) {
             promise.reject(if (call.isCanceled()) "E_CANCELLED" else "E_NETWORK", "Request did not complete", null)
@@ -84,5 +86,8 @@ class LightworkTransportModule : Module() {
     }
   }
 
-  companion object { private const val LIMIT = 4 * 1024 * 1024 }
+  companion object {
+    private const val LIMIT = 4 * 1024 * 1024
+    private val RESPONSE_HEADERS = listOf("pagination-has-more", "pagination-next-before-id")
+  }
 }

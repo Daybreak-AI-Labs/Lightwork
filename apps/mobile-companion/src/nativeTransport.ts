@@ -1,7 +1,7 @@
 import {Platform} from 'react-native';
 import {requireOptionalNativeModule} from 'expo-modules-core';
 
-type Reply = {status: number; body: string};
+type Reply = {status: number; body: string; headers?: Record<string, string>};
 type Transport = {request(id: string, url: string, method: string, headers: Record<string, string>, body: string | null): Promise<Reply>; cancel(id: string): void};
 const transport = requireOptionalNativeModule<Transport>('LightworkTransport');
 export const nativePlatform = Platform.OS === 'ios' || Platform.OS === 'android';

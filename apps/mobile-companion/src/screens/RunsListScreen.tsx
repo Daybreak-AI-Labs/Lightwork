@@ -12,25 +12,26 @@ import { offlineBanner, useCachedBundle } from "../offlineCache";
 import { usePolling } from "../poll";
 import { useTheme, type Palette } from "../theme";
 
+const UNREADABLE = 'The task list changed in a way this app could not read. Refresh, or ask your administrator to update the dashboard.';
+
 // Re-read the visible ID window so removed or newly inaccessible older rows do
 // not survive in an append-only cache. Every cursor page is scoped by the server
 // again; usePolling publishes a complete window only for its current generation.
+// The server may leave scanned rows out of a page, so whether more remain and
+// where to continue come from its continuation, not from the page's length.
 async function readTaskWindow(settings: Settings, signal: AbortSignal, status: string,
   floor: number | null, extend: boolean): Promise<{rows: Goal[]; hasMore: boolean}> {
   const rows: Goal[] = [];
   let before: number | undefined, addedBelow = 0;
   while (true) {
     if (signal.aborted) throw new ApiError('Request cancelled.', undefined, 'cancelled');
-    const page = await listGoals(settings, 50, signal, 0, status, before);
+    const reply = await listGoals(settings, 50, signal, 0, status, before);
     if (signal.aborted) throw new ApiError('Request cancelled.', undefined, 'cancelled');
-    if (!Array.isArray(page) || page.length > 50) {
-      throw new ApiError('The task list changed in a way this app could not read. Refresh, or ask your administrator to update the dashboard.', undefined, 'protocol');
-    }
+    const page = reply?.goals;
+    if (!Array.isArray(page) || page.length > 50) throw new ApiError(UNREADABLE, undefined, 'protocol');
     let previous = before ?? Infinity;
     for (const row of page) {
-      if (!Number.isSafeInteger(row.id) || row.id <= 0 || row.id >= previous) {
-        throw new ApiError('The task list changed in a way this app could not read. Refresh, or ask your administrator to update the dashboard.', undefined, 'protocol');
-      }
+      if (!Number.isSafeInteger(row.id) || row.id <= 0 || row.id >= previous) throw new ApiError(UNREADABLE, undefined, 'protocol');
       previous = row.id;
     }
     for (const row of page) {
@@ -41,9 +42,16 @@ async function readTaskWindow(settings: Settings, signal: AbortSignal, status: s
       rows.push(row);
       if (below) addedBelow++;
     }
-    if (page.length < 50) return {rows, hasMore: false};
-    if (floor === null || (extend ? addedBelow >= 50 : previous <= floor)) return {rows, hasMore: true};
-    before = previous;
+    // An older dashboard sends no continuation: a full page then means more,
+    // continuing below its last row.
+    const more = reply.hasMore ?? page.length >= 50;
+    if (!more) return {rows, hasMore: false};
+    const cursor = reply.hasMore === null ? previous : reply.nextBeforeId;
+    if (cursor === null || !Number.isSafeInteger(cursor) || cursor <= 0 || cursor > previous || cursor >= (before ?? Infinity)) {
+      throw new ApiError(UNREADABLE, undefined, 'protocol');
+    }
+    if (floor === null ? rows.length >= 50 : (extend ? addedBelow >= 50 : cursor <= floor)) return {rows, hasMore: true};
+    before = cursor;
   }
 }
 

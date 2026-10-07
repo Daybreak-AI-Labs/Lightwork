@@ -60,3 +60,16 @@ test('every header the client sends is allowed by both native bridges', async ()
     assert.deepEqual(sent.filter(name => !allowlist.includes(name)), [], 'a bridge would refuse these headers');
   }
 });
+
+// The bridges return only the response headers the client reads: the task
+// list's continuation. Nothing else (cookies, server details) crosses over.
+test('both bridges return exactly the task-list continuation response headers', () => {
+  const kotlin = fs.readFileSync(path.join(module_, 'android/src/main/java/ai/lightwork/transport/LightworkTransportModule.kt'), 'utf8');
+  const swift = fs.readFileSync(path.join(module_, 'ios/LightworkTransportModule.swift'), 'utf8');
+  const names = code => [...(code.match(/(?:RESPONSE_HEADERS|responseHeaders) = (?:listOf\(|\[)([^)\]]*)/) || [, ''])[1].matchAll(/"([^"]+)"/g)].map(item => item[1]);
+  assert.deepEqual(names(kotlin), ['pagination-has-more', 'pagination-next-before-id']);
+  assert.deepEqual(names(swift), ['pagination-has-more', 'pagination-next-before-id']);
+  // ...and hand them to JavaScript with the reply.
+  assert.match(kotlin, /"headers" to exposed/);
+  assert.match(swift, /"headers": headers/);
+});

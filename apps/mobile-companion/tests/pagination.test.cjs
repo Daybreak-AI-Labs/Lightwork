@@ -10,8 +10,16 @@ async function fixture(initial = goals(125), {replayEffects = false} = {}) {
   let stored = initial, app, settings = connection, handler, opened;
   const calls = [], timers = new Map(), deadlines = new Map();
   let nextDeadline = 0;
-  const page = ({limit, offset = 0, status = '', before}) => stored
-    .filter(row => (!status || row.status === status) && (before == null || row.id < before)).slice(offset, offset + limit);
+  // Like /api/v1/goals: pages by scanned rows, then hides rows the reader may
+  // no longer see (hidden: true), and says where to continue in headers.
+  const page = ({limit, offset = 0, status = '', before}) => {
+    const scanned = stored.filter(row => (!status || row.status === status) && (before == null || row.id < before))
+      .slice(offset, offset + limit + 1);
+    const hasMore = scanned.length > limit, kept = scanned.slice(0, limit);
+    return {goals: kept.filter(row => !row.hidden), hasMore, nextBeforeId: hasMore ? kept.at(-1).id : null};
+  };
+  // A bare array is a reply without continuation headers (an older dashboard).
+  const reply = value => Array.isArray(value) ? {goals: value, hasMore: null, nextBeforeId: null} : value;
   const api = source('src/api.ts');
   const {RunsListScreen} = source('src/screens/RunsListScreen.tsx', {
     ...(replayEffects ? {react: {...React, useEffect(effect, dependencies) {
@@ -20,7 +28,7 @@ async function fixture(initial = goals(125), {replayEffects = false} = {}) {
     '../api': {...api,
       listGoals: async (cfg, limit, signal, offset = 0, status = '', before) => {
         calls.push({cfg, limit, signal, offset, status, before});
-        if (handler) return handler({cfg, limit, signal, offset, status, before});
+        if (handler) return reply(await handler({cfg, limit, signal, offset, status, before}));
         return page({limit, offset, status, before});
       },
       searchGoals: async (_cfg, query) => stored.filter(row => row.title.includes(query)),
@@ -265,5 +273,56 @@ test('search with no matches has different guidance from an empty account', asyn
     assert.deepEqual(f.ids(), []);
     assert.match(text(f.app), /No matching tasks/);
     assert.doesNotMatch(text(f.app), /No tasks yet/);
+  } finally { await f.close(); }
+});
+
+test('rows the server hides after paging do not end the list early', async () => {
+  // Two copied conversations whose source access ended are scanned but not
+  // returned, so the first page has 48 rows although older tasks remain.
+  const rows = goals(125).map(row => [100, 76].includes(row.id) ? {...row, hidden: true} : row);
+  const visible = rows.filter(row => !row.hidden).map(row => row.id);
+  const f = await fixture(rows);
+  try {
+    assert.deepEqual(f.ids(), visible.slice(0, 50));
+    assert.equal(f.calls[1].before, 76, 'continues from the server cursor, below the hidden row');
+    await f.more();
+    await f.more();
+    assert.deepEqual(f.ids(), visible);
+    assert.equal(button(f.app, 'Load older tasks'), undefined);
+  } finally { await f.close(); }
+});
+
+test('a page that hides every row it scanned still leads to the older tasks', async () => {
+  const rows = goals(125).map(row => row.id > 75 ? {...row, hidden: true} : row);
+  const f = await fixture(rows);
+  try {
+    assert.deepEqual(f.ids(), goals(75).slice(0, 50).map(row => row.id));
+    await f.more();
+    assert.deepEqual(f.ids(), goals(75).map(row => row.id));
+  } finally { await f.close(); }
+});
+
+for (const [name, continuation] of [['missing', {hasMore: true, nextBeforeId: null}], ['not moving down', {hasMore: true, nextBeforeId: 200}]]) {
+  test(`a continuation that is ${name} fails visibly instead of looping or stopping`, async () => {
+    const f = await fixture();
+    try {
+      f.handle(() => ({goals: goals(125).slice(0, 50), ...continuation}));
+      await f.tick();
+      assert.match(text(f.app), /ask your administrator to update the dashboard/);
+      assert.ok(f.calls.length <= 3);
+    } finally { await f.close(); }
+  });
+}
+
+test('a long run of hidden rows is paged through to the tasks below it', async () => {
+  // The cursor moves down on every page, so the read always ends.
+  const rows = goals(1200).map(row => row.id > 100 ? {...row, hidden: true} : row);
+  const f = await fixture(rows);
+  try {
+    assert.deepEqual(f.ids(), goals(100).slice(0, 50).map(row => row.id));
+    assert.ok(f.calls.every((call, index) => index === 0 || call.before < (f.calls[index - 1].before ?? Infinity)));
+    await f.more();
+    assert.deepEqual(f.ids(), goals(100).map(row => row.id));
+    assert.equal(button(f.app, 'Load older tasks'), undefined);
   } finally { await f.close(); }
 });
