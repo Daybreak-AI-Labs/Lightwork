@@ -863,14 +863,16 @@ def _wire_email(server, cfg):
         handler=server._handle_message,
         imap_host=cfg["imap_host"],
         imap_user=cfg["imap_user"],
-        imap_password=cfg["imap_password"],
+        imap_password=cfg.get("imap_password") or "",
         smtp_host=cfg["smtp_host"],
         smtp_user=cfg["smtp_user"],
-        smtp_password=cfg["smtp_password"],
+        smtp_password=cfg.get("smtp_password") or "",
         smtp_port=cfg.get("smtp_port", 465),
         poll_interval=cfg.get("poll_interval", 30),
         allowed_user_ids={str(v) for v in allowed_user_ids} if allowed_user_ids is not None else None,
         trusted_authserv_id=cfg.get("trusted_authserv_id") or "",
+        oauth_config={key: cfg.get(key) for key in
+                      ("email_auth", "oauth_account", "oauth_tenant", "oauth_principal")},
     ))
 
 

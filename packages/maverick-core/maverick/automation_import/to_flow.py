@@ -52,7 +52,7 @@ from ..flow.ir import (
     partition_draft_validation_errors,
 )
 from .ir import ImportedAutomation, ImportedStep, _safe_line, operational_inputs, operational_params
-from .predicates import branches, n8n_predicate, repair, wdl_predicate
+from .predicates import branches, make_predicate, n8n_predicate, repair, wdl_predicate
 
 
 def _has_blocking_draft_errors(
@@ -739,33 +739,6 @@ _STRUCTURAL_LOWERERS = {
 
 # ---- Make (Integromat) router capture ----------------------------------------
 
-# Make filter operator tokens (`text:equal`, `number:greater`, ...) -> the flow
-# condition-evaluator's operators. We key on the part after the colon.
-_MAKE_OPS = {"equal": "==", "notequal": "!=", "greater": ">", "greaterorequal": ">=",
-             "less": "<", "lessorequal": "<=", "contain": "contains", "contains": "contains"}
-
-
-def _make_condition(route: dict) -> str | None:
-    """A route filter reduced to the flow condition grammar, or ``None`` when the
-    route has no filter (Make's unconditional fallback route). A Make filter is
-    ``{name, conditions: [[{a, o, b}]]}`` -- an OR of AND-groups; we take the
-    first leaf as the representative test (the operator refines it in the
-    designer, exactly like the n8n/WDL paths)."""
-    filt = route.get("filter") if isinstance(route.get("filter"), dict) else None
-    if not filt:
-        return None
-    groups = filt.get("conditions")
-    if isinstance(groups, list):
-        for grp in groups:
-            if isinstance(grp, list) and grp and isinstance(grp[0], dict):
-                c = grp[0]
-                left = _safe_line(c.get("a", ""), max_chars=40)
-                raw_op = str(c.get("o", "")).rsplit(":", 1)[-1].lower()
-                right = _safe_line(c.get("b", ""), max_chars=40)
-                return f"{left} {_MAKE_OPS.get(raw_op, '==')} {right}".strip()
-    return "result == true"
-
-
 def _has_router(modules: list) -> bool:
     """Whether any module (or nested route) is a router -- if not, the flat
     fallback already captures the scenario faithfully, so we skip this path."""
@@ -807,14 +780,13 @@ def _make_route_flow(route: dict, idx: int, report: list[dict]) -> Flow | None:
     ctr = {"i": 0}
     nodes: dict[str, FlowNode] = {}
     body = _make_seq(route.get("flow", []) or [], nodes, ctr, report, None)
-    cond = _make_condition(route)
-    if cond is not None:
+    predicate = make_predicate(route)
+    if predicate is not None:
         bid = f"r{idx}_guard"
-        nodes[bid] = FlowNode(id=bid, kind=NODE_BRANCH, condition=cond,
-                              if_true=body, if_false=None, label="router route")
+        nodes.update(branches(predicate, bid, body, None, "router route"))
         report.append({"step": "router route", "node": bid, "kind": NODE_BRANCH,
                        "fidelity": "preserved",
-                       "note": "Make router route filter -> branch guard"})
+                       "note": "Make route filter -> complete OR-of-AND branch guards"})
         body = bid
     if not nodes or body is None:
         return None

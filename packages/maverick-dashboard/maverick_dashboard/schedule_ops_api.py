@@ -15,6 +15,10 @@ the per-task access check. Every schedule writes one audit row first.
 """
 from __future__ import annotations
 
+import json
+import math
+import re
+import time
 from functools import lru_cache
 from typing import Literal
 from uuid import uuid4
@@ -77,6 +81,270 @@ class ScheduleAddIn(BaseModel):
     title: str | None = Field(None, max_length=200)
     goal_id: int | None = Field(None, ge=1)
     timetable: TimetableIn
+    review_reference: str | None = Field(None, max_length=524288)
+    confirmed: bool = False
+
+
+class ScheduleReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    schedule: ScheduleAddIn
+
+
+class ScheduleOriginalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reference: str = Field(min_length=1, max_length=524288)
+
+
+_CREATE_PURPOSE = "lightwork.schedule-create.v1"
+
+
+def _creation_authority(request, expected=None, *, write=False):
+    from maverick import config
+    from maverick.governed_operations import digest
+    from maverick.paths import current_tenant_id_strict
+
+    from . import auth
+    from .api_flow_operator_review import _workspace_authority
+    from .app import require_page_visible
+    from .draft_api import context_for
+
+    with auth.fresh_configuration():
+        principal = getattr(request.state, "principal", None)
+        claims = getattr(principal, "claims", None) or {}
+        via = claims.get("via")
+        fresh = principal
+        if via == "api_key":
+            fresh = auth._authenticate_api_key(request, auth._api_key_bearer(request))
+        elif via in {"session", "invite", "proxy"}:
+            fresh = {"session": auth._session_principal, "invite": auth._invite_session_principal,
+                     "proxy": auth._proxy_principal}[via](request)
+        if principal is not None:
+            if fresh is None or fresh.principal != principal.principal:
+                raise HTTPException(401, "Sign in again before reviewing this schedule.")
+            expiry = claims.get("exp")
+            if expiry is not None and (type(expiry) not in {int, float} or not time.time() < expiry < math.inf):
+                raise HTTPException(401, "Sign in again before reviewing this schedule.")
+            auth._enforce_scim_active(fresh)
+            auth._enforce_workspace_policies(request, fresh)
+        require_permission(request, "operate")
+        auth.require_page_permission(request, "/automations")
+        require_page_visible(request, "/automations")
+        context = context_for(request)
+        if expected is not None and context != expected:
+            raise HTTPException(409, "Your account or workspace changed. Reload Automations before continuing.")
+        actor, tenant = caller_principal(request) or "", current_tenant_id_strict() or ""
+        suites, scopes = caller_suites(request), auth.api_key_scopes(request)
+        access = digest([_workspace_authority(request, actor, tenant), auth.caller_role(request),
+                         sorted(suites) if suites is not None else None, sorted(scopes) if scopes is not None else None])
+        if write:
+            from .api import _require_scheduling
+            if config.config_source_errors(include_tenant=True):
+                raise HTTPException(503, "Current schedule settings could not be checked. Your entered work is kept.")
+            try:
+                _require_scheduling()
+            except HTTPException as exc:
+                raise HTTPException(exc.status_code, "Schedule creation is turned off. An administrator can manage it in Settings; original requests remain readable.") from exc
+        return {"context": context, "actor": actor, "tenant": tenant, "access": access}
+
+
+def _creation_body(body):
+    return body.model_dump(mode="json", exclude={"review_reference", "confirmed"})
+
+
+def _creation_material(request, body, schedule_id):
+    from dataclasses import asdict
+
+    from maverick.governed_operations import digest
+
+    from .api import _prepare_schedule
+    from .api_schemas import ScheduleIn
+
+    cron, zone, runs = _cron(body.timetable)
+    if body.what != "rerun":
+        if body.what == "workflow" and not (body.template or "").strip():
+            raise HTTPException(400, "Choose a saved workflow to schedule.")
+        if body.what == "task" and not (body.text or "").strip():
+            raise HTTPException(400, "Describe the task to run on this schedule.")
+        payload = _prepare_schedule(request, ScheduleIn(cron=cron, tz=zone, title=body.title,
+            template=body.template if body.what == "workflow" else None,
+            params=body.params if body.what == "workflow" else None,
+            text=body.text if body.what == "task" else None), schedule_id=schedule_id)
+        return "start_goal", payload, runs
+    goal = _world_goal(request, body.goal_id)
+    payload = {"goal_id": goal.id, "title": (body.title or goal.title or "Run an earlier task again")[:200],
+               "__cron__": cron, "__tz__": zone, "schedule_id": schedule_id, "owner": caller_principal(request) or "",
+               "schedule_source_revision": digest(asdict(goal))}
+    suites = caller_suites(request)
+    if suites is not None:
+        payload["allowed_suites"] = sorted(suites)
+    user_id = execution_user_id_from_request(request)
+    if user_id:
+        payload.update(channel="api", user_id=user_id)
+    return "run_goal", payload, runs
+
+
+def _world_goal(request, identity):
+    from .app import _world
+    if identity is None:
+        raise HTTPException(400, "Choose the earlier task to run again.")
+    goal = _world().get_goal(identity)
+    if goal is None:
+        raise HTTPException(404, "The earlier task is unavailable.")
+    assert_goal_access(request, goal)
+    return goal
+
+
+def _creation_open(reference):
+    from maverick import crypto_at_rest
+    try:
+        if not crypto_at_rest.is_sealed_str(reference):
+            raise ValueError
+        with crypto_at_rest.deployment_key_scope():
+            value = json.loads(crypto_at_rest.unseal_from_str(reference))
+        if (set(value) != {"purpose", "operation", "authority", "expires", "body", "kind", "payload", "runs"}
+                or value["purpose"] != _CREATE_PURPOSE or not re.fullmatch(r"[a-f0-9]{32}", value["operation"])
+                or type(value["expires"]) not in {int, float} or not math.isfinite(value["expires"])
+                or value["kind"] not in {"start_goal", "run_goal"} or not isinstance(value["payload"], dict)
+                or set(value["authority"]) != {"context", "actor", "tenant", "access"}
+                or not isinstance(value["runs"], list) or len(value["runs"]) != 3
+                or any(type(run) not in {int, float} or not math.isfinite(run) for run in value["runs"])):
+            raise ValueError
+        ScheduleAddIn.model_validate(value["body"])
+        return value
+    except Exception as exc:
+        raise HTTPException(409, "This original schedule reference could not be verified. Nothing was repeated.") from exc
+
+
+def _creation_key(value):
+    from maverick.governed_operations import digest
+    return "schedule-create:" + digest([value["authority"]["tenant"], value["authority"]["actor"],
+                                        value["authority"]["context"], value["operation"]])
+
+
+def _creation_owned(request, value):
+    current = _creation_authority(request, value["authority"]["context"])
+    if any(current[key] != value["authority"][key] for key in ("actor", "tenant", "context")):
+        raise HTTPException(404, "This original schedule belongs to another account or workspace.")
+    return current
+
+
+def _creation_source_visible(request, value):
+    from maverick.templates import load_template
+
+    from .auth import assert_template_access
+    try:
+        body = ScheduleAddIn.model_validate(value["body"])
+        if body.what == "workflow":
+            assert_template_access(request, load_template(body.template))
+        elif body.what == "rerun":
+            _world_goal(request, body.goal_id)
+        return True
+    except (HTTPException, OSError, ValueError):
+        return False
+
+
+def _creation_original(request, value):
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.job_queue import JobQueue
+    with authority_effect_fence():
+        _creation_owned(request, value)
+        queue = JobQueue()
+        try:
+            identity = queue.admission_receipt(value["kind"], value["payload"], idempotency_key=_creation_key(value))
+        except ValueError as exc:
+            raise HTTPException(409, "The retained admission belongs to different work. Nothing was repeated.") from exc
+        visible = _creation_source_visible(request, value)
+        result = {"found": identity is not None, "context": value["authority"]["context"],
+                  "operation": value["operation"], "admission": "confirmed" if identity is not None else "unconfirmed",
+                  "message": ("The original schedule was created. This check did not create or run it again."
+                              if identity is not None else "No admission for this exact request is confirmed. It may still be underway; check current schedules before separately reviewing another creation."),
+                  "execution": "Future runs and their results are separate from this creation receipt.",
+                  "source_visible": visible}
+        if identity is not None:
+            result.update(id=identity, schedule_id=value["payload"]["schedule_id"], next_run=value["runs"][0])
+        if visible:
+            result["title"] = value["payload"]["title"]
+        else:
+            result["source_notice"] = "Private source details are unavailable in this view. The historical creation outcome is checked separately."
+        _creation_owned(request, value)
+        return result
+
+
+@router.post("/api/v1/schedules/create-original")
+def schedule_create_original(request: Request, body: ScheduleOriginalIn) -> dict:
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    return _creation_original(request, _creation_open(body.reference))
+
+
+@router.post("/api/v1/schedules/create-review")
+def schedule_create_review(request: Request, body: ScheduleReviewIn) -> dict:
+    from maverick import crypto_at_rest
+    from maverick.authority_effects import authority_effect_fence
+
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    if body.schedule.review_reference or body.schedule.confirmed:
+        raise HTTPException(422, "Review fresh schedule choices before confirming them.")
+    with authority_effect_fence():
+        current = _creation_authority(request, body.context, write=True)
+        operation = uuid4().hex
+        kind, payload, runs = _creation_material(request, body.schedule, operation)
+        payload["schedule_creation"] = {"purpose": _CREATE_PURPOSE, "operation": operation,
+                                        "actor": current["actor"], "context": current["context"]}
+        value = {"purpose": _CREATE_PURPOSE, "operation": operation, "authority": current,
+                 "expires": time.time() + 600, "body": _creation_body(body.schedule),
+                 "kind": kind, "payload": payload, "runs": runs}
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        if len(encoded.encode()) > 262144 or len(body.schedule.params or {}) > 100:
+            raise HTTPException(422, "This complete schedule is too large to review here. Use fewer inputs; nothing was created.")
+        with crypto_at_rest.deployment_key_scope():
+            reference = crypto_at_rest.seal_to_str(encoded)
+        if not crypto_at_rest.is_sealed_str(reference):
+            raise HTTPException(503, "The original request could not be protected. No schedule was created.")
+        if current != _creation_authority(request, body.context, write=True):
+            raise HTTPException(409, "Your access changed. Review current schedule choices again.")
+        earlier = _world_goal(request, body.schedule.goal_id) if body.schedule.what == "rerun" else None
+        return {"context": current["context"], "operation": operation, "reference": reference,
+                "title": payload["title"], "work": payload.get("text") or ((earlier.description or earlier.title) if earlier else payload["title"]),
+                "earlier_task": earlier.title if earlier else None,
+                "inputs": body.schedule.params or {}, "timetable": body.schedule.timetable.model_dump(),
+                "next_runs": runs, "kind": body.schedule.what,
+                "notice": "Creating this schedule enables future recurring work under current permissions and limits. It does not run the work now. A repeated or interrupted reply must be checked through the original request; it is not permission to create another schedule."}
+
+
+def _creation_apply(request, body):
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.governed_operations import digest
+    from maverick.job_queue import JobQueue
+    value = _creation_open(body.review_reference)
+    if not body.confirmed or digest(_creation_body(body)) != digest(value["body"]):
+        raise HTTPException(409, "These choices do not match the complete review. Your draft is kept; nothing was repeated.")
+    with authority_effect_fence():
+        prior = _creation_original(request, value)
+        if prior["found"]:
+            return prior
+        def current():
+            if _creation_authority(request, value["authority"]["context"], write=True) != value["authority"]:
+                raise HTTPException(409, "Your access changed. Review current schedule choices again.")
+            kind, payload, _ = _creation_material(request, ScheduleAddIn.model_validate(value["body"]), value["operation"])
+            payload["schedule_creation"] = value["payload"]["schedule_creation"]
+            if kind != value["kind"] or digest(payload) != digest(value["payload"]):
+                raise HTTPException(409, "The selected work or connected account changed. Review the current schedule again.")
+            if _creation_authority(request, value["authority"]["context"], write=True) != value["authority"]:
+                raise HTTPException(409, "Your access changed. Review current schedule choices again.")
+            if time.time() >= min(value["expires"], value["runs"][0]):
+                raise HTTPException(409, "This review expired or its first run time passed. No new schedule was created; review the current choices again.")
+        current()
+        _audit(request, event="schedule_creation_requested", what=value["body"]["what"], cron=value["payload"]["__cron__"],
+               zone=value["payload"].get("__tz__") or "UTC", operation=value["operation"])
+        try:
+            JobQueue().enqueue_once(value["kind"], value["payload"], idempotency_key=_creation_key(value),
+                                    run_at=value["runs"][0], effect_guard=current)
+        except ValueError as exc:
+            raise HTTPException(409, "This original admission does not match the reviewed schedule. Nothing was repeated.") from exc
+        return _creation_original(request, value)
 
 
 def _cron(timetable: TimetableIn) -> tuple[str, str, list[float]]:
@@ -98,11 +366,11 @@ def _cron(timetable: TimetableIn) -> tuple[str, str, list[float]]:
     return cron, timetable.zone, runs
 
 
-def _audit(request: Request, **data) -> None:
+def _audit(request: Request, *, event="schedule_created", **data) -> None:
     from maverick.audit import AuditRefused, audit_event
 
     try:
-        audit_event("schedule_created", agent="dashboard", actor=caller_principal(request) or "local", **data)
+        audit_event(event, agent="dashboard", actor=caller_principal(request) or "local", **data)
     except AuditRefused as exc:
         raise HTTPException(503, "The activity log couldn't record this schedule, so it wasn't created.") from exc
 
@@ -125,7 +393,8 @@ def schedule_options(request: Request) -> dict:
         tasks = [{"id": g.id, "title": (g.title or "Untitled task")[:200]} for g in goals]
     except Exception:
         tasks = []
-    return {"enabled": bool(get_features().get("scheduling", True)), "zones": list(_zones()),
+    current = _creation_authority(request)
+    return {"enabled": bool(get_features().get("scheduling", True)), "context": current["context"], "zones": list(_zones()),
             "workflows": workflows, "tasks": tasks}
 
 
@@ -144,6 +413,10 @@ async def schedule_add(request: Request, body: ScheduleAddIn) -> dict:
     from .api_schemas import ScheduleIn
     from .app import _require_same_origin, _world
 
+    if body.review_reference:
+        from starlette.concurrency import run_in_threadpool
+        _require_same_origin(request)
+        return await run_in_threadpool(_creation_apply, request, body)
     require_permission(request, "operate")
     _require_same_origin(request)
     _require_scheduling()

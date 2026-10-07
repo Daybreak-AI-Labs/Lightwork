@@ -240,6 +240,28 @@
               ? function (isCurrent) { return exceptionControls.openReview({}, {isCurrent: isCurrent, context: exceptionContext}); } : null);
           return;
         }
+        if (entry[0] === 'mail_connection_review') {
+          var mailReview = entry[1], mailControls = window.LightworkConnectionSetup;
+          if (!mailReview || Array.isArray(mailReview) ||
+              Object.keys(mailReview).sort().join(',') !== 'scope,workspace_context' ||
+              mailReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(mailReview.workspace_context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review Microsoft 365 account setup',
+            '/connections#connection-setup',
+            mailControls && typeof mailControls.openReview === 'function'
+              ? function (isCurrent) { return mailControls.openReview({profile: 'microsoft-mail'}, {isCurrent: isCurrent, context: mailReview.workspace_context}); } : null);
+          return;
+        }
+        if (entry[0] === 'schedule_creation_original') {
+          var scheduleOriginal = entry[1], scheduleOriginalControls = window.LightworkScheduleCreation;
+          if (!scheduleOriginal || Array.isArray(scheduleOriginal) ||
+              Object.keys(scheduleOriginal).sort().join(',') !== 'context,scope' ||
+              scheduleOriginal.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(scheduleOriginal.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Check the original schedule result',
+            '/automations#auto-create-original',
+            scheduleOriginalControls && typeof scheduleOriginalControls.openOriginal === 'function'
+              ? function (isCurrent) { return scheduleOriginalControls.openOriginal(scheduleOriginal.context, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'schedule_creation_review') {
           var scheduleReview = entry[1], scheduleControls = window.LightworkScheduleSetup;
           var scheduleContext = catalog && catalog.context;

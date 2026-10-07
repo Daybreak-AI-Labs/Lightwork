@@ -6,6 +6,7 @@ import hmac
 import json
 import secrets
 import time
+from contextlib import nullcontext
 
 from maverick.crypto_at_rest import is_sealed, seal, unseal
 from maverick.file_lock import (
@@ -42,13 +43,25 @@ def _headers(token):
     return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
 
 
-def prepare(context, goal_id):
+def _check_source(before_effect, expected=None):
+    if before_effect is None:
+        return None
+    current = before_effect()
+    if expected is not None and current != expected:
+        raise ValueError("The task or its release decision changed. Prepare and review the current copy before sharing.")
+    return current
+
+
+def prepare(context, goal_id, *, before_effect=None):
     import httpx
 
+    source_version = _check_source(before_effect)
     token = resolve_token()
     payload = build_gist_payload(goal_id)  # evidence failures precede any disclosure
+    _check_source(before_effect, source_version)
     response = httpx.get("https://api.github.com/user", headers=_headers(token), timeout=15)
     response.raise_for_status()
+    _check_source(before_effect, source_version)
     account = response.json().get("login")
     if not isinstance(account, str) or not account:
         raise ValueError("The destination account could not be confirmed.")
@@ -60,7 +73,8 @@ def prepare(context, goal_id):
     digest = hashlib.sha256(exact.encode()).hexdigest()
     envelope = {"context": context, "goal_id": goal_id, "created_at": time.time(), "state": "prepared",
                 "payload": payload, "sha256": digest, "account": account,
-                "token_hash": hashlib.sha256(token.encode()).hexdigest()}
+                "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+                "source_version": source_version}
     directory = _directory(context)
     with cross_process_lock(directory / "index", strict=True):
         # Completed/uncertain attempt records remain available for reconciliation.
@@ -74,6 +88,7 @@ def prepare(context, goal_id):
             raise ValueError("The sharing history reached its supported limit. Ask an administrator to review receipt retention before preparing another copy.")
         if sum(_read(path).get("state") in {"prepared", "dispatching", "unknown"} for path in receipts) >= 100:
             raise ValueError("There are too many unresolved sharing attempts. Reconcile those attempts before preparing another copy.")
+        _check_source(before_effect, source_version)
         _write(directory / (identifier + ".preview"), envelope)
     return {"preview_id": identifier, "sha256": digest, "account": account,
             "payload": payload, "scope": "Redacted audit replay and proof evidence; different from the technical task archive. Business content may remain. Anyone with the secret gist link can read it."}
@@ -89,9 +104,11 @@ def attempts(context, goal_id):
     return {"attempts": sorted(rows, key=lambda row: row["created_at"], reverse=True)}
 
 
-def send(context, goal_id, identifier, digest):
+def send(context, goal_id, identifier, digest, *, before_effect=None):
     import httpx
+    from fastapi import HTTPException
     from maverick.audit import audit_event
+    from maverick.authority_effects import authority_effect_fence
 
     token = resolve_token()
     directory = _directory(context)
@@ -115,6 +132,9 @@ def send(context, goal_id, identifier, digest):
         if item["state"] in {"dispatching", "unknown"}:
             return {"shared": False, "outcome": "unknown", "attempt": identifier,
                     "message": "GitHub may have received this copy. Check the attempt on GitHub before creating another copy."}
+        if before_effect is not None and not item.get("source_version"):
+            raise ValueError("This earlier copy has no current release review. Prepare and review a new copy before sharing.")
+        _check_source(before_effect, item.get("source_version"))
         if not 0 <= time.time() - item["created_at"] <= LIFETIME:
             raise ValueError("This review expired. Prepare and review a new copy.")
         if not hmac.compare_digest(item["token_hash"], hashlib.sha256(token.encode()).hexdigest()):
@@ -123,8 +143,14 @@ def send(context, goal_id, identifier, digest):
                     actor=context, phase="dispatch", attempt=identifier, sha256=digest)
         item["state"] = "dispatching"
         _write(path, item)  # crash after dispatch must never silently resend
+        # An authority refusal after retaining the attempt leaves an unresolved
+        # original; the same request must not automatically become a new send.
         try:
-            url = upload_payload(item["payload"], token)
+            with authority_effect_fence() if before_effect is not None else nullcontext():
+                _check_source(before_effect, item.get("source_version"))
+                url = upload_payload(item["payload"], token)
+        except HTTPException:
+            raise
         except httpx.HTTPStatusError as exc:
             if 400 <= exc.response.status_code < 500:
                 item["state"] = "rejected"

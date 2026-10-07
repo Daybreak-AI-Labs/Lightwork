@@ -374,7 +374,8 @@
       <button type="button" class="btn btn--ghost turn-print">Print conversation</button>
       {% if t.goal_id %}
       {% set download = (thread_downloads or {}).get(t.id, {}) %}
-      {% if download.allowed %}<a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}/download.md?turn_id={{ t.id }}">Download answer</a>{% endif %}
+      {% if download.allowed %}<a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}/download.docx?turn_id={{ t.id }}">{{ ui('Download Word document') }}</a>
+      <a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}/download.md?turn_id={{ t.id }}">{{ ui('Download Markdown') }}</a>{% endif %}
       <a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}">Open answer</a>
       {% if can_operate %}<button type="button" class="btn btn--ghost" data-chat-message-action="branch" data-goal="{{ t.goal_id }}" data-turn="{{ t.id }}"{% if run_open %} disabled{% endif %}>Branch from here</button>{% endif %}
       {% if download.note %}<span class="muted">{{ download.note }}</span>{% endif %}

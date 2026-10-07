@@ -169,6 +169,7 @@ class EmailChannel(Channel):
         poll_interval: int = 30,
         allowed_user_ids=None,
         trusted_authserv_id: str = "",
+        oauth_config: dict | None = None,
     ):
         super().__init__(handler)
         # Without an allowlist, ANY inbound sender could drive the agent.
@@ -188,6 +189,12 @@ class EmailChannel(Channel):
         self.smtp_port = smtp_port
         self.smtp_user = smtp_user
         self.smtp_password = smtp_password
+        self._mail_cfg = {**(oauth_config or {}), "imap_host": imap_host,
+                          "imap_user": imap_user, "imap_password": imap_password,
+                          "smtp_host": smtp_host, "smtp_user": smtp_user,
+                          "smtp_password": smtp_password, "smtp_port": smtp_port,
+                          "trusted_authserv_id": self.trusted_authserv_id,
+                          "allowed_user_ids": sorted(self.allowed_user_ids)}
         self.poll_interval = poll_interval
         self._stop = False
 
@@ -291,27 +298,33 @@ class EmailChannel(Channel):
         return self.imap_host.lower() + ":" + self.imap_user.lower()
 
     def _fetch_unseen(self) -> list[dict]:
+        from maverick.microsoft_mail import authenticate_imap, mail_effect
+
         from .delivery import DeliveryJournal
 
         out = []
         journal = DeliveryJournal()
         with imaplib.IMAP4_SSL(self.imap_host, ssl_context=ssl.create_default_context(),
                               timeout=IMAP_TIMEOUT) as mail:
-            mail.login(self.imap_user, self.imap_password)
-            status, _ = mail.select("INBOX")
+            authenticate_imap(mail, self._mail_cfg)
+            with mail_effect(self._mail_cfg):
+                status, _ = mail.select("INBOX")
             if status != "OK":
                 raise RuntimeError("Email inbox is unavailable")
-            _, validity = mail.response("UIDVALIDITY")
+            with mail_effect(self._mail_cfg):
+                _, validity = mail.response("UIDVALIDITY")
             epoch = validity[0].decode("ascii") if validity and isinstance(validity[0], bytes) else ""
             if not epoch.isdecimal():
                 raise RuntimeError("Email inbox identity is unavailable")
-            status, data = mail.uid("search", None, "UNSEEN")
+            with mail_effect(self._mail_cfg):
+                status, data = mail.uid("search", None, "UNSEEN")
             if status != "OK" or not data or not isinstance(data[0], bytes):
                 raise RuntimeError("Email unread-message query is unavailable")
             for uid in data[0].split()[:50]:
                 if not uid.isdigit():
                     raise RuntimeError("Email message identity is invalid")
-                status, msg_data = mail.uid("fetch", uid, "(BODY.PEEK[])")
+                with mail_effect(self._mail_cfg):
+                    status, msg_data = mail.uid("fetch", uid, "(BODY.PEEK[])")
                 if status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
                     raise RuntimeError("Email source message is unavailable")
                 payload = msg_data[0][1]
@@ -321,22 +334,26 @@ class EmailChannel(Channel):
                 sender = authenticated_from(parsed, self.trusted_authserv_id)
                 if not sender or not is_allowed(sender.lower(), self.allowed_user_ids):
                     log.warning("Incoming email refused: sender authentication or access failed")
-                    mail.uid("store", uid, "+FLAGS", "\\Seen")
+                    with mail_effect(self._mail_cfg):
+                        mail.uid("store", uid, "+FLAGS", "\\Seen")
                     continue
                 subject, body = str(parsed.get("Subject", "")), self._extract_body(parsed)
                 attachments = self._extract_attachments(parsed)
                 if not body and not attachments:
-                    mail.uid("store", uid, "+FLAGS", "\\Seen")
+                    with mail_effect(self._mail_cfg):
+                        mail.uid("store", uid, "+FLAGS", "\\Seen")
                     continue
                 external_id = epoch + ":" + uid.decode("ascii")
                 incoming = IncomingMessage(user_id=sender, text=f"Subject: {subject}\n\n{body}" if subject else (body or "Process the attached file(s)."),
                                            channel="email", message_id=external_id, attachments=attachments)
-                row = journal.admit(incoming, external_id=external_id, account=self._account(),
-                                    route={"subject": f"Re: {subject}" if subject else "Lightwork",
-                                           "sender_auth": "trusted_dmarc_pass"})
+                with mail_effect(self._mail_cfg):
+                    row = journal.admit(incoming, external_id=external_id, account=self._account(),
+                                        route={"subject": f"Re: {subject}" if subject else "Lightwork",
+                                               "sender_auth": "trusted_dmarc_pass"})
                 # Crash after this acknowledgement is recovered from the
                 # bounded rotating journal window, never from a second run.
-                mail.uid("store", uid, "+FLAGS", "\\Seen")
+                with mail_effect(self._mail_cfg):
+                    mail.uid("store", uid, "+FLAGS", "\\Seen")
                 out.append(row)
         return out
 
@@ -400,9 +417,11 @@ class EmailChannel(Channel):
             with connection as smtp:
                 if self.smtp_port == 587:
                     smtp.starttls(context=tls)
-                smtp.login(self.smtp_user, self.smtp_password)
-                sending = True
-                refused = smtp.send_message(msg)
+                from maverick.microsoft_mail import authenticate_smtp, mail_effect
+                authenticate_smtp(smtp, self._mail_cfg)
+                with mail_effect(self._mail_cfg):
+                    sending = True
+                    refused = smtp.send_message(msg)
                 if refused:
                     raise DeliveryNotSent("SMTP rejected the recipient")
         except (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError) as exc:

@@ -40,13 +40,58 @@ def _goal(request: Request, goal_id: int):
     return world, goal
 
 
+def _export_source(request, goal_id, *, include_artifacts=False, permission="view"):
+    """Bind content release to the same current policy as the Chat download."""
+    from dataclasses import asdict
+
+    from maverick.governed_operations import digest
+    from maverick.paths import current_tenant_id_strict
+
+    from . import auth
+    from .api import _goal_gate
+    from .api_flow_operator_review import _workspace_authority
+    from .draft_api import context_for
+
+    with auth.fresh_configuration():
+        principal = getattr(request.state, "principal", None)
+        via = (getattr(principal, "claims", None) or {}).get("via")
+        refresh = {"session": auth._session_principal, "invite": auth._invite_session_principal,
+                   "proxy": auth._proxy_principal}.get(via)
+        if refresh is not None:
+            fresh = refresh(request)
+            if fresh is None or fresh.principal != principal.principal:
+                raise HTTPException(401, "Sign in again before downloading or sharing this task.")
+            request.state.principal = principal = fresh
+        if principal is not None:
+            auth._enforce_scim_active(principal)
+            auth._enforce_workspace_policies(request, principal)
+        require_permission(request, permission)
+        workspace = _workspace_authority(request, auth.caller_principal(request) or "",
+                                         current_tenant_id_strict() or "")
+        world, goal = _goal(request, goal_id)
+        artifacts = world.artifacts_for_goal(goal_id) if include_artifacts else None
+        has_output = bool(goal.result or (artifacts and any(row.get("content") for row in artifacts)))
+        gate = _goal_gate(goal.domain) if has_output else None
+        signoff = world.signoff_for(goal_id) if gate is not None else None
+        if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
+            raise HTTPException(403, "A reviewer must approve this answer before it can be downloaded or shared.")
+        version = digest([context_for(request), workspace, asdict(goal), artifacts, gate, signoff])
+        return world, goal, artifacts, version
+
+
+def _current_export(request, goal_id, expected, *, include_artifacts=False, permission="view"):
+    value = _export_source(request, goal_id, include_artifacts=include_artifacts, permission=permission)
+    if value[3] != expected:
+        raise HTTPException(409, "The task or its release decision changed. Review the current copy before downloading or sharing.")
+    return value
+
+
 @router.get("/api/v1/goals/{goal_id}/export.json")
 async def export_goal_bundle(request: Request, goal_id: int) -> Response:
     """The task's goal record, events and episode summaries as one file."""
     from maverick.goal_bundle import IncompleteGoalBundle, prepare_goal_archive
 
-    require_permission(request, "view")
-    world, _ = _goal(request, goal_id)
+    world, goal, _, version = _export_source(request, goal_id)
     try:
         prepared = await run_in_threadpool(prepare_goal_archive, world, goal_id)
     except IncompleteGoalBundle as exc:
@@ -56,9 +101,9 @@ async def export_goal_bundle(request: Request, goal_id: int) -> Response:
     try:
         # Ownership/content grants must still cover the exact exported source
         # after the snapshot is prepared and before a single byte is released.
-        _, fresh = _goal(request, goal_id)
-        if (fresh.owner or "") != (prepared.goal.owner or ""):
-            raise HTTPException(409, "Task ownership changed while preparing this archive. Review current access before downloading.")
+        _current_export(request, goal_id, version)
+        if prepared.goal != goal:
+            raise HTTPException(409, "The task changed while preparing this archive. Review the current copy before downloading.")
         assert_goal_access(request, prepared.goal)
     except Exception:
         prepared.close()
@@ -75,13 +120,8 @@ async def export_goal_handoff(request: Request, goal_id: int) -> Response:
     import html
     import re
 
-    require_permission(request, "view")
-    world, goal = _goal(request, goal_id)
-    artifacts = await run_in_threadpool(world.artifacts_for_goal, goal_id)
+    world, goal, artifacts, version = _export_source(request, goal_id, include_artifacts=True)
     questions = await run_in_threadpool(world.open_questions, goal_id=goal_id)
-    _, fresh = _goal(request, goal_id)
-    if fresh.updated_at != goal.updated_at or fresh.result != goal.result:
-        raise HTTPException(409, "The task changed while preparing the handoff. Review the new result and retry.")
     def esc(value):
         return html.escape(str(value or ""))
     sections = ["<!doctype html><html lang='en'><meta charset='utf-8'>",
@@ -113,6 +153,9 @@ async def export_goal_handoff(request: Request, goal_id: int) -> Response:
     else:
         sections.append("<p>All stored items in the stated handoff scope are included. This is a read-only snapshot, not a resumable task or a verification of external effects.</p>")
     sections.append("</section></main></body></html>")
+    _current_export(request, goal_id, version, include_artifacts=True)
+    if questions != world.open_questions(goal_id=goal_id):
+        raise HTTPException(409, "A task question changed while preparing this copy. Review the current task before downloading.")
     return HTMLResponse("".join(sections), headers={"Content-Disposition": f'attachment; filename="task-{goal_id}-handoff.html"',
                                                     "Cache-Control": "private, no-store"})
 
@@ -127,12 +170,14 @@ def _sharing_context(request, goal_id):
     return context_for(request)
 
 
-async def _sharing_call(function, *args):
+async def _sharing_call(function, *args, **kwargs):
     from maverick.replay.export import ReplayEvidenceError
     from maverick.run_share import MissingGitHubToken
 
     try:
-        return await run_in_threadpool(function, *args)
+        return await run_in_threadpool(function, *args, **kwargs)
+    except HTTPException:
+        raise
     except MissingGitHubToken as exc:
         raise HTTPException(409, "GitHub sharing is not connected. Ask an administrator to connect it in Settings.") from exc
     except ReplayEvidenceError as exc:
@@ -147,7 +192,9 @@ async def _sharing_call(function, *args):
 async def preview_goal_gist(request: Request, goal_id: int) -> dict:
     from .goal_share_previews import prepare
 
-    return await _sharing_call(prepare, _sharing_context(request, goal_id), goal_id)
+    context = _sharing_context(request, goal_id)
+    return await _sharing_call(prepare, context, goal_id,
+        before_effect=lambda: _export_source(request, goal_id, permission="operate")[3])
 
 
 @router.get("/api/v1/goals/{goal_id}/share/gist/attempts")
@@ -167,7 +214,8 @@ async def share_goal_gist(request: Request, goal_id: int, body: GistShareIn) -> 
     context = _sharing_context(request, goal_id)
     if body.confirm is not True:
         raise HTTPException(409, "Review the exact copy and confirm before uploading to GitHub.")
-    return await _sharing_call(send, context, goal_id, body.preview_id, body.sha256)
+    return await _sharing_call(send, context, goal_id, body.preview_id, body.sha256,
+        before_effect=lambda: _export_source(request, goal_id, permission="operate")[3])
 
 
 @router.post("/api/v1/goals/{goal_id}/share/gist/{attempt}/reconcile")

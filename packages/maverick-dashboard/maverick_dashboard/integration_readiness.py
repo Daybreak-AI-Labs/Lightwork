@@ -858,8 +858,12 @@ def _voice_configuration_problem(channel_config: dict[str, Any]) -> str:
 
 def _email_configuration_problem(channel_config: dict[str, Any]) -> str:
     from maverick.mail_auth import valid_trusted_mail_server
+    from maverick.microsoft_mail import configuration_problem
     from maverick_channels.base import normalize_allowlist
 
+    problem = configuration_problem(channel_config)
+    if problem:
+        return problem
     if not valid_trusted_mail_server(channel_config.get("trusted_authserv_id")):
         return ("Set the server that checks incoming mail on the Channels page. "
                 "Until then, email cannot start work.")
@@ -915,9 +919,12 @@ def probe_channel(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
     if problem:
         return {"verified": False, "detail": problem,
                 "evidence": {"kind": "local_adapter_preflight"}}
+    required = _CHANNEL_REQUIRED_FIELDS.get(channel, ())
+    if channel == "email" and channel_config.get("email_auth") == "microsoft":
+        required = tuple(field for field in required if not field.endswith("_password"))
     missing = [
         field
-        for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
+        for field in required
         if not str(channel_config.get(field) or "").strip()
     ]
     if missing:
@@ -960,9 +967,12 @@ def channel_readiness(name: str, channel_config: dict[str, Any]) -> dict[str, An
         )
     else:
         dependency = _channel_dependency(channel)
+        required = _CHANNEL_REQUIRED_FIELDS.get(channel, ())
+        if channel == "email" and channel_config.get("email_auth") == "microsoft":
+            required = tuple(field for field in required if not field.endswith("_password"))
         missing = [
             field
-            for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
+            for field in required
             if not str(channel_config.get(field) or "").strip()
         ]
         voice_problem = _voice_configuration_problem(channel_config) if channel == "voice" else ""

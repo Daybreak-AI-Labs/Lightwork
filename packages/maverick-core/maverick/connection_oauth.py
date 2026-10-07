@@ -49,6 +49,13 @@ PROFILES = {
         "connector": "jira", "origin": "https://api.atlassian.com",
         "scopes": ["read:me", "read:jira-work", "write:jira-work", "offline_access"],
     },
+    "microsoft-mail": {
+        "label": "Microsoft 365 email", "provider": "microsoft", "connector": "microsoft_mail",
+        "origin": "https://outlook.office.com",
+        "scopes": ["openid", "profile", "email", "offline_access",
+                   "https://outlook.office.com/IMAP.AccessAsUser.All",
+                   "https://outlook.office.com/SMTP.Send"],
+    },
 }
 _MAX_BYTES = 4 * 1024 * 1024
 DESKTOP_CALLBACK = "http://127.0.0.1:8766/connections"
@@ -237,7 +244,7 @@ def managed_applications(actor):
     _authority(actor)
     store = _load()
     result = []
-    for provider in ("google", "atlassian"):
+    for provider in ("google", "atlassian", "microsoft"):
         row = _bound_application(store, actor, provider, {"application_key": _workspace_app_key(provider)})
         if row:
             result.append({"provider": provider, "client_id": row["client_id"], "revision": row["revision"],
@@ -251,7 +258,7 @@ def available_applications(actor):
     _authority(actor)
     store = _load()
     result = []
-    for provider in ("google", "atlassian"):
+    for provider in ("google", "atlassian", "microsoft"):
         key, row = _selected_application(store, actor, provider)
         if row:
             result.append({"provider": provider, "configured": True,
@@ -278,7 +285,7 @@ def _save_application(actor, *, provider, client_id, client_secret, expected_rev
     _authority(actor)
     if not isinstance(desktop_return, bool) or desktop_return and (not workspace or not desktop_return_enabled()):
         raise PermissionError("Desktop account return is not enabled for this installation.")
-    if provider not in {"google", "atlassian"}:
+    if provider not in {"google", "atlassian", "microsoft"}:
         raise ValueError("Select a supported account provider.")
     if not isinstance(client_id, str) or not 1 <= len(client_id) <= 1024 or any(ord(c) < 33 for c in client_id):
         raise ValueError("Enter the provider's application client ID.")
@@ -369,7 +376,10 @@ def _identity_text(value, *, maximum, required=False):
     return result
 
 
-def _provider_identity(provider, token):
+def _provider_identity(provider, token, *, response=None, client_id="", nonce=""):
+    if provider == "microsoft":
+        from .microsoft_mail import verified_identity
+        return verified_identity(response, client_id=client_id, nonce=nonce)
     if provider == "google":
         raw = _bearer_json(
             "https://openidconnect.googleapis.com/v1/userinfo", token,
@@ -411,6 +421,11 @@ def _stored_identity(value, provider):
     if provider == "google":
         result["email_verified"] = value.get("email_verified") is True
         result["hosted_domain"] = _identity_text(value.get("hosted_domain"), maximum=255)
+    elif provider == "microsoft":
+        tenant = _identity_text(value.get("tenant_id"), maximum=36, required=True)
+        if not re.fullmatch(r"[0-9a-f-]{36}", tenant) or str(uuid.UUID(tenant)) != tenant:
+            raise ValueError("Saved Microsoft account identity is unavailable.")
+        result["tenant_id"] = tenant
     else:
         result["account_status"] = _identity_text(value.get("account_status"), maximum=64)
     return result
@@ -421,19 +436,30 @@ def _normalize_scope(provider, value):
         ord(char) < 33 for char in value
     ):
         raise ValueError("Provider granted access was invalid.")
+    if provider == "microsoft" and value in {"IMAP.AccessAsUser.All", "SMTP.Send"}:
+        return "https://outlook.office.com/" + value
     return _GOOGLE_SCOPE_ALIASES.get(value, value) if provider == "google" else value
+
+
+def _required_token_scopes(provider, requested):
+    # Microsoft reports resource permissions on its access token. Identity is
+    # verified separately from the signed ID token; refresh bytes prove renewal.
+    return set(requested) - ({"openid", "profile", "email", "offline_access"}
+                             if provider == "microsoft" else set())
 
 
 def _scope_snapshot(provider, response, requested, *, prior=None):
     returned = response.get("scope")
     if returned is None:
+        if provider == "microsoft" and prior is None:
+            raise ValueError("Microsoft did not confirm the requested mailbox access. Reconnect in Connections.")
         if prior is not None:
             return list(prior), "preserved_on_refresh"
         return [], "provider_omitted"
     if not isinstance(returned, str) or len(returned) > 8192:
         raise ValueError("Provider granted access was invalid.")
     granted = sorted({_normalize_scope(provider, value) for value in returned.split()})
-    required = {_normalize_scope(provider, value) for value in requested}
+    required = {_normalize_scope(provider, value) for value in _required_token_scopes(provider, requested)}
     if not required <= set(granted):
         raise ValueError("Provider did not grant the requested access. Review consent and reconnect.")
     return granted, "token_response"
@@ -595,6 +621,9 @@ def begin(actor, *, profile, name, redirect_uri, context, expected_revision="", 
         state = secrets.token_urlsafe(32)
         key = hashlib.sha256(state.encode()).hexdigest()
         built, verifier = oauth_providers.build_authorize_url(selected["provider"], client_id=application["client_id"], redirect_uri=redirect_uri, state=state, scopes=selected["scopes"])
+        nonce = secrets.token_urlsafe(32) if selected["provider"] == "microsoft" else ""
+        if nonce:
+            built += "&nonce=" + nonce
         # Retain only bounded, current pending consent. Consumed requests cannot
         # be retried after an uncertain token exchange.
         now = time.time()
@@ -612,6 +641,7 @@ def begin(actor, *, profile, name, redirect_uri, context, expected_revision="", 
             "application_key": application_key, "application_revision": application["revision"], "expected_revision": expected_revision,
             "redirect_uri": redirect_uri, "return_profile": return_profile,
             "site_url": site_url, "verifier": verifier, "expires_at": now + 600,
+            **({"nonce": nonce} if nonce else {}),
             **({"native_prepare_jti": prepared["jti"], "native_handle_sha256": _digest(native_handle)} if prepared else {})}
         launch_ticket = ""
         if prepared:
@@ -691,11 +721,13 @@ def finish(actor, *, state, code, context, redirect_uri, return_profile="browser
             raise connections.ConnectionVersionConflict("Connection or application changed during consent. Start again.")
         del store["consents"][key]
         _save(store)
-        token_response = _post_token(selected["provider"], {"grant_type": "authorization_code", "client_id": application["client_id"], "client_secret": application["client_secret"], "code": code, "redirect_uri": redirect_uri, "code_verifier": consent["verifier"]})
+        token_response = _post_token(selected["provider"], {"grant_type": "authorization_code", "client_id": application["client_id"], "client_secret": application["client_secret"], "code": code, "redirect_uri": redirect_uri, "code_verifier": consent["verifier"],
+            **({"scope": " ".join(selected["scopes"])} if selected["provider"] == "microsoft" else {})})
         access, refresh, expires, granted_scopes, scope_status = _tokens(
             token_response, selected["scopes"], provider=selected["provider"],
         )
-        identity = _provider_identity(selected["provider"], access)
+        identity = _provider_identity(selected["provider"], access, response=token_response,
+            client_id=application["client_id"], nonce=consent.get("nonce", ""))
         prefix = ""
         workspace = {}
         if consent["profile"] == "jira-cloud":
@@ -828,13 +860,15 @@ def _renew_owned(record, *, actor):
         app_binding = _refresh_binding(application)
         connections._save(records)
     try:
-        result = _post_token(selected["provider"], {"grant_type": "refresh_token", "client_id": application["client_id"], "client_secret": application["client_secret"], "refresh_token": oauth["refresh_token"]})
+        result = _post_token(selected["provider"], {"grant_type": "refresh_token", "client_id": application["client_id"], "client_secret": application["client_secret"], "refresh_token": oauth["refresh_token"],
+            **({"scope": " ".join(selected["scopes"])} if selected["provider"] == "microsoft" else {})})
         access, refresh, expires, granted_scopes, scope_status = _tokens(
             result, selected["scopes"], provider=selected["provider"],
             prior_refresh=oauth["refresh_token"], prior_granted=prior_granted,
         )
-        identity = _provider_identity(selected["provider"], access)
-        if identity["subject"] != prior_identity["subject"]:
+        identity = _provider_identity(selected["provider"], access, response=result, client_id=application["client_id"])
+        if (identity["subject"] != prior_identity["subject"]
+                or identity.get("tenant_id") != prior_identity.get("tenant_id")):
             raise PermissionError(
                 "The provider returned a different account. Reconnect in Connections."
             )
@@ -904,7 +938,7 @@ def public_status(record):
             scope_status = value.get("scope_status")
             if (requested_scopes != sorted(selected["scopes"])
                     or scope_status not in {"token_response", "provider_omitted", "preserved_on_refresh"}
-                    or scope_status == "token_response" and not set(requested_scopes) <= set(granted_scopes)):
+                    or scope_status == "token_response" and not _required_token_scopes(provider, requested_scopes) <= set(granted_scopes)):
                 raise ValueError("Saved provider scope status changed")
             if provider == "atlassian":
                 stored_workspace = value.get("workspace")

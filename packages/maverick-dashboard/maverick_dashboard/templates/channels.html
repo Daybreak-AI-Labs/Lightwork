@@ -6,7 +6,18 @@
       {% macro channel_field(c, f) %}
       <label class="ch-field">
         <span>{{ f.label }}{% if f.hint %} <span class="muted">· saved ({{ f.hint }})</span>{% endif %}</span>
-        {% if f.secret %}
+        {% if c.name == 'email' and f.key == 'email_auth' %}
+        <select class="select" name="email_auth" data-email-auth aria-describedby="ch-email-email_auth-help">
+          <option value="password" {% if f.value != 'microsoft' %}selected{% endif %}>Password for another mail service</option>
+          <option value="microsoft" {% if f.value == 'microsoft' %}selected{% endif %}>Microsoft account sign-in</option>
+        </select>
+        {% elif c.name == 'email' and f.key == 'oauth_account' %}
+        <select class="select" name="oauth_account" data-email-account aria-describedby="ch-email-oauth_account-help">
+          <option value="">Choose a connected mailbox…</option>
+          {% for account in email_oauth_choices %}<option value="{{ account.value }}" data-mailbox="{{ account.email }}" {% if f.value == account.value %}selected{% endif %}>{{ account.label }}</option>{% endfor %}
+        </select>
+        <a href="/connections#connection-setup" class="btn btn--ghost">Connect or reconnect a Microsoft mailbox</a>
+        {% elif f.secret %}
         <input class="input" type="password" name="{{ f.key }}" autocomplete="off"
                placeholder="{% if f.configured %}Leave blank to keep the saved value{% else %}Paste here{% endif %}"
                aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
@@ -97,6 +108,10 @@
       <p class="muted ch-help">Email can start work only when your mail server confirms the sender's address
         and the address is on your <a href="/settings/all?id=channels.email.allowed_user_ids">permitted-people list</a>.
         Messages without that confirmation are refused.</p>
+      <p class="muted ch-help">Microsoft mail uses account sign-in. Connect the mailbox in Connections,
+        choose it below, then save and apply the change. Your Microsoft administrator may need to allow
+        the app, incoming mail access and authenticated outgoing mail for this mailbox. Signing in does
+        not change those Microsoft rules or prove messages arrive.</p>
       <label class="ch-field">Your email provider
         <select class="select" data-email-preset>
           <option value="">Choose to fill in the servers…</option>
@@ -141,13 +156,11 @@
     <div class="ch-status" data-ch-status="{{ c.name }}" data-ch-on="{{ '1' if c.configured else '0' }}">{{ integration_readiness(c.readiness) }}</div>
 
     <div class="ch-actions">
-      {% if c.configured %}
-      <form method="post" action="/channels/test" data-ch-check="{{ c.name }}">
+      <form method="post" action="/channels/test" data-ch-check="{{ c.name }}" {% if not c.configured %}hidden{% endif %}>
         <input type="hidden" name="channel" value="{{ c.name }}" />
         <button type="submit" class="btn">Test connection</button>
         <span class="ch-result" data-ch-result role="status" aria-live="polite"></span>
       </form>
-      {% endif %}
       {% if c.dashboard_set %}
       <form method="post" action="/channels/clear" class="ch-form" data-channel="{{ c.name }}"
             data-ch-action="clear" data-ch-context="{{ channel_context }}">
@@ -443,6 +456,14 @@
           if (form.elements.confirm_people) form.elements.confirm_people.checked = false;
           form.querySelectorAll('input[type=password]').forEach(function (secret) { if (secret.value === body.get(secret.name)) secret.value = ''; });
           say(form, value.message, false);
+          var currentStatus = root.querySelector('[data-ch-status="' + form.dataset.channel + '"]');
+          if (currentStatus && typeof value.readiness_html === 'string') {
+            currentStatus.innerHTML = value.readiness_html;
+            currentStatus.dataset.chOn = value.enabled ? '1' : '0';
+            var connectionCheck = root.querySelector('form[data-ch-check="' + form.dataset.channel + '"]');
+            if (connectionCheck) connectionCheck.hidden = !value.enabled;
+            document.dispatchEvent(new Event('lightwork:channel-status-updated'));
+          }
         } catch (error) {
           if (started === generation && form.isConnected) {
             refreshButton.hidden = false;
@@ -518,6 +539,7 @@
         heroBadge.className = 'badge ' + (working ? 'ok' : (failed ? 'blocked' : 'idle'));
       }
     }
+    document.addEventListener('lightwork:channel-status-updated', summarize);
     document.querySelectorAll('form[data-ch-check]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         // The confirm handler above re-submits with dataset.confirmed set; run then.
@@ -569,7 +591,29 @@
           var input = form.querySelector('[name="' + key + '"]');
           if (input) input.value = values[key];
         });
+        var auth = form.querySelector('[data-email-auth]');
+        if (auth) { auth.value = select.value === 'outlook' ? 'microsoft' : 'password'; auth.dispatchEvent(new Event('change')); }
       });
+    });
+    document.querySelectorAll('[data-email-auth]').forEach(function (select) {
+      var form = select.closest('form'), account = form.querySelector('[data-email-account]');
+      function applyMode() {
+        var microsoft = select.value === 'microsoft';
+        account.disabled = !microsoft; account.required = microsoft;
+        ['imap_password', 'smtp_password'].forEach(function (name) {
+          var input = form.querySelector('[name="' + name + '"]');
+          if (input) { input.disabled = microsoft; input.closest('label').hidden = microsoft; }
+        });
+        if (microsoft) Object.keys(presets.outlook).forEach(function (key) {
+          form.querySelector('[name="' + key + '"]').value = presets.outlook[key];
+        });
+      }
+      select.addEventListener('change', applyMode);
+      account.addEventListener('change', function () {
+        var mailbox = account.selectedOptions[0] && account.selectedOptions[0].dataset.mailbox;
+        if (mailbox) ['imap_user', 'smtp_user'].forEach(function (key) { form.querySelector('[name="' + key + '"]').value = mailbox; });
+      });
+      applyMode();
     });
   })();
   </script>

@@ -43,8 +43,36 @@ def prepare(request, selection, _arguments):
     return Preview(current.summary, native={"schedule_creation_review": {"scope": "current_page"}})
 
 
+def original_snapshot(request, selection):
+    from .schedule_ops_api import _creation_authority
+
+    if selection:
+        raise HTTPException(422, "Open Automations to check your original schedule request.")
+    current = _creation_authority(request)
+    return Snapshot(digest(current), "Your original schedule request in Automations",
+        "Open the retained original-result controls for this account and workspace. "
+        "Reading an original never creates a schedule or repeats a task. Original controls remain available with scheduling turned off.")
+
+
+def original_prepare(request, selection, _arguments):
+    from .schedule_ops_api import _creation_authority
+
+    current = original_snapshot(request, selection)
+    value = _creation_authority(request)
+    if digest(value) != current.revision:
+        raise HTTPException(409, "Your account or access changed. Open the current original-result controls again.")
+    return Preview(current.summary, native={"schedule_creation_original": {
+        "scope": "current_page", "context": value["context"],
+    }})
+
+
 def entries():
-    return (Adapter("schedules.creation_controls", "Open the complete schedule form", "schedules",
+    return (
+        Adapter("schedules.creation_controls", "Open the complete schedule form", "schedules",
                     PAGE + "#auto-new-sched", (PAGE,), EmptyInput, snapshot, prepare,
                     aliases=("create a schedule", "set up a schedule", "schedule a task",
-                             "schedule a saved workflow", "open schedule creation controls")),)
+                             "schedule a saved workflow", "open schedule creation controls")),
+        Adapter("schedules.creation_original", "Open the original schedule result", "schedules",
+                PAGE + "#auto-create-original", (PAGE,), EmptyInput, original_snapshot, original_prepare,
+                aliases=("check my original schedule request", "recover a lost schedule reply", "did my schedule save")),
+    )
