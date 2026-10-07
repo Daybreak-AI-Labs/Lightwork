@@ -20,6 +20,10 @@
       !costCoverage || !costRelationshipHelp || !commercialForm) return;
 
   const context = root.dataset.context || '';
+  // The pilots script closes this report with the rest of the page when access
+  // is lost or pilots are off (data-value-locked). A request that finishes
+  // later must not open a control again.
+  const closed = () => root.dataset.valueLocked === 'true';
   const CONTEXT = /^[^\u0000-\u001f\u007f]{1,512}$/;
   const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
   const MONEY = /^(?:-?(?:0|[1-9][0-9]*))(?:\.[0-9]+)?$/;
@@ -595,7 +599,7 @@
     });
     if (cases.some(item => item.outcome.id === selected)) selector.value = selected;
     renderSelected();
-    exportButton.disabled = !report.scope_complete;
+    exportButton.disabled = closed() || !report.scope_complete;
     statusHost.textContent = 'Exact pilot cohort refreshed. ' + report.admitted + ' admitted case' + (report.admitted === 1 ? '' : 's') + ' shown.';
   }
 
@@ -681,8 +685,8 @@
     } finally {
       if (request === generation) {
         statusHost.setAttribute('aria-busy', 'false');
-        refreshButton.disabled = false;
-        exportButton.disabled = !cohort || !cohort.report.scope_complete;
+        refreshButton.disabled = closed();
+        exportButton.disabled = closed() || !cohort || !cohort.report.scope_complete;
       }
     }
   }
@@ -777,8 +781,8 @@
       return false;
     } finally {
       pilotListLoading = false;
-      pilotSelector.disabled = false;
-      loadMoreButton.disabled = !pilotCursor;
+      pilotSelector.disabled = closed();
+      loadMoreButton.disabled = closed() || !pilotCursor;
     }
   }
 
@@ -845,12 +849,12 @@
       statusHost.textContent = error instanceof ProjectionError
         ? error.message : 'The evidence could not be saved. Your entries remain in the form. Try again.';
     } finally {
-      button.disabled = false;
+      button.disabled = closed();
     }
   }
 
   function requireWhen(control, active) {
-    control.disabled = !active;
+    control.disabled = closed() || !active;
     control.required = active;
   }
   function syncBasis(form, basisName, amountName, currencyName, reasonName) {
@@ -874,8 +878,8 @@
     costRelationshipHelp.textContent = includedDetail
       ? 'Breakdown only keeps this detail visible without adding it again. Choose it only when a current all-in total already includes this amount.'
       : 'Additional cost increases the current delivered total by this amount.';
-    costCoverage.disabled = includedDetail;
-    costForm.elements.complete_coverage.disabled = includedDetail;
+    costCoverage.disabled = closed() || includedDetail;
+    costForm.elements.complete_coverage.disabled = closed() || includedDetail;
     if (includedDetail) costForm.elements.complete_coverage.checked = false;
     requireWhen(
       costForm.elements.allocation_assumption,
@@ -1041,7 +1045,7 @@
       statusHost.textContent = error instanceof ProjectionError
         ? error.message : 'The complete report could not be verified or downloaded. Try again.';
     } finally {
-      exportButton.disabled = !cohort || !cohort.report.scope_complete;
+      exportButton.disabled = closed() || !cohort || !cohort.report.scope_complete;
     }
   });
 

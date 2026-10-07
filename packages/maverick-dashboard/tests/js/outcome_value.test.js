@@ -801,3 +801,23 @@ test('invalid page context prevents every request', async t => {
   assert.equal(ui.calls.length, 0);
   assert.match(ui.host.textContent, /open for a different account or workspace/);
 });
+
+test('a report closed by the pilots page stays closed when a request finishes or a field changes', async t => {
+  const ui = await fixture(async () => ({ok: true, json: async () => payload()}));
+  t.after(() => ui.dom.window.close());
+  const d = ui.dom.window.document, root = d.getElementById('outcome-pilots');
+  const refresh = d.getElementById('ov-refresh'), exporter = d.getElementById('ov-export');
+  assert.equal(refresh.disabled, false);
+  // The pilots page loses access while this refresh is still answering.
+  refresh.click();
+  root.dataset.valueLocked = 'true';
+  await settle();
+  assert.equal(refresh.disabled, true);
+  assert.equal(exporter.disabled, true);
+  // A field that would normally apply stays closed.
+  const basis = d.querySelector('#ov-cost-form [name="basis"]');
+  basis.value = 'observed';
+  basis.dispatchEvent(new ui.dom.window.Event('change', {bubbles: true}));
+  assert.equal(d.querySelector('#ov-cost-form [name="amount"]').disabled, true);
+  assert.equal(d.querySelector('#ov-cost-form [name="complete_coverage"]').disabled, true);
+});
