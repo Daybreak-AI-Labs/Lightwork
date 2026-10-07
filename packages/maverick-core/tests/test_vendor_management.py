@@ -51,7 +51,8 @@ def test_register_is_off_by_default(tmp_path):
 def test_same_name_is_one_record_never_a_duplicate():
     record = _register()
     assert record["id"].startswith("VMR-")
-    assert record["status"] == "active"
+    # Registration is not approval: activation is gated on an assessment.
+    assert record["status"] == "under_review"
     with pytest.raises(RecordConflict):
         _register()
     # Same identity modulo case/whitespace: still the same record id.
