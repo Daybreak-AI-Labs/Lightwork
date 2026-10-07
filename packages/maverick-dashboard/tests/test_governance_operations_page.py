@@ -304,8 +304,6 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
     for path_contract in (
         "/policies/${encodeURIComponent(policyId)}/versions",
         "/policies/${encodeURIComponent(policyId)}/activate",
-        "/exceptions/${encodeURIComponent(key)}/approve",
-        "/exceptions/${encodeURIComponent(key)}/close",
         "/evaluations/${encodeURIComponent(key)}/attest",
         "/dynamic-risk/assets/${encodeURIComponent(assetId)}",
         "/dynamic-risk/assets/${encodeURIComponent(assetId)}/signals",
@@ -332,6 +330,13 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
         "/ai-media-provenance/receipts/${encodeURIComponent(operation)}",
     ):
         assert path_contract in page
+    # Exception request/approve/close moved to their reviewed controller
+    # (b0ffccbb); it still writes only through the native exception routes.
+    exceptions = client.get("/static/lightwork-policy-exceptions.js")
+    assert exceptions.status_code == 200
+    assert "'/ai-policy-management/exceptions/' + encodeURIComponent(previous.exception_key) + '/' + kind" in exceptions.text
+    assert "kind === 'approve'" in exceptions.text and "kind === 'close'" in exceptions.text
+    assert '<script src="/static/lightwork-policy-exceptions.js' in page
 
     # AI systems are picked from the inventory, never typed as MAA- IDs.
     assert 'pattern="MAA-[0-9a-f]{32}"' not in page
@@ -549,7 +554,9 @@ def test_admin_page_explains_trusted_article_73_authority_boundary():
     assert 'id="ai-media-provenance-sign"' in page
     assert 'id="ai-media-provenance-review"' in page
     assert 'sendJson("/ai-policy-management/policies"' in page
-    assert 'sendJson("/ai-policy-management/exceptions"' in page
+    # A new exception is requested through the reviewed controller.
+    assert "kind === 'request' ? '/ai-policy-management/exceptions'" in client.get(
+        "/static/lightwork-policy-exceptions.js").text
     assert 'sendJson("/ai-policy-management/evaluations"' in page
     assert 'sendJson("/dynamic-risk/signals"' in page
     assert "/collect`" in page
