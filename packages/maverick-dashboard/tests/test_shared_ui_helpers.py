@@ -104,6 +104,8 @@ _KEPT_WRAPPERS = {
 _KEPT_SETTERS = {
     # Not a status line: rendered results, output blocks, badges or translated labels.
     ("lightwork-answer-panel.js", "say"),
+    # Sets the translated words and their language on a button or status alike.
+    ("lightwork-chat-code-actions.js", "say"),
     ("lightwork-guided-actions.js", "show"),
     ("lightwork-maintenance-ops.js", "show"),
     ("lightwork-notification-badge.js", "show"),
