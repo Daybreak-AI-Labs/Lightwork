@@ -702,3 +702,16 @@ def test_bootstrap_admin_recovers_a_missing_roster(monkeypatch, tmp_path):
     assert c.post("/users/roster/reset", data={"confirm": "reset"}).status_code == 409
     assert c.post("/users/set", data={"principal": "user:demoted", "role": "viewer"}).status_code == 200
     assert auth.role_for_principal("user:demoted") == "viewer"
+
+
+def test_lost_workspace_membership_history_refuses_new_provisioning(monkeypatch, tmp_path):
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac
+
+    assert rbac.tenant_store_path().parent == rbac.store_path().parent
+    assert registry._legacy_role_names() == set()          # fresh install: clean history
+    rbac.set_tenant_role("acme", "user:a", "viewer")
+    assert registry._legacy_role_names()
+    rbac.tenant_store_path().unlink()
+    with pytest.raises(registry.TenantRegistryError):
+        registry._legacy_role_names()
