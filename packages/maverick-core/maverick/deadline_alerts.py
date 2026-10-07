@@ -16,8 +16,13 @@ deadline that moves (an extension) is a new deadline and starts over.
 
 Only a delivery that at least one channel accepted is recorded as sent. A
 definite "not sent" (no backend configured, every backend refused) records
-nothing, so the next cycle tries again once notifications are repaired. An
-uncertain outcome (a backend may have sent before failing) is recorded as
+nothing in the ledger, so the alert stays due -- but it is retried after a
+growing wait (5, 10, 20, 40, 60 minutes, then hourly), kept in its own small
+store (``deadline-alert-retries.json``) rather than the ledger or the
+delivery receipts, and retried at once when the notification setup changes.
+A workspace with no working channel therefore neither floods the delivery
+history nor blocks other notifications, and still alerts once it is repaired.
+An uncertain outcome (a backend may have sent before failing) is recorded as
 *unconfirmed* -- shown in the alert history, never replayed automatically.
 
 Configuration (``~/.maverick/config.toml``)::
@@ -47,6 +52,8 @@ per-recipient backend lands, :func:`deliver` is the single seam to route by
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 import uuid
@@ -488,6 +495,88 @@ def _record_sent(world: Any, alert: Alert, message: str, *, sent_at: float,
             "delivery": "unconfirmed" if unconfirmed else "accepted"}
 
 
+_RETRY_KEEP_SECONDS = 30 * 86400
+_RETRY_MAX_ENTRIES = 5000
+
+
+class _RetryBook:
+    """Per-alert back-off after a definite failure, outside the ledger and the
+    delivery receipts. Keyed by a hash of the alert (no record ids are stored);
+    an entry is dropped once the alert is recorded, and stale or surplus
+    entries are pruned on every save, so the file stays small."""
+
+    def __init__(self, setup: str):
+        self.setup = setup
+        self.path = None
+        self.entries: dict[str, dict[str, Any]] = {}
+        self.dirty = False
+        try:
+            from .paths import data_dir
+
+            self.path = data_dir("deadline-alert-retries.json")
+            self.entries = self._read()
+        except Exception as exc:  # noqa: BLE001 -- no back-off beats a failed cycle
+            log.warning("deadline_alerts: retry back-off unavailable: %s", type(exc).__name__)
+
+    def _read(self) -> dict[str, dict[str, Any]]:
+        from .file_lock import atomic_read_text
+
+        try:
+            data = json.loads(atomic_read_text(self.path))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, dict)}
+
+    @staticmethod
+    def key(alert: Alert) -> str:
+        return hashlib.sha256("\0".join(map(str, _ledger_key(alert))).encode("utf-8")).hexdigest()[:24]
+
+    def waiting(self, alert: Alert, now: float) -> bool:
+        """Still inside the wait after its last definite failure, with the
+        notification setup unchanged since."""
+        entry = self.entries.get(self.key(alert))
+        if not entry or entry.get("setup") != self.setup:
+            return False
+        try:
+            return now < float(entry.get("next_at") or 0)
+        except (TypeError, ValueError):
+            return False
+
+    def failed(self, alert: Alert, now: float) -> None:
+        from .notifications import retry_delay
+
+        key = self.key(alert)
+        entry = self.entries.get(key)
+        try:
+            before = int(entry.get("failures") or 0) if entry and entry.get("setup") == self.setup else 0
+        except (TypeError, ValueError):
+            before = 0
+        self.entries[key] = {"failures": before + 1, "next_at": now + retry_delay(before + 1),
+                             "setup": self.setup, "at": now}
+        self.dirty = True
+
+    def clear(self, alert: Alert) -> None:
+        if self.entries.pop(self.key(alert), None) is not None:
+            self.dirty = True
+
+    def save(self, now: float) -> None:
+        if not self.dirty or self.path is None:
+            return
+        from .file_lock import atomic_write_text, ensure_private_directory
+
+        keep = {k: v for k, v in self.entries.items()
+                if isinstance(v.get("at"), (int, float)) and v["at"] >= now - _RETRY_KEEP_SECONDS}
+        newest = sorted(keep, key=lambda k: keep[k]["at"], reverse=True)[:_RETRY_MAX_ENTRIES]
+        try:
+            ensure_private_directory(self.path.parent)
+            atomic_write_text(self.path, json.dumps({k: keep[k] for k in newest}, separators=(",", ":")))
+        except OSError as exc:
+            log.warning("deadline_alerts: retry back-off could not be saved: %s", type(exc).__name__)
+        self.dirty = False
+
+
 def alerts_for(record_type: str, record_id: str, *, world: Any = None, limit: int = 50) -> list[dict]:
     """What was sent about one record, newest first (the record page's
     "Alerts" section)."""
@@ -570,7 +659,13 @@ def deliver(
                               "category": "deadline", "async_dispatch": False, "batch": False}
     send = notify
     if send is None:
+        from .notifications import configured_backends
         from .notifications import notify as send
+
+        if not configured_backends():
+            # Nothing is set up to receive it: no attempt, and so no failed
+            # delivery receipt for every retry.
+            return Delivery()
         kwargs["outcomes"] = states  # per-backend final states
     try:
         fired = int(send(body, **kwargs) or 0)
@@ -615,7 +710,8 @@ def run_cycle(
         from .world_model import open_world
         world = open_world()
     summary: dict[str, Any] = {"evaluated": 0, "sent": 0, "held_quiet": 0, "already_sent": 0,
-                               "not_sent": 0, "unconfirmed": 0, "alerts": [], "enabled": cfg["enabled"]}
+                               "not_sent": 0, "unconfirmed": 0, "backing_off": 0, "alerts": [],
+                               "enabled": cfg["enabled"]}
     if not cfg["enabled"]:
         return summary
     quiet = in_quiet_hours(current, cfg, localtime=localtime)
@@ -629,19 +725,32 @@ def run_cycle(
             summary["held_quiet"] += 1
             continue
         pending.append(alert)
-    if cfg["mode"] == "digest":
-        _send_digest(pending, current, cfg, world, notify, localtime, summary)
-    else:
+    from .notifications import setup_fingerprint
+
+    retries = _RetryBook(setup_fingerprint())
+    try:
+        due = []
         for alert in pending:
-            title, body = message_for(alert, current, localtime=localtime)
-            outcome = deliver(title, body, urgent=alert.urgent, recipient=alert.recipient, notify=notify)
-            _settle(world, alert, body, outcome, current, "immediate", summary)
+            if retries.waiting(alert, current):
+                summary["backing_off"] += 1
+            else:
+                due.append(alert)
+        if cfg["mode"] == "digest":
+            _send_digest(due, current, cfg, world, notify, localtime, summary, retries)
+        else:
+            for alert in due:
+                title, body = message_for(alert, current, localtime=localtime)
+                outcome = deliver(title, body, urgent=alert.urgent, recipient=alert.recipient, notify=notify)
+                _settle(world, alert, body, outcome, current, "immediate", summary, retries)
+    finally:
+        retries.save(current)
     return summary
 
 
 def _settle(world, alert: Alert, message: str, outcome: Delivery | int, current: float, mode: str,
-            summary: dict[str, Any]) -> None:
-    """Record an accepted or uncertain send; leave a definite failure to retry.
+            summary: dict[str, Any], retries: _RetryBook) -> None:
+    """Record an accepted or uncertain send; leave a definite failure to retry
+    after a wait.
 
     Subscribed webhooks are a channel too: a started webhook delivery accepts
     the alert, so a webhook-only workspace is alerted once, not every cycle.
@@ -652,15 +761,17 @@ def _settle(world, alert: Alert, message: str, outcome: Delivery | int, current:
     outcome = Delivery(outcome.accepted + max(hooks, 0), outcome.uncertain)
     if outcome.status == "not_sent":
         summary["not_sent"] += 1
+        retries.failed(alert, current)
         log.warning("deadline_alerts: %s %s alert was not sent; it will be retried",
                     alert.deadline.record_type, alert.state)
         return
+    retries.clear(alert)
     summary["alerts"].append(_record_sent(world, alert, message, sent_at=current, backends=outcome.accepted,
                                           mode=mode, unconfirmed=outcome.status == "unconfirmed"))
     summary["sent" if outcome.status == "accepted" else "unconfirmed"] += 1
 
 
-def _send_digest(pending, current, cfg, world, notify, localtime, summary) -> None:
+def _send_digest(pending, current, cfg, world, notify, localtime, summary, retries) -> None:
     by_recipient: dict[str, list[Alert]] = {}
     for alert in pending:
         by_recipient.setdefault(alert.recipient, []).append(alert)
@@ -671,7 +782,7 @@ def _send_digest(pending, current, cfg, world, notify, localtime, summary) -> No
         outcome = deliver(f"Deadlines for {recipient}", body, urgent=urgent, recipient=recipient, notify=notify)
         for alert in alerts:
             _settle(world, alert, message_for(alert, current, localtime=localtime)[1], outcome, current,
-                    "digest", summary)
+                    "digest", summary, retries)
 
 
 __all__ = [

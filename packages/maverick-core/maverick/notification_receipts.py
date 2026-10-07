@@ -61,6 +61,8 @@ class DeliveryReceipts:
                 if retry:
                     return ident, False
                 if len(rows) >= 1000:
+                    rows = self._make_room(rows)
+                if len(rows) >= 1000:
                     raise ValueError("Delivery history is full; new sends are paused to preserve duplicate protection.")
                 rows.append({"id": ident, "backend": backend, "kind": kind, "state": "queued",
                              "request_id": event if kind == "test" else None,
@@ -68,6 +70,20 @@ class DeliveryReceipts:
                              "safe_to_retry": False, "message": "Waiting to send."})
             self._save(rows)
             return ident, True
+
+    @staticmethod
+    def _make_room(rows: list[dict]) -> list[dict]:
+        """Drop the oldest event whose send definitely failed and is safe to
+        retry (nothing was sent, e.g. no destination configured), so a flood of
+        such failures can never pause every other notification. Accepted,
+        queued, sending and unknown rows -- and failures that are not safe to
+        retry -- are never dropped: they are what duplicate protection rests on."""
+        oldest = None
+        for row in rows:
+            if (row.get("kind") == "event" and row.get("state") == "failed" and row.get("safe_to_retry") is True
+                    and (oldest is None or row["updated_at"] < oldest["updated_at"])):
+                oldest = row
+        return rows if oldest is None else [row for row in rows if row is not oldest]
 
     def update(self, ident: str, state: str, message: str, *, safe_to_retry: bool = False) -> None:
         with cross_process_lock(self.path):

@@ -190,7 +190,7 @@
     "business_records": 22,
     "execution": 45,
     "recovery": 12,
-    "derived": 16,
+    "derived": 17,
     "composition": 62,
     "external": 18,
     "key_custody": 4,
@@ -4914,6 +4914,33 @@
           "function": "purge_expired",
           "kind": "commit",
           "expression": "connection.commit()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/deadline_alerts.py",
+      "contract": "derived",
+      "owner": "packages/maverick-core/maverick/deadline_alerts.py",
+      "purpose": "Deadline alerts: the sent-alert ledger lives in the world model; this module also keeps a small rebuildable per-alert retry wait for alerts no channel accepted.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; the retry wait only delays a retry and authorizes nothing; it is keyed by a hash of the alert and ignored once the notification setup changes, so a lost or restored copy is harmless",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "deadline-alert-retries.json"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 516,
+          "function": "__init__",
+          "kind": "data_dir",
+          "expression": "data_dir('deadline-alert-retries.json')"
+        },
+        {
+          "line": 574,
+          "function": "save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(self.path, json.dumps({k: keep[k] for k in newest}, separators=(',', ':')))"
         }
       ]
     },
@@ -25576,7 +25603,7 @@
           "expression": "cross_process_lock(self.path)"
         },
         {
-          "line": 73,
+          "line": 89,
           "function": "update",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path)"

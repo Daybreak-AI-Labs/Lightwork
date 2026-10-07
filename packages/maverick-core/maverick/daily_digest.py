@@ -33,6 +33,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from .notifications import RETRY_MINUTES, retry_delay
+
 log = logging.getLogger(__name__)
 
 RECENT_DAYS = 7
@@ -557,46 +559,16 @@ def _attempt(channel: str, sender: DigestSender, principal: str, digest: dict[st
 # Scheduling
 # ----------------------------------------------------------------------------
 
-# Waits (minutes) after the 1st, 2nd, ... definite failure of the day; the
-# last one repeats (hourly) until the person's local day ends.
-RETRY_MINUTES = (5, 10, 20, 40, 60)
-# Environment settings that decide whether a channel can send. Only whether
-# each is set enters the setup fingerprint, never its value.
-_CHANNEL_ENV = ("SLACK_BOT_TOKEN", "EMAIL_PROVIDER", "EMAIL_USER", "EMAIL_APP_PASSWORD", "EMAIL_FROM",
-                "MAVERICK_EMAIL_DISABLE", "MAVERICK_SMTP_PASSWORD")
-
-
-def retry_delay(failures: int) -> float:
-    """Seconds to wait after the ``failures``-th definite failure of the day."""
-    return 60.0 * RETRY_MINUTES[min(max(int(failures), 1), len(RETRY_MINUTES)) - 1]
-
-
 def channel_setup(links: list[dict[str, Any]], prefs: dict[str, Any]) -> str:
     """A short fingerprint of what decides whether this person's summary can
-    go out: their linked accounts and email, the registered channels, the
-    config files (by size and modification time) and which channel
-    environment settings are present. A change ends a back-off at once."""
-    import hashlib
-    import json
-    import os
+    go out: their linked accounts and email, the registered channels and the
+    shared notification setup (:func:`maverick.notifications.setup_fingerprint`).
+    A change ends a back-off at once."""
+    from .notifications import setup_fingerprint
 
-    from .config import config_path, dashboard_overrides_path, tenant_config_path
-
-    files = []
-    for path in (config_path(), dashboard_overrides_path(), tenant_config_path()):
-        try:
-            stat = path.stat() if path else None
-        except OSError:
-            stat = None
-        files.append([str(path or ""), stat.st_mtime_ns if stat else 0, stat.st_size if stat else 0])
-    material = {
-        "links": sorted([str(link.get("channel")), str(link.get("external_id"))] for link in links),
-        "email": str(prefs.get("email") or ""),
-        "senders": sorted(digest_senders()),
-        "files": files,
-        "env": [bool(os.environ.get(name)) for name in _CHANNEL_ENV],
-    }
-    return hashlib.sha256(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return setup_fingerprint(
+        sorted([str(link.get("channel")), str(link.get("external_id"))] for link in links),
+        str(prefs.get("email") or ""), sorted(digest_senders()))
 
 
 def _waiting(retry: dict[str, Any], local_date: str, setup: str, current: float) -> bool:
