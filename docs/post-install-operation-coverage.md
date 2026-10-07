@@ -1,5 +1,19 @@
 # Post-install operation coverage
 
+October 7 UX650 item-limit repair: Designer's implicit choice says “Every item
+(maximum 1,000)” and explains that a larger list stops before this step processes
+anything. Native execution refuses an oversized implicit collection at the
+loop cursor rather than completing only its first 1,000 items. An explicitly
+chosen positive limit still processes the intended prefix. Earlier workflow
+steps and their effects are retained; this does not undo them.
+
+Actual native save/load preserved an existing implicit workflow unchanged.
+Its 1,001-item run failed before any body iteration, retained the entire list
+and its earlier Set value step. A three-item Unicode list completed in exact
+order; an explicit limit of two completed exactly two from the larger list.
+No model or action callback was called. This repairs false partial completion;
+the separate per-node parallel-choice control is not qualified by this witness.
+
 October 7 UX518: actual Learning threads now register with the existing
 dashboard shutdown supervisor. Shutdown closes new admission, requests existing
 safe-point/Budget stops and joins those threads within one deadline. A launch

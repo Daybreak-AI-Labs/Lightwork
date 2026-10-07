@@ -1400,11 +1400,16 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if node.limit and node.limit > 0:
         items = items[:node.limit]          # cap iterations (a runaway-list guard)
     elif len(items) > _FOREACH_DEFAULT_CAP:
-        # No explicit limit: a foreach of action nodes has no per-node budget gate
-        # (that wraps agents only), so bound the fan-out to a safe default and
-        # SURFACE the truncation rather than silently firing 10k+ connector calls.
-        items = items[:_FOREACH_DEFAULT_CAP]
-        data["_foreach_truncated"] = True
+        # An implicit safety ceiling is not consent to discard the list's tail.
+        # Refuse before the first body iteration rather than report partial work
+        # as complete. Deliberately chosen positive limits still select a prefix.
+        ctx.on_node(node, "skipped", None)
+        raise _Reject(node, data, error=(
+            f"This list has {len(items):,} items. Without a chosen item limit, "
+            f"repeated work supports up to {_FOREACH_DEFAULT_CAP:,} items. "
+            "This step processed no items. Choose an explicit item limit and "
+            "review the workflow before running again. Earlier steps may have completed."
+        ))
     ctx.frame["items"] = items
     results = copy.deepcopy(ctx.frame.get("results", []))
     if node.concurrent and len(items) > 1:

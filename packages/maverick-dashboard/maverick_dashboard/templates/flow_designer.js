@@ -1096,8 +1096,9 @@
     }
     if (n.kind === 'foreach') {
       props.appendChild(field('Repeat for each item in', select(n.items || '', keyChoices(n, n.items, 'Choose a list…'), function (v) { n.items = v; render(); })));
-      props.appendChild(field('At most', numberSelect(n.limit || '', [{ v: '', t: 'Every item' }, { v: '10', t: 'First 10 items' }, { v: '50', t: 'First 50 items' }, { v: '100', t: 'First 100 items' }],
+      props.appendChild(field('At most', numberSelect(n.limit || '', [{ v: '', t: 'Every item (maximum 1,000)' }, { v: '10', t: 'First 10 items' }, { v: '50', t: 'First 50 items' }, { v: '100', t: 'First 100 items' }],
         function (v) { n.limit = parseInt(v, 10) || 0; })));
+      props.appendChild(hint('If there are more than 1,000 items, this step stops before processing them. Choose a specific limit to process a smaller batch. Earlier steps may have completed.'));
       var bodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
       props.appendChild(field('Steps for each item', addButton('Edit these steps (' + bodyN + ')', function () { enterSub(n, 'foreach'); })));
       var conc = document.createElement('label'); conc.className = 'fd__check';

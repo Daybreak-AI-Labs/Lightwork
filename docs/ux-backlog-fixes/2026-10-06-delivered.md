@@ -1,5 +1,13 @@
 # Product changes delivered on October 6
 
+UX650, item-limit portion: the ordinary default reveals its maximum of 1,000.
+A larger implicit collection now fails before this loop's first body iteration
+instead of silently completing a prefix. Explicit positive limits retain their
+intentional prefix behavior. Native save/load, a retained earlier step, all
+three Unicode items and exactly two explicitly selected items passed; there
+were no model/action callbacks. Earlier effects are not rolled back. The
+separate ignored per-node parallel choice remains a distinct repair.
+
 UX518: Learning's actual threads participate in coordinated dashboard shutdown.
 New admission closes, cooperative safe points/Budget hooks receive stop, and
 joins share one deadline. Noncancellable work retains truthful running custody
