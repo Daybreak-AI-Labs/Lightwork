@@ -14,6 +14,12 @@ Each record gets at most one alert per *state* (``due_soon_7d``,
 restart never re-sends and the record page can show its alert history. A
 deadline that moves (an extension) is a new deadline and starts over.
 
+Only a delivery that at least one channel accepted is recorded as sent. A
+definite "not sent" (no backend configured, every backend refused) records
+nothing, so the next cycle tries again once notifications are repaired. An
+uncertain outcome (a backend may have sent before failing) is recorded as
+*unconfirmed* -- shown in the alert history, never replayed automatically.
+
 Configuration (``~/.maverick/config.toml``)::
 
     [deadline_alerts]
@@ -418,32 +424,68 @@ def _write(world: Any, sql: str, params: tuple = ()) -> None:
         cur.execute(sql.replace("?", "%s"), params)
 
 
+def _write_all(world: Any, statements: list[tuple[str, tuple]]) -> None:
+    if _is_sqlite(world):
+        with world._writing() as conn:
+            for sql, params in statements:
+                conn.execute(sql, params)
+        return
+    with world._tx() as cur:
+        for sql, params in statements:
+            cur.execute(sql.replace("?", "%s"), params)
+
+
 def _workspace() -> str:
     from .webhook_subscriptions import workspace_id
     return workspace_id()
 
 
-def already_sent(world: Any, alert: Alert) -> bool:
+_UNCONFIRMED = "-unconfirmed"
+
+
+def _settled(row: dict) -> bool:
+    """Accepted by a channel, or an uncertain send that must not be replayed.
+
+    A legacy row with no accepting backend in a plain mode was written by the
+    old cycle even when nothing was delivered; it does not suppress a retry.
+    """
+    return int(row.get("backends") or 0) > 0 or str(row.get("mode") or "").endswith(_UNCONFIRMED)
+
+
+def _ledger_key(alert: Alert) -> tuple:
     d = alert.deadline
-    rows = _rows(world, "SELECT id FROM deadline_alerts WHERE workspace = ? AND record_type = ?"
-                        " AND record_id = ? AND state = ? AND due_at = ? LIMIT 1",
-                 (_workspace(), d.record_type, d.record_id, alert.state, float(d.due_at)))
-    return bool(rows)
+    return (_workspace(), d.record_type, d.record_id, alert.state, float(d.due_at))
+
+
+_KEY_SQL = " WHERE workspace = ? AND record_type = ? AND record_id = ? AND state = ? AND due_at = ?"
+
+
+def already_sent(world: Any, alert: Alert) -> bool:
+    rows = _rows(world, "SELECT backends, mode FROM deadline_alerts" + _KEY_SQL, _ledger_key(alert))
+    return any(_settled(row) for row in rows)
 
 
 def _record_sent(world: Any, alert: Alert, message: str, *, sent_at: float,
-                 backends: int, mode: str) -> dict:
+                 backends: int, mode: str, unconfirmed: bool = False) -> dict:
     d = alert.deadline
     alert_id = "dla_" + uuid.uuid4().hex[:16]
-    _write(world, "INSERT INTO deadline_alerts(id, workspace, record_type, record_id, state, due_at,"
-                  " recipient, recipient_kind, title, message, link, sent_at, backends, mode)"
-                  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-           (alert_id, _workspace(), d.record_type, d.record_id, alert.state, float(d.due_at),
-            alert.recipient, alert.recipient_kind, d.title[:300], message[:2000], d.link[:1000],
-            sent_at, int(backends), mode))
+    stored_mode = mode + (_UNCONFIRMED if unconfirmed else "")
+    # A legacy row for the same key (nothing accepted) is replaced in the same
+    # transaction; the unique index keeps one row per alert state.
+    _write_all(world, [
+        ("DELETE FROM deadline_alerts" + _KEY_SQL + " AND backends = 0 AND mode IN ('immediate', 'digest')",
+         _ledger_key(alert)),
+        ("INSERT INTO deadline_alerts(id, workspace, record_type, record_id, state, due_at,"
+         " recipient, recipient_kind, title, message, link, sent_at, backends, mode)"
+         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+         (alert_id, _workspace(), d.record_type, d.record_id, alert.state, float(d.due_at),
+          alert.recipient, alert.recipient_kind, d.title[:300], message[:2000], d.link[:1000],
+          sent_at, int(backends), stored_mode)),
+    ])
     return {"id": alert_id, "record_type": d.record_type, "record_id": d.record_id,
             "state": alert.state, "due_at": d.due_at, "recipient": alert.recipient,
-            "recipient_kind": alert.recipient_kind, "sent_at": sent_at, "backends": backends}
+            "recipient_kind": alert.recipient_kind, "sent_at": sent_at, "backends": backends,
+            "delivery": "unconfirmed" if unconfirmed else "accepted"}
 
 
 def alerts_for(record_type: str, record_id: str, *, world: Any = None, limit: int = 50) -> list[dict]:
@@ -502,37 +544,59 @@ def message_for(alert: Alert, now: float,
     return title[:200], body
 
 
+@dataclass(frozen=True)
+class Delivery:
+    """How one send ended: backends that accepted it, and whether any backend
+    may have sent it without confirming (an outcome never replayed)."""
+
+    accepted: int = 0
+    uncertain: bool = False
+
+    @property
+    def status(self) -> str:
+        return "accepted" if self.accepted else ("unconfirmed" if self.uncertain else "not_sent")
+
+
 def deliver(
     title: str, body: str, *, urgent: bool, recipient: str,
     notify: Callable[..., int] | None = None,
-) -> int:
+) -> Delivery:
     """Send one alert through the notification backends. ``recipient`` is the
     seam for per-person routing once a backend supports it; today every
     backend configured for the workspace receives it."""
     del recipient  # routed by name inside the message until backends carry recipients
+    states: list[str] = []
+    kwargs: dict[str, Any] = {"title": title, "priority": "high" if urgent else "default",
+                              "category": "deadline", "async_dispatch": False, "batch": False}
     send = notify
     if send is None:
         from .notifications import notify as send
+        kwargs["outcomes"] = states  # per-backend final states
     try:
-        return int(send(body, title=title, priority="high" if urgent else "default",
-                        category="deadline", async_dispatch=False, batch=False) or 0)
+        fired = int(send(body, **kwargs) or 0)
     except Exception as exc:
         log.warning("deadline_alerts: notification failed: %s", type(exc).__name__)
-        return 0
+        # The built-in sender catches every backend failure itself, so an
+        # exception before any backend started means nothing went out. A
+        # failure after a backend started, or from another sender, may have
+        # delivered: never replay it blindly.
+        return Delivery(states.count("delivered"), uncertain=notify is not None or bool(states))
+    return Delivery(max(fired, states.count("delivered")), uncertain="unknown" in states)
 
 
-def _emit_webhook(alert: Alert, world: Any) -> None:
+def _emit_webhook(alert: Alert, world: Any) -> int:
+    """Webhook deliveries started for this alert (0 when nothing is subscribed)."""
     due_soon_event, overdue_event = _WEBHOOK_EVENTS.get(alert.deadline.record_type, ("", ""))
     event = overdue_event if alert.state == "overdue" else due_soon_event
     if not event:
-        return
+        return 0
     from .webhook_events import emit
     d = alert.deadline
-    emit(event, record_type=d.record_type, record_id=d.record_id, title=d.title,
-         summary={"due_at": d.due_at, "state": alert.state, "assignee": d.assignee, **d.detail},
-         link=d.link, payload={"state": alert.state, "due_at": d.due_at,
-                               "recipient": alert.recipient, "recipient_kind": alert.recipient_kind},
-         world=world)
+    return emit(event, record_type=d.record_type, record_id=d.record_id, title=d.title,
+                summary={"due_at": d.due_at, "state": alert.state, "assignee": d.assignee, **d.detail},
+                link=d.link, payload={"state": alert.state, "due_at": d.due_at,
+                                      "recipient": alert.recipient, "recipient_kind": alert.recipient_kind},
+                world=world)
 
 
 # --------------------------------------------------------------- run cycle
@@ -550,8 +614,8 @@ def run_cycle(
     if world is None:
         from .world_model import open_world
         world = open_world()
-    summary: dict[str, Any] = {"evaluated": 0, "sent": 0, "held_quiet": 0,
-                               "already_sent": 0, "alerts": [], "enabled": cfg["enabled"]}
+    summary: dict[str, Any] = {"evaluated": 0, "sent": 0, "held_quiet": 0, "already_sent": 0,
+                               "not_sent": 0, "unconfirmed": 0, "alerts": [], "enabled": cfg["enabled"]}
     if not cfg["enabled"]:
         return summary
     quiet = in_quiet_hours(current, cfg, localtime=localtime)
@@ -570,12 +634,30 @@ def run_cycle(
     else:
         for alert in pending:
             title, body = message_for(alert, current, localtime=localtime)
-            fired = deliver(title, body, urgent=alert.urgent, recipient=alert.recipient, notify=notify)
-            summary["alerts"].append(_record_sent(world, alert, body, sent_at=current,
-                                                  backends=fired, mode="immediate"))
-            summary["sent"] += 1
-            _emit_webhook(alert, world)
+            outcome = deliver(title, body, urgent=alert.urgent, recipient=alert.recipient, notify=notify)
+            _settle(world, alert, body, outcome, current, "immediate", summary)
     return summary
+
+
+def _settle(world, alert: Alert, message: str, outcome: Delivery | int, current: float, mode: str,
+            summary: dict[str, Any]) -> None:
+    """Record an accepted or uncertain send; leave a definite failure to retry.
+
+    Subscribed webhooks are a channel too: a started webhook delivery accepts
+    the alert, so a webhook-only workspace is alerted once, not every cycle.
+    """
+    if not isinstance(outcome, Delivery):  # a plain count of accepting backends
+        outcome = Delivery(max(int(outcome or 0), 0))
+    hooks = int(_emit_webhook(alert, world) or 0)
+    outcome = Delivery(outcome.accepted + max(hooks, 0), outcome.uncertain)
+    if outcome.status == "not_sent":
+        summary["not_sent"] += 1
+        log.warning("deadline_alerts: %s %s alert was not sent; it will be retried",
+                    alert.deadline.record_type, alert.state)
+        return
+    summary["alerts"].append(_record_sent(world, alert, message, sent_at=current, backends=outcome.accepted,
+                                          mode=mode, unconfirmed=outcome.status == "unconfirmed"))
+    summary["sent" if outcome.status == "accepted" else "unconfirmed"] += 1
 
 
 def _send_digest(pending, current, cfg, world, notify, localtime, summary) -> None:
@@ -586,16 +668,14 @@ def _send_digest(pending, current, cfg, world, notify, localtime, summary) -> No
         lines = [message_for(a, current, localtime=localtime)[1] for a in alerts]
         body = f"{len(alerts)} deadline(s) need attention. For: {recipient}.\n" + "\n".join(f"- {ln}" for ln in lines)
         urgent = any(a.urgent for a in alerts)
-        fired = deliver(f"Deadlines for {recipient}", body, urgent=urgent, recipient=recipient, notify=notify)
+        outcome = deliver(f"Deadlines for {recipient}", body, urgent=urgent, recipient=recipient, notify=notify)
         for alert in alerts:
-            summary["alerts"].append(_record_sent(world, alert, message_for(alert, current, localtime=localtime)[1],
-                                                  sent_at=current, backends=fired, mode="digest"))
-            summary["sent"] += 1
-            _emit_webhook(alert, world)
+            _settle(world, alert, message_for(alert, current, localtime=localtime)[1], outcome, current,
+                    "digest", summary)
 
 
 __all__ = [
-    "Alert", "Deadline", "RECORD_LABELS", "alerts_for", "collect", "current_state",
+    "Alert", "Deadline", "Delivery", "RECORD_LABELS", "alerts_for", "collect", "current_state",
     "deliver", "evaluate", "in_quiet_hours", "message_for", "recent_alerts",
     "recipient_for", "run_cycle", "settings",
 ]
