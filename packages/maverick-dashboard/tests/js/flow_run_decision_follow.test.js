@@ -49,6 +49,10 @@ async function mount(runs, post, { stream = false, refresh = null } = {}) {
     if (url === "/api/v1/flows/orders") return reply(200, {
       id: "orders", name: "Orders", start: "gate", nodes: [{ id: "gate", kind: "approval" }] });
     if (url === "/api/v1/flows/runs/run-42") return reply(200, runs[Math.min(reads++, runs.length - 1)]);
+    // The run page reads its saved inputs and data as bounded, versioned pages.
+    if (url.startsWith("/api/v1/flows/runs/run-42/values?")) return new Response(JSON.stringify({
+      version: "d".repeat(64), context: "e".repeat(64), kind: "object", children: [], total: 0, remaining: 0, next: null }),
+      { headers: { "Content-Type": "application/json" } });
     return reply(404, {});
   };
   dom.window.mvConfirm = async () => true;
