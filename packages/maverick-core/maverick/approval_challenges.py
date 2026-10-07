@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import marshal
 import os
 import secrets
 import sqlite3
@@ -175,12 +174,24 @@ def adapter_version():
     functions = (approval_review_identity, channel_vote_review, require_locked_vote_review, decide_from_channel, record_vote,
                  WorldModel.decide_approval_audited, WorldModel.claim_approval, WorldModel.undo_approval_decision,
                  WorldModel.mark_approval_audit_delivered)
+    def constant(item):
+        if isinstance(item, types.CodeType):
+            return code_version(item)
+        if isinstance(item, (tuple, list)):
+            return [type(item).__name__, [constant(part) for part in item]]
+        if isinstance(item, (set, frozenset)):
+            return [type(item).__name__, sorted(json.dumps(constant(part)) for part in item)]
+        return [type(item).__name__, repr(item)]
+
     def code_version(code):
-        # Installation paths are not executable behavior. Normalize them for
-        # the child interpreter's absolute module search path.
-        code = code.replace(co_filename="native-approval-adapter", co_consts=tuple(
-            code_version(item) if isinstance(item, types.CodeType) else item for item in code.co_consts))
-        return code
+        # The executable behavior of a code object, field by field. Never
+        # marshal: its output also records how many references each constant
+        # has in this process, so merely importing an unrelated module changed
+        # the version. Installation paths (co_filename) are not behavior.
+        return [code.co_code.hex(), code.co_argcount, code.co_posonlyargcount, code.co_kwonlyargcount,
+                code.co_flags, code.co_name, getattr(code, "co_qualname", code.co_name), list(code.co_names),
+                list(code.co_varnames), list(code.co_freevars), list(code.co_cellvars),
+                getattr(code, "co_exceptiontable", b"").hex(), [constant(item) for item in code.co_consts]]
     # Bind whole files as well as loaded entry-point bodies: a helper, constant
     # or closed receiver change must invalidate a saved result. This declared
     # local adapter scope does not include customer settings or other products.
@@ -199,7 +210,7 @@ def adapter_version():
         if len(data) > 2 * 1024 * 1024 or total > 8 * 1024 * 1024:
             raise ValueError("The local software version could not be checked within its limit. No current safeguard result is confirmed.")
         files.append([name, hashlib.sha256(data).hexdigest()])
-    return _sha([sys.version, sqlite3.sqlite_version, files, [hashlib.sha256(marshal.dumps(code_version(function.__code__))).hexdigest() for function in functions]])
+    return _sha([sys.version, sqlite3.sqlite_version, files, [_sha(code_version(function.__code__)) for function in functions]])
 
 
 def check_native(value):
