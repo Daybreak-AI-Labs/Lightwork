@@ -10,6 +10,8 @@ const read = (name) => fs.readFileSync(path.resolve(__dirname, "../../maverick_d
 const jobs = read("lightwork-ops-jobs.js");
 const learning = read("lightwork-learning-ops.js");
 const learned = read("lightwork-learned-ops.js");
+const flywheel = read("lightwork-learning-flywheel.js");
+const holdout = read("lightwork-learning-holdout-setup.js");
 const templates = path.resolve(__dirname, "../../maverick_dashboard/templates/");
 
 // The partials' own markup, with the Jinja admin blocks kept (the page is
@@ -22,6 +24,12 @@ function partial(name) {
     .replace(/<script[\s\S]*?<\/script>/g, "");
 }
 
+const CONTEXT = "c".repeat(64);
+const OPERATION = "0123456789abcdef0123456789abcdef";  // pragma: allowlist secret
+const CYCLE = { context: CONTEXT, operation: OPERATION, recorded: true, confirmed: true,
+  message: "The original cycle task is recorded. Read its current progress; nothing was repeated.",
+  result: { message: "Looked at 12 tasks.", counts: { avoid: 1, habits: 1, ideas: 1 },
+    stores: [{ Information: "Safeguards", "Recorded state": "Saved", Items: 1 }] } };
 const JOB = (result) => ({ job: { id: "0123456789abcdef", state: "done", can_stop: false, result } });  // pragma: allowlist secret
 
 function defaults() {
@@ -39,8 +47,13 @@ function defaults() {
       token_codes: { codes: 0, on: false }, exact_count_available: false },
     "/api/v1/learning-ops/donations": { sharing: true, with_text: false, waiting: 2, sizes: [10, 12], can_clear: true },
     "/api/v1/learning-ops/jobs": { jobs: [{ id: "a", label: "Training the reward model", state: "done", started_at: 1700000000 }] },
-    "/api/v1/learning-ops/flywheel/turn": JOB({ acted: true, tasks: 12, avoid: ["send_unchecked"], habits: ["check_totals"],
-      ideas: [{ instead_of: "retry", try: "ask the owner" }], counts: { avoid: 1, habits: 1, ideas: 1 } }),
+    // The improvement cycle: current work, a full review, then the reviewed start.
+    "/api/v1/learning-ops/flywheel": { context: CONTEXT, revision: "rev-1", ready: true, tasks: 12, requests: [] },
+    "/api/v1/learning-ops/flywheel/review": { context: CONTEXT, operation: OPERATION, token: "sealed:cycle",
+      rows: [{ label: "Currently permitted recorded work", after: "12 recorded runs" },
+        { label: "Cost", after: "No AI provider calls or charges." }] },
+    "/api/v1/learning-ops/flywheel/turn": CYCLE,
+    ["/api/v1/learning-ops/flywheel/original/" + OPERATION]: CYCLE,
     "/api/v1/learning-ops/factory/preview": { corrections: [{ guidance: "Add a deny list.", seen_in: 3, area: "provisioning" }] },
     "/api/v1/learning-ops/self-modify/run": JOB({ ran: false, tested: 0, spent: 0, rounds: [], problem: "Turn this experiment on first." }),
     "/api/v1/learning-ops/donations/clear": { cleared: 2 },
@@ -50,8 +63,20 @@ function defaults() {
       places: { test_cases: "All settings, Memory & learning, Self-improving instructions, “Test cases for improvements”",
         hold_out: "All settings, Memory & learning, Self-improving instructions, “Record of unseen-case checks”",
         self_coaching: "“Self-harness” under Learning systems on the Learning page" } },
-    "/api/v1/learning-ops/self-harness/clash-check": JOB({ pairs: [{ model: "claude-x", first: "cite", second: "never cite" }], spent: 0.02 }),
-    "/api/v1/learning-ops/self-harness/hold-out/set-up": { created: true, record_number: "ledger-42" },
+    // The meaning check: current originals, a full review, then the reviewed start.
+    "/api/v1/learning-ops/self-harness/clash-check": (method) => method === "GET"
+      ? { context: CONTEXT, requests: [], notice: "Original checks are kept for your account." }
+      : { context: CONTEXT, operation: OPERATION, state: "done", message: "Original result read.", notice: "Judgments may be wrong.",
+        checked: 1, unknown: 0, flagged: 1, wording_flags: 0, spent: 0.02,
+        pairs: [{ area: "Claude X", first: "cite", second: "never cite", basis: "These ask for opposite things." }] },
+    "/api/v1/learning-ops/self-harness/clash-check/review": { context: CONTEXT, operation: OPERATION, token: "sealed:check",
+      changes: [{ label: "Lessons to compare", after: ["cite", "never cite"] }, { label: "Spending limit", after: "$5.00" }] },
+    // The one-time hold-out record (its own reviewed setup).
+    "/api/v1/learning-holdout-setup": { context: CONTEXT, revision: "rev-h", configured: true, ready: false,
+      message: "The record location is chosen. Initialize the record once." },
+    "/api/v1/learning-holdout-setup/review": { context: CONTEXT, operation: OPERATION, token: "sealed:holdout",
+      changes: [{ label: "Change", after: "Initialize the hold-out record once; it is never replaced." }] },
+    "/api/v1/learning-holdout-setup/save": { context: CONTEXT, operation: OPERATION, message: "The record was initialized.", current: "Ready." },
     "/api/v1/learning-ops/self-harness/test-cases/import/preview": { replace: false, added: 1, total_now: 1, total_after: 2,
       keys: [{ key: "claude-x", label: "Claude X", now: 1, after: 2 }] },
     "/api/v1/learning-ops/self-harness/test-cases/import": { cases: 1, replaced: false },
@@ -75,7 +100,8 @@ async function fixture(markup, scripts, { answers = {}, confirm = true } = {}) {
     let body = init.body;
     if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { /* raw */ } }
     calls.push({ url, method, body });
-    const answer = table[url.split("?")[0]];
+    let answer = table[url.split("?")[0]];
+    if (typeof answer === "function") answer = answer(method, body);
     const status = answer && answer.__status ? answer.__status : (answer ? 200 : 404);
     return new Response(JSON.stringify(answer || { detail: "Missing." }), { status, headers: { "Content-Type": "application/json" } });
   };
@@ -103,14 +129,28 @@ test("learning page loads each system's status in plain words", async (t) => {
   assert.equal(ui.doc.getElementById("lo-cd-exact").options.length, 1, "no exact count offered when not allowed");
 });
 
-test("turning the flywheel asks, runs a job and lists what was learned", async (t) => {
-  const ui = await fixture(LEARNING(), [learning]);
+test("an improvement cycle is reviewed in full, started once and its outcome read back", async (t) => {
+  const ui = await fixture(LEARNING(), [learning, flywheel]);
   t.after(() => ui.window.close());
-  ui.doc.getElementById("lo-fw-run").click();
+  const $ = (id) => ui.doc.getElementById(id);
+  assert.match($("lo-fw-status").textContent, /12 permitted recorded runs/);
+  $("lo-fw-run").click();
   await ui.settle();
-  assert.match(ui.calls.find((c) => c.confirm).confirm, /whole installation/);
-  assert.match(ui.doc.getElementById("lo-fw-out").textContent, /Looked at 12 tasks/);
-  assert.match(ui.doc.getElementById("lo-fw-out").textContent, /Instead of “retry”, try “ask the owner”/);
+  assert.equal($("lo-fw-review").hidden, false);
+  assert.match($("lo-fw-review-rows").textContent, /Currently permitted recorded work.*12 recorded runs/s);
+  assert.equal($("lo-fw-apply").disabled, true, "nothing starts before the review is ticked");
+  assert.equal(ui.calls.filter((c) => c.url.endsWith("/flywheel/turn")).length, 0);
+  $("lo-fw-reviewed").checked = true;
+  $("lo-fw-reviewed").dispatchEvent(new ui.window.Event("change"));
+  $("lo-fw-apply").click();
+  await ui.settle();
+  const turns = ui.calls.filter((c) => c.url.endsWith("/flywheel/turn"));
+  assert.equal(turns.length, 1);
+  assert.deepEqual(turns[0].body, { token: "sealed:cycle", confirmed: true });
+  assert.match($("lo-fw-out").textContent, /Looked at 12 tasks/);
+  assert.match($("lo-fw-out").textContent, /1 safeguards, 1 habits and 1 suggestions/);
+  assert.match($("lo-fw-out").textContent, /never repeats the cycle/);
+  assert.ok(ui.calls.some((c) => c.url.endsWith("/flywheel/original/" + OPERATION)), "the original is read back");
 });
 
 test("practice rounds show the spending limit in the confirmation and the kernel's refusal", async (t) => {
@@ -152,18 +192,26 @@ test("the agent-building preview lists guidance in a table", async (t) => {
   assert.match(ui.doc.getElementById("lo-fa-out").textContent, /Add a deny list\.3 agents/);
 });
 
-test("learned page tools: clash check, hold-out set-up and a previewed import", async (t) => {
+test("learned page tools: a reviewed meaning check and a previewed import", async (t) => {
   const ui = await fixture(LEARNED(), [learned]);
   t.after(() => ui.window.close());
   assert.equal(ui.doc.getElementById("lpo-transfer-source").options.length, 2);
   ui.doc.getElementById("lpo-clash-run").click();
   await ui.settle();
-  assert.match(ui.doc.getElementById("lpo-clash-out").textContent, /1 pair of lessons may contradict/);
-
-  ui.doc.querySelector("#lpo-holdout button").click();
+  const review = ui.doc.getElementById("lpo-clash-review");
+  assert.match(review.textContent, /Review this exact meaning check.*never cite.*Spending limit\$5\.00/s);
+  const start = Array.from(review.querySelectorAll("button")).find((b) => /Start reviewed meaning check/.test(b.textContent));
+  assert.equal(start.disabled, true, "no AI call before the review is ticked");
+  const tick = review.querySelector('input[type="checkbox"]');
+  tick.checked = true;
+  tick.dispatchEvent(new ui.window.Event("change"));
+  start.click();
   await ui.settle();
-  assert.match(ui.calls.filter((c) => c.confirm).pop().confirm, /can only be done once/);
-  assert.match(ui.doc.getElementById("lpo-holdout").textContent, /ledger-42/);
+  const started = ui.calls.filter((c) => c.method === "POST" && c.url === "/api/v1/learning-ops/self-harness/clash-check");
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].body, { context: CONTEXT, token: "sealed:check", confirmed: true });
+  assert.match(ui.doc.getElementById("lpo-clash-out").textContent, /1 possible conflicts flagged by AI/);
+  assert.match(ui.doc.getElementById("lpo-clash-out").textContent, /These ask for opposite things\./);
 
   const input = ui.doc.getElementById("lpo-import-file");
   const file = new ui.window.File(['{"claude-x": []}'], "cases.json", { type: "application/json" });
@@ -185,8 +233,32 @@ test("the learned page names the exact setting to fill in first", async (t) => {
     { test_cases_set_up: false, hold_out: { set_up: false, exists: false } }) };
   const ui = await fixture(LEARNED(), [learned], { answers });
   t.after(() => ui.window.close());
+  // Test cases are set up in the Self-coaching questions section on this page.
   assert.match(ui.doc.getElementById("lpo-plan").textContent,
-    /choose where to keep them in All settings, Memory & learning, Self-improving instructions, “Test cases for improvements”/);
-  assert.match(ui.doc.getElementById("lpo-holdout").textContent, /“Record of unseen-case checks”/);
-  assert.equal(ui.doc.querySelector("#lpo-holdout a").getAttribute("href"), "/settings/all");
+    /Test cases are not set up yet\. Use Self-coaching questions below to choose Lightwork’s managed location\./);
+  const raw = (name) => fs.readFileSync(path.join(templates, name), "utf8");
+  assert.match(raw("_learned_ops.html"), /\{% include "_learning_test_cases\.html" %\}/);
+  assert.match(raw("_learning_test_cases.html"), /<h3 id="learning-case-title">Self-coaching questions<\/h3>/);
+});
+
+test("the hold-out record is initialized once, only after its review is ticked", async (t) => {
+  const ui = await fixture(partial("_learning_holdout_setup.html"), [holdout]);
+  t.after(() => ui.window.close());
+  const $ = (id) => ui.doc.getElementById("learning-holdout-" + id);
+  assert.match($("status").textContent, /Initialize the record once/);
+  assert.equal($("initialize").hidden, false);
+  $("initialize").click();
+  await ui.settle();
+  assert.match($("review").textContent, /Review one-time initialization.*never replaced/s);
+  const apply = Array.from($("review").querySelectorAll("button")).find((b) => /Initialize reviewed record/.test(b.textContent));
+  assert.equal(apply.disabled, true);
+  const tick = $("review").querySelector('input[type="checkbox"]');
+  tick.checked = true;
+  tick.dispatchEvent(new ui.window.Event("change"));
+  apply.click();
+  await ui.settle();
+  const saves = ui.calls.filter((c) => c.url === "/api/v1/learning-holdout-setup/save");
+  assert.equal(saves.length, 1);
+  assert.deepEqual(saves[0].body, { token: "sealed:holdout", confirmed: true });
+  assert.match($("result").textContent, /The record was initialized\./);
 });
