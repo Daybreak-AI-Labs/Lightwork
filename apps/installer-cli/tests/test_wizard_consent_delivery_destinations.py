@@ -80,4 +80,5 @@ def test_wizard_keeps_named_adapters_absent_without_explicit_opt_in(
     monkeypatch.setattr(wizard, "_q_text", lambda _prompt, *, default="": default)
 
     selected = wizard.pick_assessments()
-    assert selected["consent_preferences"]["delivery"] == {"enable": True}
+    # Automatic delivery stays off unless separately chosen; no destination.
+    assert selected["consent_preferences"]["delivery"] == {"enable": True, "worker": {"enable": False}}

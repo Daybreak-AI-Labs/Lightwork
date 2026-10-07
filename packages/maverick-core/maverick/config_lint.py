@@ -928,7 +928,12 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
         "retry_base_seconds",
         "retry_max_seconds",
         "destinations",
+        "worker",
     },
+    # Automatic delivery for separately reviewed subscriptions; read by the
+    # dashboard (consent_delivery_managed_api.worker_enabled), which refuses
+    # any other key.
+    ("consent_preferences", "delivery", "worker"): {"enable"},
     ("consent_preferences", "delivery", "destinations"): {
         "enable",
         "enabled_providers",
@@ -1374,6 +1379,7 @@ _NESTED_BOOL_KEYS: dict[tuple[str, ...], set[str]] = {
     },
     ("consent_preferences", "identity"): {"enable"},
     ("consent_preferences", "delivery"): {"enable"},
+    ("consent_preferences", "delivery", "worker"): {"enable"},
     ("consent_preferences", "delivery", "destinations"): {"enable"},
     ("consent_preferences", "analytics"): {"enable"},
     ("consent_preferences", "experiments"): {"enable"},

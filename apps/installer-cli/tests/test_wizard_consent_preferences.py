@@ -82,7 +82,7 @@ def test_pick_assessments_can_enable_consent_preferences(monkeypatch):
             "tcf": False,
             "google_consent_mode": False,
         },
-        "delivery": {"enable": True},
+        "delivery": {"enable": True, "worker": {"enable": False}},
         "analytics": {"enable": True},
         "experiments": {"enable": True},
         "profile_data": {
