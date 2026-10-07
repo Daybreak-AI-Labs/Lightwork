@@ -66,7 +66,7 @@ test('stored names render as text and destination is rebuilt from typed filters'
 test('task page restores typed URL filters and binds real filter selection to Copilot',async()=>{
   const template=fs.readFileSync(path.join(base,'templates/goals.html'),'utf8');
   const script=template.slice(template.indexOf('<script>')+8,template.indexOf('</script>'));
-  const dom=new JSDOM('<input id="run-search-q"><div id="run-list"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div></div><p id="run-search-status"></p><button id="run-search-retry"></button><button data-g-filter=""></button><button data-g-filter="failed"></button>',
+  const dom=new JSDOM('<input id="run-search-q"><div id="run-list"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div></div><p id="run-search-status"></p><button id="run-search-retry"></button><button id="run-search-older" hidden></button><button id="run-more" data-next-offset="" hidden></button><button data-g-filter=""></button><button data-g-filter="failed"></button>',
     {url:'https://local.test/goals?status=failed',runScripts:'outside-only'});
   const w=dom.window,selections=[];w.document.addEventListener('lightwork:copilot-selection',event=>selections.push(event.detail.selection));w.eval(script);
   assert.equal(w.document.querySelector('[data-status="done"]').hidden,true);
@@ -78,7 +78,7 @@ test('task page restores typed URL filters and binds real filter selection to Co
 test('choosing a filter or typing a search updates the address without adding history',async()=>{
   const template=fs.readFileSync(path.join(base,'templates/goals.html'),'utf8');
   const script=template.slice(template.indexOf('<script>')+8,template.indexOf('</script>'));
-  const dom=new JSDOM('<input id="run-search-q"><div id="run-list"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div></div><p id="run-search-status"></p><button id="run-search-retry"></button><button data-g-filter=""></button><button data-g-filter="failed"></button><button data-g-filter="done"></button>',
+  const dom=new JSDOM('<input id="run-search-q"><div id="run-list"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div></div><p id="run-search-status"></p><button id="run-search-retry"></button><button id="run-search-older" hidden></button><button id="run-more" data-next-offset="" hidden></button><button data-g-filter=""></button><button data-g-filter="failed"></button><button data-g-filter="done"></button>',
     {url:'https://local.test/goals?status=done&view=mine#top',runScripts:'outside-only'});
   const w=dom.window,d=w.document;w.fetch=async()=>({ok:true,status:200,json:async()=>[]});w.eval(script);
   const before=w.history.length;

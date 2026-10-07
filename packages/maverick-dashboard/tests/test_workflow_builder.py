@@ -629,12 +629,27 @@ def test_draft_from_file_form_playbook(monkeypatch, tmp_path):
     assert "ap invoice" in captured["src"].lower()
 
 
+def _specialist_decision(client, name, action, **fields):
+    """Review one complete specialist-draft decision, then confirm it."""
+    context = client.get("/api/v1/specialist-drafts", params={"name": name})
+    assert context.status_code == 200, context.text
+    review = client.post("/api/v1/specialist-drafts/review", json={
+        "name": name, "action": action, "context": context.json()["context"], **fields})
+    if review.status_code != 200:
+        return review
+    return client.post("/api/v1/specialist-drafts/apply",
+                       json={"token": review.json()["token"], "confirmed": True})
+
+
 def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
-    """The playbook form persists through the existing /agents/<name>/override
-    path: a new pack, discoverable, with its gated workflow intact."""
+    """The playbook form persists through the reviewed draft path: a saved
+    draft changes nothing, and publishing it makes a new, discoverable pack
+    with its gated workflow intact. The old direct override write is closed."""
     _isolate(monkeypatch, tmp_path)
-    # Saving accepts only actions this installation can run.
-    r = _client().post("/api/v1/agents/ap-bot/override", json={
+    from maverick.domain import available_domains
+
+    client = _client()
+    entered = {
         "description": "AP clerk", "persona": "You are a careful AP clerk.",
         "allow_tools": ["ocr", "global_payments"], "deny_tools": ["shell"],
         "max_risk": "high",
@@ -642,21 +657,34 @@ def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
             {"name": "Read", "instruction": "ocr", "tools": ["ocr"], "gate": None},
             {"name": "Pay", "instruction": "pay", "tools": ["global_payments"], "gate": "approval"},
         ],
-    })
-    assert r.status_code == 200, r.text
-    from maverick.domain import available_domains
+    }
+    direct = client.post("/api/v1/agents/ap-bot/override", json=entered)
+    assert direct.status_code == 409 and "ap-bot" not in available_domains()
+    # Saving accepts only actions this installation can run.
+    saved = _specialist_decision(client, "ap-bot", "save", entered=entered)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["confirmed"] is True and "ap-bot" not in available_domains()
+    # A new agent has no active definition yet; the editor then names the
+    # draft by its original operation, exactly as Workflow Builder does.
+    draft = saved.json().get("draft") or "SPD-" + saved.json()["operation"]
+    published = _specialist_decision(client, "ap-bot", "publish", selected=draft,
+                                     reason="New agent from the workflow builder")
+    assert published.status_code == 200, published.text
+    assert published.json()["confirmed"] is True
     prof = available_domains()["ap-bot"]
     assert [(s.name, s.gate) for s in prof.workflow] == [("Read", None), ("Pay", "approval")]
     assert prof.allow_tools == ["ocr", "global_payments"]
-    unknown = _client().post("/api/v1/agents/ap-bot-2/override", json={
-        "description": "AP clerk", "allow_tools": ["send_payment"], "max_risk": "low"})
+    # The draft is linted first, so the risk ceiling admits the action and the
+    # refusal is about availability alone.
+    unknown = _specialist_decision(client, "ap-bot-2", "save", entered={
+        "description": "AP clerk", "allow_tools": ["send_payment"], "max_risk": "high"})
     assert unknown.status_code == 422 and "not available in this installation" in unknown.text
 
 
 def test_save_playbook_rejects_lint_failure(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    # An empty allowlist grants ALL tools -> lint error -> write refused (422).
-    r = _client().post("/api/v1/agents/loose-bot/override", json={
+    # An empty allowlist grants ALL tools -> lint error -> draft refused (422).
+    r = _specialist_decision(_client(), "loose-bot", "save", entered={
         "description": "x", "allow_tools": [], "max_risk": "low",
         "workflow": [{"name": "go"}],
     })

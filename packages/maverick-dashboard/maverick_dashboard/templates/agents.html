@@ -536,7 +536,7 @@
       {% if editable %}
       <section class="panel" id="specialist-drafts" data-specialist-drafts aria-labelledby="specialist-drafts-title" style="margin-top: var(--space-4);">
         <h3 id="specialist-drafts-title">Preview, try and publish</h3>
-        <p>Keep a draft before changing the specialist people use. Preview shows every entered setting together with the other settings being preserved.</p>
+        <p>Keep a draft before changing the {{ kind_word }} people use. Preview shows every entered setting together with the other settings being preserved.</p>
         <p>Answer checks send the draft instructions and fictional questions to your configured AI service. They use no tools, files, company knowledge or shared learning. A plausible answer does not prove connected actions work.</p>
         <label for="sd-title">Draft name (optional)</label><input class="input" id="sd-title" data-sd-title maxlength="120" placeholder="For example, Clearer invoice follow-up">
         <div class="af-actions" style="margin-block: var(--space-3);">
@@ -551,7 +551,7 @@
         <p class="muted">One shared check allowance: at most $0.25, 10,000 input tokens, 640 output tokens and two minutes. A stopped or partial run does not count as a complete passing check.</p>
         <p><a href="/workforce{% if selected %}?specialist={{ selected.name | urlencode }}{% endif %}#wo-my-tests">Add or edit saved answer questions in Workforce</a></p>
         <label for="sd-draft">Saved draft</label><select class="input" id="sd-draft" data-sd-draft><option value="">Choose…</option></select>
-        <div class="af-actions" style="margin-block: var(--space-3);"><button class="btn" type="button" data-sd-action="load">Load draft into editor</button><button class="btn btn--primary" type="button" data-sd-action="publish">Review Publish</button></div>
+        <div class="af-actions" style="margin-block: var(--space-3);"><button class="btn" type="button" data-sd-action="load">Load draft into editor</button><button class="btn" type="button" data-sd-action="publish">Review Publish</button></div>
         <label for="sd-earlier">Earlier definition</label><select class="input" id="sd-earlier" data-sd-earlier><option value="">Choose…</option></select>
         <button class="btn" type="button" data-sd-action="restore" style="margin-block: var(--space-3);">Review Restore</button>
         <label for="sd-reason">Reason for proceeding without a complete passing check (optional)</label><textarea class="input" id="sd-reason" data-sd-reason rows="2" maxlength="300"></textarea>

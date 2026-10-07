@@ -82,9 +82,14 @@ def test_qa_065_generated_property_condition_and_approval_controls_are_named() -
     assert "l.id = labelId" in generic_field
     assert "inputEl.setAttribute('aria-labelledby', labelId)" in generic_field
     assert "l.htmlFor = inputEl.id" in generic_field
-    assert "keySel.setAttribute('aria-label', label + ': information to check')" in condition
-    assert "opSel.setAttribute('aria-label', label + ': comparison')" in condition
-    assert "valIn.setAttribute('aria-label', label + ': value')" in condition
+    # Each question in each condition group names its own controls.
+    assert "var name = label + ', group ' + (groupIndex + 1) + ', question ' + (questionIndex + 1);" in condition
+    assert "match.setAttribute('aria-label', label + ': which questions must match')" in condition
+    assert "keySel.setAttribute('aria-label', name + ': information to check')" in condition
+    assert "opSel.setAttribute('aria-label', name + ': comparison')" in condition
+    assert "kindSel.setAttribute('aria-label', name + ': value type')" in condition
+    assert "valueInput.setAttribute('aria-label', name + ': value')" in condition
+    assert "remove.setAttribute('aria-label', name + ': remove question')" in condition
     assert "lb.setAttribute('aria-label', 'Approver question ' + (fi + 1))" in approval
     assert "ci0.setAttribute('aria-label', 'Extra answer ' + (ci + 1))" in approval
 

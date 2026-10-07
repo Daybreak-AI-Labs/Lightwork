@@ -179,12 +179,13 @@ def test_facts_page_renders(tmp_path, monkeypatch):
 
 def test_shell_assets_are_fingerprinted_and_long_cached(tmp_path, monkeypatch):
     """W3-77: the shell CSS/JS links carry a content hash and the versioned
-    URL is cached for a year; unversioned or stale requests keep the short
-    cache so an upgrade can never pin an old bundle."""
+    URL is cached for a year; unversioned or stale requests revalidate
+    (``no-cache`` plus a content ETag) so an upgrade can never pin an old
+    bundle."""
     import re
 
     from maverick import world_model
-    from maverick_dashboard.app import STATIC_IMMUTABLE_CACHE, STATIC_SHORT_CACHE, static_version
+    from maverick_dashboard.app import STATIC_IMMUTABLE_CACHE, static_version
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     page = client.get("/overview").text
@@ -198,10 +199,14 @@ def test_shell_assets_are_fingerprinted_and_long_cached(tmp_path, monkeypatch):
     versioned = client.get(f"/static/lightwork.css?v={static_version('lightwork.css')}")
     assert versioned.status_code == 200
     assert versioned.headers["cache-control"] == STATIC_IMMUTABLE_CACHE
+    etag = f'W/"{static_version("lightwork.css")}"'
     plain = client.get("/static/lightwork.css")
-    assert plain.headers["cache-control"] == STATIC_SHORT_CACHE
+    assert plain.headers["cache-control"] == "public, no-cache"
+    assert plain.headers["etag"] == etag
     stale = client.get("/static/lightwork.css?v=00000000")
-    assert stale.headers["cache-control"] == STATIC_SHORT_CACHE
+    assert stale.headers["cache-control"] == "public, no-cache"
+    revalidated = client.get("/static/lightwork.css", headers={"If-None-Match": etag})
+    assert revalidated.status_code == 304
     assert static_version("does-not-exist.js") == ""
 
 

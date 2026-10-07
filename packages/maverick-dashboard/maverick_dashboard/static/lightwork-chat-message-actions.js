@@ -13,7 +13,7 @@
   original.hidden = !pending;
   if (pending) root.hidden = false;
   function node(tag, text) { var item = document.createElement(tag); item.textContent = text; return item; }
-  function say(text) { status.textContent = text; }
+  function say(text) { window.mvStatus(status, text); }
   function invalidate() { plan = null; review.replaceChildren(); review.hidden = true; }
   function clear() {
     current = false; generation += 1; controllers.forEach(function (item) { item.abort(); }); controllers.clear();

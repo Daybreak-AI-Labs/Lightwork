@@ -30,7 +30,8 @@ FOLDED = (
 NEWLY_GOVERNED = ("/security/report", "/security/assurance")
 # Screens with their own routes that the registry now governs (they were
 # missing from the finder). The first four also need a named account.
-NAMED_ACCOUNT_SCREENS = ("/notifications", "/access-requests", "/devices", "/get-started/employee")
+NAMED_ACCOUNT_SCREENS = ("/notifications", "/access-requests", "/devices", "/get-started/employee",
+                         "/human-conversations")
 OPEN_SCREENS = ("/help", "/budget", "/my-work", "/conversations", "/cost-reconciliation",
                 "/project-workspaces", "/provider-spending")
 

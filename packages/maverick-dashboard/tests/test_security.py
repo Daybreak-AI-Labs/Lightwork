@@ -381,14 +381,16 @@ def test_security_headers_present_on_every_response(monkeypatch, tmp_path):
 
 
 def test_static_assets_keep_explicit_caching(monkeypatch, tmp_path):
-    # setdefault("Cache-Control", "no-store") must not clobber the long-lived
-    # caching the static-asset routes set for themselves.
+    # setdefault("Cache-Control", "no-store") must not clobber the public
+    # caching the static-asset routes set for themselves. An unversioned
+    # controller URL is cacheable but revalidated against its content ETag.
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     resp = _client().get("/static/lightwork.css")
     assert resp.status_code == 200
-    assert "max-age" in resp.headers["Cache-Control"]
+    assert resp.headers["Cache-Control"] == "public, no-cache"
+    assert resp.headers["ETag"]
     assert "no-store" not in resp.headers["Cache-Control"]
 
 

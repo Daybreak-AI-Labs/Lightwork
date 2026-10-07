@@ -80,6 +80,23 @@ _KEPT_WRAPPERS = {
     ("lightwork-answer-panel.js", "request"),
     ("lightwork-compliance-questionnaire-builder.js", "call"),
     ("lightwork-privacy-notice-proposals.js", "call"),
+    # From the owner's reviewed-decision pages on #2529 (human conversations,
+    # Knowledge sources, the learning cycle, specialist drafts, vendor
+    # profiles): each checks that the view it asked for is still current
+    # between the reply and its body, clears private state on lost access
+    # before reading any detail, and otherwise shows the server's own sentence
+    # with its own wording for an unconfirmed reply, so a lost answer is read
+    # from its original instead of being retried.
+    ("lightwork-human-conversation-handoffs.js", "request"),
+    ("lightwork-knowledge-sources.js", "request"),
+    ("lightwork-learning-flywheel.js", "request"),
+    ("lightwork-specialist-drafts.js", "fetchCurrent"),
+    ("lightwork-specialist-drafts.js", "historyGet"),
+    ("lightwork-specialist-drafts.js", "request"),
+    ("lightwork-vendor-profile.js", "request"),
+    # Loaded by both shells and tested on its own without lightwork-ui.js; it
+    # tells a refusal from a blocked request in its own words.
+    ("lightwork-pins.js", "change"),
 }
 
 # Status-line setters that still write the text themselves, each named with
@@ -106,6 +123,7 @@ _KEPT_SETTERS = {
     ("lightwork-plugins.js", "setStatus"),
     ("lightwork-vendor-onboarding.js", "show"),
     ("privacy_notice_governance.html", "say"),
+    ("lightwork-company-signin-migration.js", "say"),
     # A note inside one settings row; the page announces through its own region.
     ("lightwork-settings-all.js", "say"),
     # Pages served without the dashboard shell (no lightwork-ui.js).

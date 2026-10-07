@@ -107,7 +107,7 @@ def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(
     # Like the companions, these screens' routes need a named account the local
     # owner does not have, so the finder withholds them.
     unavailable = {"/companion", "/companion/admin", "/notifications", "/access-requests",
-                   "/devices", "/get-started/employee"}
+                   "/devices", "/get-started/employee", "/human-conversations"}
 
     markup = _overview_markup(monkeypatch, tmp_path)
 

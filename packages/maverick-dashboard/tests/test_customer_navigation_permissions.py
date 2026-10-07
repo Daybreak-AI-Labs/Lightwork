@@ -394,7 +394,7 @@ def test_security_operators_do_not_request_installation_switches(
         response = client.get("/security")
         assert response.status_code == 200
         assert ('id="sec-hunters"' in response.text) is can_manage
-        assert ("fetch('/api/v1/features/switches')" in response.text) is can_manage
+        assert ("mvFetchJSON('/api/v1/features/switches'" in response.text) is can_manage
         if not can_manage:
             assert "An administrator turns threat hunting on or off." in response.text
     finally:

@@ -596,7 +596,6 @@ def test_request_fit_check_follows_the_setting(monkeypatch, audit_rows):
 # environment variable and a value that must win over the saved one)
 def _switch_cases():
     from maverick import budget_receipts, llm, net_concurrency, observability, tool_token
-    from maverick.cache import llm as llm_cache
     from maverick.orchestrator import _bon_early_exit
     from maverick.providers import anthropic_provider as ap
     from maverick.skill import stats
@@ -608,7 +607,6 @@ def _switch_cases():
 
     return [
         ("search.early_exit", False, _bon_early_exit, False, "MAVERICK_BON_EARLY_EXIT", "1", True),
-        ("cache.llm_responses", True, llm_cache._enabled_via_env, True, "MAVERICK_LLM_CACHE", "0", False),
         ("skills.decay", False, stats._enabled, False, "MAVERICK_SKILL_DECAY", "1", True),
         ("skills.allow_url_install", True, url_install_allowed, True,
          "MAVERICK_ALLOW_SKILL_INSTALL", "0", False),
@@ -647,6 +645,12 @@ def _switch_cases():
         ("safety.decode_hidden", False, guard._decode_disabled, True,
          "MAVERICK_SHIELD_NO_DECODE", "0", False),
     ]
+
+
+def test_ineffective_answer_reuse_switch_is_not_offered_on_the_page():
+    # The standalone answer cache is not wired into customer work, so its
+    # switch was removed rather than presented as a working feature.
+    assert "cache.llm_responses" not in catalog.BY_ID
 
 
 def test_former_environment_switches_take_effect_from_the_page(monkeypatch, audit_rows):

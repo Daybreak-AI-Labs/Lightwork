@@ -714,8 +714,7 @@
       // mvLoading shows its words only if the switches take over 300 ms.
       var wait = window.mvLoading(huntersHost, {text: 'Loading threat hunting switches…', action: 'load the threat hunting switches', retry: loadHunters});
       huntersStatus.textContent = '';
-      fetch('/api/v1/features/switches')
-        .then(function (response) { if (!response.ok) throw response; return response.json(); })
+      window.mvFetchJSON('/api/v1/features/switches', {}, 'load the threat hunting switches')
         .then(async function (body) {
           await wait.done();
           var rows = (body.switches || []).filter(function (row) {

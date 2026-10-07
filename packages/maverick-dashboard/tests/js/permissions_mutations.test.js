@@ -50,8 +50,11 @@ function toolFixture(result, action = "enable") {
   button.closest = () => row;
   const message = new Element();
   let requests = 0;
+  // The page wires its bulk bar once the shared helpers load; none are
+  // loaded here, so each button's own handler is exercised alone.
   const context = {
-    document: { getElementById() { return message; }, querySelectorAll() { return [button]; } },
+    window: {},
+    document: { getElementById() { return message; }, querySelectorAll() { return [button]; }, addEventListener() {} },
     async fetch() { requests += 1; return result; },
   };
   vm.runInNewContext(scripts[1], context);

@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 
 import pytest
+from maverick_dashboard.app import static_url
 
 ROLE_DENIED = "this page is not enabled for your role"
 
@@ -148,7 +149,7 @@ def test_host_pages_show_their_tabs_only_in_areas_mode(host, monkeypatch, tmp_pa
     _areas_on(monkeypatch)
     areas = client.get(host).text
     assert "data-mv-tabs" in areas and 'role="tablist"' in areas
-    assert '<script src="/static/lightwork-tabs.js" defer></script>' in areas
+    assert f'<script src="{static_url("lightwork-tabs.js")}" defer></script>' in areas
 
 
 def test_old_query_values_carry_over_to_the_new_address(monkeypatch, tmp_path):

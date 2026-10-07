@@ -34,8 +34,9 @@ def test_pick_budget_defaults_to_strict_pricing(monkeypatch):
     assert prompts == [
         ("  Use task limits? Standard goals stop at $2 and 30 minutes; choose No for no task limit.", True),
         (
-            "  Strict pricing? Fail closed if a model has no verified price "
-            "(recommended; choose No only for estimate-only custom gateways)",
+            "  Require a reviewed price before paid AI work? Recommended. "
+            "You can add your contract's spending ceiling in Settings after installation. "
+            "Choose No only if you accept that dollar limits may be under-counted",
             True,
         ),
         ("  Show known budget headroom before work? This never changes execution limits.", True),

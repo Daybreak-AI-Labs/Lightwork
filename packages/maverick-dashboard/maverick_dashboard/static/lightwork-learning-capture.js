@@ -82,8 +82,8 @@
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(String(value)) : String(value).replace(/[_.-]+/g, ' '); }
   function say(text) { window.mvStatus($('status'), text); }
-  async function api(path, body) {
-    return window.mvFetchJSON(base + path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', body: body});
+  async function api(path, body, action) {
+    return window.mvFetchJSON(base + path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', body: body}, action);
   }
   function isoDay(epoch) { const d = new Date(epoch * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function endOfDay(value) { const t = Date.parse(value + 'T23:59:00'); return Number.isFinite(t) ? t / 1000 : NaN; }
@@ -243,7 +243,7 @@
       if (row.status === 'awaiting_review' && !renderReview($('evidence'), value.changes)) { show(null); say('The complete retained details could not be displayed. Nothing can be approved from this preview.'); }
       return;
     }
-    try { prepared = await api('/suggestion'); } catch (failure) {
+    try { prepared = await api('/suggestion', undefined, 'check this run’s learning status'); } catch (failure) {
       if (failure && (failure.status === 404 || failure.status === 409)) {
         say('This run can’t become a learning example now. Examples start at the flow’s first approval, before any action runs, and example collection must be on.');
         return;
@@ -270,7 +270,7 @@
       { okText: 'Keep as example' });
     if (!ok) return;
     const row = await api('', { expected_pause_binding: prepared.expected_pause_binding, allowed_tools: prepared.allowed_tools,
-      input_schema: model.input_schema, tool_data_schemas: model.tool_data_schemas, retain_until: until });
+      input_schema: model.input_schema, tool_data_schemas: model.tool_data_schemas, retain_until: until }, 'keep this run as a learning example');
     status(row);
   }));
   $('accept').addEventListener('click', () => run(() => prepareDecision('accept')));

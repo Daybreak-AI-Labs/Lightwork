@@ -184,6 +184,16 @@ ROWS = [
   '保存した手順書は「エージェント」でエージェントになります。',
   '保存的操作手册会成为智能体页面中的智能体。'),
  ('Agents', 'Agents', 'Agenten', 'エージェント', '智能体'),
+ ('Review Save draft', 'Vérifier « Enregistrer le brouillon »', '„Entwurf speichern“ prüfen', '「下書きを保存」を確認',
+  '审核“保存草稿”'),
+ ('Save a retained draft, then separately review Publish in Agent Factory. Saving here does not change the '
+  'agent people use.',
+  'Enregistrez un brouillon conservé, puis vérifiez séparément la publication dans l’Atelier d’agents. '
+  'L’enregistrement ici ne modifie pas l’agent que les personnes utilisent.',
+  'Speichern Sie einen aufbewahrten Entwurf und prüfen Sie dann separat die Veröffentlichung in der '
+  'Agentenwerkstatt. Das Speichern hier ändert nicht den Agenten, den andere verwenden.',
+  '下書きを保存して保持し、その後エージェント作成で公開を別途確認します。ここで保存しても、利用中のエージェントは変わりません。',
+  '先保存一份保留的草稿，再到智能体工坊单独审核发布。在此保存不会更改大家正在使用的智能体。'),
  ('This draft stays unsaved until an administrator checks and saves it.',
   'Ce brouillon n’est pas enregistré tant qu’un administrateur ne l’a pas vérifié et enregistré.',
   'Dieser Entwurf bleibt ungespeichert, bis die Administration ihn prüft und speichert.',
@@ -387,7 +397,7 @@ ROWS = [
   'Rechercher des actions par nom ou description…',
   'Aktionen nach Name oder Beschreibung suchen…',
   '名前または説明で操作を検索…',
-  '按名称或描述搜索操作…'),
+  '请输入不低于 0 美元、最多两位小数的支出上限；留空表示不设上限。'),
  ('Search connectors', 'Rechercher des connecteurs', 'Verbindungen suchen', 'コネクターを検索', '搜索连接器'),
  ('Describe what you want or provide a document. Lightwork drafts it for you to refine, save and run. You '
   'can also build it by hand.',

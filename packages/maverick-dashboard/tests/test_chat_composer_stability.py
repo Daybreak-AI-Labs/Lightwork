@@ -58,7 +58,10 @@ def _assert_composer_wrapped(body, form_marker):
     # focus or clicks while it waits to be replaced.
     placeholder = body[panel:form]
     assert '<details class="draft-recovery__compact">' in placeholder
-    assert "Checking draft recovery…" in placeholder
+    # The live panel's first state says only "Draft recovery"; "Checking…"
+    # appears only if the check is slow (lightwork-draft-recovery.js).
+    assert ">Draft recovery</summary>" in placeholder
+    assert "Checking draft recovery…" not in placeholder
     assert re.search(r'<section class="draft-recovery" data-draft-panel inert[ >]', body)
     # Both notes are rendered; the second only takes its space until restore.
     block = body[note:]

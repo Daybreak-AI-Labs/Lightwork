@@ -22,7 +22,6 @@ ADMIN_OPERATIONS = [
     ("settings_set_provider", "maverick_dashboard.settings_store", "rotate_provider", {"provider": "openai"}, None),
     ("settings_test_provider", "maverick_dashboard.integration_readiness", "test_provider", {"provider": "openai"}, None),
     ("settings_set_capabilities", "maverick_dashboard.settings_store", "_write", {}, None),
-    ("settings_set_features", "maverick_dashboard.settings_store", "_write", {}, None),
     ("settings_set_ui_visibility", "maverick_dashboard.ui_visibility", "apply_selection", {}, None),
     ("settings_reset_ui_visibility", "maverick_dashboard.ui_visibility", "clear_overrides", {}, None),
     ("users_page", "maverick_dashboard.admin_pages", "_users_context", {}, {}),
@@ -121,7 +120,7 @@ def settings_client(monkeypatch, tmp_path):
     return TestClient(dashboard.app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False)
 
 
-@pytest.mark.parametrize("section", ["capabilities", "features"])
+@pytest.mark.parametrize("section", ["capabilities"])
 def test_toggle_form_publishes_one_complete_selection(monkeypatch, settings_client, section):
     defaults = settings_store.CAPABILITY_DEFAULTS if section == "capabilities" else settings_store.FEATURE_DEFAULTS
     for name in defaults:
@@ -139,7 +138,7 @@ def test_toggle_form_publishes_one_complete_selection(monkeypatch, settings_clie
     assert snapshots == [dict.fromkeys(defaults, False)], "readers observed a partly saved selection"
 
 
-@pytest.mark.parametrize("section", ["capabilities", "features"])
+@pytest.mark.parametrize("section", ["capabilities"])
 def test_toggle_form_file_failure_keeps_state_and_allows_retry(monkeypatch, settings_client, section):
     from maverick import config, file_lock
 
@@ -164,7 +163,7 @@ def test_toggle_form_file_failure_keeps_state_and_allows_retry(monkeypatch, sett
     assert settings_store.load_overlay()[section][name] is False
 
 
-@pytest.mark.parametrize("section", ["capabilities", "features"])
+@pytest.mark.parametrize("section", ["capabilities"])
 def test_toggle_form_preserves_invalid_section_for_recovery(settings_client, section):
     from maverick import config
 
@@ -175,3 +174,20 @@ def test_toggle_form_preserves_invalid_section_for_recovery(settings_client, sec
     response = settings_client.post("/settings/" + section, data={}, follow_redirects=False)
     assert response.status_code == 503
     assert path.read_bytes() == before
+
+
+def test_retired_whole_feature_form_leaves_every_switch_unchanged(settings_client):
+    """Feature switches now save one at a time from All settings. The old
+    whole-form submission is refused before any write, so a stale form can
+    never turn every unlisted switch off."""
+    from maverick import config
+
+    for name in settings_store.FEATURE_DEFAULTS:
+        settings_store.set_toggle("features", name, True)
+    path = config.dashboard_overrides_path()
+    before = path.read_bytes()
+    response = settings_client.post("/settings/features", data={}, follow_redirects=False)
+    assert response.status_code == 409
+    assert "Your draft is kept" in response.json()["detail"]
+    assert path.read_bytes() == before
+    assert settings_store.load_overlay()["features"] == dict.fromkeys(settings_store.FEATURE_DEFAULTS, True)

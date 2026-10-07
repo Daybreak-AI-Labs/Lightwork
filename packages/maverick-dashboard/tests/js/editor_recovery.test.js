@@ -9,6 +9,8 @@ function flowFixture(fetchImpl){
     apiFetch:fetchImpl||(async()=>({ok:true,json:async()=>({id:'saved',version:2,revision:'revision-two'})})),pushHistory(){},renderCrumbs(){},syncScheduleControls(){},render(){},renderProps(){},
     draftSnapshot(){return JSON.stringify({flow:context.rootFlow,id:context.idInput.value,name:context.nameInput.value,inputs:context.flowInputs});}};
   const source=fs.readFileSync(path.join(templates,'flow_designer.js'),'utf8');
+  // flow_designer.html loads the recipe-inputs helpers before the designer.
+  vm.runInNewContext(fs.readFileSync(path.join(templates,'flow_designer_inputs.js'),'utf8'),context);
   vm.runInNewContext(source.slice(source.indexOf('  function recoveryPayload('),source.indexOf('  function initializeRecovery(')),context);
   const payload={format:1,base:{id:'saved',version:2,revision:'revision-two'},brief:'Recovered brief',editor:{flow:{id:'saved',name:'Recovered',start:'loop',nodes:[{id:'loop',kind:'foreach',body:{nodes:[{id:'child',kind:'action',paramsRaw:'{unfinished',params:{}}]}}]},id:'saved',name:'Recovered',inputs:[],notify:false}};
   return {dom,d,context,payload};

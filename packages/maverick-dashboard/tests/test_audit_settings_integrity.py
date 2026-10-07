@@ -131,12 +131,18 @@ def test_supported_profile_round_trip_uses_ordinary_conflict_checked_writer():
 def test_file_review_covers_non_catalog_fields_without_leaking_values(monkeypatch):
     from maverick_dashboard.setup_guide import _other_file_impact
     monkeypatch.setenv('OPENAI_API_KEY', 'deployment-secret')
-    layers = {'base': {'features': {'personal_preferences': True}, 'private_table': {'secret': 'old'}},
-              'here': {'features': {'personal_preferences': True}}, 'operator': {}}
-    proposed = {'features': {'personal_preferences': False}, 'providers': {'openai': {'api_key': 'new-secret'}}}
+    # Every built-in feature switch is now a catalog row (shown typed above);
+    # a switch the catalog does not know, such as one left by an older
+    # release, is still accounted for here.
+    layers = {'base': {'features': {'personal_preferences': True, 'retired_preview': True},
+                       'private_table': {'secret': 'old'}},
+              'here': {'features': {'retired_preview': True}}, 'operator': {}}
+    proposed = {'features': {'personal_preferences': False, 'retired_preview': False},
+                'providers': {'openai': {'api_key': 'new-secret'}}}
     rows = _other_file_impact(layers, proposed)
-    assert {row['label'] for row in rows} >= {'features.personal_preferences', 'private_table.secret'}
-    feature = next(row for row in rows if row['label'] == 'features.personal_preferences')
+    assert {row['label'] for row in rows} >= {'features.retired_preview', 'private_table.secret'}
+    assert 'features.personal_preferences' not in {row['label'] for row in rows}
+    feature = next(row for row in rows if row['label'] == 'features.retired_preview')
     assert feature['after'] == 'Disabled' and feature['overridden']
     assert next(row for row in rows if row['label'] == 'private_table.secret')['change'] == 'Removed'
     assert 'new-secret' not in str(rows) and 'deployment-secret' not in str(rows)
