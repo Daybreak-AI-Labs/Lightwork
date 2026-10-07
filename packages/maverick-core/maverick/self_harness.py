@@ -47,6 +47,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .audit.errors import AuditRefused
 from .learning_guard import Halted, check_learning_halt
 from .paths import data_dir
 from .wilson_score import wilson_lower_bound as _wilson_lower_bound
@@ -845,6 +846,8 @@ def _forget_finalize(model_id, line, before, after, touched, *, path, strict, ef
             from .audit import EventKind, record
             record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=model_id,
                    rung="prompt", line=line or "*", phase="forget")
+    except AuditRefused:
+        raise  # a declined audit write is never converted into a silent forget
     except Exception:
         if strict:
             raise
@@ -2779,6 +2782,8 @@ def review_relapses(model_id: str, *, failure_share: float,
                     relapsed.append(ln)
                     if after_write is not None:
                         after_write()
+    except AuditRefused:
+        raise
     except Exception:  # pragma: no cover -- review never perturbs a run
         if strict:
             raise
@@ -2794,8 +2799,10 @@ def _relapse_audit(key, line, rec):
         record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=mid,
                scope=(scope or None), rung="prompt", line=line, phase="relapse",
                recent_failures=sum(1 for outcome in window if not outcome), recent_total=len(window))
+    except AuditRefused:
+        raise  # the audit layer declined: the caller must not continue as if recorded
     except Exception:
-        pass
+        log.debug("self_harness: relapse audit failed", exc_info=True)
 
 
 # ---- CROSS-MODEL TRANSFER --------------------------------------------------

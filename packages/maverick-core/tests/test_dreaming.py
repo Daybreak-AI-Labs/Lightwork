@@ -12,6 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from maverick import dreaming, reflexion
 
+# A real dream cycle records signed start/completion receipts.
+pytestmark = pytest.mark.usefixtures("signed_audit")
+
 
 class _Profile:
     def __init__(self, description: str = "", persona: str = ""):

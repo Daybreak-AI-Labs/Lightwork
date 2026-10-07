@@ -317,10 +317,10 @@ def test_live_rollout_reports_partial_store_restore_and_leaves_no_false_success(
     monkeypatch.setattr(dreaming, "snapshots_dir", lambda: snapdir)
     original_restore = dreaming._restore_private_directory
 
-    def fail_skill_restore(src, destination):
+    def fail_skill_restore(src, destination, **kwargs):  # kwargs: the verified inventory
         if destination == skills:
             raise OSError("simulated learned-skills restore failure")
-        return original_restore(src, destination)
+        return original_restore(src, destination, **kwargs)
 
     monkeypatch.setattr(dreaming, "_restore_private_directory", fail_skill_restore)
     monkeypatch.setattr("maverick.audit.record", lambda *a, **k: None)

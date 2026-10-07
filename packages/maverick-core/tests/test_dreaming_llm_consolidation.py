@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
 from maverick import dreaming, reflexion
+
+# A real dream cycle records signed start/completion receipts.
+pytestmark = pytest.mark.usefixtures("signed_audit")
 
 # ---------- fakes ----------
 
