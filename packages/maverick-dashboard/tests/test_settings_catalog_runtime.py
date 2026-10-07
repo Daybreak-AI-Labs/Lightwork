@@ -281,7 +281,14 @@ def test_row_saves_reads_back_and_resets(setting, audit_rows):
     row = _row(setting.id)
     if row["source"] == "here":
         from maverick.config_resets import is_reset
-        assert is_reset(page._sources()["here"], setting), "Only the explicit product-default mask may remain after reset"
+        here = page._sources()["here"]
+        if page._has_partial_default(setting):
+            # Removing the value could let an older or legacy choice apply again,
+            # so reset writes the product default itself and nothing else.
+            assert catalog.lookup(here, setting.path) == (True, page._default_of(setting))
+            assert row["value"] == page._default_of(setting)
+        else:
+            assert is_reset(here, setting), "Only the explicit product-default mask may remain after reset"
     else:
         assert row["source"] == "default"
 
