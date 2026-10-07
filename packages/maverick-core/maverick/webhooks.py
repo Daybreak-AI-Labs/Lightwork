@@ -39,6 +39,7 @@ import logging
 import os
 import threading
 import time
+from contextvars import copy_context
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -185,10 +186,11 @@ def _submit(executor, fn, *args) -> bool:
     sem = _inflight  # capture: a reset must not make us release a different one
     if not sem.acquire(blocking=False):
         return False
+    context = copy_context()
 
     def _runner():
         try:
-            fn(*args)
+            context.run(fn, *args)
         finally:
             sem.release()
 

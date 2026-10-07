@@ -18,6 +18,28 @@
   function say(text) { window.mvStatus(live, text); }
   function fail(action) { return function (f) { var t = R.errorText(f, action); say(t); if (window.mvToast) { window.mvToast(t, { error: true }); } }; }
   function api(method, path, body) { return R.call(method, API + path, body); }
+  var contextChanged = false;
+  window.addEventListener("lightwork:context-changed", function () { contextChanged = true; });
+  window.LightworkContinuousEvidence = { openReview: async function (selection, options) {
+    var current = options && options.isCurrent, context = options && options.context;
+    if (contextChanged || location.pathname !== "/compliance/continuous-evidence" ||
+        (selection && Object.keys(selection).length) || !/^[a-f0-9]{64}$/.test(context || "") ||
+        (current && !current())) { return false; }
+    var checked = await R.call("POST", "/api/v1/copilot/product-operations/catalog", {
+      page: "/compliance/continuous-evidence", selection: {}
+    });
+    if (contextChanged || checked.context !== context || (current && !current()) ||
+        !(checked.operations || []).some(function (row) {
+          return row.id === "connections.continuous_evidence_status" && row.available;
+        })) { return false; }
+    // Focus only: refreshing lists would discard a currently open collection
+    // form. Native approval and collection stay separate, reviewed actions.
+    var refresh = document.getElementById("trc-refresh");
+    if (!refresh || refresh.disabled) { return false; }
+    refresh.focus(); refresh.scrollIntoView({ block: "center" });
+    say("Review the evidence controls here. Your entered choices were kept; no collection was started.");
+    return true;
+  } };
   function setCycleReady(ready) {
     runCycle.disabled = !ready || !canAdmin;
     if (runCycle.disabled) { runCycle.setAttribute("aria-disabled", "true"); } else { runCycle.removeAttribute("aria-disabled"); }
@@ -31,7 +53,7 @@
     say("Loading…");
     return Promise.all([
       api("GET", "/status").then(function (d) { S.status = d; }),
-      api("GET", "/setup").then(function (d) { S.setup = d.items || []; }).catch(function () { S.setup = []; }),
+      api("GET", "/setup").then(function (d) { S.setup = d.items || []; }),
       api("GET", "/definitions").then(function (d) { S.definitions = d.items || []; }),
       api("GET", "/enrollments").then(function (d) { S.enrollments = d.items || []; }),
       api("GET", "/runs?limit=50").then(function (d) { S.runs = d.items || []; }),

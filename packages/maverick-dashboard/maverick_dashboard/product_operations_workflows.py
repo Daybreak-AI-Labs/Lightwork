@@ -160,6 +160,26 @@ def harden_execute(request, selection, _arguments, native_review, _operation_id)
                    {"flow": flow_id, "version": result["version"], "published": False})
 
 
+def soften_snapshot(request, selection):
+    flow_id = _flow_id(selection)
+    node_id = selection.get("node_id")
+    if not node_id:
+        raise HTTPException(409, "Select the fixed action you want to review in the workflow designer.")
+    review = native.flow_apply_review_endpoint(request, flow_id, node_id)
+    if review["from_kind"] != "action" or review["to_kind"] != "agent":
+        raise HTTPException(409, "Choose a fixed action with a current replacement suggestion.")
+    href = ("/flows/designer/" + quote(flow_id, safe="") + "?review_softening=" + quote(node_id, safe="")
+            + "&review_binding=" + review["review_binding"] + "&review_context=" + review["review_context"])
+    return Snapshot(review["review_binding"], "Current owned workflow and selected action",
+                    "Open the protected complete action review and enter replacement instructions. Nothing is saved, published or run by this check.",
+                    details={"open": {"href": href, "label": "Review complete replacement instructions"}})
+
+
+def soften_prepare(request, selection, _arguments):
+    state = soften_snapshot(request, selection)
+    return Preview(state.summary, native=state.details)
+
+
 def snapshot(request, selection):
     flow_id = _flow_id(selection)
     # The same native endpoints own operate permission, flow enablement, exact
@@ -497,6 +517,9 @@ def entries():
             Adapter("learning.workflow_harden", "Review fixed action for this step", "learning", "/workflows",
                     FLOW_EDITOR_PAGES, HardeningBindings, harden_snapshot, harden_prepare, harden_execute,
                     aliases=("harden this step", "make this step a fixed action", "apply flow improvement")),
+            Adapter("learning.workflow_soften", "Review replacement instructions for this action", "learning", "/workflows",
+                    FLOW_EDITOR_PAGES, EmptyInput, soften_snapshot, soften_prepare,
+                    aliases=("let AI handle this action", "review replacement instructions", "soften this step")),
             Adapter("learning.workflow_turn_off", "Turn off this flow", "learning", "/workflows",
                     FLOW_EDITOR_PAGES, EmptyInput, off_snapshot, off_prepare, off_execute,
                     aliases=("unpublish this flow", "stop this flow", "turn off this flow")),

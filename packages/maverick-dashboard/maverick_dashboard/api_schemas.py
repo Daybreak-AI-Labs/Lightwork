@@ -692,7 +692,7 @@ class FlowApplyIn(BaseModel):
 
     Hardening to an action needs ``tool`` and an explicit reviewed ``params``
     binding (including ``{}`` for a genuinely no-argument action); softening to
-    an agent needs ``brief`` (else the existing brief/label is used)."""
+    an agent needs explicitly reviewed replacement instructions."""
     node_id: str = Field(..., min_length=1, max_length=120)
     to_kind: str = Field(..., pattern="^(agent|action)$")
     tool: str = Field(default="", max_length=120)
@@ -700,6 +700,9 @@ class FlowApplyIn(BaseModel):
     # reviewed no-argument binding and remains distinguishable from omission.
     params: dict | None = None
     brief: str = Field(default="", max_length=4000)
+    replacement_reviewed: StrictBool = False
+    review_binding: str = Field(default="", max_length=64)
+    review_context: str = Field(default="", max_length=64)
     version: int | None = Field(default=None, ge=1)
     revision: str = Field(default="", max_length=128)
 

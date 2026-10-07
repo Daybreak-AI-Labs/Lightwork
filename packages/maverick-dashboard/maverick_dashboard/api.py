@@ -8613,6 +8613,84 @@ def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
 
 
+def _softening_action_rows(node) -> list[dict]:
+    """Complete ordinary fields, with credential masking before presentation."""
+    from maverick.flow.redact import redact
+
+    rows = []
+
+    def visit(label, value, depth=0):
+        if depth > 12 or len(rows) >= 2048:
+            raise HTTPException(409, "This action is too large for a complete replacement review. Edit it in the designer first.")
+        if isinstance(value, dict) and value:
+            for key, item in value.items():
+                visit(label + " · " + str(redact(str(key), strict=True)).replace("_", " "), item, depth + 1)
+        elif isinstance(value, list) and value:
+            for index, item in enumerate(value):
+                visit(label + " · Item " + str(index + 1), item, depth + 1)
+        else:
+            shown = ("Yes" if value else "No") if isinstance(value, bool) else (
+                "Not set" if value is None else "Empty" if value in ({}, []) else str(value))
+            rows.append({"label": label, "value": shown})
+
+    try:
+        visit("Current action", redact(node.tool, strict=True))
+        visit("Current action inputs", redact(node.params, strict=True))
+        visit("Answer kept as", redact(node.output, strict=True) or "No saved answer")
+        visit("Current extra instructions", redact(node.brief, strict=True) or "None")
+    except ValueError as exc:
+        raise HTTPException(503, "The action could not be safely displayed. Nothing was changed.") from exc
+    return rows
+
+
+def _softening_review(request: Request, flow, node) -> dict:
+    from maverick.governed_operations import digest
+
+    from .draft_api import context_for
+
+    context = context_for(request)
+    publication = _flow_publication_fields(flow.id)
+    return {"review_context": context,
+            "review_binding": digest([context, flow.to_dict(), node.id, publication]),
+            "current_action": _softening_action_rows(node), "brief": "",
+            "replacement_consequences": [
+                "The fixed action and its inputs are removed from this step in a new draft.",
+                "The AI task uses only the complete replacement instructions you enter. A step label is not a substitute.",
+                "Automatic retries for this step are turned off. Its answer destination stays the same.",
+                "No work starts now. The published edition stays unchanged until you separately publish the draft.",
+                "A credential value is masked when necessary; never copy credentials into the instructions.",
+            ]}
+
+
+def _save_reviewed_softening(request: Request, source, candidate, payload):
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.flow import store
+
+    if (payload.replacement_reviewed is not True or not payload.brief.strip()
+            or payload.brief.strip() == source.nodes[payload.node_id].label.strip()):
+        raise HTTPException(409, "Review the current action and enter complete replacement instructions before changing it to an AI task.")
+
+    def guard():
+        require_permission(request, "operate")
+        _require_flows()
+        current = store.load_flow(source.id)
+        if current is None:
+            raise HTTPException(404, "no such flow")
+        _assert_flow_access(request, current)
+        if payload.node_id not in current.nodes:
+            raise HTTPException(409, "The selected step changed. Review the current workflow again.")
+        review = _softening_review(request, current, current.nodes[payload.node_id])
+        if (current.to_dict() != source.to_dict()
+                or review["review_context"] != payload.review_context
+                or review["review_binding"] != payload.review_binding):
+            raise HTTPException(409, "The workflow or current access changed. Your replacement instructions are kept; review the current action again.")
+
+    with authority_effect_fence(), store._definitions_lock():
+        guard()
+        return store.save_flow(candidate, expected_version=payload.version,
+                               expected_revision=payload.revision, effect_guard=guard)
+
+
 @router.get("/flows/{flow_id}/apply-review")
 def flow_apply_review_endpoint(
     request: Request, flow_id: str, node_id: str, tool: str = "",
@@ -8647,7 +8725,7 @@ def flow_apply_review_endpoint(
         "tool": "", "description": "", "fields": [], "sources": [],
     }
     if proposal.to_kind != "action":
-        result["brief"] = node.brief or node.label or ""
+        result.update(_softening_review(request, flow, node))
         return result
 
     chosen = (tool or proposal.inferred_tool or "").strip()
@@ -8803,11 +8881,14 @@ def apply_flow_proposal_endpoint(
             status_code=400, detail="resulting flow invalid: " + "; ".join(errs[:5])
         )
     try:
-        saved = store.save_flow(
-            new_flow,
-            expected_version=payload.version,
-            expected_revision=payload.revision,
-        )
+        if from_kind == "action" and payload.to_kind == "agent":
+            saved = _save_reviewed_softening(request, f, new_flow, payload)
+        else:
+            saved = store.save_flow(
+                new_flow,
+                expected_version=payload.version,
+                expected_revision=payload.revision,
+            )
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     evolution_log.record_apply(

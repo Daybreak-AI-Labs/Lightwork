@@ -213,6 +213,18 @@
               ? function (isCurrent) { return discoveryControls.openReview({}, {isCurrent: isCurrent}); } : null);
           return;
         }
+        if (entry[0] === 'continuous_evidence_review') {
+          var evidenceReview = entry[1], evidenceControls = window.LightworkContinuousEvidence;
+          var evidenceContext = catalog && catalog.context;
+          if (!evidenceReview || Array.isArray(evidenceReview) ||
+              Object.keys(evidenceReview).join(',') !== 'scope' || evidenceReview.scope !== 'current_page' ||
+              typeof evidenceContext !== 'string' || !/^[a-f0-9]{64}$/.test(evidenceContext)) return;
+          protectedControls(node('dd', undefined, list), 'Open complete evidence controls',
+            '/compliance/continuous-evidence#trc-root',
+            evidenceControls && typeof evidenceControls.openReview === 'function'
+              ? function (isCurrent) { return evidenceControls.openReview({}, {isCurrent: isCurrent, context: evidenceContext}); } : null);
+          return;
+        }
         if (entry[0] === 'webhook_subscription_review') {
           var webhookReview = entry[1], webhookControls = window.LightworkWebhookSubscriptions;
           var webhookContext = catalog && catalog.context;

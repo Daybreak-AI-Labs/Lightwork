@@ -703,11 +703,11 @@
 
   {% if snap.flow_autonomy %}
   <section aria-labelledby="lrn-auto-h" data-learning-group="controls">
-    <div class="section-head"><h2 id="lrn-auto-h" class="lrn__section-h">Autonomous workflow self-improvement</h2></div>
+    <div class="section-head"><h2 id="lrn-auto-h" class="lrn__section-h">Workflow improvements</h2></div>
     <div class="panel">
       <p class="lrn__section-sub" style="margin-bottom: var(--space-3);">
-        This lets your workflows improve themselves while they run, so it is a separate choice.
-        Each change is measured against real results and saved as a new version, so a change that hurts can be undone.</p>
+        Review suggestions from recorded workflow results before changing what a step does.
+        Automatic undo can restore a measured change that makes results clearly worse.</p>
       {% if not snap.flow_autonomy.engine_on %}
       <p class="lrn__section-sub">Turn on workflows first. These options appear once workflows are running.</p>
       <button type="button" class="btn btn--primary" id="lrn-flows-on"
@@ -758,12 +758,8 @@
           {{ 'Automatic undo is on: turn it off' if snap.flow_autonomy.auto_evolve else 'Turn on automatic undo' }}
         </button>
         <span class="lrn__enable-note" style="margin-top:0;">Automatically undo a workflow change that makes results clearly worse. This is the safety net.</span>
-        <button type="button" class="btn" id="lrn-auto-apply" data-on="{{ 'true' if snap.flow_autonomy.auto_apply else 'false' }}"
-                aria-pressed="{{ 'true' if snap.flow_autonomy.auto_apply else 'false' }}"
-                {% if not learning_can_manage or not snap.flow_autonomy.auto_evolve %}disabled aria-disabled="true"{% endif %}>
-          {{ 'Automatic improvements are on: turn them off' if snap.flow_autonomy.auto_apply else 'Turn on automatic improvements' }}
-        </button>
-        <span class="lrn__enable-note" style="margin-top:0;">Apply a proven improvement without waiting for a person. Needs automatic undo on first.</span>
+        <p class="lrn__enable-note" style="margin-top:0;">Workflow suggestions require your review. Replacing a fixed action needs complete replacement instructions; past failure rates do not supply them. <a href="/automations">Review workflow suggestions</a>.</p>
+        <span class="lrn__enable-note" style="margin-top:0;">Suggestions wait for complete review. Automatic undo is a separate control.</span>
         <span class="lrn__enable-note" id="lrn-auto-msg" aria-live="polite" style="margin-top:0;"></span>
       </div>
       <script>
@@ -779,17 +775,10 @@
             var next = btn.getAttribute('data-on') !== 'true';
             var prompt;
             var okText;
-            if (field === 'auto_apply') {
-              prompt = next
-                ? 'Enable automatic application of proven workflow improvements? Future accepted changes may be deployed without another human click.'
-                : 'Disable automatic application of workflow improvements? Existing deployed changes remain, while future accepted changes will wait for a human.';
-              okText = next ? 'Turn on' : 'Turn off';
-            } else {
-              prompt = next
-                ? 'Enable automatic rollback of measured workflow regressions? The deployment may revert a harmful self-improvement without another human click.'
-                : 'Disable automatic rollback of workflow regressions? Deployed self-improvements will lose this automatic safety net.';
-              okText = next ? 'Turn on' : 'Turn off';
-            }
+            prompt = next
+              ? 'Enable automatic rollback of measured workflow regressions? The deployment may revert a harmful self-improvement without another human click.'
+              : 'Disable automatic rollback of workflow regressions? Deployed self-improvements will lose this automatic safety net.';
+            okText = next ? 'Turn on' : 'Turn off';
             if (!(await mvConfirm(prompt, { okText: okText }))) { delete btn.dataset.inFlight; return; }
             var body = {}; body[field] = next;
             btn.disabled = true; btn.setAttribute('aria-busy', 'true'); msg.textContent = 'Applying…';
@@ -813,7 +802,6 @@
           });
         }
         wire('lrn-auto-evolve', 'auto_evolve');
-        wire('lrn-auto-apply', 'auto_apply');
       })();
       </script>
       {% endif %}
