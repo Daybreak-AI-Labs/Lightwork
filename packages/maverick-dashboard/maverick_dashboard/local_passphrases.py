@@ -42,8 +42,9 @@ _DUMMY_SALT = secrets.token_hex(16)
 
 NOT_ACCEPTED = (
     "The email or passphrase was not accepted. If you have not set a passphrase yet, ask your "
-    "administrator for an invitation. An invitation cannot replace a passphrase you already "
-    "have; if you have forgotten it, ask the installation owner to reset it."
+    "administrator for an invitation. If you already have access here but no passphrase, ask the "
+    "installation owner for a link to choose one. An invitation cannot replace a passphrase you "
+    "already have; if you have forgotten it, ask the installation owner to reset it."
 )
 LOCKED = "Wait one minute before trying to sign in again."
 UNAVAILABLE = "Sign-in is unavailable right now. Ask your administrator to check Lightwork."
@@ -52,17 +53,16 @@ NO_ACCESS = ("This account no longer has access to this workspace. "
 # Refusal shown when an invitation names someone who can already sign in here.
 ACCOUNT_EXISTS = (
     "This email already has a sign-in on this installation, so it cannot be invited: accepting "
-    "would replace that person's passphrase. They keep signing in with their current passphrase; "
-    "if they have forgotten it, the installation owner can reset it on the Users page. "
-    "To change their access, change their role on the Users page or add them to the workspace there."
+    "would replace that person's passphrase. If they have forgotten it, or have none yet, the "
+    "installation owner or an installation administrator can send them a link to choose one on "
+    "the Users page. To change their access, change their role there."
 )
 # The same refusal for everyone who may not see the installation's people: it
 # must read identically whatever made the invitation impossible, so it cannot
 # be used to find out who has an account, or which workspace holds them.
 NOT_INVITABLE = (
     "This invitation could not be created for that email address. Check the address. If you "
-    "expected it to work, ask the installation owner or an installation administrator to invite "
-    "this person."
+    "expected it to work, ask the installation owner or an installation administrator."
 )
 TOO_MANY = "Too many sign-in attempts. Wait a minute and try again."
 ATTEMPTS_PER_MINUTE = 10  # per client address, owner and colleagues alike

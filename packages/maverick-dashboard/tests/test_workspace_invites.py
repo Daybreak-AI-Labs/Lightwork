@@ -258,7 +258,7 @@ def test_provider_email_is_from_current_signed_login_not_historical_alias():
     assert "idp_email" not in session_claims({"idp_email": "right@example.com"}, None, via="invite")
 
 
-def test_bind_failure_explains_a_replacement_link_is_needed(monkeypatch, tmp_path):
+def _failed_acceptance(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from maverick.tenant import registry
     from maverick_dashboard import invite_routes, invites, rbac
@@ -269,9 +269,24 @@ def test_bind_failure_explains_a_replacement_link_is_needed(monkeypatch, tmp_pat
     monkeypatch.setattr(invite_routes, "_bind_role", lambda *_: (_ for _ in ()).throw(ValueError("store failed")))
     response = _accept(client, f"/auth/invite/{token}")
     assert response.status_code == 503
-    assert "new invitation link" in response.text
     assert invites.peek_invite(token) is None
     assert rbac.get_tenant_role("acme", "user:new@example.com") is None
+    return " ".join(response.text.split())
+
+
+def test_bind_failure_with_a_saved_passphrase_points_to_the_users_page(monkeypatch, tmp_path):
+    """The passphrase is saved before the access, and an invitation for that
+    email is refused as an existing account, so a replacement link would not help."""
+    text = _failed_acceptance(monkeypatch, tmp_path)
+    assert "Users page" in text and "passphrase you chose" in text
+    assert "new invitation link" not in text
+
+
+def test_bind_failure_without_passphrases_explains_a_replacement_link_is_needed(monkeypatch, tmp_path):
+    from maverick_dashboard import local_passphrases
+
+    monkeypatch.setattr(local_passphrases, "available", lambda: False)
+    assert "new invitation link" in _failed_acceptance(monkeypatch, tmp_path)
 
 
 def test_saml_only_deployment_does_not_accept_invite_as_local_login(monkeypatch, tmp_path):

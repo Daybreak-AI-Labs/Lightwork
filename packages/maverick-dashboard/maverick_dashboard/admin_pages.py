@@ -1285,7 +1285,8 @@ def users_roster_reset(request: Request, confirm: str = Form("")) -> RedirectRes
 
 @router.post("/users/passphrase-reset", response_class=HTMLResponse)
 def users_passphrase_reset(request: Request, email: str = Form(...), confirm: str = Form("")) -> HTMLResponse:
-    """Reset a colleague's forgotten passphrase and show its one-time link ONCE.
+    """Reset a colleague's forgotten passphrase, or give a person with access but no
+    passphrase a first link, and show its one-time link ONCE.
 
     Only the installation owner or a configured installation administrator;
     never a workspace administrator (see :mod:`passphrase_resets`)."""
@@ -1304,6 +1305,7 @@ def users_passphrase_reset(request: Request, email: str = Form(...), confirm: st
     return _app().templates.TemplateResponse(request, "users.html", {
         **_users_context(request), "passphrase_reset_link": link,
         "passphrase_reset_email": record["email"], "passphrase_reset_expires_at": record["expires_at"],
+        "passphrase_reset_first": record["first"],
     }, headers={"Cache-Control": "private, no-store"})
 
 

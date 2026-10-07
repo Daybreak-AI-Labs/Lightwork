@@ -805,6 +805,11 @@ def tenant_memberships(principal: str) -> dict[str, str]:
             if principal in members}
 
 
+def tenant_member_principals() -> set[str]:
+    """Every principal holding a direct role in any workspace."""
+    return {principal for members in _load_tenant().values() for principal in members}
+
+
 def list_tenant_roles(tenant: str) -> dict[str, str]:
     """All {principal: role} memberships within ``tenant``."""
     if _tenant_removed(tenant):
@@ -839,7 +844,7 @@ __all__ = [
     "permissions_for", "list_users", "get_stored_role", "set_role", "remove_user",
     "tenant_store_path", "get_tenant_role", "set_tenant_role",
     "remove_tenant_role", "list_tenant_roles", "clear_tenant_roles", "has_tenant_membership",
-    "tenant_memberships",
+    "tenant_memberships", "tenant_member_principals",
     "custom_roles_path", "list_custom_roles", "known_roles", "is_known_role",
     "most_privileged", "set_custom_role", "delete_custom_role",
 ]
