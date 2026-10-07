@@ -131,6 +131,8 @@ def test_schedule_permission_change_refuses_before_goal_or_runner(account, monke
     with pytest.raises(selections.SelectionUnavailable):
         worker._dispatch(SimpleNamespace(kind="start_goal", payload=payload, id=1, attempts=1))
     assert called == [] and "goal_id" not in payload
+    # A certain refusal never records an uncertain creation boundary.
+    assert "_goal_creation_started" not in payload
 
 
 def test_selected_drive_uses_exact_saved_account_and_refuses_writes(account, monkeypatch):

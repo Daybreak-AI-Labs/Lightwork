@@ -307,6 +307,7 @@ class Worker:
             raise GoalRunFailed(f"goal {goal_id} terminal status={status!r}")
 
     def _create_scheduled_goal(self, job: Job, text: str) -> int:
+        from .template_connections import SelectionUnavailable, validate
         from .world_model import close_world_if_owned, open_world
 
         world = None
@@ -316,6 +317,13 @@ class Worker:
                     "An earlier attempt's scheduled task creation could not be confirmed. "
                     "Check task history before starting more work. This job will not create another task."
                 )
+            # Check the saved account selections first: a read-only refusal
+            # (revoked access, changed permissions) is certain no task was
+            # created, so it must surface as itself -- before the uncertain
+            # creation marker below, which would otherwise block the job as
+            # "could not be confirmed".
+            owner = str(job.payload.get("owner") or "")
+            refs = validate(owner, job.payload.get("connection_references", []))
             # Persist the uncertain boundary before task creation. A reclaimed
             # lease with this marker and no task id cannot mint a second task.
             # Recurrence's immutable clean template was captured before dispatch.
@@ -326,9 +334,6 @@ class Worker:
                 raise LeaseLost(f"job {job.id}: creation admission lease was lost")
             world = open_world()  # client/tenant-floored canonical world
             title = (job.payload.get("title") or text).strip()[:80]
-            owner = str(job.payload.get("owner") or "")
-            from .template_connections import validate
-            refs = validate(owner, job.payload.get("connection_references", []))
             goal_id = world.create_goal(title, text, owner=owner,
                 **({"connection_references": refs} if refs else {}))
             schedule_id = job.payload.get("schedule_id")
@@ -341,7 +346,7 @@ class Worker:
             ):
                 raise LeaseLost(f"job {job.id}: goal checkpoint lease was lost")
             return goal_id
-        except (LeaseLost, GoalRunStopped):
+        except (LeaseLost, GoalRunStopped, SelectionUnavailable):
             raise
         except Exception as exc:
             raise GoalRunStopped(
