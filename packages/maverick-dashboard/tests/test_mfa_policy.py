@@ -178,6 +178,7 @@ def test_step_up_only_knows_the_documented_operations():
     assert set(step_up.SENSITIVE_OPERATIONS) == {
         "change_role", "remove_spending_limit", "clear_emergency_stop", "rotate_keys",
         "change_auth_settings", "delete_workspace", "restore_workspace", "revoke_sessions",
+        "reset_passphrase",
     }
 
 

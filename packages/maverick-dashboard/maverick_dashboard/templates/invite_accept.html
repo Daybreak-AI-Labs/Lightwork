@@ -30,7 +30,7 @@
   {% if message %}<p class="own__alert" role="alert">{{ message }}</p>{% endif %}
   {% if state == 'local' %}
   <p>Choose a passphrase to finish. Next time, sign in with your email and this passphrase.
-    An invitation cannot replace it later, so keep it safe; if you forget it, ask the installation owner for help.</p>
+    An invitation cannot replace it later, so keep it safe; if you forget it, ask the installation owner to reset it.</p>
   <form method="post" data-draft-recovery="off" id="owner-form" novalidate>
     <label class="own__field"><span>Email address</span>
       <input class="input" type="email" id="invite-email" autocomplete="username" value="{{ invite.email }}" readonly aria-describedby="invite-email-help">

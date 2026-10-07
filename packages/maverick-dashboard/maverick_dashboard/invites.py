@@ -56,14 +56,15 @@ class ExistingAccountError(ValueError):
 
 def existing_local_account(email: str) -> bool:
     """Whether accepting a local invitation for ``email`` would take over an
-    existing identity: a colleague passphrase, the installation owner, a
-    configured bootstrap admin, a stored role or any workspace membership.
+    existing identity: a colleague passphrase (or one being reset), the
+    installation owner, a configured bootstrap admin, a stored role or any
+    workspace membership.
 
     Accepting a local invitation sets a passphrase and signs in as
     ``user:<email>``, so any of these would let whoever holds the link become
     that person. Unreadable state counts as existing (fail closed).
     """
-    from . import local_passphrases, rbac
+    from . import local_passphrases, passphrase_resets, rbac
 
     email = (email or "").strip().lower()
     principal = "user:" + email
@@ -71,6 +72,7 @@ def existing_local_account(email: str) -> bool:
         from maverick.suite_grants import is_admin_principal
 
         return bool(local_passphrases.has_account(email) or local_passphrases.owner_of(email)
+                    or passphrase_resets.pending_for(email)
                     or is_admin_principal(principal)
                     or rbac.get_stored_role(principal) is not None
                     or rbac.has_tenant_membership(principal))

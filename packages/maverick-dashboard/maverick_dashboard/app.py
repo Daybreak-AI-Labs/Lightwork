@@ -2318,6 +2318,12 @@ app.include_router(session_expiry_router)
 templates.env.globals["page_session"] = _page_session
 
 app.include_router(invite_router)
+# One-time passphrase reset links (/auth/invite/reset/{token}) that the owner
+# makes on /users. Same token-is-the-credential shape as invite links; inert
+# unless colleagues sign in with passphrases. See passphrase_resets.
+from .passphrase_resets import router as passphrase_reset_router  # noqa: E402
+
+app.include_router(passphrase_reset_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
 # 404s when unset, so including it is inert off by default. It carries its own
 # static IdP bearer, so the /scim/ prefix is exempted from the dashboard-token

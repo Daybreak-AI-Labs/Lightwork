@@ -33,6 +33,7 @@ SENSITIVE_OPERATIONS: dict[str, str] = {
     "delete_workspace": "Deleting a workspace",
     "restore_workspace": "Restoring a removed workspace",
     "revoke_sessions": "Signing other devices or people out",
+    "reset_passphrase": "Resetting a colleague's passphrase",
 }
 
 STEP_UP_MESSAGE = (

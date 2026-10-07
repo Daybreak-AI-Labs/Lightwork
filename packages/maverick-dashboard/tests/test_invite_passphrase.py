@@ -220,6 +220,7 @@ def test_sign_in_page_offers_a_new_invite_to_people_without_a_passphrase(workspa
     page = re.sub(r"\s+", " ", _remote().get("/auth/local-login").text)
     assert "No passphrase yet? Ask your administrator for an invitation" in page
     assert "An invitation cannot replace a passphrase you already have" in page
+    assert "Forgotten it? Ask the installation owner to reset it." in page
     assert "/static/lightwork.css" in page
 
 
@@ -431,3 +432,233 @@ def test_new_colleagues_can_still_be_invited(workspace):
     assert _accept(newcomer, link).status_code == 303
     assert "mvk_session" in newcomer.cookies
     assert invites.existing_local_account("new@example.test") is True
+
+
+# -- the installation owner resets a forgotten passphrase ----------------------
+
+def _reset(client, email=COLLEAGUE, confirm="reset"):
+    return client.post("/users/passphrase-reset", data={"email": email, "confirm": confirm})
+
+
+def _reset_link(response) -> str:
+    assert response.status_code == 200, response.text
+    match = re.search(r'id="passphrase-reset-link"[^>]*value="[^"]*(/auth/invite/reset/pwr_[A-Za-z0-9_-]+)"',
+                      response.text)
+    assert match, response.text[:2000]
+    return match[1]
+
+
+def _later(monkeypatch, seconds=2):
+    """Sign-ins after a reset are issued after its revocation epoch (whole seconds)."""
+    from maverick_dashboard import oidc_login
+
+    now = int(time.time()) + seconds
+    monkeypatch.setattr(oidc_login, "_now", lambda: now)
+
+
+def _colleague_with_session(owner):
+    assert _accept(_remote(), _invite(owner)).status_code == 303
+    browser = _remote()
+    assert _sign_in(browser).status_code == 303
+    assert browser.get("/api/v1/features/modules").status_code == 200
+    return browser
+
+
+def test_the_owner_resets_a_forgotten_passphrase_end_to_end(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import rbac, session_registry
+
+    signed_in = _colleague_with_session(workspace)
+    page = workspace.get("/users")
+    assert 'action="/users/passphrase-reset"' in page.text and 'data-users-ok="Reset passphrase"' in page.text
+    assert f"Reset the passphrase for {COLLEAGUE}?" in page.text
+    audits = _audits(monkeypatch)
+
+    reset = _reset(workspace)
+    link = _reset_link(reset)
+    assert f"Passphrase reset for {COLLEAGUE}." in reset.text
+    assert "no-store" in reset.headers["cache-control"]
+    store = tmp_path / "dashboard-passphrase-resets.json"
+    assert link.rsplit("/", 1)[1] not in store.read_text(encoding="utf-8")  # only a hash is kept
+    # The old passphrase and every live session stop working at once.
+    assert _sign_in(_remote(), password=GOOD).status_code == 401
+    assert signed_in.get("/api/v1/features/modules").status_code == 401
+    assert session_registry.list_for("user:" + COLLEAGUE) == []
+    assert rbac.get_stored_role("user:" + COLLEAGUE) == "operator"  # access is not changed
+    issued = [row for row in audits if row.get("action") == "passphrase_reset_issued"]
+    assert len(issued) == 1
+    assert issued[0]["actor"] == "user:" + OWNER and issued[0]["principal"] == "user:" + COLLEAGUE
+
+    browser = _remote()
+    opened = browser.get(link)
+    assert opened.status_code == 200
+    text = re.sub(r"\s+", " ", opened.text)
+    assert f"reset by the installation owner ({OWNER})" in text
+    assert re.search(r'<input[^>]*name="password"[^>]*autocomplete="new-password"', opened.text)
+    done = _accept(browser, link, OTHER)
+    assert done.status_code == 200, done.text
+    assert "New passphrase saved" in done.text
+    assert "mvk_session" not in browser.cookies  # the link signs no one in
+    assert any(row.get("action") == "passphrase_reset_completed" and row.get("reset_by") == "user:" + OWNER
+               for row in audits)
+    assert _passphrase_row(tmp_path)["tenant"] == ""
+
+    _later(monkeypatch)
+    assert _sign_in(_remote(), password=GOOD).status_code == 401
+    returned = _remote()
+    assert _sign_in(returned, password=OTHER).status_code == 303
+    assert returned.get("/api/v1/features/modules").status_code == 200
+    assert rbac.get_stored_role("user:" + COLLEAGUE) == "operator"
+
+
+def test_a_reset_link_works_once(workspace, tmp_path):
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    link = _reset_link(_reset(workspace))
+    assert _accept(_remote(), link, OTHER).status_code == 200
+    saved = _passphrase_row(tmp_path)
+    again = _accept(_remote(), link, GOOD + " again")
+    assert again.status_code == 410
+    assert "invalid, expired or already used" in again.text
+    assert _remote().get(link).status_code == 410
+    assert _passphrase_row(tmp_path) == saved
+
+
+def test_an_expired_reset_link_is_refused_and_the_owner_can_reset_again(workspace, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick_dashboard import passphrase_resets
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    link = _reset_link(_reset(workspace))
+    later = time.time() + passphrase_resets.RESET_TTL_SECONDS + 1
+    monkeypatch.setattr(passphrase_resets, "time", SimpleNamespace(time=lambda: later))
+    assert _remote().get(link).status_code == 410
+    assert _accept(_remote(), link, OTHER).status_code == 410
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE not in accounts
+    # The person is still listed, so the owner can send a new link.
+    page = re.sub(r"\s+", " ", workspace.get("/users").text)
+    assert "Waiting to choose a new passphrase" in page
+    fresh = _reset_link(_reset(workspace))
+    assert _accept(_remote(), fresh, OTHER).status_code == 200
+    assert _accept(_remote(), link, GOOD).status_code == 410  # the old link stays dead
+
+
+@pytest.mark.parametrize("change", ["role", "workspace", "departments"])
+def test_a_reset_link_is_refused_after_the_account_changes(workspace, tmp_path, monkeypatch, change):
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac, suite_grants
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    link = _reset_link(_reset(workspace))
+    audits = _audits(monkeypatch)
+    principal = "user:" + COLLEAGUE
+    if change == "role":
+        rbac.set_role(principal, "admin")
+    elif change == "workspace":
+        registry.create_tenant("client-a")
+        rbac.set_tenant_role("client-a", principal, "admin")
+    else:
+        suite_grants.set_suites(principal, [sorted(suite_grants.known_suites())[0]])
+    refused = _accept(_remote(), link, OTHER)
+    assert refused.status_code == 409
+    assert "changed after the reset" in refused.text and "no passphrase was saved" in refused.text
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE not in accounts  # no passphrase was saved
+    assert any(row.get("action") == "passphrase_reset_refused" and row.get("reason") == "account_changed"
+               for row in audits)
+    # The link is used up: changing the access back does not revive it.
+    if change == "role":
+        rbac.set_role(principal, "operator")
+    elif change == "workspace":
+        rbac.remove_tenant_role("client-a", principal)
+    assert _accept(_remote(), link, OTHER).status_code == 410
+
+
+def test_the_owner_cannot_be_reset_this_way(workspace, tmp_path):
+    refused = _reset(workspace, email=OWNER)
+    assert refused.status_code == 403
+    assert "owner recovery" in refused.text
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+    local = workspace
+    local.cookies.clear()
+    assert _sign_in(local, email=OWNER, password=OWNER_PASS).status_code == 303
+
+
+def test_an_admin_role_holder_who_is_not_the_owner_cannot_reset(workspace, tmp_path):
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    assert _accept(_remote(), _invite(workspace, email="boss@example.test", role="admin")).status_code == 303
+    boss = _remote()
+    assert _sign_in(boss, email="boss@example.test").status_code == 303
+    page = boss.get("/users")
+    assert page.status_code == 200 and 'action="/users/passphrase-reset"' not in page.text
+    before = _passphrase_row(tmp_path)
+    refused = _reset(boss)
+    assert refused.status_code == 403
+    assert _passphrase_row(tmp_path) == before
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+
+
+def test_installation_administrators_reset_colleagues_but_only_the_owner_resets_them(
+        workspace, tmp_path, monkeypatch):
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    for email in ("ia@example.test", "ib@example.test"):
+        assert _accept(_remote(), _invite(workspace, email=email, role="admin")).status_code == 303
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:ia@example.test,user:ib@example.test")
+    installer = _remote()
+    assert _sign_in(installer, email="ia@example.test").status_code == 303
+    page = installer.get("/users").text
+    assert f'name="email" value="{COLLEAGUE}"' in page and 'name="email" value="ib@example.test"' not in page
+    link = _reset_link(_reset(installer))
+    opened = re.sub(r"\s+", " ", _remote().get(link).text)
+    assert "reset by an installation administrator (ia@example.test)" in opened
+    before = _passphrase_row(tmp_path, "ib@example.test")
+    refused = _reset(installer, email="ib@example.test")
+    assert refused.status_code == 403
+    assert _passphrase_row(tmp_path, "ib@example.test") == before
+    assert _reset_link(_reset(workspace, email="ib@example.test"))  # the owner may
+    # An administrator who loses that standing also loses the links they made.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:ib@example.test")
+    assert _accept(_remote(), link, OTHER).status_code == 409
+    assert COLLEAGUE not in json.loads(
+        (tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+
+
+def test_a_reset_needs_confirmation_this_site_and_a_recent_second_factor(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import step_up
+    from maverick_dashboard.app import app
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    before = _passphrase_row(tmp_path)
+    assert _reset(workspace, confirm="").status_code == 422
+    hostile = TestClient(app, base_url=LOCAL, client=("127.0.0.1", 50001),
+                         headers={"Origin": "https://attacker.example"}, follow_redirects=False)
+    hostile.cookies.update(workspace.cookies)
+    assert _reset(hostile).status_code == 403
+    monkeypatch.setattr(step_up, "applies", lambda request: True)
+    stepped = _reset(workspace)
+    assert stepped.status_code == 403
+    assert step_up.STEP_UP_MESSAGE in stepped.text
+    assert _passphrase_row(tmp_path) == before
+    assert _sign_in(_remote(), password=GOOD).status_code == 303
+
+
+def test_a_reset_link_only_saves_from_its_own_page(workspace, tmp_path):
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    link = _reset_link(_reset(workspace))
+    from maverick_dashboard.app import app
+
+    for headers in ({}, {"Origin": "https://attacker.example"}):
+        hostile = TestClient(app, base_url=REMOTE, client=("192.0.2.41", 50003),
+                             headers=headers, follow_redirects=False)
+        assert _accept(hostile, link, OTHER).status_code == 400
+    assert _accept(_remote(), link, OTHER).status_code == 200  # still usable from its page
+
+
+def test_a_person_waiting_for_a_new_passphrase_cannot_be_invited(workspace):
+    from maverick_dashboard import invites, rbac
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    _reset_link(_reset(workspace))
+    rbac.remove_user("user:" + COLLEAGUE)
+    assert invites.existing_local_account(COLLEAGUE) is True
+    assert workspace.post("/users/invite", data={"email": COLLEAGUE, "role": "viewer"}).status_code == 409
