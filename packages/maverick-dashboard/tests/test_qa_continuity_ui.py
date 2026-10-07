@@ -59,10 +59,13 @@ def test_assessment_page_sends_revision_on_every_record_mutation():
     assert "?expected_revision=' + encodeURIComponent(a.revision)" in source
     assert source.count("expected_revision: a.revision") >= 3
     assert "expected_revision: 0" in source
-    assert "result.status !== 409" in source
-    assert "This assessment changed in another tab" in source
-    assert "Reload latest assessment" in source
-    assert "open(assessment.kind, assessment.subject, reloadButton)" in source
+    # A conflict keeps the entered work and offers to read the latest version;
+    # an unconfirmed change is never presented as failed or retried.
+    assert "result.status === 409" in source
+    assert "This assessment or your access changed. Your entered work is kept" in source
+    assert "Read current assessment" in source
+    assert "open(assessment.kind, assessment.subject, read, true)" in source
+    assert "It may already be saved. Read the current assessment before deciding again." in source
 
 
 def test_flow_designer_has_loss_and_double_submit_guards():
@@ -98,7 +101,11 @@ def test_settings_saves_one_section_and_keeps_other_drafts():
     source = (TEMPLATES / "settings.html").read_text(encoding="utf-8")
     assert "var dirty = new Set()" in source
     assert "dirty.delete(form)" in source
-    assert "dirty.clear()" not in source
+    # Saving never clears other drafts. The only clear is a whole-page reload
+    # of refreshed model choices that the person confirmed first.
+    reload = "dirty.clear(); window.location.assign('/settings#settings-models');"
+    assert source.count("dirty.clear()") == source.count(reload) == 1
+    assert "okText:'Reload choices'" in source and "if (!agreed) return;" in source
     assert "Your other section drafts are kept" in source
     assert "var response = await fetch(url" in source
     assert "window.addEventListener('beforeunload'" in source
@@ -137,7 +144,10 @@ def test_high_impact_learning_workforce_and_agent_actions_confirm():
     workforce = (TEMPLATES / "workforce.html").read_text(encoding="utf-8")
     agents = (TEMPLATES / "agents.html").read_text(encoding="utf-8")
     assert "This changes the deployment-wide learning posture" in learning
-    assert "Enable automatic application of proven workflow improvements?" in learning
+    # Automatic application was withdrawn (suggestions wait for a complete
+    # review); the remaining automatic switch, rollback, still confirms.
+    assert "Enable automatic rollback of measured workflow regressions?" in learning
+    assert 'id="lrn-auto-apply"' not in learning
     assert "Scheduled and triggered workflows may start running" in learning
     teams = (TEMPLATES.parent / "static" / "lightwork-department-team-updates.js").read_text(encoding="utf-8")
     overrides = (TEMPLATES.parent / "static" / "lightwork-agent-override-changes.js").read_text(encoding="utf-8")
@@ -145,7 +155,12 @@ def test_high_impact_learning_workforce_and_agent_actions_confirm():
     assert "await window.LWDepartmentTeamUpdates.open(key, btn);" in workforce
     assert agents.count("await window.LWDepartmentTeamUpdates.open(") == 2
     assert "Review the complete before and after. Saving does not start any tasks." in teams
-    assert "Its allowed actions, steps and independence settings take effect for everyone who uses it" in agents
+    # Saving an agent keeps a draft; publishing it, which changes the agent
+    # people use, needs the complete review and a ticked consent.
+    drafts = (TEMPLATES.parent / "static" / "lightwork-specialist-drafts.js").read_text(encoding="utf-8")
+    assert "await window.LWSpecialistDrafts.reviewEntered('save')" in agents
+    assert "I reviewed every setting and consequence above." in drafts
+    assert "apply.disabled = !consent.checked || busy || reviewed !== value" in drafts
     # Reset and removal show a reviewed consequence and need a ticked consent.
     assert "'Review reset to the built-in definition'" in overrides
     assert "apply.disabled = busy || !consent.checked" in overrides
