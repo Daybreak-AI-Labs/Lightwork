@@ -178,6 +178,13 @@ def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
 
     configured = {"enabled": True, "api_key": "fixture", "webhook_token": "fixture",
                   "allowed_callers": ["+12025550111"]}
+    # Incoming calls also need the saved assistant from the phone service.
+    no_assistant = integration_readiness.channel_readiness("voice", configured)["runtime"]
+    assert no_assistant["status"] != "passed"
+    if not ("adapter is unavailable" in no_assistant["detail"]
+            or "not installed" in no_assistant["detail"]):
+        assert "saved assistant" in no_assistant["detail"]
+    configured["assistant_id"] = "assistant-fixture"
     voice_runtime = integration_readiness.channel_readiness("voice", configured)["runtime"]
     if voice_runtime["status"] != "passed":
         assert "adapter is unavailable" in voice_runtime["detail"] or "not installed" in voice_runtime["detail"]
