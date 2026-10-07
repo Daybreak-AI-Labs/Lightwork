@@ -63,15 +63,17 @@
   }
   async function load() {
     if (busy || expired) return; var attempt=++generation; lock(true); pending=null; review.hidden=true;
+    // The shared loading state: words only when the list takes over 300 ms.
+    var wait=window.mvLoading ? window.mvLoading(list,{text:'Loading your saved views…'}) : null;
     try {
-      var current=await request('/api/v1/views?task_filters=true'); if (attempt !== generation || expired) return;
+      var current=await request('/api/v1/views?task_filters=true'); if (wait) await wait.done(); if (attempt !== generation || expired) return;
       state=current; render();
       if (uncertain) {
         var saved=state.views.find(function (view) { return view.name === uncertain.name; });
         var matches=uncertain.deleting ? !saved : saved && saved.params.q === uncertain.q && saved.params.status === uncertain.status;
         say(matches ? 'Current saved views match your last reviewed change. This check sent no change and does not identify who saved it.' : 'Current saved views are shown. Your last request is not confirmed; review these values before making another change.'); uncertain=null;
       } else say(state.other_views ? 'Your task views are ready. Other saved dashboard views are preserved.' : 'Your task views are ready.');
-    } catch (error) { if (!expired && attempt === generation) say(error.message); }
+    } catch (error) { if (wait) await wait.done(); if (!expired && attempt === generation) say(error.message); }
     finally { if (attempt === generation) lock(false); }
   }
   form.addEventListener('submit',function (event) { event.preventDefault(); if (form.reportValidity()) prepare(name.value,filters(),false); });

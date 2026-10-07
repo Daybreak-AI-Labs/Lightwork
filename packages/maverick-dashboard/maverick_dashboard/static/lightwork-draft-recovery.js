@@ -83,17 +83,38 @@
     storage.append(storageTitle, storageStatus, storageRefresh, storageRetire); panel.append(storage);
     // Chat's dock needs one quiet readiness row. The same native controls stay
     // available in its disclosure; unresolved recovery always opens in full.
-    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false;
+    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false, slowCheck = false, checkingSince = 0;
     if (compact) {
       disclosure = doc.createElement('details'); disclosureTitle = doc.createElement('summary');
-      disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Checking draft recovery…';
+      disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Draft recovery';
       disclosureTitle.style.cssText = 'cursor:pointer;color:var(--muted);font-size:var(--text-xs);line-height:1.5';
+      // Opened, the row floats above the composer: it opens by itself when
+      // recovery needs attention, and growing the dock in place pushed the
+      // conversation up (a 0.17 layout shift on phones).
       var disclosureBody = doc.createElement('div');
-      disclosureBody.style.cssText = 'margin-top:var(--space-2);max-height:min(44vh,24rem);overflow:auto;overflow-wrap:anywhere';
+      disclosure.style.position = 'relative';
+      disclosureBody.style.cssText = 'position:absolute;inset-inline:0;bottom:calc(100% + var(--space-1));z-index:var(--z-popover);' +
+        'max-height:min(44vh,24rem);overflow:auto;overflow-wrap:anywhere;padding:var(--space-3);background:var(--surface-1);' +
+        'border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg)';
       while (panel.firstChild) disclosureBody.appendChild(panel.firstChild);
       if (options.information) disclosureBody.appendChild(options.information);
       disclosure.append(disclosureTitle, disclosureBody); panel.append(disclosure);
       panel.style.cssText = 'padding:var(--space-2);margin-block:var(--space-2);min-width:0';
+      // The loading words appear only when the check takes longer than
+      // 300 ms (the mvLoading rule), so a quick check never flashes them.
+      root.setTimeout(function () {
+        slowCheck = true;
+        if (initialized) return;
+        checkingSince = Date.now(); compactControls();
+        // Counted from the first frame that can show the words: a busy phone
+        // paints late, and a page still loading is inert (not yet shown).
+        function shown() {
+          if (!checkingSince) return;
+          if (disclosureTitle.closest('[inert], [hidden]')) { root.requestAnimationFrame(shown); return; }
+          checkingSince = Date.now();
+        }
+        if (typeof root.requestAnimationFrame === 'function') root.requestAnimationFrame(shown);
+      }, 300);
       disclosureTitle.addEventListener('click', function (event) {
         if (blocked || failed || pendingOperation) { event.preventDefault(); disclosure.open = true; }
         else automaticallyOpened = false;
@@ -149,8 +170,12 @@
     function compactControls() {
       if (!compact) return;
       var attention = blocked || failed || pendingOperation;
+      // Once shown, the checking words stay 500 ms so they can be read.
+      var shownFor = checkingSince ? Date.now() - checkingSince : 500;
+      if (initialized && !attention && shownFor < 500) { root.setTimeout(compactControls, 500 - shownFor); return; }
+      if (initialized) checkingSince = 0;
       disclosureTitle.textContent = failed ? 'Draft recovery needs attention' : blocked ? 'Recovery copy needs review' :
-        pendingOperation ? 'Recovery save needs confirmation' : !initialized ? 'Checking draft recovery…' :
+        pendingOperation ? 'Recovery save needs confirmation' : !initialized ? (slowCheck ? 'Checking draft recovery…' : 'Draft recovery') :
         running || changed ? 'Keeping unsent text…' : remote ? 'Unsent text protected' : 'Draft recovery ready';
       if (attention && !disclosure.open) { automaticallyOpened = true; disclosure.open = true; }
       else if (!attention && automaticallyOpened) { automaticallyOpened = false; disclosure.open = false; }

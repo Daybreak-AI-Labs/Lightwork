@@ -214,7 +214,9 @@
   // (complete text behind a toggle — the real review home is the shared
   // pop-out), and Review leads the decision row.
   (function() {
-    if (!window.mvAssessmentReview) return;
+    // The pop-out's code (lightwork-assessment-review.js) is deferred: shape
+    // the rows now, before the first paint, and open it on a later click.
+    if (!document.getElementById('arv-dialog')) return;
     function el(tag, cls, text) {
       const n = document.createElement(tag);
       if (cls) n.className = cls;
@@ -243,7 +245,7 @@
       const cell = item.querySelector('.approval-actions');
       const btn = el('button', 'btn approval-review', 'Review assessment');
       btn.type = 'button';
-      btn.addEventListener('click', function () { window.mvAssessmentReview.open(assessmentId); });
+      btn.addEventListener('click', function () { if (window.mvAssessmentReview) window.mvAssessmentReview.open(assessmentId); });
       cell.insertBefore(btn, cell.firstChild);
       item.dataset.assessment = assessmentId;
     });
@@ -336,8 +338,16 @@
     // can be undone. High risk needs the box ticked; critical also needs
     // the word APPROVE typed. Never the browser's confirm().
     const dlg = document.getElementById('approval-confirm');
+    // Opening a modal dialog restyles the whole page (about 100 ms on a
+    // phone). The click's own frame paints first and the confirmation opens
+    // in the next one, so the click answers within 200 ms (INP).
+    let opening = false;
+    function afterPaint(run) {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(function () { setTimeout(run, 0); });
+      else setTimeout(run, 0);
+    }
     function confirmApproval(item) {
-      if (!dlg || typeof dlg.showModal !== 'function' || dlg.open) return Promise.resolve(null);
+      if (!dlg || typeof dlg.showModal !== 'function' || dlg.open || opening) return Promise.resolve(null);
       const risk = (item.dataset.risk || '').toLowerCase();
       const critical = risk === 'critical';
       const opener = document.activeElement;
@@ -403,7 +413,9 @@
         clearInvalid(e.target);
         err.textContent = '';
       }
-      ack.checked = false; typed.value = ''; err.textContent = '';
+      // Only reset what changed: writing a text field's value makes the
+      // browser lay the page out at once, before the dialog can open.
+      ack.checked = false; if (typed.value) typed.value = ''; err.textContent = '';
       clearInvalid(ack); clearInvalid(typed);
       typedWrap.hidden = !critical;
       return new Promise(function (resolve) {
@@ -431,8 +443,12 @@
         dlg.addEventListener('cancel', onCancel);
         ack.addEventListener('change', onFix);
         typed.addEventListener('input', onFix);
-        dlg.showModal();
-        ack.focus();
+        opening = true;
+        afterPaint(function () {
+          opening = false;
+          dlg.showModal();
+          ack.focus();
+        });
       });
     }
 
@@ -500,6 +516,8 @@
       if (!decidedList.querySelector('article.approval-item')) decidedSection.hidden = true;
     }
 
+    // A rejection reason typed for a decision that did not get through.
+    const keptReasons = {};
     async function decide(btn, opts) {
       opts = opts || {};
       const id = btn.dataset.id;
@@ -515,7 +533,15 @@
           b.disabled = originalDisabled[index];
         });
         btn.removeAttribute('aria-busy');
-        if (busyLine) busyLine.textContent = '';
+        if (busyLine) { busyLine.textContent = ''; busyLine.classList.remove('mv-status--error'); }
+      }
+      // The decision did not get through: say so on the card, where the
+      // person pressed, as well as in the page's status line.
+      function showFailure(text) {
+        restoreDisabledStates();
+        if (!busyLine) return;
+        busyLine.textContent = text;
+        busyLine.classList.add('mv-status--error');
       }
       // Feedback on the card itself the moment the decision is sent (as forms
       // say "Saving…"); the page's status line below may be out of view.
@@ -532,6 +558,8 @@
         busyLine.textContent = text;
         btn.setAttribute('aria-busy', 'true');
       }
+      const oldLine = item0 && item0.querySelector('[data-approval-busy]');
+      if (oldLine) { oldLine.textContent = ''; oldLine.classList.remove('mv-status--error'); }
       const body = {};
       if (action === 'approve' && item0 && isHighRisk(item0)) {
         if (opts.confirmed) {
@@ -546,11 +574,13 @@
       if (action === 'deny' && !opts.confirmed) {
         const answers = window.mvForm ? await window.mvForm('Reject "' + label + '"', [
           { key: 'reason', label: 'Why are you rejecting it? (optional)', type: 'text', required: false,
-            help: 'Written to the audit log next to your decision.' },
+            help: 'Written to the audit log next to your decision.', default: keptReasons[id] || '' },
         ], { okText: tr('Reject "{action}"', {action: label}) }) : {};
         if (answers === null) { say('Nothing was changed.'); return; }
         const reason = ((answers && answers.reason) || '').trim();
         if (reason) body.reason = reason;
+        // Offered again if this attempt does not get through.
+        keptReasons[id] = reason;
       }
       let revisionRationale = '';
       if (action === 'revise') {
@@ -607,6 +637,7 @@
             return;
           }
           const decidedBy = r.headers.get('X-Lightwork-Decided-By') || '';
+          delete keptReasons[id];
           const undoSeconds = parseInt(r.headers.get('X-Lightwork-Undo-Seconds') || '0', 10) || 0;
           const outcome = action === 'approve' ? 'approved' : 'denied';
           const decisionText = label + (action === 'approve'
@@ -635,13 +666,13 @@
             if (moveFocus) focusAfterDecision(item, next, opts.pointer);
           }
         } else {
-          restoreDisabledStates();
+          showFailure(plainError(r, 'record your decision'));
           if (focusStillHere(item0)) focusOn(btn, opts.pointer);
           say(plainError(r, 'record your decision'), 'var(--danger)');
           toast(plainError(r, 'record your decision'), { error: true });
         }
       } catch (e) {
-        restoreDisabledStates();
+        showFailure(plainError(e, 'record your decision'));
         if (focusStillHere(item0)) focusOn(btn, opts.pointer);
         say(plainError(e, 'record your decision'), 'var(--danger)');
         toast(plainError(e, 'record your decision'), { error: true });

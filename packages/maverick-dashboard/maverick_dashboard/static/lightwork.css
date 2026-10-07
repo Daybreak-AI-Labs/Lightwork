@@ -241,6 +241,9 @@
        under it (WCAG 2.4.11). lightwork-ui.js keeps --shell-topbar-h equal to
        the bar's measured height, which grows when a phone header wraps. */
     html { scroll-padding-top: calc(var(--shell-topbar-h) + var(--space-3)); }
+    /* The same at the bottom for the floating Copilot button (3rem tall,
+       1.1rem from the edge): a focused row link is scrolled above it. */
+    html:has(.mv-copilot__fab) { scroll-padding-bottom: calc(3rem + 2.2rem); }
     #content { scroll-margin-top: var(--space-2); }
     body {
       margin: 0;
@@ -736,6 +739,10 @@
       animation: skeleton 1.4s ease infinite; min-height: 1rem;
     }
     @keyframes skeleton { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+    /* mvLoading (lightwork-ui.js): shown only after 300 ms, kept 500 ms. */
+    .mv-loading { margin: var(--space-2) 0; color: var(--muted); font-size: var(--text-sm); }
+    .mv-loading--error { color: var(--danger); }
+    .mv-loading--error .btn { margin-inline-start: var(--space-2); }
 
     /* ---------- halt killswitch pill ---------- */
     .halt-pill {
@@ -786,6 +793,9 @@
     .chat-shell .service-banner { border-radius: 0; }
     /* The Help menu: same popover as display preferences. */
     .help-menu__panel { display: flex; flex-direction: column; gap: var(--space-1); min-width: 16rem; }
+    .help-menu:not([open]) > .help-menu__panel { display: none; }
+    /* Every disclosure is a 24 px target at least (WCAG 2.5.8). */
+    summary { min-height: 24px; box-sizing: border-box; }
     .help-menu__item { display: block; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; }
     .help-menu__item:hover, .help-menu__item:focus-visible { background: var(--surface-2); text-decoration: none; }
     .help-topic { margin: var(--space-2) 0; }
@@ -2020,6 +2030,12 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 
 /* The Help menu in the chat sidebar opens across the sidebar's width, above the row. */
 .cs-account { position: relative; }
+/* Today: pinned pages and card links stack one per line, so each is a
+   24 px target (WCAG 2.5.8) rather than a 19 px line of text. */
+.today-pins li > a, .today-grid li > a { display: inline-flex; align-items: center; min-height: 24px; }
+/* Target size (WCAG 2.5.8): the chat shell's account links are at least
+   24 px tall, like every disclosure summary below. (Help is in the top bar.) */
+.cs-account a, .cs-workspace a { display: inline-flex; align-items: center; min-height: 24px; }
 
 /* Optional ease-of-use survey panels (lightwork-usability-survey.js). */
 .mv-survey { margin-bottom: var(--space-4); }
@@ -2069,4 +2085,60 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 .areanav__heading { margin: 0 0 var(--space-1); font-weight: var(--font-semibold); }
 @media (forced-colors: active) {
   .areanav__tabs a.active, .areanav__pages a.active { outline: 2px solid Highlight; }
+}
+/* Settings section index. Styled here, in the head, so the index does not
+   grow while the page parses and push the sections down (layout shift). */
+.settings-index { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-3); align-items: end; margin-bottom: var(--space-4); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--border) 72%, white 18%); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 78%, transparent); box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in srgb, white 15%, transparent); }
+/* Its blur belongs to Glass effects, like every pane below the top bar. */
+body.glass-on:not(.theme-hicontrast) .settings-index { backdrop-filter: blur(22px) saturate(145%); -webkit-backdrop-filter: blur(22px) saturate(145%); }
+.settings-index > * { min-width: 0; }
+.settings-index h2, .settings-index p { margin: 0; }
+.settings-index label { display: grid; gap: var(--space-1); }
+.settings-index > .mv-tabs { grid-column: 1 / -1; }
+#settings-filter-status { grid-column: 1 / -1; min-height: 1lh; }
+.settings-all-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+@media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
+@media (prefers-reduced-transparency: reduce) { .settings-index { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--panel); } }
+/* Touch screens and phones (MOB-2). Primary controls get a hit area of at
+   least 44 x 44 px, and text fields use 16 px text so phone browsers do not
+   zoom the page when a field is focused. `body` raises the specificity above
+   the page stylesheets that size these controls after this file loads; the
+   16 px text is !important because no page size may undo it on a phone. */
+@media (pointer: coarse), (max-width: 560px) {
+  body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  body select, body textarea, body .ctl { font-size: max(16px, 1rem) !important; }
+  body .btn, body .halt-pill, body .sidebar nav a, body .cs-side a, body [role="tab"],
+  body .composer__send, body .ask__send, body .composer__icon, body .ask__icon,
+  body .g-row__title a, body .g-row__actions a { min-height: 44px; min-width: 44px; }
+  body .topbar__menu, body .iconbtn, body .iconbtn--text { width: 44px; height: 44px; }
+  body .brand { min-height: 44px; min-width: 44px; justify-content: center; }
+  body .g-row__title a, body .g-row__actions a { display: inline-flex; align-items: center; }
+  body main details > summary { min-height: 44px; padding-block: 10px; box-sizing: border-box; }
+}
+/* On a phone the top bar's nine controls cannot sit in one 44 px row, so the
+   controls take a second row instead of shrinking below a thumb's width. */
+/* The bar's height is known before lightwork-ui.js measures it, so the
+   drawer and scroll padding that follow it do not move on load. */
+@media (max-width: 560px) {
+  :root { --shell-topbar-h: calc(2 * var(--space-2) + 2 * 44px + var(--space-1) + 1px); }
+  .topbar { flex-wrap: wrap; row-gap: var(--space-1); }
+  .topbar__controls { flex-basis: 100%; justify-content: space-between; }
+  /* Two rows cover too much of a phone while reading: scrolling down tucks
+     the bar away and scrolling up brings it back (lightwork-ui.js). */
+  body.topbar-tucked .topbar { transform: translateY(-100%); }
+}
+/* Below 360 px even that row is too narrow for seven 44 px controls. */
+@media (max-width: 360px) {
+  :root { --shell-topbar-h: calc(2 * var(--space-2) + 3 * 44px + 2 * var(--space-1) + 1px); }
+  .topbar__controls { flex-wrap: wrap; justify-content: flex-start; }
+}
+/* A table whose rows become labelled cards on a phone (<table class=
+   "table--stacked">, each cell with data-label="<column>"), so no column is
+   pushed off screen and nothing scrolls sideways (WCAG 1.4.10). */
+@media (max-width: 560px) {
+  .table--stacked, .table--stacked tbody, .table--stacked tr, .table--stacked td { display: block; width: 100%; }
+  .table--stacked thead { display: none; }
+  .table--stacked tr { padding-block: var(--space-2); border-bottom: 1px solid var(--hairline); }
+  .table--stacked td { padding: var(--space-1) 0; border: 0; }
+  .table--stacked td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-weight: var(--font-semibold); }
 }

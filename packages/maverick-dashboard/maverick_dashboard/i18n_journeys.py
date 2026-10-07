@@ -139,10 +139,12 @@ def context(request, lang):
     catalog = browser_catalog(lang)
     metadata = {"language": lang, "locale": locale_for(request, lang),
                 "review_status": "source" if lang == "en" else "community_seed" if lang == "ar" else "draft_partial"}
-    revision, _ = browser_catalog_asset(lang)
+    # English is the source language and its catalog is identity (the
+    # runtime's fallback), so English pages skip the blocking download.
+    asset = "" if lang == "en" else f"/static/lightwork-i18n-catalog/{lang}/{browser_catalog_asset(lang)[0]}.js"
     return {"ui": lambda source, /, **values: region(source, lang, **values),
             "ut": lambda source, /, **values: text(source, lang, **values),
             "ul": lambda source: entry(source, lang)[1],
             "journey_i18n": {**metadata, "catalog": catalog},
             "journey_i18n_bootstrap": metadata,
-            "journey_i18n_asset": f"/static/lightwork-i18n-catalog/{lang}/{revision}.js"}
+            "journey_i18n_asset": asset}

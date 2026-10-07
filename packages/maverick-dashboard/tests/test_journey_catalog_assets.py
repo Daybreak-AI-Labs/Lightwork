@@ -43,8 +43,32 @@ def test_settings_initial_page_stays_bounded_in_every_supported_language(languag
     assert bootstrap["language"] == language and "catalog" not in bootstrap
     expected_revision, _ = i18n_journeys.browser_catalog_asset(language)
     asset = f"/static/lightwork-i18n-catalog/{language}/{expected_revision}.js"
-    assert response.text.index(asset) < response.text.index('/static/lightwork-i18n.js')
+    if language == "en":
+        # English is the source language: its catalog is identity, so English
+        # pages skip the render-blocking download (206 KB, 36 KB compressed).
+        assert "/static/lightwork-i18n-catalog/" not in response.text
+        assert '/static/lightwork-i18n.js' in response.text
+    else:
+        assert response.text.index(asset) < response.text.index('/static/lightwork-i18n.js')
     assert 'data-setting-id="' not in response.text
+
+
+def test_english_catalog_is_identity_so_pages_can_skip_it():
+    # The browser runtime falls back to the source text marked English, which
+    # is exactly what the English catalog would have said for every entry.
+    for source, row in i18n_journeys.browser_catalog("en").items():
+        assert row == {"text": source, "lang": "en"}
+
+
+@pytest.mark.parametrize("path", ["/chat", "/goals", "/approvals", "/settings"])
+def test_english_shells_load_no_catalog_script_or_preload(path):
+    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+        english = client.get(path, params={"lang": "en"})
+        french = client.get(path, params={"lang": "fr"})
+    assert english.status_code == 200 and french.status_code == 200
+    assert "/static/lightwork-i18n-catalog/" not in english.text
+    assert '/static/lightwork-i18n.js' in english.text
+    assert "/static/lightwork-i18n-catalog/fr/" in french.text
 
 
 def test_catalog_rejects_unknown_languages_without_reflecting_request_content():

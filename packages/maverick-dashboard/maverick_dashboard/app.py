@@ -1657,6 +1657,12 @@ from .usability_survey_api import survey_context as _usability_survey_context  #
 app.include_router(approval_waits_router)
 app.include_router(usability_survey_router)
 templates.context_processors.append(_usability_survey_context)
+from .web_vitals_api import router as web_vitals_router  # noqa: E402
+from .web_vitals_api import vitals_context as _web_vitals_context  # noqa: E402
+
+app.include_router(web_vitals_router)
+templates.context_processors.append(_web_vitals_context)
+
 from . import usage_measures_api as _usage_measures_api  # noqa: E402
 
 # ONB-1 / AI-13 research measures: off unless [analytics] usage_measures.

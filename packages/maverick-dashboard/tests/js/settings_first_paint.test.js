@@ -136,3 +136,17 @@ test('the page script takes over the painted group without switching it', () => 
   assert.equal(dom.window.location.hash, '#settings-models');
   dom.window.close();
 });
+
+// The section index is styled by the shared stylesheet in the head. Its rules
+// used to arrive in a style block at the end of the body, so the index grew
+// from 157 to 249 px while the page parsed and pushed the sections down
+// (layout shift 0.163 on Settings).
+test('the settings index is styled before it is parsed', () => {
+  const css = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork.css'), 'utf8');
+  for (const rule of ['.settings-index {', '#settings-filter-status {', '.settings-all-link {']) {
+    assert.ok(css.includes(rule), `${rule} is in lightwork.css`);
+  }
+  const after = template.slice(template.indexOf('<section class="settings-index"'));
+  assert.doesNotMatch(after, /<style>[^<]*\.settings-index\s*[{,>]/, 'no settings-index rule arrives after the section');
+  assert.doesNotMatch(after, /#settings-filter-status\s*\{|\.settings-all-link\s*\{/);
+});
