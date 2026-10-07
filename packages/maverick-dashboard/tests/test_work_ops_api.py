@@ -437,7 +437,7 @@ def test_business_setup_bounds_documents(env):
 
 # ---- Ekko recording ------------------------------------------------------------
 
-def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env):
+def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env, monkeypatch):
     body = {"events": json.dumps({"app": "excel", "action": "open"}) + "\n", "acknowledge_capture_scope": False}
     assert env.client.post("/api/v1/ekko/recording/import", json=body).status_code == 400
     body["acknowledge_capture_scope"] = True
@@ -447,9 +447,24 @@ def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env):
     assert env.client.post("/api/v1/ekko/recording/import", json=too_big).status_code == 422
     options = env.client.get("/api/v1/ekko/recording/options").json()
     assert options["activity_file"] is True and options["windows_active_app"] is (os.name == "nt")
-    if os.name != "nt":
+    if not options["active_app"]:
+        # This computer has no supported desktop recorder: nothing starts, and
+        # the reply says why in the platform's own words.
         watch = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": True})
-        assert watch.status_code == 409 and "Windows" in watch.json()["detail"]
+        assert watch.status_code == 409
+        assert watch.json()["detail"] == {"message": options["availability_message"], "not_started": True}
+    # Where a recorder is available, watching still needs the capture-scope
+    # acknowledgement and an enabled, enrolled Ekko before anything records.
+    import maverick.ekko_foreground as foreground
+
+    monkeypatch.setattr(foreground, "foreground_options", lambda: {
+        "active_app": True, "observer": "linux_x11_foreground", "platform": "Linux",
+        "availability_message": "Record recognized apps on the local Linux X11 desktop where Lightwork is installed."})
+    monkeypatch.setattr(foreground, "foreground_observer", lambda: pytest.fail("no recorder may open before consent"))
+    unacknowledged = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": False})
+    assert unacknowledged.status_code == 400 and unacknowledged.json()["detail"]["not_started"] is True
+    off = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": True})
+    assert off.status_code == 409 and off.json()["detail"]["not_started"] is True  # Ekko is off
 
 
 def test_ekko_recording_runs_the_daemon_over_the_uploaded_file(env, monkeypatch):

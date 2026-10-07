@@ -153,9 +153,14 @@ def test_a_workspace_admin_is_not_a_global_admin(client, monkeypatch):
 
 def test_reads_on_the_learning_page_need_view(client, monkeypatch):
     _as(monkeypatch, "viewer")
-    for path in (f"{TO}/model-improvement", f"{TO}/reward-models", f"{TO}/codec", f"{LO}/donations", f"{LO}/jobs"):
+    for path in (f"{TO}/reward-models", f"{TO}/codec", f"{LO}/donations", f"{LO}/jobs"):
         assert client.get(path).status_code == 200, path
     assert client.post(f"{LO}/donations/clear", json={"confirm": True}).status_code == 403
+    # Model choices are read only by those the Learning page itself admits
+    # (installation administrators); a viewer is refused, an administrator reads.
+    assert client.get(f"{TO}/model-improvement").status_code == 403
+    _as(monkeypatch, "admin")
+    assert client.get(f"{TO}/model-improvement").status_code == 200
 
 
 # ---- background jobs -------------------------------------------------------------

@@ -30,14 +30,14 @@ const CYCLE = { context: CONTEXT, operation: OPERATION, recorded: true, confirme
   message: "The original cycle task is recorded. Read its current progress; nothing was repeated.",
   result: { message: "Looked at 12 tasks.", counts: { avoid: 1, habits: 1, ideas: 1 },
     stores: [{ Information: "Safeguards", "Recorded state": "Saved", Items: 1 }] } };
-const JOB = (result) => ({ job: { id: "0123456789abcdef", state: "done", can_stop: false, result } });  // pragma: allowlist secret
+const JOB = (result) => ({ job: { id: "0123456789abcdef", kind: "learning_task", state: "done", can_stop: false, result } });  // pragma: allowlist secret
 
 function defaults() {
   return {
     "/api/v1/learning-ops/self-modify": { state: "blocked", blockers: ["Add at least two practice tests it must pass."],
       level: "starter", areas: 2, results: 0, spending_limit: 4, technical: { areas: ["docs/**"] } },
     "/api/v1/learning-ops/self-modify/results": { results: [] },
-    "/api/v1/training-ops/model-improvement": { on: false, catalog: { as_of: "2026-06-01", candidates: 7 },
+    "/api/v1/training-ops/model-improvement": { context: CONTEXT, on: false, catalog: { as_of: "2026-06-01", candidates: 7 },
       task_sets: [{ value: "invoice_triage", label: "Invoice triage", ready: false, practice_groups: 3,
         kept_aside_groups: 2, why_not: ["Needs more independent practice task groups."] }],
       choices: { roles: [{ value: "coder", label: "Coder" }], memory_gib: [16, 32], context_tokens: [16384],
