@@ -410,6 +410,31 @@ def test_post_message_open_dm_and_respond_use_the_guarded_client(monkeypatch):
     assert respond("", {}) is False
 
 
+class _NoReply(_Client):
+    def post(self, url, json=None, headers=None):
+        _Client.calls.append((url, json, headers))
+        raise TimeoutError("read timed out after the request was written")
+
+
+def test_a_message_that_may_have_reached_slack_is_reported_unconfirmed(monkeypatch):
+    from maverick.notifications import send_checked
+    from maverick.slack_interactive import send_dm
+    from maverick.tools import _ssrf
+
+    opened = {"ok": True, "channel": {"id": "D1"}}
+    clients = iter([_Client(_Response(body=opened)), _NoReply(None),
+                    _Client(_Response(body=opened)), _Client(_Response(status=502)),
+                    _Client(_Response(body=opened)), _Client(_Response(body={"ok": False, "error": "not_authed"})),
+                    _NoReply(None)])
+    monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: next(clients))
+    # No answer, or a server error, after posting: it may be in the DM.
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, True)
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, True)
+    # Slack refusing the post, or the DM never opening, means nothing went out.
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, False)
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, False)
+
+
 def test_approval_card_in_the_shared_channel_says_why_it_is_there(tmp_path):
     """NOT-1: the channel card names why it is posted, the decide-by time and the exact link."""
     from maverick.channel_approvals import card_content

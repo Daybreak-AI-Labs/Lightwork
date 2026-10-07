@@ -170,7 +170,7 @@ def test_run_cycle_sends_once_skips_empty_and_audits(tmp_path, recorded, monkeyp
         summary = daily_digest.run_digest_cycle(
             world, principals=people, can_decide=lambda p: p == "user:alice", now=now)
         assert summary == {"checked": 4, "sent": 1, "skipped_empty": 1,
-                           "skipped_unlinked": 1, "failed": 0}
+                           "skipped_unlinked": 1, "failed": 0, "unconfirmed": 0}
         assert sorted(s[0] for s in sent) == ["slack", "teams"]
         assert all(s[1] == "user:alice" for s in sent)
         notes = [p for k, p in recorded if k == "digest_sent"]
@@ -201,7 +201,7 @@ def test_email_digest_uses_linked_address_or_profile_email(tmp_path, recorded, m
     prefs = user_preferences.get_preferences("user:alice")
     digest = daily_digest.compose_digest(world, "user:alice", can_decide=True)
     outcomes = daily_digest.send_digest("user:alice", digest, links=[], prefs=prefs)
-    assert outcomes == [{"channel": "email", "ok": True}]
+    assert outcomes == [{"channel": "email", "ok": True, "delivery": "accepted"}]
     assert mails[0][0] == "alice@example.com" and mails[0][2] is True
     assert "summary" in mails[0][1].lower()
     outcomes = daily_digest.send_digest(
@@ -355,3 +355,142 @@ def test_results_already_seen_in_the_app_are_left_out_of_the_summary(tmp_path, m
     prepared = daily_digest.prepare_digest(world, "user:alice", can_decide=True,
                                            prefs={"time_zone": "UTC"})
     assert prepared["results"] == [] and prepared["left_out_seen"] == 1
+
+
+# ---- the day counts as done only once a channel accepted the summary ------
+
+NOON = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc).timestamp()
+
+
+def _cycle(world, now):
+    from maverick import daily_digest
+
+    return daily_digest.run_digest_cycle(world, principals=["user:alice"], can_decide=lambda p: True, now=now)
+
+
+def _last_sent():
+    from maverick import user_preferences
+
+    return user_preferences.get_preferences("user:alice").get("last_digest_date")
+
+
+def _deliveries(recorded):
+    return [(n["channel"], n["delivery"]) for k, n in recorded if k == "digest_sent"]
+
+
+def test_no_working_channel_is_retried_until_the_channel_is_set_up(tmp_path, recorded, monkeypatch):
+    from maverick import channel_identities, slack_interactive
+
+    world = _world(tmp_path)
+    _seed(world)
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    channel_identities.link("slack", "U1", "user:alice", actor="admin")
+    first = _cycle(world, NOON)
+    assert first["failed"] == 1 and first["sent"] == 0 and _last_sent() == ""
+    assert _deliveries(recorded) == [("slack", "not_sent")]
+    assert _cycle(world, NOON + 300)["failed"] == 1 and _last_sent() == ""
+    # The Slack app gets connected: the next poll still delivers today's summary, once.
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-not-a-real-token")
+    dms = []
+    monkeypatch.setattr(slack_interactive, "send_dm",
+                        lambda token, user, text, blocks=None: dms.append(user) or True)
+    fixed = _cycle(world, NOON + 600)
+    assert fixed["sent"] == 1 and fixed["failed"] == 0 and dms == ["U1"]
+    assert _last_sent() == "2026-07-01"
+    assert _cycle(world, NOON + 900)["sent"] == 0 and dms == ["U1"]
+
+
+def test_every_channel_refusing_keeps_the_day_open_and_one_accepting_closes_it(tmp_path, recorded, monkeypatch):
+    from maverick import channel_identities, daily_digest
+
+    world = _world(tmp_path)
+    _seed(world)
+    answers = {"slack": False, "teams": False}
+    tried = []
+
+    def sender(channel):
+        return lambda p, d, links, prefs: tried.append(channel) or answers[channel]
+    monkeypatch.setattr(daily_digest, "_send_slack", sender("slack"))
+    daily_digest.register_digest_sender("teams", sender("teams"))
+    try:
+        channel_identities.link("slack", "U1", "user:alice", actor="admin")
+        channel_identities.link("teams", "T-1", "user:alice", actor="admin")
+        refused = _cycle(world, NOON)
+        assert refused["failed"] == 1 and sorted(tried) == ["slack", "teams"] and _last_sent() == ""
+        assert {d for _, d in _deliveries(recorded)} == {"not_sent"}
+        answers["teams"] = True
+        one = _cycle(world, NOON + 300)
+        assert one["sent"] == 1 and one["failed"] == 0 and len(tried) == 4
+        assert _last_sent() == "2026-07-01"
+        assert ("teams", "accepted") in _deliveries(recorded)
+        assert _cycle(world, NOON + 600)["sent"] == 0 and len(tried) == 4
+    finally:
+        daily_digest.register_digest_sender("teams", None)
+
+
+def test_a_channel_failing_mid_send_is_unconfirmed_and_not_resent(tmp_path, recorded, monkeypatch):
+    from maverick import channel_identities, daily_digest
+
+    world = _world(tmp_path)
+    _seed(world)
+    tried = []
+
+    def broken(p, d, links, prefs):
+        tried.append("teams")
+        raise ConnectionError("reset after the message was written")
+    monkeypatch.setattr(daily_digest, "_send_slack", lambda p, d, links, prefs: tried.append("slack") and False)
+    daily_digest.register_digest_sender("teams", broken)
+    try:
+        channel_identities.link("slack", "U1", "user:alice", actor="admin")
+        channel_identities.link("teams", "T-1", "user:alice", actor="admin")
+        first = _cycle(world, NOON)
+        assert first["unconfirmed"] == 1 and first["failed"] == 0 and first["sent"] == 0
+        assert sorted(_deliveries(recorded)) == [("slack", "not_sent"), ("teams", "unconfirmed")]
+        assert _last_sent() == "2026-07-01"
+        assert _cycle(world, NOON + 300)["unconfirmed"] == 0 and len(tried) == 2
+    finally:
+        daily_digest.register_digest_sender("teams", None)
+
+
+class _Smtp:
+    def __init__(self, refused):
+        self.refused = refused
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def starttls(self, **kwargs):
+        return None
+
+    def send_message(self, message):
+        return self.refused
+
+
+def test_email_the_server_refused_is_retried_and_one_it_may_have_taken_is_not(tmp_path, recorded, monkeypatch):
+    from maverick import notifications, user_preferences
+
+    world = _world(tmp_path)
+    _seed(world)
+    user_preferences.set_preferences("user:alice", email="alice@example.com")
+    monkeypatch.setattr(notifications, "_load_config",
+                        lambda: {"email": {"host": "smtp.example.test", "from_address": "lw@example.test"}})
+    monkeypatch.setattr(notifications, "_smtp_session",
+                        lambda mail: _Smtp({"alice@example.com": (550, b"mailbox unavailable")}))
+    refused = _cycle(world, NOON)
+    assert refused["failed"] == 1 and _last_sent() == ""
+    attempts = []
+
+    def no_reply(mail):
+        attempts.append(mail["host"])
+        raise TimeoutError("no reply after the message was sent")
+    monkeypatch.setattr(notifications, "_smtp_session", no_reply)
+    lost = _cycle(world, NOON + 300)
+    assert lost["unconfirmed"] == 1 and lost["failed"] == 0 and _last_sent() == "2026-07-01"
+    assert _deliveries(recorded) == [("email", "not_sent"), ("email", "unconfirmed")]
+    assert _cycle(world, NOON + 600)["unconfirmed"] == 0 and len(attempts) == 1
+    # The server accepts tomorrow's summary as usual.
+    monkeypatch.setattr(notifications, "_smtp_session", lambda mail: _Smtp({}))
+    assert _cycle(world, NOON + 86_400)["sent"] == 1 and _last_sent() == "2026-07-02"

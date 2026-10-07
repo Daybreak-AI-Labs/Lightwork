@@ -168,7 +168,7 @@ def test_alerts_for_record_and_recent(world):
 def test_disabled_sends_nothing(world):
     summary, sent = _run(world, [_deadline(due_in=-DAY)], config=_config(enabled=False))
     assert summary == {"evaluated": 0, "sent": 0, "held_quiet": 0, "already_sent": 0,
-                       "alerts": [], "enabled": False} and sent == []
+                       "not_sent": 0, "unconfirmed": 0, "alerts": [], "enabled": False} and sent == []
 
 
 def test_settings_defaults_and_bounds(monkeypatch):
@@ -243,3 +243,137 @@ def test_approval_deadline_opens_that_approval_card(monkeypatch):
         type("Approval", (), {"id": 41, "detail": "card", "action": "deploy", "risk": "high"})()]})()
     [deadline] = da._approval_deadlines(NOW, world)
     assert deadline.link.endswith("/approvals#approval-41")
+
+
+# ---- only an accepted delivery suppresses the next cycle -------------------
+
+def _cycle(world, deadlines, notify, *, now=NOW, mode="immediate"):
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(da, "collect", lambda **kw: list(deadlines))
+        return da.run_cycle(now=now, world=world, config=_config(mode=mode), notify=notify)
+
+
+def _real_notify_config(tmp_path, monkeypatch, backend):
+    """Route the cycle through the real notification layer with ``backend``."""
+    from maverick import config, notifications
+    (tmp_path / "config.toml").write_text(
+        f'[notifications]\nbackend = "{backend}"\nntfy_topic = "deadlines"\n', encoding="utf-8")
+    config.reset_config_cache()
+    monkeypatch.setattr(notifications, "_load_config",
+                        lambda: {"backend": backend, "ntfy_topic": "deadlines", "delivery_receipts": False})
+    return notifications
+
+
+def test_no_notification_backend_keeps_the_alert_due_until_repaired(world, tmp_path, monkeypatch):
+    notifications = _real_notify_config(tmp_path, monkeypatch, "none")
+    d = _deadline(record_type="incident", record_id="I1", due_in=-HOUR)
+    first = _cycle(world, [d], None)
+    assert first["sent"] == 0 and first["not_sent"] == 1 and first["alerts"] == []
+    assert da.recent_alerts(world=world) == []
+    # The next cycle tries again rather than reporting it as already sent.
+    second = _cycle(world, [d], None, now=NOW + 900)
+    assert second["already_sent"] == 0 and second["not_sent"] == 1
+    # Once a backend is configured and accepts, the overdue alert goes out once.
+    monkeypatch.setattr(notifications, "_load_config",
+                        lambda: {"backend": "ntfy", "ntfy_topic": "deadlines", "delivery_receipts": False})
+    posted = []
+    monkeypatch.setattr(notifications, "_send_ntfy",
+                        lambda title, body, priority, server, topic: posted.append(title) or True)
+    third = _cycle(world, [d], None, now=NOW + 1800)
+    assert third["sent"] == 1 and len(posted) == 1 and posted[0].startswith("Overdue")
+    assert third["alerts"][0]["delivery"] == "accepted" and third["alerts"][0]["backends"] == 1
+    fourth = _cycle(world, [d], None, now=NOW + 2700)
+    assert fourth["already_sent"] == 1 and fourth["sent"] == 0 and len(posted) == 1
+
+
+def test_every_backend_refusing_is_retried_and_one_accepting_is_enough(world):
+    d = _deadline(record_type="dsar", record_id="D1", due_in=-DAY)
+    refused = _cycle(world, [d], lambda body, **kw: 0)
+    assert refused["not_sent"] == 1 and refused["sent"] == 0
+    assert da.recent_alerts(world=world) == []
+    accepted = _cycle(world, [d], lambda body, **kw: 1, now=NOW + 900)
+    assert accepted["sent"] == 1 and accepted["alerts"][0]["backends"] == 1
+    assert _cycle(world, [d], lambda body, **kw: 1, now=NOW + 1800)["already_sent"] == 1
+
+
+def test_one_of_several_backends_accepting_records_it_sent(world, tmp_path, monkeypatch):
+    notifications = _real_notify_config(tmp_path, monkeypatch, "ntfy")
+    monkeypatch.setattr(notifications, "_load_config",
+                        lambda: {"backend": "ntfy", "ntfy_topic": "deadlines", "slack_webhook": "",
+                                 "delivery_receipts": False})
+    monkeypatch.setattr(notifications, "_send_ntfy", lambda *a: True)
+    outcome = da.deliver("t", "b", urgent=True, recipient="x", notify=None)
+    assert outcome.status == "accepted" and outcome.accepted == 1
+    # Several backends: one refuses (no Slack address), one accepts.
+    monkeypatch.setattr(notifications, "_dispatch",
+                        lambda backend, **kw: backend == "ntfy")
+    real = notifications.notify
+    monkeypatch.setattr(notifications, "notify",
+                        lambda body, **kw: real(body, backends=["slack", "ntfy"], **kw))
+    d = _deadline(record_id="M1", due_in=-DAY)
+    summary = _cycle(world, [d], None)
+    assert summary["sent"] == 1 and summary["alerts"][0]["backends"] == 1
+
+
+def test_an_uncertain_send_is_recorded_unconfirmed_and_never_replayed(world, tmp_path, monkeypatch):
+    notifications = _real_notify_config(tmp_path, monkeypatch, "ntfy")
+    attempts = []
+
+    def lost_reply(title, body, priority, server, topic):
+        attempts.append(title)
+        notifications._network_unknown()  # the service may have received it
+        return False
+    monkeypatch.setattr(notifications, "_send_ntfy", lost_reply)
+    d = _deadline(record_type="incident", record_id="I2", due_in=-HOUR)
+    first = _cycle(world, [d], None)
+    assert first["unconfirmed"] == 1 and first["sent"] == 0 and len(attempts) == 1
+    row = da.recent_alerts(world=world)[0]
+    assert row["mode"] == "immediate-unconfirmed" and row["backends"] == 0
+    assert first["alerts"][0]["delivery"] == "unconfirmed"
+    # Not replayed blindly on the next cycle.
+    again = _cycle(world, [d], None, now=NOW + 900)
+    assert again["already_sent"] == 1 and len(attempts) == 1
+
+
+def test_a_sender_failing_mid_send_is_unconfirmed_not_retried(world):
+    calls = []
+
+    def broken(body, **kw):
+        calls.append(body)
+        raise ConnectionError("reset after the request was written")
+    d = _deadline(record_id="X1", due_in=-DAY)
+    first = _cycle(world, [d], broken)
+    assert first["unconfirmed"] == 1 and first["not_sent"] == 0
+    assert _cycle(world, [d], broken, now=NOW + 900)["already_sent"] == 1 and len(calls) == 1
+
+
+def test_digest_mode_retries_a_refused_digest_for_every_alert_in_it(world):
+    ds = [_deadline(record_id="G1", due_in=-DAY), _deadline(record_id="G2", due_in=-DAY)]
+    refused = _cycle(world, ds, lambda body, **kw: 0, mode="digest")
+    assert refused["not_sent"] == 2 and refused["sent"] == 0
+    sent = _cycle(world, ds, lambda body, **kw: 1, now=NOW + 900, mode="digest")
+    assert sent["sent"] == 2 and {a["record_id"] for a in sent["alerts"]} == {"G1", "G2"}
+
+
+def test_a_legacy_unsent_row_no_longer_suppresses_the_alert(world):
+    """Rows written by the old cycle when nothing accepted are retried once."""
+    d = _deadline(record_type="incident", record_id="L1", due_in=-HOUR)
+    alert = da.Alert(d, "overdue", "Dana (privacy owner)", "owner", True)
+    da._write(world, "INSERT INTO deadline_alerts(id, workspace, record_type, record_id, state, due_at,"
+                     " recipient, recipient_kind, title, message, link, sent_at, backends, mode)"
+                     " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              ("dla_legacy", da._workspace(), "incident", "L1", "overdue", float(d.due_at),
+               alert.recipient, "owner", d.title, "old", d.link, NOW - DAY, 0, "immediate"))
+    assert not da.already_sent(world, alert)
+    summary = _cycle(world, [d], lambda body, **kw: 1)
+    assert summary["sent"] == 1
+    rows = da.alerts_for("incident", "L1", world=world)
+    assert len(rows) == 1 and rows[0]["backends"] == 1
+
+
+def test_a_subscribed_webhook_counts_as_delivery(world, monkeypatch):
+    monkeypatch.setattr(da, "_emit_webhook", lambda alert, world: 1)
+    d = _deadline(record_id="W1", due_in=-DAY)
+    summary = _cycle(world, [d], lambda body, **kw: 0)
+    assert summary["sent"] == 1 and summary["alerts"][0]["backends"] == 1
+    assert _cycle(world, [d], lambda body, **kw: 0, now=NOW + 900)["already_sent"] == 1

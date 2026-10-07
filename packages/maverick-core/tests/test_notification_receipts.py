@@ -81,3 +81,27 @@ def test_async_queue_is_not_delivery_and_failed_backend_visible(tmp_path, monkey
     assert DeliveryReceipts(path).recent()[0]['state'] == 'failed'
     assert notifications.notify('PRIVATE', batch=False, delivery_key='event-once') == 0
     assert 'PRIVATE' not in path.read_text()
+
+
+def test_sync_outcomes_report_each_backends_final_state(tmp_path, monkeypatch):
+    from maverick import notifications
+    path = tmp_path / 'receipts.json'
+    monkeypatch.setattr('maverick.paths.data_dir', lambda *parts: path)
+    monkeypatch.setattr(notifications, '_load_config', lambda: {'backend': 'ntfy'})
+
+    def dispatch(backend, **kwargs):
+        if backend == 'slack':
+            raise TimeoutError('the service may have accepted it')
+        return backend == 'ntfy'
+    monkeypatch.setattr(notifications, '_dispatch', dispatch)
+    outcomes = []
+    assert notifications.notify('synthetic', backends=['ntfy', 'discord', 'slack'], batch=False,
+                                async_dispatch=False, outcomes=outcomes) == 1
+    assert outcomes == ['delivered', 'failed', 'unknown']
+
+    def refuse():
+        raise PermissionError('revoked')
+    refused = []
+    assert notifications.notify('synthetic', batch=False, async_dispatch=False, authorize=refuse,
+                                outcomes=refused) == 0
+    assert refused == ['failed']

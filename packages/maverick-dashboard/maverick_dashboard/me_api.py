@@ -200,12 +200,14 @@ def _render_me_page(request: Request, *, saved: str = "", link_code: str = "",
         "chat_disconnected": "This chat account can no longer start Lightwork tasks.",
         "sent": "Your summary was sent. Check your linked chat app or inbox.",
         "not_sent": "Your summary could not be sent. Link a chat account or add an email first.",
+        "unconfirmed": ("Your summary may have been sent, but the service did not confirm it. "
+                        "Check your chat app or inbox before sending it again."),
         "bad_preferences": "Those choices could not be saved. Check the values and try again.",
     }.get(saved, "")
     model.update({
         "principal": principal,
         "saved": saved_msg,
-        "saved_failed": saved in {"not_sent", "bad_preferences"},
+        "saved_failed": saved in {"not_sent", "unconfirmed", "bad_preferences"},
         "link_code": link_code,
         "link_channel": link_channel,
         "bridge_code": bridge_code,
@@ -385,8 +387,10 @@ async def me_send_now(request: Request) -> RedirectResponse:
     digest = _prepared_digest(request, principal, prefs)
     outcomes = await run_in_threadpool(
         daily_digest.send_digest, principal, digest, links=links, prefs=prefs)
-    ok = any(o["ok"] for o in outcomes)
-    return RedirectResponse(f"/me?saved={'sent' if ok else 'not_sent'}", status_code=303)
+    deliveries = {o["delivery"] for o in outcomes}
+    status = ("sent" if "accepted" in deliveries
+              else "unconfirmed" if "unconfirmed" in deliveries else "not_sent")
+    return RedirectResponse(f"/me?saved={status}", status_code=303)
 
 
 def _prepared_digest(request: Request, principal: str, prefs: dict) -> dict:

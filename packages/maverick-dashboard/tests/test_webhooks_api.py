@@ -153,3 +153,16 @@ def test_deadline_alerts_endpoints_and_record_page(monkeypatch):
     assert client.get("/api/v1/deadline-alerts").json()["alerts"][0]["record_id"] == record["id"]
     page = client.get(f"/privacy/dsar/{record['id']}")
     assert "was due" in page.text and "the privacy owner" in page.text
+
+
+def test_an_unconfirmed_deadline_alert_says_so_and_is_not_replayed(monkeypatch):
+    from maverick import deadline_alerts, privacy_ops
+    record = privacy_ops.open_dsar("c@d.com", "access", opened_by="t")
+    monkeypatch.setattr(privacy_ops, "list_dsars", lambda: [{**record, "due_at": 1.0}])
+    monkeypatch.setattr(deadline_alerts, "deliver",
+                        lambda title, body, **kw: deadline_alerts.Delivery(0, uncertain=True))
+    r = client.post("/api/v1/deadline-alerts/run")
+    assert r.status_code == 200 and r.json()["sent"] == 0 and r.json()["unconfirmed"] == 1
+    page = client.get(f"/privacy/dsar/{record['id']}")
+    assert "Not confirmed. Check the channel before sending it again." in page.text
+    assert client.post("/api/v1/deadline-alerts/run").json()["already_sent"] == 1

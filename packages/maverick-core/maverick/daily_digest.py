@@ -14,6 +14,11 @@ person's own hour in their own time zone through their linked channels:
 An empty summary is skipped unless the person opted into "send even when
 empty"; a person can turn the summary off on ``/me``. Every send is written
 to the audit log with the recipient, the channel and item counts only.
+
+The day counts as done only once a channel accepted the summary. When every
+channel definitely did not send it (nothing set up, or refused), the next
+poll tries again, so fixing the channel still delivers today's summary. When
+a channel may have sent it without confirming, it is not sent again.
 """
 from __future__ import annotations
 
@@ -518,17 +523,31 @@ def send_digest(principal: str, digest: dict[str, Any], *, links: list[dict[str,
     for channel, sender in digest_senders().items():
         if channel not in by_channel:
             continue
-        try:
-            ok = bool(sender(principal, digest, by_channel[channel], prefs))
-        except Exception:  # noqa: BLE001 -- one channel failing never blocks the others
-            log.warning("digest send through %s failed", channel, exc_info=True)
-            ok = False
+        delivery = _attempt(channel, sender, principal, digest, by_channel[channel], prefs)
+        ok = delivery == "accepted"
         audit.audit_event(
             audit.EventKind.DIGEST_SENT, agent="system:daily-digest", recipient=principal,
-            channel=channel, ok=ok, **digest["counts"],
+            channel=channel, ok=ok, delivery=delivery, **digest["counts"],
         )
-        outcomes.append({"channel": channel, "ok": ok})
+        outcomes.append({"channel": channel, "ok": ok, "delivery": delivery})
     return outcomes
+
+
+def _attempt(channel: str, sender: DigestSender, principal: str, digest: dict[str, Any],
+             links: list[dict[str, Any]], prefs: dict[str, Any]) -> str:
+    """``accepted``; ``not_sent`` (definitely not: nothing set up, or refused);
+    or ``unconfirmed`` (it may have gone out: the sender failed mid-send, or
+    the service did not confirm it). An unconfirmed summary is never resent."""
+    from .notifications import send_checked
+
+    try:
+        ok, unconfirmed = send_checked(lambda: bool(sender(principal, digest, links, prefs)))
+    except Exception:  # noqa: BLE001 -- one channel failing never blocks the others
+        log.warning("digest send through %s failed", channel, exc_info=True)
+        return "unconfirmed"
+    if ok:
+        return "accepted"
+    return "unconfirmed" if unconfirmed else "not_sent"
 
 
 # ----------------------------------------------------------------------------
@@ -558,7 +577,8 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
     from . import channel_identities, user_preferences
 
     current = time.time() if now is None else float(now)
-    summary = {"checked": 0, "sent": 0, "skipped_empty": 0, "skipped_unlinked": 0, "failed": 0}
+    summary = {"checked": 0, "sent": 0, "skipped_empty": 0, "skipped_unlinked": 0, "failed": 0,
+               "unconfirmed": 0}
     for principal in principals:
         summary["checked"] += 1
         prefs = user_preferences.get_preferences(principal)
@@ -578,11 +598,14 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
             summary["skipped_empty"] += 1
             user_preferences.mark_digest_sent(principal, local_date)
             continue
-        outcomes = send_digest(principal, digest, links=links, prefs=prefs)
-        if any(o["ok"] for o in outcomes):
+        deliveries = {o["delivery"] for o in send_digest(principal, digest, links=links, prefs=prefs)}
+        if "accepted" in deliveries:
             summary["sent"] += 1
+        elif "unconfirmed" in deliveries:
+            summary["unconfirmed"] += 1  # it may have gone out: never resent
         else:
-            summary["failed"] += 1
+            summary["failed"] += 1  # definitely not sent: the next poll tries again
+            continue
         user_preferences.mark_digest_sent(principal, local_date)
     return summary
 

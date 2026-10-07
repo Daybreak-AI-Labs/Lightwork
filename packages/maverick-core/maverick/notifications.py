@@ -39,7 +39,9 @@ import logging
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar, copy_context
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +62,25 @@ def _response_accepted(status: int) -> bool:
 
 def _network_unknown() -> None:
     _outcome.set(("unknown", "Delivery could not be confirmed. Check the destination before sending again.", False))
+
+
+def mark_unconfirmed() -> None:
+    """Flag that a send made outside this module (a Slack DM) may have gone
+    out without a confirmation; :func:`send_checked` reports it."""
+    _network_unknown()
+
+
+def send_checked(send: Callable[[], Any]) -> tuple[Any, bool]:
+    """Run ``send`` and also say whether a transport inside it could not
+    confirm the result -- it may have been delivered, so never replay it
+    blindly. An exception propagates; callers treat it as unconfirmed too."""
+    token = _outcome.set(None)
+    try:
+        result = send()
+        state = _outcome.get()
+        return result, bool(state) and state[0] == "unknown"
+    finally:
+        _outcome.reset(token)
 
 
 _executor = None  # type: ignore[var-annotated]
@@ -387,10 +408,11 @@ def _admit(cfg, requested, event, delivery_kind, retry):
     return receipts, admitted
 
 
-def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize):
+def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize, states=None):
     from .authority_effects import authority_effect_fence
     token = _outcome.set(("failed", "Not sent. Check the channel configuration and installed backend dependencies.", True))
     started = False
+    final = "failed"
     try:
         with authority_effect_fence():
             if authorize is not None:
@@ -404,11 +426,14 @@ def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize)
             outcome = _outcome.get()
             if result and outcome[0] != "delivered":
                 outcome = ("delivered", "Accepted by the notification service. This does not mean the person saw it.", False)
+            final = outcome[0] if outcome[0] in ("delivered", "failed", "unknown") else ("delivered" if result else "unknown")
             if receipts is not None:
                 receipts.update(ident, outcome[0], outcome[1], safe_to_retry=outcome[2])
             return result
     except Exception as exc:
         log.warning("notify dispatch unavailable: %s", type(exc).__name__)
+        if final != "delivered":
+            final = "unknown" if started else "failed"
         if receipts is not None:
             try:
                 message = ("Delivery could not be confirmed. Check the destination before sending again." if started
@@ -419,6 +444,8 @@ def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize)
         return False
     finally:
         _outcome.reset(token)
+        if states is not None:
+            states.append(final)
 
 
 def notify(
@@ -434,6 +461,7 @@ def notify(
     delivery_kind: str = "event",
     retry: bool = False,
     authorize=None,
+    outcomes: list[str] | None = None,
 ) -> int:
     """Queue a notification. Async returns accepted queue count, never proof of delivery.
 
@@ -444,6 +472,10 @@ def notify(
     pushes (``[notifications] batch_window_seconds``); high/urgent always go
     straight through, and with batching unconfigured this is a no-op. When an
     item is queued for a later batch, the call returns 0 (fired *now*).
+
+    ``outcomes`` (synchronous sends only) receives one final state per
+    dispatched backend: ``delivered`` (accepted), ``failed`` (definitely not
+    sent) or ``unknown`` (it may have been sent; never replay it blindly).
     """
     from . import practice
 
@@ -477,9 +509,9 @@ def notify(
     event = delivery_key or uuid.uuid4().hex
     receipts, admitted = _admit(cfg, requested, event, delivery_kind, retry)
 
-    def tracked(backend, ident):
+    def tracked(backend, ident, states=None):
         return _tracked(backend, ident, cfg=cfg, title=title, body=body,
-                        priority=priority, receipts=receipts, authorize=authorize)
+                        priority=priority, receipts=receipts, authorize=authorize, states=states)
 
     if async_dispatch:
         exec_ = _get_executor()
@@ -490,9 +522,9 @@ def notify(
     # Sync (for tests).
     fired = 0
     for backend, ident in admitted:
-        if tracked(backend, ident):
+        if tracked(backend, ident, outcomes):
             fired += 1
     return fired
 
 
-__all__ = ["email_configured", "notify", "send_email"]
+__all__ = ["email_configured", "mark_unconfirmed", "notify", "send_checked", "send_email"]
