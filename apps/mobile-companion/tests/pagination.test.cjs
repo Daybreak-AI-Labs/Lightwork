@@ -352,6 +352,25 @@ test('a continuation that does not move down the list fails visibly', async () =
   } finally { await f.close(); }
 });
 
+test('a continuation equal to the cursor just requested stops the read instead of looping', async () => {
+  // The first read (nothing shown yet) gets a short page, 20 of its scanned rows
+  // being hidden, so it continues below row 76. The next reply is empty and
+  // points at 76 again: the same request would be sent for ever. It must fail
+  // on that first repeat; the handler ends the loop after 6 only so that a
+  // broken guard fails this test instead of hanging it.
+  const sent = [];
+  const f = await fixture(goals(125), {handler: request => {
+    sent.push(request.before);
+    if (request.before === undefined) return {goals: goals(125).slice(0, 30), hasMore: true, nextBeforeId: 76};
+    if (sent.length > 6) return {goals: [], hasMore: false, nextBeforeId: null};
+    return {goals: [], hasMore: true, nextBeforeId: request.before};
+  }});
+  try {
+    assert.match(text(f.app), /ask your administrator to update the dashboard/);
+    assert.deepEqual(sent, [undefined, 76], 'the repeated cursor is refused on its first repeat');
+  } finally { await f.close(); }
+});
+
 test('a long run of hidden rows is paged through to the tasks below it', async () => {
   // The cursor moves down on every page, so the read always ends.
   const rows = goals(1200).map(row => row.id > 100 ? {...row, hidden: true} : row);
