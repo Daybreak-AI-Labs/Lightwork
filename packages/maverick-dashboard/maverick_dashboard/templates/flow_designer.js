@@ -1103,12 +1103,12 @@
       props.appendChild(field('Steps for each item', addButton('Edit these steps (' + bodyN + ')', function () { enterSub(n, 'foreach'); })));
       var conc = document.createElement('label'); conc.className = 'fd__check';
       var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!n.concurrent;
-      cb.addEventListener('change', function () { n.concurrent = cb.checked; if (cb.checked && !(n.concurrency > 1)) n.concurrency = 4; render(); renderProps(); });
+      cb.addEventListener('change', function () { n.concurrent = cb.checked; if (cb.checked && !(n.concurrency > 0)) n.concurrency = 4; render(); renderProps(); });
       conc.appendChild(cb); conc.appendChild(document.createTextNode('Handle several items at once'));
       props.appendChild(conc);
       if (n.concurrent) {
-        props.appendChild(field('How many at once', numberSelect(n.concurrency || 4, [{ v: '2', t: '2' }, { v: '4', t: '4' }, { v: '8', t: '8' }],
-          function (v) { n.concurrency = parseInt(v, 10) || 1; })));
+        props.appendChild(field('How many at once', numberSelect(n.concurrency || '', [{ v: '', t: 'Shared workflow limit' }, { v: '2', t: '2' }, { v: '4', t: '4' }, { v: '8', t: '8' }],
+          function (v) { n.concurrency = parseInt(v, 10) || 0; })));
       }
       props.appendChild(hint('Each item is available to the repeated steps as “Item”.'));
     }

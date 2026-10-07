@@ -39,7 +39,7 @@ _FLOW_FIELDS = frozenset({
 })
 _NODE_FIELDS = frozenset({
     "kind", "next", "tool", "params", "brief", "condition", "if_true", "if_false",
-    "cases", "items", "var", "body", "limit", "concurrent", "branches", "prompt",
+    "cases", "items", "var", "body", "limit", "concurrent", "concurrency", "branches", "prompt",
     "choices", "seconds", "flow_ref", "retries", "retry_backoff", "on_error", "timeout", "output",
     "label", "x", "y",
     # rich human-task fields (approval) -- documented in FLOW_SCHEMA_BLOCK, so
@@ -184,6 +184,8 @@ def describe_patch(p: dict) -> str:
     if op == "remove_node":
         return f"remove node {p.get('id', '?')}"
     if op == "set_field":
+        if p.get("field") == "concurrency":
+            return f"set items at once for {p.get('id', '?')} to {p.get('value') or 'Shared workflow limit'}"
         return f"set {p.get('id', '?')}.{p.get('field', '?')}"
     if op == "set_flow_field":
         return f"set flow.{p.get('field', '?')}"

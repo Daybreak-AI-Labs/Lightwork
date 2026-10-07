@@ -1,5 +1,29 @@
 # Post-install operation coverage
 
+October 7 UX650 parallel-choice repair: Designer's 2/4/8 “How many at once”
+choice now survives its ordinary serializer and native versioned Save/Load.
+Execution honors an explicit limit including the calling thread. Older omitted
+or zero values retain the existing shared-pool behavior and unchanged serialized
+form; the UI names that choice instead of implying four. Invalid values refuse.
+Workflow Assistant's existing native patch compiler and supplied schema also
+support the field and shared-limit reset without mutating the original graph.
+
+Actual Designer serialization and three native saved versions retained 2/4/8.
+A saved limit of two completed six deterministic items with maximum two
+simultaneous bodies including the caller, preserving input order. Existing
+shared spawned-slot accounting and its inherited semaphore are unchanged;
+this does not establish an aggregate nested-work bound including every caller.
+Native Assistant patches accepted four/reset and refused invalid values without
+writing or calling a model. No live language-model response, browser admission,
+provider or action callback was used by these particular witnesses.
+
+October 7 UX649 installer alignment: retry entry uses the native maximum of
+ten and explains that zero turns retries off. Invalid or out-of-range values
+ask again rather than silently becoming a different setting. The exact native
+prompt body qualified malformed/out-of-range entries, zero, default five and
+ten without writing configuration. This is the installer input seam; the
+existing runtime and All settings limits are unchanged.
+
 October 7 UX650 item-limit repair: Designer's implicit choice says “Every item
 (maximum 1,000)” and explains that a larger list stops before this step processes
 anything. Native execution refuses an oversized implicit collection at the
@@ -12,7 +36,7 @@ Its 1,001-item run failed before any body iteration, retained the entire list
 and its earlier Set value step. A three-item Unicode list completed in exact
 order; an explicit limit of two completed exactly two from the larger list.
 No model or action callback was called. This repairs false partial completion;
-the separate per-node parallel-choice control is not qualified by this witness.
+the per-node parallel-choice control is qualified separately above.
 
 October 7 UX518: actual Learning threads now register with the existing
 dashboard shutdown supervisor. Shutdown closes new admission, requests existing

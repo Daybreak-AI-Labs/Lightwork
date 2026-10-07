@@ -1,12 +1,28 @@
 # Product changes delivered on October 6
 
+UX650, parallel-choice portion: ordinary 2/4/8 choices reach the saved native
+definition and execution instead of disappearing during serialization. The
+explicit maximum includes the caller; legacy omitted/zero values retain their
+original wire and shared-pool behavior. Actual serialization, three native
+versions, a six-item saved run with maximum two bodies and exact order, and
+invalid-value refusals passed without model/action callbacks. Workflow
+Assistant's native compiler/schema support the same field and reset; live
+language-model acceptance was not used. Global spawned-slot accounting is
+unchanged and is not a new aggregate nested-work limit.
+
+UX649, installer alignment: setup now uses the same canonical zero-to-ten retry
+range as native execution and All settings. Invalid entries ask again instead
+of silently clamping to a different choice. Zero and default five remain
+available. Exact prompt-body qualification passed without configuration writes;
+this does not claim a complete interactive installation.
+
 UX650, item-limit portion: the ordinary default reveals its maximum of 1,000.
 A larger implicit collection now fails before this loop's first body iteration
 instead of silently completing a prefix. Explicit positive limits retain their
 intentional prefix behavior. Native save/load, a retained earlier step, all
 three Unicode items and exactly two explicitly selected items passed; there
 were no model/action callbacks. Earlier effects are not rolled back. The
-separate ignored per-node parallel choice remains a distinct repair.
+parallel-choice portion is qualified separately above.
 
 UX518: Learning's actual threads participate in coordinated dashboard shutdown.
 New admission closes, cooperative safe points/Budget hooks receive stop, and

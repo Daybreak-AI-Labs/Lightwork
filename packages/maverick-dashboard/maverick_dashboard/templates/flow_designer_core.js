@@ -5,7 +5,7 @@ var FDCore = (function () {
   'use strict';
   var NODE_DEFAULTS = {
     params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-    cases: [], items: '', var: 'item', limit: 0, concurrent: false, prompt: '',
+    cases: [], items: '', var: 'item', limit: 0, concurrent: false, concurrency: 0, prompt: '',
     choices: [], assignee: '', expires_after: 0, on_expire: null, form: [],
     seconds: 0, flow_ref: '',
     retries: 0, retry_backoff: 0, on_error: null, timeout: 0, output: '', label: '',
@@ -54,6 +54,7 @@ var FDCore = (function () {
     if (n.timeout) o.timeout = n.timeout;
     if (n.limit) o.limit = n.limit;
     if (n.concurrent) o.concurrent = true;
+    if (n.concurrency) o.concurrency = n.concurrency;
     if (n.cases && n.cases.length) o.cases = n.cases;
     if (n.choices && n.choices.length) o.choices = n.choices;
     if (n.expires_after) o.expires_after = n.expires_after;

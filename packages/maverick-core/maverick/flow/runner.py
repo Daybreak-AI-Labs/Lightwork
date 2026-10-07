@@ -1396,6 +1396,8 @@ def _run_scope(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
 
 
 def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    if type(node.concurrency) is not int or not 0 <= node.concurrency <= _PARALLEL_MAX_WORKERS:
+        raise _Reject(node, data, error="Choose Shared workflow limit or between 1 and 8 items at once.")
     items = copy.deepcopy(ctx.frame.get("items", list(_dig(data, node.items) or [])))
     if node.limit and node.limit > 0:
         items = items[:node.limit]          # cap iterations (a runaway-list guard)
@@ -1425,8 +1427,12 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             subs.append(sub)
         threaded = []
         inline = []
+        # Explicit caps include the calling thread, which processes inline items.
+        # Zero preserves older definitions' use of the unchanged shared pool.
+        spawn_cap = node.concurrency - 1 if node.concurrency else _PARALLEL_MAX_WORKERS
         for index, sub in enumerate(subs):
-            if ctx.parallel_slots is not None and ctx.parallel_slots.acquire(blocking=False):
+            if (len(threaded) < spawn_cap and ctx.parallel_slots is not None
+                    and ctx.parallel_slots.acquire(blocking=False)):
                 threaded.append((index, sub))
             else:
                 inline.append((index, sub))

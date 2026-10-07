@@ -1896,16 +1896,24 @@ def pick_flows() -> dict[str, Any]:
         default=False,
     )
     out.update(_pick_action_recipe_lineage())
+    from maverick.flow.ir import MAX_FLOW_NODE_RETRIES
+
     console.print(
-        "[dim]Retries can recover transient agent/tool failures, but every retry "
-        "can spend provider budget or repeat side effects. Keep the per-node cap "
-        "small unless operations explicitly need more.[/dim]"
+        "[dim]Retries can recover temporary failures, but each attempt can spend "
+        "money or repeat earlier changes. Choose the smallest number you need.[/dim]"
     )
-    retry_cap = _q_text("Max retries per flow node", default="5").strip()
-    try:
-        out["max_node_retries"] = max(0, min(50, int(retry_cap or "5")))
-    except ValueError:
-        out["max_node_retries"] = 5
+    while True:
+        try:
+            retry_cap = int(_q_text(
+                f"Retries for each workflow step (0–{MAX_FLOW_NODE_RETRIES}; zero turns retries off)",
+                default="5",
+            ).strip())
+        except ValueError:
+            retry_cap = -1
+        if 0 <= retry_cap <= MAX_FLOW_NODE_RETRIES:
+            out["max_node_retries"] = retry_cap
+            break
+        console.print(f"[yellow]Enter a whole number from 0 to {MAX_FLOW_NODE_RETRIES}.[/yellow]")
     console.print(
         "[dim]For actionable channel approvals (clickable Approve/Reject links), "
         "the dashboard needs its externally-reachable base URL. Leave blank to "

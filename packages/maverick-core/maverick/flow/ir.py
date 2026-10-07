@@ -303,6 +303,7 @@ class FlowNode:
     # A reviewed rule-only release must stop on uncertainty instead of invoking AI.
     learned_fallback: bool = True
     recipe_step: int | None = None  # requires the parent flow's complete recipe
+    concurrency: int = 0          # foreach: simultaneous items; 0 keeps the shared pool
 
     def to_dict(self) -> dict:
         d: dict[str, Any] = {"id": self.id, "kind": self.kind}
@@ -326,6 +327,8 @@ class FlowNode:
                 d[key] = value
         if self.concurrent:
             d["concurrent"] = True
+        if self.concurrency:
+            d["concurrency"] = self.concurrency
         if self.cases:
             d["cases"] = self.cases
         if self.choices:
@@ -349,6 +352,9 @@ class FlowNode:
     @staticmethod
     def from_dict(d: dict) -> FlowNode:
         body = d.get("body")
+        concurrency = d.get("concurrency", 0)
+        if type(concurrency) is not int or not 0 <= concurrency <= 8:
+            raise ValueError("Choose Shared workflow limit or between 1 and 8 items at once.")
         # Legacy-shape migration, done HERE so every consumer (runner, sweep,
         # designer, drafter) sees one field: old approvals encoded their expiry
         # in `timeout` before `expires_after` existed.
@@ -367,6 +373,7 @@ class FlowNode:
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
             limit=int(d.get("limit", 0) or 0),
             concurrent=bool(d.get("concurrent", False)),
+            concurrency=concurrency,
             cases=[dict(c) for c in (d.get("cases") or []) if isinstance(c, dict)],
             choices=[str(c) for c in (d.get("choices") or [])],
             assignee=str(d.get("assignee", "")),
@@ -547,6 +554,8 @@ class Flow:
             seen_ids.add(n.id)
             if n.kind not in NODE_KINDS:
                 errs.append(f"node {n.id!r}: unknown kind {n.kind!r}")
+            if type(n.concurrency) is not int or not 0 <= n.concurrency <= 8:
+                errs.append(f"node {n.id!r}: choose Shared workflow limit or between 1 and 8 items at once")
             errs.extend(self._validate_retry_policy(n))
             errs.extend(self._validate_routing(n))
             errs.extend(self._validate_retry_budget(n))

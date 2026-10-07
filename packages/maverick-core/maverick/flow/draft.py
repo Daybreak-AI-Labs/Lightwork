@@ -89,7 +89,7 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"action","tool":"<tool name>","params":{...},"next":"<id|null>"}
 - {"id","kind":"branch","condition":"<key op value>","if_true":"<id>","if_false":"<id>"}
 - {"id","kind":"switch","condition":"<data key to route on>","cases":[{"value":"<match>","to":"<id>"}],"next":"<id|null = the default arm>"}
-- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"concurrent":<true to run iterations in parallel>,"next":"<id|null>"}
+- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"concurrent":<true to run iterations in parallel>,"concurrency":<optional integer 1 to 8 for maximum items at once; omit or 0 keeps the shared workflow limit>,"next":"<id|null>"}
 - {"id","kind":"while","condition":"<keep-looping condition>","body":{<a nested flow>},"limit":<max passes>,"next":"<id|null>"}
 - {"id","kind":"parallel","branches":[{<nested flow>},...],"next":"<id|null>"}
 - {"id","kind":"approval","prompt":"<what a human approves>","choices":["<optional verdicts beyond approve/reject>"],"assignee":"<who to notify, optional>","expires_after":<seconds until it auto-resolves>,"on_expire":"<id to route on expiry, optional (else rejected)>","form":[{"name":"<field>","label":"<prompt>"}],"next":"<id|null>"}
