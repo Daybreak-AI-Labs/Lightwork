@@ -232,7 +232,7 @@ def test_actual_composed_dashboard_registers_all_default_components():
             "entitlements", "voice", "privacy_discovery", "privacy_publication", "ai_governance",
             "consent_scan", "trc_evidence", "data_use_audit", "unified_audit", "third_party_feed",
             "code_watch", "code_sessions", "services",
-            "conversation_inbox", "personal_notifications",
+            "conversation_inbox", "knowledge_sources", "personal_notifications",
         }
         assert supervisor.phase == "running"
     assert supervisor.phase == "stopped" and not supervisor.errors
