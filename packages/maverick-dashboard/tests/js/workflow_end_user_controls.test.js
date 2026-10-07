@@ -93,7 +93,9 @@ function scheduleFixture(value = "") {
     "fd-sched-days": { hidden: true }, "fd-sched-dom-row": { hidden: true }, "fd-sched-minute-row": { hidden: true },
     "fd-sched-time-row": { hidden: true }, "fd-sched-tz-row": { hidden: true },
   };
-  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days } };
+  // A changed timetable is one undoable edit (the designer's pushHistory).
+  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days }, edits: 0 };
+  context.pushHistory = () => { context.edits += 1; };
   const source = readTemplate("flow_designer.js");
   vm.runInNewContext(source.slice(source.indexOf("  // ---- schedule picker"),
     source.indexOf("  function fillTimeZones(")), context);
@@ -254,6 +256,9 @@ test("plain schedule choices produce the matching timetable and read back the sa
     ui.context.syncScheduleControls();
     assert.equal(ui.fields["fd-sched-freq"].value, freq);
   }
+  assert.equal(ui.context.edits, cases.length, "each changed timetable is one undo step");
+  ui.context.chooseSchedule();
+  assert.equal(ui.context.edits, cases.length, "choosing the same timetable adds no undo step");
   ui.fields["fd-sched-freq"].value = "weekly";
   ui.days.find(d => d.value === "5").checked = true;
   ui.fields["fd-sched-time"].value = "17:45";
