@@ -130,7 +130,8 @@ def test_agent_run_redacts_role_from_invoke_agent_span(monkeypatch):
     monkeypatch.setattr(obs, "trace_span", _fake_trace_span)
 
     async def _inner(self):
-        return "ok"
+        # Agent.run's contract is a structured AgentResult.
+        return agent_mod.AgentResult(final="ok", role=self.role, name=self.name)
 
     monkeypatch.setattr(agent_mod.Agent, "_run_inner", _inner)
     agent = agent_mod.Agent.__new__(agent_mod.Agent)
@@ -138,7 +139,7 @@ def test_agent_run_redacts_role_from_invoke_agent_span(monkeypatch):
     agent.name = f"{agent.role}-1-abcdef"
 
     import asyncio
-    assert asyncio.run(agent_mod.Agent.run(agent)) == "ok"
+    assert asyncio.run(agent_mod.Agent.run(agent)).final == "ok"
     span_name, attrs = spans[0]
     assert "SECRET_TOKEN" not in span_name
     assert "sk_live" not in span_name
@@ -166,7 +167,8 @@ def test_agent_run_opens_invoke_agent_span(monkeypatch):
     monkeypatch.setattr(obs, "trace_span", _fake_trace_span)
 
     async def _inner(self):
-        return "ok"
+        # Agent.run's contract is a structured AgentResult.
+        return agent_mod.AgentResult(final="ok", role=self.role, name=self.name)
 
     monkeypatch.setattr(agent_mod.Agent, "_run_inner", _inner)
     agent = agent_mod.Agent.__new__(agent_mod.Agent)
@@ -174,7 +176,7 @@ def test_agent_run_opens_invoke_agent_span(monkeypatch):
     agent.name = "coder-1"
 
     import asyncio
-    assert asyncio.run(agent_mod.Agent.run(agent)) == "ok"
+    assert asyncio.run(agent_mod.Agent.run(agent)).final == "ok"
     assert spans and spans[0][0] == "invoke_agent coder"
     assert spans[0][1]["gen_ai.agent.name"] == "coder"
     assert spans[0][1]["gen_ai.agent.id"] == "coder-1"

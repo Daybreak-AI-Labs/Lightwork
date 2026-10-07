@@ -503,25 +503,39 @@ def test_rls_covers_the_workspace_scoped_webhook_and_alert_tables():
 
 def test_rls_policy_verification_reads_the_table_specific_column(monkeypatch):
     world = PostgresWorldModel.__new__(PostgresWorldModel)
-    rows = iter([
-        (True, True),
-        ("(workspace = NULLIF(current_setting('maverick.tenant', true), ''))",
-         "(workspace = NULLIF(current_setting('maverick.tenant', true), ''))"),
-    ])
+    # pg_get_expr's own rendering of the stock policy for webhook_deliveries.
+    workspace = "(workspace = NULLIF(current_setting('maverick.tenant'::text, true), ''::text))"
+    tenant_id = "(tenant_id = NULLIF(current_setting('maverick.tenant'::text, true), ''::text))"
 
-    class _Cur:
-        def execute(self, *_a, **_k):
-            pass
+    def policy(expression, name="mvk_tenant_isolation", permissive=True):
+        # relrowsecurity, relforcerowsecurity, polname, polcmd, polpermissive,
+        # polroles (0 = PUBLIC), USING, WITH CHECK
+        return (True, True, name, "*", permissive, [0], expression, expression)
 
-        def fetchone(self):
-            return next(rows)
+    def verify(rows):
+        class _Cur:
+            def execute(self, *_a, **_k):
+                pass
 
-    @contextmanager
-    def tx():
-        yield _Cur()
+            def fetchall(self):
+                return rows
 
-    monkeypatch.setattr(world, "_tx", tx)
-    assert world._rls_policy_is_active("webhook_deliveries") is True
+        @contextmanager
+        def tx():
+            yield _Cur()
+
+        monkeypatch.setattr(world, "_tx", tx)
+        return world._rls_policy_is_active("webhook_deliveries")
+
+    assert verify([policy(workspace)]) is True
+    # The generic tenant_id column is not this table's isolation column.
+    assert verify([policy(tenant_id)]) is False
+    # Another permissive policy could OR around isolation.
+    assert verify([policy(workspace), policy("true", name="extra")]) is False
+    # An additional restrictive policy only narrows access.
+    assert verify([policy(workspace), policy("true", name="extra", permissive=False)]) is True
+    # Without FORCE the table owner bypasses the policy.
+    assert verify([(True, False, *policy(workspace)[2:])]) is False
 
 
 # --- #51/#57: enterprise auto-on for strict isolation + RLS ----------------
