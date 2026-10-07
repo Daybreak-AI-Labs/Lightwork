@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import auth
 from . import learning_jobs as jobs
 from .draft_api import context_for
-from .plain_labels import model_label
+from .plain_labels import CAPABILITY_LABELS, capability_label, model_label
 
 PAGE = "/learning#lo-factory"
 TTL = 600
@@ -216,7 +216,7 @@ def review_rows(prepared):
     rows = [{"label": "Meaning and limits", "after": NOTICE},
             {"label": "Guidance used today", "after": prepared.get("current_guidance", "The current saved guidance remains in both comparisons.")},
             {"label": "Selected additional guidance", "after": prepared["correction"]["guidance"]},
-            {"label": "Expected result (reported)", "after": "The generated setup allows " + prepared["correction"]["detail"] + " after the usual safety checks."},
+            {"label": "Expected result (reported)", "after": "The generated setup allows this action: " + _action_name(prepared["correction"]["detail"]) + ". The usual safety checks still apply."},
             {"label": "AI service", "after": model_label(prepared["connection"]["model"])},
             {"label": "Spending and time limits", "after": "$" + str(prepared["body"]["dollars"]) + "; " + str(prepared["body"]["seconds"]) + " seconds, or tighter current organization limits."}]
     for index, case in enumerate(prepared["cases"], 1):
@@ -224,7 +224,7 @@ def review_rows(prepared):
                      "after": case["description"] + ("\nGoals:\n" + "\n".join(case["goals"]) if case["goals"] else "\nNo additional goals.")})
     if prepared["action"] == "adopt":
         rows.extend(prepared["comparison_rows"])
-        rows.append({"label": "What adopting changes", "after": "Adds this one piece of guidance for future agent building. It grants no tools and changes no saved or running agent. The current native promotion gates must still pass."})
+        rows.append({"label": "What adopting changes", "after": "Adds this one piece of guidance for future agent building. It grants no actions and changes no saved or running agent. Existing approval and safety requirements still apply."})
     else:
         rows.append({"label": "Work admitted", "after": str(len(prepared["cases"]) * 2) + " AI generations. Generated setups are checked locally and never activated. A stopped or incomplete comparison cannot qualify adoption."})
     return rows
@@ -311,6 +311,8 @@ def original(request, operation):
     safe = {key: result[key] for key in ("baseline_score", "candidate_score", "samples", "effect_ci_low", "adopted", "gate_reasons", "complete") if key in result}
     if private:
         safe.update({key: result[key] for key in ("pairs", "guidance", "prepared") if key in result})
+        if "pairs" in result:
+            safe["comparison_rows"] = _comparison_rows(result["pairs"])
     authority(request, context)
     return {"operation": operation, "confirmed": complete, "state": job.state,
             "message": "The original result is confirmed; no work was repeated." if complete else "The original start or completion is unconfirmed. Read saved progress; do not start it again automatically.",
@@ -391,8 +393,7 @@ def prepare_adopt(request, operation):
     authority(request, prepared["body"]["context"], write=True)
     _guard(request, prepared, float("inf"))
     prepared.update(action="adopt", comparison=operation, result={key: result[key] for key in ("baseline_score", "candidate_score", "samples", "effect_ci_low")},
-                    comparison_rows=[{"label": "Request " + str(i + 1) + ": " + pair["request"],
-                                      "before": _capability_text(pair["baseline"]), "after": _capability_text(pair["candidate"])} for i, pair in enumerate(result["pairs"])])
+                    comparison_rows=_comparison_rows(result["pairs"]))
     from maverick import self_improvement as si
     correction = factory.ProposerCorrection(**{key: prepared["correction"][key] for key in ("scope", "signal", "detail", "support", "guidance")})
     evidence = _evidence(prepared)
@@ -409,8 +410,18 @@ def prepare_adopt(request, operation):
     return prepared
 
 
+def _action_name(name):
+    from .permission_requests_api import action_label
+    return capability_label(name) if name in CAPABILITY_LABELS else action_label("tool", name)
+
+
 def _capability_text(value):
-    return "Expected tool: " + ("Allowed" if value["passed"] else "Not allowed") + "\nAllowed tools: " + ", ".join(value["allowed_tools"]) + "\nDenied tools: " + ", ".join(value["denied_tools"]) + "\nMaximum risk: " + str(value["maximum_risk"])
+    return "Expected action: " + ("Allowed" if value["passed"] else "Not allowed") + "\nAllowed actions: " + ", ".join(_action_name(name) for name in value["allowed_tools"]) + "\nActions it cannot use: " + ", ".join(_action_name(name) for name in value["denied_tools"]) + "\nMaximum risk: " + str(value["maximum_risk"])
+
+
+def _comparison_rows(pairs):
+    return [{"label": "Request " + str(i + 1) + ": " + pair["request"].replace("_", " "),
+             "before": _capability_text(pair["baseline"]), "after": _capability_text(pair["candidate"])} for i, pair in enumerate(pairs)]
 
 
 def _evidence(prepared):
