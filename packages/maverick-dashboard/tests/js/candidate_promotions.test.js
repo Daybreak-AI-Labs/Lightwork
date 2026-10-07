@@ -158,7 +158,7 @@ test('submits an independent app review with the current context and exact revis
   assert.deepEqual(submitted, {context:CONTEXT, confirm:true, expected_revision:1,
     approve:true, reason_code:'reviewed_scope',
     note:'Verified current rights and the rollback plan.'});
-  assert.match(ui.document.getElementById('research-promotions-list').textContent, /authorized/);
+  assert.match(ui.document.getElementById('research-promotions-list').textContent, /Approved for preparation/);
   ui.dom.window.close();
 });
 
