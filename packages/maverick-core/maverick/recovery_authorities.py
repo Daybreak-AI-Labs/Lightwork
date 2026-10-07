@@ -153,6 +153,31 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "security_risks": "security_risk_authority",
     "security_vendors": "security_vendor_authority",
     "vendor_renewal_observations": "vendor_renewal_observation_authority",
+    # Company sign-in: uploaded SAML metadata, certificates and keys, the
+    # reviewed setup, provider sign-in checks and local-owner migration.  These
+    # carry credential and identity authority; a restored copy is retained and
+    # blocks start until current custody is reconciled (never replayed or
+    # silently discarded).
+    "company-saml-materials": "company_saml_credential_authority",
+    "company-saml-setups": "company_saml_setup_authority",
+    "company-signin-tests": "company_signin_test_authority",
+    "company-signin-migrations": "company_signin_migration_authority",
+    # Saved remote Knowledge sources pin an account/container, publish
+    # reviewed snapshots for specialist use and journal paid refresh work.
+    "knowledge-remote-sources": "knowledge_remote_source_authority",
+    "knowledge-source-refreshes": "knowledge_source_refresh_execution_authority",
+    "knowledge-source-snapshots": "knowledge_source_snapshot_authority",
+    "knowledge-source-decisions": "knowledge_source_decision_authority",
+    # Reviewed single sends: a restored request must never resend.
+    "channel-test-requests": "channel_test_dispatch_authority",
+    "personal-alert-tests": "personal_alert_test_dispatch_authority",
+    # Reviewed specialist publication and vendor identity decisions.
+    "specialist-drafts": "specialist_draft_publication_authority",
+    "vendor-profile-decisions": "vendor_profile_decision_authority",
+    # Exact retained safety-settings copies and reviewed restore requests are
+    # runtime-override authority: a restored copy must not reapply itself.
+    "runtime-policy-copies": "runtime_policy_copy_authority",
+    "runtime-policy-requests": "runtime_policy_restore_request_authority",
 }
 
 # These governed records cannot authorize source work, change budget limits or
