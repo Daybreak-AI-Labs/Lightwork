@@ -140,11 +140,14 @@ test("checking a use against the rules is built from pickers and a refusal is on
 });
 
 test("records sent to ServiceNow are chosen from a list and sending asks first", async t => {
-  const source = {source_kind: "finding", source_id: "MRF-1", asset_id: "MAA-1", severity: "high", summary: "No accountable owner", source_revision: 1, source_digest: D, finding_type: "undeclared_asset"};
+  // The choice is only a reference; the server resolves the exact current
+  // record and returns a sealed review the send must quote.
+  const source = {source_kind: "finding", source_id: "MRF-1"};
   const h = await fixture(t, {
-    "/pickers/grc-sources?source_kind=finding": {sources: [{label: "No accountable owner", asset_id: "MAA-1", source}]},
-    "POST /grc-outbound/servicenow_irm/preview": {status: "previewed"},
-    "POST /grc-outbound/servicenow_irm/sync": {status: "delivered"}
+    "/pickers/grc-sources?source_kind=finding": {sources: [{label: "No accountable owner", asset_id: "MAA-1", severity: "high", source}]},
+    "POST /grc-outbound/servicenow_irm/preview": {review_token: "sealed-review", message: "Review the complete current record and destination. Nothing has been sent.",
+      details: [{label: "Complete summary", value: "No accountable owner"}], technical: {target: "servicenow_irm"}},
+    "POST /grc-outbound/servicenow_irm/sync": {status: "delivered", message: "The destination confirmed this exact reviewed record.", state: {}}
   });
   const form = h.byId("grc-outbound-preview");
   const options = Array.from(form.elements.source_choice.options).map(option => option.textContent);
@@ -152,13 +155,19 @@ test("records sent to ServiceNow are chosen from a list and sending asks first",
   h.change(form.elements.source_choice, "0");
   h.submit(form); await h.settle();
   assert.deepEqual(plain(h.posted("/grc-outbound/servicenow_irm/preview")[0].body), source);
+  assert.match(h.byId("grc-outbound-result").textContent, /No accountable owner/);
+  const confirm = h.byId("grc-outbound-confirm"), send = h.byId("grc-outbound-sync");
+  send.click(); await h.settle();
+  assert.equal(h.posted("/grc-outbound/servicenow_irm/sync").length, 0, "nothing is sent before the review is ticked");
+  confirm.checked = true; confirm.dispatchEvent(new h.w.Event("change"));
   h.setConfirm(false);
-  h.byId("grc-outbound-sync").click(); await h.settle();
+  send.click(); await h.settle();
   assert.equal(h.posted("/grc-outbound/servicenow_irm/sync").length, 0);
   h.setConfirm(true);
-  h.byId("grc-outbound-sync").click(); await h.settle();
+  send.click(); await h.settle();
+  assert.deepEqual(plain(h.posted("/grc-outbound/servicenow_irm/sync")[0].body), {review_token: "sealed-review", confirmed: true});
   assert.equal(h.posted("/grc-outbound/servicenow_irm/sync").length, 1);
-  assert.match(h.byId("grc-outbound-sync-status").textContent, /Delivered/);
+  assert.match(h.byId("grc-outbound-sync-status").textContent, /confirmed this exact reviewed record/);
 });
 
 test("an insurer profile cites only approved evidence of the chosen AI system", async t => {
