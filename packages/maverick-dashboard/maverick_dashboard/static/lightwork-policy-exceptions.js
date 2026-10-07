@@ -24,11 +24,15 @@
     doc.getElementById('policy-exception-original').hidden = true;
     doc.getElementById('policy-exception-new').hidden = true;
   }
-  // A failed first read must not leave "Loading…" placeholders behind.
+  // Nothing has been read yet (or private details were cleared): a failed read
+  // must not leave "Loading…" placeholders behind. Once a read has succeeded,
+  // the lists stay as read, including a correct "no safeguards recorded" note,
+  // whatever later error (a refresh, or a form that was not complete) follows.
   function settleUnread() {
+    if (state) return;
     var holder = doc.getElementById('policy-exception-controls'), select = doc.getElementById('policy-exception-policy');
-    if (holder && !holder.querySelector('input')) holder.replaceChildren(make('p', 'Safeguards could not be read. Use Refresh to try again.'));
-    if (select && !state) select.replaceChildren(new Option('Refresh to read current rules', ''));
+    if (holder) holder.replaceChildren(make('p', 'Safeguards could not be read. Use Refresh to try again.'));
+    if (select) select.replaceChildren(new Option('Refresh to read current rules', ''));
   }
   function problem(error) {
     if (error && [401,403,409].includes(error.status)) {
