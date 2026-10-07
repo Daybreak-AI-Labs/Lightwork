@@ -37,7 +37,8 @@ def test_default_ceiling_is_medium(tmp_path, monkeypatch):
     cap = _a2a_capability()
     assert cap.max_risk == "medium"
     assert cap.permits("read_file")            # low
-    assert cap.permits("some_unknown_tool")    # medium fallback
+    assert cap.permits("kv_memory")            # reviewed medium
+    assert not cap.permits("some_unknown_tool")  # unrated -> high floor -> blocked
     assert not cap.permits("shell")            # high -> blocked
     assert not cap.permits("mcp_x__y")         # MCP defaults high -> blocked
 
