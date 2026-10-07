@@ -77,9 +77,8 @@
   let candidatesWanted = false;
   // The cohort value report inside this page keeps its own field states
   // (for example, a reason that applies only when a cost is unknown).
-  function pilotFields() {
-    return [...root.querySelectorAll('button,input,select,textarea')].filter(field => !field.closest('[data-own-controls]'));
-  }
+  const fieldsOf = own => [...root.querySelectorAll('button,input,select,textarea')].filter(field => !!field.closest('[data-own-controls]') === own);
+  const pilotFields = () => fieldsOf(false);
   function controls(disabled) {
     if (!disabled && candidatesWanted && !busy) { candidatesWanted = false; setTimeout(() => { if ($('op-plan-details').open) refreshReleaseCandidates(); }, 0); }
     root.setAttribute('aria-busy', String(disabled));
@@ -89,6 +88,12 @@
     const confirm = $('op-guided-review').querySelector('[data-save-review]');
     if (confirm) confirm.disabled = disabled || lostAuthority || !review || !$('op-guided-review').querySelector('[data-review-confirm]').checked;
     if(root.dataset.enabled!=='true'){pilotFields().forEach(button=>button.disabled=true);$('op-original-check').disabled=busy||lostAuthority;}
+    // Saving pilot work leaves the cohort value report to its own states, but it
+    // closes with this page when access is lost or pilots are off. The report
+    // reads data-value-locked so a request finishing later cannot reopen it.
+    const closed = lostAuthority || root.dataset.enabled !== 'true';
+    root.dataset.valueLocked = String(closed);
+    if (closed) fieldsOf(true).forEach(field => { field.disabled = true; });
   }
   async function mutation(task) {
     if (busy) return;
