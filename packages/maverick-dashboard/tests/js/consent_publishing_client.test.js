@@ -9,6 +9,7 @@ const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<30;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
 const reply=(status,body)=>({ok:status<400,status,json:async()=>body});
+const CONTEXT="c".repeat(64);
 
 async function page(options={}){
   const html=read("templates/consent_publishing.html").replace(/\{%[\s\S]*?%\}/g,"").replace(/\{\{[\s\S]*?\}\}/g,"");
@@ -30,7 +31,13 @@ async function page(options={}){
     if(u.pathname.includes("/catalog/translations/"))return reply(200,{payload:{messages:{"purpose.old.title":"Old"}}});
     if(u.pathname.includes("/catalog/"))return reply(200,{items:[],total:0,next_offset:null});
     if(u.pathname.endsWith("/history"))return reply(200,{items:[{publication_id:"publication-b",publication_revision:2,action:"publish",created_at:1800000100},{publication_id:"publication-a",publication_revision:1,action:"publish",created_at:1800000000}]});
-    if(u.pathname.endsWith("/withdraw")&&options.withdrawStatus)return reply(options.withdrawStatus,{detail:"publication revision is 3, expected 2"});
+    if(u.pathname==="/api/v1/consent/withdrawal-requests")return reply(200,{context:CONTEXT,requests:[]});
+    if(u.pathname==="/api/v1/consent/withdrawal-requests/review")return reply(200,{context:CONTEXT,operation:"withdrawal-op-1",token:"sealed-review",
+      changes:Array.from({length:8},(_,i)=>({label:i?"Detail "+i:"Website",after:i?"Value "+i:"Main website"}))});
+    if(u.pathname==="/api/v1/consent/withdrawal-requests/apply"){
+      if(options.withdrawStatus)return reply(options.withdrawStatus,{detail:"publication revision is 3, expected 2"});
+      return reply(200,{context:CONTEXT,confirmed:true,message:"The banner was withdrawn.",current:"No banner",notice:"Main website"});
+    }
     return reply(201,{ok:true});
   };
   shell(w);
@@ -78,10 +85,17 @@ test("publishing uses the revisions of the chosen row and only after confirmatio
 test("withdraw and restore confirm first and carry the row's references",async()=>{
   const ui=await page();
   try{
+    // Withdrawal opens a complete server review; nothing changes until the
+    // reviewed banner is confirmed, and the apply quotes that exact review.
     ui.button("#cpp-property-table","Withdraw").click();await flush();
-    assert.match(ui.confirms[0],/Stop showing the banner on Main website/);
-    const withdraw=ui.posts().find(c=>c.url.endsWith("/withdraw"));
-    assert.deepEqual([withdraw.body.expected_property_revision,withdraw.body.expected_publication_revision],[3,2]);
+    const review=ui.posts().find(c=>c.url.endsWith("/withdrawal-requests/review"));
+    assert.deepEqual(review.body,{website:"main-website",context:CONTEXT});
+    assert.equal(ui.d.getElementById("cpp-withdrawal-review").hidden,false);
+    assert.match(ui.d.getElementById("cpp-withdrawal-changes").textContent,/Main website/);
+    assert.equal(ui.posts().filter(c=>c.url.endsWith("/apply")).length,0,"nothing is withdrawn before confirmation");
+    ui.d.getElementById("cpp-withdrawal-confirm").click();await flush();
+    const apply=ui.posts().find(c=>c.url.endsWith("/withdrawal-requests/apply"));
+    assert.deepEqual(apply.body,{operation:"withdrawal-op-1",token:"sealed-review",confirmed:true});
     ui.button("#cpp-property-table","History").click();await flush();
     const restore=[...ui.d.querySelectorAll("#cpp-history button")].filter(b=>b.textContent==="Restore this version");
     assert.equal(restore.length,1,"only earlier versions can be restored");
@@ -93,15 +107,16 @@ test("withdraw and restore confirm first and carry the row's references",async()
 });
 
 test("stale withdrawal gives refresh guidance without exposing revisions; other failures use the shared error",async()=>{
-  for(const [code,expected] of [[409,/changed since you opened it\. Refresh the page/],[503,/^Could not withdraw the banner\.$/]]){
+  for(const [code,expected] of [[409,/refused\. Read its original result, then review current banner settings/],[503,/original response is uncertain\. Use Read original result/]]){
     const ui=await page({withdrawStatus:code});
     try{
       ui.button("#cpp-property-table","Withdraw").click();await flush();
-      const status=ui.d.getElementById("cpp-status");
+      ui.d.getElementById("cpp-withdrawal-confirm").click();await flush();
+      const status=ui.d.getElementById("cpp-withdrawal-status");
       assert.equal(status.getAttribute("role"),"alert");
       assert.match(status.textContent,expected);
       assert.doesNotMatch(status.textContent,/revision|expected 2|409|503/);
-      assert.equal(ui.posts().filter(c=>c.url.endsWith("/withdraw")).length,1);
+      assert.equal(ui.posts().filter(c=>c.url.endsWith("/withdrawal-requests/apply")).length,1);
     }finally{ui.dom.window.close();}
   }
 });
