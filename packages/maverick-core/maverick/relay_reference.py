@@ -275,8 +275,8 @@ def build_start_request(
     """Build the body + headers for the forward to ``POST /webhook/start``.
 
     A helper for the real ``starter``: serializes ``payload`` and, when a
-    secret is configured, attaches ``X-Maverick-Signature`` /
-    ``X-Maverick-Timestamp`` exactly as ``maverick.webhooks`` expects on the
+    secret is configured, attaches ``X-Lightwork-Signature`` /
+    ``X-Lightwork-Timestamp`` and identical legacy aliases, as expected on the
     receiving end. ``encoder`` defaults to compact JSON; injected so a caller
     can pin serialization for signing.
     """
@@ -293,6 +293,8 @@ def build_start_request(
     }
     if config.hmac_secret:
         signature, ts = sign_body(body, config.hmac_secret)
+        headers["X-Lightwork-Signature"] = signature
+        headers["X-Lightwork-Timestamp"] = ts
         headers["X-Maverick-Signature"] = signature
         headers["X-Maverick-Timestamp"] = ts
     return body, headers

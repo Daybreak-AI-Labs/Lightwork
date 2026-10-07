@@ -162,7 +162,8 @@ the no-hosted-dependency default.
 ## Signing the forward
 
 When `RelayConfig.hmac_secret` is set, `build_start_request` attaches
-`X-Maverick-Signature` and `X-Maverick-Timestamp` using the same HMAC-SHA256
+`X-Lightwork-Signature` and `X-Lightwork-Timestamp`, plus identical
+`X-Maverick-*` compatibility headers, using the same HMAC-SHA256
 construction as `maverick.webhooks`, so the existing inbound `/webhook/start`
 receiver verifies the relay's forward with no extra wiring. Share one signing
 key via the `[webhooks] secret` config knob (env `MAVERICK_WEBHOOK_SECRET`).

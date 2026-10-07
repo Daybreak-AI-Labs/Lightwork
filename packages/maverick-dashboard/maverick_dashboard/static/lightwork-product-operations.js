@@ -340,6 +340,18 @@
               ? function (isCurrent) { return privatePushControls.openReview(privatePushSetup.context, {isCurrent: isCurrent}); } : null);
           return;
         }
+        if (entry[0] === 'work_record_details_review') {
+          var workDetailsReview = entry[1], workDetailsControls = window.LightworkWorkRecordDetails;
+          if (!workDetailsReview || Array.isArray(workDetailsReview) ||
+              Object.keys(workDetailsReview).sort().join(',') !== 'context,scope' ||
+              workDetailsReview.scope !== 'current_page' ||
+              !/^[a-f0-9]{64}$/.test(workDetailsReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open business fields and stages',
+            '/work-details',
+            workDetailsControls && typeof workDetailsControls.openReview === 'function'
+              ? function (isCurrent) { return workDetailsControls.openReview({}, {isCurrent: isCurrent, context: workDetailsReview.context}); } : null);
+          return;
+        }
         if (entry[0] === 'report_schedule_form') {
           var reportScheduleForm = entry[1], reportScheduleControls = window.LightworkExecutiveReportSchedules;
           if (!reportScheduleForm || Array.isArray(reportScheduleForm) ||

@@ -94,6 +94,7 @@ from dataclasses import dataclass
 from maverick.persona import STYLES, style_choices
 
 GROUPS: tuple[str, ...] = (
+    "Work",
     "Safety",
     "Security",
     "AI models",
@@ -113,6 +114,7 @@ GROUPS: tuple[str, ...] = (
 )
 
 GROUP_INTROS: dict[str, str] = {
+    "Work": "The business details your team keeps alongside tasks and records.",
     "Safety": "How carefully agents are checked before and while they act.",
     "Security": "Protections for records, approvals and outside agents.",
     "AI models": "How agents plan, check their answers and pick models.",
@@ -937,6 +939,10 @@ SETTINGS: tuple[Setting, ...] = (
       integer=True, unit="days", weaker="lower",
       warning="Older usage tallies will be permanently deleted at the next clean-up.",
       preview="retention"),
+    S("work_details", "enable", "Business fields and stages",
+      "Let your team set up named business fields and stages for tasks and security records. "
+      "Every save is reviewed; these labels do not change execution or approval. Original results are retained for the latest 20 saves per record.",
+      "toggle", "Work", True, "maverick.work_record_details"),
     S("durable", "enabled", "Resume tasks after a crash",
       "Save progress as tasks run so they can continue from the last step after an interruption.",
       "toggle", "Data retention", False, "maverick.config"),

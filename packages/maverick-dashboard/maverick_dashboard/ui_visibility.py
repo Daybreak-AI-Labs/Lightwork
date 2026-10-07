@@ -160,6 +160,9 @@ PAGES: tuple[dict, ...] = (
         "default": "view",
     },
     # Alternate goal composers, linked from the Goals page toolbar.
+    {"path": "/work-details", "label": "Business details", "group": "Operate",
+     "aliases": "business custom fields stages task details security record details",
+     "icon": "target", "floor": "operate", "default": "operate", "in_nav": False},
     {
         "path": "/goal-builder",
         "label": "Task builder",
@@ -1474,6 +1477,7 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/chat": ("Ask", "Ask"),
     "/companion": ("Ask", "My companion"),
     "/goals": ("Work", "Tasks"),
+    "/work-details": ("Work", "Business details"),
     "/goal-builder": ("Ask", "Ask"),
     "/graph-editor": ("Work", "Tasks"),
     "/projects": ("Work", "Projects"),

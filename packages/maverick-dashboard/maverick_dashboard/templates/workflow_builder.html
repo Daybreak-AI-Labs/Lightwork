@@ -428,7 +428,7 @@
           <span class="wf__hint" id="trig-msg" role="status" aria-live="polite"></span>
         </div>
         <div id="trig-howto" hidden>
-          <p class="wf__hint">{{ ui("In the other app, add a step that sends a web request to this address and names this start. Your administrator can help with the security key.") }}<span id="trig-secret-warn" hidden> ⚠ {{ ui("The security key isn’t set up yet, so the address won’t accept requests.") }} {% if pack_editing_allowed %}<a href="/settings#webhook-secret">{{ ui("Set it up in Settings") }}</a>{% else %}Ask an administrator to set it up in Settings.{% endif %}</span></p>
+          <p class="wf__hint">{{ ui("In the other app, add a step that sends a web request to this address and names this start. Your administrator can help with the security key.") }}<span id="trig-secret-warn" hidden> ⚠ {{ ui("The security key isn’t set up yet, so the address won’t accept requests.") }} {% if webhook_setup_available %}<a href="/settings#webhook-settings">{{ ui("Set it up in Settings") }}</a>{% else %}Ask an administrator to set it up in Settings.{% endif %}</span></p>
           <div class="wf__copyrow"><code id="trig-url"></code><button type="button" class="btn btn--ghost" id="trig-url-copy">{{ ui("Copy address") }}</button><button type="button" class="btn btn--ghost" id="trig-name-copy">{{ ui("Copy start name") }}</button></div>
         </div>
         <ul class="wf__sched-list" id="trig-list" aria-label="{{ ut('Starts from other apps') }}" lang="{{ ul('Starts from other apps') }}"></ul>

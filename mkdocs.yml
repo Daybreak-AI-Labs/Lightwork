@@ -1,5 +1,5 @@
 site_name: Lightwork
-site_description: Recursive multi-agent swarm. Drives Claude / GPT / Kimi / Grok / Gemini / Ollama from one kernel.
+site_description: AI workers, company knowledge, repeatable workflows and governed learning, with controls for your team.
 site_url: https://daybreak-ai-labs.github.io/Lightwork/
 repo_url: https://github.com/Daybreak-AI-Labs/Lightwork
 repo_name: Daybreak-AI-Labs/Lightwork
@@ -8,6 +8,10 @@ copyright: Proprietary, commercially licensed (see LICENSE). Built for everyone,
 
 theme:
   name: material
+  custom_dir: docs/overrides
+  logo: assets/brand/daybreak-mark.png
+  favicon: assets/brand/daybreak-mark.png
+  font: false
   language: en
   features:
     - navigation.tabs
@@ -27,15 +31,15 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: deep purple
-      accent: cyan
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: deep purple
-      accent: cyan
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -43,6 +47,14 @@ theme:
     repo: fontawesome/brands/github
     edit: material/pencil
     view: material/eye
+
+extra_css:
+  - assets/brand/lightwork-docs.css
+
+# Theme assets are copied by MkDocs for both the private and public builds.
+# They are not documents and must not become duplicate docs_dir outputs.
+exclude_docs: |
+  /overrides/
 
 plugins:
   - search:
