@@ -85,8 +85,11 @@ test("closing asks what happened before anything is sent, and errors stay plain"
   ui.doc.getElementById("dsar-close").click(); await ui.settle();
   assert.equal(ui.forms.length, 2);
   assert.equal(ui.forms[1].opts.okText, "Close request");
-  assert.deepEqual(JSON.parse(ui.calls[0].body), { kind: "no_response" });
-  assert.equal(ui.doc.getElementById("dsar-status").textContent, "Could not close the request.");
+  // The first thing sent is the outcome for review; nothing is closed yet.
+  assert.match(ui.calls[0].url, /\/privacy\/dsar\/DSAR-1\/handling\/review$/);
+  assert.deepEqual(JSON.parse(ui.calls[0].body), { outcome: { kind: "no_response" } });
+  assert.equal(ui.calls.length, 1);
+  assert.equal(ui.doc.getElementById("dsar-status").textContent, "Could not review the complete outcome.");
 });
 
 test("closing warns when the requester's identity was never confirmed", async (t) => {
@@ -105,18 +108,24 @@ test("cancelling the close form changes nothing", async (t) => {
 });
 
 test("closing a deletion records the answer date, the erasure result and the proof", async (t) => {
+  const outcome = { kind: "answered", answered_on: "2026-10-04", erasure: "erased", reference: "ticket 9" };
   const ui = await fixture({
     formValues: [{ kind: "answered" }, { answered_on: "2026-10-04", erasure: "erased", reference: "ticket 9" }],
-    reply: () => json({}),
+    reply: (url) => url.endsWith("/handling/review")
+      ? json({ token: "review-1", outcome, summary: "Close DSAR-1 as answered on 2026-10-04." })
+      : json({ status: "closed", outcome: { ...outcome, operation_id: "op-1" } }),
   });
   t.after(() => ui.window.close());
   ui.doc.getElementById("dsar-close").click(); await ui.settle();
   const keys = ui.forms[1].fields.map((f) => f.key).join(",");
   assert.equal(keys, "answered_on,erasure,lawful_basis,reference");
   assert.ok(ui.forms[1].fields.find((f) => f.key === "erasure").options.every((o) => !/_/.test(o.label)));
-  assert.match(ui.calls[0].url, /\/privacy\/dsar\/DSAR-1\/close$/);
-  assert.deepEqual(JSON.parse(ui.calls[0].body),
-    { kind: "answered", answered_on: "2026-10-04", erasure: "erased", reference: "ticket 9" });
+  assert.match(ui.calls[0].url, /\/privacy\/dsar\/DSAR-1\/handling\/review$/);
+  assert.deepEqual(JSON.parse(ui.calls[0].body), { outcome });
+  assert.deepEqual(ui.confirms, ["Close DSAR-1 as answered on 2026-10-04."]);
+  assert.match(ui.calls[1].url, /\/privacy\/dsar\/DSAR-1\/close$/);
+  assert.deepEqual(JSON.parse(ui.calls[1].body), { ...outcome, review_token: "review-1" });
+  assert.equal(ui.doc.getElementById("dsar-status").textContent, "Your reviewed outcome statement was recorded.");
 });
 
 test("keeping someone's data needs the lawful reason before anything is sent", async (t) => {
@@ -138,7 +147,7 @@ test("a refused close says what is missing in plain words", async (t) => {
   t.after(() => ui.window.close());
   ui.doc.getElementById("dsar-close").click(); await ui.settle();
   assert.equal(ui.doc.getElementById("dsar-status").textContent,
-    "Could not close the request. The answer date cannot be in the future.");
+    "Could not review the complete outcome. The answer date cannot be in the future.");
 });
 
 test("a list's Close link opens the close form on arrival", async (t) => {

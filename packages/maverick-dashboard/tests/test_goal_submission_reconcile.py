@@ -84,9 +84,9 @@ def test_request_that_created_the_receipt_answers_when_a_replay_won_the_claim(is
     client, world, _runs = isolated
     real = goal_submission.try_claim_api_dispatch
 
-    def replay_claims_first(w, receipt, intent):
-        assert real(w, receipt, intent)  # the concurrent replay wins
-        return real(w, receipt, intent)  # the creator's own claim then fails
+    def replay_claims_first(w, receipt, intent, **guard):  # guard: the current-authority effect_guard
+        assert real(w, receipt, intent, **guard)  # the concurrent replay wins
+        return real(w, receipt, intent, **guard)  # the creator's own claim then fails
 
     monkeypatch.setattr(goal_submission, "try_claim_api_dispatch", replay_claims_first)
     r = client.post("/api/v1/goals", headers={"Idempotency-Key": "replay-won"}, json={"title": "Review"})

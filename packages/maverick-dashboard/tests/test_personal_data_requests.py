@@ -98,7 +98,7 @@ def test_own_request_requires_distinct_current_reviewer(request_store):
 
 def test_effect_receipt_precedes_dispatch_failure_stays_unknown(request_store, monkeypatch):
     def erase(*args, authorize=None):
-        assert authorize is not None  # the current reviewer check reaches the store
+        assert callable(authorize)  # the current reviewer check reaches the store
         assert request_store.row["targets"][0]["state"] == "dispatching"
         raise OSError("interrupted deletion")
     monkeypatch.setattr(deletion, "_erase_target", erase)
@@ -110,7 +110,10 @@ def test_effect_receipt_precedes_dispatch_failure_stays_unknown(request_store, m
 
 
 def test_purged_scope_keeps_explicit_retained_exceptions(request_store, monkeypatch):
-    monkeypatch.setattr(deletion, "_erase_target", lambda *args, authorize=None: {"state": "purged", "removed": 2})
+    def erase(*args, authorize=None):
+        assert callable(authorize)  # the reviewer's authority is re-checked at each store
+        return {"state": "purged", "removed": 2}
+    monkeypatch.setattr(deletion, "_erase_target", erase)
     receipt = deletion.apply("PDR-case", 1, "user:reviewer", lambda: None, None, external_holds_clear=True)
     assert receipt["status"] == "purged-with-retained-exceptions"
     assert any(row["state"] == "external-unverified" for row in receipt["exceptions"])

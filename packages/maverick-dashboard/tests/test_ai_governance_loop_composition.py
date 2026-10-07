@@ -277,6 +277,20 @@ def test_install_is_lazy_and_server_factories_fail_closed_without_authority(
     assert callable(app.state.ai_governance_loop_runtime_factory)
     assert callable(app.state.ai_governance_loop_worker_factory)
     assert callable(app.state.ai_governance_loop_trigger_callback_factory)
+    from maverick_dashboard.ai_governance_native_sources import factory as native_factory
+
+    # The native retained authorities are the default reader, but nothing is
+    # built until the loop is turned on.
+    assert app.state.ai_governance_loop_authority_reader_factory is native_factory
+    with pytest.raises(composition.AIGovernanceLoopCompositionError, match="disabled"):
+        app.state.ai_governance_loop_runtime_factory(
+            TENANT,
+            "operator-one",
+            SimpleNamespace(app=app),
+        )
+    # Turned on but with the authority reader removed, it still fails closed.
+    monkeypatch.setattr(composition, "_load_tenant_config", lambda _tenant: config())
+    app.state.ai_governance_loop_authority_reader_factory = None
     with pytest.raises(composition.AIGovernanceLoopCompositionError, match="factory"):
         app.state.ai_governance_loop_runtime_factory(
             TENANT,
@@ -284,7 +298,6 @@ def test_install_is_lazy_and_server_factories_fail_closed_without_authority(
             SimpleNamespace(app=app),
         )
 
-    monkeypatch.setattr(composition, "_load_tenant_config", lambda _tenant: config())
     app.state.ai_governance_loop_authority_reader_factory = lambda **_kwargs: Reader()
     callback = app.state.ai_governance_loop_trigger_callback_factory("inventory-authority")
     assert callable(callback)

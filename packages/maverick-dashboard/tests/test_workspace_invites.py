@@ -243,7 +243,11 @@ def test_provider_email_is_from_current_signed_login_not_historical_alias():
     assert _oidc_invite_email({"email": "right@example.com", "email_verified": False}) == ""
     assert _oidc_invite_email({"preferred_username": "right@example.com"}) == "right@example.com"
     assert _saml_invite_email(SamlIdentity("opaque", {"mail": ["right@example.com"]})) == "right@example.com"
-    assert session_claims({"idp_email": "RIGHT@example.com"}, None, via="session")["idp_email"] == "right@example.com"
+    import time
+    # A session cookie needs its signed issue time; one without it is refused.
+    assert session_claims({"idp_email": "RIGHT@example.com"}, None, via="session") is None
+    fresh = {"idp_email": "RIGHT@example.com", "iat": time.time()}
+    assert session_claims(fresh, None, via="session")["idp_email"] == "right@example.com"
     assert "idp_email" not in session_claims({"idp_email": "right@example.com"}, None, via="invite")
 
 
