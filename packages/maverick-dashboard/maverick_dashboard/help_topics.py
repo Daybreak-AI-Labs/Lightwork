@@ -72,10 +72,11 @@ TOPICS: tuple[Topic, ...] = (
     ), (("chat_goal.html", "Stop task"), ("chat_goal.html", "Try again"))),
     Topic("use-result", "Use a result", "Employee", ("/deliverables",), (
         "Open the finished task.",
-        "Use Copy answer or Download answer to take the result with you.",
+        "Use Copy answer, Download Word document or Download Markdown to take the result with you.",
         "Ask for a change in the message box; the task keeps its history.",
         "Results lists every finished result you can see.",
-    ), (("chat_goal.html", "Copy answer"), ("chat_goal.html", "Download answer"))),
+    ), (("chat_goal.html", "Copy answer"), ("chat_goal.html", "Download Word document"),
+        ("chat_goal.html", "Download Markdown"))),
     Topic("find-task", "Find a past task", "Employee", ("/goals",), (
         "Open Tasks.",
         "Type part of the task's title in Search tasks.",
