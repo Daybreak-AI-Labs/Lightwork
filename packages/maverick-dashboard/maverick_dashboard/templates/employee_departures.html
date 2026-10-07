@@ -21,7 +21,7 @@
   async function load() {
     reviewed = null; byId('ed-begin').hidden = true; byId('ed-inventory').replaceChildren();
     model = await call(''); byId('ed-new').hidden = !model.enabled;
-    choose(byId('ed-person'), model.people.filter(p => !p.admin)); choose(byId('ed-custodian'), model.people.filter(p => p.admin && p.active));
+    choose(byId('ed-person'), model.people.filter(p => !p.admin && !p.departed)); choose(byId('ed-custodian'), model.people.filter(p => p.admin && p.active));
     say(model.enabled ? 'Current cases loaded. Dispatching steps without a later confirmation have an unknown outcome; do not repeat them blindly.' : 'Departure actions are off. Existing cases remain readable. An installation administrator can enable actions in Settings.');
     const cases = byId('ed-cases'); cases.replaceChildren(); if (!model.cases.length) cases.appendChild(node('p', 'No departure cases yet. Start one above when someone leaves, to hand over their work.'));
     model.cases.forEach(row => {

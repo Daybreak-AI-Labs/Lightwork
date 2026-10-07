@@ -963,6 +963,23 @@ def _people(users: dict, labels: dict, extra) -> list[dict]:
     return sorted(seen.values(), key=lambda p: p["label"].lower())
 
 
+def known_people(role_map: dict, all_invites, verified: dict | None = None) -> tuple[list[dict], dict[str, str]]:
+    """The installation's people for every picker, and the readable label per sign-in id.
+
+    One source for the Users page and Departures: explicit role holders, people
+    who joined by an accepted invitation (installation-wide or into a
+    workspace), department grants, installation administrators and people who
+    have signed in. ``verified`` adds labels from company sign-in checks.
+    ``all_invites`` is passed in so each caller chooses how an unreadable
+    invitation store is handled."""
+    from . import suite_grants
+
+    labels = _invite_labels(all_invites)
+    labels.update(verified or {})
+    extra = [*suite_grants.list_grants(), *suite_grants.admin_principals(), *_signed_in_principals()]
+    return _people(role_map, labels, extra), labels
+
+
 def _users_context(request: Request) -> dict:
     """Template context for the /users page (shared with the invite handler)."""
     import os as _os
@@ -1076,11 +1093,9 @@ def _users_context(request: Request) -> dict:
         all_invites = []
     workspace_options, wm_tenant = _workspace_options(request)
     role_map = rbac.list_users()
-    labels = _invite_labels(all_invites)
     from .company_signin_tests import verified_people
-    labels.update(verified_people(request))
+    people, labels = known_people(role_map, all_invites, verified_people(request))
     grants = suite_grants.list_grants()
-    people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
     from .access_explanations import role_descriptions, standard_role
     from .first_login_defaults import preview as first_login_preview
     from .identity_format import role_label
