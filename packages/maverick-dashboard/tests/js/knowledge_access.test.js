@@ -112,7 +112,7 @@ async function setup(queue, {canReview = true} = {}) {
     const next = queue.shift();
     if (next instanceof Error) { throw next; }
     if (typeof next === 'function') { return next(url, options); }
-    return response(next);
+    return response(String(url).includes('/request-batches?') ? batch(url, next) : next);
   };
   window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-access-state.js'), 'utf8'));window.eval(script);
   await tick();
@@ -148,6 +148,16 @@ test('knowledge export-only denial preserves authorized search and locks only ex
   assert.equal(ui.document.getElementById('ka-search').disabled,false);
   assert.equal(ui.document.getElementById('ka-export').disabled,true);ui.dom.window.close();
 });
+
+// Request lists are read in bounded batches of one view (active, ready or
+// archive). A listing below fills in the batch fields the server adds for the
+// view it was asked for, unless the test states them.
+function batch(url, listing) {
+  const view = new URL(String(url), 'https://lightwork.test').searchParams.get('view');
+  const next = listing.next_cursor === undefined ? null : listing.next_cursor;
+  return {view, scanned: listing.items.length, notice: 'Checked against current access.', ...listing,
+    next_cursor: next, complete: next === null};
+}
 
 function requestList(records = []) {
   return {context: CONTEXT, schema: 'lightwork.knowledge-rights-requests.v1',
@@ -501,7 +511,7 @@ test('overfilled request view scans bounded batches to reach older finished case
     decided_by: ACTOR, decision_evidence_sha256: '0'.repeat(64), archive_ready: true});
   const capacity = {active_count: 3, active_limit: 2, archive_available: true};
   const initial = {...requestList(), archived: false, ready_to_archive: false, capacity};
-  const cursor = 'knowledge-req-' + '1'.repeat(40) + '.json';
+  const cursor = 'knowledge-req-' + '1'.repeat(40);
   const first = {...requestList(), archived: false, ready_to_archive: true, capacity, next_cursor: cursor};
   const second = {...requestList([finished]), archived: false, ready_to_archive: true,
     capacity, next_cursor: null};
@@ -509,13 +519,13 @@ test('overfilled request view scans bounded batches to reach older finished case
   assert.match(ui.document.getElementById('ka-capacity').textContent, /scan batches/);
   ui.document.getElementById('ka-show-ready').click();
   await tick(); await tick();
-  assert.match(ui.calls[1].url, /\/requests\/recovery\?limit=100&cursor=$/);
-  assert.match(ui.document.getElementById('ka-requests').textContent, /No finished requests in this batch/);
+  assert.match(ui.calls[1].url, /\/request-batches\?limit=25&view=ready&cursor=$/);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /No matching requests in this batch\. Continue to the next batch/);
   const more = ui.document.getElementById('ka-recovery-more');
   assert.equal(more.hidden, false);
   more.click();
   await tick(); await tick();
-  assert.match(ui.calls[2].url, /\/requests\/recovery\?limit=100&cursor=knowledge-req-/);
+  assert.match(ui.calls[2].url, /\/request-batches\?limit=25&view=ready&cursor=knowledge-req-/);
   assert.match(ui.document.getElementById('ka-requests').textContent, /Move to finished archive/);
   assert.equal(more.hidden, true);
   ui.dom.window.close();
