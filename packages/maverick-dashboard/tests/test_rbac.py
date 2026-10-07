@@ -598,3 +598,107 @@ def test_shared_halt_allows_admin(monkeypatch, tmp_path):
     assert r.status_code == 204
     assert fake_world.armed is False
     assert not (tmp_path / "HALT").exists()
+
+
+# ---------- a missing roster after roles were assigned ----------
+
+def test_fresh_install_without_a_roster_keeps_the_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    assert not rbac.store_path().exists()
+    assert rbac.list_users() == {}
+    assert rbac.missing_rosters() == []
+    assert auth.role_for_principal("user:new") == "operator"
+
+
+def test_deleted_roster_after_assignment_denies_instead_of_promoting(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:boss")
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:demoted", "viewer")
+    rbac.store_path().unlink()
+
+    with pytest.raises(rbac.RosterMissingError):
+        rbac.list_users()
+    assert auth.role_for_principal("user:demoted") is None       # not the operator default
+    assert auth.role_for_principal("user:someone-else") is None
+    assert rbac.permissions_for(auth.role_for_principal("user:demoted")) == frozenset()
+    with pytest.raises(rbac.RbacStoreError):
+        rbac.set_role("user:new", "admin")
+    assert not rbac.store_path().exists()                       # never silently recreated
+    assert auth.role_for_principal("user:boss") == "admin"      # bootstrap admin keeps access
+    assert rbac.missing_rosters() == ["global"]
+
+
+def test_roster_from_before_the_marker_is_recorded_on_first_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    path = rbac.store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"user:demoted": "viewer"}', encoding="utf-8")
+    path.chmod(0o600)
+    assert auth.role_for_principal("user:demoted") == "viewer"
+    path.unlink()
+    assert auth.role_for_principal("user:demoted") is None
+
+
+def test_corrupt_roster_with_marker_still_denies(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:demoted", "viewer")
+    rbac.store_path().write_text("{not json", encoding="utf-8")
+    assert auth.role_for_principal("user:demoted") is None
+    with pytest.raises(rbac.RbacStoreError):
+        rbac.reset_missing_rosters(actor="user:boss") or rbac.list_users()
+    assert rbac.store_path().read_text(encoding="utf-8") == "{not json"   # reset never replaces it
+
+
+def test_deleted_workspace_roster_denies_instead_of_falling_back(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    monkeypatch.setattr("maverick.paths.current_tenant_id", lambda: "acme")
+    rbac.set_tenant_role("acme", "user:demoted", "viewer")
+    assert auth.role_for_principal("user:demoted") == "viewer"
+    rbac.tenant_store_path().unlink()
+    assert auth.role_for_principal("user:demoted") is None       # not the global default
+    with pytest.raises(rbac.RosterMissingError):
+        rbac.list_tenant_roles("acme")
+
+
+def test_bootstrap_admin_recovers_a_missing_roster(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:boss")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:demoted", "viewer")
+    rbac.store_path().unlink()
+
+    # Ordinary role changes are a plain refusal, not a 500 or a recreated roster.
+    _as(monkeypatch, "user:boss")
+    refused = c.post("/users/set", data={"principal": "user:x", "role": "viewer"},
+                     headers={"Accept": "application/json"})
+    assert refused.status_code == 503
+    assert refused.json()["code"] == "access_roles_unavailable"
+    assert not rbac.store_path().exists()
+
+    # Others cannot see or start the recovery.
+    _as(monkeypatch, "user:demoted")
+    assert c.get("/users").status_code == 403
+    assert c.post("/users/roster/reset", data={"confirm": "reset"}).status_code == 403
+
+    _as(monkeypatch, "user:boss")
+    page = c.get("/users")
+    assert page.status_code == 503
+    assert 'action="/users/roster/reset"' in page.text
+    assert c.post("/users/roster/reset", data={}).status_code == 422
+    assert not rbac.store_path().exists()
+    done = c.post("/users/roster/reset", data={"confirm": "reset"}, follow_redirects=False)
+    assert done.status_code == 303
+    assert rbac.list_users() == {}
+    assert c.post("/users/roster/reset", data={"confirm": "reset"}).status_code == 409
+    assert c.post("/users/set", data={"principal": "user:demoted", "role": "viewer"}).status_code == 200
+    assert auth.role_for_principal("user:demoted") == "viewer"

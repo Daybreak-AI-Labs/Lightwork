@@ -1051,6 +1051,8 @@ def _users_context(request: Request) -> dict:
              "invite_revoked": "Invitation revoked.",
              "role_saved": "Custom role saved.",
              "role_deleted": "Custom role deleted.",
+             "roster_reset": ("A new, empty role list was started. Earlier assignments are gone; "
+                              "assign roles again before relying on them."),
              "channel_linked": "Chat account linked.",
              "channel_unlinked": "Chat account unlinked."}.get(
         request.query_params.get("saved", ""), "")
@@ -1216,8 +1218,40 @@ def users_bulk_undo(request: Request, restore: list[str] = Form(default=[])) -> 
 def users_page(request: Request) -> HTMLResponse:
     """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
     auth.require_permission(request, "admin")
-    return _app().templates.TemplateResponse(request, "users.html",
-                                             _users_context(request))
+    from . import rbac
+    try:
+        context = _users_context(request)
+    except rbac.RosterMissingError:
+        # Only an installation administrator (a configured bootstrap admin
+        # while roles are unreadable) may see or start the recovery.
+        auth.require_global_permission(request, "admin")
+        return _app().templates.TemplateResponse(request, "error.html", {
+            "status": 503, "title": "The role list is missing",
+            "message": ("Roles were assigned on this installation, but the role list is missing, so "
+                        "nobody's stored role is used and no access is granted from it. Restore "
+                        "dashboard-users.json (and dashboard-tenant-roles.json) from a backup, or "
+                        "start a new, empty role list and assign roles again."),
+            "path": request.url.path, "gate": "roster_missing", "reauthenticate": "", "feature": {},
+        }, status_code=503, headers={"Cache-Control": "private, no-store"})
+    return _app().templates.TemplateResponse(request, "users.html", context)
+
+
+@router.post("/users/roster/reset")
+def users_roster_reset(request: Request, confirm: str = Form("")) -> RedirectResponse:
+    """Explicitly start new, empty role lists where recorded ones are missing.
+
+    Recovery for an installation administrator when no backup can be
+    restored. Present rosters, including corrupt ones, are never replaced.
+    """
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    if confirm != "reset":
+        raise HTTPException(status_code=422, detail="Confirm that earlier role assignments are gone before starting a new role list.")
+    step_up.require_recent_mfa(request, "change_role")
+    from . import rbac
+    if not rbac.reset_missing_rosters(actor=auth.caller_principal(request) or "local"):
+        raise HTTPException(status_code=409, detail="No missing role list was found. Nothing was changed.")
+    return RedirectResponse("/users?saved=roster_reset", status_code=303)
 
 
 @router.get("/users/access", response_class=HTMLResponse)

@@ -193,6 +193,10 @@ def _legacy_role_names() -> set[str]:
     from ..file_lock import ensure_private_file
     path = maverick_home() / "dashboard-tenant-roles.json"
     if not path.exists():
+        # The dashboard records that memberships existed; their loss is not a
+        # clean history (maverick_dashboard.rbac presence marker).
+        if os.path.lexists(path.with_name(path.name + ".present")):
+            raise TenantRegistryError("Legacy workspace membership history is unavailable; new provisioning is refused.")
         return set()
     try:
         ensure_private_file(path)
