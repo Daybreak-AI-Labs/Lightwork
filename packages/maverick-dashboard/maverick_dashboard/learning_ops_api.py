@@ -27,7 +27,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from . import learning_jobs as jobs
@@ -144,6 +144,12 @@ class ModifyReviewIn(BaseModel):
     cycles: Literal[1, 2, 3, 5] = 1
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
     revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("objective", mode="before")
+    @classmethod
+    def _one_line(cls, value):
+        # The reviewed, recorded and run objective is the same plain sentence.
+        return " ".join(value.split()) if isinstance(value, str) else value
 
 
 class ModifyRunIn(ModifyReviewIn):
@@ -1299,10 +1305,12 @@ async def modify_run(request: Request, body: ModifyRunIn) -> dict:
         return state
 
     await run_in_threadpool(current)
+    # An exhausted organisation allowance refuses before anything starts, so
+    # no activity row claims a practice run that never began.
+    budget = await run_in_threadpool(_budget, "self_modify")
     await run_in_threadpool(lambda: _record(request, "self_modify_run", cycles=body.cycles, operation=material["operation"],
                                             objective=body.objective[:300]))
     retained = {"binding": binding, "actor": material["actor"], "workspace": material["workspace"], "review": material["review"]}
-    budget = None
 
     def _run(job: jobs.Job) -> dict:
         current()
@@ -1317,7 +1325,6 @@ async def modify_run(request: Request, body: ModifyRunIn) -> dict:
         return out
     with authority_effect_fence():
         current()
-        budget = _budget("self_modify")
         try:
             job = jobs.start("self_modify_run", "Practising changes to its own code", _run,
                              started_by=_actor(request), workspace=_workspace(), requested_id=job_id,

@@ -41,7 +41,7 @@ def test_model_for_role_accepts_bare_vs_qualified_allowlist(monkeypatch, tmp_pat
     from maverick import llm
     ro = _point_overlay(monkeypatch, tmp_path)
     ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
-    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "claude-sonnet-4-6")
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "claude-sonnet-4-6")
     assert llm.model_for_role("orchestrator") == "claude-sonnet-4-6"
 
 
@@ -53,7 +53,7 @@ def test_model_for_role_fallback_is_cheapest_not_lexicographic(monkeypatch, tmp_
     from maverick import llm
     ro = _point_overlay(monkeypatch, tmp_path)
     ro.set_allowed_models(["anthropic:claude-opus-4-8", "deepseek:deepseek-v4-flash"])
-    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "openai:gpt-5.5")
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "openai:gpt-5.5")
     assert llm.model_for_role("bulk") == "deepseek:deepseek-v4-flash"
 
 
@@ -65,7 +65,7 @@ def test_model_for_role_fallback_prefers_zero_cost_local_models(monkeypatch, tmp
 
     ro = _point_overlay(monkeypatch, tmp_path)
     ro.set_allowed_models(["ollama:my-local", "deepseek:deepseek-v4-flash"])
-    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "openai:gpt-5.5")
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "openai:gpt-5.5")
 
     assert llm.model_for_role("bulk") == "ollama:my-local"
 

@@ -96,3 +96,24 @@ def test_chat_pages_read_plainly_and_offer_a_menu_on_small_screens(monkeypatch, 
     assert 'id="cs-menu" aria-controls="cs-side"' in r.text
     assert 'aria-label="Start task"' in r.text and "Run this task" in r.text
     assert "transcribe failed" not in r.text
+
+
+def test_chat_searches_published_specialists_instead_of_shipping_the_roster(monkeypatch, tmp_path):
+    import re
+
+    _prep(monkeypatch, tmp_path)
+    client = _client()
+    page = client.get("/chat").text
+    picker = page.split('id="chat-specialist"', 1)[1].split("</select>", 1)[0]
+    # Only "Let Lightwork choose the team" is shipped; the roster is searched.
+    assert picker.count("<option") == 1
+    assert 'id="chat-specialist-search"' in page and "Find a specialist" in page
+    context = re.search(r'name="specialist_context" value="([^"]*)"', page).group(1)
+    found = client.get("/api/v1/chat/specialists", params={"q": "invoice", "limit": 5})
+    assert found.status_code == 200 and found.headers["cache-control"].startswith("no-store")
+    body = found.json()
+    assert body["context"] == context and 0 < len(body["items"]) <= 5 and body["total"] >= len(body["items"])
+    assert all(set(item) == {"value", "label", "revision"} for item in body["items"])
+    assert all("invoice" in (item["label"] + item["value"]).casefold() for item in body["items"])
+    assert client.get("/api/v1/chat/specialists", params={"limit": 51}).status_code == 422
+

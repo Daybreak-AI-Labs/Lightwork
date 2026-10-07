@@ -260,8 +260,13 @@ def test_grc_studio_and_pilot_review_use_pickers_not_typed_references():
     assert 'id="grcs-collector-choice"' in studio and 'id="grcs-projection-target"' in studio
     assert "Copy the collector" not in studio
     visible = _without_technical(studio)
-    for field in ('id="grcs-collector-digest"', 'name="target_revision"', 'name="target_id"'):
+    for field in ('name="target_revision"', 'name="target_id"'):
         assert field not in visible, field
+    # The chosen source's exact reference travels in hidden fields the picker
+    # fills; nobody types or reads a fingerprint.
+    for field in ("grcs-collector-id", "grcs-collector-version", "grcs-collector-digest"):
+        tags = re.findall(r"<input[^>]*\bid=\"" + field + r"\"[^>]*>", visible)
+        assert tags and all('type="hidden"' in tag for tag in tags), field
     pilots = _static("templates/outcome_pilots.html")
     assert '<select class="select" id="op-review-reference"' in pilots
     assert "Pilot reference shared by its owner" not in pilots and 'pattern="OPL-' not in pilots

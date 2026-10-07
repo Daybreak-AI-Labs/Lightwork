@@ -218,6 +218,8 @@ test("Agent Factory: saving without a name or instructions points to each field 
       <textarea id="f-persona" name="persona" required data-error-required="Describe what the agent should do, in a sentence or two."></textarea>
       <input id="f-allow" type="hidden" value=""><input id="f-deny" type="hidden" value=""><select id="f-risk" hidden><option value="low" selected>low</option></select>
       <p id="agent-actions-error" hidden></p><p id="agent-risk-error" hidden></p><div id="wf-steps"></div>
+      <select id="f-model"></select><div id="agent-supporting-models"></div>
+      <div id="agent-tool-service-choices"></div><p id="agent-tool-service-status"></p>
       <button type="button" id="btn-save">Create custom agent</button><button type="button" id="btn-validate">Check settings</button>
     </form>`;
   const calls = [];

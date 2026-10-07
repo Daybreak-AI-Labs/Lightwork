@@ -122,7 +122,9 @@ ADMIN_ONLY = (
     ("get", f"{LO}/factory/preview", None),
     ("get", f"{LO}/self-modify", None),
     ("get", f"{LO}/self-modify/results", None),
-    ("post", f"{LO}/self-modify/run", {"objective": "make summaries faster", "confirm": True}),
+    ("post", f"{LO}/self-modify/review", {"objective": "make summaries faster", "context": "0" * 64, "revision": "0" * 64}),
+    ("post", f"{LO}/self-modify/run", {"objective": "make summaries faster", "context": "0" * 64,
+                                       "revision": "0" * 64, "token": "sealed-review", "confirm": True}),
     ("post", f"{TO}/reward-models/train", {}),
     ("post", f"{TO}/codec/shorthand/learn", {}),
     ("post", f"{TO}/codec/token-codes/learn", {}),
@@ -148,14 +150,20 @@ def test_a_workspace_admin_is_not_a_global_admin(client, monkeypatch):
     monkeypatch.setattr(auth, "has_permission", lambda request, perm: True)
     assert client.post(f"{LO}/flywheel/turn", json={"token": "sealed-review", "confirmed": True}).status_code == 403
     assert client.post(f"{LO}/self-modify/run", json={"objective": "make it faster please",
+                                                       "context": "0" * 64, "revision": "0" * 64, "token": "sealed-review",
                                                        "confirm": True}).status_code == 403
 
 
 def test_reads_on_the_learning_page_need_view(client, monkeypatch):
     _as(monkeypatch, "viewer")
-    for path in (f"{TO}/model-improvement", f"{TO}/reward-models", f"{TO}/codec", f"{LO}/donations", f"{LO}/jobs"):
+    for path in (f"{TO}/reward-models", f"{TO}/codec", f"{LO}/donations", f"{LO}/jobs"):
         assert client.get(path).status_code == 200, path
     assert client.post(f"{LO}/donations/clear", json={"confirm": True}).status_code == 403
+    # Model choices are read only by those the Learning page itself admits
+    # (installation administrators); a viewer is refused, an administrator reads.
+    assert client.get(f"{TO}/model-improvement").status_code == 403
+    _as(monkeypatch, "admin")
+    assert client.get(f"{TO}/model-improvement").status_code == 200
 
 
 # ---- background jobs -------------------------------------------------------------
@@ -482,6 +490,15 @@ def test_self_modify_status_is_plain_and_run_needs_confirmation(client, audit_ro
     assert audit_rows == []
 
 
+def _practice(client, objective="make summaries faster", cycles=1):
+    """Start practice the way the page does: review the exact objective first."""
+    current = client.get(f"{LO}/self-modify").json()
+    body = {"objective": objective, "cycles": cycles, "context": current["context"], "revision": current["revision"]}
+    review = client.post(f"{LO}/self-modify/review", json=body)
+    assert review.status_code == 200, review.text
+    return client.post(f"{LO}/self-modify/run", json={**body, "token": review.json()["token"], "confirm": True})
+
+
 def test_self_modify_run_uses_the_kernel_budget_and_shows_its_refusal(client, monkeypatch, audit_rows):
     from maverick import self_modify_runner
     seen: dict = {}
@@ -490,8 +507,7 @@ def test_self_modify_run_uses_the_kernel_budget_and_shows_its_refusal(client, mo
         seen.update(cycles=cycles, objective=objective, budget=budget)
         return self_modify_runner.RunSummary(False, reason="self-modification disabled ([self_modify] enable)")
     monkeypatch.setattr(self_modify_runner, "run", run)
-    done = _wait(client, client.post(f"{LO}/self-modify/run", json={
-        "objective": "  make   summaries faster  ", "cycles": 2, "confirm": True}))
+    done = _wait(client, _practice(client, "  make   summaries faster  ", cycles=2))
     assert seen["cycles"] == 2 and seen["objective"] == "make summaries faster"
     assert seen["budget"] is not None
     assert done["result"]["ran"] is False and done["result"]["problem"] == (
@@ -509,7 +525,7 @@ def test_an_exhausted_organisation_allowance_refuses_before_anything_starts(clie
         b._tenant_refusal = "organisation allowance exhausted"
         return b
     monkeypatch.setattr(budget_mod, "budget_from_config", refused)
-    r = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "confirm": True})
+    r = _practice(client)
     assert r.status_code == 409 and "allowance is used up" in r.json()["detail"]
     assert audit_rows == []
 
@@ -526,7 +542,7 @@ def test_stopping_self_modify_tightens_its_own_budget(client, monkeypatch):
                 return self_modify_runner.RunSummary(True)
             time.sleep(0.01)
     monkeypatch.setattr(self_modify_runner, "run", run)
-    started = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "confirm": True})
+    started = _practice(client)
     job = started.json()["job"]
     deadline = time.time() + 15
     while job["state"] == "admitted":  # the stop button appears once it runs

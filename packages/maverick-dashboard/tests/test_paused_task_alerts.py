@@ -7,11 +7,10 @@ summary. Other people never see them.
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from maverick.oidc import VerifiedPrincipal
 
 
 @pytest.fixture
@@ -30,7 +29,7 @@ def client_and_actor(monkeypatch, tmp_path):
     actor = {"principal": "user:alice"}
 
     async def bind(request: Request):
-        request.state.principal = SimpleNamespace(principal=actor["principal"])
+        request.state.principal = VerifiedPrincipal(sub=(actor["principal"]).removeprefix("user:"), issuer="https://idp.test", audience="lightwork")
         return request.state.principal
 
     dashboard.app.dependency_overrides[auth.require_principal_in_request_context] = bind

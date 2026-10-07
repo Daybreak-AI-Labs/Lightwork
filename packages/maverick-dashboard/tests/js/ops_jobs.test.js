@@ -30,13 +30,14 @@ function fixture(answers, { confirm = true } = {}) {
   return { window, doc: window.document, calls, settle };
 }
 
-const STARTED = { job: { id: "0123456789abcdef", state: "running", can_stop: true } };  // pragma: allowlist secret
+// Replies carry the job reference the client checks: a 16-character id and a kind.
+const STARTED = { job: { id: "0123456789abcdef", kind: "probe", state: "running", can_stop: true } };  // pragma: allowlist secret
 const POLL = "/api/v1/learning-ops/jobs/0123456789abcdef";  // pragma: allowlist secret
 
 test("a job is polled until it finishes and its result is shown", async (t) => {
   const ui = fixture({
     "/start": [STARTED],
-    [POLL]: [{ job: { id: "0123456789abcdef", state: "done", can_stop: false, result: { n: 3 } } }],  // pragma: allowlist secret
+    [POLL]: [{ job: { id: "0123456789abcdef", kind: "probe", state: "done", can_stop: false, result: { n: 3 } } }],  // pragma: allowlist secret
   });
   t.after(() => ui.window.close());
   const J = ui.window.LWJobs;
@@ -69,11 +70,14 @@ test("a refusal to start shows the server's plain sentence", async (t) => {
   const J = ui.window.LWJobs;
   const status = ui.doc.getElementById("status");
   await J.run("/start", { method: "POST", json: {} }, { status, out: ui.doc.getElementById("out"), action: "do it" });
-  assert.equal(status.textContent, "This is already running.");
+  // The refusal is the server's plain sentence, then how to check before trying again.
+  assert.equal(status.textContent, "This is already running. Read recorded tasks before deciding what to do next. "
+    + "Work is never repeated automatically. Open recorded tasks");
+  assert.equal(status.querySelector("a").getAttribute("href"), "/learning#lo-jobs-panel");
 });
 
 test("a failed job shows its plain problem and no result", async (t) => {
-  const ui = fixture({ "/start": [{ job: { id: "a", state: "failed", problem: "It reached its spending limit and stopped." } }] });
+  const ui = fixture({ "/start": [{ job: { id: "fedcba9876543210", kind: "probe", state: "failed", problem: "It reached its spending limit and stopped." } }] });
   t.after(() => ui.window.close());
   const J = ui.window.LWJobs;
   const status = ui.doc.getElementById("status");

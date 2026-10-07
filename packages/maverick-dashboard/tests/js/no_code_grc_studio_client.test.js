@@ -263,7 +263,11 @@ test("collectors and destinations are chosen from lists, not typed", async (t) =
   const digest = "a".repeat(64);
   const h = page(t, [row({ state: "published" })], {
     "GET /sources": {
-      collectors: [{ collector_id: "cloud-config-scan", collector_version: 3, collector_integrity_sha256: digest }],
+      // Approved evidence sources, with the result fields and controls they support.
+      collectors: [{ collector_id: "cloud-config-scan", collector_version: 3, collector_integrity_sha256: digest,
+        label: "Cloud config scan", definition_id: "cloud-config-scan",
+        outputs: [{ path: ["status"], label: "Check result", type: "text_ref" }],
+        controls: [{ value: "oidc_auth", label: "Company sign-in" }] }],
       destinations: [
         { target_kind: "questionnaire", target_id: "vendor-portal", target_revision: 7, label: "Vendor portal" },
         { target_kind: "report", target_id: "board-pack", target_revision: 2, label: null },
@@ -274,13 +278,16 @@ test("collectors and destinations are chosen from lists, not typed", async (t) =
   await h.settle();
   const collector = h.$("grcs-collector-choice");
   assert.equal(collector.options.length, 2);
-  assert.equal(collector.options[1].textContent, "Cloud config scan (version 3)");
-  assert.equal(h.$("grcs-collector-id").closest("details").open, false);
-  collector.value = "0";
+  assert.equal(collector.options[1].textContent, "Cloud config scan · approved version 3");
+  collector.value = "cloud-config-scan:3:" + digest;
   collector.dispatchEvent(new h.w.Event("change"));
+  // The exact reference travels in hidden fields; nobody types it.
+  for (const id of ["grcs-collector-id", "grcs-collector-version", "grcs-collector-digest"]) assert.equal(h.$(id).type, "hidden");
   assert.equal(h.$("grcs-collector-id").value, "cloud-config-scan");
   assert.equal(h.$("grcs-collector-version").value, "3");
   assert.equal(h.$("grcs-collector-digest").value, digest);
+  assert.deepEqual([...h.$("grcs-source-path").options].map((option) => option.textContent), ["Choose a result field", "Check result"]);
+  assert.match(h.$("grcs-control-refs").textContent, /Company sign-in/);
   const target = h.$("grcs-projection-target");
   // Only destinations that accept the chosen kind (a form) are offered.
   assert.deepEqual([...target.options].map((option) => option.textContent), ["Choose a destination", "Vendor portal (version 7)"]);
@@ -297,7 +304,7 @@ test("without a destination list the page says who to ask", async (t) => {
     "GET /sources": { collectors: [], destinations: [], destinations_listed: false },
   });
   await h.settle();
-  assert.match(h.$("grcs-collector-note").textContent, /No collectors are linked/);
+  assert.match(h.$("grcs-collector-note").textContent, /Set up an evidence source in Continuous evidence and have a different administrator approve it/);
   assert.match(h.$("grcs-projection-target-note").textContent, /Ask your administrator/);
   assert.doesNotMatch(h.$("grcs-projection-target-note").textContent, /fingerprint|revision|[0-9a-f]{64}/);
 });

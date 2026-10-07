@@ -7970,6 +7970,34 @@ def _picker_rank(query: str, label: str, name: str) -> int | None:
     return None
 
 
+@app.get("/api/v1/chat/specialists")
+def chat_specialist_choices(
+    request: Request,
+    q: str = Query(default="", max_length=100),
+    limit: int = Query(default=20, ge=1, le=50),
+) -> JSONResponse:
+    """Published specialists matching a Chat search, best name matches first.
+
+    The same current, department-scoped choices Chat validates on start; the
+    workspace context lets the page refuse a reply from a changed account.
+    """
+    require_permission(request, "operate")
+    require_page_visible(request, "/chat")
+    from .product_operations_task_launch import published_specialists
+
+    current = published_specialists(request)
+    query = " ".join(q.split()).casefold()
+    matches = [
+        choice for choice in current["choices"]
+        if not query or query in choice["label"].casefold() or query in choice["value"].casefold()
+    ]
+    matches.sort(key=lambda choice: (not choice["label"].casefold().startswith(query), choice["label"].casefold()))
+    return JSONResponse(
+        {"context": current["context"], "items": matches[:limit], "total": len(matches)},
+        headers={"Cache-Control": "no-store, private"},
+    )
+
+
 @app.get("/agents/picker")
 async def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
     """Search-as-you-type for the Agent Factory picker.
@@ -9086,6 +9114,8 @@ def tools_page(
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
         enterprise_blocked = enterprise_unavailable_tool_names()
+        # One snapshot of the permitted tools serves the list and its summaries.
+        registered = {t.name: t for t in reg.all()}
         catalog = [
             {
                 "name": t.name,
@@ -9093,7 +9123,7 @@ def tools_page(
                 "summary": plain_tool_summary(t.name, t.description) if query else "",
                 "enterprise_blocked": t.name in enterprise_blocked,
             }
-            for t in sorted(reg.all(), key=lambda x: x.name)
+            for t in sorted(registered.values(), key=lambda x: x.name)
         ]
         enterprise_blocked_total = sum(1 for tool in catalog if tool["enterprise_blocked"])
         folded = query.casefold()
@@ -9117,7 +9147,7 @@ def tools_page(
             # Browsing needs only this page's copy. Searches still inspect
             # every current permitted summary, including its full description.
             for tool in tools:
-                tool["summary"] = plain_tool_summary(tool["name"], reg.get(tool["name"]).description)
+                tool["summary"] = plain_tool_summary(tool["name"], registered[tool["name"]].description)
         tool_page = {
             "query": query,
             "page": page,
@@ -11144,6 +11174,11 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
     requested_specialist = request.query_params.get("specialist")
     if requested_specialist is not None:
         published_selection(request, requested_specialist)
+    # The roster has 2,000+ specialists: the page ships only the requested and
+    # saved choices, and Find a specialist searches the rest (/api/v1/chat/specialists).
+    shown = {requested_specialist, specialist_choices.get("personal_default")} - {None, ""}
+    specialist_choices = {**specialist_choices,
+                          "choices": [c for c in specialist_choices["choices"] if c["value"] in shown]}
     return templates.TemplateResponse(
         request,
         "chat.html",

@@ -45,6 +45,11 @@ _ENV = sorted({name for row in ROWS for name in row.env} | {
 # id -> (value sent by the page, value the kernel then reads)
 VALUES: dict[str, tuple[object, object]] = {
     "billing.enforce_plan_caps": (True, True),
+    "image_edit.inpaint_model": ("stability-ai/stable-diffusion-inpainting:abc123",
+                                 "stability-ai/stable-diffusion-inpainting:abc123"),
+    "image_edit.variation_model": ("lambdal/stable-diffusion-image-variation",
+                                   "lambdal/stable-diffusion-image-variation"),
+    "image_edit.upscale_model": ("nightmareai/real-esrgan", "nightmareai/real-esrgan"),
     "billing.plans": (
         [{"name": "pro", "features": ["core", "channels"], "max_daily_dollars": 50,
           "max_concurrent_goals": 3}],
@@ -136,6 +141,10 @@ VALUES: dict[str, tuple[object, object]] = {
 # id -> a value the server must refuse
 INVALID: dict[str, object] = {
     "billing.enforce_plan_caps": "yes",
+    # A web address, a path or a space is never a model name.
+    "image_edit.inpaint_model": "https://replicate.com/stability-ai/stable-diffusion-inpainting",
+    "image_edit.variation_model": "../models/variation",
+    "image_edit.upscale_model": "nightmareai/real esrgan",
     "billing.plans": [{"name": "gold", "features": [], "max_daily_dollars": 1,
                        "max_concurrent_goals": 1}],
     "billing.stripe.prices.pro": "prod_123",

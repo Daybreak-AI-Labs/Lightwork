@@ -62,7 +62,7 @@ function defaults() {
       review: [{ label: "Models", after: "Claude X" }, { label: "Spending limit", after: "$5.00 for testing" }] },
     "/passes/start": PASS_DONE,
     ["/passes/requests/" + PASS]: PASS_DONE,
-    "/corpus-quality": { job: { id: "1123456789abcdef", state: "done", can_stop: false, result: {  // pragma: allowlist secret
+    "/corpus-quality": { job: { id: "1123456789abcdef", kind: "corpus_quality", state: "done", can_stop: false, result: {  // pragma: allowlist secret
       configured: true, removed: 1, cases: [{ task: "easy task", useful: false, baseline_rate: 1 }] } } },
     "/api/v1/learning-ops/self-harness/plan": { spending_limit: 5, checker: "Claude Checker", careful_testing: true },
     "/refinements/0123456789abcdef/review": { context: CONTEXT, title: "Check quote approval",  // pragma: allowlist secret

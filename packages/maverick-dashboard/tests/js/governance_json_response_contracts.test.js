@@ -140,6 +140,7 @@ function harness(file, functionName, args) {
       querySelectorAll() { return []; },
       querySelector() { return element(`${id}:query`); },
       replaceChildren() {},
+      add() {},
       appendChild() {},
       append() {},
       setAttribute() {},
@@ -166,11 +167,18 @@ function harness(file, functionName, args) {
     TextDecoder,
     Uint8Array,
     document: {
+      readyState: "complete",
       getElementById: element,
       querySelector() { return element("document:query"); },
       querySelectorAll() { return []; },
       createElement() { return element("document:created"); },
+      // Page-level event wiring (draft loaded, recording status) is inert here.
+      addEventListener(type, listener) { listeners.set(`document:${type}`, listener); },
     },
+    // agents.html watches its drafts list for changes; nothing changes here.
+    MutationObserver: class { observe() {} disconnect() {} },
+    // agents.html builds its AI model choices as <option> elements.
+    Option: class { constructor(text, value) { this.text = text; this.value = value; this.disabled = false; } },
     window: {
       confirm() { return true; },
       // The shell's fetch helper, sending through the context's fetch.
