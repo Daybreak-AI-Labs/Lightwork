@@ -46,6 +46,9 @@ KNOWN_SECTIONS = frozenset({
     "alerts",
     # [collaboration] comments: comment threads and @mentions (maverick.comments).
     "collaboration",
+    # [work_details] enable: reviewed business fields and stages on tasks and
+    # security records (maverick.work_record_details), on All settings.
+    "work_details",
     # [first_outcome] department / sample_workspace_created: the department
     # first task picked at setup (maverick.sample_outcomes).
     "first_outcome",
