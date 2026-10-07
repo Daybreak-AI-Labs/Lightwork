@@ -11,20 +11,20 @@ import re
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from maverick.oidc import VerifiedPrincipal
 
 CLUSTER = ['class="topbar-utilities"', 'Docs (opens in a new tab)', 'id="help-menu"', 'id="prefs-menu"', 'href="/account"']
 
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    from types import SimpleNamespace
 
     from maverick import config, world_model
     from maverick_dashboard import app as dashboard
     from maverick_dashboard import auth
 
     async def bind(request: Request):
-        request.state.principal = SimpleNamespace(principal="user:alice")
+        request.state.principal = VerifiedPrincipal(sub=("user:alice").removeprefix("user:"), issuer="https://idp.test", audience="lightwork")
         return request.state.principal
 
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
