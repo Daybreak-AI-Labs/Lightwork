@@ -183,6 +183,11 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     # native-authority pins the AI governance loop decides against.
     "runtime-enforcement": "runtime_enforcement_evidence_authority",
     "ai-governance-source-pins": "ai_governance_source_pin_authority",
+    # Reviewed business fields keep their exact operation outcomes as replay
+    # barriers; independent audit checkpoint copies are second-person approved
+    # uploads whose unknown outcomes are never repeated.
+    "work-record-details": "work_record_detail_authority",
+    "audit-checkpoint-custody": "audit_checkpoint_custody_authority",
 }
 
 # These governed records cannot authorize source work, change budget limits or

@@ -176,8 +176,8 @@
     }
   },
   "counts": {
-    "governed": 134,
-    "artifact": 54,
+    "governed": 136,
+    "artifact": 55,
     "a2a": 4,
     "preferences": 8,
     "learning": 61,
@@ -29929,6 +29929,109 @@
           "sample_path": "privacy_automation/discovery-data-use-key.sealed",
           "recovery_policy": "privacy_discovery_data_use_key",
           "disposition": "Tenant-sealed key for the discovery data-use database (an unknown, blocking SQLite). Retained with it; never regenerated over saved data."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/cli/run_result.py",
+      "contract": "artifact",
+      "owner": "packages/maverick-core/maverick/cli/run_result.py",
+      "purpose": "Private, native single-run result for automation; never inferred from logs.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 M1 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 126,
+          "function": "write_run_result",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(target, json.dumps(result, ensure_ascii=False, allow_nan=False) + '\\n', mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/work_record_details.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/work_record_details.py",
+      "purpose": "Reviewed business fields beside native work; never an execution transition.",
+      "referenced_store_owners": [
+        ".governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 M1 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "work-record-details",
+          "line": 45,
+          "recovery_policy": "work_record_detail_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 10,
+        "outbox": 1
+      },
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('work-record-details', 'WRD', 'work_record_details')"
+        },
+        {
+          "line": 226,
+          "function": "save",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(data_dir('work-record-details', 'definition-authority'), strict=True)"
+        },
+        {
+          "line": 227,
+          "function": "save",
+          "kind": "data_dir",
+          "expression": "data_dir('work-record-details', 'definition-authority')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/audit_checkpoint_custody_api.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/audit_checkpoint_custody_api.py",
+      "purpose": "Independent checkpoint copies: full review, second-person approval and Original.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 M1 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "audit-checkpoint-custody",
+          "line": 34,
+          "recovery_policy": "audit_checkpoint_custody_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 14
+      },
+      "source_sites": [
+        {
+          "line": 34,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('audit-checkpoint-custody', 'ACC', 'audit_checkpoint_custody')"
+        },
+        {
+          "line": 84,
+          "function": "_source",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 366,
+          "function": "check",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
         }
       ]
     }
