@@ -116,6 +116,7 @@
   var DEFAULT_LIMITS = { max_records: 10000, max_files: 1000, max_bytes: 67108864, max_seconds: 300.0, max_findings: 10000, max_fields_per_record: 256, max_record_bytes: 262144, max_document_bytes: 4194304 };
   var setup = { providers: [], connections: [], evidence_keys: [] };
   var state = { sources: [], jobs: [], reports: [] };
+  var workingJobs = Object.create(null);
   var openReport = null;
 
   var PROVIDERS = {
@@ -130,12 +131,17 @@
     precise_location: "Precise location", unknown_personal_data: "Other personal data",
   };
   var SOURCE_STATE = { active: ["Active", "active"], suspended: ["Paused", "warn"], revoked: ["Removed", "idle"] };
-  var JOB_STATE = { queued: ["Waiting to run", "info"], leased: ["Running", "info"], complete: ["Done", "active"], dead_letter: ["Failed", "blocked"] };
+  var JOB_STATE = { queued: ["Waiting to run", "info"], leased: ["Running or awaiting its saved result", "info"], complete: ["Done", "active"], dead_letter: ["Needs attention", "blocked"], cancelled: ["Cancelled", "idle"] };
+  var JOB_ERROR = { source_changed: "Source changed; waiting to retry its current selection.", source_inactive: "The source was paused or removed.",
+    stale_lease_recovered: "An interrupted scan was queued again.", stale_lease_exhausted: "An interrupted scan used its allowed attempts.",
+    credential_unavailable: "The saved connection or protection key needs attention.", adapter_error: "The storage service could not finish the scan.",
+    provider_contract_invalid: "The storage service returned an unreadable reply.", operator_cancelled: "Cancelled by your team." };
   var WORK_STATE = {
     queued: ["Waiting", "info"], leased: ["In progress", "info"], applied: ["Done", "active"], no_change: ["Already up to date", "active"],
     ambiguous: ["Needs checking", "warn"], dead_letter: ["Failed", "blocked"], cancelled: ["Cancelled", "idle"],
   };
-  var COMPLETENESS = { complete: "Fully checked", partial: "Partly checked", truncated: "Stopped at a limit", failed: "Could not finish" };
+  var COMPLETENESS = { complete: "Finished within the selected limits", complete_within_declared_bounds: "Finished within the selected limits",
+    bounded_partial: "Partly checked", partial: "Partly checked", truncated: "Stopped at a limit", failed: "Could not finish" };
   var DECISION = { confirmed: "Correct", reclassified: "Different kind of data", false_positive: "Not personal data" };
 
   function say(text) { window.mvStatus(statusEl, text); }
@@ -167,6 +173,18 @@
   async function load() {
     try {
       var both = await Promise.all([call("/sources?limit=500"), call("/jobs?limit=200"), call("/reports?limit=200")]);
+      if (both[0].permissions) {
+        can.operate = both[0].permissions.operate === true;
+        can.admin = both[0].permissions.admin === true;
+        can.audit = both[0].permissions.audit === true;
+        ["pdd-new-source", "pdd-process", "pdd-maintenance", "pdd-rotate-key", "pdd-purge"].forEach(function (id) {
+          var control = document.getElementById(id); if (control) control.disabled = !can.admin;
+        });
+        var saveSource = document.querySelector("#pdd-source-form button[type=submit]");
+        if (saveSource) saveSource.disabled = !can.admin;
+        var queueDue = document.getElementById("pdd-enqueue-due"); if (queueDue) queueDue.disabled = !can.operate;
+        ["pdd-verify", "pdd-audit"].forEach(function (id) { var control = document.getElementById(id); if (control) control.disabled = !can.audit; });
+      }
       state.sources = both[0].items || [];
       state.jobs = both[1].items || [];
       state.reports = both[2].items || [];
@@ -174,11 +192,27 @@
       loadReviews();
       loadInventory();
       if (can.admin) loadWork();
-    } catch (f) { fail(f, "load your data sources"); }
+      return true;
+    } catch (f) {
+      if (f && (f.status === 401 || f.status === 403 || f.status === 409)) {
+        state = { sources: [], jobs: [], reports: [] };
+        can.admin = false; can.operate = false; render();
+      }
+      fail(f, "load your data sources"); return false;
+    }
+  }
+
+  function discoveryTable(container, columns, rows, actions, empty) {
+    R.table(container, columns, rows, actions, empty);
+    container.querySelectorAll("tbody tr").forEach(function (row) {
+      Array.from(row.cells).forEach(function (cell, index) {
+        cell.dataset.label = index < columns.length ? columns[index].label : "Actions";
+      });
+    });
   }
 
   function render() {
-    R.table(document.getElementById("pdd-sources"), [
+    discoveryTable(document.getElementById("pdd-sources"), [
       { label: "Source", value: function (s) { return sourceName(s.source_id); } },
       { label: "Where", value: function (s) { return provider(s.provider) + " – " + s.resource_ref; } },
       { label: "Status", value: function (s) { return badge(SOURCE_STATE, s.state); } },
@@ -192,18 +226,22 @@
       { label: "Remove", kind: "danger", when: function (s) { return can.admin && s.state !== "revoked"; }, run: function (s) { setState(s, "revoked"); } },
     ], { text: can.admin ? "No data sources yet. Use “Add a data source”." : "No data sources yet. Ask an administrator to add one." });
 
-    R.table(document.getElementById("pdd-jobs"), [
+    discoveryTable(document.getElementById("pdd-jobs"), [
       { label: "Source", value: function (j) { return sourceName(j.source_id); } },
       { label: "Status", value: function (j) { return badge(JOB_STATE, j.state); } },
+      { label: "Next step", value: function (j) { return JOB_ERROR[j.last_error_code] || ""; } },
       { label: "Tries", value: function (j) { return j.attempts + " of " + j.max_attempts; } },
       { label: "Started by", value: function (j) { return j.schedule_id ? "Schedule" : "Someone on your team"; } },
     ], state.jobs, [
-      { label: "Run now", kind: "primary", when: function (j) { return can.admin && j.state === "queued"; }, run: runJob },
+      { label: "Run now", kind: "primary", when: function (j) { return canRunSource(j.source_id) && j.state === "queued" && j.next_attempt_at <= Date.now() / 1000; }, run: runJob },
       { label: "Try again", when: function (j) { return can.admin && j.state === "dead_letter"; }, run: retryJob },
       { label: "Cancel", kind: "danger", when: function (j) { return can.operate && j.state === "queued"; }, run: cancelJob },
+      { label: "Read saved result", when: function (j) { return j.state === "complete" || j.state === "leased"; }, run: function (j) {
+        readOriginal(j).catch(function (f) { fail(f, "read the saved scan"); });
+      } },
     ], { text: "No scans yet. Use “Scan now” on a data source." });
 
-    R.table(document.getElementById("pdd-reports"), [
+    discoveryTable(document.getElementById("pdd-reports"), [
       { label: "Source", value: function (r) { return sourceName(r.source_id); } },
       { label: "Finished", value: function (r) { return R.when(r.finished_at); } },
       { label: "Checked", value: function (r) { return (r.records_seen || 0) + " records, " + (r.files_seen || 0) + " files"; } },
@@ -220,11 +258,16 @@
   }
 
   // ---- data sources -----------------------------------------------------------------
+  function canRunSource(sourceId) {
+    var source = state.sources.find(function (s) { return s.source_id === sourceId; });
+    return can.operate && source && (can.admin || source.credential_env.indexOf("connection:") === 0);
+  }
+
   async function scanNow(s) {
     try {
       await call("/sources/" + encodeURIComponent(s.source_id) + "/jobs", "POST",
         { limits: DEFAULT_LIMITS, max_attempts: 3, retention_seconds: 90 * 86400, idempotency_key: R.newKey() });
-      say(can.admin ? "Scan queued. Use “Run now” in the Scans list to start it." : "Scan queued. It runs when an administrator starts it or the scheduler picks it up.");
+      say(canRunSource(s.source_id) ? "Scan queued. Use “Run now” in the Scans list to start it." : "Scan queued. It runs when an administrator starts it or the scheduler picks it up.");
       await load();
     } catch (f) { fail(f, "queue the scan"); }
   }
@@ -370,18 +413,54 @@
   });
 
   // ---- scans --------------------------------------------------------------------------
+  async function readOriginal(j) {
+    var original = await call("/jobs/" + encodeURIComponent(j.job_id) + "/result");
+    if (original.report) {
+      say("Saved scan: " + original.report.findings_count + " possible item(s) of personal data found. " +
+        (COMPLETENESS[original.report.completeness] || "Review its saved coverage and limits."));
+    } else if (original.job.state === "cancelled") {
+      say("Cancellation is saved. This scan will not run.");
+    } else if (original.job.state === "leased") {
+      say("The earlier scan may still be running. No scan was repeated. Read its saved result again before another decision.");
+    } else {
+      say(JOB_ERROR[original.job.last_error_code] || "The earlier scan has no saved report. Refresh its current state before another decision.");
+    }
+    if (!(await load())) return false;
+    return original;
+  }
   async function runJob(j) {
-    var ok = await R.confirm("Scan " + sourceName(j.source_id) + " now? Lightwork will read from it within the scan limits.", "Scan now");
-    if (!ok) return;
+    if (workingJobs[j.job_id]) return;
+    workingJobs[j.job_id] = true;
+    var submitted = false;
     try {
-      var res = await call("/jobs/" + encodeURIComponent(j.job_id) + "/execute", "POST");
+      var original = await call("/jobs/" + encodeURIComponent(j.job_id) + "/result");
+      var current = original.job;
+      if (current.state !== "queued" || current.revision !== j.revision) {
+        say("This scan changed or already started. Read its saved result before another decision."); await load(); return;
+      }
+      var source = await call("/sources/" + encodeURIComponent(current.source_id));
+      var bounds = current.limits;
+      var ok = await R.confirm("Scan " + sourceName(current.source_id) + " at " + source.resource_ref + " now? Lightwork will read up to " +
+        bounds.max_records + " records, " + bounds.max_files + " files and " + Math.round(bounds.max_bytes / 1048576) +
+        " MB, for up to " + bounds.max_seconds + " seconds. Only fingerprints and counts are saved. This does not prove the whole system was checked.", "Scan now");
+      if (!ok) return;
+      submitted = true;
+      say("Scanning the reviewed source. You can read its saved result if this reply is interrupted.");
+      var res = await call("/jobs/" + encodeURIComponent(j.job_id) + "/run", "POST", {
+        expected_revision: current.revision, expected_source_revision: source.revision,
+        expected_source_integrity_sha256: source.integrity_sha256, idempotency_key: R.newKey(), confirmed: true
+      });
       var rep = res && res.report;
-      say(rep ? "Scan finished: " + rep.findings_count + " possible item(s) of personal data found. " + (COMPLETENESS[rep.completeness] || "") : "Scan finished.");
+      say(rep ? "Scan finished: " + rep.findings_count + " possible item(s) of personal data found. " + (COMPLETENESS[rep.completeness] || "") :
+        "The earlier scan has no saved report yet. No scan was repeated. Read its saved result before another decision.");
       await load();
     } catch (f) {
-      if (f && f.status === 409) { say("This scan is not ready to run. It may already be running, or the source changed."); await load(); return; }
+      if (submitted) {
+        try { await readOriginal(j); return; }
+        catch (_unavailable) { say("The scan reply and its saved result could not be read. No scan was repeated. Refresh and read the original before another decision."); return; }
+      }
       fail(f, "run the scan");
-    }
+    } finally { delete workingJobs[j.job_id]; }
   }
   async function retryJob(j) {
     try {
@@ -391,13 +470,35 @@
     } catch (f) { fail(f, "retry the scan"); }
   }
   async function cancelJob(j) {
-    if (!(await R.confirm("Cancel this scan?", "Cancel scan"))) return;
+    if (workingJobs[j.job_id]) return;
+    workingJobs[j.job_id] = true;
+    var submitted = false;
     try {
-      await call("/jobs/" + encodeURIComponent(j.job_id) + "/fail", "POST", { error_code: "operator_cancelled", base_backoff_seconds: 5.0 });
-      say("Scan cancelled.");
+      if (!(await R.confirm("Cancel this waiting scan for " + sourceName(j.source_id) + "? Its saved schedule is kept. Work that already started cannot be cancelled here.", "Cancel scan"))) return;
+      submitted = true;
+      await call("/jobs/" + encodeURIComponent(j.job_id) + "/cancel", "POST", { expected_revision: j.revision, idempotency_key: R.newKey(), confirmed: true });
+      say("Scan cancelled. It will not run.");
       await load();
-    } catch (f) { fail(f, "cancel the scan"); }
+    } catch (f) {
+      if (submitted) {
+        try { await readOriginal(j); return; }
+        catch (_unavailable) { say("The cancellation reply could not be read. No cancellation was repeated. Refresh and read this scan's saved state."); return; }
+      }
+      fail(f, "cancel the scan");
+    } finally { delete workingJobs[j.job_id]; }
   }
+
+  global.LightworkPrivacyDiscovery = { openReview: async function (selection, options) {
+    if (selection && Object.keys(selection).length) return false;
+    var current = options && options.isCurrent;
+    if (current && !current()) return false;
+    if (!(await load())) return false;
+    if (current && !current()) return false;
+    var box = document.getElementById("pdd-jobs");
+    box.setAttribute("tabindex", "-1"); box.focus(); box.scrollIntoView({ block: "center" });
+    say("Review the current scans before starting or cancelling one. Each change needs a separate review.");
+    return true;
+  } };
   var due = document.getElementById("pdd-enqueue-due");
   if (due) due.addEventListener("click", async function () {
     try {
@@ -418,7 +519,7 @@
       document.getElementById("pdd-findings-summary").textContent =
         sourceName(r.source_id) + ", scanned " + R.when(r.finished_at) + ". " + (COMPLETENESS[r.completeness] || "") +
         ((r.limitations || []).length ? ". Some items could not be read." : ".");
-      R.table(document.getElementById("pdd-findings"), [
+      discoveryTable(document.getElementById("pdd-findings"), [
         { label: "Kind of data", value: function (x) { return category(x.category); } },
         { label: "How sure", value: function (x) { return Math.round((x.confidence || 0) * 100) + "%"; } },
         { label: "Needs a closer look", value: function (x) { return x.ambiguous ? "Yes" : "No"; } },
@@ -477,7 +578,7 @@
     var box = document.getElementById("pdd-reviews");
     try {
       var res = await call("/reviews?status=pending&limit=200");
-      R.table(box, [
+      discoveryTable(box, [
         { label: "Decision", value: function (v) { return DECISION[v.decision] || R.human(v.decision); } },
         { label: "Kind of data", value: function (v) { return v.effective_category ? category(v.effective_category) : "Not personal data"; } },
         { label: "Checked", value: function (v) { return R.when(v.prepared_at); } },
@@ -508,7 +609,7 @@
       var inv = await call("/inventory");
       var counts = inv.counts_by_category || {};
       var rows = Object.keys(counts).map(function (k) { return { k: k, n: counts[k] }; }).sort(function (a, b) { return b.n - a.n; });
-      R.table(box, [
+      discoveryTable(box, [
         { label: "Kind of data", value: function (r) { return category(r.k); } },
         { label: "Places found", value: function (r) { return r.n; } },
       ], rows, null, { text: "Nothing recorded yet. Scan a data source to start building your data map." });
@@ -525,7 +626,7 @@
     if (!box) return;
     try {
       var res = await call("/remediation/work?limit=100");
-      R.table(box, [
+      discoveryTable(box, [
         { label: "Update", value: function (w) { return "Data map update"; } },
         { label: "Status", value: function (w) { return badge(WORK_STATE, w.state); } },
         { label: "Tries", value: function (w) { return w.attempts != null ? w.attempts + (w.max_attempts ? " of " + w.max_attempts : "") : ""; } },

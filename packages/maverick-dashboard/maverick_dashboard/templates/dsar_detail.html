@@ -59,7 +59,7 @@
   <p class="page-subtitle">
     <span class="badge {{ 'info' if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') else 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status in ('awaiting_erasure', 'unverified') else 'info' if dsar.status == 'open' else '' }}">{{ 'Data collected' if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') else status_labels.get(dsar.status, dsar.status | humanize) }}</span>
     {% if dsar.response_pending %}
-      · <span {% if dsar.overdue %}class="pw-due-warn"{% endif %}>{{ (dsar.days_left ~ ' days left') if not dsar.overdue else ((dsar.days_left | abs) ~ ' days overdue') }}</span>
+      · <span {% if dsar.overdue %}class="pw-due-warn"{% endif %}>{% if dsar.days_left == 0 %}{{ 'Deadline passed today' if dsar.overdue else 'Due today' }}{% elif dsar.overdue %}{{ dsar.days_left | abs }} day{{ '' if (dsar.days_left | abs) == 1 else 's' }} overdue{% else %}{{ dsar.days_left }} day{{ '' if dsar.days_left == 1 else 's' }} left{% endif %}</span>
     {% endif %}
     · <span class="muted">Reference {{ dsar.id }}</span>
   </p>

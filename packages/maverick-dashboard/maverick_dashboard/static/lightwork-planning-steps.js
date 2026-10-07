@@ -8,11 +8,13 @@
   if (!/^\d+$/.test(goal)) return;
   const $ = id => document.getElementById('ps-' + id);
   const STATUS = {
-    done: 'The review found the request met.',
-    max_iterations: 'It stopped after the rounds you chose.',
-    stalled: 'The review asked to keep going without a new plan, so it stopped there.'
+    done: 'The AI review considered the request met.',
+    max_iterations: 'This attempt reached the rounds you chose. Its result is incomplete.',
+    stalled: 'This attempt stopped without a revised plan. Its result is incomplete.',
+    no_plan: 'The AI did not produce usable planning steps.',
+    review_unavailable: 'The AI review could not be read. Earlier step outputs are an incomplete attempt.'
   };
-  const VERDICT = { done: 'Met', revise: 'Plan changed', 'continue': 'Keep going' };
+  const VERDICT = { done: 'The AI considered the request met', revise: 'Plan changed', 'continue': 'Further work requested', unavailable: 'Not confirmed' };
   let busy = false;
   function product(node, text, values) {
     if (window.LightworkI18n) window.LightworkI18n.set(node, text, values);
@@ -36,17 +38,20 @@
   function valid(data) {
     return data && data.ran === true && Array.isArray(data.plan) && Array.isArray(data.steps) && Array.isArray(data.reviews)
       && data.plan.every(s => typeof s === 'string') && data.steps.every(s => s && typeof s.step === 'string' && typeof s.output === 'string')
-      && data.reviews.every(r => r && typeof r.verdict === 'string' && typeof r.notes === 'string') && typeof data.cost === 'number';
+      && data.reviews.every(r => r && Object.hasOwn(VERDICT, r.verdict) && typeof r.notes === 'string')
+      && Object.hasOwn(STATUS, data.status) && Number.isFinite(data.cost) && data.cost >= 0;
   }
   function show(data) {
     const out = $('result');
     out.replaceChildren();
-    const plan = make('section');
-    plan.append(make('h3', null, 'The plan'));
-    const list = make('ol');
-    data.plan.forEach(step => list.append(make('li', null, step, true)));
-    plan.append(list);
-    out.append(plan);
+    if (data.plan.length) {
+      const plan = make('section');
+      plan.append(make('h3', null, 'The plan'));
+      const list = make('ol');
+      data.plan.forEach(step => list.append(make('li', null, step, true)));
+      plan.append(list);
+      out.append(plan);
+    }
     if (data.steps.length) {
       const work = make('section');
       work.append(make('h3', null, 'What each step produced'));
@@ -71,7 +76,7 @@
     }
     const cost = window.mvMoney ? window.mvMoney(data.cost) : data.cost < 0.01 ? translated('less than one cent') : '$' + data.cost.toFixed(2);
     const summary = make('p', 'muted');
-    product(summary, '{status} This cost {cost}. Nothing about the task was changed.', {status:translated(STATUS[data.status] || 'Finished.'), cost:cost});
+    product(summary, '{status} Recorded AI cost: {cost}. Nothing about the task was changed.', {status:translated(STATUS[data.status]), cost:cost});
     out.append(summary);
     out.hidden = false;
   }
@@ -100,7 +105,7 @@
         if (data && data.ran === false) { say(typeof data.message === 'string' ? data.message : 'This couldn’t be started.'); return; }
         if (!valid(data)) { say((data && typeof data.message === 'string' && data.message) || 'The planning steps couldn’t be checked. Try again.'); return; }
         show(data);
-        say('The planning steps are ready below.');
+        say(data.status === 'done' ? 'The planning attempt is ready below.' : STATUS[data.status]);
         return;
       }
       say('This is taking longer than expected. Check back later.');

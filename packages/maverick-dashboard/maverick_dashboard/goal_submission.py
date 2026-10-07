@@ -16,7 +16,7 @@ def api_token(key):
     return "api-goal:" + hashlib.sha256(key.encode()).hexdigest()
 
 
-def reserve_api(world, *, key, owner, payload, title, description, domain, caps, connection_references=None):
+def reserve_api(world, *, key, owner, payload, title, description, domain, caps, connection_references=None, effect_guard=None):
     token = api_token(key)
     # Historical processed-message rows did not bind full request payloads.
     # They remain readable for reconciliation, but cannot authorize new work.
@@ -38,7 +38,7 @@ def reserve_api(world, *, key, owner, payload, title, description, domain, caps,
         return SubmissionStore(world).create(token=token, fingerprint=fingerprint, owner=owner,
             title=title[:200], description=description, domain=domain or "", manifest=[],
             kind="source_analysis" if payload.knowledge_context is not None else "api",
-            connection_references=connection_references)
+            connection_references=connection_references, **({"effect_guard": effect_guard} if effect_guard is not None else {}))
     except SubmissionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -68,15 +68,15 @@ def lookup_receipt(world, *, key, owner, kind):
     return receipt, goal
 
 
-def claim_api_dispatch(world, receipt, intent):
-    if not try_claim_api_dispatch(world, receipt, intent):
+def claim_api_dispatch(world, receipt, intent, *, effect_guard=None):
+    if not try_claim_api_dispatch(world, receipt, intent, **({"effect_guard": effect_guard} if effect_guard is not None else {})):
         raise HTTPException(status_code=409, detail="Request retained; execution admission is unconfirmed. Reconcile before retrying.")
 
 
-def try_claim_api_dispatch(world, receipt, intent) -> bool:
+def try_claim_api_dispatch(world, receipt, intent, *, effect_guard=None) -> bool:
     """Move an admitted request's draft goal to pending exactly once. ``False``
     when another request (a concurrent replay) already claimed it."""
     store = SubmissionStore(world)
-    store.record_dispatch_intent(receipt["key"], intent)
-    store.update(receipt["key"], state="ready", message="Request accepted; execution admission is pending.")
-    return store.claim_dispatch(receipt["key"])
+    store.record_dispatch_intent(receipt["key"], intent, **({"effect_guard": effect_guard} if effect_guard is not None else {}))
+    store.update(receipt["key"], state="ready", message="Request accepted; execution admission is pending.", **({"effect_guard": effect_guard} if effect_guard is not None else {}))
+    return store.claim_dispatch(receipt["key"], **({"effect_guard": effect_guard} if effect_guard is not None else {}))

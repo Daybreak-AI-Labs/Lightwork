@@ -1433,28 +1433,28 @@ _CONTEXTS = tuple(
         _registered(
             path="/compliance/continuous-evidence",
             summary=(
-                "Operate exact continuous-evidence definitions, enrollments, bounded collection "
-                "cycles, digest-only observations, change alerts, recovery, and integrity."
+                "Collect evidence from approved sources, review what was checked, "
+                "and follow changes to your controls."
             ),
             capabilities=(
-                "Run the local SOC 2 observer and configured read-only AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security-stream, and Okta posture collectors.",
-                "Inspect each source's setup and approval, its scans, recorded observations, alerts, retention, and integrity.",
-                "Run one bounded server-authorized scheduler cycle or let the configured leased scheduler operate across active workspaces.",
+                "Collect from configured AWS, Azure, Google Cloud, GitHub and Okta sources, plus Lightwork's own security checks.",
+                "Use each source's Set up, Approve, Start collecting, Pause and Resume controls.",
+                "Review recent collections and evidence changes, retry failed collections, and check retained records.",
             ),
             boundaries=(
-                "The browser cannot choose a workspace, provider origin, asset scope, source selector, credential reference, transport, or raw provider payload.",
-                "Readiness resolves no credential value and performs no provider network request; collection rechecks the exact approved definition and active enrollment for every scan.",
-                "A configured source or successful observation does not prove estate completeness, control effectiveness, compliance, certification, licensed access, or live provider/customer acceptance.",
+                "A different administrator must approve a source's setup before collection starts.",
+                "Checking setup does not collect from an outside service. Collection checks the current approval and access again.",
+                "Evidence shows what was checked. It does not prove every system is covered, that a control works, or that the company is certified.",
             ),
             next_steps=(
-                "Refresh readiness and resolve every missing stock source manifest or credential reference.",
-                "Register and independently approve the exact collector definition, then create the matching workspace enrollment using its current integrity digest.",
-                "Run a bounded cycle, inspect incomplete/retry/dead-letter state, verify integrity, and obtain live provider and customer acceptance before relying on coverage.",
+                "Refresh Sources and review which connections are ready.",
+                "Choose Set up, ask another administrator to Approve, then use Start collecting to choose the schedule and keep period.",
+                "Use Collect evidence now for due work, then review incomplete collections and recorded changes before relying on the evidence.",
             ),
             suggested_questions=(
-                "Which stock collector source is not ready?",
-                "What authority is rechecked before provider I/O?",
-                "What does a successful observation not prove?",
+                "How do I start collecting from a source?",
+                "Why does setup need another administrator's approval?",
+                "What does collected evidence tell us?",
             ),
         ),
         _registered(
@@ -1468,12 +1468,14 @@ _CONTEXTS = tuple(
                 "Review vendor paper and supporting evidence beside the governed record.",
                 "Inspect a registered vendor's current assessments, screening, contracts and open tasks together; explicitly link an existing profile or review activation after the latest assessment.",
                 "Inspect program insights, lineage, and bounded privacy records.",
+                "Read the selected privacy request's current response deadline, remaining work and recorded answer, then open its complete native record.",
             ),
             boundaries=(
                 "Generated analysis and redlines are decision support, not legal advice or approval.",
                 "Vendor submissions and local workflow state are not independently verified external facts.",
                 "Vendor activation requires the latest complete evaluated assessment; linking existing identities does not create fresh screening or independent identity verification.",
                 "Final applicability, risk acceptance, and disposition remain human decisions.",
+                "A collected data package is separate from an answer; recorded answers do not independently confirm receipt or deletion by another service.",
             ),
             next_steps=(
                 "Open the work item that needs attention and verify its current evidence revision.",
@@ -1486,6 +1488,26 @@ _CONTEXTS = tuple(
             ),
         ),
         _registered(
+            path="/channels",
+            summary="Connect chat apps, choose who may use them and review their current readiness.",
+            capabilities=(
+                "Check each saved chat connection and its permitted people.",
+                "Open the complete protected message test for Telegram, Discord, WhatsApp or Mattermost.",
+                "Review a currently permitted private conversation and the fixed test sentence before sending; read its original outcome afterward.",
+            ),
+            boundaries=(
+                "A connection check does not prove a person received a message; a service accepting the test is a separate result.",
+                "An uncertain message outcome must be read from its original before a separate new decision; it is never automatically resent.",
+                "WhatsApp tests need a recent saved private conversation; the service can still refuse a reply outside its allowed window.",
+            ),
+            next_steps=(
+                "Choose the chat app and check its current connection.",
+                "Open the protected form, choose a permitted conversation and review the recipient and message.",
+                "Confirm the send separately, then read its saved outcome.",
+            ),
+            suggested_questions=("How can I check this chat connection?", "Can I review a test message?", "Was my earlier test accepted?"),
+        ),
+        _registered(
             path="/privacy/data-discovery",
             summary=(
                 "Enroll exact data sources, run bounded provider scans, review minimized findings, "
@@ -1494,6 +1516,7 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Enroll, suspend, reactivate, or revoke an exact source and its schedule.",
                 "Start, retry and inspect scans through stock AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB, and Microsoft Entra adapters.",
+                "Read recent retained scan states in Copilot, then open the same protected scan review without changing the current source selection or drafts.",
                 "Propose and independently approve a classification, then operate its durable remediation outbox and digest-only governed data-map projection.",
                 "Inspect or enable the bounded managed remediation scheduler for workspace-derived retry and exact local ambiguity reconciliation.",
             ),
@@ -2098,9 +2121,9 @@ def context_for_page(page: object) -> CopilotPageContext:
         base = _CONTEXT_BY_PATH["/workflows"]
         return replace(
             base, path=path, title="Flow run",
-            summary="This is a saved flow run. Review its current state and step timeline before choosing a recovery action.",
-            next_steps=("Check this run's current status and step timeline.", "If a step failed or paused, review its native details before retrying or approving."),
-            suggested_questions=("What is this run's status?", "What should I check before retrying this run?"),
+            summary="Review this workflow run's current state, complete permitted result and step timeline. Copilot can read its owned status and open the same complete result controls.",
+            next_steps=("Check this run's current status and step timeline.", "Open Information in this run or What it started with, then expand details or choose Read more to see the complete permitted value.", "If a step failed or paused, review its native details before retrying or approving."),
+            suggested_questions=("What is the status of this workflow run?", "Show this complete workflow result", "What should I check before retrying this run?"),
         )
     if path == "/compliance/scope-actions/mapping":
         return CopilotPageContext(
@@ -2110,6 +2133,15 @@ def context_for_page(page: object) -> CopilotPageContext:
             boundaries=("Only an approved mapping can support a task plan.", "This page records your team's choices; it does not supply licensed framework text.", _READ_ONLY_BOUNDARY),
             next_steps=("Choose a final scope, then the work status, responsible role and evidence cadence.", "Review the exact mapping and ask another authorized person to approve it."),
             suggested_questions=("Which controls need tasks?", "How do I prepare this scope's mapping?"),
+        )
+    if path == "/settings/webhooks/manage":
+        return CopilotPageContext(
+            path=path, title="Work updates",
+            summary="Choose which saved task events send updates to another approved service, and read retained delivery states.",
+            capabilities=("Read current subscription and recent delivery counts.", "Open the same complete update form from Copilot while keeping entered choices."),
+            boundaries=("These controls require current administrator access.", "Waiting for your answer is separate from completed work. A queued update or service acceptance does not prove arrival."),
+            next_steps=("Choose the events you need, including waiting questions or completed work, then review the full destination and signing setup in the protected form.", "Read retained deliveries before deciding whether to retry an update."),
+            suggested_questions=("Read current work updates", "Open the complete update controls"),
         )
     if path == "/settings/local-ai":
         return CopilotPageContext(

@@ -795,7 +795,8 @@ def _workspace_context(request: Request) -> dict:
     if tenant_id:
         from maverick.tenant.registry import get_tenant
         record = get_tenant(tenant_id)
-        workspace_name = (record.display_name or record.id) if record else "Selected workspace"
+        workspace_name = ((record.display_name or "").strip()
+                          or ("Main workspace" if record.id == "default" else "Unnamed workspace")) if record else "Selected workspace"
     return {
         "workspace_tenant_name": workspace_name,
         "workspace_tenant_id": tenant_id,
@@ -1975,6 +1976,9 @@ app.include_router(knowledge_sources_router, prefix="/api/v1")
 from .vendor_profile_api import router as vendor_profile_router  # noqa: E402
 
 app.include_router(vendor_profile_router, prefix="/api/v1")
+from .channel_test_requests_api import router as channel_test_requests_router  # noqa: E402
+
+app.include_router(channel_test_requests_router)
 from .answer_feedback_operations import router as answer_feedback_router  # noqa: E402
 from .department_team_updates_api import router as department_team_updates_router  # noqa: E402
 
@@ -6991,14 +6995,14 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     except Exception:
         tenant = "default"
 
-    # A human workspace name for the statement heading; fall back to the id.
-    tenant_label = tenant
+    # Keep native workspace identifiers out of the statement's display name.
+    tenant_label = "Main workspace" if tenant == "default" else "Unnamed workspace"
     try:
         from maverick.tenant.registry import get_tenant
 
         _rec = get_tenant(tenant)
-        if _rec and _rec.display_name:
-            tenant_label = _rec.display_name
+        if _rec and (_rec.display_name or "").strip():
+            tenant_label = _rec.display_name.strip()
     except Exception:  # noqa: BLE001 - registry optional; label is cosmetic
         pass
 
@@ -7098,7 +7102,8 @@ def _invoice_workspaces(current: str, current_label: str) -> list[dict]:
 
     try:
         from maverick.tenant.registry import list_tenants
-        rows = [{"id": t.id, "name": t.display_name or t.id} for t in list_tenants()]
+        rows = [{"id": t.id, "name": (t.display_name or "").strip()
+                 or ("Main workspace" if t.id == "default" else "Unnamed workspace")} for t in list_tenants()]
     except Exception:  # noqa: BLE001 - registry optional
         rows = []
     duplicates = duplicate_workspace_ids((row["id"], row["name"]) for row in rows)
@@ -13756,6 +13761,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-personal-alert-tests.js")
 @app.get("/static/lightwork-human-conversation-handoffs.js")
 @app.get("/static/lightwork-vendor-profile.js")
+@app.get("/static/lightwork-channel-message-tests.js")
 @app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-shortcuts.js")
 @app.get("/static/lightwork-pins.js")

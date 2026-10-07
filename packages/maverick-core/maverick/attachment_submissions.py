@@ -70,18 +70,26 @@ class SubmissionStore:
             self.seal, self.open = _seal, _unseal
 
     @contextmanager
-    def transaction(self, lock: str):
+    def transaction(self, lock: str, *, effect_guard=None):
         self._check_context()
         if self.sqlite:
             with self.world._writing() as connection:
                 if not connection.in_transaction:
                     connection.execute("BEGIN IMMEDIATE")
+                if effect_guard:
+                    effect_guard()
                 yield connection
+                if effect_guard:
+                    effect_guard()
         else:
             key = int.from_bytes(hashlib.sha256(f"{self.tenant}\0{lock}".encode()).digest()[:8], "big", signed=True)
             with self.world._tx() as cursor:
                 cursor.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+                if effect_guard:
+                    effect_guard()
                 yield cursor
+                if effect_guard:
+                    effect_guard()
 
     def execute(self, connection, sql, parameters=()):
         if self.sqlite:
@@ -133,12 +141,12 @@ class SubmissionStore:
                parent_id=None, domain="", project_id=None, kind="chat",
                chat_text=None, chat_root_id=None, connection_references=None,
                chat_prior=(), attachment_records=(), submission_detail=None, before_create=None,
-               initial_status="draft", initial_result=None, processed_message=None):
+               initial_status="draft", initial_result=None, processed_message=None, effect_guard=None):
         from .template_connections import packed
         _preparation_inputs(initial_status, initial_result, processed_message)
         selection = packed(owner, connection_references or [])
         key = self.token_key(token, owner)
-        with self.transaction("submission:" + key) as connection:
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             prior = self._receipt(connection, key)
             if prior is not None:
                 if prior["fingerprint"] != fingerprint:
@@ -222,10 +230,10 @@ class SubmissionStore:
         self.execute(connection, f"INSERT INTO processed_messages({columns}) "
             f"VALUES({','.join('?' for _ in values)})", tuple(values))
 
-    def update(self, key, *, state, message, coverage=None):
+    def update(self, key, *, state, message, coverage=None, effect_guard=None):
         if state not in {"draft", "admitted", "ready", "rejected"}:
             raise ValueError("Invalid submission state")
-        with self.transaction("submission:" + key) as connection:
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             receipt = self._receipt(connection, key)
             if receipt is None:
                 raise LookupError("Unknown submission")
@@ -240,8 +248,8 @@ class SubmissionStore:
             # goals.result makes the chat render it as Lightwork's response.
             return self._receipt(connection, key)
 
-    def claim_dispatch(self, key):
-        with self.transaction("submission:" + key) as connection:
+    def claim_dispatch(self, key, *, effect_guard=None):
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             receipt = self._receipt(connection, key)
             if receipt is None or receipt["state"] != "ready":
                 return False
@@ -259,9 +267,9 @@ class SubmissionStore:
                          (time.time(), key))
             return True
 
-    def record_dispatch_intent(self, key, intent):
+    def record_dispatch_intent(self, key, intent, *, effect_guard=None):
         """Retain reviewed runner context before the cross-store dispatch boundary."""
-        with self.transaction("submission:" + key) as connection:
+        with self.transaction("submission:" + key, effect_guard=effect_guard) as connection:
             receipt = self._receipt(connection, key)
             if receipt is None:
                 raise LookupError("Unknown submission")

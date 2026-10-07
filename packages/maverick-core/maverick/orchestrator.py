@@ -2173,11 +2173,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         if result.blocked_on_user:
             _lifecycle.end_episode("blocked awaiting user", "interrupted")
             world.set_goal_status(goal_id, "blocked")
-            _fire_webhook("goal_finished", {
-                "goal_id": goal_id, "status": "blocked",
-                "result": "blocked awaiting user",
-            })
             qs = world.open_questions(goal_id)
+            _fire_webhook("goal_waiting", {
+                "goal_id": goal_id, "status": "blocked",
+                "waiting_for": "user_input",
+                "open_question_count": min(len(qs), 10000),
+                "open_question_count_complete": len(qs) <= 10000,
+            })
             # Question-asked signal: a stall on missing input is a learnable
             # pattern — record WHAT was missing so the next similar goal
             # gathers it up front (recalled via reflexion; dreaming

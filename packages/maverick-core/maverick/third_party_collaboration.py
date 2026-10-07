@@ -31,7 +31,7 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -1072,6 +1072,67 @@ class ThirdPartyCollaborationStore:
         )
         return digest
 
+    @staticmethod
+    def _assessment_scope_sha256(
+        assessment: lifecycle.Assessment,
+        template: lifecycle.AssessmentTemplate,
+        allowed_question_ids: Sequence[str],
+    ) -> str:
+        """Pin structure and answers that can affect this invitation's work.
+
+        Other respondents may add unrelated answers. Their answer changes still
+        advance the full lifecycle revision; final submission uses that freshly
+        observed revision with the unchanged native CAS writer.
+        """
+
+        questions = {str(item["question_id"]): item for item in template.questions}
+        dependencies: set[str] = set()
+        pending = list(allowed_question_ids)
+        while pending:
+            question_id = pending.pop()
+            if question_id in dependencies:
+                continue
+            if question_id not in questions:
+                raise ThirdPartyCollaborationConflict("invitation question authority changed")
+            dependencies.add(question_id)
+            condition = questions[question_id]["condition"]
+            if isinstance(condition, Mapping):
+                pending.append(str(condition["question_id"]))
+        authority = asdict(assessment)
+        for field in ("revision", "updated_at", "integrity_sha256"):
+            authority.pop(field)
+        authority["responses"] = {
+            question_id: dict(assessment.responses[question_id])
+            for question_id in sorted(dependencies)
+            if question_id in assessment.responses
+        }
+        return _sha256(
+            {
+                "schema": "lightwork.third-party-collaboration-answer-authority.v1",
+                "assessment": authority,
+                "question_ids": sorted(dependencies),
+            }
+        )
+
+    def _assessment_matches(
+        self,
+        assessment: lifecycle.Assessment,
+        template: lifecycle.AssessmentTemplate,
+        payload: Mapping[str, object],
+    ) -> bool:
+        if "assessment_scope_sha256" in payload:
+            return hmac.compare_digest(
+                self._assessment_scope_sha256(
+                    assessment, template, payload["allowed_question_ids"]  # type: ignore[arg-type]
+                ),
+                _digest(payload["assessment_scope_sha256"], "assessment_scope_sha256"),
+            )
+        # Already-issued invitations retain their exact original authority rule.
+        return (
+            assessment.revision == payload["assessment_revision"]
+            and assessment.integrity_sha256 == payload["assessment_sha256"]
+        )
+
     def _authority(
         self, payload: Mapping[str, object]
     ) -> tuple[lifecycle.Assessment, lifecycle.AssessmentTemplate]:
@@ -1091,11 +1152,10 @@ class ThirdPartyCollaborationStore:
         if (
             assessment.template_id != payload["template_id"]
             or assessment.template_version != payload["template_version"]
-            or assessment.revision != payload["assessment_revision"]
-            or assessment.integrity_sha256 != payload["assessment_sha256"]
             or template.revision != payload["template_revision"]
             or template.integrity_sha256 != payload["template_sha256"]
             or template.state != "approved"
+            or not self._assessment_matches(assessment, template, payload)
         ):
             raise ThirdPartyCollaborationConflict("pinned assessment or template authority changed")
         return assessment, template
@@ -1322,6 +1382,9 @@ class ThirdPartyCollaborationStore:
                 "assessment_id": assessment.assessment_id,
                 "assessment_revision": assessment.revision,
                 "assessment_sha256": assessment.integrity_sha256,
+                "assessment_scope_sha256": self._assessment_scope_sha256(
+                    assessment, template, allowed
+                ),
                 "template_id": template.template_id,
                 "template_version": template.version,
                 "template_revision": template.revision,
@@ -1877,6 +1940,26 @@ class ThirdPartyCollaborationStore:
             )
 
     @staticmethod
+    def _finalization_authority(
+        invitation: Mapping[str, object], finalization: Mapping[str, object]
+    ) -> dict[str, object]:
+        authority = _closed(
+            finalization.get(
+                "assessment_authority",
+                {
+                    "revision": invitation["assessment_revision"],
+                    "sha256": invitation["assessment_sha256"],
+                },
+            ),
+            "prepared assessment authority",
+            frozenset({"revision", "sha256"}),
+        )
+        return {
+            "revision": _integer(authority["revision"], "assessment_revision", 1, 1_000_000),
+            "sha256": _digest(authority["sha256"], "assessment_sha256"),
+        }
+
+    @staticmethod
     def _lifecycle_responses(
         invitation: Mapping[str, object],
         answers: Mapping[str, Mapping[str, object]],
@@ -2074,12 +2157,17 @@ class ThirdPartyCollaborationStore:
                         "lifecycle_operation",
                         _OP_RE,
                     )
+                    assessment_authority = self._finalization_authority(invitation, finalization)
                 else:
                     if attested is not True:
                         raise ThirdPartyCollaborationPermissionDenied(
                             "explicit respondent attestation is required"
                         )
                     assessment, template = self._authority(invitation)
+                    assessment_authority = {
+                        "revision": assessment.revision,
+                        "sha256": assessment.integrity_sha256,
+                    }
                     normalized, manifests, _, _ = self._normalize_submission(
                         invitation,
                         assessment,
@@ -2100,7 +2188,7 @@ class ThirdPartyCollaborationStore:
                             "schema": "lightwork.third-party-collaboration-attestation.v1",
                             "tenant_id": tenant,
                             "invitation_id": invitation_id,
-                            "assessment_sha256": invitation["assessment_sha256"],
+                            "assessment_sha256": assessment.integrity_sha256,
                             "template_sha256": invitation["template_sha256"],
                             "respondent_ref": invitation["respondent_ref"],
                             "notice_sha256": invitation["notice_sha256"],
@@ -2133,6 +2221,7 @@ class ThirdPartyCollaborationStore:
                                 "question_ids": sorted(lifecycle_responses),
                                 "lifecycle_operation": lifecycle_operation,
                                 "prepared_responses": lifecycle_responses,
+                                "assessment_authority": assessment_authority,
                                 "started_at": now,
                                 "receipt": None,
                                 "finalized_at": None,
@@ -2174,8 +2263,8 @@ class ThirdPartyCollaborationStore:
                     str(invitation["assessment_id"]),
                     responses=lifecycle_responses,
                     attestation_sha256=attestation_sha,
-                    expected_revision=int(invitation["assessment_revision"]),
-                    expected_assessment_sha256=str(invitation["assessment_sha256"]),
+                    expected_revision=int(assessment_authority["revision"]),
+                    expected_assessment_sha256=str(assessment_authority["sha256"]),
                     expected_template_revision=int(invitation["template_revision"]),
                     expected_template_sha256=str(invitation["template_sha256"]),
                     idempotency_key=lifecycle_operation,
@@ -2556,6 +2645,10 @@ class ThirdPartyCollaborationStore:
                     "finalization": None,
                 }
             )
+            if "assessment_scope_sha256" in current:
+                updated["assessment_scope_sha256"] = self._assessment_scope_sha256(
+                    assessment, template, questions
+                )
             if float(updated["retained_until"]) < float(updated["expires_at"]):
                 updated["retained_until"] = updated["expires_at"]
             self._write_invitation(connection, updated)

@@ -207,6 +207,122 @@ def _valid_destination(name: str, to: str) -> str:
     return to
 
 
+def _reviewed_http(method, url, headers, guard, *, params=None, body=None):
+    """Reuse pinned egress with fresh admission after DNS and bounded replies."""
+    import json
+
+    from maverick.tools import _ssrf
+
+    def before_request(_request):
+        guard()
+
+    with _ssrf.safe_client(url, timeout=_TIMEOUT, event_hooks={"request": [before_request]}) as client:
+        with client.stream(method, url, headers=headers, params=params, json=body) as response:
+            raw = bytearray()
+            for chunk in response.iter_bytes():
+                if len(raw) + len(chunk) > 65536:
+                    raise ValueError("The chat service response exceeded the supported bound")
+                raw.extend(chunk)
+            try:
+                value = json.loads(raw)
+            except (ValueError, UnicodeError):
+                value = {}
+            return response.status_code, value if isinstance(value, dict) else {}
+
+
+def reviewed_account(name, cfg, guard):
+    """Read the configured bot's identity; never create a conversation."""
+    if name == "telegram":
+        status, body = _reviewed_http("GET", _telegram_url(cfg, "getMe"), {}, guard)
+        return str((body.get("result") or {}).get("id") or "") if status == 200 and body.get("ok") else ""
+    if name == "discord":
+        status, body = _reviewed_http("GET", "https://discord.com/api/v10/users/@me", _bot_headers(name, cfg), guard)
+        return str(body.get("id") or "") if status == 200 and body.get("bot") is True else ""
+    if name == "whatsapp_cloud":
+        return str(cfg.get("phone_number_id") or "")
+    import hashlib
+
+    from maverick_channels.mattermost import server_origin
+
+    return server_origin(cfg.get("url", "")) + ":" + hashlib.sha256(str(cfg.get("bot_token") or "").encode()).hexdigest()
+
+
+def _telegram_url(cfg, operation):
+    return "https://api.telegram.org/bot" + quote(str(cfg.get("bot_token") or ""), safe=":") + "/" + operation
+
+
+def _bot_headers(name, cfg):
+    return {"Authorization": ("Bot " if name == "discord" else "Bearer ") + str(cfg.get("bot_token") or cfg.get("access_token") or "")}
+
+
+def reviewed_recipient(name, cfg, destination, guard):
+    """Verify a previously admitted conversation using the current bot account."""
+    if name == "whatsapp_cloud":
+        return {"id": destination, "label": "WhatsApp conversation with +" + destination, "type": "private"}
+    if name == "telegram":
+        status, value = _reviewed_http("GET", _telegram_url(cfg, "getChat"), {}, guard, params={"chat_id": destination})
+        body = value.get("result") or {}
+        if status != 200 or value.get("ok") is not True:
+            raise HTTPException(409, "This Telegram conversation is no longer available to the saved bot.")
+        label = body.get("title") or " ".join(str(body.get(key) or "") for key in ("first_name", "last_name")).strip()
+    else:
+        from maverick_channels.mattermost import server_origin
+
+        base = "https://discord.com/api/v10" if name == "discord" else server_origin(cfg.get("url", "")) + "/api/v4"
+        status, body = _reviewed_http("GET", base + "/channels/" + quote(destination, safe=""), _bot_headers(name, cfg), guard)
+        if status != 200:
+            raise HTTPException(409, "This conversation is no longer available to the saved bot.")
+        label = body.get("display_name") or body.get("name") or "Private conversation"
+    if str(body.get("id")) != destination:
+        raise HTTPException(409, "The chat service did not confirm this exact conversation.")
+    if not isinstance(label, str) or not label.strip() or len(label) > 200 or any(ord(char) < 32 for char in label):
+        raise HTTPException(409, "The chat service did not return a readable conversation name.")
+    return {"id": destination, "label": label.strip(), "type": str(body.get("type", "conversation"))[:32]}
+
+
+def reviewed_sender(cfg, sender, guard):
+    """Resolve Mattermost's supported username allowlist using the saved bot."""
+    from maverick_channels.mattermost import server_origin
+
+    status, body = _reviewed_http("GET", server_origin(cfg.get("url", "")) + "/api/v4/users/" + quote(sender, safe=""),
+                                 _bot_headers("mattermost", cfg), guard)
+    username = body.get("username")
+    if status != 200 or body.get("id") != sender or not isinstance(username, str) or not 0 < len(username) <= 200:
+        raise HTTPException(409, "The saved bot could not confirm this conversation's current sender.")
+    return username
+
+
+def send_reviewed_test(name, cfg, destination, guard):
+    """Offer one fixed sentence, retaining provider acceptance separately."""
+    if name == "telegram":
+        url, headers, body = _telegram_url(cfg, "sendMessage"), {}, {"chat_id": destination, "text": TEST_TEXT}
+    elif name == "discord":
+        url, headers = "https://discord.com/api/v10/channels/" + quote(destination, safe="") + "/messages", _bot_headers(name, cfg)
+        body = {"content": TEST_TEXT, "allowed_mentions": {"parse": []}}
+    elif name == "whatsapp_cloud":
+        from maverick_channels.whatsapp_cloud import API_VERSION, GRAPH_BASE
+
+        version = str(cfg.get("api_version") or API_VERSION)
+        if not re.fullmatch(r"v[0-9]{1,2}\.0", version):
+            raise HTTPException(409, "The saved WhatsApp API version is unavailable.")
+        url = GRAPH_BASE + "/" + version + "/" + quote(str(cfg.get("phone_number_id") or ""), safe="") + "/messages"
+        headers = _bot_headers(name, cfg)
+        body = {"messaging_product": "whatsapp", "to": destination, "type": "text", "text": {"body": TEST_TEXT}}
+    else:
+        from maverick_channels.mattermost import server_origin
+
+        url, headers = server_origin(cfg.get("url", "")) + "/api/v4/posts", _bot_headers(name, cfg)
+        body = {"channel_id": destination, "message": TEST_TEXT}
+    status, value = _reviewed_http("POST", url, headers, guard, body=body)
+    if (400 <= status < 500 and status != 408) or (name == "telegram" and value.get("ok") is False):
+        return "refused", ""
+    receipt = (value.get("result") or {}).get("message_id") if name == "telegram" else (
+        (value.get("messages") or [{}])[0].get("id") if name == "whatsapp_cloud" else value.get("id"))
+    if 200 <= status < 300 and isinstance(receipt, (str, int)) and not isinstance(receipt, bool) and 0 < len(str(receipt)) <= 512:
+        return "accepted", str(receipt)
+    return "unknown", ""
+
+
 def _back(name: str, result: str) -> RedirectResponse:
     return RedirectResponse(f"/channels?saved={result}&channel={quote(name)}#channel-{quote(name)}",
                             status_code=303)

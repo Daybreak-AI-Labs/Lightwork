@@ -4176,7 +4176,7 @@ class PostgresWorldModel:
         return row is not None
 
     def _require_locked_approval_review(self, cur, approval_id: int, status: str,
-                                        approver: str, event_id: str, review: dict) -> None:
+                                        approver: str, event_id: str, review: dict, effect_guard=None) -> None:
         """Read reviewed card, quorum and content owner under the held row lock."""
         from ..approval_vote_review import require_locked_vote_review
         from ..world_model import _single_approver
@@ -4197,7 +4197,7 @@ class PostgresWorldModel:
         audit_pending = int(cur.fetchone()[0])
         content_owner = (exact.requested_by or "") if exact is not None else None
         if exact is not None and exact.goal_id:
-            owner_sql = "SELECT owner FROM goals WHERE id = %s"
+            owner_sql = "SELECT owner,domain FROM goals WHERE id = %s"
             owner_values = [exact.goal_id]
             if approval_scope:
                 owner_sql += " AND " + approval_scope
@@ -4205,6 +4205,9 @@ class PostgresWorldModel:
             cur.execute(owner_sql + " FOR SHARE", tuple(owner_values))
             source = cur.fetchone()
             content_owner = (source[0] or "") if source is not None else None
+            source_guard = getattr(effect_guard, "approval_source", None)
+            if source_guard is not None:
+                source_guard(exact.goal_id, content_owner, source[1] if source is not None else None)
         require_locked_vote_review(exact, review, status=status, actor=approver,
                                    event_id=event_id, approvers=approvers, audit_pending=audit_pending,
                                    content_owner=content_owner)
@@ -4216,6 +4219,7 @@ class PostgresWorldModel:
         *,
         decided_by: str,
         reviewed_card: dict | None = None,
+        effect_guard=None,
     ):
         """Atomically accept a vote and queue its signed-audit delivery."""
         if status not in ("approved", "denied"):
@@ -4243,13 +4247,15 @@ class PostgresWorldModel:
             # Row lock serializes duplicate and competing votes across replicas.
             cur.execute(approval_sql, tuple(approval_values))
             approval = cur.fetchone()
+            if effect_guard:
+                effect_guard()
             undo_round = self._approval_undo_round(cur, approval_id)
             event_id = _approval_audit_event_id(
                 tenant, approval_id, status, approver, undo_round,
             )
 
             if reviewed_card is not None:
-                self._require_locked_approval_review(cur, approval_id, status, approver, event_id, reviewed_card)
+                self._require_locked_approval_review(cur, approval_id, status, approver, event_id, reviewed_card, effect_guard)
 
             cur.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -4381,7 +4387,7 @@ class PostgresWorldModel:
                     tenant,
                 ),
             )
-            return ApprovalAuditEvent(
+            result = ApprovalAuditEvent(
                 event_id=event_id,
                 approval_id=int(approval_id),
                 status=status,
@@ -4390,12 +4396,16 @@ class PostgresWorldModel:
                 created_at=now,
                 delivered_at=None,
             )
+            if effect_guard:
+                effect_guard()
+            return result
 
     def mark_approval_audit_delivered(
         self,
         event_id: str,
         *,
         delivered_at: float | None = None,
+        effect_guard=None,
     ) -> bool:
         """Acknowledge signed delivery and apply any now-safe final outcome."""
         outbox_scope, outbox_params = _approval_outbox_scope()
@@ -4408,8 +4418,18 @@ class PostgresWorldModel:
                 tuple([str(event_id), *outbox_params]),
             )
             event = cur.fetchone()
+            if effect_guard is not None:
+                effect_guard()
             if event is None:
                 return False
+            source_guard = getattr(effect_guard, "approval_source", None)
+            if source_guard is not None:
+                goal_scope, goal_params = _tenant_scope("g.tenant_id")
+                cur.execute("SELECT g.id,g.owner,g.domain FROM approvals a JOIN goals g ON g.id=a.goal_id WHERE a.id=%s" + (" AND " + goal_scope if goal_scope else "") + " FOR SHARE OF g", tuple([event[1], *goal_params]))
+                source = cur.fetchone()
+                if source is None:
+                    raise PermissionError("The original approval task is unavailable")
+                source_guard(source[0], source[1] or "", source[2])
             if event[6] is None:
                 cur.execute(
                     "UPDATE approval_audit_outbox SET delivered_at = %s "
@@ -4455,6 +4475,8 @@ class PostgresWorldModel:
                         sql += " AND " + approval_scope
                         values += approval_params
                     cur.execute(sql, tuple(values))
+            if effect_guard is not None:
+                effect_guard()
             return True
 
     def decide_approval(self, approval_id: int, status: str,

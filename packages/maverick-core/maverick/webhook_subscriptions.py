@@ -202,9 +202,18 @@ def _audit(action: str, actor: str, **detail: Any) -> None:
 
 
 def _public(row: dict) -> dict:
+    from .crypto_at_rest import EncryptionUnavailable
+    from .world_model import _UNSEALED_WITHHELD, _dec_field
+
     out = dict(row)
     secret = out.pop("secret", "")
-    out["secret_set"] = bool(secret)
+    try:
+        saved_secret = _dec_field(secret)
+    except EncryptionUnavailable as exc:
+        raise SubscriptionError("The saved signing secret could not be verified. No secret was exposed.") from exc
+    if saved_secret == _UNSEALED_WITHHELD:
+        raise SubscriptionError("The saved signing secret could not be verified. No secret was exposed.")
+    out["secret_set"] = bool(saved_secret)
     out["enabled"] = bool(out.get("enabled"))
     try:
         out["events"] = json.loads(out.get("events") or '["*"]')

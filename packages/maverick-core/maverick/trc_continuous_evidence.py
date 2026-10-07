@@ -1778,10 +1778,10 @@ class ContinuousEvidenceStore:
         max_attempts = _integer(max_attempts, "max_attempts", 1, _MAX_ATTEMPTS)
         allowed_collectors = _collector_allowlist(allowed_collector_ids)
         actor = self._actor_sha256()
-        now = self._now()
         created: list[EvidenceJob] = []
         with self._connect() as connection:
             self._begin(connection)
+            now = self._now()
             rows = connection.execute(
                 "SELECT * FROM trc_enrollments WHERE tenant_sha256=? "
                 "AND state='active' AND next_due_at<=? ORDER BY next_due_at,enrollment_id "
@@ -1862,7 +1862,17 @@ class ContinuousEvidenceStore:
                     _MIN_RETENTION_SECONDS,
                     enrollment.retained_until - enrollment.updated_at,
                 )
-                next_due_at = due_at + enrollment.interval_seconds
+                # One collection requests the elapsed window. Continue the
+                # original cadence after now instead of replaying each missed
+                # interval as another collection of overlapping current data.
+                intervals = math.floor((now - due_at) / enrollment.interval_seconds) + 1
+                next_due_at = _timestamp(
+                    due_at + intervals * enrollment.interval_seconds, "next_due_at",
+                )
+                if next_due_at <= now:
+                    raise ContinuousEvidenceValidationError(
+                        "the next collection time cannot advance at this clock value"
+                    )
                 scheduled_enrollment = self._replace_enrollment(
                     connection,
                     enrollment,

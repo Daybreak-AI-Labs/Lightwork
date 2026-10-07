@@ -900,6 +900,20 @@ def release_runtime_check() -> None:
     )
 
 
+def _reporting_world(ctx: click.Context):
+    from ..world_model import open_world
+
+    if ctx.parent is not None and ctx.parent.params.get("db") is not None:
+        from ..world_model_backends import is_postgres_configured
+
+        if is_postgres_configured():
+            raise click.UsageError(
+                "--db selects a local database file and cannot select a Postgres database. "
+                "Omit --db to report on the configured Postgres workspace."
+            )
+    return open_world(ctx.obj["db"])
+
+
 @main.command()
 @click.option("--json", "as_json", is_flag=True,
               help="Machine-readable output for FinOps/BI scripts.")
@@ -909,7 +923,8 @@ def release_runtime_check() -> None:
               help="Max recent priced episodes to scan.")
 @click.option("--top", default=15, show_default=True,
               help="Show the top N goals by cost.")
-def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
+@click.pass_context
+def spend(ctx: click.Context, as_json: bool, tag_field: str, limit: int, top: int) -> None:
     """Print spend — total, per-goal, and per-tag run costs.
 
     The CLI face of the /spend dashboard: pull FinOps data into scripts and
@@ -918,8 +933,8 @@ def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
     import json as _json
 
     from ..cost.by_tag import gather, render, split_by_tag
-    from ..world_model import close_world_if_owned, open_world
-    w = open_world()
+    from ..world_model import close_world_if_owned
+    w = _reporting_world(ctx)
     total = w.total_spend()
 
     by_goal: dict[int, dict] = {}
@@ -4466,13 +4481,14 @@ def config_lint_cmd() -> None:
 
 @main.command("costs")
 @click.option("--limit", default=30, show_default=True, help="Rows to show.")
-def costs_cmd(limit: int) -> None:
+@click.pass_context
+def costs_cmd(ctx: click.Context, limit: int) -> None:
     """Cross-run spend, by day, from recorded episodes (the persisted ledger)."""
     from datetime import datetime, timezone
 
     from ..cost.report import format_report
-    from ..world_model import close_world_if_owned, open_world
-    w = open_world()
+    from ..world_model import close_world_if_owned
+    w = _reporting_world(ctx)
     rows: list[dict] = []
     try:
         for ep in w.list_episodes(limit=1_000_000):
@@ -4754,7 +4770,8 @@ def schedule_goal(cron_expr: str, text: str, title: str | None) -> None:
 @main.command()
 @click.option("--max-depth", default=3, type=int)
 @click.option("--verbose", "-v", is_flag=True)
-def serve(max_depth: int, verbose: bool) -> None:
+@click.pass_context
+def serve(ctx: click.Context, max_depth: int, verbose: bool) -> None:
     """Start the channel server."""
     # Use Lightwork's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
     # correlation-id context filter, secret scrubbing) for parity with the
@@ -4800,7 +4817,9 @@ def serve(max_depth: int, verbose: bool) -> None:
         click.echo(f"ERROR: {e}", err=True)
         sys.exit(2)
     try:
-        server = build_from_config()
+        server = (build_from_config(db=ctx.obj["db"])
+                  if ctx.parent is not None and ctx.parent.params.get("db") is not None
+                  else build_from_config())
     except RuntimeError as e:
         click.echo(f"ERROR: {e}", err=True)
         sys.exit(2)

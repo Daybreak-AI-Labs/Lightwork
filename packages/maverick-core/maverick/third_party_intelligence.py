@@ -3757,25 +3757,26 @@ class ThirdPartyIntelligenceStore:
         return self._monitor_from(payload, digest)
 
     def due_monitors(
-        self, tenant_id: str, *, limit: int = 100, now: float | None = None
+        self, tenant_id: str, *, limit: int = 100, now: float | None = None,
+        after_id: str | None = None,
     ) -> tuple[Monitor, ...]:
         tenant = _tenant(tenant_id)
         limit_value = _integer(limit, "limit", 1, 500)
         moment = _timestamp(self._clock() if now is None else now, "now")
+        position = "" if after_id is None else _id(after_id, "after_id")
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM monitors WHERE tenant_id=? ORDER BY monitor_id LIMIT ?",
-                (tenant, _MAX_LIST),
+                "SELECT * FROM monitors WHERE tenant_id=? "
+                "AND json_extract(payload_json,'$.state')='active' "
+                "AND json_extract(payload_json,'$.next_run_at')<=? "
+                "AND monitor_id>? "
+                "ORDER BY monitor_id LIMIT ?",
+                (tenant, moment, position, limit_value),
             ).fetchall()
-        monitors = [
+        return tuple(
             self._monitor_from(self._row(row, "monitor"), row["integrity_sha256"])
             for row in rows
-        ]
-        return tuple(
-            item
-            for item in monitors
-            if item.state == "active" and item.next_run_at <= moment
-        )[:limit_value]
+        )
 
     def record_monitor_observation(
         self,

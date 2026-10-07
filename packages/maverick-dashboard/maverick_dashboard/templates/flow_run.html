@@ -26,8 +26,14 @@
   .fr__step .lbl { flex: 1; }
   .fr__step.cursor { background: var(--surface-sunken); }
   .fr__data { margin-top: var(--space-4); }
-  .fr__data table { width: 100%; }
-  .fr__data td { overflow-wrap: anywhere; }
+  .fr__values { min-width: 0; }
+  .fr__value { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-2); margin: var(--space-2) 0; min-width: 0; }
+  .fr__value summary { cursor: pointer; white-space: pre-wrap; overflow-wrap: break-word; }
+  .fr__value-body { min-width: 0; padding-top: var(--space-2); }
+  .fr__data .fr__literal { white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; max-width: 100%; box-sizing: border-box; }
+  .fr__data .btn { white-space: normal; max-width: 100%; }
+  .fr__value-note { margin: var(--space-2) 0; font-size: var(--text-sm); color: var(--muted); }
+  .fr__answer { overflow-wrap: break-word; max-height: 320px; overflow: auto; }
   .fr__data pre { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-md);
                   padding: var(--space-3); font-size: 12px; overflow-x: auto; max-height: 320px; }
   .fr__allow { display: flex; gap: var(--space-2); align-items: flex-end; flex-wrap: wrap; flex: 1 0 100%; }
@@ -55,7 +61,9 @@
     <a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a>
     <a class="btn btn--ghost" href="/automations">All automations</a>
   </p>
-  <p id="fr-review-links" hidden>{{ back_link('/approvals', 'Approvals') }}</p>
+  <div id="fr-review-links" hidden>{{ back_link('/approvals', 'Approvals') }}
+    <p class="fr__msg">This view shows your assigned approval. Complete run information is available to the flow owner.</p>
+  </div>
   <div class="fr__error" id="fr-error" role="alert" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" role="status" aria-live="polite"></span>
@@ -142,18 +150,22 @@
 
   <div class="fr__data" hidden>
     <h2 style="font-size:var(--text-base);">Information in this run</h2>
-    <p class="fr__msg">Private values are hidden.</p>
-    <table><thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead><tbody id="fr-data-rows"></tbody></table>
+    <p class="fr__msg">Private values are hidden. Open a named value to read it. Long text and lists have further pages; the remaining amount is always shown.</p>
+    <p id="fr-values-status" class="fr__msg" role="status" aria-live="polite"></p>
+    <button class="btn btn--ghost" type="button" id="fr-values-refresh">Refresh run information</button>
+    <div class="fr__values" id="fr-data-rows"></div>
     <h2 style="font-size:var(--text-base);">What it started with</h2>
-    <table><thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead><tbody id="fr-input-rows"></tbody></table>
+    <div class="fr__values" id="fr-input-rows"></div>
     <details style="margin-top: var(--space-3);">
       <summary>Technical details</summary>
+      <p class="fr__msg">This is a limited summary. Use the named values above for complete saved information.</p>
       <pre id="fr-data">…</pre>
       <pre id="fr-input">…</pre>
     </details>
   </div>
 </div>
 
+<script src="/static/lightwork-markdown.js"></script>
 <script>
 (function () {
   'use strict';
@@ -540,31 +552,163 @@
     });
   }
 
-  function fillRows(id, data) {
-    var body = document.getElementById(id); if (!body) return;
-    body.textContent = '';
-    var keys = Object.keys(data || {});
-    if (!keys.length) {
-      var tr0 = document.createElement('tr'); var td0 = document.createElement('td'); td0.colSpan = 2; td0.className = 'muted';
-      td0.textContent = 'Nothing yet. Values appear here as the run produces them.'; tr0.appendChild(td0); body.appendChild(tr0); return;
-    }
-    keys.forEach(function (k) {
-      var v = data[k], text;
-      if (v === null || v === undefined) text = '—';
-      else if (typeof v === 'boolean') text = v ? 'Yes' : 'No';
-      else if (Array.isArray(v)) text = v.length + (v.length === 1 ? ' item' : ' items');
-      else if (typeof v === 'object') text = Object.keys(v).map(function (kk) {
-        var vv = v[kk]; return human(kk) + ': ' + (vv !== null && typeof vv === 'object' ? '…' : String(vv));
-      }).join(' · ');
-      else text = String(v);
-      var tr = document.createElement('tr');
-      var th = document.createElement('td'); th.textContent = human(k);
-      var td = document.createElement('td'); td.textContent = text.length > 400 ? text.slice(0, 399) + '…' : text;
-      tr.appendChild(th); tr.appendChild(td); body.appendChild(tr);
+  var pageGeneration = 0, valuesGeneration = 0, valuesUpdated = null;
+  var valuesVersion = '', valuesContext = '', privateClosed = false, liveStream = null;
+  var valueRequests = new Set(), valueRetries = new Set();
+  var valuesStatus = document.getElementById('fr-values-status');
+  function clearValues(message, closePrivate) {
+    valuesGeneration += 1;
+    valueRequests.forEach(function (controller) { controller.abort(); }); valueRequests.clear();
+    valueRetries.clear();
+    valuesVersion = ''; valuesContext = ''; valuesUpdated = null;
+    ['fr-data-rows', 'fr-input-rows', 'fr-data', 'fr-input'].forEach(function (id) {
+      document.getElementById(id).textContent = '';
     });
+    valuesStatus.textContent = message || '';
+    if (closePrivate) {
+      privateClosed = true; pageGeneration += 1;
+      if (liveStream) liveStream.close();
+      ['fr-steps', 'fr-actions', 'fr-error', 'fr-meta'].forEach(function (id) {
+        document.getElementById(id).textContent = '';
+      });
+      ['fr-owner-links', 'le-card', 'lx-card', 'fr-feedback'].forEach(function (id) {
+        var node = document.getElementById(id); if (node) node.hidden = true;
+      });
+      document.getElementById('fr-title').textContent = 'Flow run';
+      document.getElementById('fr-status').textContent = 'Reopen to check access';
+      document.getElementById('fr-values-refresh').disabled = true;
+      say(message);
+    }
   }
+  function valueFailure(error) {
+    if (error.stale) return;
+    if ([401, 403, 404].indexOf(error.status) >= 0 || error.redirected) {
+      clearValues('This run is no longer available in this account. Reopen it after checking your access.', true);
+    } else if (error.status === 409) {
+      clearValues('The saved information or account changed. Refresh the run information before reading more.', false);
+    } else if (error.status === 503) {
+      clearValues('Complete saved information is unavailable. Refresh after its retained data is available.', false);
+    }
+  }
+  async function readValue(scope, path, part, offset) {
+    var started = valuesGeneration, page = pageGeneration;
+    var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 12000);
+    valueRequests.add(controller);
+    var query = new URLSearchParams({ scope: scope, part: part, offset: String(offset), updated: String(valuesUpdated) });
+    path.forEach(function (index) { query.append('path', String(index)); });
+    if (valuesVersion) query.set('version', valuesVersion);
+    if (valuesContext) query.set('context', valuesContext);
+    function current() { return !privateClosed && started === valuesGeneration && page === pageGeneration; }
+    try {
+      var response = await api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/values?' + query, { signal: controller.signal });
+      if (!current()) throw { stale: true };
+      if (response.redirected || !response.ok || !/^application\/json\b/i.test(response.headers.get('Content-Type') || '')) {
+        throw { status: response.status, redirected: response.redirected };
+      }
+      var reader = response.body.getReader(), bytes = 0, chunks = [];
+      for (;;) {
+        var chunk = await reader.read();
+        if (!current()) { await reader.cancel(); throw { stale: true }; }
+        if (chunk.done) break;
+        bytes += chunk.value.byteLength;
+        if (bytes > 65536) { await reader.cancel(); throw new Error('The saved page is too large to show.'); }
+        chunks.push(chunk.value);
+      }
+      var joined = new Uint8Array(bytes), at = 0;
+      chunks.forEach(function (chunk) { joined.set(chunk, at); at += chunk.byteLength; });
+      var result = JSON.parse(new TextDecoder().decode(joined));
+      if (!current()) throw { stale: true };
+      if (!/^[a-f0-9]{64}$/.test(result.version || '') || !/^[a-f0-9]{64}$/.test(result.context || '')
+          || (valuesVersion && result.version !== valuesVersion) || (valuesContext && result.context !== valuesContext)) {
+        throw { status: 409 };
+      }
+      valuesVersion = result.version; valuesContext = result.context;
+      return result;
+    } catch (error) { valueFailure(error); throw error; }
+    finally { clearTimeout(timer); valueRequests.delete(controller); }
+  }
+  function showValue(host, scope, path, part) {
+    var started = valuesGeneration, offset = 0, loaded = false, busy = false, text = '';
+    var content = el('div', 'fr__value-body'), note = el('p', 'fr__value-note', 'Checking this saved value…');
+    var more = el('button', 'btn btn--ghost', 'Read saved value'); more.type = 'button';
+    host.append(content, note, more);
+    async function load() {
+      if (busy || privateClosed || started !== valuesGeneration) return;
+      valueRetries.delete(load);
+      busy = true; more.disabled = true;
+      try {
+        var result = await readValue(scope, path, part, offset);
+        if (started !== valuesGeneration || !host.isConnected) return;
+        if (result.kind === 'object' || result.kind === 'list') {
+          if (!Array.isArray(result.children) || result.children.length > 20) throw new Error('Unsupported saved page.');
+          result.children.forEach(function (child) {
+            var childPath = path.concat(child.index), detail = el('details', 'fr__value');
+            var summary = el('summary', '', child.name + (child.name_complete ? '' : '… (name continues)'));
+            var body = el('div'); detail.append(summary, body); content.appendChild(detail);
+            var opened = false;
+            detail.addEventListener('toggle', function () {
+              if (!detail.open || opened || started !== valuesGeneration) return;
+              opened = true;
+              if (!child.name_complete) {
+                var names = el('details', 'fr__value'); names.appendChild(el('summary', '', 'Read complete field name'));
+                var nameBody = el('div'); names.appendChild(nameBody); body.appendChild(names);
+                names.addEventListener('toggle', function () {
+                  if (names.open && !nameBody.childNodes.length) showValue(nameBody, scope, childPath, 'name');
+                });
+              }
+              showValue(body, scope, childPath, 'value');
+            });
+          });
+          note.textContent = result.total ? (result.remaining ? result.remaining + ' more ' + (result.kind === 'list' ? 'items' : 'named values') + ' to read.' : result.total + ' ' + (result.kind === 'list' ? (result.total === 1 ? 'item' : 'items') : (result.total === 1 ? 'named value' : 'named values')) + ' · All shown') : 'No saved values here.';
+          more.textContent = 'Show more ' + (result.kind === 'list' ? 'items' : 'named values');
+        } else {
+          if (typeof result.text !== 'string') throw new Error('Unsupported saved value.');
+          text += result.text;
+          var pre = content.querySelector('pre');
+          if (!pre) { pre = el('pre', 'fr__literal'); pre.tabIndex = 0; content.appendChild(pre); }
+          pre.textContent = result.kind === 'scalar' && result.text === 'true' ? 'Yes' : result.kind === 'scalar' && result.text === 'false' ? 'No' : result.kind === 'scalar' && result.text === 'null' ? 'No value' : text;
+          note.textContent = result.remaining ? result.remaining + ' more characters to read.' : 'Complete saved value shown.';
+          more.textContent = 'Read more text';
+          if (!result.remaining && result.answer === true && text.length <= 65536 && window.lwMarkdown) {
+            var formatted = el('div', 'fr__answer'); formatted.hidden = true;
+            var toggle = el('button', 'btn btn--ghost', 'Read formatted answer'); toggle.type = 'button';
+            window.lwMarkdown.renderInto(formatted, text); content.append(formatted, toggle);
+            toggle.addEventListener('click', function () {
+              formatted.hidden = !formatted.hidden; pre.hidden = !formatted.hidden;
+              toggle.textContent = formatted.hidden ? 'Read formatted answer' : 'Show answer as written';
+            });
+          }
+        }
+        offset = result.next; loaded = true; more.hidden = result.next === null;
+      } catch (error) {
+        if (error.stale || started !== valuesGeneration || !host.isConnected) return;
+        valueRetries.add(load);
+        note.textContent = 'Could not read this saved page. Your reading position is kept. Check access or try this page again.';
+        more.textContent = loaded ? 'Try this page again' : 'Read saved value';
+      } finally { busy = false; more.disabled = false; }
+    }
+    more.addEventListener('click', load); load();
+  }
+  function renderValues(run) {
+    if (privateClosed || assignedReviewOnly) { clearValues('', false); return; }
+    if (valuesUpdated === run.updated) { valueRetries.forEach(function (retry) { retry(); }); return; }
+    clearValues('', false); valuesUpdated = run.updated;
+    showValue(document.getElementById('fr-data-rows'), 'data', [], 'value');
+    showValue(document.getElementById('fr-input-rows'), 'input', [], 'value');
+  }
+  document.getElementById('fr-values-refresh').addEventListener('click', function () { poll(0); });
+  function privateBoundary(event) {
+    if (event.detail && event.detail.reason === 'selection') return;
+    clearValues('Your account, workspace or access changed. Reopen this run to read its current information.', true);
+  }
+  ['lightwork:workspace-changed', 'lightwork:account-context-changed'].forEach(function (name) {
+    document.addEventListener(name, privateBoundary); window.addEventListener(name, privateBoundary);
+  });
+  window.addEventListener('lightwork:copilot-context-changed', privateBoundary);
+  document.addEventListener('lightwork:copilot-context-changed', privateBoundary);
   var finishedSaid = false;
   function renderRun(run) {
+    if (privateClosed) return;
     assignedReviewOnly = run.approval_review_only === true;
     if (!assignedReviewOnly && !finishedSaid && ['failed', 'completed', 'rejected'].indexOf(run.status) >= 0) {
       finishedSaid = true;  // the rating (lightwork-result-feedback.js) appears once the run is done
@@ -610,8 +754,7 @@
       more.appendChild(copy);
       err.appendChild(more);
     } else { err.hidden = true; }
-    fillRows('fr-data-rows', run.data || {});
-    fillRows('fr-input-rows', run.input_data || {});
+    renderValues(run);
     document.getElementById('fr-data').textContent = JSON.stringify(run.data || {}, null, 2);
     document.getElementById('fr-input').textContent = JSON.stringify(run.input_data || {}, null, 2);
     renderSteps(run); renderActions(run);
@@ -648,9 +791,16 @@
   }
 
   function poll(tries, queuedKey) {
+    if (privateClosed) return;
+    var page = pageGeneration;
     api('/api/v1/flows/runs/' + encodeURIComponent(runId))
       .then(function (r) {
+        if (page !== pageGeneration || privateClosed) return null;
+        if (r.redirected || [401, 403, 404].indexOf(r.status) >= 0) {
+          clearValues('This run is no longer available in this account. Reopen it after checking your access.', true); return null;
+        }
         if (!r.ok) {
+          if (r.status === 503) clearValues('Complete saved information is unavailable. Refresh after its retained data is available.', false);
           if (r.status === 404) {
             say('We couldn’t find this run, or you don’t have access to it.');
             document.getElementById('fr-status').textContent = 'Not found';
@@ -660,7 +810,7 @@
         return r.json();
       })
       .then(function (run) {
-        if (!run) return;
+        if (!run || page !== pageGeneration || privateClosed) return;
         renderRun(run);
         var queued = !!queuedKey && runKey(run) === queuedKey;
         if ((queued || ACTIVE.indexOf(run.status) >= 0) && tries > 0) {
@@ -673,21 +823,25 @@
       }).catch(function (e) { say(plain(e, 'load the run')); });
   }
   function watch() {
+    if (privateClosed) return;
+    var page = pageGeneration;
     // Live updates over SSE; polling is the fallback (no EventSource, stream
     // slots exhausted, or the connection never opens).
     if (typeof EventSource === 'undefined') { poll(60); return; }
     var es;
     try { es = new EventSource('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/events'); }
     catch (e) { poll(60); return; }
+    liveStream = es;
     var closed = false;
     function fallback() {
-      if (closed) return;
+      if (closed || privateClosed || page !== pageGeneration) return;
       closed = true;
       es.close();
       if (pendingAction && pendingAction.reviewOnly) return;
       poll(60, pendingAction && pendingAction.key);
     }
     function onSnap(evt) {
+      if (privateClosed || page !== pageGeneration) return;
       try { renderRun(JSON.parse(evt.data)); } catch (e) { /* keep streaming */ }
     }
     es.addEventListener('snapshot', onSnap);

@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 # event type -> (record type, what it means)
 EVENT_CATALOG: dict[str, tuple[str, str]] = {
     "goal_created": ("goal", "A goal was created."),
+    "goal_waiting": ("goal", "A task paused while waiting for your answer or more information."),
     "goal_finished": ("goal", "A goal finished (or its gated result is awaiting sign-off)."),
     "episode_finished": ("goal", "One attempt at a goal finished."),
     "final_emitted": ("goal", "A goal produced its final output."),

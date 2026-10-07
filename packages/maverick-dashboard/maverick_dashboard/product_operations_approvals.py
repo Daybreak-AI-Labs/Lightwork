@@ -94,12 +94,12 @@ def outcome(value, *, replayed=False):
     return Outcome("replayed" if replayed and audit_delivered else "confirmed" if audit_delivered else "unconfirmed", message, value)
 
 
-def execute(request, selection, arguments, review, _operation_id, *, status):
+def execute(request, selection, arguments, review, _operation_id, *, status, effect_guard=None):
     from . import api
 
     approval_id = native.selected_id(selection)
     response = api._decide_approval(request, approval_id, arguments, status,
-                                    binding=review["binding"], reviewed=review)
+                                    binding=review["binding"], reviewed=review, **({"effect_guard": effect_guard} if effect_guard is not None else {}))
     value = native.recover(request, approval_id, status, review)
     if value is None or response.headers.get("X-Lightwork-Decision-Id") != review["event_id"]:
         raise HTTPException(503, "The original decision result could not be verified. Read its current status before another attempt.")

@@ -191,6 +191,8 @@
       <button type="submit" class="btn">Send a test message</button>
       <span class="ch-result" data-ch-result role="status" aria-live="polite"></span>
     </form>
+    {% elif c.configured and c.name in ['telegram', 'discord', 'whatsapp_cloud', 'mattermost'] %}
+    <a class="btn" href="#channel-message-tests" data-cmt-open="{{ c.name }}">Review a test message</a>
     {% elif c.configured %}
     <p class="muted ch-help">To check replies, send a message to your {{ c.label }} bot. Lightwork answers in the same conversation.</p>
     {% endif %}
@@ -243,6 +245,8 @@
     {% endif %}
   </div>
   {% endfor %}
+
+  {% include "_channel_message_tests.html" %}
 
   <div class="section-head"><h2 id="oidc-channel-links">Chat account connections</h2></div>
   <div class="panel">
@@ -569,4 +573,5 @@
     });
   })();
   </script>
+  <script src="/static/lightwork-channel-message-tests.js" defer></script>
 {% endblock %}

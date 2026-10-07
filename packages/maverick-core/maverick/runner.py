@@ -30,6 +30,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from ._envparse import env_float
@@ -377,6 +378,18 @@ def _goal_run_exception_status(world, goal_id: int, exc: Exception) -> str:
     return "error"
 
 
+def _run_world(db_path: Path | None):
+    from .world_model import open_world
+
+    if db_path is None:
+        return open_world()
+    from .world_model_backends import is_postgres_configured
+
+    if is_postgres_configured():
+        raise RuntimeError("An explicit local database cannot run through Postgres.")
+    return open_world(db_path)
+
+
 def run_goal_in_thread(
     goal_id: int,
     max_dollars: float | None = None,
@@ -392,6 +405,7 @@ def run_goal_in_thread(
     acquire_timeout: float | None = None,
     usage_observer=None,
     detailed_outcome: bool = False,
+    db_path: Path | None = None,
 ) -> str | None | GoalRunUnavailable:
     """Synchronously run a goal under the global concurrency semaphore.
 
@@ -458,8 +472,8 @@ def run_goal_in_thread(
             run_goal_sync,
         )
         from .sandbox import build_sandbox
-        from .world_model import close_world_if_owned, open_world
-        world = open_world()  # client/tenant-floored canonical world
+        from .world_model import close_world_if_owned
+        world = _run_world(db_path)
         from .federation_admission import FederationAdmissionRequired, require_execution
         try:
             require_execution(world, goal_id, capability=capability,
@@ -614,6 +628,7 @@ class LocalThreadDispatcher:
         capability: Any | None = None,
         concurrency_principal: str | None = None,
         allowed_suites: frozenset[str] | None = None,
+        db_path: Path | None = None,
     ) -> str | None:
         return run_goal_in_thread(
             goal_id=goal_id, max_dollars=max_dollars,
@@ -622,6 +637,7 @@ class LocalThreadDispatcher:
             capability=capability,
             concurrency_principal=concurrency_principal,
             allowed_suites=allowed_suites,
+            **({"db_path": db_path} if db_path is not None else {}),
         )
 
 
@@ -653,6 +669,7 @@ def run_goal_in_background(
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    db_path: Path | None = None,
 ) -> str | None:
     """Dispatch a goal through the active :class:`Dispatcher`. Defaults to
     in-process thread execution; ``set_dispatcher`` swaps in a task queue
@@ -664,16 +681,22 @@ def run_goal_in_background(
     worker, which would run it live: it is stopped with the reason instead."""
     from . import practice
 
-    if practice.active() and not isinstance(get_dispatcher(), LocalThreadDispatcher):
-        _mark_dispatch_failure(goal_id, practice.WORKERS_REASON + " This practice task did not start.")
+    dispatcher = get_dispatcher()
+    if db_path is not None and not isinstance(dispatcher, LocalThreadDispatcher):
+        raise RuntimeError("An explicit local database cannot be sent to a network worker.")
+
+    if practice.active() and not isinstance(dispatcher, LocalThreadDispatcher):
+        _mark_dispatch_failure(goal_id, practice.WORKERS_REASON + " This practice task did not start.",
+                               **({"db_path": db_path} if db_path is not None else {}))
         return "error"
-    return get_dispatcher().submit(
+    return dispatcher.submit(
         goal_id, max_dollars=max_dollars,
         max_wall_seconds=max_wall_seconds, max_depth=max_depth,
         channel=channel, user_id=user_id, conversation_id=conversation_id,
         capability=capability,
         concurrency_principal=concurrency_principal,
         allowed_suites=allowed_suites,
+        **({"db_path": db_path} if db_path is not None else {}),
     )
 
 
@@ -689,6 +712,7 @@ async def run_goal_in_background_async(
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    db_path: Path | None = None,
 ) -> str | None:
     """Dispatch without blocking an async channel or HTTP event loop.
 
@@ -717,6 +741,7 @@ async def run_goal_in_background_async(
         capability=capability,
         concurrency_principal=concurrency_principal,
         allowed_suites=allowed_suites,
+        **({"db_path": db_path} if db_path is not None else {}),
     )
     try:
         status = await loop.run_in_executor(_goal_executor, call)
@@ -727,23 +752,25 @@ async def run_goal_in_background_async(
         # in-process fallback. Keep the external error generic and the details
         # in operator logs.
         log.exception("goal #%s dispatcher submission failed", goal_id)
-        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch failed")
+        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch failed",
+                                **({"db_path": db_path} if db_path is not None else {}))
         return "error"
     if status is None:
         # ``None`` means the dispatcher could not start the goal. Queue-backed
         # acceptance has the explicit ``queued`` status, so this is no longer
         # ambiguous with a successful asynchronous enqueue.
-        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch unavailable")
+        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch unavailable",
+                                **({"db_path": db_path} if db_path is not None else {}))
     return status
 
 
-def _mark_dispatch_failure(goal_id: int, result: str) -> None:
+def _mark_dispatch_failure(goal_id: int, result: str, *, db_path: Path | None = None) -> None:
     """Best-effort terminalization after a dispatcher cannot start a goal."""
     world = None
     try:
-        from .world_model import close_world_if_owned, open_world
+        from .world_model import close_world_if_owned
 
-        world = open_world()
+        world = _run_world(db_path)
         goal = world.get_goal(goal_id)
         # Do not clobber a worker that started despite an ambiguous transport
         # failure, or any goal that reached a terminal state in the meantime.

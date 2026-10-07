@@ -64,21 +64,57 @@ def task_snapshot(request, selection):
 
 
 def current_status_snapshot(request, selection):
-    from .answer_run_details import read as read_run_details
+    from .answer_projection import projection, validate_current
+    from .goal_waiting import open_question_ids
+    from .plain_labels import datetime_text
+    from .run_status import status_label
 
-    world, goal = _task(request, selection)
-    state = task_snapshot(request, selection)
-    run_details = read_run_details(request, world, goal.id, expected_goal=goal)
-    details = dict(state.details)
-    details["recorded_run"] = ({key: run_details[key] for key in ("price_text", "elapsed_text", "scope")}
+    world, selected = _task(request, selection)
+    source = projection(request, world, selected.id)
+    goal = source["goal"]
+    questions = open_question_ids(world, goal)
+    stop = None if questions else source["stop"]
+    run_details = source["answer_run_details"]
+    href = f"/chat/goal/{goal.id}"
+    details = {"Task": goal.title,
+               "Status": "Waiting for your answer" if questions else
+                   status_label(goal.status, stop["kind"] if stop else None) or "Status unavailable",
+               "Last updated": datetime_text(goal.updated_at) or "Date unavailable"}
+    if questions:
+        details.update({"Reason": "Lightwork is waiting for an answer before continuing.",
+                        "Next action": {"label": "Read and answer the current question",
+                                        "href": href + "#question-panel"}})
+    elif stop:
+        details.update({"Reason": stop["message"], "Next step": stop["action"]})
+        if stop["link"] and (auth.has_permission(request, "admin") or
+                             not stop["link"].startswith(("/settings", "/mcp"))):
+            details["Next action"] = {"label": stop["link_label"], "href": stop["link"]}
+    elif goal.status == "cancelled":
+        details.update({"Reason": "The task was stopped. Earlier changes are not undone.",
+                        "Next step": "Review saved progress and any changes already made before another attempt."})
+    else:
+        answer = source["chat_answer_text"]
+        details["Saved answer"] = (answer if len(answer) <= 12000 else
+            "The complete saved answer is too large for this panel. Open the task to read it in full.") or "No saved answer."
+    artifacts = source["artifacts"]
+    details["Saved output titles"] = ([row.get("title") or "Untitled output" for row in artifacts]
+        if len(artifacts) <= 20 else
+        f"{len(artifacts)} retained outputs. Open the task to review all names and complete contents.") or "No saved outputs."
+    details["Complete answer and files"] = {"label": "Open the complete task and recovery controls", "href": href}
+    details["Recorded run"] = ({"Runtime price": run_details["price_text"],
+                                "Time": run_details["elapsed_text"], "Scope": run_details["scope"]}
                                if run_details else "No retained run figures match this saved answer.")
-    return replace(state, revision=digest({"answer": state.revision, "run": run_details}), details=details)
+    validate_current(request, world, source, source["conversation_context"])
+    if questions != open_question_ids(world, goal):
+        raise HTTPException(409, "The task question changed. Check its current status again.")
+    return Snapshot(digest({"answer": source["answer_version"], "run": run_details, "questions": questions}),
+                    "Current saved task, result, artifacts and review state", goal.title, details)
 
 
 def task_preview(request, selection, args):
     state = current_status_snapshot(request, selection)
-    return Preview("Read the current saved result and execution status. A saved result does not prove external delivery.",
-                   [{"label": "Task", "after": state.details}])
+    return Preview("Current saved task and recovery information. A saved answer does not prove external delivery. "
+                   "Open the task for all retained attachments, complete output contents or a larger answer.", native=state.details)
 
 
 def answer_snapshot(request, selection):

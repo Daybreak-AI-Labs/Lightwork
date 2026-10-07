@@ -203,6 +203,28 @@
             } : null);
           return;
         }
+        if (entry[0] === 'privacy_discovery_review') {
+          var discoveryReview = entry[1], discoveryControls = window.LightworkPrivacyDiscovery;
+          if (!discoveryReview || Array.isArray(discoveryReview) ||
+              Object.keys(discoveryReview).join(',') !== 'scope' || discoveryReview.scope !== 'current_page') return;
+          protectedControls(node('dd', undefined, list), 'Open the protected scan controls',
+            '/privacy/data-discovery#pdd-jobs',
+            discoveryControls && typeof discoveryControls.openReview === 'function'
+              ? function (isCurrent) { return discoveryControls.openReview({}, {isCurrent: isCurrent}); } : null);
+          return;
+        }
+        if (entry[0] === 'webhook_subscription_review') {
+          var webhookReview = entry[1], webhookControls = window.LightworkWebhookSubscriptions;
+          var webhookContext = catalog && catalog.context;
+          if (!webhookReview || Array.isArray(webhookReview) ||
+              Object.keys(webhookReview).join(',') !== 'scope' || webhookReview.scope !== 'current_page' ||
+              typeof webhookContext !== 'string' || !/^[a-f0-9]{64}$/.test(webhookContext)) return;
+          protectedControls(node('dd', undefined, list), 'Open the complete update controls',
+            '/settings/webhooks/manage#wh-form',
+            webhookControls && typeof webhookControls.openReview === 'function'
+              ? function (isCurrent) { return webhookControls.openReview({}, {isCurrent: isCurrent, context: webhookContext}); } : null);
+          return;
+        }
         if (entry[0] === 'channels_people') {
           var channelPeople = entry[1], channelStarted = generation, channelSelection = JSON.stringify(context());
           if (!channelPeople || Array.isArray(channelPeople) || Object.keys(channelPeople).sort().join(',') !== 'channel,context' ||
@@ -378,6 +400,16 @@
           protectedControls(node('dd', undefined, list), 'Open complete single sign-on setup',
             '/settings/all#company-saml-setup', samlControl && typeof samlControl.open === 'function'
               ? function (isCurrent) { return samlControl.open(samlForm.context, samlForm.original, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'channel_message_test') {
+          var channelTest = entry[1], channelTestControl = window.LightworkChannelMessageTests;
+          if (!channelTest || Array.isArray(channelTest) || Object.keys(channelTest).sort().join(',') !== 'channel,context' ||
+              typeof channelTest.context !== 'string' || !/^[a-f0-9]{64}$/.test(channelTest.context) ||
+              !['telegram', 'discord', 'whatsapp_cloud', 'mattermost'].includes(channelTest.channel)) return;
+          protectedControls(node('dd', undefined, list), 'Open the complete channel message test',
+            '/channels#channel-message-tests', channelTestControl && typeof channelTestControl.open === 'function'
+              ? function (isCurrent) { return channelTestControl.open(channelTest.context, channelTest.channel, isCurrent); } : null);
           return;
         }
         if (entry[0] === 'company_signin_migration') {

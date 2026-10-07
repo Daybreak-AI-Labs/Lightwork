@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import math
 import os
 import re
@@ -703,6 +704,36 @@ class ThirdPartyFeedRuntimeStore:
                     (tenant, state, count),
                 ).fetchall()
         return tuple(self._job_from(self._payload(row, "feed job")) for row in rows)
+
+    def select_due_monitors(
+        self, tenant_id: str, intelligence_store: Any, *, limit: int = 100,
+    ) -> tuple:
+        """Rotate a bounded native selection even while earlier jobs remain due.
+
+        The cursor is tenant-bound scheduling metadata, never evidence of a
+        scan or permission to run it. Save it before enqueueing: a crash may
+        delay a selection until the next rotation, but cannot replay an effect.
+        The ordinary enqueue path still rechecks current source authority and
+        retains the exact existing job for a previously submitted revision.
+        """
+        tenant = _tenant(tenant_id)
+        count = _integer(limit, "limit", 1, 500)
+        key = "monitor-selection:" + tenant
+        with self._connect() as connection:
+            self._begin(connection)
+            row = connection.execute("SELECT value FROM feed_meta WHERE key=?", (key,)).fetchone()
+            position = _identifier(row["value"], "monitor selection") if row else None
+            monitors = intelligence_store.due_monitors(tenant, limit=count, after_id=position)
+            if not monitors and position is not None:
+                monitors = intelligence_store.due_monitors(tenant, limit=count)
+            if monitors:
+                last = _identifier(monitors[-1].monitor_id, "monitor selection")
+                connection.execute(
+                    "INSERT INTO feed_meta(key,value) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, last),
+                )
+            connection.commit()
+        return tuple(monitors)
 
     def enqueue_monitor(
         self,
@@ -2001,12 +2032,14 @@ def enqueue_due_monitors(
     actor_ref: str,
     limit: int = 100,
 ) -> tuple[FeedJob, ...]:
-    """Deterministically enqueue due monitors without duplicating revisions."""
+    """Rotate due monitors without duplicating revisions or blocking peers."""
+
+    from .third_party_intelligence import ThirdPartyIntelligenceNotFound
 
     tenant = _tenant(tenant_id)
     actor = _identifier(actor_ref, "actor_ref")
     count = _integer(limit, "limit", 1, 500)
-    monitors = intelligence_store.due_monitors(tenant, limit=count)
+    monitors = runtime_store.select_due_monitors(tenant, intelligence_store, limit=count)
     jobs: list[FeedJob] = []
     for monitor in monitors:
         stable = _sha256(
@@ -2017,8 +2050,8 @@ def enqueue_due_monitors(
                 "monitor_integrity_sha256": monitor.integrity_sha256,
             }
         )
-        jobs.append(
-            runtime_store.enqueue_monitor(
+        try:
+            job = runtime_store.enqueue_monitor(
                 tenant,
                 monitor.monitor_id,
                 intelligence_store,
@@ -2026,7 +2059,16 @@ def enqueue_due_monitors(
                 idempotency_key=f"due-monitor-{stable[:48]}",
                 require_due=True,
             )
-        )
+        except (ThirdPartyFeedRuntimeConflict, ThirdPartyIntelligenceNotFound):
+            # Current source/monitor authority can change after selection. No
+            # job or permission is invented; eligible peers still get queued.
+            # Configuration, integrity and unexpected failures still surface.
+            logging.getLogger(__name__).warning(
+                "Due monitor refused by current authority: tenant=%s monitor=%s",
+                tenant, monitor.monitor_id,
+            )
+            continue
+        jobs.append(job)
     return tuple(jobs)
 
 

@@ -40,6 +40,7 @@ import shutil
 import threading
 import time
 import uuid
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -131,6 +132,27 @@ class _PinnedCommand:
                 )
 
 
+@dataclass
+class _ChildLease:
+    """Process custody without retaining its tool or invocation owner."""
+
+    process: OwnedProcess | None = None
+
+    def close(self) -> None:
+        process, self.process = self.process, None
+        if process is not None:
+            process.close()
+
+
+def _release_child(lease: _ChildLease) -> None:
+    try:
+        lease.close()
+    except Exception:
+        # No invocation remains to receive this failure. Keep cleanup visible;
+        # never restart the process or repeat an earlier tool effect.
+        log.error("released ts plugin child cleanup incomplete")
+
+
 class _PluginChild:
     """One serialized invocation owner; restarting a process never replays work."""
 
@@ -141,23 +163,24 @@ class _PluginChild:
         self.call_timeout = call_timeout
         self.protocol = protocol
         self._pinned_command = command
-        self._proc: OwnedProcess | None = None
+        self._lease = _ChildLease()
+        # The finalizer must own only the lease. A bound method or this child
+        # in its arguments would retain the tools and recreate the leak.
+        self._finalizer = weakref.finalize(self, _release_child, self._lease)
         self._lock = threading.Lock()
         self._buffer = bytearray()
 
     def _ensure_started(self) -> OwnedProcess:
-        if self._proc is not None and self._proc.proc.poll() is not None:
+        if self._lease.process is not None and self._lease.process.proc.poll() is not None:
             self.close()
-        if self._proc is None:
+        if self._lease.process is None:
             self._pinned_command.verify()
-            self._proc = OwnedProcess(self.command, env=scrub_child_env())
-        return self._proc
+            self._lease.process = OwnedProcess(self.command, env=scrub_child_env())
+        return self._lease.process
 
     def close(self) -> None:
-        proc, self._proc = self._proc, None
         self._buffer.clear()
-        if proc is not None:
-            proc.close()
+        self._lease.close()
 
     def _response(self, child: OwnedProcess, rid: str, deadline: float, check) -> dict:
         received = len(self._buffer)
@@ -289,13 +312,17 @@ class _PluginChild:
             self._lock.release()
 
 
-# Children live as long as the process (tools have no lifecycle hooks); kill
-# them at interpreter exit so none outlive the host.
-_CHILDREN: list[_PluginChild] = []
+# Tool closures and active call frames retain their native child. Once the last
+# tool/call is released, its lease reaps the owned process; this index must not
+# keep discarded agent registries alive. Live children are also closed at exit.
+_CHILDREN: weakref.WeakSet[_PluginChild] = weakref.WeakSet()
+_CHILDREN_LOCK = threading.Lock()
 
 
 def _close_all_children() -> None:
-    for c in _CHILDREN:
+    with _CHILDREN_LOCK:
+        children = tuple(_CHILDREN)
+    for c in children:
         c.close()
 
 
@@ -365,7 +392,8 @@ def load_ts_plugin(
             fn=fn,
         ))
     if tools:
-        _CHILDREN.append(child)
+        with _CHILDREN_LOCK:
+            _CHILDREN.add(child)
     return tools
 
 

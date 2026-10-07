@@ -1,7 +1,7 @@
 import {msg, messageLanguage, useLanguage, formattedTime} from "./src/language";
-/* Lightwork mobile companion — read-only oversight from a phone.
+/* Lightwork mobile companion — oversight and separately enrolled work.
  *
- * Three tabs (Tasks, Overview, Settings) plus a task-detail drill-down, and
+ * Tasks, Overview, Approvals and Settings plus task-detail and new-task forms,
  * a first-run connection setup when nothing is saved yet. Plain
  * state-based navigation: no navigation library, so the dependency surface
  * stays react/react-native/expo only. All data comes from the dashboard's
@@ -17,13 +17,16 @@ import { InvalidSavedConnection, loadSettings, resetSettings } from "./src/setti
 import { useConnectionCache } from "./src/offlineCache";
 import { GlanceScreen } from "./src/screens/GlanceScreen";
 import { RunDetailScreen } from "./src/screens/RunDetailScreen";
+import { NewTaskScreen } from "./src/screens/NewTaskScreen";
+import { ApprovalsScreen } from "./src/screens/ApprovalsScreen";
 import { RunsListScreen } from "./src/screens/RunsListScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 
-type Tab = "runs" | "glance" | "settings";
+type Tab = "runs" | "glance" | "approvals" | "settings";
 const TABS: { id: Tab; label: string }[] = [
   { id: "runs", label: "Tasks" },
   { id: "glance", label: "Overview" },
+  { id: "approvals", label: "Approvals" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -34,6 +37,7 @@ export default function App(): React.JSX.Element {
   const [corrupt, setCorrupt] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [tab, setTab] = useState<Tab>("runs");
+  const [newTask, setNewTask] = useState(false);
   const [run, setRun] = useState<{ id: number; title?: string } | null>(null);
   const cache = useConnectionCache(settings);
   const mounted = useRef(false);
@@ -45,7 +49,7 @@ export default function App(): React.JSX.Element {
     setSettingsError(""); setCorrupt(false);
     loadSettings().then((loaded) => {
       if (!mounted.current || request !== settingsRequest.current) return;
-      setRun(null); setSettings(loaded);
+      setRun(null); setNewTask(false); setSettings(loaded);
     }, (error: unknown) => {
       if (!mounted.current || request !== settingsRequest.current) return;
       if (error instanceof InvalidSavedConnection) { setCorrupt(true); setSettingsError(error.message); return; }
@@ -63,12 +67,13 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (newTask) {setNewTask(false); return true;}
       if (run) { setRun(null); setTab('runs'); return true; }
       if (tab !== 'runs') { setTab('runs'); return true; }
       return false;
     });
     return () => handler.remove();
-  }, [run, tab]);
+  }, [run, tab, newTask]);
   function resetCorrupt(): void {
     Alert.alert('Reset saved connection?', 'Only this app’s saved connection and offline tasks will be removed.', [
       {text: 'Cancel', style: 'cancel'}, {text: 'Reset connection', style: 'destructive', onPress: () => {
@@ -76,7 +81,7 @@ export default function App(): React.JSX.Element {
       }},
     ]);
   }
-  const openSettings = useCallback(() => { setTab("settings"); setRun(null); }, []);
+  const openSettings = useCallback(() => { setTab("settings"); setRun(null); setNewTask(false); }, []);
   const firstRun = Boolean(settings?.needsSetup);
 
   let body: React.JSX.Element;
@@ -92,6 +97,10 @@ export default function App(): React.JSX.Element {
     ) : <Text style={styles.loading} accessibilityLiveRegion="polite" accessibilityLanguage="en">Loading…</Text>;
   } else if (firstRun) {
     body = <SettingsScreen firstRun onSaved={reloadSettings} />;
+  } else if (tab === "runs" && newTask) {
+    body = <NewTaskScreen settings={settings} onBack={() => setNewTask(false)} />;
+  } else if (tab === "approvals") {
+    body = <ApprovalsScreen settings={settings} />;
   } else if (tab === "runs" && run !== null) {
     body = (
       <RunDetailScreen
@@ -103,7 +112,7 @@ export default function App(): React.JSX.Element {
       />
     );
   } else if (tab === "runs") {
-    body = <RunsListScreen settings={settings} onOpenRun={(id, title) => setRun({ id, title })} onOpenSettings={openSettings} />;
+    body = <RunsListScreen settings={settings} onOpenRun={(id, title) => setRun({ id, title })} onOpenSettings={openSettings} onNewTask={() => setNewTask(true)} />;
   } else if (tab === "glance") {
     body = <GlanceScreen settings={settings} liveBundle={cache.data} onOpenRun={(id, title) => { setRun({id, title}); setTab("runs"); }} onOpenSettings={openSettings} />;
   } else {
@@ -127,7 +136,7 @@ export default function App(): React.JSX.Element {
               accessibilityState={{ selected: tab === t.id }}
               onPress={() => {
                 setTab(t.id);
-                setRun(null);
+                setRun(null); setNewTask(false);
               }}
             >
               <Text style={[styles.tabText, tab === t.id && styles.tabActive]} accessibilityLanguage={messageLanguage(t.label)}>{msg(t.label)}</Text>

@@ -40,7 +40,15 @@ from urllib.parse import urlparse
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_JOB_TABLE_SQL = """CREATE TABLE IF NOT EXISTS {name}(
+    tenant_id TEXT NOT NULL, job_id TEXT NOT NULL, source_id TEXT NOT NULL,
+    schedule_id TEXT,
+    state TEXT NOT NULL CHECK(state IN ('queued','leased','complete','dead_letter','cancelled')),
+    next_attempt_at REAL NOT NULL, lease_until REAL, payload_json TEXT NOT NULL,
+    integrity_sha256 TEXT NOT NULL, PRIMARY KEY(tenant_id, job_id),
+    FOREIGN KEY(tenant_id, source_id) REFERENCES sources(tenant_id, source_id)
+);"""
 REPORT_SCHEMA = "lightwork.privacy-data-discovery-report.v1"
 FINDING_SCHEMA = "lightwork.privacy-data-discovery-finding.v1"
 REVIEW_SCHEMA = "lightwork.privacy-data-discovery-review.v1"
@@ -69,7 +77,7 @@ _MAX_BACKOFF_SECONDS = 86_400.0
 _MAX_RETENTION_SECONDS = 10 * 365 * 24 * 3_600
 _SOURCE_KINDS = frozenset({"structured", "unstructured"})
 _SOURCE_STATES = frozenset({"active", "suspended", "revoked"})
-_JOB_STATES = frozenset({"queued", "leased", "complete", "dead_letter"})
+_JOB_STATES = frozenset({"queued", "leased", "complete", "dead_letter", "cancelled"})
 _REVIEW_DECISIONS = frozenset({"confirmed", "reclassified", "false_positive"})
 _CATEGORIES = frozenset(
     {
@@ -97,6 +105,10 @@ class PrivacyDataDiscoveryError(RuntimeError):
 
 class PrivacyDataDiscoveryConfigError(PrivacyDataDiscoveryError):
     """The capability has not been explicitly enabled."""
+
+
+class PrivacyDataDiscoveryReadInterrupted(PrivacyDataDiscoveryError):
+    """Current authority could not be verified at a provider read boundary."""
 
 
 class PrivacyDataDiscoveryValidationError(PrivacyDataDiscoveryError, ValueError):
@@ -564,6 +576,7 @@ class DiscoveryRunResult:
     worker_id: str
     completed_reports: tuple[ScanReport, ...]
     failed_jobs: tuple[ScanJob, ...]
+    interrupted_jobs: tuple[ScanJob, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -830,7 +843,7 @@ class PrivacyDataDiscoveryStore:
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(
-                """
+                f"""
                 BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS metadata(
                     key TEXT PRIMARY KEY,
@@ -855,20 +868,7 @@ class PrivacyDataDiscoveryStore:
                     FOREIGN KEY(tenant_id, source_id)
                         REFERENCES sources(tenant_id, source_id)
                 );
-                CREATE TABLE IF NOT EXISTS jobs(
-                    tenant_id TEXT NOT NULL,
-                    job_id TEXT NOT NULL,
-                    source_id TEXT NOT NULL,
-                    schedule_id TEXT,
-                    state TEXT NOT NULL CHECK(state IN ('queued','leased','complete','dead_letter')),
-                    next_attempt_at REAL NOT NULL,
-                    lease_until REAL,
-                    payload_json TEXT NOT NULL,
-                    integrity_sha256 TEXT NOT NULL,
-                    PRIMARY KEY(tenant_id, job_id),
-                    FOREIGN KEY(tenant_id, source_id)
-                        REFERENCES sources(tenant_id, source_id)
-                );
+                {_JOB_TABLE_SQL.format(name='jobs')}
                 CREATE INDEX IF NOT EXISTS jobs_claim
                     ON jobs(tenant_id, state, next_attempt_at, lease_until);
                 CREATE TABLE IF NOT EXISTS reports(
@@ -924,13 +924,26 @@ class PrivacyDataDiscoveryStore:
                     PRIMARY KEY(tenant_id, sequence)
                 );
                 INSERT OR IGNORE INTO metadata(key,value)
-                    VALUES('schema_version','1');
+                    VALUES('schema_version','2');
                 COMMIT;
                 """
             )
             version = connection.execute(
                 "SELECT value FROM metadata WHERE key='schema_version'"
             ).fetchone()
+            if version is not None and version["value"] == "1":
+                # No native table references jobs. Rebuild only its closed state
+                # constraint atomically; retained payloads, receipts and digests
+                # remain byte-for-byte intact on installed V1 databases.
+                self._begin(connection)
+                connection.execute(_JOB_TABLE_SQL.format(name="jobs_v2"))
+                connection.execute("INSERT INTO jobs_v2 SELECT * FROM jobs")
+                connection.execute("DROP TABLE jobs")
+                connection.execute("ALTER TABLE jobs_v2 RENAME TO jobs")
+                connection.execute("CREATE INDEX jobs_claim ON jobs(tenant_id,state,next_attempt_at,lease_until)")
+                connection.execute("UPDATE metadata SET value='2' WHERE key='schema_version'")
+                connection.commit()
+                version = connection.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
             if version is None or version["value"] != str(SCHEMA_VERSION):
                 raise PrivacyDataDiscoveryIntegrityError(
                     "privacy discovery database schema is unsupported"
@@ -1781,24 +1794,96 @@ class PrivacyDataDiscoveryStore:
                     payload["revision"] = int(payload["revision"]) + 1
                     self._update_job_row(connection, tenant, payload)
                     continue
-                payload["state"] = "leased"
-                payload["attempts"] = int(payload["attempts"]) + 1
-                payload["lease_owner"] = worker
-                payload["lease_until"] = moment + lease_for
-                payload["revision"] = int(payload["revision"]) + 1
-                digest = self._update_job_row(connection, tenant, payload)
-                self._audit(
-                    connection,
-                    tenant,
-                    "scan_leased",
-                    str(payload["job_id"]),
-                    worker,
-                    {"attempt": payload["attempts"]},
-                    moment,
-                )
+                digest = self._lease_job(connection, tenant, payload, worker, moment, lease_for)
                 claimed.append(self._job_from(payload, digest))
             connection.commit()
         return tuple(claimed)
+
+    def _lease_job(self, connection, tenant, payload, worker, moment, lease_for):
+        """The shared physical lease writer for a batch and a reviewed single scan."""
+        payload.update(state="leased", attempts=int(payload["attempts"]) + 1,
+                       lease_owner=worker, lease_until=moment + lease_for,
+                       revision=int(payload["revision"]) + 1)
+        digest = self._update_job_row(connection, tenant, payload)
+        self._audit(connection, tenant, "scan_leased", str(payload["job_id"]), worker,
+                    {"attempt": payload["attempts"]}, moment)
+        return digest
+
+    def claim_job(self, tenant_id: str, job_id: str, *, expected_revision: int,
+                  expected_source_revision: int, worker_id: str, idempotency_key: str,
+                  before_write=None) -> tuple[ScanJob, bool]:
+        """Claim exactly one reviewed queued job once; repeats only read its original."""
+        tenant, job, worker = _tenant_id(tenant_id), _opaque(job_id, "job_id"), _opaque(worker_id, "worker_id")
+        expected = _positive_int(expected_revision, "expected_revision", 2**31 - 1)
+        source_expected = _positive_int(expected_source_revision, "expected_source_revision", 2**31 - 1)
+        request = {"action": "claim_scan", "job_id": job, "worker_id": worker,
+                   "expected_revision": expected, "expected_source_revision": source_expected}
+        with self._connect() as connection:
+            self._begin(connection)
+            request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
+            if operation is not None:
+                connection.commit()
+                return self.get_job(tenant, job), False
+            row = connection.execute("SELECT * FROM jobs WHERE tenant_id=? AND job_id=?", (tenant, job)).fetchone()
+            if row is None:
+                raise PrivacyDataDiscoveryNotFound("scan job does not exist for tenant")
+            payload = self._row_payload(row, "job")
+            self._verify_job_indexes(row, payload)
+            moment = _finite_time(self._clock(), "now")
+            if payload["state"] != "queued" or int(payload["revision"]) != expected:
+                raise PrivacyDataDiscoveryConflict("This scan changed or already started. Read its original before another decision.")
+            if float(payload["next_attempt_at"]) > moment or int(payload["attempts"]) >= int(payload["max_attempts"]):
+                raise PrivacyDataDiscoveryConflict("This scan is waiting for its retry time or has used its attempts. Refresh the scan before continuing.")
+            source_row = connection.execute("SELECT * FROM sources WHERE tenant_id=? AND source_id=?",
+                (tenant, payload["source_id"])).fetchone()
+            if source_row is None:
+                raise PrivacyDataDiscoveryIntegrityError("job source is missing")
+            source = self._row_payload(source_row, "source")
+            if source["state"] != "active" or int(source["revision"]) != source_expected:
+                raise PrivacyDataDiscoveryConflict("This source changed or was paused. Review its current selection before scanning.")
+            if before_write is not None:
+                before_write()
+            lease_for = min(_MAX_LEASE_SECONDS, float(payload["limits"]["max_seconds"]) + 60)
+            digest = self._lease_job(connection, tenant, payload, worker, moment, lease_for)
+            self._record_operation(connection, tenant, idempotency_key, request_sha, "job", job)
+            connection.commit()
+        return self._job_from(payload, digest), True
+
+    def cancel_job(self, tenant_id: str, job_id: str, *, expected_revision: int,
+                   actor_ref: str, idempotency_key: str, before_write=None) -> ScanJob:
+        """Cancel only an exact queued scan; never relabel running work as cancelled."""
+        tenant, job, actor = _tenant_id(tenant_id), _opaque(job_id, "job_id"), _opaque(actor_ref, "actor_ref")
+        expected = _positive_int(expected_revision, "expected_revision", 2**31 - 1)
+        request = {"action": "cancel_scan", "job_id": job, "actor_ref": actor, "expected_revision": expected}
+        with self._connect() as connection:
+            self._begin(connection)
+            request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
+            if operation is not None:
+                connection.commit()
+                return self.get_job(tenant, job)
+            row = connection.execute("SELECT * FROM jobs WHERE tenant_id=? AND job_id=?", (tenant, job)).fetchone()
+            if row is None:
+                raise PrivacyDataDiscoveryNotFound("scan job does not exist for tenant")
+            payload = self._row_payload(row, "job")
+            self._verify_job_indexes(row, payload)
+            if payload["state"] != "queued" or int(payload["revision"]) != expected:
+                raise PrivacyDataDiscoveryConflict("This scan changed or already started. Refresh its current state before cancelling.")
+            if before_write is not None:
+                before_write()
+            moment = _finite_time(self._clock(), "now")
+            payload.update(state="cancelled", lease_owner=None, lease_until=None,
+                           last_error_code="operator_cancelled", revision=expected + 1)
+            digest = self._update_job_row(connection, tenant, payload)
+            self._record_operation(connection, tenant, idempotency_key, request_sha, "job", job)
+            self._audit(connection, tenant, "scan_cancelled", job, actor, {"revision": expected + 1}, moment)
+            connection.commit()
+        return self._job_from(payload, digest)
+
+    def report_for_job(self, tenant_id: str, job_id: str) -> ScanReport | None:
+        tenant, job = _tenant_id(tenant_id), _opaque(job_id, "job_id")
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM reports WHERE tenant_id=? AND job_id=?", (tenant, job)).fetchone()
+        return self._report_from(self._row_payload(row, "report"), row["integrity_sha256"]) if row else None
 
     def fail_job(
         self,
@@ -1959,6 +2044,7 @@ class PrivacyDataDiscoveryStore:
         evidence_key_fingerprint: str | None = None,
         source_scope_sha256: str | None = None,
         expected_source_sha256: str | None = None,
+        before_write=None,
     ) -> ScanReport:
         tenant = _tenant_id(tenant_id)
         job = _opaque(job_id, "job_id")
@@ -2043,6 +2129,8 @@ class PrivacyDataDiscoveryStore:
                 "source_scope_sha256": source_scope_sha256,
             }
             report_digest = _sha256(report_payload)
+            if before_write is not None:
+                before_write()
             connection.execute(
                 "INSERT INTO reports VALUES(?,?,?,?,?,?)",
                 (
@@ -3061,7 +3149,7 @@ class PrivacyDataDiscoveryCoordinator:
                     ):
                         truncations.append("finding_limit")
                         return records, 0, byte_count, detections, truncations, errors
-        except PrivacyDataDiscoveryValidationError:
+        except PrivacyDataDiscoveryError:
             raise
         except Exception as exc:
             raise PrivacyDataDiscoveryAdapterError(
@@ -3140,7 +3228,7 @@ class PrivacyDataDiscoveryCoordinator:
                 ):
                     truncations.append("finding_limit")
                     break
-        except PrivacyDataDiscoveryValidationError:
+        except PrivacyDataDiscoveryError:
             raise
         except Exception as exc:
             raise PrivacyDataDiscoveryAdapterError(
@@ -3148,7 +3236,8 @@ class PrivacyDataDiscoveryCoordinator:
             ) from exc
         return 0, files, byte_count, detections, truncations, errors[:_MAX_ERRORS]
 
-    def execute_job(self, job: ScanJob, *, worker_id: str) -> ScanReport:
+    def execute_job(self, job: ScanJob, *, worker_id: str, expected_source_sha256: str | None = None,
+                    before_effect=None) -> ScanReport:
         """Execute one already-leased job; raw provider content is never returned."""
 
         worker = _opaque(worker_id, "worker_id")
@@ -3162,6 +3251,8 @@ class PrivacyDataDiscoveryCoordinator:
         source = self.store.get_source(job.tenant_id, job.source_id)
         if source.state != "active":
             raise PrivacyDataDiscoveryConflict("source is not active")
+        if expected_source_sha256 is not None and source.integrity_sha256 != expected_source_sha256:
+            raise PrivacyDataDiscoveryConflict("This source changed after review. No report was committed.")
         if source.credential_env.startswith("connection:") or source.evidence_key_env.startswith("evidence-key:"):
             from .paths import current_tenant_id_strict
 
@@ -3184,6 +3275,8 @@ class PrivacyDataDiscoveryCoordinator:
         detector = PersonalDataDetector(evidence_key)
         started = _finite_time(self._clock(), "started_at")
         deadline = started + job.limits.max_seconds
+        if before_effect is not None:
+            before_effect()
         if source.kind == "structured":
             result = self._scan_structured(source, job, detector, deadline)
         elif source.kind == "unstructured":
@@ -3199,6 +3292,8 @@ class PrivacyDataDiscoveryCoordinator:
         finished = _finite_time(self._clock(), "finished_at")
         if finished > deadline and "time_limit" not in truncations:
             truncations.append("time_limit")
+        if before_effect is not None:
+            before_effect()
         return self.store._complete_job(
             job.tenant_id,
             job.job_id,
@@ -3214,6 +3309,7 @@ class PrivacyDataDiscoveryCoordinator:
             evidence_key_fingerprint=hmac.new(evidence_key, b"lightwork-discovery-comparison-key-v1", hashlib.sha256).hexdigest(),
             source_scope_sha256=_sha256({"provider": source.provider, "origin": source.origin, "resource_ref": source.resource_ref}),
             expected_source_sha256=source.integrity_sha256,
+            before_write=before_effect,
         )
 
     def run_once(
@@ -3225,7 +3321,12 @@ class PrivacyDataDiscoveryCoordinator:
         lease_seconds: float = 600.0,
         now: float | None = None,
     ) -> DiscoveryRunResult:
-        """Claim and execute a bounded batch, retrying only sanitized failures."""
+        """Claim a bounded batch; interrupted jobs never prevent independent work.
+
+        A changed source is retried only while this worker still owns the lease.
+        Lost leases are reported from current retained state without mutating
+        another worker's job or claiming that its scan completed.
+        """
 
         tenant = _tenant_id(tenant_id)
         worker = _opaque(worker_id, "worker_id")
@@ -3238,41 +3339,35 @@ class PrivacyDataDiscoveryCoordinator:
         )
         completed: list[ScanReport] = []
         failed: list[ScanJob] = []
+        interrupted: list[ScanJob] = []
         for job in jobs:
             try:
                 completed.append(self.execute_job(job, worker_id=worker))
-            except PrivacyDataDiscoveryConfigError:
-                failed.append(
-                    self.store.fail_job(
-                        tenant,
-                        job.job_id,
-                        worker_id=worker,
-                        error_code="credential_unavailable",
+            except PrivacyDataDiscoveryLeaseLost:
+                interrupted.append(self.store.get_job(tenant, job.job_id))
+            except (PrivacyDataDiscoveryConfigError, PrivacyDataDiscoveryAdapterError,
+                    PrivacyDataDiscoveryValidationError, PrivacyDataDiscoveryConflict) as exc:
+                if isinstance(exc, PrivacyDataDiscoveryConfigError):
+                    error_code = "credential_unavailable"
+                elif isinstance(exc, PrivacyDataDiscoveryAdapterError):
+                    error_code = "adapter_error"
+                elif isinstance(exc, PrivacyDataDiscoveryValidationError):
+                    error_code = "provider_contract_invalid"
+                else:
+                    error_code = "source_changed"
+                try:
+                    failed.append(
+                        self.store.fail_job(tenant, job.job_id, worker_id=worker,
+                                            error_code=error_code)
                     )
-                )
-            except PrivacyDataDiscoveryAdapterError:
-                failed.append(
-                    self.store.fail_job(
-                        tenant,
-                        job.job_id,
-                        worker_id=worker,
-                        error_code="adapter_error",
-                    )
-                )
-            except PrivacyDataDiscoveryValidationError:
-                failed.append(
-                    self.store.fail_job(
-                        tenant,
-                        job.job_id,
-                        worker_id=worker,
-                        error_code="provider_contract_invalid",
-                    )
-                )
+                except PrivacyDataDiscoveryLeaseLost:
+                    interrupted.append(self.store.get_job(tenant, job.job_id))
         return DiscoveryRunResult(
             tenant_id=tenant,
             worker_id=worker,
             completed_reports=tuple(completed),
             failed_jobs=tuple(failed),
+            interrupted_jobs=tuple(interrupted),
         )
 
 
