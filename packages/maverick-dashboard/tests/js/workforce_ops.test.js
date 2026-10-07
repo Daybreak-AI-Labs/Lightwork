@@ -29,9 +29,9 @@ function defaults(admin) {
       id: "a".repeat(32), specialist: "finance_ap", revision: 1, task: "Could these invoices be duplicates?",
       includes: ["duplicate"], excludes: ["payment sent"], refusal: false, citation: false
     }], runs: [] },
-    "/api/v1/workforce-ops/test-suite/customer/run": { job: { id: "abcdef0123456789", state: "done", can_stop: false,
+    "/api/v1/workforce-ops/test-suite/customer/run": { job: { id: "abcdef0123456789", kind: "customer_answer_check", state: "done", can_stop: false,
       result: { run: { state: "done", passed: 1, total: 1 } } } },
-    "/api/v1/workforce-ops/setup-check": { job: { id: "0123456789abcdef", state: "done", can_stop: false, result: {  // pragma: allowlist secret
+    "/api/v1/workforce-ops/setup-check": { job: { id: "0123456789abcdef", kind: "setup_check", state: "done", can_stop: false, result: {  // pragma: allowlist secret
       specialists: 40, must_fix: 1, could_improve: 2, more: 0, findings: [{ specialist: "Invoice drafter",
         must_fix: ["It has no limit on how risky its actions may be."], could_improve: [], technical: ["max_risk is unset"] }] } } },
     "/api/v1/workforce-ops/upcoming": { days: 30, tasks: [
