@@ -200,7 +200,7 @@ test("the register loads on open with plain rows and working row buttons", async
   await h.settle();
   assert.equal(h.$("grcs-operations").disabled, false);
   assert.equal(h.$("grcs-status-mark").textContent, "Ready to build");
-  assert.match(h.$("grcs-readiness-detail").textContent, /will not update questionnaires/);
+  assert.match(h.$("grcs-readiness-detail").textContent, /questionnaire builder below to bring supported form questions into a reviewed questionnaire\. Evidence checks and reports need their own supported destination/);
   const text = h.$("grcs-version-list").textContent;
   assert.match(text, /Supplier review/);
   assert.match(text, /Draft/);
