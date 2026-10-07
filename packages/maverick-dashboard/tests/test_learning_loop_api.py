@@ -439,11 +439,14 @@ def test_test_case_check_runs_in_the_background_and_removal_needs_confirmation(c
         {"goal": "hard task", "discriminative": True, "baseline_rate": 0.5, "age_days": 3.0}])
     removed: list = []
     monkeypatch.setattr(ev, "retire_corpus_cases", lambda path, key, goals: removed.append((key, goals)) or len(goals))
-    kept = _finished(client, client.post(API + "/corpus-quality", json={}))["result"]
-    assert kept["removed"] == 0 and len(kept["cases"]) == 2 and removed == []
-    assert client.post(API + "/corpus-quality", json={"remove_weak": True}).status_code == 422
-    out = _finished(client, client.post(API + "/corpus-quality", json={"remove_weak": True, "confirm": True}))
-    assert out["result"]["removed"] == 1 and removed[0][1] == ["easy task"]
+    # Checking now runs from Check saved learning questions on Learned, after a
+    # complete review; checking never
+    # removes a question. The old check-and-delete shortcut refuses every form.
+    for body in ({}, {"remove_weak": True}, {"remove_weak": True, "confirm": True}):
+        refused = client.post(API + "/corpus-quality", json=body)
+        assert refused.status_code == 409
+        assert "Checking never removes a question" in refused.json()["detail"]
+    assert removed == []
 
 
 def test_learned_page_shows_the_new_sections_in_plain_words(client):
