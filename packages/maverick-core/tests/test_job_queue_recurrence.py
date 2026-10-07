@@ -198,7 +198,11 @@ def test_timezone_and_execution_identity_survive_advance(tmp_path):
 def test_concurrency_deferral_does_not_fork_the_recurring_schedule(tmp_path, monkeypatch):
     q = JobQueue(tmp_path / "jobs.db")
     jid = q.enqueue("run_goal", {"__cron__": "0 0 1 1 *", "goal_id": 42}, run_at=0)
-    monkeypatch.setattr("maverick.runner.run_goal_in_thread", lambda *a, **kw: None)
+    from maverick.runner import GoalRunUnavailable
+    # The worker asks for the detailed outcome: only an explicit slot refusal
+    # defers (a bare None is an unconfirmed outcome and stops the job).
+    monkeypatch.setattr("maverick.runner.run_goal_in_thread",
+                        lambda *a, **kw: GoalRunUnavailable("concurrency_slot"))
     worker = Worker(q)
     assert worker.run_once()
     parent = q.get(jid)

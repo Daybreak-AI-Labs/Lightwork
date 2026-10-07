@@ -202,6 +202,7 @@ def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch
     assert seen["run_kwargs"] == {
         "channel": "api", "user_id": "alice",
         "acquire_timeout": worker_mod._QUEUE_GOAL_ACQUIRE_TIMEOUT,
+        "detailed_outcome": True,  # a slot refusal is told apart from an unknown result
     }
 
 
