@@ -140,6 +140,7 @@ function harness(file, functionName, args) {
       querySelectorAll() { return []; },
       querySelector() { return element(`${id}:query`); },
       replaceChildren() {},
+      add() {},
       appendChild() {},
       append() {},
       setAttribute() {},
@@ -176,6 +177,8 @@ function harness(file, functionName, args) {
     },
     // agents.html watches its drafts list for changes; nothing changes here.
     MutationObserver: class { observe() {} disconnect() {} },
+    // agents.html builds its AI model choices as <option> elements.
+    Option: class { constructor(text, value) { this.text = text; this.value = value; this.disabled = false; } },
     window: {
       confirm() { return true; },
       // The shell's fetch helper, sending through the context's fetch.
