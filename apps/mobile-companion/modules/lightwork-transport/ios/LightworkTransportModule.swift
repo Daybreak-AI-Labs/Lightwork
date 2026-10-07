@@ -76,7 +76,7 @@ public final class LightworkTransportModule: Module {
       var request = URLRequest(url: target)
       request.httpMethod = method; request.httpBody = method == "POST" ? (body ?? "").data(using: .utf8) : nil
       for (key, value) in headers {
-        guard ["accept", "authorization", "content-type", "origin", "x-lightwork-offline-policy"].contains(key.lowercased()),
+        guard ["accept", "authorization", "content-type", "origin", "x-lightwork-expected-tenant", "x-lightwork-offline-policy"].contains(key.lowercased()),
           value.utf8.count <= 16384, !value.contains("\r"), !value.contains("\n") else {
           promise.reject("E_REQUEST", "Request unavailable"); return
         }

@@ -33,7 +33,7 @@ class LightworkTransportModule : Module() {
         require(method in setOf("GET", "POST") && id.length in 1..80 && (body?.toByteArray()?.size ?: 0) <= 65536)
         val builder = Request.Builder().url(url).method(method, if (method == "POST") (body ?: "").toRequestBody() else null)
         for ((key, value) in headers) {
-          require(key.lowercase() in setOf("accept", "authorization", "content-type", "origin", "x-lightwork-offline-policy"))
+          require(key.lowercase() in setOf("accept", "authorization", "content-type", "origin", "x-lightwork-expected-tenant", "x-lightwork-offline-policy"))
           require(value.length <= 16384 && !value.contains('\r') && !value.contains('\n'))
           builder.header(key, value)
         }
