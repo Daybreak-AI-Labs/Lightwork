@@ -179,7 +179,7 @@ def test_native_key_rotation_does_not_freeze_a_carried_forward_address(monkeypat
     from maverick_dashboard import settings_store
 
     settings_store.rotate_provider(
-        "openai_compatible", api_key="replacement-5678", base_url=_ENV_URL,
+        "openai_compatible", api_key="replacement-5678", base_url=_ENV_URL,  # pragma: allowlist secret -- test value
     )
     assert "base_url" not in settings_store.load_overlay()["providers"]["openai_compatible"]
     assert config.provider_configuration_state("openai_compatible")["base_url_source"].startswith("environment:")
@@ -193,7 +193,7 @@ def test_native_key_rotation_does_not_freeze_a_carried_forward_address(monkeypat
 def test_provider_address_sign_in_material_is_not_displayed_or_prefilled(monkeypatch):
     _env_openai_compatible(monkeypatch)
     monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL",
-                       "https://user:private-password@llm.example.test/v1?token=private-token#private-fragment")
+                       "https://user:private-password@llm.example.test/v1?token=private-token#private-fragment")  # pragma: allowlist secret -- test value
     from maverick import config
 
     config.reset_config_cache()
@@ -216,7 +216,7 @@ def test_provider_address_sign_in_material_is_not_displayed_or_prefilled(monkeyp
 
 
 @pytest.mark.parametrize("address", [
-    "https://user:private-password@llm.example.test/v1",
+    "https://user:private-password@llm.example.test/v1",  # pragma: allowlist secret -- test value
     "https://llm.example.test/v1?token=private-token",
     "http://localhost:bad-port/v1",
 ])
@@ -230,7 +230,7 @@ def test_provider_rejects_an_unusable_address_before_rotating_the_key(monkeypatc
         headers={"Origin": "http://testserver"},
     )
     response = client.post("/settings/providers", data={
-        "provider": "openai_compatible", "api_key": "new-key-5678", "base_url": address,
+        "provider": "openai_compatible", "api_key": "new-key-5678", "base_url": address,  # pragma: allowlist secret -- test value
     }, follow_redirects=False)
     assert response.status_code == 400, response.text
     assert "use the key field for access" in response.json()["detail"]

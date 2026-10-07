@@ -9,7 +9,7 @@ test('an interrupted signing-secret publication is recovered without republishin
   await page.goto('/settings#settings-integrations');
   const panel=page.locator('#webhook-change-recovery');await expect(panel).toBeVisible();
   await expect(page.locator('#wh-secret')).toBeEnabled();
-  await arm('interrupt');const secret='synthetic-browser-original-rotation';
+  await arm('interrupt');const secret='synthetic-browser-original-rotation';  // pragma: allowlist secret -- synthetic test value
   await page.locator('#wh-secret').fill(secret);await page.locator('#wh-confirm').check();await page.locator('#wh-save').click();
   await expect(page.locator('#wh-state')).toContainText('not confirmed');
   await expect.poll(async()=> (await (await request.get(base)).json()).records.filter(row=>row.can_reconcile).length).toBe(1);
@@ -44,7 +44,7 @@ test('an interrupted signing-secret publication is recovered without republishin
   // A native confirmation outage rolls back exact old bytes. Copilot records
   // the old state truthfully, rather than claiming the attempted key was active.
   await arm('rollback');const reviewed=await (await request.get('/settings/webhooks')).json();
-  const failed=await request.post('/settings/webhooks',{form:{action:'set',secret:'synthetic-browser-rolled-back',expected_generation:reviewed.expected_generation}});
+  const failed=await request.post('/settings/webhooks',{form:{action:'set',secret:'synthetic-browser-rolled-back',expected_generation:reviewed.expected_generation}});  // pragma: allowlist secret -- synthetic test value
   expect(failed.status()).toBe(503);
   choices=await (await request.get(base)).json();row=choices.records.find(item=>item.can_reconcile);expect(row.summary).toContain('exact previous settings');
   await page.reload();await page.locator('#mv-copilot-fab').click();
@@ -59,7 +59,7 @@ test('an interrupted signing-secret publication is recovered without republishin
   // be a missing audit row. The page explicitly records a NEW state check.
   await page.locator('#mv-copilot-close').click();await arm('receipt');
   const receiptBefore=await (await request.get('/settings/webhooks')).json();
-  const accepted=await request.post('/settings/webhooks',{form:{action:'set',secret:'synthetic-browser-receipt-loss',expected_generation:receiptBefore.expected_generation}});
+  const accepted=await request.post('/settings/webhooks',{form:{action:'set',secret:'synthetic-browser-receipt-loss',expected_generation:receiptBefore.expected_generation}});  // pragma: allowlist secret -- synthetic test value
   expect(accepted.ok(),await accepted.text()).toBeTruthy();expect((await accepted.json()).history_pending).toBe(true);
   choices=await (await request.get(base)).json();row=choices.records.find(item=>item.can_reconcile);expect(row.summary).toContain('earlier completion entry may already exist');
   await panel.getByRole('button',{name:'Refresh saved changes',exact:true}).click();await panel.getByRole('combobox').selectOption(row.id);
@@ -70,7 +70,7 @@ test('an interrupted signing-secret publication is recovered without republishin
   // A newly active external owner cannot be overridden or treated as evidence
   // that the original publication remains effective.
   await arm('interrupt');const before=await (await request.get('/settings/webhooks')).json();
-  await request.post('/settings/webhooks',{form:{action:'set',secret:'synthetic-browser-stale-owner',expected_generation:before.expected_generation}});
+  await request.post('/settings/webhooks',{form:{action:'set',secret:'synthetic-browser-stale-owner',expected_generation:before.expected_generation}});  // pragma: allowlist secret -- synthetic test value
   choices=await (await request.get(base)).json();row=choices.records.find(item=>item.can_reconcile);await arm('external');
   const stale=await request.post(base+'/'+row.id+'/check',{data:{context:choices.context,review:row.review,confirm:true}});expect(stale.status()).toBe(409);
   const after=await (await request.get(base)).json();expect(after.records.find(item=>item.id===row.id).can_reconcile).toBe(false);
