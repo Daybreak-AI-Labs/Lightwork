@@ -17,7 +17,12 @@ function fixture(forms, changing = false) {
     published: true, inferred_tool: "web_search", tool: "web_search", approval_added: true,
     fields: [{name: "query", label: "Query", type: "string", required: true}],
     sources: [{key: "customer", label: "Customer name", origin: "input"}]};
-  const context = {window: {mvFetchJSON: fetchHelpers(() => context.fetch).mvFetchJSON}, encodeURIComponent, Number, Error,
+  // The module clears private review drafts when the account or workspace changes.
+  const listeners = {};
+  const context = {window: {mvFetchJSON: fetchHelpers(() => context.fetch).mvFetchJSON,
+      addEventListener(name, callback) { listeners[name] = callback; }},
+    document: {addEventListener(name, callback) { listeners[name] = callback; }},
+    encodeURIComponent, Number, Error,
     async fetch(url, options = {}) {
       calls.push([url, options]);
       let body;
@@ -33,7 +38,7 @@ function fixture(forms, changing = false) {
   };
   context.window.mvConfirm = async (message) => {confirmations.push(message); return true;};
   vm.runInNewContext(script, context);
-  return {api: context.window.LightworkFlowRewrite, calls, prompts, confirmations};
+  return {api: context.window.LightworkFlowRewrite, calls, prompts, confirmations, listeners};
 }
 
 test("review binds a named flow input and sends the current version only after confirmation", async () => {
