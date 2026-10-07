@@ -18,7 +18,7 @@
 
   <div class="section-head"><h2 id="speed-results">Each page at the 75th percentile</h2></div>
   <div class="panel">
-    <p class="muted">Three in four visits were at least this fast. A page is good when it shows its main content within {{ (report.thresholds.lcp / 1000) | round(1) }} seconds, responds to a click or key press within {{ report.thresholds.inp | int }} milliseconds, and its layout moves less than {{ report.thresholds.cls }} (the web.dev Core Web Vitals). A page needs at least {{ report.minimum }} measured visits before it is judged. About {{ (report.sample_rate * 100) | int }}% of visits are measured.</p>
+    <p class="muted">Three in four visits were at least this fast. A page is good when it shows its main content within {{ (report.thresholds.lcp / 1000) | round(1) }} seconds and responds to a click or key press within {{ report.thresholds.inp | int }} milliseconds. Its layout must also move less than {{ report.thresholds.cls }} (the web.dev Core Web Vitals). A page needs at least {{ report.minimum }} measured visits before it is judged. About {{ (report.sample_rate * 100) | int }}% of visits are measured.</p>
     {% if not report.rows %}
       {{ empty_state('No visits measured yet', 'When page speed measurement is on, a sample of visits is measured and each page appears here.', compact=true) }}
     {% else %}

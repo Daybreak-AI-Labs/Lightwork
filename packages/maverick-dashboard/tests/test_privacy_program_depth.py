@@ -226,6 +226,9 @@ def test_privacy_page_renders_program_depth_ui():
 def test_review_popout_carries_lifecycle_controls():
     html = client.get("/privacy").text
     assert 'id="arv-accept"' in html and 'id="arv-trigger"' in html
-    assert "/accept-risk" in html and "/trigger-review" in html
-    assert "/api/v1/assess/trend" in html   # trend line in the pop-out
-    assert "review order unknown" in html
+    # The pop-out's code is a deferred static file the page loads.
+    assert "/static/lightwork-assessment-review.js" in html
+    script = client.get("/static/lightwork-assessment-review.js").text
+    assert "/accept-risk" in script and "/trigger-review" in script
+    assert "/api/v1/assess/trend" in script   # trend line in the pop-out
+    assert "review order unknown" in script
