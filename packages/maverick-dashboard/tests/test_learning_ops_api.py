@@ -383,12 +383,18 @@ def test_test_cases_find_download_preview_and_add(client, monkeypatch, tmp_path,
     pv = client.post(f"{LO}/self-harness/test-cases/import/preview", content=upload).json()
     assert pv["added"] == 1 and pv["keys"][0]["now"] == 1 and pv["keys"][0]["after"] == 2
     assert json.loads((tmp_path / "corpus.json").read_text())["claude-x"][-1]["goal"] == "old"
-    assert client.post(f"{LO}/self-harness/test-cases/import", content=upload).status_code == 422
-    assert client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=b"[1, 2]").status_code == 422
+    review = {"X-Lightwork-Import-Review": pv["token"]}
+    # Importing needs both the sealed review of this exact file and an explicit confirmation.
+    assert client.post(f"{LO}/self-harness/test-cases/import", content=upload).status_code == 409
+    assert client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=upload).status_code == 409
+    assert client.post(f"{LO}/self-harness/test-cases/import", content=upload, headers=review).status_code == 409
+    assert client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=b"[1, 2]",
+                       headers=review).status_code == 422
     assert client.post(f"{LO}/self-harness/test-cases/import/preview",
                        content=b"{" + b" " * (6 * 1024 * 1024) + b"}").status_code == 413
-    added = client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=upload)
-    assert added.json() == {"cases": 1, "replaced": False}
+    assert json.loads((tmp_path / "corpus.json").read_text())["claude-x"][-1]["goal"] == "old"
+    added = client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=upload, headers=review).json()
+    assert (added["confirmed"], added["cases"], added["replaced"], added["operation"]) == (True, 1, False, pv["operation"])
     assert [c["goal"] for c in json.loads((tmp_path / "corpus.json").read_text())["claude-x"]] == ["old", "new"]
     assert [r["action"] for r in audit_rows] == [
         "self_harness_corpus_harvest", "self_harness_corpus_export", "self_harness_corpus_import"]
@@ -741,7 +747,10 @@ def test_test_case_location_is_checked_on_the_server_and_then_used(client):
     assert _save_setting(client, [{"id": "self_harness.eval_corpus", "value": target}]).status_code == 200
     assert client.get(f"{LO}/self-harness/plan").json()["test_cases_set_up"] is True
     upload = json.dumps({"claude-x": [{"goal": "new", "expected": "y"}]}).encode()
-    assert client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=upload).json()["cases"] == 1
+    token = client.post(f"{LO}/self-harness/test-cases/import/preview", content=upload).json()["token"]
+    added = client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=upload,
+                        headers={"X-Lightwork-Import-Review": token}).json()
+    assert added["confirmed"] is True and added["cases"] == 1
     assert json.loads(Path(target).read_text())["claude-x"][0]["goal"] == "new"
 
 
