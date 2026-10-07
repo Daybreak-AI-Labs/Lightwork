@@ -8,6 +8,11 @@ const {shell} = require('./_shell');
 const root = path.resolve(__dirname, '../../maverick_dashboard');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n?/g, '\n');
 const template = read('templates/chat_goal.html');
+// The answer panel's own feedback block, as the server renders it for a person who can operate.
+const panelTemplate = read('templates/_chat_answer_panel.html');
+const feedbackAt = panelTemplate.indexOf('<div id="feedback"');
+const feedbackMarkup = panelTemplate.slice(feedbackAt, panelTemplate.indexOf('</div>{% endif %}', feedbackAt) + 6)
+  .replace(/\{#[\s\S]*?#\}/g, '').replace(/\{%[\s\S]*?%\}/g, '').replace(/\{\{[\s\S]*?\}\}/g, 'x');
 const projectionScript = read('static/lightwork-answer-panel.js');
 const shareScript = read('static/lightwork-deliverable-sharing.js');
 const historyScript = read('static/lightwork-thread-history.js');
@@ -27,7 +32,7 @@ function response(html, context = 'scope') {
 }
 function actionMarkup(answer = '## Saved answer\n\n- First step') {
   return `<div id="result-section"><div id="result">Rendered answer</div></div>
-    <div id="feedback"><button id="feedback-up"></button><button id="feedback-down"></button><span id="feedback-msg"></span></div>
+    ${feedbackMarkup}
     <textarea id="saved-answer-source" readonly hidden>${answer}</textarea><textarea id="edit-text">Unsaved changes</textarea>
     <button id="copy-result">Copy answer</button><button id="print-result">Print conversation</button>
     <button id="share-open" aria-expanded="false">Share</button><span id="answer-action-msg"></span>`;
@@ -55,12 +60,18 @@ async function projectionHarness(content = '<div id="result">Live answer</div>',
   window.fetch = async (url, options = {}) => {
     calls.push({url, options});
     if (url.endsWith('/feedback')) return {ok: true, json: async () => ({})};
+    if (url.startsWith('/api/v1/goals/7/answer-feedback')) return {ok: true, status: 200, redirected: false,
+      json: async () => ({context: 'scope', feedback: null, eligible: false})};
     assert.equal(url, '/chat/goal/7/answer-panel', 'refresh fetches the authorized result projection');
     return typeof projection === 'function' ? projection(url, options) : projection;
   };
-  shell(window);
-  window.eval(projectionScript);
-  await settle();
+  // A page script that throws must not leave this window (and its timers)
+  // open: the test would fail, then the run would never finish.
+  try {
+    shell(window);
+    window.eval(projectionScript);
+    await settle();
+  } catch (error) { window.close(); throw error; }
   return {dom, window, doc: window.document, copied, calls, get prints() {return prints;},
     setProjection(value) {projection = value;}, refresh() {return window.mvRefreshAnswerPanel();}};
 }
