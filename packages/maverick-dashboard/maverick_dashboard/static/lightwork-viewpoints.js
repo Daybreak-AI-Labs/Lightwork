@@ -63,8 +63,8 @@
   function showAnswers(data) {
     const verdict = make('section'); verdict.className = 'cs-viewpoints__verdict';
     verdict.append(make('h3', 'Verdict'), make('p', VERDICT[data.verdict]));
-    if (data.reason) {const line = make('p', 'Why: '); line.append(make('span', data.reason, true)); verdict.append(line);}
-    if (data.key_point) {const line = make('p', 'The point that decided it: '); line.append(make('span', data.key_point, true)); verdict.append(line);}
+    if (data.reason) {const line = make('p'); line.append(make('span', 'Why:'), ' ', make('span', data.reason, true)); verdict.append(line);}
+    if (data.key_point) {const line = make('p'); line.append(make('span', 'The point that decided it:'), ' ', make('span', data.key_point, true)); verdict.append(line);}
     result.append(verdict);
     for (const side of ['for', 'against']) {
       const turns = data.turns.filter(turn => turn.side === side); if (!turns.length) continue;
@@ -126,7 +126,7 @@
       const row = await request('/review', {...entered, context: current.context, revision: current.revision}); if (started !== generation) return;
       reviewed = row; preview.append(make('h3', 'Review this complete AI request'));
       const fields = make('dl'); row.changes.forEach(change => {fields.append(make('dt', change.label), make('dd', String(change.after), true));}); preview.append(fields);
-      const label = make('label'), check = make('input'); check.type = 'checkbox'; label.append(check, document.createTextNode(' I reviewed the full question, positions, connected model and spending.'));
+      const label = make('label'), check = make('input'); check.type = 'checkbox'; label.append(check, ' ', make('span', 'I reviewed the full question, positions, connected model and spending.'));
       const apply = make('button', 'Start reviewed viewpoints'); apply.type = 'button'; apply.className = 'btn btn--primary'; apply.disabled = true;
       check.addEventListener('change', () => {apply.disabled = busy || !check.checked;});
       apply.addEventListener('click', async () => {
