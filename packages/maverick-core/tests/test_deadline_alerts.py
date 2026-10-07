@@ -168,7 +168,7 @@ def test_alerts_for_record_and_recent(world):
 def test_disabled_sends_nothing(world):
     summary, sent = _run(world, [_deadline(due_in=-DAY)], config=_config(enabled=False))
     assert summary == {"evaluated": 0, "sent": 0, "held_quiet": 0, "already_sent": 0,
-                       "not_sent": 0, "unconfirmed": 0, "alerts": [], "enabled": False} and sent == []
+                       "not_sent": 0, "unconfirmed": 0, "backing_off": 0, "alerts": [], "enabled": False} and sent == []
 
 
 def test_settings_defaults_and_bounds(monkeypatch):
@@ -422,3 +422,124 @@ def test_email_that_never_reached_the_server_is_retried_not_marked_unconfirmed(w
     lost = _cycle(world, [other], None)
     assert lost["unconfirmed"] == 1 and lost["not_sent"] == 0
     assert _cycle(world, [other], None, now=NOW + 3600)["already_sent"] == 1
+
+
+# ---- a channel that never works cannot flood or block the notification layer
+
+def _receipt_rows():
+    from maverick.notification_receipts import DeliveryReceipts
+
+    return DeliveryReceipts()._load()
+
+
+def _configure_ntfy(tmp_path, monkeypatch, *, accepts):
+    """The admin sets an ntfy topic in config.toml; the server accepts or refuses."""
+    from maverick import config, notifications
+
+    (tmp_path / "config.toml").write_text('[notifications]\nbackend = "ntfy"\nntfy_topic = "deadlines"\n',
+                                          encoding="utf-8")
+    config.reset_config_cache()
+    posted = []
+    monkeypatch.setattr(notifications, "_send_ntfy",
+                        lambda title, body, priority, server, topic: posted.append(title) or accepts)
+    return posted
+
+
+def test_400_cycles_with_no_backend_leave_the_delivery_history_alone_then_everything_goes_out(
+        world, tmp_path, monkeypatch):
+    from maverick import notifications
+
+    # A default install: no [notifications] section (ntfy without a topic), receipts on, 3 overdue records.
+    deadlines = [_deadline(record_id=f"D{i}", due_in=-DAY) for i in range(3)]
+    for i in range(400):  # about 4 days of 15-minute cycles
+        assert _cycle(world, deadlines, None, now=NOW + 900 * i)["sent"] == 0
+    assert _receipt_rows() == []
+    assert da.recent_alerts(world=world) == []
+    # The admin configures a working topic: an unrelated notification and all three alerts go out.
+    posted = _configure_ntfy(tmp_path, monkeypatch, accepts=True)
+    assert notifications.notify("hello", async_dispatch=False, batch=False) == 1
+    recovered = _cycle(world, deadlines, None, now=NOW + 900 * 400)
+    assert recovered["sent"] == 3 and recovered["not_sent"] == 0 and len(posted) == 4
+    assert len(_receipt_rows()) == 4
+    assert _cycle(world, deadlines, None, now=NOW + 900 * 401)["already_sent"] == 3
+
+
+def test_a_channel_that_refuses_is_retried_with_a_growing_wait_and_a_bounded_history(world, tmp_path, monkeypatch):
+    from maverick import notifications
+
+    posted = _configure_ntfy(tmp_path, monkeypatch, accepts=False)
+    deadlines = [_deadline(record_id=f"D{i}", due_in=-DAY) for i in range(3)]
+    for i in range(400):
+        _cycle(world, deadlines, None, now=NOW + 900 * i)
+    # 5, 10, 20, 40 minutes, then hourly: about 100 attempts per alert, not 400.
+    assert 3 * 90 <= len(posted) <= 3 * 110
+    assert len(_receipt_rows()) == len(posted) < 400
+    # The topic is fixed later that day: other notifications were never blocked, and the alerts follow.
+    monkeypatch.setattr(notifications, "_send_ntfy", lambda *a: True)
+    assert notifications.notify("hello", async_dispatch=False, batch=False) == 1
+    assert _cycle(world, deadlines, None, now=NOW + 900 * 400 + 3600)["sent"] == 3
+
+
+def test_definite_failures_back_off_5_10_20_40_60_minutes_then_hourly(world):
+    d = _deadline(record_id="B1", due_in=-DAY)
+    attempts = [m for m in range(0, 256, 5)
+                if _cycle(world, [d], lambda body, **kw: 0, now=NOW + 60 * m)["not_sent"]]
+    assert attempts == [0, 5, 15, 35, 75, 135, 195, 255]
+    waiting = _cycle(world, [d], lambda body, **kw: 0, now=NOW + 60 * 260)
+    assert waiting["backing_off"] == 1 and waiting["not_sent"] == 0 and waiting["already_sent"] == 0
+
+
+def test_changing_the_notification_setup_ends_the_wait_at_once(world, tmp_path):
+    d = _deadline(record_id="B2", due_in=-DAY)
+    for m in (0, 5, 15, 35):
+        assert _cycle(world, [d], lambda body, **kw: 0, now=NOW + 60 * m)["not_sent"] == 1
+    assert _cycle(world, [d], lambda body, **kw: 0, now=NOW + 60 * 40)["backing_off"] == 1  # next try at 75
+    (tmp_path / "config.toml").write_text('[notifications]\nbackend = "ntfy"\nntfy_topic = "fixed"\n',
+                                          encoding="utf-8")
+    from maverick import config
+    config.reset_config_cache()
+    sent = _cycle(world, [d], lambda body, **kw: 1, now=NOW + 60 * 45)
+    assert sent["sent"] == 1 and sent["backing_off"] == 0
+
+
+def test_a_recovered_alert_leaves_no_retry_state_and_an_unconfirmed_one_is_not_retried(world, tmp_path):
+    import json
+
+    path = tmp_path / "deadline-alert-retries.json"
+    d = _deadline(record_id="B3", due_in=-DAY)
+    assert _cycle(world, [d], lambda body, **kw: 0)["not_sent"] == 1
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    assert len(entries) == 1 and "B3" not in path.read_text(encoding="utf-8")  # hashed, no record ids
+    assert _cycle(world, [d], lambda body, **kw: 1, now=NOW + 600)["sent"] == 1
+    assert json.loads(path.read_text(encoding="utf-8")) == {}
+    lost = _deadline(record_id="B4", due_in=-DAY)
+
+    def broken(body, **kw):
+        raise ConnectionError("reset after the request was written")
+    assert _cycle(world, [lost], lambda body, **kw: 0)["not_sent"] == 1
+    assert _cycle(world, [lost], broken, now=NOW + 600)["unconfirmed"] == 1
+    assert json.loads(path.read_text(encoding="utf-8")) == {}
+    assert _cycle(world, [lost], lambda body, **kw: 1, now=NOW + 7200)["already_sent"] == 1
+
+
+def test_no_destination_means_no_attempt_and_no_receipt(world, monkeypatch):
+    from maverick import notifications
+
+    monkeypatch.setattr(notifications, "notify", lambda *a, **kw: pytest.fail("nothing is set up to receive it"))
+    outcome = da.deliver("t", "b", urgent=True, recipient="x", notify=None)
+    assert outcome.status == "not_sent" and _receipt_rows() == []
+
+
+def test_the_retry_store_prunes_old_entries_and_stays_bounded(world, tmp_path, monkeypatch):
+    import json
+
+    path = tmp_path / "deadline-alert-retries.json"
+    path.write_text(json.dumps({"old": {"failures": 3, "next_at": 1.0, "setup": "x", "at": NOW - 40 * DAY}}),
+                    encoding="utf-8")
+    assert _cycle(world, [_deadline(record_id="B5", due_in=-DAY)], lambda body, **kw: 0)["not_sent"] == 1
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    assert "old" not in entries and len(entries) == 1
+    monkeypatch.setattr(da, "_RETRY_MAX_ENTRIES", 2)
+    ds = [_deadline(record_id=f"C{i}", due_in=-DAY) for i in range(4)]
+    _cycle(world, ds, lambda body, **kw: 0, now=NOW + 3600)
+    assert len(json.loads(path.read_text(encoding="utf-8"))) == 2

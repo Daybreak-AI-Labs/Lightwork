@@ -367,13 +367,23 @@ def _legacy_url(section: dict, backend: str):
     # Older installers wrote ``webhook_url`` next to a single backend.
     return section.get("webhook_url") if section.get("backend") == backend else None
 
+def _ntfy_topic(cfg: dict) -> str | None:
+    # ``topic`` is what older installers wrote; keep honouring it.
+    return (_resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
+            or os.environ.get("MAVERICK_NTFY_TOPIC"))
+
+
+def _webhook_url(cfg: dict, backend: str) -> str:
+    """The saved or environment webhook URL of a ``discord`` / ``slack`` backend."""
+    env_name = "DISCORD_NOTIFY_WEBHOOK_URL" if backend == "discord" else "SLACK_NOTIFY_WEBHOOK_URL"
+    return (_resolve_env_ref(cfg.get(f"{backend}_webhook") or _legacy_url(cfg, backend))
+            or os.environ.get(env_name) or "")
+
+
 def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) -> bool:
     if backend == "ntfy":
-        # ``topic`` is what older installers wrote; keep honouring it.
-        topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
         server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
-        if not topic:
-            topic = os.environ.get("MAVERICK_NTFY_TOPIC")
+        topic = _ntfy_topic(cfg)
         if not topic:
             log.debug("notify ntfy: no topic configured")
             return False
@@ -381,13 +391,9 @@ def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) 
     if backend == "pushover":
         return _send_pushover(title, body, priority, cfg)
     if backend == "discord":
-        url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
-              os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
-        return _send_discord(title, body, url or "")
+        return _send_discord(title, body, _webhook_url(cfg, "discord"))
     if backend == "slack":
-        url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
-              os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
-        return _send_slack(title, body, url or "")
+        return _send_slack(title, body, _webhook_url(cfg, "slack"))
     if backend == "email":
         mail = _email_config(cfg)
         if not mail["to"]:
@@ -396,6 +402,82 @@ def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) 
         return send_email(mail["to"], title, body, cfg=cfg)
     log.warning("notify: unknown backend %r", backend)
     return False
+
+def _requested(cfg: dict, backends: list[str] | None) -> list[str]:
+    # Normalize: backend names are user-typed (config/TOML or the `backends`
+    # arg) and matched case-sensitively in _dispatch ("ntfy"/"discord"/...), so
+    # "Discord" / "Ntfy" / "None" would otherwise dispatch to no handler or
+    # skip the "none" filter -- a user who configured notifications silently
+    # gets none. Lowercase + strip; drop empties and the "none" sentinel.
+    return [
+        b.strip().lower()
+        for b in (backends or [cfg.get("backend", "ntfy")])
+        if isinstance(b, str) and b.strip().lower() not in ("", "none")
+    ]
+
+
+def configured_backends(backends: list[str] | None = None) -> list[str]:
+    """The backends :func:`notify` would really try: the ones named (else the
+    configured default) that have a destination set up -- an ntfy topic, a
+    webhook URL, Pushover keys or an email recipient. A caller with its own
+    retry policy uses it to skip a send that would fail before any backend
+    starts, so it leaves no failed delivery receipt behind."""
+    cfg = _load_config()
+    ready = []
+    for backend in dict.fromkeys(_requested(cfg, backends)):
+        if backend == "ntfy":
+            usable = bool(_ntfy_topic(cfg))
+        elif backend == "pushover":
+            usable = all(_pushover_credentials(cfg))
+        elif backend in ("discord", "slack"):
+            usable = bool(_webhook_url(cfg, backend))
+        elif backend == "email":
+            usable = bool(_email_config(cfg)["to"])
+        else:
+            usable = False
+        if usable:
+            ready.append(backend)
+    return ready
+
+
+# Waits (minutes) after the 1st, 2nd, ... definite failure of a send that is
+# retried on a schedule; the last one repeats (hourly).
+RETRY_MINUTES = (5, 10, 20, 40, 60)
+
+
+def retry_delay(failures: int) -> float:
+    """Seconds to wait after the ``failures``-th definite failure."""
+    return 60.0 * RETRY_MINUTES[min(max(int(failures), 1), len(RETRY_MINUTES)) - 1]
+
+
+# Environment settings that decide whether a channel can send. Only whether
+# each is set enters :func:`setup_fingerprint`, never its value.
+_SETUP_ENV = ("MAVERICK_NTFY_TOPIC", "PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN", "DISCORD_NOTIFY_WEBHOOK_URL",
+              "SLACK_NOTIFY_WEBHOOK_URL", "SLACK_BOT_TOKEN", "EMAIL_PROVIDER", "EMAIL_USER", "EMAIL_APP_PASSWORD",
+              "EMAIL_FROM", "MAVERICK_EMAIL_DISABLE", "MAVERICK_SMTP_PASSWORD")
+
+
+def setup_fingerprint(*parts: object) -> str:
+    """A short fingerprint of what decides whether a notification can go out:
+    the config files (by size and modification time), which channel
+    environment settings are present, and any caller-supplied ``parts``
+    (linked accounts, registered channels). A caller backing off after a
+    definite failure retries at once when it changes."""
+    import hashlib
+    import json
+
+    from .config import config_path, dashboard_overrides_path, tenant_config_path
+
+    files = []
+    for path in (config_path(), dashboard_overrides_path(), tenant_config_path()):
+        try:
+            stat = path.stat() if path else None
+        except OSError:
+            stat = None
+        files.append([str(path or ""), stat.st_mtime_ns if stat else 0, stat.st_size if stat else 0])
+    material = {"files": files, "env": [bool(os.environ.get(name)) for name in _SETUP_ENV], "parts": parts}
+    return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+
 
 def _admit(cfg, requested, event, delivery_kind, retry):
     from .notification_receipts import DeliveryReceipts
@@ -497,16 +579,7 @@ def notify(
         practice.record("alert", title, {"body": body, "priority": priority})
         return 0
     cfg = _load_config()
-    # Normalize: backend names are user-typed (config/TOML or the `backends`
-    # arg) and matched case-sensitively in _dispatch ("ntfy"/"discord"/...), so
-    # "Discord" / "Ntfy" / "None" would otherwise dispatch to no handler or
-    # skip the "none" filter -- a user who configured notifications silently
-    # gets none. Lowercase + strip; drop empties and the "none" sentinel.
-    requested = [
-        b.strip().lower()
-        for b in (backends or [cfg.get("backend", "ntfy")])
-        if isinstance(b, str) and b.strip().lower() not in ("", "none")
-    ]
+    requested = _requested(cfg, backends)
     if not requested:
         return 0
 
@@ -541,4 +614,7 @@ def notify(
     return fired
 
 
-__all__ = ["email_configured", "mark_unconfirmed", "notify", "send_checked", "send_email"]
+__all__ = [
+    "RETRY_MINUTES", "configured_backends", "email_configured", "mark_unconfirmed", "notify",
+    "retry_delay", "send_checked", "send_email", "setup_fingerprint",
+]
