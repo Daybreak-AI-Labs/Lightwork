@@ -136,6 +136,7 @@ def test_sidebar_calls_root_summary_query_with_active_selection(world, monkeypat
     monkeypatch.setattr(world, "list_goals", lambda **_kwargs: pytest.fail("sidebar loaded complete goals"))
     assert app._chat_threads(request, world, active_root=root)[0] == {
         "id": root, "target_id": root, "title": "Root", "status": "pending", "state_label": "Queued",
+        "stop_kind": "",  # only a stopped task names why it stopped
         "active": True, "pinned": False, "archived": False,
         "updated_at": world.get_goal(root).updated_at,
     }
