@@ -46,8 +46,8 @@ def test_tool_risk_defaults():
     ):
         assert tool_risk(connector) == "high"
     assert tool_risk("read_file") == "low"
-    # Unclassified tool falls back to medium.
-    assert tool_risk("some_unknown_tool") == "medium"
+    # Unclassified tool fails safe to high (cannot slip under a medium ceiling).
+    assert tool_risk("some_unknown_tool") == "high"
 
 
 def test_tool_risk_config_override(tmp_path, monkeypatch):
@@ -65,7 +65,7 @@ read_file = "high"
 def test_risk_map_classifies_each_name():
     from maverick.safety.tool_risk import risk_map
     m = risk_map(["shell", "read_file", "some_unknown_tool"])
-    assert m == {"shell": "high", "read_file": "low", "some_unknown_tool": "medium"}
+    assert m == {"shell": "high", "read_file": "low", "some_unknown_tool": "high"}
 
 
 def test_risk_map_honors_config_override_loaded_once(tmp_path, monkeypatch):
