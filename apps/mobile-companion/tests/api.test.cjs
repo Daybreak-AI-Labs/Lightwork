@@ -59,3 +59,10 @@ test('missing or unreadable continuation headers are reported as unknown, never 
     assert.equal(page.hasMore, headers['Pagination-Has-More'] === 'true' ? true : null, JSON.stringify(headers));
   }
 });
+
+test('a dashboard from before ID cursors: Has-More and Next-Offset without a before-id cursor', async () => {
+  const api = source('src/api.ts', {fetch: async () => new Response('[]',
+    {headers: {'Pagination-Limit': '50', 'Pagination-Offset': '0', 'Pagination-Has-More': 'true', 'Pagination-Next-Offset': '50'}})});
+  const page = JSON.parse(JSON.stringify(await api.listGoals({baseUrl: 'https://dashboard.example.test', token: 'synthetic-token'})));
+  assert.deepEqual(page, {goals: [], hasMore: true, nextBeforeId: null});
+});
