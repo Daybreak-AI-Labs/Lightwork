@@ -109,7 +109,7 @@ def test_learned_page_renders_empty(monkeypatch, tmp_path):
     assert "Checking your retained tools" in text and 'id="generated-tools"' in text
     listing = _client().get("/api/v1/generated-tool-removals").json()
     assert listing["choices"] == []
-    assert "No shared lessons are currently available" in text
+    assert "No shared lessons yet. Lessons appear here after agents finish tasks" in text
     # Reached from the Learning page (one nav entry per job: /learned left the
     # sidebar; the link lives on /learning).
     assert 'href="/learned"' in _client().get("/learning").text
