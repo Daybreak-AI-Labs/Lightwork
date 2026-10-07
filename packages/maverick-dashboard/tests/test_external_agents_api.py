@@ -411,6 +411,8 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
     from maverick import external_agents
     from maverick import model_risk_assurance as assurance
 
+    # Safeguard activity is retained per workspace; unbound mode refuses it.
+    monkeypatch.setenv("MAVERICK_TENANT", "gateway-workspace")
     _enroll()
     token = _mint()
     headers = {"Authorization": f"Bearer {token}"}
@@ -438,7 +440,7 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
                     "policy_sha256": "a" * 64,
                     "evaluated_at": 1_800_000_000.0,
                     "asset_binding": {
-                        "tenant_ref": "TEN-" + ("b" * 24),
+                        "tenant_ref": runtime._tenant_ref(),
                         "asset_id": asset_id,
                         "asset_revision": 2,
                         "asset_version_digest": digest,
@@ -447,6 +449,8 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
             )
 
     monkeypatch.setattr(runtime, "enabled", lambda: True)
+    # Recording the refusal checks the switch itself, as the enabled runtime does.
+    monkeypatch.setattr(runtime, "require_enabled", lambda: None)
     monkeypatch.setattr(runtime, "default_service", Service())
     monkeypatch.setattr(assurance, "enabled", lambda: True)
     _stub_review_is_current(monkeypatch, assurance)
@@ -507,6 +511,8 @@ def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatc
     from maverick import governed_rest
     from maverick import model_risk_assurance as assurance
 
+    # Safeguard activity is retained per workspace; unbound mode refuses it.
+    monkeypatch.setenv("MAVERICK_TENANT", "gateway-workspace")
     _enroll()
     token = _mint()
     headers = {"Authorization": f"Bearer {token}"}
@@ -558,7 +564,7 @@ def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatc
                     ),
                     "evaluated_at": 1_800_000_000.0 + current_call,
                     "asset_binding": {
-                        "tenant_ref": "TEN-" + ("b" * 24),
+                        "tenant_ref": runtime._tenant_ref(),
                         "asset_id": asset_id,
                         "asset_revision": 2,
                         "asset_version_digest": digest,
