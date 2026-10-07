@@ -119,9 +119,10 @@ TOPICS: tuple[Topic, ...] = (
     Topic("vendor", "Review a vendor", "Privacy officer", ("/vendors",), (
         "Open the vendor from Privacy, or press Add a vendor.",
         "Press Send a questionnaire and wait for the replies; View replies shows them.",
-        "Mark as active when the review is done, or Stop using this vendor.",
+        "When the review is done, press Review assessment before activation and confirm the activation, "
+        "or press Stop using this vendor.",
     ), (("privacy.html", "Add a vendor"), ("vendor_detail.html", "Send a questionnaire"),
-        ("vendor_detail.html", "View replies"), ("vendor_detail.html", "Mark as active"))),
+        ("vendor_detail.html", "View replies"), ("vendor_detail.html", "Review assessment before activation"))),
     Topic("privacy-report", "Share the privacy programme report", "Privacy officer", ("/privacy/report",), (
         "Open the privacy report from Privacy.",
         "Print it or save it as a PDF to share it.",
