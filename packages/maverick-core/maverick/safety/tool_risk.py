@@ -419,15 +419,8 @@ def reviewed_ratings(ratings: dict[str, str]):
     """
     base = _current_overrides(None)
 
-    def unrated(name: str) -> bool:
-        # A namespaced name inherits its namespace's rating (upward only), so
-        # a classified namespace counts as rated too.
-        namespace = name.split(".", 1)[0]
-        return not (tool_risk_is_classified(name, base)
-                    or tool_risk_is_classified(namespace, base))
-
     extra = {name: level for name, level in (ratings or {}).items()
-             if level in RISK_LEVELS and unrated(name)}
+             if level in RISK_LEVELS and tool_risk_is_unrated(name, base)}
     token = _PINNED_OVERRIDES.set({**extra, **base})
     try:
         yield
@@ -521,6 +514,21 @@ def tool_risk_is_classified(
         or name in _read_connector_names()
         or name in _enterprise_connector_names()
     )
+
+
+def tool_risk_is_unrated(
+    name: str, overrides: dict[str, str] | None = None,
+) -> bool:
+    """Whether ``name`` only carries the unrated high refusal floor.
+
+    A namespaced name (``salesforce.write``) inherits its namespace's rating
+    upward, so a classified namespace makes the name rated too.
+    """
+    name = str(name or "")
+    overrides = _current_overrides(overrides)
+    namespace = name.split(".", 1)[0]
+    return not (tool_risk_is_classified(name, overrides)
+                or (namespace != name and tool_risk_is_classified(namespace, overrides)))
 
 
 def tools_exceeding(

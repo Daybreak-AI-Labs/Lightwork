@@ -67,8 +67,12 @@ def test_pack_is_coherent_and_governed(name, packs):
     # 1. Read-only by default: no allowed tool is a money/posting/filing tool.
     leaked = set(p.allow_tools) & _FORBIDDEN_IN_ALLOW
     assert not leaked, f"{name} allows forbidden mutating tools: {sorted(leaked)}"
-    # 2. Coherent envelope: every allowed tool fits under the pack's risk ceiling.
-    exceeding = tools_exceeding(p.allow_tools, p.max_risk)
+    # 2. Coherent envelope: every rated allowed tool fits under the pack's risk
+    # ceiling. An unrated customer adapter (e.g. get_price_snapshot) is a
+    # deployment prerequisite that its high floor refuses until it is rated.
+    from maverick.safety.tool_risk import tool_risk_is_unrated
+    rated = [tool for tool in p.allow_tools if not tool_risk_is_unrated(tool)]
+    exceeding = tools_exceeding(rated, p.max_risk)
     assert not exceeding, f"{name} allows tools above its max_risk: {sorted(exceeding)}"
     # 3. Compartment seal set.
     assert p.compartment, f"{name} has no compartment seal"

@@ -212,3 +212,15 @@ def test_export_fallback_discloses_missing_live_connector():
         assert 'missing prerequisite' in profile.persona
         assert 'read_file' in profile.allow_tools
         assert not domain.tool_compatibility_errors(profile, risk_overrides={})
+
+
+def test_unrated_adapter_is_a_prerequisite_but_rated_names_keep_their_ceiling():
+    # An unrated adapter name is not a contract violation (it is refused at
+    # dispatch until rated), but a name rated directly or through its
+    # namespace still cannot exceed the pack's ceiling.
+    adapter = domain.DomainProfile(name='p', allow_tools=['customer_ledger'], max_risk='medium')
+    assert domain.tool_compatibility_errors(adapter, risk_overrides={}) == []
+    for name in ('shell', 'salesforce.write'):
+        profile = domain.DomainProfile(name='p', allow_tools=[name], max_risk='medium')
+        errors = domain.tool_compatibility_errors(profile, risk_overrides={})
+        assert any('exceeds max_risk' in error for error in errors), name

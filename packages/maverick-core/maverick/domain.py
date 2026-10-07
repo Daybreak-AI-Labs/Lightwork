@@ -31,7 +31,7 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 from .agent_autonomy import AutonomyProfile
-from .safety.tool_risk import risk_rank, tool_risk, tool_risk_is_classified
+from .safety.tool_risk import risk_rank, tool_risk, tool_risk_is_unrated
 
 # Keys we accept from a pack's TOML. Unknown keys are ignored so a newer pack
 # can't crash an older loader.
@@ -965,7 +965,7 @@ def tool_compatibility_errors(
             # deployment prerequisite, not a pack contract violation: the
             # unrated high floor still refuses it at dispatch (Capability's
             # max_risk) until an operator gives it a reviewed rating.
-            if not tool_risk_is_classified(name, overrides=risk_overrides):
+            if tool_risk_is_unrated(name, risk_overrides):
                 continue
             risk = tool_risk(name, overrides=risk_overrides)
             if risk_rank(risk) > risk_rank(profile.max_risk):
@@ -1107,7 +1107,7 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
     # A provisioned adapter that nobody has rated keeps the unrated high floor,
     # so this pack's ceiling refuses it at dispatch until it is rated.
     unrated = {name for name in (set(profile.allow_tools) | {t for step in profile.workflow for t in step.tools}) & names
-               if not tool_risk_is_classified(name)
+               if tool_risk_is_unrated(name)
                and risk_rank(tool_risk(name)) > risk_rank(profile.max_risk)}
     missing = sorted({name for step in profile.workflow for name in step.tools} - (names - unrated))
     from .chat_message_actions import answer_only_runtime
