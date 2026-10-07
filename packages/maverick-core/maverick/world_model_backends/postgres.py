@@ -750,6 +750,10 @@ MIGRATIONS.append((47, [
 # v48: approval-gate decisions without content (maverick.approval_checks).
 MIGRATIONS.append((48, _APPROVAL_CHECK_SCHEMA_PG))
 
+# v49: retire only the unused ciphertext-derived message-search index.
+# The authoritative messages table, its contents and tenant policies remain.
+MIGRATIONS.append((49, ["DROP INDEX IF EXISTS idx_pg_messages_fts"]))
+
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 _MIGRATIONS_TABLE = (
@@ -5273,23 +5277,11 @@ class PostgresWorldModel:
 
         return set(gids), list(plan["attachment_paths"]), removed_turns
 
-    # ----- messages (goal-scoped log + full-text search) -----
+    # ----- messages (goal-scoped log) -----
 
     def append_message(self, goal_id: int, role: str, content: str) -> None:
-        # W1-53: idx_pg_messages_fts (a GIN index on to_tsvector(content), see
-        # SCHEMA above) is built and maintained on every insert here, INCLUDING
-        # ciphertext once at_rest_enabled() is on (the default) -- the same
-        # ciphertext-indexing cost the SQLite messages_fts drop targets.
-        # search_messages(), the index's one reader, has been removed (zero
-        # production callers -- only its own definition and tests referenced
-        # it, confirmed by grep). The index itself could not be dropped in the
-        # same pass: migration_governance.py's additive-only policy for NEW
-        # migrations (old replicas must keep reading the old schema during a
-        # rolling deploy) refuses DROP INDEX, and SCHEMA is immutable once
-        # released (fingerprinted as the governance ladder's version 1) --
-        # editing it, even to remove this one statement, trips the checksum
-        # guard. Routed to INFRA_AND_POLICY_DECISIONS.md: dropping it needs
-        # either a policy exception or a different technical approach.
+        # v49 retires only the unused GIN message-search index. This log still
+        # stores complete content through the same authenticated at-rest codec.
         #
         # Gate on the parent goal being in the active tenant (see start_episode);
         # a cross-tenant write silently no-ops, like set_goal_status.

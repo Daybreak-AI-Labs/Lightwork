@@ -11,7 +11,7 @@
         <input type="text" class="input wf-name" style="width: 100%;" value="{{ s.name if s else '' }}">
       </label>
       <label style="min-width: min(100%, 9rem);">Does a person check it?<br>
-        <select class="input wf-gate" style="width: 100%;">
+        <select class="input wf-gate" style="width: 100%;" aria-label="Does a person check it? “{{ s.name if s else 'Unnamed step' }}”">
           <option value="">No check</option>
           {% for g, label in [('approval', 'Someone must approve'), ('review', 'Someone reviews')] %}
           <option value="{{ g }}"{% if s and s.gate == g %} selected{% endif %}>{{ label }}</option>
@@ -19,9 +19,9 @@
         </select>
       </label>
       <div style="display: flex; gap: 0.25rem;">
-        <button type="button" class="btn btn--ghost wf-up">Move up</button>
-        <button type="button" class="btn btn--ghost wf-down">Move down</button>
-        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove step</button>
+        <button type="button" class="btn btn--ghost wf-up" aria-label="Move up: “{{ s.name if s else 'Unnamed step' }}”">Move up</button>
+        <button type="button" class="btn btn--ghost wf-down" aria-label="Move down: “{{ s.name if s else 'Unnamed step' }}”">Move down</button>
+        <button type="button" class="btn btn--ghost btn--danger wf-del" aria-label="Remove step: “{{ s.name if s else 'Unnamed step' }}”">Remove step</button>
       </div>
     </div>
     <label style="display: block; margin-top: 0.4rem;">What to do in this step
@@ -1198,9 +1198,46 @@
 
       const stepsEl = document.getElementById('wf-steps');
       const addBtn = document.getElementById('wf-add');
+      const draftsBox = document.getElementById('specialist-drafts');
+      function stepLabel(row) {
+        const rows = Array.from(stepsEl.querySelectorAll('.wf-step'));
+        const name = row.querySelector('.wf-name').value.trim();
+        return (name ? '“' + name + '”' : 'Unnamed step') + ' (step ' + (rows.indexOf(row) + 1) + ' of ' + rows.length + ')';
+      }
+      function refreshSteps() {
+        if (!stepsEl) return;
+        const rows = Array.from(stepsEl.querySelectorAll('.wf-step'));
+        const locked = !!form.closest('[inert]') || !!(draftsBox && (draftsBox.hidden || draftsBox.getAttribute('aria-busy') === 'true'));
+        if (addBtn) addBtn.disabled = locked;
+        rows.forEach((row, index) => {
+          const label = stepLabel(row);
+          const unavailable = locked || row.querySelector('.wf-name').matches(':disabled');
+          row.querySelector('.wf-name').setAttribute('aria-label', 'Step name: ' + label);
+          row.querySelector('.wf-instruction').setAttribute('aria-label', 'What to do in this step: ' + label);
+          row.querySelector('.wf-gate').setAttribute('aria-label', 'Does a person check it? ' + label);
+          const up = row.querySelector('.wf-up'), down = row.querySelector('.wf-down');
+          up.setAttribute('aria-label', 'Move up: ' + label); up.disabled = unavailable || index === 0;
+          down.setAttribute('aria-label', 'Move down: ' + label); down.disabled = unavailable || index === rows.length - 1;
+          const remove = row.querySelector('.wf-del'); remove.setAttribute('aria-label', 'Remove step: ' + label); remove.disabled = unavailable;
+        });
+      }
+      function stepsChanged(text, focus) {
+        refreshSteps();
+        stepsEl.dispatchEvent(new Event('input', {bubbles: true}));
+        show(text, true);
+        if (focus) (focus.disabled ? focus.closest('.wf-step').querySelector('.wf-name') : focus).focus();
+      }
+      refreshSteps();
+      if (draftsBox) new MutationObserver(refreshSteps).observe(draftsBox, {attributes: true, attributeFilter: ['aria-busy', 'hidden']});
+      document.addEventListener('lightwork:specialist-draft-loaded', refreshSteps);
+      if (stepsEl) stepsEl.addEventListener('input', event => {
+        if (event.target.classList.contains('wf-name')) refreshSteps();
+      });
       if (addBtn) addBtn.addEventListener('click', () => {
-        stepsEl.appendChild(document.getElementById('wf-row-tpl').content.cloneNode(true));
+        const row = document.getElementById('wf-row-tpl').content.firstElementChild.cloneNode(true);
+        stepsEl.appendChild(row);
         mountToolPicks();
+        stepsChanged('Added ' + stepLabel(row) + '.', row.querySelector('.wf-name'));
       });
       mountToolPicks();
       // The short name follows the specialist's name until someone edits it.
@@ -1211,13 +1248,21 @@
         if (!idTouched) idInput.value = descInput.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
       });
       if (stepsEl) stepsEl.addEventListener('click', (e) => {
-        const btn = e.target.closest('button'); if (!btn) return;
+        const btn = e.target.closest('button'); if (!btn || btn.disabled) return;
         const row = btn.closest('.wf-step');
-        if (btn.classList.contains('wf-del')) row.remove();
-        else if (btn.classList.contains('wf-up') && row.previousElementSibling)
+        if (!row || row.parentNode !== stepsEl) return;
+        if (btn.classList.contains('wf-del')) {
+          const label = stepLabel(row), next = row.nextElementSibling || row.previousElementSibling;
+          row.remove();
+          stepsChanged('Removed ' + label + '. ' + stepsEl.children.length + ' steps remain.', next ? next.querySelector('.wf-name') : addBtn);
+          return;
+        }
+        if (btn.classList.contains('wf-up') && row.previousElementSibling)
           row.parentNode.insertBefore(row, row.previousElementSibling);
         else if (btn.classList.contains('wf-down') && row.nextElementSibling)
           row.parentNode.insertBefore(row.nextElementSibling, row);
+        else return;
+        stepsChanged('Moved ' + stepLabel(row) + '.', btn);
       });
 
       function gatherWorkflow() {
@@ -1528,6 +1573,7 @@
       </div>
       <div class="jc-cards" id="jc-stats"></div>
       <p class="muted" id="jc-stats-note">Finishing a task does not prove the result was useful. A result that needs approval counts only after a person approves it; this card does not estimate savings or return on investment without customer evidence.</p>
+      {% include "_agent_activity.html" %}
       <div class="jc-sec"><h3>Cost level</h3>
         <div class="jc-tier">
           <span class="jc-band" id="jc-band"></span>
@@ -1634,4 +1680,5 @@
   {% endif %}
 <script src="/static/lightwork-business-agent.js" defer></script>
 <script src="/static/lightwork-agent-override-changes.js" defer></script>
+<script src="/static/lightwork-agent-activity.js" defer></script>
 {% endblock %}

@@ -61,7 +61,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 48
+SCHEMA_VERSION = 49
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -433,7 +433,28 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 """
 
 
+def _bootstrap_schema(conn: sqlite3.Connection) -> str:
+    """Do not recreate v49's retired derived index from the immutable v1 seed."""
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+    ).fetchone():
+        row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+        if row and row[0] >= 49:
+            start = SCHEMA.index("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts")
+            end = SCHEMA.index("-- Q1 2026 index audit", start)
+            return SCHEMA[:start] + SCHEMA[end:]
+    return SCHEMA
+
+
 MIGRATIONS: dict[int, list[str]] = {
+    # v49: retire only unused derived message-search storage. Authoritative
+    # messages and conversation turns are untouched; the exact SQL is governed.
+    49: [
+        "DROP TRIGGER IF EXISTS messages_ai",
+        "DROP TRIGGER IF EXISTS messages_ad",
+        "DROP TRIGGER IF EXISTS messages_au",
+        "DROP TABLE IF EXISTS messages_fts",
+    ],
     # v48: one row per approval-gate decision (no content), for previewing a
     # threshold change later (maverick.approval_checks).
     48: _APPROVAL_CHECK_SCHEMA,
@@ -1340,7 +1361,7 @@ class WorldModel:
         deadline = time.monotonic() + WAL_SWITCH_RETRY_SECONDS
         while True:
             try:
-                self.conn.executescript(SCHEMA)
+                self.conn.executescript(_bootstrap_schema(self.conn))
                 self._init_schema_version()
                 self._apply_migrations()
                 self.conn.commit()
@@ -4073,22 +4094,8 @@ class WorldModel:
 
     # ----- messages -----
     def append_message(self, goal_id: int, role: str, content: str) -> None:
-        # W1-53: this trigger the messages_fts virtual table (SCHEMA, applied
-        # via executescript above) into tokenizing every inserted row, INCLUDING
-        # ciphertext once at_rest_enabled() is on (the default) -- >100% storage
-        # overhead measured on 300 messages, for an index that can then only
-        # ever match legacy pre-encryption plaintext. search_messages(), the
-        # index's one reader, has been removed (zero production callers; only
-        # its own definition and tests referenced it -- grep confirmed). The
-        # trigger/table themselves could not be removed in the same pass:
-        # migration_governance.py's additive-only policy for NEW migrations
-        # (old replicas must keep reading the old schema during a rolling
-        # deploy) refuses any DROP TABLE/TRIGGER/INDEX, and SCHEMA itself
-        # (fingerprinted as the governance ladder's version 1) is immutable
-        # once released -- editing it, even to add this comment inline, trips
-        # the same checksum guard. Routed to INFRA_AND_POLICY_DECISIONS.md:
-        # removing the schema objects needs either a policy exception or a
-        # different technical approach (e.g. a new table name), not a code fix.
+        # v49 retires the unused ciphertext-derived FTS index, preserving this
+        # authoritative message log and its existing encryption/read behavior.
         with self._writing() as conn:
             conn.execute(
                 "INSERT INTO messages(goal_id, role, content, ts) VALUES(?, ?, ?, ?)",

@@ -340,6 +340,19 @@
               ? function (isCurrent) { return privatePushControls.openReview(privatePushSetup.context, {isCurrent: isCurrent}); } : null);
           return;
         }
+        if (entry[0] === 'agent_activity_form') {
+          var agentActivityForm = entry[1], agentActivityControls = window.LightworkAgentActivity;
+          if (!agentActivityForm || Array.isArray(agentActivityForm) ||
+              Object.keys(agentActivityForm).sort().join(',') !== 'context,name,revision' ||
+              !/^[a-f0-9]{64}$/.test(agentActivityForm.context || '') ||
+              !/^[a-f0-9]{64}$/.test(agentActivityForm.revision || '') ||
+              !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(agentActivityForm.name || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open this specialist’s recent work',
+            '/agents?name=' + encodeURIComponent(agentActivityForm.name) + '#agent-recent-work',
+            agentActivityControls && typeof agentActivityControls.open === 'function'
+              ? function (isCurrent) { return agentActivityControls.open(agentActivityForm.context, agentActivityForm.name, agentActivityForm.revision, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'work_record_details_review') {
           var workDetailsReview = entry[1], workDetailsControls = window.LightworkWorkRecordDetails;
           if (!workDetailsReview || Array.isArray(workDetailsReview) ||

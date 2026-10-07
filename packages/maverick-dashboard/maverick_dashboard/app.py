@@ -2070,6 +2070,7 @@ from .privacy_discovery_data_use_api import (  # noqa: E402
 )
 
 app.include_router(privacy_discovery_data_use_router, prefix="/api/v1")
+from .agent_activity_api import router as agent_activity_router  # noqa: E402
 from .audit_checkpoint_custody_api import router as audit_checkpoint_custody_router  # noqa: E402
 from .consent_delivery_managed_api import router as consent_delivery_managed_router  # noqa: E402
 from .dsar_handling_api import router as dsar_handling_router  # noqa: E402
@@ -2089,6 +2090,7 @@ app.include_router(voice_receiver_router)
 app.include_router(personal_push_devices_router)
 app.include_router(product_tour_router)
 app.include_router(audit_checkpoint_custody_router)
+app.include_router(agent_activity_router)
 app.include_router(executive_report_schedules_router)
 app.include_router(work_record_details_router)
 app.include_router(generated_tool_removal_api.router)
@@ -4195,7 +4197,7 @@ def workforce_page(request: Request) -> HTMLResponse:
     if department_boards.scoped(request):
         return department_boards.page(request, "workforce")
     require_unscoped_board(request)
-    from maverick.departments import department_entitled, list_departments
+    from maverick.departments import department_entitlements, list_departments
     from maverick.fleet import list_fleets
     from maverick.marketplace.storefront import connector_marketplace
     from maverick.operating_record import assemble
@@ -4246,7 +4248,7 @@ def workforce_page(request: Request) -> HTMLResponse:
         "workforce.html",
         {
             "departments": depts,
-            "entitlements": {d.key: department_entitled(d.key) for d in depts},
+            "entitlements": department_entitlements(d.key for d in depts),
             "firm": firm,
             "pack_total": sum(d.headcount for d in depts),
             "deployed_specialists": deployed_specialists,
@@ -9073,7 +9075,7 @@ def tools_page(
             {
                 "name": t.name,
                 "description": (t.description or "")[:240],
-                "summary": plain_tool_summary(t.name, t.description),
+                "summary": plain_tool_summary(t.name, t.description) if query else "",
                 "enterprise_blocked": t.name in enterprise_blocked,
             }
             for t in sorted(reg.all(), key=lambda x: x.name)
@@ -9096,6 +9098,11 @@ def tools_page(
             )
         start = (page - 1) * per_page
         tools = filtered[start : start + per_page]
+        if not query:
+            # Browsing needs only this page's copy. Searches still inspect
+            # every current permitted summary, including its full description.
+            for tool in tools:
+                tool["summary"] = plain_tool_summary(tool["name"], reg.get(tool["name"]).description)
         tool_page = {
             "query": query,
             "page": page,
@@ -14100,6 +14107,16 @@ async def work_record_details_client() -> FileResponse:
     """Reviewed business-field controls using the shared product design."""
     return FileResponse(
         _STATIC_DIR / "lightwork-work-record-details.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-agent-activity.js")
+async def agent_activity_client() -> FileResponse:
+    """Current authorized recent work for the selected specialist."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-agent-activity.js",
         media_type="application/javascript; charset=utf-8",
         headers={"Cache-Control": "public, max-age=300"},
     )

@@ -1,5 +1,50 @@
 # Post-install operation coverage
 
+October 7 specialist activity follow-through: Recent work in Agent Factory reads
+the selected specialist's newest 50 account-owned tasks within 7, 30 or 90 days.
+Four compact current-state cards lead to named tasks, readable stop reasons and
+their ordinary recovery controls. Separate disclosures retain the complete
+coverage, creation trend and unavailable-cost explanation. A finished or approved
+answer is not presented as proof of accuracy or business value.
+
+The native reader refreshes owner, workspace, specialist, source and access before
+returning private records. Copilot opens this same complete current view without
+starting or changing work, importing task bodies or replacing an editor draft.
+Actual native source changes refused; ordinary and protected Copilot journeys
+preserved entered work at 320 pixels. A genuine signed-session refusal cleared
+all private activity and disabled its controls while retaining the editor draft.
+Local qualification used retained tasks and no model or provider call.
+
+October 7 specialist editor follow-through: current step names and positions
+distinguish every Move, Remove, instruction and approval control. Boundary moves
+are disabled, real moves preserve focus and announce the new position, and each
+actual Add/Move/Remove produces the existing draft-change signal. Structural
+edits now invalidate an obsolete review and protect entered work when loading a
+saved draft. Initial rendering, renaming and programmatic Load do not fabricate
+structural edits. One ordinary native Review/Cancel/Save/Load journey preserved
+the complete profile and ordering, retained exactly one draft and called no AI
+provider. Publication and the existing native review writer are unchanged.
+
+October 7 page efficiency follow-through: Workforce resolves all currently
+visible department entitlements from one current plan read, with no retained
+grant. Actual native free, added/removed feature, paid, past-due and later
+withdrawal checks matched the existing individual gates; unreadable registered
+policy refused. Ordinary tool browsing produces only the visible page's plain
+summaries, while searches still inspect every current permitted summary. English
+pages construct no unused translation catalog, and other languages construct it
+once for the separate asset. All six public catalog assets retained identical
+bytes. Native rendered pages and searches passed; these are bounded reductions
+in repeated work, not a general memory or deployment-latency guarantee.
+
+October 7 message storage follow-through: the exact version-49 upgrade retires
+unused ciphertext-derived search indexes without changing saved messages,
+conversation history, current search or tenant policies. Actual SQLite and
+PostgreSQL upgrades preserved authoritative rows byte for byte; reopening did
+not recreate the indexes. Earlier migration checksums remain unchanged and only
+the exact reviewed retirement is permitted. The [upgrade boundary](operations/message-search-retirement.md)
+requires an offline application update; physical file shrinkage and custom-SQL
+compatibility are not claimed. No customer database editing is required.
+
 October 7 privacy outcome follow-through: manually handled correction, opt-out,
 objection and similar requests no longer become Answered through an unsupported
 fulfillment call. Ordinary action/response review requires the action and affected
