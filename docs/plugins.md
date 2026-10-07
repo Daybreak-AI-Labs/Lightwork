@@ -54,6 +54,23 @@ Install it from a reviewed local checkout, for example
 run, every agent gets a `weather` tool in its catalog. The tool passes
 through `Shield.scan_tool_call` just like a built-in.
 
+## TypeScript plugins
+
+The bundled `sdks/plugin-ts` kit (`@maverick/plugin-sdk`) lets a publisher
+provide a Node program exposing tools through the current
+`maverick-plugin/2` NDJSON stdio contract. The host also accepts the legacy
+`maverick-plugin/1` contract; these protocol versions are distinct from the
+Python plugin manifest's supported API majors.
+
+After the program is installed, an administrator can open **All settings**,
+search for **TypeScript plugins**, and add its **Program**, **Plugin file**
+and optional **Extra words** using the ordinary reviewed settings form.
+Configuration does not require editing a file in a terminal. The program and
+its runtime must already exist on the installation. Lightwork checks the
+program's declared tools before exposing them, starts its process on first
+use with a scrubbed environment, and retains an interrupted invocation as
+unconfirmed rather than automatically repeating possible effects.
+
 ## Channel plugin example
 
 ```toml

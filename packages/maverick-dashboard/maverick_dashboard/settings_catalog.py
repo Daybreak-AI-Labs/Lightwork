@@ -640,10 +640,14 @@ SETTINGS: tuple[Setting, ...] = (
       "Let Lightwork choose how much reasoning effort each task needs.",
       "toggle", "AI models", False, "maverick.effort", env=("MAVERICK_EFFORT_ENABLED",)),
     S("context", "compaction_strategy", "How long conversations are shortened",
-      "The method used to shorten long conversations so they fit.",
+      "The method used to shorten long conversations so they fit. Written summaries use "
+      "extra AI calls within the task's spending limit, reuse the earlier summary in the same "
+      "run, and add older turns at the configured summary interval. Their style learns from "
+      "agents that returned a complete answer and continued turns; this does not measure "
+      "answer accuracy or whether the team's final review accepted it.",
       "select", "AI models", "", "maverick.compaction.strategies",
       choices=(("", "Keep recent turns and trim long tool results (default)"),
-               ("learned", "Written summary that improves over time"),
+               ("learned", "Written summary that learns from completed answers"),
                ("multimodal", "Replace large images and audio with short notes"),
                ("streaming", "Running summary for very long chats"),
                ("graph", "Summary of people, things and how they relate")),

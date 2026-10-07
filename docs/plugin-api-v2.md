@@ -27,9 +27,11 @@ api_version = "2"
   runs plugin tool *calls* outside the host interpreter (scrubbed env, fault
   isolation) while their schemas stay in-process.
 - **TypeScript plugins.** `sdks/plugin-ts` (`@maverick/plugin-sdk`) authors a
-  tool in TypeScript over the `maverick-plugin/1` NDJSON stdio protocol;
-  `[plugins] ts = [["node", "/path/plugin.js"]]` loads it like any other tool
-  (no-shadowing rule included).
+  tool in TypeScript over the current `maverick-plugin/2` NDJSON stdio protocol.
+  Add its installed program and plugin file in **All settings > TypeScript
+  plugins**; the host retains support for legacy `maverick-plugin/1` programs.
+  Tools use the same no-shadowing rule. The stdio protocol version is separate
+  from the manifest's `api_version`.
 
 ## Compatibility
 

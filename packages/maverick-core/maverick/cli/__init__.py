@@ -3864,15 +3864,22 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
               help="Director mode: TITLE is an outcome, run plan-first under this "
                    "autonomy profile (consent, review checkpoints and budget from "
                    "[director.profiles], clamped to the configured spend cap).")
+@click.option("--result-file", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Write a private native single-run result for automation to a new file. Existing files are never replaced.")
+@click.option("--result-key-file", type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="Bind --result-file to an automation-owned private 32-byte key. The key is never emitted.")
 @click.pass_context
 @_humane_errors
 def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat, director_profile,
+    repeat, director_profile, result_file=None, result_key_file=None,
 ) -> None:
     """Start a new goal and run the swarm."""
+    from .run_result import prepare_result_target, read_result_key, write_if_requested
+    result_file = prepare_result_target(result_file, repeat=repeat, dry_cost=dry_cost, key_file=result_key_file)
+    result_key = read_result_key(result_key_file)
     # Coding-mode flags propagate via env so coding_mode.from_env()
     # picks them up everywhere (agent prompt, patch validator,
     # test-driven verifier, best-of-N candidate eval).
@@ -4034,7 +4041,10 @@ def start(
                 poller.join(timeout=2.0)
             # Close so WorldModel.close()'s WAL TRUNCATE checkpoint runs; the
             # poller thread (already joined) used its own connection.
-            world.close()
+            try:
+                write_if_requested(result_file, world, goal_id, bud, domain=domain, key=result_key)
+            finally:
+                world.close()
         click.echo("")
         click.echo(result)
         # Single-run keeps the exit-2-on-blocked contract (scripts/CI rely on

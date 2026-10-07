@@ -1270,10 +1270,14 @@ class PostgresWorldModel:
         # point there but harmless.
         self._lock = threading.RLock()
         self._tx_depth = threading.local()
-        self._migrate()
-        if self._rls:
-            self._preflight_rls_or_die()
-            self._apply_rls()
+        try:
+            self._migrate()
+            if self._rls:
+                self._preflight_rls_or_die()
+                self._apply_rls()
+        except BaseException:
+            self.close()
+            raise
 
     def __enter__(self) -> PostgresWorldModel:
         return self
@@ -1438,8 +1442,8 @@ class PostgresWorldModel:
 
         Policy: a row is visible/writable only when its ``tenant_id`` equals the
         transaction-local ``maverick.tenant`` GUC set by ``_tx``. Unset, empty,
-        or no-active-tenant GUC values match no rows. Idempotent
-        (drop-then-create the policy; ENABLE/FORCE are no-ops if already set).
+        or no-active-tenant GUC values match no rows. Current exact policies
+        need only a catalog read; bootstrap/repair retains serialized DDL.
 
         Only a table's **owner** may ALTER it. A non-owner connection may start
         only if the owner/migration has already installed and forced the exact
@@ -1447,12 +1451,21 @@ class PostgresWorldModel:
         running without database-enforced tenant isolation.
         """
         for table in _RLS_TABLES:
+            if self._rls_policy_is_active(table):
+                continue
             try:
                 with self._tx() as cur:
+                    cur.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATION_ADVISORY_LOCK,))
+                    # Another replica may have installed the policy while this
+                    # connection waited. Inspect again on the writer's cursor.
+                    if self._rls_policy_is_active(table, cursor=cur):
+                        continue
                     cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
                     cur.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
                     cur.execute(f"DROP POLICY IF EXISTS mvk_tenant_isolation ON {table}")
                     cur.execute(self._rls_policy_sql(table))
+                    if not self._rls_policy_is_active(table, cursor=cur):
+                        raise RuntimeError("The exact tenant policy could not be verified.")
             except Exception as e:  # non-owner / insufficient privilege
                 if self._rls_policy_is_active(table):
                     log.info(
@@ -1477,54 +1490,71 @@ class PostgresWorldModel:
             ")"
         )
 
-    def _rls_policy_is_active(self, table: str) -> bool:
-        """Verify the fail-closed RLS policy is already installed and forced."""
+    def _rls_policy_is_active(self, table: str, *, cursor=None) -> bool:
+        """Verify FORCE and the complete stock policy before skipping DDL.
+
+        Extra restrictive policies can narrow access. Another permissive policy
+        can OR around isolation, so it is never evidence of a safe fast path.
+        """
+        sql = (
+            "SELECT c.relrowsecurity,c.relforcerowsecurity,p.polname,p.polcmd,"
+            "p.polpermissive,p.polroles,pg_get_expr(p.polqual,p.polrelid),"
+            "pg_get_expr(p.polwithcheck,p.polrelid) FROM pg_class c "
+            "LEFT JOIN pg_policy p ON p.polrelid=c.oid WHERE c.oid=%s::regclass"
+        )
         try:
+            if cursor is not None:
+                cursor.execute(sql, (table,))
+                return self._rls_policy_rows_are_active(table, cursor.fetchall())
             with self._tx() as cur:
-                cur.execute(
-                    "SELECT relrowsecurity, relforcerowsecurity "
-                    "FROM pg_class WHERE oid = %s::regclass",
-                    (table,),
-                )
-                row = cur.fetchone()
-                if not row or not (row[0] and row[1]):
-                    return False
-                cur.execute(
-                    "SELECT qual, with_check FROM pg_policies "
-                    "WHERE schemaname = current_schema() "
-                    "AND tablename = %s AND policyname = 'mvk_tenant_isolation'",
-                    (table,),
-                )
-                policy = cur.fetchone()
+                cur.execute(sql, (table,))
+                rows = cur.fetchall()
         except Exception:
             return False
-        if not policy:
+        return self._rls_policy_rows_are_active(table, rows)
+
+    @staticmethod
+    def _rls_policy_rows_are_active(table, rows) -> bool:
+        if not rows or not all(row[0] and row[1] for row in rows):
+            return False
+        policies = [row for row in rows if row[2] == "mvk_tenant_isolation"]
+        if len(policies) != 1 or any(row[4] for row in rows if row[2] != "mvk_tenant_isolation"):
+            return False
+        policy = policies[0]
+        if policy[3] != "*" or policy[4] is not True or list(policy[5] or ()) != [0]:
             return False
         column = _RLS_TENANT_COLUMN.get(table, "tenant_id")
+        expected = f"({column}=nullif(current_setting('maverick.tenant'::text,true),''::text))"
+        return all("".join(str(expr).lower().split()) == expected for expr in policy[6:8])
 
-        def fail_closed(expr: object) -> bool:
-            text = " ".join(str(expr).lower().split())
-            return (
-                column in text
-                and "current_setting" in text
-                and "maverick.tenant" in text
-                and "nullif" in text
-                and " or " not in text
-                and "is null" not in text
-            )
-
-        return fail_closed(policy[0]) and fail_closed(policy[1])
+    @staticmethod
+    def _migration_version(cur) -> int | None:
+        cur.execute("SELECT to_regclass('schema_migrations')")
+        if not cur.fetchone()[0]:
+            return None
+        cur.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
+        current = int((cur.fetchone() or [0])[0])
+        if current > _PG_SCHEMA_VERSION:
+            raise RuntimeError("The Postgres database schema is newer than this Lightwork installation.")
+        return current
 
     def _migrate(self) -> None:
         """Apply pending migrations atomically, recording each in
         ``schema_migrations`` so a statement runs at most once.
 
-        Takes a transaction-scoped advisory lock first so that concurrent
+        A current native migration record requires only a read. Bootstrap and
+        upgrades take a transaction-scoped advisory lock so that concurrent
         replica startup serializes -- the second waiter re-reads the version
         after the first commits and applies nothing, rather than racing the
         non-concurrency-safe DDL."""
         with self._tx() as cur:
+            if self._migration_version(cur) == _PG_SCHEMA_VERSION:
+                return
+        with self._tx() as cur:
             cur.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATION_ADVISORY_LOCK,))
+            # Re-read after waiting; an earlier replica may have upgraded it.
+            if self._migration_version(cur) == _PG_SCHEMA_VERSION:
+                return
             cur.execute(_MIGRATIONS_TABLE)
             cur.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
             current = int((cur.fetchone() or [0])[0])

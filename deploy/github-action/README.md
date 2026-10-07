@@ -54,6 +54,37 @@ distribution.
 |---|---|
 | `result` | Sanitized, mention-neutralized run output, bounded to 50,000 characters. |
 | `result-file` | Path to an owner-only file with the same sanitized, bounded output. |
+| `goal-id` | Actual saved task ID. Empty when the process did not retain a native result. |
+| `status` | Saved task status, such as `done`, `blocked`, `failed`, or `active`; `unavailable` when native result custody is missing. |
+| `spend-recorded-usd` | Budget's recorded model usage in USD. Empty when unavailable. This is not a provider invoice or proof that interrupted calls have no additional cost. |
+| `release-status` | `released`, `pending_signoff`, `not_completed`, `policy_unavailable`, or `unavailable`. A `done` task can still require sign-off. |
+| `deliverable-file` | Owner-only sanitized `answer.md` created from the saved completed answer when release is allowed; empty otherwise. It is not a model-declared file path. |
+
+Structured fields come from the same actual CLI run's saved task and Budget,
+not parsed log lines or model-authored metadata. The action validates the private
+native result before publishing these five named values. It never publishes
+the raw JSON. A fresh action-owned private key authenticates the exact native
+result, so a stale file or fabricated native-shaped JSON is refused. The key is
+kept outside the ordinary container's workspace mount, passed by private file
+path rather than environment or prompt, and deleted after validation. This does
+not make explicitly unsafe local execution safe against hostile host code.
+When work is incomplete, sign-off is pending, current source
+access is unavailable, or native custody is missing, raw logs and drafts remain
+private; `result` and the summary contain only a fixed status message. A
+preflight refusal is `unavailable`, not a fabricated task or zero-dollar bill.
+Dry runs leave these outputs empty because no task runs.
+
+Both text files use the existing 50,000-character sanitization limit and include
+an explicit truncation notice if needed. Native result capture accepts at most
+32 MiB; a larger or malformed record refuses publication. These paths are local
+to the current job and are not automatically uploaded, shared, or committed.
+After checking `release-status == 'released'`, a downstream step can deliberately
+use `deliverable-file` instead of trying to extract an answer from the run log.
+Never upload `native-result.json` or other raw captures.
+
+For other local automation, `maverick start "..." --result-file <new-file>`
+creates the same owner-only result. It requires one actual run and refuses
+existing files, redirected directories, `--repeat`, and `--dry-cost`.
 
 ## Examples
 
