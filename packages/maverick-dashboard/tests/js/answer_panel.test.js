@@ -58,65 +58,85 @@ test('dirty review note defers replacement until an explicit refresh decision',a
   assert.equal(p.doc.getElementById('answer-input').value,'Unsent follow-up');p.dom.window.close();
 });
 
-const FEEDBACK = '<div id="feedback"><button id="feedback-up">up</button><button id="feedback-down">down</button><span id="feedback-msg"></span></div>' +
-  '<form id="feedback-reason" hidden><p id="feedback-reason-q">What was wrong? This is optional.</p>' +
+// As _chat_answer_panel.html renders the rating: one choice opens the note
+// form (with the optional reasons for Needs improvement), and Save feedback
+// sends it once, bound to the exact saved answer it was given for.
+const FEEDBACK = '<div id="feedback"><button id="feedback-up" data-rating="up">up</button><button id="feedback-down" data-rating="down">down</button>' +
+  '<button id="feedback-review">Review saved feedback</button><button id="feedback-copilot">Copilot</button><div id="feedback-saved"></div>' +
+  '<form id="feedback-form" hidden><p id="feedback-choice"></p><div role="group" aria-labelledby="feedback-reason-q">' +
+  '<p id="feedback-reason-q">What was wrong? This is optional.</p>' +
   '<button type="button" data-reason="wrong" aria-pressed="false">Wrong or inaccurate</button>' +
-  '<button type="button" data-reason="incomplete" aria-pressed="false">Missing something</button>' +
-  '<textarea id="feedback-note"></textarea><button type="submit" id="feedback-reason-send">Send</button>' +
-  '<button type="button" id="feedback-reason-skip">Skip</button></form>';
+  '<button type="button" data-reason="incomplete" aria-pressed="false">Missing something</button></div>' +
+  '<textarea id="feedback-note" maxlength="500"></textarea><button type="submit" id="feedback-save">Save feedback</button>' +
+  '<button type="button" id="feedback-cancel">Cancel</button></form>' +
+  '<button id="feedback-recover" hidden>Check my original feedback</button><span id="feedback-msg"></span>' +
+  '<p id="feedback-hand-off" hidden><a href="/help#get-help">Get help</a></p></div>';
+const REVISION = 'a'.repeat(64);
 function feedbackPage(replies) {
   const p = page(FEEDBACK); const posts = [];
-  p.dom.window.fetch = async (url, options) => {
-    if (String(url).endsWith('/feedback') && options && options.method === 'POST') {
+  p.dom.window.fetch = async (url, options = {}) => {
+    if (String(url).includes('/answer-feedback') && options.method === 'POST') {
       const body = JSON.parse(options.body); posts.push(body);
       const reply = replies.shift() || {acknowledgement: 'Thanks. Saved with this task.'};
-      return {ok: true, status: 200, json: async () => reply};
+      return {ok: true, status: 200, json: async () => ({context: 'scope',
+        feedback: {operation_id: body.operation_id, rating: body.rating, current_result: true, recorded_at: 1,
+          acknowledgement: reply.acknowledgement}, ...reply})};
     }
-    if (String(url).endsWith('/feedback')) return {ok: true, json: async () => ({})};
-    return {ok: true, status: 200, headers: {get: () => 'scope'}, text: async () => fragment('one', FEEDBACK)};
+    if (String(url).includes('/answer-feedback')) return {ok: true, status: 200,
+      json: async () => ({context: 'scope', revision: REVISION, eligible: true, updated_at: 1, feedback: null})};
+    return {ok: true, status: 200, headers: {get: () => 'scope'}, text: async () => fragment('two', FEEDBACK)};
   };
   return {p, posts};
 }
-test('thumbs-down saves at once, then offers optional reasons that send with a private comment', async () => {
-  const {p, posts} = feedbackPage([{acknowledgement: 'Thanks. Saved with this task. It was not recorded as a learning signal, so it does not change this agent.'},
-    {acknowledgement: "Thanks. Saved with this task. The administrators' summary shows counts and the reasons picked for this agent, not what you wrote."}]);
-  await settle();
-  p.doc.getElementById('feedback-down').click(); await settle();
-  assert.deepEqual(posts[0], {rating: 'down'});
-  assert.match(p.doc.getElementById('feedback-msg').textContent, /not recorded as a learning signal/);
-  const form = p.doc.getElementById('feedback-reason');
+async function open(p, rating) {
+  // The refreshed answer binds its rating to the saved answer it shows.
+  await p.dom.window.mvRefreshAnswerPanel(); await settle();
+  // The rating buttons unlock once the current saved answer has been read.
+  for (let i = 0; i < 50 && p.doc.getElementById('feedback-' + rating).disabled; i++) await settle();
+  p.doc.getElementById('feedback-' + rating).click(); await settle();
+  return p.doc.getElementById('feedback-form');
+}
+test('thumbs-down opens optional reasons that send once with a private note', async () => {
+  const {p, posts} = feedbackPage([{acknowledgement: "Thanks. Saved with this task. The administrators' summary shows counts and the reasons picked for this agent, not what you wrote."}]);
+  const form = await open(p, 'down');
+  assert.equal(posts.length, 0, 'choosing does not save');
   assert.equal(form.hidden, false);
+  assert.equal(p.doc.getElementById('feedback-reason-q').hidden, false);
+  assert.equal(p.doc.activeElement, p.doc.getElementById('feedback-note'));
   form.querySelector('[data-reason="incomplete"]').click();
   assert.equal(form.querySelector('[data-reason="incomplete"]').getAttribute('aria-pressed'), 'true');
   p.doc.getElementById('feedback-note').value = 'It skipped the Fabrikam POs.';
   form.dispatchEvent(new p.dom.window.Event('submit', {cancelable: true})); await settle();
-  assert.deepEqual(posts[1], {rating: 'down', reason: 'incomplete', note: 'It skipped the Fabrikam POs.'});
-  assert.equal(form.hidden, true);
-  assert.match(p.doc.getElementById('feedback-msg').textContent, /not what you wrote/);
-  p.dom.window.close();
-});
-test('the reason step is one tap to skip and sends nothing more', async () => {
-  const {p, posts} = feedbackPage([]);
-  await settle();
-  p.doc.getElementById('feedback-down').click(); await settle();
-  p.doc.getElementById('feedback-reason-skip').click(); await settle();
-  assert.equal(p.doc.getElementById('feedback-reason').hidden, true);
   assert.equal(posts.length, 1);
+  const {operation_id: operation, ...sent} = posts[0];
+  assert.match(operation, /^[a-f0-9]{32}$/);
+  assert.deepEqual(sent, {rating: 'down', note: 'It skipped the Fabrikam POs.', reason: 'incomplete', revision: REVISION, expected_context: 'scope'});
+  assert.equal(form.hidden, true);
+  assert.match(p.doc.getElementById('feedback-msg').textContent, /Feedback saved\..*not what you wrote/);
   p.dom.window.close();
 });
-test('after repeated rejections the reason step asks one short open question', async () => {
-  const {p} = feedbackPage([{acknowledgement: 'Thanks.', follow_up: {question: 'What would make this better?'}}]);
-  await settle();
-  p.doc.getElementById('feedback-down').click(); await settle();
-  assert.equal(p.doc.getElementById('feedback-reason-q').textContent, 'What would make this better?');
-  assert.equal(p.doc.activeElement, p.doc.getElementById('feedback-note'));
-  p.dom.window.close();
-});
-test('thumbs-up never opens the reason step', async () => {
+test('the reason step is one tap to cancel and sends nothing', async () => {
   const {p, posts} = feedbackPage([]);
-  await settle();
-  p.doc.getElementById('feedback-up').click(); await settle();
-  assert.deepEqual(posts[0], {rating: 'up'});
-  assert.equal(p.doc.getElementById('feedback-reason').hidden, true);
+  const form = await open(p, 'down');
+  p.doc.getElementById('feedback-cancel').click(); await settle();
+  assert.equal(form.hidden, true);
+  assert.equal(posts.length, 0);
+  p.dom.window.close();
+});
+test('after repeated rejections the reply asks one short open question', async () => {
+  const {p} = feedbackPage([{acknowledgement: 'Thanks.', follow_up: {question: 'What would make this better?'}}]);
+  const form = await open(p, 'down');
+  form.dispatchEvent(new p.dom.window.Event('submit', {cancelable: true})); await settle();
+  assert.match(p.doc.getElementById('feedback-msg').textContent, /What would make this better\?/);
+  p.dom.window.close();
+});
+test('thumbs-up never shows the reasons', async () => {
+  const {p, posts} = feedbackPage([]);
+  const form = await open(p, 'up');
+  assert.equal(form.hidden, false);
+  assert.equal(p.doc.getElementById('feedback-reason-q').hidden, true);
+  form.dispatchEvent(new p.dom.window.Event('submit', {cancelable: true})); await settle();
+  assert.equal(posts[0].rating, 'up');
+  assert.equal(posts[0].reason, '');
   p.dom.window.close();
 });
