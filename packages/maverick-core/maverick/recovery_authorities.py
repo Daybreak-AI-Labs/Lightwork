@@ -129,8 +129,6 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "learning-case-requests": "learning_case_write_authority",
     "learning-case-import-requests": "learning_case_import_authority",
     "learning-case-setup-requests": "learning_case_setup_authority",
-    # Reviewed imports of saved learning test cases (like learning-case-requests).
-    "learning-case-import-requests": "learning_case_import_authority",
     "learning-holdout-initializations": "learning_holdout_initialization_authority",
     "learning-holdout-requests": "learning_holdout_setup_authority",
     "learning-pending-requests": "learning_question_decision_authority",
