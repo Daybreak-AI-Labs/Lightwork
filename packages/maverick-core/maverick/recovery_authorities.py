@@ -122,6 +122,22 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "viewpoints-requests": "viewpoints_request_source_authority",
     "settings-catalog-requests": "settings_catalog_request_authority",
     "consent-withdrawal-requests": "consent_withdrawal_request_authority",
+    # Company sign-in, knowledge-source, channel/alert test and vendor-profile
+    # records (2c076ffa) carry identity configuration, source access, pending
+    # provider effects or reviewed decisions. A restored older copy is not
+    # current authority, so startup retains it and blocks admission.
+    "company-saml-materials": "company_saml_material_authority",
+    "company-saml-setups": "company_saml_setup_authority",
+    "company-signin-migrations": "company_signin_migration_authority",
+    "company-signin-tests": "company_signin_test_authority",
+    "knowledge-remote-sources": "knowledge_remote_source_authority",
+    "knowledge-source-decisions": "knowledge_source_decision_authority",
+    "knowledge-source-refreshes": "knowledge_source_refresh_authority",
+    "knowledge-source-snapshots": "knowledge_source_snapshot_authority",
+    "channel-test-requests": "channel_test_request_authority",
+    "personal-alert-tests": "personal_alert_test_authority",
+    "specialist-drafts": "specialist_draft_authority",
+    "vendor-profile-decisions": "vendor_profile_decision_authority",
     "workflow-step-checks": "workflow_step_check_source_authority",
     "commitment-economic-alternatives": "commitment_economic_alternatives_source_authority",
     "local-rule-requalification": "rule_requalification_authority",
@@ -202,6 +218,12 @@ DYNAMIC_JSON_AUTHORITY_POLICIES = {
         "identity_delivery_outcome_authority"
     ),
     "identity_governance_dynamic_risk_requests": "identity_change_request",
+    # runtime_policy_recovery.store() selects one of two deployment-global
+    # namespaces: reviewed safety-settings recovery requests and the retained
+    # copies they restore from. An older restored copy or request must not
+    # silently replace current safety settings, so both block admission.
+    "runtime-policy-requests": "runtime_policy_recovery_request_authority",
+    "runtime-policy-copies": "runtime_policy_recovery_copy_authority",
 }
 
 

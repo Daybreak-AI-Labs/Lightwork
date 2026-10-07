@@ -173,6 +173,7 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
         "f'identity_governance_{sink}_outcomes'",
         "f'identity_governance_{sink}_requests'",
         "'conversation-organization-' + context_for(request)",
+        "'runtime-policy-requests' if requests else 'runtime-policy-copies'",
     }
     for namespace, policy in DYNAMIC_JSON_AUTHORITY_POLICIES.items():
         relative = f"{namespace}/recovered.json"
