@@ -30,7 +30,7 @@ function flow() {
 
 function fixture() {
   const context = { document: { getElementById() { return null; } },
-    renderCrumbs() {}, syncScheduleControls() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
+    renderCrumbs() {}, syncScheduleControls() {}, syncSaveButtons() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
     nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
   const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
   const loadStart = source.indexOf("  function fromApiFlow("), loadEnd = source.indexOf("  function autoLayout(", loadStart);
