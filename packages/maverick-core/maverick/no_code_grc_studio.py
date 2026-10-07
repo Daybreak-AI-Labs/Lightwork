@@ -29,6 +29,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -2149,6 +2150,24 @@ class GRCStudioStore:
             pointer = self._get_active(connection, studio_id)
             assert pointer is not None
             return pointer, self._get_version(connection, pointer.studio_id, pointer.active_version)
+
+    @contextmanager
+    def active_source_fence(self, tenant_id: str, studio_id: str, *,
+                            expected_pointer_integrity: str, expected_blueprint_sha256: str):
+        """Hold the actual lifecycle writer lock through a local consumer's save.
+
+        This is source custody, not target enrollment or approval. Consumers
+        still need their own exact target CAS, idempotence and independent review.
+        No provider operations belong inside this bounded local writer fence.
+        """
+        pointer_pin = _digest(expected_pointer_integrity, "active pointer integrity")
+        blueprint_pin = _digest(expected_blueprint_sha256, "active blueprint integrity")
+        with self._thread_lock, cross_process_lock(self._lock_path):
+            pointer, version = self.get_active(tenant_id, studio_id)
+            if (pointer.integrity_sha256 != pointer_pin
+                    or version.blueprint_sha256 != blueprint_pin):
+                raise GRCStudioConflict("the selected live form changed before saving")
+            yield version
 
     def list_versions(
         self,

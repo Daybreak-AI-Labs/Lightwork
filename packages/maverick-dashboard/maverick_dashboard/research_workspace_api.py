@@ -214,6 +214,7 @@ class RunPlan(_Reviewed):
     model_ref: AssetReference | None = None
     resource_caps: ResourceCaps
     metric_protocol_sha256: Sha256
+    program_id: Identifier | None = None
 
     @model_validator(mode="after")
     def exact_refs(self):
@@ -226,6 +227,10 @@ class RunPlan(_Reviewed):
 
 class RunRevision(_Reviewed):
     expected_revision: int = Field(ge=1, le=2**31 - 1)
+
+
+class ExecutionApproval(RunRevision):
+    review_sha256: Sha256
 
 
 class RunCancellation(RunRevision):
@@ -272,6 +277,13 @@ def _worker_authority(tenant: str, principal: str) -> ResearchWorkerAuthority:
     return ResearchWorkerAuthority(tenant, principal, current.authorization_sha256)
 
 
+def _review_authority(tenant: str, principal: str) -> ResearchWorkerAuthority:
+    from .research_api import resolve_dispatch_authority
+
+    current = resolve_dispatch_authority(tenant, principal)
+    return ResearchWorkerAuthority(tenant, principal, current.authorization_sha256)
+
+
 def _server_training_receipt(tenant: str, receipt_id: str):
     from maverick.training.receipts import server_training_trust_registries
 
@@ -295,11 +307,15 @@ def _registry_service(state=None) -> ResearchRegistry:
 
 def _run_service(state=None) -> ResearchRuns:
     adapter = getattr(state, "research_run_effect_adapter", None)
+    if adapter is None:
+        from .research_execution_composition import PackagedResearchExecution
+        adapter = PackagedResearchExecution()
     shared_guard = getattr(state, "research_run_shared_effect_guard", None)
     return ResearchRuns(
         registry=_registry_service(state),
         authority_resolver=_run_authority,
         worker_authority_resolver=_worker_authority,
+        review_authority_resolver=_review_authority,
         effect_adapter=adapter,
         shared_effect_guard=shared_guard if callable(shared_guard) else None,
     )
@@ -480,7 +496,7 @@ def _safe_terminal(value):
     return result
 
 
-def _run_projection(value: dict) -> dict:
+def _run_projection(value: dict, actor: str | None = None) -> dict:
     manifest = dict(value["manifest"])
     attempts = []
     for item in value["attempts"]:
@@ -507,6 +523,11 @@ def _run_projection(value: dict) -> dict:
                 "events": item["events"],
                 "costs": [_safe_cost_event(event) for event in item["costs"]],
                 "metrics": item["metrics"],
+                "execution": item.get("execution"),
+                "stop_requested": item.get("stop_requested") is True,
+                "execution_owner": (item.get("worker_authority") or {}).get("principal"),
+                "execution_approval": ({key: item["execution_approval"].get(key) for key in
+                    ("reviewer", "review_sha256", "expires_at")} if item.get("execution_approval") else None),
             }
         )
     return {
@@ -520,12 +541,22 @@ def _run_projection(value: dict) -> dict:
         "updated_at": value["updated_at"],
         "attempts": attempts,
         "cost_summary": value.get("cost_summary"),
+        "can_stop": value["status"] == "running" and (value["attempts"][-1].get("worker_authority") or {}).get("principal") == actor,
+        "can_start": value["status"] == "queued" and (value["attempts"][-1].get("execution_approval") or {}).get("reviewer") == actor,
+        "can_manage": value["created_by"] == actor,
     }
 
 
 def _adapter_available(state) -> bool:
     adapter = getattr(state, "research_run_effect_adapter", None)
-    return callable(getattr(adapter, "materialize_and_dispatch", None))
+    if adapter is not None:
+        return callable(getattr(adapter, "materialize_and_dispatch", None))
+    try:
+        from maverick.research_jobs import configured_profile
+        configured_profile()
+        return True
+    except Exception:
+        return False
 
 
 def _data_use_choices(tenant: str) -> dict:
@@ -595,7 +626,7 @@ def _data_use_choices(tenant: str) -> dict:
 
 async def _current_run(service: ResearchRuns, tenant: str, actor: str, result: dict) -> dict:
     current = await _call(service.inspect, tenant, actor, str(result["run_id"]))
-    return _run_projection(current)
+    return _run_projection(current, actor)
 
 
 async def workspace_overview(request: Request, tenant: str, actor: str) -> dict:
@@ -624,15 +655,15 @@ async def workspace_overview(request: Request, tenant: str, actor: str) -> dict:
             "training_receipt_verification": "server_policy_on_demand",
             "data_use_decisions": decisions,
         },
-        "governed_runs": [_run_projection(row) for row in runs[:100]],
+        "governed_runs": [_run_projection(row, actor) for row in runs[:100]],
         "governed_runs_truncated": len(runs) > 100,
         "governed_execution": {
             "available": _adapter_available(request.app.state),
             "state": "configured" if _adapter_available(request.app.state) else "unavailable",
             "detail": (
-                "A trusted dataset materialization and dispatch adapter is configured."
+                "The installed local container executor is available for supported text snapshots and saved programs. Complete the independent review before Start."
                 if _adapter_available(request.app.state)
-                else "No trusted dataset materialization and dispatch adapter is configured; queued runs fail closed before data access."
+                else "Set up the installed local container and its correct-output checks before running experiments. Unsupported inputs are refused before Start."
             ),
         },
     }
@@ -780,6 +811,67 @@ async def plan_run(payload: RunPlan, request: Request, response: Response):
     values["resource_caps"] = ResearchResourceCaps(**payload.resource_caps.model_dump())
     service = _run_service(request.app.state)
     result = await _call(service.plan, tenant, actor, **values)
+    return await _current_run(service, tenant, actor, result)
+
+
+@router.get("/execution-options")
+async def execution_options(request: Request, response: Response):
+    tenant, actor, context = _binding(request, response)
+    from maverick.research_jobs import configured_profile
+
+    from .research_execution_composition import program_choices
+    try:
+        profile = await _call(configured_profile)
+    except HTTPException as exc:
+        return {"context": context, "available": False, "programs": [],
+                "detail": "Complete Administrator setup for the installed local container and its correct-output check.", "status": exc.status_code}
+    programs = await _call(program_choices, tenant, actor)
+    return {"context": context, "available": True, "programs": programs,
+            "environment": "Installed local container", "timeout_seconds": profile.limits.timeout_seconds,
+            "detail": "Select a saved program submission. The installed executor supports exact local text snapshots, no model or paid AI calls. A different administrator reviews every program file before separately starting it."}
+
+
+@router.get("/governed-runs/{run_id}/execution-review")
+async def execution_review(run_id: Identifier, request: Request, response: Response):
+    tenant, actor, context = _binding(request, response)
+    from .research_api import resolve_dispatch_authority
+    from .research_execution_composition import complete_review
+    await _call(resolve_dispatch_authority, tenant, actor)
+    service = _run_service(request.app.state)
+    record = await _call(service.inspect, tenant, actor, run_id)
+    result = await _call(complete_review, service, record, actor)
+    return {"context": context, **result}
+
+
+@router.post("/governed-runs/{run_id}/approve-execution")
+async def approve_execution(run_id: Identifier, payload: ExecutionApproval, request: Request, response: Response):
+    tenant, actor, _ = _binding(request, response, payload)
+    from .research_api import resolve_dispatch_authority
+    from .research_execution_composition import review_binding
+    await _call(resolve_dispatch_authority, tenant, actor)
+    service = _run_service(request.app.state)
+    result = await _call(service.approve_execution, tenant, actor, run_id,
+        expected_revision=payload.expected_revision,review_sha256=payload.review_sha256,
+        review=lambda record, reviewer: review_binding(service,record,reviewer))
+    return await _current_run(service, tenant, actor, result)
+
+
+@router.get("/governed-runs/{run_id}/original")
+async def execution_original(run_id: Identifier, request: Request, response: Response):
+    """Pure existing run lookup; never start, finish or replay a candidate."""
+    tenant, actor, context = _binding(request, response)
+    result = await _call(_run_service(request.app.state).inspect, tenant, actor, run_id)
+    return {"context":context,"run":_run_projection(result, actor),"historical":True,
+            "message":"This is the retained original run. Running or interrupted work is never started again by this read."}
+
+
+@router.post("/governed-runs/{run_id}/stop")
+async def execution_stop(run_id: Identifier, payload: RunRevision, request: Request, response: Response):
+    tenant, actor, _ = _binding(request, response, payload)
+    from .research_api import resolve_dispatch_authority
+    await _call(resolve_dispatch_authority, tenant, actor)
+    service = _run_service(request.app.state)
+    result = await _call(service.stop_execution,tenant,actor,run_id,expected_revision=payload.expected_revision)
     return await _current_run(service, tenant, actor, result)
 
 

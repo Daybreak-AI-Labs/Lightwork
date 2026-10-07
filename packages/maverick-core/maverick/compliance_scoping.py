@@ -516,8 +516,20 @@ def _display_names(value, questionnaire_id, questions, rules):
     return names
 
 
+def _studio_source(value):
+    """Retained source provenance; callers still enforce actual source authority."""
+    if value is None:
+        return {}
+    source = _closed_mapping(value, "studio source", frozenset({"studio_id", "form_id", "version",
+        "pointer_sha256", "blueprint_sha256"}))
+    return {"studio_id": _id(source["studio_id"], "studio_id"), "form_id": _id(source["form_id"], "form_id"),
+            "version": _integer(source["version"], "studio version", 1, 2_147_483_647),
+            "pointer_sha256": _digest(source["pointer_sha256"], "studio pointer"),
+            "blueprint_sha256": _digest(source["blueprint_sha256"], "studio blueprint")}
+
+
 def _creation_material(questionnaire_id, questions, rules, expected_latest_version,
-                       actor, display_names=None, expected_latest_integrity=None):
+                       actor, display_names=None, expected_latest_integrity=None, studio_source=None):
     questionnaire = _id(questionnaire_id, "questionnaire_id")
     expected = _integer(expected_latest_version, "expected_latest_version", 0, 1_000_000)
     known = {}
@@ -540,6 +552,9 @@ def _creation_material(questionnaire_id, questions, rules, expected_latest_versi
                "expected_latest_version": expected, "actor_ref": actor}
     if names:
         request["display_names"] = names
+    source = _studio_source(studio_source)
+    if source:
+        request["studio_source"] = source
     if expected_latest_integrity is not None:
         request["expected_latest_integrity"] = _digest(expected_latest_integrity, "latest questionnaire")
         if expected == 0:
@@ -563,6 +578,7 @@ class QuestionnaireVersion:
     reviewed_at: float | None
     integrity_sha256: str
     display_names: Mapping[str, str] = field(default_factory=dict)
+    studio_source: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -954,6 +970,7 @@ class ComplianceScopingStore:
         publication_digest: str,
     ) -> QuestionnaireVersion:
         return QuestionnaireVersion(
+            studio_source=_studio_source(definition.get("studio_source")),
             display_names=_display_names(definition.get("display_names"), definition["questionnaire_id"],
                                          definition["questions"], definition["rules"]),
             tenant_id=definition["tenant_id"],
@@ -1051,13 +1068,15 @@ class ComplianceScopingStore:
         idempotency_key: str,
         display_names: Mapping[str, str] | None = None,
         expected_latest_integrity: str | None = None,
+        studio_source: Mapping[str, object] | None = None,
+        effect_guard: Callable[[], object] | None = None,
     ) -> QuestionnaireVersion:
         """Append an immutable questionnaire definition pending independent review."""
 
         tenant = _tenant(tenant_id)
         actor = self._actor()
         request = _creation_material(questionnaire_id, questions, rules, expected_latest_version,
-                                     actor, display_names, expected_latest_integrity)
+                                     actor, display_names, expected_latest_integrity, studio_source)
         questionnaire = request["questionnaire_id"]
         expected = request["expected_latest_version"]
         validated_questions, validated_rules = request["questions"], request["rules"]
@@ -1065,6 +1084,8 @@ class ComplianceScopingStore:
         version = expected + 1
         with self._connect() as connection:
             self._begin(connection)
+            if effect_guard is not None:
+                effect_guard()
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
@@ -1097,6 +1118,8 @@ class ComplianceScopingStore:
             }
             if request.get("display_names"):
                 definition["display_names"] = request["display_names"]
+            if request.get("studio_source"):
+                definition["studio_source"] = request["studio_source"]
             definition_digest = self._insert(
                 connection,
                 "scope_questionnaires",
@@ -1135,9 +1158,12 @@ class ComplianceScopingStore:
                 "questionnaire_version_created",
                 f"{questionnaire}:{version}",
                 actor,
-                {"version": version, "question_count": len(validated_questions)},
+                {"version": version, "question_count": len(validated_questions),
+                 **({"studio_source_sha256": _sha256(request["studio_source"])} if request.get("studio_source") else {})},
                 now,
             )
+            if effect_guard is not None:
+                effect_guard()
             return self._questionnaire(
                 definition, publication, definition_digest, publication_digest
             )
@@ -1154,11 +1180,11 @@ class ComplianceScopingStore:
     def questionnaire_creation_receipt(self, tenant_id: str, questionnaire_id: str, *,
                                        questions, rules, expected_latest_version: int,
                                        idempotency_key: str, display_names=None,
-                                       expected_latest_integrity=None) -> QuestionnaireVersion | None:
+                                       expected_latest_integrity=None, studio_source=None) -> QuestionnaireVersion | None:
         """Read only the original actor's atomically accepted operation, never replay it."""
         tenant = _tenant(tenant_id)
         request = _creation_material(questionnaire_id, questions, rules, expected_latest_version,
-                                     self._actor(), display_names, expected_latest_integrity)
+                                     self._actor(), display_names, expected_latest_integrity, studio_source)
         with self._connect() as connection:
             _digest_value, operation = self._operation(connection, tenant, idempotency_key, request)
             if operation is None:

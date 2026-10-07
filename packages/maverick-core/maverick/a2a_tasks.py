@@ -1,7 +1,7 @@
 """A2A task lifecycle: the execution half of A2A (discovery lives in
 ``a2a.py``).
 
-Implements the A2A v1.0 JSON-RPC task surface over a single ``POST
+Implements the A2A 0.3 JSON-RPC task surface over a single ``POST
 /a2a/v1`` endpoint, mounted on the dashboard FastAPI app by
 ``a2a.mount()`` when A2A is enabled:
 
@@ -14,7 +14,7 @@ Implements the A2A v1.0 JSON-RPC task surface over a single ``POST
   - ``tasks/pushNotificationConfig/set|get``  register a webhook that
                          receives the Task when it reaches a terminal state.
 
-Spec shapes follow https://a2a-protocol.org (v1.0): Task ``kind="task"``,
+Spec shapes follow https://a2a-protocol.org/v0.3.0/specification/: Task ``kind="task"``,
 ``status.state`` in {submitted, working, completed, failed, canceled,
 rejected}, and ``status-update`` / ``artifact-update`` stream events.
 

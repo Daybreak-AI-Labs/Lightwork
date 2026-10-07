@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import secrets
 import time
+from contextlib import nullcontext
 from functools import wraps
 from typing import Literal
 
@@ -52,19 +53,33 @@ class Design(StrictInput):
     rules: list[Rule] = Field(min_length=1, max_length=512)
 
 
+class StudioSource(StrictInput):
+    studio: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    form: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    pointer: str = Field(pattern=r"^[a-f0-9]{64}$")
+    blueprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class ReviewInput(StrictInput):
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
     source: str = Field(default="", max_length=128)
     source_revision: str = Field(default="", pattern=r"^(?:[a-f0-9]{64})?$")
     design: Design
+    studio_source: StudioSource | None = None
 
 
 def native_errors(function):
     @wraps(function)
     def wrapped(*args, **kwargs):
         from maverick import compliance_scoping as core
+        from maverick import no_code_grc_studio as studio
         try:
             return function(*args, **kwargs)
+        except studio.GRCStudioError as exc:
+            code = (404 if isinstance(exc, studio.GRCStudioNotFound) else
+                    403 if isinstance(exc, (studio.GRCStudioPermissionDenied, studio.GRCStudioConfigError)) else
+                    409 if isinstance(exc, studio.GRCStudioConflict) else 503)
+            raise HTTPException(code, "The live studio form changed or is unavailable. Your draft is kept; check its current version before saving.") from exc
         except core.ComplianceScopingError as exc:
             code = (404 if isinstance(exc, core.ComplianceScopingNotFound) else
                     403 if isinstance(exc, (core.ComplianceScopingPermissionDenied, core.ComplianceScopingConfigError)) else
@@ -86,6 +101,101 @@ def bound(request, expected=None):
 
 def name_for(names, ref):
     return names.get(ref) or ref.removeprefix("ref:").replace("-", " ").replace("_", " ").strip().capitalize()
+
+
+def _studio(request, tenant):
+    from . import no_code_grc_studio_composition as composition
+    auth.require_permission(request, "view")
+    if not composition.grc_studio_enabled(tenant):
+        raise HTTPException(403, "Turn on Compliance studio before choosing a live form.")
+    factory = getattr(request.app.state, "grc_studio_store_factory", None)
+    if not callable(factory):
+        raise HTTPException(503, "Compliance studio is unavailable. Your questionnaire draft is kept.")
+    return factory(tenant_id=tenant, principal_ref=composition.principal_ref(request, tenant), request=request)
+
+
+def _form(version, form_id):
+    form = next((row for row in version.blueprint["forms"] if row["form_id"] == form_id), None)
+    if form is None:
+        raise HTTPException(404, "Choose a current live studio form.")
+    record = next(row for row in version.blueprint["objects"] if row["object_id"] == form["object_id"])
+    fields = {row["field_id"]: row for row in record["fields"]}
+    questions, issues = [], []
+    for section in form["sections"]:
+        for identity in section["field_ids"]:
+            item = fields[identity]
+            label = name_for({}, item["label_ref"])
+            choices = [name_for({}, option) for option in item["options"]]
+            if len(label) > 120 or any(len(choice) > 120 for choice in choices):
+                issues.append(label + ": use question and choice names of no more than 120 characters.")
+            if len(set(choices)) != len(choices):
+                issues.append(label + ": give each choice a different readable name before importing.")
+            if item["field_type"] not in {"boolean", "integer", "single_choice", "multi_choice"}:
+                issues.append(label + ": this answer format is not supported by compliance questionnaires.")
+            if item["default"] is not None:
+                issues.append(label + ": automatic answers are not supported; answers must be supplied by the respondent.")
+            if len(item["options"]) > 64:
+                issues.append(label + ": compliance questionnaires allow up to 64 choices per question.")
+            questions.append({"name": label, "domain": section["section_id"] if section["section_id"] in DOMAINS else "",
+                              "kind": item["field_type"], "options": choices,
+                              "required": item["required"], "condition": None})
+    if not 8 <= len(questions) <= 256:
+        issues.append("This form must contain between 8 and 256 questions to cover all eight compliance topics.")
+    for rule in version.blueprint["rules"]:
+        if rule["object_id"] == record["object_id"]:
+            issues.append(name_for({}, rule["rule_id"]) + ": studio record actions cannot be translated into compliance applicability rules. Remove this rule from the form’s record type before importing.")
+    return {"name": name_for({}, form["title_ref"]), "questions": questions, "incompatibilities": issues}
+
+
+@native_errors
+def studio_sources(request):
+    original = context(request)
+    _core, tenant, _store = bound(request, original)
+    store = _studio(request, tenant)
+    versions = store.list_versions(tenant, state="published", limit=1000)
+    output = []
+    for version in versions:
+        pointer, active = store.get_active(tenant, version.studio_id)
+        if active.version != version.version:
+            continue
+        for form in active.blueprint["forms"]:
+            output.append({"studio": version.studio_id, "form": form["form_id"],
+                           "name": name_for({}, active.blueprint["name_ref"]) + " · " + name_for({}, form["title_ref"]),
+                           "version": active.version})
+            if len(output) >= 1000:
+                break
+        if len(output) >= 1000:
+            break
+    bound(request, original)
+    return {"context": original, "forms": output,
+            "notice": "Choose an independently approved live form. Up to 1,000 forms from the most recent 1,000 published studio versions are listed; the exact live source is checked again before saving."}
+
+
+@native_errors
+def studio_form(request, studio_id, form_id):
+    original = context(request)
+    _core, tenant, _store = bound(request, original)
+    pointer, version = _studio(request, tenant).get_active(tenant, studio_id)
+    result = _form(version, form_id)
+    bound(request, original)
+    return {"context": original, "source_version": version.version, "studio_source": {"studio": studio_id, "form": form_id,
+            "pointer": pointer.integrity_sha256, "blueprint": version.blueprint_sha256}, **result,
+            "notice": "Import keeps every question, answer format and choice. Assign a topic to each question and supply your team’s real framework and control rules. Saving creates a separate immutable questionnaire awaiting independent approval; it does not change the studio."}
+
+
+def _checked_studio(request, tenant, pin, design=None, store=None):
+    pointer, version = (store or _studio(request, tenant)).get_active(tenant, pin.studio)
+    if pointer.integrity_sha256 != pin.pointer or version.blueprint_sha256 != pin.blueprint:
+        raise HTTPException(409, "The live studio form changed. Your draft is kept. Check the current form before another review.")
+    form = _form(version, pin.form)
+    if form["incompatibilities"]:
+        raise HTTPException(422, "This form is not compatible: " + " ".join(form["incompatibilities"]))
+    if design is not None:
+        exact = [{key: value for key, value in question.model_dump().items() if key != "domain"} for question in design.questions]
+        source_questions = [{key: value for key, value in question.items() if key != "domain"} for question in form["questions"]]
+        if exact != source_questions:
+            raise HTTPException(409, "Keep the imported questions, choices and answer formats intact. Assign topics and scope rules in this builder; change the source questions in Compliance studio.")
+    return version
 
 
 def public(q):
@@ -195,6 +305,9 @@ def _compile(design, questionnaire, previous=None):
 def review(request, data: ReviewInput):
     with authority_effect_fence():
         core, tenant, store = bound(request, data.context)
+        studio_version = None
+        if data.studio_source is not None:
+            studio_version = _checked_studio(request, tenant, data.studio_source, data.design)
         previous = store.latest_questionnaire(tenant, data.source) if data.source else None
         if data.source and (previous is None or previous.integrity_sha256 != data.source_revision):
             raise HTTPException(409, "The selected questionnaire changed after you opened it. Keep your draft and open the current version before reviewing again.")
@@ -206,15 +319,21 @@ def review(request, data: ReviewInput):
                     "display_names": names, "expected_latest_version": previous.version if previous else 0,
                     "expected_latest_integrity": previous.integrity_sha256 if previous else None,
                     "idempotency_key": "design-" + secrets.token_hex(16)}
+        if studio_version is not None:
+            material["studio_source"] = {"studio_id": data.studio_source.studio, "form_id": data.studio_source.form,
+                "version": studio_version.version, "pointer_sha256": data.studio_source.pointer,
+                "blueprint_sha256": data.studio_source.blueprint}
         # Use the same closed validation now; the native transaction rechecks source at save.
-        core._creation_material(identity, questions, rules, material["expected_latest_version"], store._actor(), names, material["expected_latest_integrity"])
+        core._creation_material(identity, questions, rules, material["expected_latest_version"], store._actor(), names,
+                               material["expected_latest_integrity"], material.get("studio_source"))
         bound(request, data.context)
         token = crypto_at_rest.seal_to_str(json.dumps({"purpose": PURPOSE, "context": data.context,
-                "expires_at": time.time() + TTL, "material": material}, sort_keys=True, allow_nan=False))
+                "expires_at": time.time() + TTL, "material": material,
+                "studio_source": data.studio_source.model_dump() if data.studio_source else None}, sort_keys=True, allow_nan=False))
         if not crypto_at_rest.is_sealed_str(token):
             raise HTTPException(503, "Secure review is unavailable. Nothing was saved.")
     return {"token": token, "context": data.context, "preview": data.design.model_dump(),
-            "version": material["expected_latest_version"] + 1,
+            "version": material["expected_latest_version"] + 1, "studio_form": data.studio_source is not None,
             "message": "This creates an immutable version waiting for approval by a different administrator. Existing assessments keep their original version. Names and rules are supplied by your team; Lightwork does not verify framework coverage or legal correctness."}
 
 
@@ -223,7 +342,7 @@ def open_token(token, recovery=False):
         if not crypto_at_rest.is_sealed_str(token):
             raise ValueError
         value = json.loads(crypto_at_rest.unseal_from_str(token))
-        if (set(value) != {"purpose", "context", "expires_at", "material"} or value["purpose"] != PURPOSE
+        if (set(value) not in ({"purpose", "context", "expires_at", "material"}, {"purpose", "context", "expires_at", "material", "studio_source"}) or value["purpose"] != PURPOSE
                 or not isinstance(value["expires_at"], float) or (not recovery and not time.time() < value["expires_at"] <= time.time() + TTL)):
             raise ValueError
         return value
@@ -250,6 +369,23 @@ def apply(request, token):
         if prior is not None:
             return {"confirmed": True, "result": public(prior), "message": "Read the original accepted version; no new version was created."}
         open_token(token)
-        q = store.create_questionnaire_version(tenant, **value["material"])
+        pin = StudioSource.model_validate(value["studio_source"]) if value.get("studio_source") else None
+        source_store = _studio(request, tenant) if pin else None
+        fence = (source_store.active_source_fence(tenant, pin.studio, expected_pointer_integrity=pin.pointer,
+                 expected_blueprint_sha256=pin.blueprint) if pin else nullcontext())
+        with fence:
+            def guard():
+                # Do not reopen/initialize the target store inside its held
+                # SQLite transaction. Recheck current authority without a writer.
+                auth.require_permission(request, "operate")
+                if context(request) != value["context"]:
+                    raise HTTPException(409, "Your account, workspace or access changed. No questionnaire was saved.")
+                if not _core.enabled():
+                    raise HTTPException(403, "Compliance questionnaires were turned off before saving. No questionnaire was changed.")
+                open_token(token)
+                if pin:
+                    auth.require_permission(request, "view")
+                    _checked_studio(request, tenant, pin, store=source_store)
+            q = store.create_questionnaire_version(tenant, **value["material"], effect_guard=guard)
         bound(request, value["context"])
         return {"confirmed": True, "result": public(q), "message": "Saved for independent approval. A different administrator must review it before any new assessment can use it."}

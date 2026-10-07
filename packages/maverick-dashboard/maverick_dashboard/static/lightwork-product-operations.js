@@ -307,6 +307,17 @@
               ? function (isCurrent) { return consentDeliveryControls.openReview({}, {isCurrent: isCurrent, context: consentDeliveryReview.context}); } : null);
           return;
         }
+        if (entry[0] === 'research_execution_review') {
+          var researchExecutionReview = entry[1], researchExecutionControls = window.LightworkResearchExecution;
+          if (!researchExecutionReview || Array.isArray(researchExecutionReview) ||
+              Object.keys(researchExecutionReview).sort().join(',') !== 'context,scope' ||
+              researchExecutionReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(researchExecutionReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open complete research run controls',
+            '/research#research-run-form',
+            researchExecutionControls && typeof researchExecutionControls.openReview === 'function'
+              ? function (isCurrent) { return researchExecutionControls.openReview({}, {isCurrent: isCurrent, context: researchExecutionReview.context}); } : null);
+          return;
+        }
         if (entry[0] === 'runtime_enforcement_form') {
           var safeguardReview = entry[1], safeguardControls = window.LightworkRuntimeEnforcement;
           if (!safeguardReview || Array.isArray(safeguardReview) ||

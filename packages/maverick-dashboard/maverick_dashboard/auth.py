@@ -89,6 +89,9 @@ SELF_AUTH_WEBHOOK_PATHS = frozenset(
         "/webhook/github",
         "/webhook/gitlab",
         "/webhook/stripe",
+        # Phone providers use their own current check key, native caller
+        # authority and durable call original, rather than a dashboard session.
+        "/api/v1/channels/voice/receive",
     }
 )
 

@@ -15,6 +15,9 @@
   var dirty = false;
   var source = null, draft = null, fields = {}, pending = null, busy = false, generation = 0, handoff = null;
   var recoveryCopy = null, sourceChecked = false, requests = new Set();
+  var studioForms = [], studioPreview = null, studioPin = null;
+  var studioChoice = document.getElementById('cqb-studio-source'), studioBody = document.getElementById('cqb-studio-preview-body');
+  var studioImport = document.getElementById('cqb-studio-import'), studioLinked = document.getElementById('cqb-studio-linked');
   var storage = 'lightwork.questionnaire.review.v1';
   function el(tag, text, parent, cls) { var node = R.el(tag, cls || '', text); if (parent) parent.appendChild(node); return node; }
   function button(label, parent, handler) { var b = el('button', label, parent, 'btn btn--ghost'); b.type = 'button'; b.addEventListener('click', handler); return b; }
@@ -24,7 +27,11 @@
   function lock(on) {
     busy = on;
     panel.querySelectorAll('input,select,textarea,button').forEach(function (control) { control.disabled = on; });
-    if (!on) { apply.disabled = !sourceChecked || !confirm.checked || !pending || pending.uncertain; prepare.disabled = !sourceChecked || !!(pending && pending.uncertain); select.disabled = !!(pending && pending.uncertain); }
+    if (!on) {
+      apply.disabled = !sourceChecked || !confirm.checked || !pending || pending.uncertain; prepare.disabled = !sourceChecked || !!(pending && pending.uncertain); select.disabled = !!(pending && pending.uncertain);
+      if (pending && pending.uncertain) panel.querySelectorAll('input,select,textarea,button').forEach(function (control) { if (control !== recover && control.id !== 'cqb-close') control.disabled = true; });
+      if (studioPin) work.querySelectorAll('[data-design-field^="questions."], [data-source-question]').forEach(function (control) { if (!/\.domain$/.test(control.dataset.designField || '')) control.disabled = true; });
+    }
   }
   async function call(method, url, body) {
     var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 30000);
@@ -46,10 +53,10 @@
   function recoveryReady() {
     if (recoveryCopy || !window.mvDraftRecovery) return;
     recoveryCopy = window.mvDraftRecovery.create({host: document.getElementById('cqb-draft'), key: 'compliance-questionnaire-designer',
-      read: function () { return source && draft ? {source: source.source, source_revision: source.source_revision, design: read()} : {}; },
+      read: function () { return source && draft ? {source: source.source, source_revision: source.source_revision, studio_source: studioPin, design: read()} : {}; },
       restore: function (value) {
         if (!source || !value || !value.design || !Array.isArray(value.design.questions) || !Array.isArray(value.design.rules) || pending && pending.uncertain) { say('Check the original save before restoring this draft.'); return; }
-        source.source = value.source || ''; source.source_revision = value.source_revision || ''; draft = value.design; select.value = source.source; render();
+        source.source = value.source || ''; source.source_revision = value.source_revision || ''; studioPin = value.studio_source || null; draft = value.design; select.value = source.source; render(); lock(false);
         say('Draft restored for review. If the saved starting version changed, the native review will refuse to overwrite it.');
       }});
   }
@@ -113,7 +120,7 @@
       var prefix = 'questions.' + i;
       q.name = value(prefix + '.name'); q.domain = value(prefix + '.domain'); q.kind = value(prefix + '.kind');
       q.options = fields[prefix + '.options'] ? lines(prefix + '.options') : []; q.required = fields[prefix + '.required'].checked;
-      q.condition = readCondition(prefix + '.condition');
+      q.condition = studioPin ? null : readCondition(prefix + '.condition');
     });
     draft.rules.forEach(function (rule, i) {
       var prefix = 'rules.' + i;
@@ -131,20 +138,21 @@
       var card = el('fieldset', undefined, work, 'panel cs-stack'); el('legend', 'Question ' + (i + 1), card);
       var prefix = 'questions.' + i;
       field(prefix + '.name', 'Question name', 'text', q.name, card);
-      field(prefix + '.domain', 'Topic', 'select', q.domain, card, domains);
+      field(prefix + '.domain', 'Topic', 'select', q.domain, card, Object.assign({'': 'Choose a topic'}, domains));
       field(prefix + '.kind', 'Answer format', 'select', q.kind, card, kinds).addEventListener('change', function () { read(); render(); });
       if (q.kind === 'single_choice' || q.kind === 'multi_choice') field(prefix + '.options', 'Choices · one name per line', 'lines', q.options.join('\n'), card);
       field(prefix + '.required', 'An answer is required when this question appears', 'checkbox', q.required, card);
-      conditionFields(prefix + '.condition', q.condition, i, card);
-      button('Remove question ' + (i + 1), card, function () {
+      if (!studioPin) conditionFields(prefix + '.condition', q.condition, i, card);
+      var removeQuestion = button('Remove question ' + (i + 1), card, function () {
         read(); draft.questions.splice(i, 1);
         function shift(c) { if (!c || c.question === i) return null; if (c.question > i) c.question--; return c; }
         draft.questions.forEach(function (row) { row.condition = shift(row.condition); });
         draft.rules.forEach(function (row) { row.conditions = row.conditions.map(shift).filter(Boolean); });
         render(); say('Question removed. Conditions that referred to it were removed too. Review the remaining rules before saving.');
       });
+      removeQuestion.setAttribute('data-source-question', 'true');
     });
-    button('Add a question', work, function () { read(); if (draft.questions.length >= 256) { say('A questionnaire can contain up to 256 questions.'); return; } draft.questions.push({name: '', domain: 'organization', kind: 'boolean', options: [], required: true, condition: null}); render(); });
+    button('Add a question', work, function () { read(); if (draft.questions.length >= 256) { say('A questionnaire can contain up to 256 questions.'); return; } draft.questions.push({name: '', domain: 'organization', kind: 'boolean', options: [], required: true, condition: null}); render(); }).setAttribute('data-source-question', 'true');
     el('h3', 'Scope rules', work); el('p', 'A rule applies its named controls when every listed condition matches. A rule with no conditions always applies. Names identify your team’s approved requirements; enter no evidence or licensed framework paragraphs.', work, 'muted');
     draft.rules.forEach(function (rule, i) {
       var card = el('fieldset', undefined, work, 'panel cs-stack'); el('legend', 'Scope rule ' + (i + 1), card);
@@ -158,6 +166,8 @@
       button('Remove rule ' + (i + 1), card, function () { read(); draft.rules.splice(i, 1); render(); });
     });
     button('Add a scope rule', work, function () { read(); if (draft.rules.length >= 512) { say('A questionnaire can contain up to 512 scope rules.'); return; } draft.rules.push({framework: '', controls: [], overlaps: [], reason: '', conditions: []}); render(); });
+    studioLinked.textContent = studioPin ? 'Questions are linked to the reviewed live studio form. Change questions in Compliance studio; assign topics and scope rules here. The live source is checked again before saving.' : '';
+    lock(busy);
   }
   function conditionText(c, design) {
     if (!c) return 'Always shown';
@@ -175,6 +185,7 @@
   function showReview(body) {
     preview.textContent = '';
     el('p', body.preview.name + ' · new version ' + body.version, preview); el('p', body.message, preview, 'muted');
+    if (body.studio_form) el('p', 'Imported questions are bound to the exact live studio form you selected. This save creates a separate questionnaire for independent approval.', preview, 'muted');
     showDesign(preview, body.preview);
     reviewPanel.hidden = false; confirm.checked = false; apply.disabled = true; reviewPanel.scrollIntoView({block: 'start'});
   }
@@ -183,7 +194,7 @@
     if (!valid(started)) return;
     var saved;
     try { saved = JSON.parse(sessionStorage.getItem(storage) || 'null'); } catch (_) { saved = null; }
-    dirty = false; source = body; draft = body.design; select.value = body.source; sourceChecked = true;
+    dirty = false; studioPin = null; studioPreview = null; studioBody.replaceChildren(); studioImport.hidden = true; source = body; draft = body.design; select.value = body.source; sourceChecked = true;
     if (saved) pending = {token: saved.token, uncertain: true};
     render(); recoveryReady();
     document.getElementById("cqb-update-source").hidden = !source.source;
@@ -201,6 +212,10 @@
       var current = await call('GET', API + '/catalog');
       if (!valid(started)) return;
       if (expectedContext && current.context !== expectedContext) throw new Error('Your account, workspace or access changed. Refresh current controls.');
+      if (source && draft && dirty && source.context === current.context && (expectedContext || !identity || identity === source.source)) {
+        say('Your current questionnaire draft and linked studio form are kept. Review these existing questions before saving or changing the starting point.');
+        panel.scrollIntoView({block: 'start'}); if (fields.name) fields.name.focus({preventScroll: true}); return;
+      }
       select.textContent = ''; var fresh = el('option', 'New questionnaire', select); fresh.value = '';
       current.sources.forEach(function (q) { var option = el('option', q.name + ' · version ' + q.version, select); option.value = q.id; });
       document.getElementById('cqb-notice').textContent = current.notice;
@@ -233,7 +248,7 @@
     if (busy || !sourceChecked || !source || pending && pending.uncertain) return;
     var started = generation; read(); lock(true);
     try {
-      var body = await call('POST', API + '/review', {context: source.context, source: source.source, source_revision: source.source_revision, design: draft});
+      var body = await call('POST', API + '/review', {context: source.context, source: source.source, source_revision: source.source_revision, studio_source: studioPin, design: draft});
       if (!valid(started)) return;
       pending = {token: body.token, uncertain: false}; keepPending(); showReview(body); say('Review every question and rule. Nothing has been saved yet.');
     } catch (error) { if (valid(started)) fail(error); }
@@ -269,6 +284,7 @@
     document.getElementById('cqb-draft').replaceChildren(); document.getElementById('cqb-latest-preview').replaceChildren(); document.getElementById('cqb-latest').hidden = true;
     work.replaceChildren(); preview.replaceChildren(); select.replaceChildren(); document.getElementById('cqb-notice').textContent = '';
     reviewPanel.hidden = true; recover.hidden = true; confirm.checked = false;
+    studioPin = null; studioPreview = null; studioForms = []; studioChoice.replaceChildren(); studioBody.replaceChildren(); studioLinked.textContent = ''; studioImport.hidden = true;
     source = null; draft = null; fields = {}; pending = null; sourceChecked = false; dirty = false; lock(false);
     // Keep the sealed original request in this tab for its original account.
     say('Your account, workspace or access changed. Private questionnaire details were cleared. Return to the original account to check a pending save.');
@@ -283,6 +299,12 @@
       var fresh = await call('GET', API + '/source?identity=' + encodeURIComponent(original.source));
       if (!valid(started)) return;
       if (fresh.context !== original.context) { clearPrivate(); return; }
+      if (studioPin) {
+        var live = await call('GET', API + '/studio-form?studio=' + encodeURIComponent(studioPin.studio) + '&form=' + encodeURIComponent(studioPin.form));
+        if (!valid(started)) return;
+        if (live.context !== original.context) { clearPrivate(); return; }
+        if (JSON.stringify(live.studio_source) !== JSON.stringify(studioPin) || live.incompatibilities.length) throw new Error('The linked studio form changed. Your draft is kept; saving is paused until you review and import its current form.');
+      }
       recoveryReady();
       if (fresh.source !== original.source || fresh.source_revision !== original.source_revision || fresh.source_version !== original.source_version) {
         dropReview();
@@ -313,4 +335,48 @@
     if (busy || handoff || !options || typeof options.active !== 'function' || !options.active()) return Promise.reject(new Error('The questionnaire form is unavailable.'));
     return new Promise(function (resolve, reject) { handoff = {parent: panel.parentNode, next: panel.nextSibling, resolve: resolve, active: options.active}; options.host.appendChild(panel); open('', options.context).catch(function (error) { finish({status: 'unconfirmed'}); reject(error); }); });
   }};
+  document.getElementById('cqb-studio-load').addEventListener('click', async function () {
+    if (busy || !source || pending && pending.uncertain) return;
+    var started = generation; lock(true);
+    try {
+      var body = await call('GET', API + '/studio-sources');
+      if (!valid(started)) return;
+      if (body.context !== source.context) { clearPrivate(); return; }
+      studioForms = body.forms; studioChoice.replaceChildren(); el('option', 'Choose a form', studioChoice).value = '';
+      studioForms.forEach(function (row, index) { el('option', row.name + ' · version ' + row.version, studioChoice).value = String(index); });
+      say(studioForms.length ? body.notice : 'There are no live forms yet. Build a form in Compliance studio and complete its review, approval and publication first. Your draft is kept.');
+    } catch (error) { if (valid(started)) fail(error); }
+    finally { if (valid(started)) lock(false); }
+  });
+  studioChoice.addEventListener('change', function () { studioPreview = null; studioBody.replaceChildren(); studioImport.hidden = true; });
+  document.getElementById('cqb-studio-preview').addEventListener('click', async function () {
+    if (busy || !source || pending && pending.uncertain) return;
+    var row = studioChoice.value === '' ? null : studioForms[Number(studioChoice.value)];
+    if (!row) { say('Choose a live form first. Your draft is kept.'); return; }
+    var started = generation; lock(true); studioPreview = null; studioImport.hidden = true;
+    try {
+      var body = await call('GET', API + '/studio-form?studio=' + encodeURIComponent(row.studio) + '&form=' + encodeURIComponent(row.form));
+      if (!valid(started)) return;
+      if (body.context !== source.context) { clearPrivate(); return; }
+      studioBody.replaceChildren(); el('h4', body.name + ' · version ' + body.source_version, studioBody); el('p', body.notice, studioBody);
+      body.questions.forEach(function (q, index) { el('p', (index + 1) + '. ' + q.name + ' · ' + (kinds[q.kind] || 'Unsupported answer format') + ' · ' + (q.required ? 'Required' : 'Optional') + (q.options.length ? ' · Choices: ' + q.options.join(' / ') : ''), studioBody); });
+      if (body.incompatibilities.length) {
+        el('h4', 'Resolve these before importing', studioBody); var list = el('ul', undefined, studioBody);
+        body.incompatibilities.forEach(function (issue) { el('li', issue, list); });
+        say('This form cannot be imported yet. Its questions and your draft have not changed.');
+      } else { studioPreview = body; studioImport.hidden = false; say('Review every question and choice before importing. Nothing has been saved.'); }
+    } catch (error) { if (valid(started)) fail(error); }
+    finally { if (valid(started)) lock(false); }
+  });
+  studioImport.addEventListener('click', async function () {
+    if (busy || !studioPreview || !source || pending && pending.uncertain) return;
+    var reviewed = studioPreview, started = generation;
+    var ok = await R.confirm('Replace the draft questions and scope rules with these reviewed form questions? Assign all eight topics and add your team’s real framework and control rules afterward. The saved starting questionnaire and studio remain unchanged.', 'Import questions');
+    if (!ok || !valid(started) || studioPreview !== reviewed || busy || pending && pending.uncertain) return;
+    read(); studioPin = reviewed.studio_source;
+    draft = {name: reviewed.name, questions: JSON.parse(JSON.stringify(reviewed.questions)), rules: [{framework: '', controls: [], overlaps: [], reason: '', conditions: []}]};
+    dirty = true; render(); say('Questions imported into your draft. Assign all eight topics, add scope rules, then review and save for independent approval.');
+    if (recoveryCopy) document.getElementById('cqb-draft').dispatchEvent(new Event('input', {bubbles: true}));
+  });
+  if (window.location.hash === '#cs-questionnaire-design') open();
 }());

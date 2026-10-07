@@ -181,7 +181,7 @@
       <h3 id="vendor-title">AI supplier reviews</h3>
       {% if ai_vendor_error %}<p class="assurance-alert">{{ ai_vendor_error }}</p>{% endif %}
       {% if ai_vendor_items %}
-      <div class="assurance-table"><table><caption>Latest supplier reviews</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Risk</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="Latest supplier reviews"><table><caption>Latest supplier reviews</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Risk</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
       {% for row in ai_vendor_items %}<tr><th scope="row">{{ row.vendor }}</th><td>{{ row.risk_rating|humanize }}</td><td>{{ MRA_STATUS.get(row.status, row.status|humanize) }}</td><td>{% if gateway_admin and row.status == 'pending_review' %}<button class="btn btn--ghost" type="button" data-vendor-review="{{ row.id }}" data-revision="{{ row.revision }}" aria-label="Review the {{ row.vendor }} assessment">Review</button>{% elif gateway_admin and row.status == 'approved' %}<button class="btn btn--ghost" type="button" data-vendor-project="{{ row.id }}" aria-label="Attach the {{ row.vendor }} review to an AI system">Attach to an AI system</button>{% else %}<span class="assurance-muted">—</span>{% endif %}</td></tr>{% endfor %}
       </tbody></table></div>
       {% else %}<p class="assurance-empty">No supplier reviews yet. Start one below when you take on a new AI supplier.</p>{% endif %}
@@ -213,8 +213,8 @@
           <p>Workspace code: <span id="ai-vendor-portal-tenant"></span> <button class="btn btn--ghost" type="button" data-copy-target="ai-vendor-portal-tenant">Copy</button></p>
           <p>Access code: <span id="ai-vendor-portal-token"></span> <button class="btn btn--ghost" type="button" data-copy-target="ai-vendor-portal-token">Copy</button></p>
         </div>
-        <div class="assurance-table"><table><caption>Access codes</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Status</th><th scope="col">Expires</th><th scope="col">Actions</th></tr></thead><tbody id="ai-vendor-portal-invitations"><tr><td colspan="4">Loading…</td></tr></tbody></table></div>
-        <div class="assurance-table"><table><caption>Answers sent by suppliers</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Status</th><th scope="col">Received</th><th scope="col">Actions</th></tr></thead><tbody id="ai-vendor-portal-submissions"><tr><td colspan="4">Loading…</td></tr></tbody></table></div>
+        <div class="assurance-table" tabindex="0" role="region" aria-label="Access codes"><table><caption>Access codes</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Status</th><th scope="col">Expires</th><th scope="col">Actions</th></tr></thead><tbody id="ai-vendor-portal-invitations"><tr><td colspan="4">Loading…</td></tr></tbody></table></div>
+        <div class="assurance-table" tabindex="0" role="region" aria-label="Answers sent by suppliers"><table><caption>Answers sent by suppliers</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Status</th><th scope="col">Received</th><th scope="col">Actions</th></tr></thead><tbody id="ai-vendor-portal-submissions"><tr><td colspan="4">Loading…</td></tr></tbody></table></div>
         <button class="btn btn--ghost" id="ai-vendor-portal-refresh" type="button">Refresh</button>
       </details>
       {% endif %}
@@ -240,7 +240,7 @@
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Check for drift</button> <span id="drift-evaluate-status" class="assurance-muted" role="status" aria-live="polite"></span></div>
       </form>
       {% if drift_monitoring_items %}
-      <div class="assurance-table"><table><caption>Recent drift checks</caption><thead><tr><th scope="col">AI system</th><th scope="col">Data</th><th scope="col">Result</th><th scope="col">Checked</th></tr></thead><tbody>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="Recent drift checks"><table><caption>Recent drift checks</caption><thead><tr><th scope="col">AI system</th><th scope="col">Data</th><th scope="col">Result</th><th scope="col">Checked</th></tr></thead><tbody>
       {% for row in drift_monitoring_items[:20] %}<tr><th scope="row">{{ mra_name(row.asset_id) }}</th><td>{{ row.source_id|humanize }}</td><td>{{ MRA_STATUS.get(row.result, row.result|humanize) }}</td><td>{% if row.observed_at %}{{ row.observed_at|datetime }}{% else %}—{% endif %}</td></tr>{% endfor %}
       </tbody></table></div>
       {% else %}<p class="assurance-empty">No drift checks yet. Results appear here once a monitored AI system reports a check.</p>{% endif %}
@@ -265,7 +265,7 @@
     {% elif ai_incident_error %}<p class="assurance-alert">{{ ai_incident_error }}</p>
     {% elif ai_incident_declarations %}
     {% if ai_incident_overdue %}<p class="assurance-alert">{{ ai_incident_overdue }} report{{ 's are' if ai_incident_overdue != 1 else ' is' }} past the deadline.</p>{% endif %}
-    <div class="assurance-table"><table><caption>Declared serious incidents, most urgent first</caption><thead><tr><th scope="col">What happened</th><th scope="col">Country</th><th scope="col">Status</th><th scope="col">Deadline</th></tr></thead><tbody>
+    <div class="assurance-table" tabindex="0" role="region" aria-label="Declared serious incidents, most urgent first"><table><caption>Declared serious incidents, most urgent first</caption><thead><tr><th scope="col">What happened</th><th scope="col">Country</th><th scope="col">Status</th><th scope="col">Deadline</th></tr></thead><tbody>
     {% for row in ai_incident_declarations %}<tr data-record="{{ row.id }}"><th scope="row">{{ row.category|humanize }}</th><td>{{ row.member_state }}</td><td>{{ MRA_STATUS.get(row.status, row.status|humanize) }}</td><td>{% if row.overdue %}<span class="badge failed">Overdue</span>{% else %}{{ row.clock_label|replace('d left', ' days left') }}{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
     <p class="assurance-muted">These are records of what people did. Lightwork does not send anything to an authority.</p>
@@ -383,7 +383,7 @@
         {{ gateway_panel_errors.policies }} The other sections still work.
       </div>
       {% else %}
-      <div class="assurance-table"><table>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="Active rules and whether each is tied to one exact model version"><table>
         <caption>Active rules and whether each is tied to one exact model version</caption>
         <thead><tr><th scope="col">Rule</th><th scope="col">Model</th><th scope="col">Linked regulation changes</th></tr></thead>
         <tbody>{% for row in policies %}<tr data-record="{{ row.policy_id|default(row.id, true) }}">
@@ -431,7 +431,7 @@
       {{ gateway_panel_errors.receipts }} The other sections still work.
     </div>
     {% else %}
-    <div class="assurance-table"><table>
+    <div class="assurance-table" tabindex="0" role="region" aria-label="Most recent records"><table>
       <caption>Most recent records</caption>
       <thead><tr><th scope="col">When</th><th scope="col">Status</th><th scope="col">Signature</th><th scope="col">Model</th></tr></thead>
       <tbody>{% for row in receipts %}<tr data-record="{{ row.receipt_id|default(row.id, true) }}">
@@ -467,7 +467,7 @@
       {{ impact_page.count|default(0, true) }} of
       {{ impact_page.snapshot_total|default(0, true) }}.
     </p>
-    <div class="assurance-table"><table>
+    <div class="assurance-table" tabindex="0" role="region" aria-label="Regulation changes that may affect your AI systems, waiting for a person to decide"><table>
       <caption>Regulation changes that may affect your AI systems, waiting for a person to decide</caption>
       <thead><tr><th scope="col">Affects</th><th scope="col">Status</th><th scope="col">Controls</th><th scope="col">Source</th><th scope="col">Actions</th></tr></thead>
       <tbody>{% for row in regulatory_impacts %}<tr data-record="{{ row.impact_id|default(row.id, true) }}">
@@ -526,7 +526,7 @@
       <div class="assurance-stat"><strong>{{ model_risk_totals.evidence }}</strong><span>test results</span></div>
       <div class="assurance-stat"><strong>{{ model_risk_totals.findings }}</strong><span>current findings</span></div>
     </div>
-    <div class="assurance-table"><table>
+    <div class="assurance-table" tabindex="0" role="region" aria-label="Current findings that need someone&#x27;s attention"><table>
       <caption>Current findings that need someone's attention</caption>
       <thead><tr><th scope="col">Finding</th><th scope="col">Severity</th><th scope="col">AI system</th><th scope="col">Sources</th></tr></thead>
       <tbody>{% for row in findings %}<tr>
@@ -563,7 +563,7 @@
     </div>
 
     <h3>Connected accounts</h3>
-    <div class="assurance-table"><table>
+    <div class="assurance-table" tabindex="0" role="region" aria-label="Latest check of each connected account"><table>
       <caption>Latest check of each connected account</caption>
       <thead><tr><th scope="col">Account</th><th scope="col">Status</th><th scope="col">Last full check</th><th scope="col">AI systems</th></tr></thead>
       <tbody>{% for connector in ai_inventory_connectors %}
@@ -600,7 +600,7 @@
     {% endif %}
 
     <h3>AI systems found</h3>
-    <div class="assurance-table"><table>
+    <div class="assurance-table" tabindex="0" role="region" aria-label="AI systems seen in your connected accounts; up to 500 are shown"><table>
       <caption>AI systems seen in your connected accounts; up to 500 are shown</caption>
       <thead><tr><th scope="col">AI system</th><th scope="col">Where / model</th><th scope="col">Owner</th><th scope="col">Version tracking</th><th scope="col">Status</th><th scope="col">Last seen</th></tr></thead>
       <tbody>{% for row in ai_inventory_assets %}<tr data-asset-id="{{ row.asset_id }}">
@@ -625,7 +625,7 @@
 
     <details>
       <summary>Recent checks ({{ ai_inventory_runs|length }})</summary>
-      <div class="assurance-table"><table>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="Full, partial and failed checks; up to 50 are shown"><table>
         <caption>Full, partial and failed checks; up to 50 are shown</caption>
         <thead><tr><th scope="col">Started</th><th scope="col">Account</th><th scope="col">Result</th><th scope="col">AI systems found</th></tr></thead>
         <tbody>{% for row in ai_inventory_runs %}<tr data-run="{{ row.id }}">
@@ -659,7 +659,7 @@
     </div>
 
     <h3>Prepared packs</h3>
-    <div class="assurance-table"><table>
+    <div class="assurance-table" tabindex="0" role="region" aria-label="Packs prepared for use across all workspaces"><table>
       <caption>Packs prepared for use across all workspaces</caption>
       <thead><tr><th scope="col">Pack</th><th scope="col">Framework</th><th scope="col">Coverage</th><th scope="col">Source</th></tr></thead>
       <tbody>{% for row in policy_pack_catalog["items"] %}<tr data-record="{{ row.id }}">
@@ -673,7 +673,7 @@
     {% if policy_pack_catalog.truncated %}<p class="assurance-muted">Only the first page of prepared packs is shown.</p>{% endif %}
 
     <div class="assurance-grid">
-      <div class="assurance-table"><table>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="Packs turned on for all workspaces"><table>
         <caption>Packs turned on for all workspaces</caption>
         <thead><tr><th scope="col">Pack</th><th scope="col">Version in use</th><th scope="col">Controls</th></tr></thead>
         <tbody>{% for row in policy_pack_channels["items"] %}<tr>
@@ -681,7 +681,7 @@
           <td>{{ row.control_count }}</td>
         </tr>{% else %}<tr><td colspan="3">No packs are turned on.</td></tr>{% endfor %}</tbody>
       </table></div>
-      <div class="assurance-table"><table>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="Packs this workspace uses, and its evidence for them"><table>
         <caption>Packs this workspace uses, and its evidence for them</caption>
         <thead><tr><th scope="col">Pack</th><th scope="col">Version</th><th scope="col">Evidence</th></tr></thead>
         <tbody>{% for row in policy_pack_subscriptions["items"] %}<tr>
@@ -786,7 +786,7 @@
         <div class="assurance-stat"><strong>{{ portfolio_snapshots|length }}</strong><span>quarterly reports saved</span></div>
       </div>
       <p><strong>Current quarter:</strong> {{ portfolio_report.period_id|default("unknown", true) }}</p>
-      <div class="assurance-table"><table>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="What adds to the score"><table>
         <caption>What adds to the score</caption>
         <thead><tr><th scope="col">AI system</th><th scope="col">Severity</th><th scope="col">Points</th></tr></thead>
         <tbody>{% for row in portfolio_report.contributors|default([], true) %}<tr data-record="{{ row.finding_id }}">
@@ -816,7 +816,7 @@
     {% elif red_team_error %}
       <div class="assurance-alert" role="status">{{ red_team_error }}</div>
     {% else %}
-      <div class="assurance-table"><table>
+      <div class="assurance-table" tabindex="0" role="region" aria-label="Recent test runs"><table>
         <caption>Recent test runs</caption>
         <thead><tr><th scope="col">AI system tested</th><th scope="col">Status</th><th scope="col">Progress</th><th scope="col">Grade</th>
           {% if gateway_admin %}<th scope="col">Actions</th>{% endif %}</tr></thead>
@@ -1510,7 +1510,8 @@ window.mraFailure = response => {
           tbody.appendChild(row);
         });
         table.appendChild(tbody);
-        const wrap = document.createElement("div"); wrap.className = "assurance-table"; wrap.appendChild(table);
+        const wrap = document.createElement("div"); wrap.className = "assurance-table";
+        wrap.tabIndex = 0; wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", caption.textContent); wrap.appendChild(table);
         topologyResult.appendChild(wrap); topologyResult.hidden = false;
         status("agent-topology-status", human(agent) + " can reach " + nodes.length + " thing" + (nodes.length === 1 ? "" : "s") + ".");
       } catch (error) { status("agent-topology-status", window.mraPlain(error, "load what the agent can reach")); }

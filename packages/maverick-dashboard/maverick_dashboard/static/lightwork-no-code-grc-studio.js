@@ -491,7 +491,7 @@
       readiness.textContent = ready ? "You can build and approve blueprints here." : (status.enabled ? "The studio is not set up yet." : "The studio is turned off.");
       readinessDetail.textContent = ready ? (connected
         ? "Destinations are connected. Check the specific destination before applying a published blueprint to it."
-        : "Publishing makes a blueprint active in this studio. It will not update questionnaires, evidence checks or reports elsewhere until an administrator connects those destinations.")
+        : "Publishing makes a blueprint active in this studio. Use the questionnaire builder below to bring supported form questions into a reviewed questionnaire. Evidence checks and reports need their own supported destination.")
         : status.enabled ? "Ask an administrator to finish setting up the no-code GRC studio for this workspace."
           : "Ask an administrator to turn on the no-code GRC studio for this workspace.";
       $("grcs-projection-panel").hidden = !(ready && status.runtime_projection_preview_configured === true);

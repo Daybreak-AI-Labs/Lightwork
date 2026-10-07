@@ -20,9 +20,10 @@ async def until(predicate):
 
 
 def voice_event(**fields):
-    return {"message": {"type": "transcript", "role": "user", "transcriptType": "final",
-            "transcript": "question", "id": "event1", "call": {"id": "call1", "customer": {"number": "+12025550111"}},
-            **fields}}
+    return {"message": {"type": fields.get("type", "tool-calls"),
+            "call": {"id": "call1", "assistantId": "fixture-assistant", "customer": {"number": "+12025550111"}},
+            "toolCallList": [{"id": fields.get("id", "event1"), "name": "lightwork_request",
+                              "parameters": {"request": fields.get("request", "question")}}]}}
 
 
 def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
@@ -33,16 +34,19 @@ def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
             await release.wait()
             return "saved response"
         handler_mock = AsyncMock(side_effect=handler)
-        channel = VoiceChannel(handler_mock, api_key="fixture", webhook_token="fixture", allowed_callers={"+12025550111"})
+        channel = VoiceChannel(handler_mock, api_key="fixture", webhook_token="fixture", assistant_id="fixture-assistant",
+                               allowed_callers={"+12025550111"})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=channel._app), base_url="http://fixture",
                                      headers={"Authorization": "Bearer fixture"}) as client:
             first = asyncio.create_task(client.post("/webhook/voice", json=voice_event()))
             await asyncio.wait_for(entered.wait(), timeout=5)
             duplicates = await asyncio.gather(*(client.post("/webhook/voice", json=voice_event()) for _ in range(3)))
-            assert all(response.status_code == 202 for response in duplicates)
+            assert all(response.status_code == 200 and "still processing" in response.json()["results"][0]["result"]
+                       for response in duplicates)
             release.set()
-            assert (await first).json() == {"response": "saved response"}
-            assert (await client.post("/webhook/voice", json=voice_event())).json() == {"response": "saved response"}
+            saved = {"results": [{"name": "lightwork_request", "toolCallId": "event1", "result": "saved response"}]}
+            assert (await first).json() == saved
+            assert (await client.post("/webhook/voice", json=voice_event())).json() == saved
             handler_mock.assert_awaited_once()
             channel.allowed_callers = {"+12025550112"}
             response = await client.post("/webhook/voice", json=voice_event())
@@ -55,14 +59,15 @@ def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
 def test_voice_partial_missing_identity_and_changed_replay_do_not_execute():
     async def run():
         handler = AsyncMock(return_value="answer")
-        channel = VoiceChannel(handler, api_key="fixture", webhook_token="fixture", allowed_callers={"+12025550111"})
+        channel = VoiceChannel(handler, api_key="fixture", webhook_token="fixture", assistant_id="fixture-assistant",
+                               allowed_callers={"+12025550111"})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=channel._app), base_url="http://fixture",
                                      headers={"Authorization": "Bearer fixture"}) as client:
-            assert (await client.post("/webhook/voice", json=voice_event(transcriptType="partial"))).json() == {}
+            assert (await client.post("/webhook/voice", json=voice_event(type="transcript"))).json() == {}
             assert (await client.post("/webhook/voice", json=voice_event(id=None))).status_code == 400
             handler.assert_not_awaited()
             assert (await client.post("/webhook/voice", json=voice_event())).status_code == 200
-            assert (await client.post("/webhook/voice", json=voice_event(transcript="changed"))).status_code == 400
+            assert (await client.post("/webhook/voice", json=voice_event(request="changed"))).status_code == 409
             handler.assert_awaited_once()
     asyncio.run(run())
 

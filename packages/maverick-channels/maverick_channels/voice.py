@@ -1,47 +1,16 @@
-"""Voice channel (Vapi / Retell / Bland).
+"""Provider function calls backed by the existing durable channel original.
 
-Tenth channel adapter. A voice provider exposes a REST + webhook surface
-that matches Lightwork's existing IncomingMessage / handler contract —
-when the user speaks, the provider transcribes (Deepgram / Whisper /
-ElevenLabs) and POSTs the transcript to our webhook; we run the swarm;
-the reply goes back via the provider's TTS.
-
-Config in ~/.maverick/config.toml::
-
-    [channels.voice]
-    enabled       = true
-    provider      = "vapi"            # vapi | retell | bland
-    api_key       = "${VAPI_API_KEY}" # RETELL_API_KEY / BLAND_API_KEY for those
-    phone_number  = "+14155551234"
-    port          = 8770
-    assistant_id  = "<provider assistant/agent id>"
-    webhook_token = "${VAPI_WEBHOOK_TOKEN}"
-    allowed_callers = ["+12025550111"]
-
-Only listed caller numbers may start work. Caller ID is a coarse restriction,
-not proof of the individual behind a call; sensitive actions still need review.
-
-The TTS / STT happens on the provider's side; Lightwork is just the
-"reasoning brain" the provider calls when the user pauses. This keeps
-the adapter thin.
-
-Provider support:
-  - Inbound webhook parsing is Vapi-shaped today (the swarm-facing
-    transcript handler). Retell/Bland inbound is not yet wired.
-  - Outbound ``send()`` (proactive calls) is provider-dispatched and
-    supports vapi, retell, and bland. The Vapi contract is live-tested;
-    the Retell and Bland contracts are wired from each vendor's public
-    API docs and should be smoke-tested with real credentials before
-    you depend on them.
-
-Requires::
-
-    python -m pip install -e './packages/maverick-channels[voice]'
+Vapi tool-calls and Retell custom functions use ``lightwork_request(request)``.
+Transcript/status notifications are informational and never start work. Caller
+numbers are a coarse restriction, not company identity; native task authority
+and spending limits still apply. Returning a result does not prove it was heard.
+Bland retains its outbound implementation; inbound conversations are unsupported.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -67,6 +36,110 @@ PROVIDER_KEY_ENV = {
 
 
 _E164 = re.compile(r"\+[1-9][0-9]{5,14}\Z")
+FUNCTION_NAME = "lightwork_request"
+INBOUND_PROVIDERS = frozenset({"vapi", "retell"})
+
+
+def _identity(value):
+    if not isinstance(value, str) or not value or len(value) > 256 or any(ord(c) < 33 for c in value):
+        raise ValueError("A current call and function identity are required.")
+    return value
+
+
+def _arguments(value):
+    from .base import _max_inbound_chars
+
+    if not isinstance(value, dict) or set(value) != {"request"}:
+        raise ValueError("Use the supported request field for this function.")
+    text = value["request"]
+    limit = _max_inbound_chars()
+    if not isinstance(text, str) or not text.strip() or len(text) > min(30_000, limit if limit > 0 else 30_000):
+        raise ValueError("The spoken request is empty or too long.")
+    return text
+
+
+def _retell_request(payload):
+    if payload.get("name") != FUNCTION_NAME:
+        if "event" in payload:
+            return None  # Retell call lifecycle webhooks are informational.
+        raise ValueError("This function is not supported.")
+    call = payload.get("call")
+    if not isinstance(call, dict) or call.get("call_type") != "phone_call" or call.get("direction") != "inbound":
+        raise ValueError("A supported incoming phone call is required.")
+    call_id, source_assistant = _identity(call.get("call_id")), call.get("agent_id")
+    caller = call.get("from_number")
+    text = _arguments(payload.get("args"))
+    history = call.get("transcript_with_tool_calls")
+    if not isinstance(history, list) or not 1 <= len(history) <= 2048:
+        raise ValueError("The current function identity is unavailable.")
+    invocation = next((item for item in reversed(history) if isinstance(item, dict)
+                       and item.get("role") == "tool_call_invocation"), None)
+    if not invocation or invocation.get("name") != FUNCTION_NAME:
+        raise ValueError("The current function identity is unavailable.")
+    arguments = invocation.get("arguments")
+    if not isinstance(arguments, str) or len(arguments) > 200_000:
+        raise ValueError("The recorded function request is unavailable.")
+    try:
+        recorded = json.loads(arguments)
+    except (ValueError, RecursionError):
+        raise ValueError("The recorded function request is unavailable.") from None
+    if recorded != payload["args"]:
+        raise ValueError("The recorded function request changed.")
+    requests = [(_identity(invocation.get("tool_call_id")), text)]
+    return call_id, caller, source_assistant, requests
+
+
+def parse_request(payload, *, provider, assistant_id, callers):
+    """Pure, bounded provider parsing; no caller-authored invocation fallback."""
+    if not isinstance(payload, dict):
+        raise ValueError("A supported call message is required.")
+    if provider not in INBOUND_PROVIDERS:
+        raise ValueError("This service supports outgoing calls only.")
+    if provider == "vapi":
+        message = payload.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("A supported call message is required.")
+        if message.get("type") != "tool-calls":
+            return None  # Transcript/status notifications never authorize work.
+        call = message.get("call")
+        if not isinstance(call, dict):
+            raise ValueError("The call details are missing.")
+        customer = call.get("customer")
+        caller = customer.get("number") if isinstance(customer, dict) else None
+        call_id, source_assistant = _identity(call.get("id")), call.get("assistantId")
+        source = message.get("assistant")
+        if isinstance(source, dict) and source.get("id"):
+            if source_assistant and source_assistant != source["id"]:
+                raise ValueError("The call assistant details disagree.")
+            source_assistant = source["id"]
+        flat, wrapped = message.get("toolCallList"), message.get("toolWithToolCallList")
+        def unpack(items, nested=False):
+            if not isinstance(items, list) or not 1 <= len(items) <= 8:
+                raise ValueError("The call must contain one to eight supported requests.")
+            output = []
+            for item in items:
+                if not isinstance(item, dict) or item.get("name") != FUNCTION_NAME:
+                    raise ValueError("This function is not supported.")
+                native = item.get("toolCall") if nested else item
+                if not isinstance(native, dict):
+                    raise ValueError("The function details are missing.")
+                output.append((_identity(native.get("id")), _arguments(native.get("parameters"))))
+            if len({item[0] for item in output}) != len(output):
+                raise ValueError("The call repeats a function identity.")
+            return output
+        requests = unpack(flat) if flat is not None else unpack(wrapped, True)
+        if flat is not None and wrapped is not None and requests != unpack(wrapped, True):
+            raise ValueError("The call function details disagree.")
+    else:
+        result = _retell_request(payload)
+        if result is None:
+            return None
+        call_id, caller, source_assistant, requests = result
+    if not assistant_id or source_assistant != assistant_id:
+        raise PermissionError("The call assistant is not the currently configured assistant.")
+    if not isinstance(caller, str) or not _E164.fullmatch(caller) or not is_allowed(caller, callers):
+        raise PermissionError("This caller number is not permitted to start work.")
+    return call_id, caller, requests
 
 
 def configured_callers(values=None) -> set[str]:
@@ -83,6 +156,39 @@ def configured_callers(values=None) -> set[str]:
     return callers
 
 
+def configuration_identity(settings):
+    """Hash the effective installation channel, including current secret sources."""
+    if not isinstance(settings, dict):
+        raise ValueError("Phone call settings are unavailable.")
+    provider = settings.get("provider") or "vapi"
+    material = {**settings, "provider": provider,
+                "api_key": settings.get("api_key") or os.environ.get(PROVIDER_KEY_ENV.get(provider, "")),
+                "webhook_token": settings.get("webhook_token") or os.environ.get("VAPI_WEBHOOK_TOKEN"),
+                "allowed_callers": sorted(configured_callers(settings.get("allowed_callers")))}
+    return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def require_saved_source(source):
+    """The current native saved result and external-release gate remain required."""
+    from maverick.channel_reply_results import require_source
+    from maverick.domain import available_domains, deliverable_release_allowed
+    from maverick.world_model import close_world_if_owned, open_world
+
+    require_source(source)
+    world = open_world()
+    try:
+        goal = world.get_goal(source["goal_id"])
+        if (goal is None or goal.status != "done" or
+                hashlib.sha256((goal.result or "").encode()).hexdigest() != source["voice_result_sha256"]):
+            raise PermissionError("The saved answer changed or is no longer available.")
+        if goal.domain:
+            profile = available_domains().get(goal.domain)
+            if profile is None or not deliverable_release_allowed(profile, world.signoff_for(goal.id)):
+                raise PermissionError("The saved answer is not approved for release.")
+    finally:
+        close_world_if_owned(world)
+
+
 try:
     import httpx
     from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -93,17 +199,7 @@ except ImportError:
 
 
 class VoiceChannel(Channel):
-    """Vapi-backed voice channel.
-
-    Lifecycle:
-      - start(): bring up a FastAPI server on `port` exposing
-        `/webhook/voice` for Vapi's events.
-      - on each `function-call` / `transcript` event, dispatch to
-        Lightwork's handler and return a `result` Vapi will TTS.
-      - send(): for proactive notifications (e.g., goal completed
-        while user was on another call) we POST to Vapi's outbound
-        call endpoint with the assistant_id.
-    """
+    """Supported provider functions; HTTP results never prove spoken delivery."""
 
     name = "voice"
 
@@ -117,13 +213,13 @@ class VoiceChannel(Channel):
         provider: str = "vapi",
         webhook_token: str | None = None,
         allowed_callers=None,
+        current_authority=None,
     ):
         super().__init__(handler)
         if not _HAVE_DEPS:
             raise ImportError(
-                "fastapi/httpx not installed. Run: "
-                "From the reviewed checkout run: python -m pip install -e "
-                "'./packages/maverick-channels[voice]'"
+                "Phone call support is missing from this installation. "
+                "An installation administrator can update the installed channel support."
             )
         self.provider = provider
         # Each provider keeps its key in its own env var; fall back to the
@@ -139,6 +235,7 @@ class VoiceChannel(Channel):
         # The bearer authenticates the webhook service, not the phone caller.
         # A caller list is required before any transcript can start work.
         self.allowed_callers = configured_callers(allowed_callers)
+        self.current_authority = current_authority
 
         self._app = FastAPI()
         add_webhook_body_limit(self._app)
@@ -165,93 +262,124 @@ class VoiceChannel(Channel):
         if not self.allowed_callers:
             raise HTTPException(status_code=403, detail="voice caller list is not configured")
 
-        # Vapi sends webhook events with a `type` field: "function-call",
-        # "end-of-call-report", "transcript", "speech-update", etc.
-        # We only care about transcripts that resolve into agent turns.
         try:
             payload = await request.json()
+            parsed = parse_request(payload, provider=self.provider, assistant_id=self.assistant_id,
+                                   callers=self.allowed_callers)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from None
+        except (ValueError, RecursionError):
+            raise HTTPException(400, "The phone call request is missing or unsupported.") from None
+        if parsed is None:
+            return Response(content="{}", media_type="application/json")
+        call_id, caller, requests = parsed
+        results, originals = [], []
+        from maverick.paths import TenantPolicyError, tenant_by_user_enabled, tenant_scope
+
+        # Exactly the same native phone principal/tenant as Server; no body or
+        # browser-selected workspace may choose a different delivery original.
+        try:
+            voice_tenant = f"voice:{caller}" if tenant_by_user_enabled() else None
+        except TenantPolicyError:
+            raise HTTPException(503, "The phone call account settings are unavailable. No request was started.") from None
+        for invocation, text in requests:
+            with tenant_scope(tenant=voice_tenant):
+                result, row, authorize = await self._answer_function(call_id, caller, invocation, text, authorization)
+            results.append({"name": FUNCTION_NAME, "toolCallId": invocation, "result": result})
+            originals.append((row, authorize))
+        from maverick.authority_effects import authority_effect_fence
+
+        from .delivery import _require_reply_source
+
+        with tenant_scope(tenant=voice_tenant), authority_effect_fence():
+            for row, authorize in originals:
+                if not authorize():
+                    raise HTTPException(403, "Current access to this call or its saved answer is unavailable.")
+                try:
+                    _require_reply_source(row)
+                    if row.get("reply_source"):
+                        require_saved_source(row["reply_source"])
+                except PermissionError:
+                    raise HTTPException(403, "Current access to this saved answer is unavailable.") from None
+            body = {"results": results} if self.provider == "vapi" else {"result": results[0]["result"]}
+            return Response(json.dumps(body), media_type="application/json", headers={"Cache-Control": "no-store"})
+
+    async def _answer_function(self, call_id, caller, invocation, text, authorization):
+        from maverick.authority_effects import authority_effect_fence
+
+        from .delivery import (
+            DeliveryJournal,
+            DeliveryUnknown,
+            _digest,
+            _payload,
+            _record_id,
+            _require_reply_source,
+        )
+
+        identity = f"{len(call_id)}:{call_id}:{invocation}"
+        account = self._delivery_account()
+        message = IncomingMessage(user_id=caller, sender_id=caller, text=text, channel=self.name,
+                                  message_id=identity, conversation_ref=call_id)
+        route = {"response_transport": "http", "function": FUNCTION_NAME}
+        def authorize():
+            return (account == self._delivery_account() and self._check_webhook_auth(authorization)
+                    and is_allowed(caller, self.allowed_callers)
+                    and (self.current_authority is None or self.current_authority()))
+        async def offered(reply):
+            raise DeliveryUnknown("Voice HTTP response acceptance is unconfirmed")
+        try:
+            if not authorize():
+                raise PermissionError("Current phone call settings changed.")
+            journal = DeliveryJournal()
+            row = journal.get(_record_id(self.name, account, identity))
+            if row is not None:
+                # An original read never resumes a received, running or unknown
+                # execution. Changed input cannot borrow its retained identity.
+                material, _ = _payload(message, row["id"])
+                if row["fingerprint"] != _digest([material, route]):
+                    raise ValueError("The function identity belongs to a different request.")
+            else:
+                row = await self.process_message(message, external_id=identity, account=account,
+                                                 authorize=authorize, send=offered, route=route,
+                                                 journal=journal)
+            with authority_effect_fence():
+                if not authorize():
+                    raise PermissionError("Current phone call settings changed.")
+                _require_reply_source(row)
+                if row.get("reply_source"):
+                    require_saved_source(row["reply_source"])
+                if row["execution"] == "completed" and row.get("reply"):
+                    return row["reply"]["text"], row, authorize
+                if row["execution"] in {"received", "staging", "execution_started_unconfirmed"}:
+                    return "Your earlier request is still processing. It has not been started again.", row, authorize
+                return ("Your earlier request has no confirmed result. Changes may already have happened. "
+                        "Check the original request in Lightwork before starting another request."), row, authorize
+        except PermissionError:
+            raise HTTPException(403, "Current access to this call or its saved answer is unavailable.") from None
+        except ValueError:
+            raise HTTPException(409, "This call identity already belongs to a different request.") from None
         except Exception:
-            # Malformed / non-JSON body: 400, don't 500 (which Vapi
-            # retries, amplifying load).
-            raise HTTPException(status_code=400, detail="invalid JSON body") from None
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="expected a JSON object")
-        # Coerce nested fields to dicts: a body like {"message": "x"} would make
-        # the chained .get() raise AttributeError -> unhandled 500 (and Vapi
-        # retries non-2xx, amplifying load).
-        msg_data = payload.get("message")
-        if not isinstance(msg_data, dict):
-            msg_data = {}
-        ev_type = msg_data.get("type", "")
-
-        if ev_type == "transcript":
-            transcript = msg_data.get("transcript", "")
-            role = msg_data.get("role", "user")
-            if role != "user" or not transcript or msg_data.get("transcriptType") == "partial":
-                return Response(content="{}", media_type="application/json")
-            call = msg_data.get("call") or payload.get("call")
-            call = call if isinstance(call, dict) else {}
-            customer = call.get("customer")
-            customer = customer if isinstance(customer, dict) else {}
-            user_id = customer.get("number")
-            if not isinstance(user_id, str) or not _E164.fullmatch(user_id):
-                raise HTTPException(status_code=403, detail="canonical caller number required")
-            if not is_allowed(user_id, self.allowed_callers):
-                log.warning("unauthorized voice caller")
-                return {"response": "Sorry, this number isn't authorized to use this assistant."}
-            from .delivery import DeliveryUnknown
-
-            call_id = str(call.get("id") or "")
-            event_id = str(msg_data.get("id") or msg_data.get("timestamp") or "")
-            if not call_id or not event_id:
-                raise HTTPException(status_code=400, detail="stable call and transcript event identity required")
-            identity = f"{len(call_id)}:{call_id}:{event_id}"
-            account = self._delivery_account()
-            msg = IncomingMessage(user_id=user_id, sender_id=user_id, text=transcript,
-                                  channel=self.name, message_id=identity)
-            def authorize():
-                return (account == self._delivery_account() and self._check_webhook_auth(authorization)
-                        and is_allowed(user_id, self.allowed_callers))
-            async def prepare_response(reply):
-                # Returning a response object cannot confirm provider receipt
-                # or spoken delivery. Repeated callbacks read the saved result.
-                raise DeliveryUnknown("Voice HTTP response acceptance is unconfirmed")
-            try:
-                row = await self.process_message(msg, external_id=identity, account=account,
-                    authorize=authorize, send=prepare_response, route={"response_transport": "http"})
-            except PermissionError as exc:
-                raise HTTPException(status_code=403, detail="voice caller authority changed") from exc
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="invalid or conflicting voice input") from exc
-            except Exception as exc:
-                raise HTTPException(status_code=503, detail="voice intake or receipt unavailable") from exc
-            if row.get("reply"):
-                return {"response": row["reply"]["text"]}
-            from fastapi.responses import JSONResponse
-
-            pending = row["execution"] in {"received", "execution_started_unconfirmed"}
-            return JSONResponse({"response": "Your request is still processing." if pending else
-                                 "This request needs review before it can be repeated.",
-                                 "status": row["execution"]}, status_code=202 if pending else 409)
-
-        # Other events (end-of-call, status updates) are informational.
-        # Acknowledge with empty body so Vapi doesn't retry.
-        return Response(content="{}", media_type="application/json")
+            raise HTTPException(503, "The phone call result is unavailable. Work may already have started; "
+                                     "check the original request before starting another request.") from None
 
     def _delivery_account(self):
-        return ":".join((self.provider, self.assistant_id or "", self.phone_number or "",
-                         hashlib.sha256(self.api_key.encode()).hexdigest()))
+        # Provider-issued assistant identity is stable through key rotation.
+        # A changed credential must not give an old invocation a new original.
+        return json.dumps([self.provider, self.assistant_id or ""], separators=(",", ":"))
 
     async def start(self) -> None:
+        if self.provider not in INBOUND_PROVIDERS:
+            raise ValueError("This phone service supports outgoing calls only.")
+        if not self.assistant_id:
+            raise ValueError("Choose the saved call assistant in All settings before receiving calls.")
         if not self.allowed_callers:
-            raise ValueError("voice channel: set allowed_callers or VOICE_ALLOWED_CALLERS before receiving calls")
+            raise ValueError("Add permitted caller numbers in All settings before receiving calls.")
         import uvicorn
         if not self.webhook_token:
             # Inbound webhook auth rejects every request without a token, so the
             # listener would accept nothing. Fail loudly rather than run inert.
             raise ValueError(
-                "voice channel: webhook token not set "
-                "(pass webhook_token or set VAPI_WEBHOOK_TOKEN) to receive calls"
+                "Save a call check key in All settings before receiving calls."
             )
         log.info("Voice channel listening on :%d (provider=%s)",
                  self.port, self.provider)

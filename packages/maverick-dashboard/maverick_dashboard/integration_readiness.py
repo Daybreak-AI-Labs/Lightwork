@@ -835,7 +835,12 @@ def _channel_dependency(channel: str) -> dict[str, Any]:
 def _voice_configuration_problem(channel_config: dict[str, Any]) -> str:
     """A local voice preflight must reflect the inbound caller gate."""
     try:
-        from maverick_channels.voice import _HAVE_DEPS, PROVIDER_KEY_ENV, configured_callers
+        from maverick_channels.voice import (
+            _HAVE_DEPS,
+            INBOUND_PROVIDERS,
+            PROVIDER_KEY_ENV,
+            configured_callers,
+        )
     except ImportError:
         return "The phone call adapter is unavailable."
     if not _HAVE_DEPS:
@@ -848,6 +853,10 @@ def _voice_configuration_problem(channel_config: dict[str, Any]) -> str:
     if not callers:
         return "Add permitted caller numbers in Settings > All settings > Chat channels > Phone calls before calls can start work."
     provider = str(channel_config.get("provider") or "vapi")
+    if provider not in INBOUND_PROVIDERS:
+        return "This phone service supports outgoing calls only. Choose Vapi or Retell for incoming conversations."
+    if not channel_config.get("assistant_id"):
+        return "Choose the saved assistant from your phone service in All settings before receiving calls."
     key_env = PROVIDER_KEY_ENV.get(provider, "VAPI_API_KEY")
     if not (channel_config.get("api_key") or os.environ.get(key_env)):
         return "The phone call service key is missing."

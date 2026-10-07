@@ -660,6 +660,24 @@ class Server:
         if not text or text.startswith("⚠ Output blocked:"):
             return text
         try:
+            if msg.channel == "voice":
+                from maverick_channels.voice import require_saved_source
+
+                from .paths import current_tenant_id_strict
+
+                goal = world.get_goal(goal_id)
+                if goal is not None and goal.status == "done":
+                    source = {"goal_id": goal.id, **identity, "tenant": current_tenant_id_strict(),
+                              "channel": msg.channel,
+                              "account_sha256": getattr(msg, "_verified_channel_account_sha256", None),
+                              "provider_tenant_id": msg.provider_tenant_id,
+                              "provider_sender_id": msg.provider_sender_id,
+                              "voice_result_sha256": hashlib.sha256((goal.result or "").encode()).hexdigest()}
+                    require_saved_source(source)
+                    # Voice returns text to the provider, never artifact files.
+                    # Bind that answer even when no downloadable artifact exists.
+                    msg._channel_reply_material = {"source": source, "files": []}
+                    return text
             return prepare_reply(world, msg, goal_id, text, **identity)
         except PermissionError:
             return "This task's saved output is no longer available to this chat account. Open Lightwork to review current access."
@@ -1006,9 +1024,42 @@ def _wire_irc(server, cfg):
 
 
 def _wire_voice(server, cfg):
-    from maverick_channels.voice import VoiceChannel
+    from maverick_channels.voice import VoiceChannel, configuration_identity
+
+    from .paths import (
+        TenantPolicyError,
+        current_tenant_id_strict,
+        reset_tenant,
+        set_tenant,
+        tenant_by_user_enabled,
+    )
+
+    expected = configuration_identity(cfg)
+    installation_tenant, expected_by_user = current_tenant_id_strict(), tenant_by_user_enabled()
+    def current_authority():
+        from .config import config_source_errors, load_global_config
+
+        token = set_tenant(installation_tenant)
+        try:
+            current = load_global_config().get("channels", {}).get("voice", {})
+            return (not config_source_errors(include_tenant=False) and current.get("enabled") is True
+                    and tenant_by_user_enabled() == expected_by_user and configuration_identity(current) == expected)
+        except (TenantPolicyError, ValueError, TypeError, AttributeError):
+            return False
+        finally:
+            reset_tenant(token)
+
+    async def handle(message):
+        # Server owns the identity/tenant decision. Caller-scoped receipt
+        # custody must not supply a different initial configuration context.
+        token = set_tenant(installation_tenant)
+        try:
+            return await server._handle_message(message)
+        finally:
+            reset_tenant(token)
+
     server.add_channel(VoiceChannel(
-        handler=server._handle_message,
+        handler=handle,
         # Let VoiceChannel resolve the key from the provider-specific env
         # var (VAPI/RETELL/BLAND) when config doesn't pin one explicitly.
         api_key=cfg.get("api_key"),
@@ -1018,6 +1069,7 @@ def _wire_voice(server, cfg):
         provider=cfg.get("provider", "vapi"),
         webhook_token=cfg.get("webhook_token") or os.environ.get("VAPI_WEBHOOK_TOKEN"),
         allowed_callers=cfg.get("allowed_callers"),
+        current_authority=current_authority,
     ))
 
 

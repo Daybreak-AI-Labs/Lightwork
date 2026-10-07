@@ -1111,7 +1111,7 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
     elif ch_id == "voice":
         provider = (
             _q_text(
-                "  Voice provider (vapi, retell, bland)",
+                "  Phone service (vapi or retell for conversations; bland for outgoing calls only)",
                 default="vapi",
             )
             .strip()
@@ -1129,20 +1129,24 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
         # / ${BLAND_API_KEY} that the user was never asked to enter.
         envs.add(key_env)
         cfg["api_key"] = "${" + key_env + "}"
-        # Inbound webhook auth is Vapi-shaped today; keep the token ref.
+        # Existing installation secret name; both supported services use the
+        # same explicitly configured private Bearer check key.
         cfg["webhook_token"] = "${VAPI_WEBHOOK_TOKEN}"
         cfg["phone_number"] = _q_text(
-            "  Phone number (E.164, optional)",
+            "  Phone number (starts with + and the country code, optional)",
             default="",
         )
         cfg["assistant_id"] = _q_text(
-            "  Assistant/agent ID (optional)",
+            "  Saved assistant ID from Vapi, or saved agent ID from Retell",
             default="",
         )
         cfg["port"] = _safe_int(
             _q_text("  Webhook port", default="8770"),
             default=8770,
         )
+        console.print("  Finish the provider's function form in Settings > All settings > Set up phone conversations. "
+                      "The hosted Lightwork address receives supported requests; no transcript notification starts work. "
+                      "A permitted number does not grant company sign-in or a role.")
     elif ch_id == "whatsapp":
         cfg["account_sid"] = "${TWILIO_ACCOUNT_SID}"
         cfg["auth_token"] = "${TWILIO_AUTH_TOKEN}"
@@ -1181,7 +1185,7 @@ def _channel_allowlist(ch_id: str, cfg: dict[str, Any]) -> None:
             )
     elif ch_id == "voice":
         raw = _q_text(
-            "  Allowed caller numbers (E.164, comma-separated; blank = any authenticated caller)",
+            "  Permitted caller numbers (+countrycode, comma-separated; blank refuses all callers)",
             default="",
         )
         callers = _csv_list(raw)
@@ -7460,8 +7464,10 @@ def pick_a2a() -> tuple[dict[str, Any], list[str]]:
         "  [dim]A2A serves an agent card at /.well-known/agent-card.json and a "
         "task endpoint at /a2a/v1 (on `maverick dashboard`). Budget is clamped "
         "to operator caps; a bearer token is required. A2A goals run under a "
-        "tool ceiling (max_risk=medium by default -- edit [a2a].max_risk to "
-        'tighten to "low" or open to "high"/"none").[/dim]'
+        "tool ceiling (medium by default). After installation, use All settings > "
+        "Security > Requests from other agents to manage its password, public "
+        "address, tool permissions and limits. External agents issues individual "
+        "access keys.[/dim]"
     )
     return {"enabled": True, "max_risk": "medium"}, ["MAVERICK_A2A_TOKEN"]
 

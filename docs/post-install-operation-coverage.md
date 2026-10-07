@@ -2411,3 +2411,29 @@ Attention includes actual pending vendor lifecycle, DROP authority, Trust Center
 ## Backup key names visible in recovery
 
 New backups sign the complete bounded list of excluded on-disk key file names alongside their payload manifest. Workspace recovery shows that verified list after creation, import and inspection. Saved installation points retain their capture-time list in signed metadata and show it beside update recovery controls. Key contents stay separate; older copies explicitly report an unrecorded list, and an update authorization without a saved copy is not presented as one. Invalid key paths and oversized retained records refuse without replacing existing recovery metadata. Actual isolated archives and signed installation readback qualified the native behavior; controller projection qualified visibility and access clearing. Separate vault custody, browser layout and application-update execution were not part of this change.
+
+## Saved compliance forms become usable questionnaires
+
+No-code Studio can open a supported saved form in the ordinary questionnaire builder. Complete questions, answer choices and supported conditional framework/control rules survive the import, full review and separate Save. Immutable native questionnaire provenance retains the exact Studio edition; source changes or unsupported meaning refuse instead of silently dropping content. The creator cannot publish their own version. A different authorized administrator reads its complete saved questions and rules before the existing Publish action. A lost Save response recovered the original single version, and that published version was consumed by the actual native assessment. This connects the supported questionnaire path; it does not configure arbitrary evidence collectors or external report adapters.
+
+## Actual local research execution
+
+Research connects a saved program and currently approved text snapshots to the installed isolated container runner. A different administrator reads every program file, input permission, execution limit and expected result before approving the exact run; Start remains separate. The existing research record retains original progress, output checks, actual timing and cleanup. No image is downloaded and no program falls back to execution on the host. Unsupported training, model execution, remote data and unverifiable data constraints refuse before execution.
+
+An ordinary local journey ran a saved program in the cached Python container, checked its output, retained actual input bytes and Docker timing, and verified cleanup. A lost successful Start reply recovered that original without a second Start. This establishes the supported local execution path, without claiming a novel learning algorithm or measured customer benefit.
+
+Stop now reads the current revision while retaining the same manifest, attempt and worker before its native compare-and-set, so progress updates do not make the visible button stale. An actually started sleeping program was cancelled, cleanup was verified and its Docker container was absent. Stop before launch also retains the runner's observed cleanup without inventing execution timing or a score. Current reviewer withdrawal refused private Original, Stop and Copilot access under the same signed session.
+
+## Supported incoming phone functions
+
+All settings includes a guided incoming-call setup for Vapi and Retell, saved assistant and caller choices, protected credentials, service restart and the real product receiver address when the request has a public HTTPS origin. Supported named function requests return native results in each provider's expected shape; informational transcripts and status events start no work. The existing channel journal owns each original, bound to provider, assistant, call and invocation rather than the current check-key bytes. Rotation and a service restart do not repeat the same task. Changed input, changed caller permission, source ownership withdrawal and enterprise phone-only requests refuse through current native controls. An uncertain entered task retains an unknown original without automatic replay. Bland's outbound path remains available; inbound Bland is unsupported.
+
+Actual dashboard-to-channel-to-Agent journeys completed two local tasks and exercised restart, originals, current access and 320-pixel ordinary setup/Copilot draft preservation. Model responses were supplied locally. No live phone provider, spoken delivery or externally reachable installation was qualified.
+
+## Keyboard access to maps and remaining wide tables
+
+The Goal Map's interactive SVG is exposed as a group, retaining its named keyboard-operable task buttons. Remaining wide tables in the agent control plane, audit binder, obligations, partner listings, control report and AI assurance now have focusable, named scrolling regions, including the dynamically created agent-access table. The embedded analytics code area is also focusable. Existing repaired security/code tables and the plan/history main headings remain in place. These are compact semantic repairs; they do not certify every screen-reader and browser combination.
+
+## Current external-agent discovery
+
+The agent card now advertises the installed A2A 0.3 task contract and its actual current authentication requirement, with plain product descriptions and no published credential. Native discovery, unauthenticated refusal and authenticated readback were exercised without starting a task. Existing All settings controls manage the shared key, public address and limits; enabling the service is explicitly marked as requiring a restart. This corrects inaccurate discovery and setup guidance; it does not claim A2A 1.0 conformance.

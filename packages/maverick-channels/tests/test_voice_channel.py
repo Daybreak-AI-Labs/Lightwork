@@ -76,8 +76,8 @@ def test_voice_caller_configuration_refuses_invalid_numbers_and_empty_start(monk
         VoiceChannel(handler=_noop, api_key="vapi-test-key", allowed_callers="+12025550111")
     with pytest.raises(ValueError, match="caller list needs phone numbers"):
         VoiceChannel(handler=_noop, api_key="vapi-test-key", allowed_callers=["202-555-0111"])
-    channel = VoiceChannel(handler=_noop, api_key="vapi-test-key", webhook_token="voice-secret")
-    with pytest.raises(ValueError, match="allowed_callers"):
+    channel = VoiceChannel(handler=_noop, api_key="vapi-test-key", webhook_token="voice-secret", assistant_id="fixture-assistant")
+    with pytest.raises(ValueError, match="permitted caller"):
         asyncio.run(channel.start())
 
 
@@ -116,11 +116,13 @@ def test_voice_webhook_requires_bearer_token(monkeypatch):
 
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
-def test_voice_webhook_accepts_valid_bearer_token(monkeypatch):
+def test_voice_webhook_accepts_informational_transcript_without_work(monkeypatch):
     from fastapi.testclient import TestClient
     from maverick_channels.voice import VoiceChannel
 
-    async def _noop(_):
+    seen = []
+    async def _noop(message):
+        seen.append(message)
         return "ok"
 
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
@@ -133,7 +135,8 @@ def test_voice_webhook_accepts_valid_bearer_token(monkeypatch):
         headers={"Authorization": "Bearer voice-secret"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"response": "ok"}
+    assert resp.json() == {}
+    assert seen == []
 
 
 # ---- multi-provider outbound send() ----------------------------------
