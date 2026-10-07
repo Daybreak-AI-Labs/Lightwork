@@ -120,10 +120,15 @@ test("an author cannot see their own approval and gets an invite path", async (t
 });
 
 test("approving carries the row version and a generated request key after a confirmation", async (t) => {
-  const ui = await fixture(); t.after(() => ui.window.close());
+  // Approval first reads the exact current version and shows it in full.
+  const current = { ...data().templates[1], mitigation_rules: [], retained_until: 9 };
+  const ui = await fixture({ intercept: (c) => c.method === "GET" && c.url.pathname.endsWith("/templates/privacy/versions/1") ? current : undefined });
+  t.after(() => ui.window.close());
   ui.rowButton("tpl-templates", "Privacy check", "Approve").click();
   await ui.settle();
   assert.equal(ui.confirms.length, 1);
+  assert.match(ui.confirms[0], /Privacy check · version 1/);
+  assert.match(ui.confirms[0], /Approve this exact questionnaire for assessments\?/);
   const call = ui.calls.find((c) => c.url.pathname.endsWith("/templates/privacy/versions/1/approve"));
   assert.equal(call.method, "POST");
   assert.equal(call.body.expected_revision, 1);

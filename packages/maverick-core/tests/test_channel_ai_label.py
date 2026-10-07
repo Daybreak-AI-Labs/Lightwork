@@ -16,6 +16,9 @@ class ChannelMessage:
     conversation_ref: str | None = None
     attachments: list | None = None
     question_reply_only: bool = False
+    # Provider identities carried by the real maverick_channels ChannelMessage.
+    provider_tenant_id: str | None = None
+    provider_sender_id: str | None = None
 
     @property
     def principal_id(self):
@@ -31,6 +34,9 @@ def _server(monkeypatch, tmp_path, outcome):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT_BY_USER", raising=False)
     monkeypatch.setattr("maverick.compliance.first_turn_disclosure", lambda *a, **k: None)
+    # The voice reply re-reads its saved answer from the deployment's world, so
+    # the default world must be the same database the server writes to.
+    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
     world = WorldModel(tmp_path / "world.db")
 
     async def dispatch(goal_id, **kwargs):

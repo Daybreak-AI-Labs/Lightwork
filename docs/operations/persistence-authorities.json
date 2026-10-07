@@ -176,7 +176,7 @@
     }
   },
   "counts": {
-    "governed": 131,
+    "governed": 134,
     "artifact": 54,
     "a2a": 4,
     "preferences": 8,
@@ -191,9 +191,9 @@
     "execution": 45,
     "recovery": 12,
     "derived": 16,
-    "composition": 61,
+    "composition": 62,
     "external": 18,
-    "key_custody": 3,
+    "key_custody": 4,
     "storage_primitive": 10,
     "world": 5,
     "mixed_api": 8,
@@ -29756,6 +29756,179 @@
           "function": "_artifact",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/personal_push_devices.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/personal_push_devices.py",
+      "purpose": "Owned private ntfy topics, separate from organization notification settings.",
+      "referenced_store_owners": [
+        ".governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 6
+      },
+      "source_sites": [
+        {
+          "line": 31,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore(kind + '-' + scope, 'pnr' if receipts else 'pnd', kind)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "private-push-destinations-cccccccccccccccccccccccccccccccc/recovered.json",
+          "recovery_policy": "personal_push_destination_authority",
+          "disposition": "Per-owner private topic destinations (namespace from the owner digest). Retained and blocks startup after restore; never adopted or discarded."
+        },
+        {
+          "sample_path": "private-push-results-cccccccccccccccccccccccccccccccc/recovered.json",
+          "recovery_policy": "personal_push_delivery_receipt_authority",
+          "disposition": "Per-owner send receipts. Retained and blocks startup; an uncertain send is never resent."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/runtime_enforcement_records.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/runtime_enforcement_records.py",
+      "purpose": "Source-owned, digest-only evidence from actual guarded connector attempts.",
+      "referenced_store_owners": [
+        ".governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "runtime-enforcement",
+          "line": 17,
+          "recovery_policy": "runtime_enforcement_evidence_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 4
+      },
+      "source_sites": [
+        {
+          "line": 17,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('runtime-enforcement', 'RTE', 'runtime_enforcement')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/ai_governance_native_sources.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/ai_governance_native_sources.py",
+      "purpose": "Current native authorities projected into retained, digest-only loop pins.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "ai-governance-source-pins",
+          "line": 15,
+          "recovery_policy": "ai_governance_source_pin_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 4
+      },
+      "source_sites": [
+        {
+          "line": 15,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('ai-governance-source-pins', 'AGP', 'ai_governance_source_pins')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/consent_delivery_managed_api.py",
+      "contract": "composition",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/consent_delivery_managed_api.py",
+      "purpose": "Protected signing keys and one explicit future-only delivery subscription.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "consent-delivery.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "revision": 7
+      },
+      "source_sites": [
+        {
+          "line": 69,
+          "function": "_store",
+          "kind": "data_dir",
+          "expression": "data_dir('consent_preferences', 'consent-delivery.sqlite3', tenant=tenant)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/privacy_discovery_data_use_api.py",
+      "contract": "key_custody",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/privacy_discovery_data_use_api.py",
+      "purpose": "Review one complete approved scan before updating a named Data Use dataset.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "discovery-data-use-key.sealed",
+        "discovery-data-use.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1,
+        "revision": 5
+      },
+      "source_sites": [
+        {
+          "line": 63,
+          "function": "_key",
+          "kind": "data_dir",
+          "expression": "data_dir('privacy_automation', 'discovery-data-use-key.sealed', tenant=tenant)"
+        },
+        {
+          "line": 64,
+          "function": "_key",
+          "kind": "data_dir",
+          "expression": "data_dir('privacy_automation', 'discovery-data-use.sqlite3', tenant=tenant)"
+        },
+        {
+          "line": 65,
+          "function": "_key",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 70,
+          "function": "_key",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, seal_text_for_tenant(tenant, json.dumps(value)))"
+        },
+        {
+          "line": 89,
+          "function": "_services",
+          "kind": "data_dir",
+          "expression": "data_dir('privacy_automation', 'discovery-data-use.sqlite3', tenant=tenant)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "privacy_automation/discovery-data-use-key.sealed",
+          "recovery_policy": "privacy_discovery_data_use_key",
+          "disposition": "Tenant-sealed key for the discovery data-use database (an unknown, blocking SQLite). Retained with it; never regenerated over saved data."
         }
       ]
     }

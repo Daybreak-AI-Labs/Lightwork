@@ -33,11 +33,11 @@ def _interrupt_first_claim(monkeypatch):
     real = SubmissionStore.claim_dispatch
     calls = {"n": 0}
 
-    def flaky(self, key):
+    def flaky(self, key, **guard):  # guard: the current-authority effect_guard
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("crash between admission and dispatch")
-        return real(self, key)
+        return real(self, key, **guard)
     monkeypatch.setattr(SubmissionStore, "claim_dispatch", flaky)
 
 

@@ -324,10 +324,15 @@ def test_a_request_marked_answered_then_closed_still_shows_its_answer():
     from maverick import privacy_ops
 
     request = privacy_ops.open_dsar("ola@example.com", "opt_out", opened_by="ops")
-    privacy_ops.fulfill_dsar(request["id"], fulfilled_by="ops")
-    privacy_ops.close_dsar(request["id"], closed_by="ops")
-    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    # An opt-out is answered by recording what was stopped, when, and the proof;
+    # a bare "mark answered" click no longer counts as an answer.
+    with pytest.raises(ValueError, match="Record what was changed or stopped"):
+        privacy_ops.fulfill_dsar(request["id"], fulfilled_by="ops")
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    privacy_ops.close_dsar(request["id"], closed_by="ops", outcome={
+        "kind": "answered", "answered_on": today, "reference": "Ticket 77",
+        "note": "Stopped the sale of their data in the CRM"})
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
     assert f'Answered on <time datetime="{today}" data-mv-time="{today}"' in main
     assert "Closed without a recorded answer" not in main
     assert 'id="dsar-record-outcome"' not in main  # nothing left to record

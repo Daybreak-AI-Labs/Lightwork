@@ -15,7 +15,7 @@
   function restoreFocus() { const target = openingFocus?.isConnected && visible(openingFocus) && !openingFocus.disabled ? openingFocus : offer?.querySelector('button') || document.getElementById('content'); if (target) target.focus({preventScroll:true}); }
   function pause() { remember('paused'); if (dialog) { dialog.close(); dialog.remove(); dialog = null; } unmark(); notice(true); restoreFocus(); }
   function stop() { generation += 1; unmark(); removeOffer(); if (dialog) { dialog.close(); dialog.remove(); dialog = null; } current = null; }
-  function say(text) { if (typeof window.mvToast === 'function') window.mvToast(text, {error:true}); else if (offer) offer.querySelector('p').textContent = text; }
+  function say(text) { if (typeof window.mvToast === 'function') window.mvToast(text, {error:true}); else if (offer) { const line = offer.querySelector('p'); if (typeof window.mvStatus === 'function') window.mvStatus(line, text, {error:true}); else line.textContent = text; } }
   async function fresh() {
     const started = ++generation;
     const value = await window.mvFetchJSON(`/api/v1/help/product-tour?page=${encodeURIComponent(page)}`, {cache:'no-store', plainDetail:true});

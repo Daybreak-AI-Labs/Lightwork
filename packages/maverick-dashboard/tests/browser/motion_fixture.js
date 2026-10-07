@@ -74,7 +74,7 @@ function reply(name, pathname, method = 'GET') {
     if (p === '/vendors') return {items: [vendor]};
     if (p === '/screening/runs') return {items: [{run_id: 'run-1', vendor_id: vendor.vendor_id, requested_kinds: ['sanctions'], state: 'open', revision: 1}]};
     if (p === '/edd/cases') return {items: [{case_id: 'case-1', vendor_id: vendor.vendor_id, reason: 'Review', severity: 'medium', state: 'open', tasks: [], evidence: [], revision: 1}]};
-    if (['/sources', '/snapshots', '/risk/policies', '/risk/decisions', '/monitors', '/monitoring/alerts', '/exchange/consents', '/screening/runs/run-1/findings'].includes(p)) return {items: []};
+    if (['/sources', '/snapshots', '/risk/policies', '/risk/decisions', '/monitors', '/monitoring/alerts', '/exchange/consents', '/alert-recipients', '/outbox', '/screening/runs/run-1/findings'].includes(p)) return {items: []};
   }
   if (name === 'lifecycle') {
     if (p === '/templates') return {items: [template]};

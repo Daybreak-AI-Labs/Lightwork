@@ -29,7 +29,8 @@ class TestHTTPTransport:
         assert resp.status_code == 200
         body = resp.json()
         assert body["name"] == "Lightwork"
-        assert body["protocolVersion"] == "1.0"
+        # The card advertises the A2A version the installed task surface speaks.
+        assert body["protocolVersion"] == "0.3.0"
 
     def test_initialize_returns_capabilities(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_MCP_TOKEN", "s3cr3t")

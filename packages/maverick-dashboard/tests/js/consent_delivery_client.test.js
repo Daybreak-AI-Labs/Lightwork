@@ -26,6 +26,7 @@ async function page(options={}){
   const destination={destination_id:"crm",origin:"https://crm.example.com",status:"active",active_key_id:"key-a",revision:4,max_attempts:6,default_retention_seconds:2592000,keys:[{key_id:"key-a",status:"active"},{key_id:"key-old",status:"retired"}]};
   w.fetch=async(url,init={})=>{
     const method=init.method||"GET",body=init.body?JSON.parse(init.body):null;calls.push({url,method,body});
+    if(url.endsWith("/managed"))return reply(200,{context:"c".repeat(64),keys:[{key_id:"key-a",label:"CRM signing key"},{key_id:"key-b",label:"Mail signing key"}],worker:{enabled:false,running_here:false},subscription:null});
     if(url.includes("/destinations?"))return reply(200,{items:[destination],truncated:false});
     if(url.endsWith("/status")&&url.includes("destination-adapters"))return reply(200,{destinations:[{destination_id:"salesforce",provider_id:"salesforce",credential_reference_present:true}],reconciliation_supported:{salesforce:true},transport_factory_installed:true});
     if(url.endsWith("/status"))return reply(200,{counts:{queued:2,leased:1,delivered:9,dead_letter:1},retention_due:{delivered:3},audit_chain:{valid:true,events:12}});
@@ -38,7 +39,7 @@ async function page(options={}){
   };
   shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
-  w.eval([...source.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1]);
+  w.eval([...source.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].at(-1)[1]);
   await flush();
   const button=(scope,label)=>[...d.querySelectorAll(scope+" button")].find(b=>b.textContent===label);
   return {dom,w,d,calls,confirms,button,posts:()=>calls.filter(c=>c.method!=="GET")};
@@ -47,7 +48,8 @@ async function page(options={}){
 test("destinations, totals, failures and history load as plain rows",async()=>{
   const ui=await page();
   try{
-    assert.match(ui.d.getElementById("cd-destination-table").textContent,/Crm.*https:\/\/crm\.example\.com.*Sending/);
+    assert.match(ui.d.getElementById("cd-destination-table").textContent,/Crm.*https:\/\/crm\.example\.com.*Available.*CRM signing key/);
+    assert.match(ui.d.getElementById("cd-managed-status").textContent,/No automatic subscription is authorized/);
     assert.equal(ui.d.getElementById("cd-count-waiting").textContent,"3");
     assert.equal(ui.d.getElementById("cd-count-old").textContent,"3");
     assert.match(ui.d.getElementById("cd-dead-table").textContent,/The system took too long to answer/);
@@ -56,17 +58,18 @@ test("destinations, totals, failures and history load as plain rows",async()=>{
   }finally{ui.dom.window.close();}
 });
 
-test("a destination is added from a name and address; the reference and key are generated",async()=>{
+test("a destination is added from a name, an address and a saved signing key; the reference is generated",async()=>{
   const ui=await page();
   try{
     ui.d.getElementById("cd-destination-new").click();
     const form=ui.d.getElementById("cd-destination"),f=form.elements;
-    f.destination_name.value="Email Platform";f.origin.value="mail.example.com/path";
+    assert.deepEqual([...f.signing_key_id.options].map(o=>o.textContent),["CRM signing key","Mail signing key","Existing deployment key 1"]);
+    f.destination_name.value="Email Platform";f.origin.value="mail.example.com/path";f.signing_key_id.value="key-b";
     form.dispatchEvent(new ui.w.Event("submit",{bubbles:true,cancelable:true}));await flush();
     const post=ui.posts()[0];
     assert.equal(post.url,"/api/v1/consent/delivery/destinations/email-platform");
     assert.equal(post.body.origin,"https://mail.example.com");
-    assert.match(post.body.signing_key_id,/^signing-key-\d{6}-[0-9a-f]{6}$/);
+    assert.equal(post.body.signing_key_id,"key-b");
     assert.equal(post.body.default_retention_seconds,2592000);assert.equal(post.body.max_attempts,6);
     assert.ok(post.body.idempotency_key);
   }finally{ui.dom.window.close();}

@@ -154,3 +154,14 @@ def test_named_provider_list_with_inline_table_never_raises() -> None:
         item.key == "enabled_providers" and item.severity == "error"
         for item in lint_config(config)
     )
+
+
+def test_automatic_delivery_worker_switch_is_a_closed_boolean() -> None:
+    def findings(worker):
+        cfg = {"consent_preferences": {"enable": True, "delivery": {"enable": True, "worker": worker}}}
+        return [(f.severity, f.key) for f in lint_config(cfg) if f.section.startswith("consent_preferences")]
+
+    assert findings({"enable": False}) == []
+    assert findings({"enable": True}) == []
+    assert findings({"enable": "yes"}) == [("error", "enable")]
+    assert findings({"enable": True, "destinations": ["x"]}) == [("warning", "destinations")]

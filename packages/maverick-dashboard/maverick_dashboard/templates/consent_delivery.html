@@ -31,7 +31,7 @@
     <section class="panel" aria-labelledby="cd-destinations-heading">
       <div id="cd-managed" tabindex="-1">
         <h2>Signing keys and automatic delivery</h2>
-        <p class="muted">Save the shared secret supplied by the receiving system. Lightwork protects it; the receiver must use the same secret. Updates use Lightwork’s signed consent endpoint at /v1/consent-preference-events.</p>
+        <p class="muted">Save the shared secret supplied by the receiving system. Lightwork protects it; the receiver must use the same secret. Lightwork sends each signed update to /v1/consent-preference-events at the receiving system’s address.</p>
         <form id="cd-key-form" class="cw-form" novalidate>
           <label>Name for this signing key<input class="input" name="label" required maxlength="100" autocomplete="off"></label>
           <label>Shared signing secret<input class="input" name="secret" type="password" required maxlength="200" autocomplete="new-password"><span class="muted">32 to 64 bytes. It is never shown again after saving.</span></label>
@@ -40,7 +40,7 @@
         <label>Automatic delivery name<input class="input" id="cd-subscription-name" maxlength="100" placeholder="For example: CRM consent updates"></label>
         <p class="muted">Choose destinations in Send updates below, then review an ongoing subscription. It includes choices recorded after your review. Saving a destination alone authorizes no automatic send.</p>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="button" id="cd-subscribe"{% if not cd_admin %} disabled{% endif %}>Review automatic delivery</button>
+          <button class="btn" type="button" id="cd-subscribe"{% if not cd_admin %} disabled{% endif %}>Review automatic delivery</button>
           <button class="btn" type="button" id="cd-subscription-pause" hidden>Pause automatic delivery</button>
           <button class="btn" type="button" id="cd-managed-refresh">Refresh setup</button>
           <a class="btn btn--ghost" href="/settings/all?q=automatic%20consent%20delivery">Automatic delivery settings</a>

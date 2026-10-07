@@ -32,7 +32,8 @@ def test_defaults_are_off_and_permissive():
     assert mfa["acr_values"] == []
     assert mfa["saml_authn_contexts"] == list(config.DEFAULT_MFA_SAML_CONTEXTS)
     assert config.get_ip_allowlist() == {"cidrs": [], "workspace_cidrs": []}
-    assert config.get_auth_sessions() == {"retention_days": 30}
+    # Browser session limits (company-wide hours, idle minutes) are off (0).
+    assert config.get_auth_sessions() == {"retention_days": 30, "company_hours": 0, "idle_minutes": 0}
 
 
 def test_config_values_are_read(tmp_path):
@@ -50,13 +51,15 @@ workspace_cidrs = ["10.1.0.0/16"]
 
 [auth.sessions]
 retention_days = 7
+company_hours = 12
+idle_minutes = 30
 """)
     mfa = config.get_auth_mfa()
     assert mfa == {"require": True, "step_up_minutes": 30, "amr_values": ["otp", "fido"],
                    "acr_values": ["urn:x:mfa"], "saml_authn_contexts": ["urn:x:saml"]}
     assert config.get_ip_allowlist() == {"cidrs": ["10.0.0.0/8", "192.0.2.1"],
                                          "workspace_cidrs": ["10.1.0.0/16"]}
-    assert config.get_auth_sessions() == {"retention_days": 7}
+    assert config.get_auth_sessions() == {"retention_days": 7, "company_hours": 12, "idle_minutes": 30}
 
 
 def test_environment_wins(tmp_path, monkeypatch):
@@ -78,3 +81,11 @@ def test_bad_values_fail_closed_or_fall_back(tmp_path):
     assert mfa["step_up_minutes"] == 15      # nonsense: the documented default
     assert mfa["amr_values"] == ["otp", "sms"]  # a comma string is tolerated
     assert config.get_auth_sessions()["retention_days"] == 1
+
+
+@pytest.mark.parametrize("line", ["company_hours = 169", "idle_minutes = -1",
+                                  "idle_minutes = true", "company_hours = \"8\""])
+def test_bad_session_limits_fail_closed(tmp_path, line):
+    _write(tmp_path, "[auth.sessions]\n" + line + "\n")
+    with pytest.raises(ValueError, match="auth.sessions"):
+        config.get_auth_sessions()

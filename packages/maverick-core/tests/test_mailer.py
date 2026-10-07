@@ -58,9 +58,10 @@ def test_kill_switch_wins(monkeypatch):
 def test_header_injection_blocked(monkeypatch):
     _creds(monkeypatch)
     boom = []
-    for to, subject in (("v@x.co\nBcc: evil@x.co", "hi"),
-                        ("v@x.co", "hi\r\nBcc: evil@x.co")):
-        with pytest.raises(mailer.MailerError, match="header injection"):
+    for to, subject, field in (("v@x.co\nBcc: evil@x.co", "hi", "to"),
+                               ("v@x.co", "hi\r\nBcc: evil@x.co", "subject")):
+        # Refused before any effect: the typed "not sent" outcome.
+        with pytest.raises(mailer.MailerNotSent, match=f"Invalid email {field}"):
             mailer.send(to, subject, "b", transport=lambda *a: boom.append(1))
     assert not boom                       # transport never reached
 
@@ -70,8 +71,9 @@ def test_smtp_failure_surfaces_as_mailer_error(monkeypatch):
 
     def transport(*a):
         raise ConnectionRefusedError("nope")
-    with pytest.raises(mailer.MailerError, match="smtp send failed"):
+    with pytest.raises(mailer.MailerError, match=r"Email sending failed \(ConnectionRefusedError\)") as caught:
         mailer.send("to@x.co", "hi", "body", transport=transport)
+    assert "nope" not in str(caught.value)  # provider detail is not echoed
 
 
 def test_message_content(monkeypatch):

@@ -7,6 +7,7 @@ closed registry to audit.
 """
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 
 # Installation-wide, append-only identity history. These roots are outside
@@ -178,6 +179,10 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     # runtime-override authority: a restored copy must not reapply itself.
     "runtime-policy-copies": "runtime_policy_copy_authority",
     "runtime-policy-requests": "runtime_policy_restore_request_authority",
+    # Digest-only evidence of guarded connector attempts, and the retained
+    # native-authority pins the AI governance loop decides against.
+    "runtime-enforcement": "runtime_enforcement_evidence_authority",
+    "ai-governance-source-pins": "ai_governance_source_pin_authority",
 }
 
 # These governed records cannot authorize source work, change budget limits or
@@ -220,6 +225,17 @@ APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES = {
 # than literal namespace declarations.  Both supported sinks are enumerated so
 # restored request/outcome delivery state cannot fall through the literal-store
 # completeness check.
+# Per-person private push (ntfy) stores are named ``<kind>-<32 hex>`` from a
+# digest of the owner. Destinations hold the private topic; results hold
+# send receipts that must never allow a blind resend after a restore.
+PERSONAL_PUSH_AUTHORITY_POLICIES = {
+    "private-push-destinations": "personal_push_destination_authority",
+    "private-push-results": "personal_push_delivery_receipt_authority",
+}
+_PERSONAL_PUSH_NAMESPACE = re.compile(
+    r"(private-push-destinations|private-push-results)-[0-9a-f]{32}"
+)
+
 DYNAMIC_JSON_AUTHORITY_POLICIES = {
     "identity_governance_alert_outcomes": "identity_delivery_outcome_authority",
     "identity_governance_alert_requests": "identity_change_request",
@@ -288,6 +304,11 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "privacy_identity_key_authority"
     if _contains(parts, "keys", "dek.wrapped"):
         return "wrapped_tenant_dek"
+    if _contains(parts, "privacy_automation", "discovery-data-use-key.sealed"):
+        # Tenant-sealed key for the discovery data-use database (itself an
+        # unknown, blocking SQLite). Retain it with that database; a missing or
+        # rolled-back key must never be silently regenerated over saved data.
+        return "privacy_discovery_data_use_key"
     tenant_scoped_root = len(parts) == 1 or (
         len(parts) >= 3 and parts[-3] == "tenants"
     )
@@ -623,6 +644,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
     for namespace, policy in namespace_policies.items():
         if namespace in parts[:-1]:
             return policy
+    for part in parts[:-1]:
+        matched = _PERSONAL_PUSH_NAMESPACE.fullmatch(part)
+        if matched:
+            return PERSONAL_PUSH_AUTHORITY_POLICIES[matched.group(1)]
 
     if is_sqlite:
         if name == "provider_spend.sqlite3":
@@ -733,6 +758,7 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "dashboard-session.key": "dashboard_session_secret",
     "dashboard-passphrases.json": "dashboard_local_passphrases",
     "notification-links/signing.key": "notification_link_signing_key",
+    "privacy_automation/discovery-data-use-key.sealed": "privacy_discovery_data_use_key",
     "scim_users.json": "scim_user_directory",
     "scim_groups.json": "scim_group_directory",
     "scim_groups.audit-outbox.json": "scim_audit_delivery",
@@ -915,6 +941,10 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
         for namespace, policy in DYNAMIC_JSON_AUTHORITY_POLICIES.items()
         if policy != "identity_change_request"
     },
+    **{
+        f"{kind}-{'c' * 32}/recovered.json": policy
+        for kind, policy in PERSONAL_PUSH_AUTHORITY_POLICIES.items()
+    },
 }
 
 
@@ -985,6 +1015,7 @@ __all__ = [
     "AUTHORITY_SAMPLES",
     "DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES",
     "DYNAMIC_JSON_AUTHORITY_POLICIES",
+    "PERSONAL_PUSH_AUTHORITY_POLICIES",
     "GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES",
     "GLOBAL_START_JSON_AUTHORITY_POLICIES",
     "authority_policy",

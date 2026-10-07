@@ -110,10 +110,16 @@ test("closing uses the approved result and the request's revision", async (t) =>
 });
 
 test("administrators cannot approve their own change; others approve with one click after confirming", async (t) => {
-  const ui = await fixture(); t.after(() => ui.window.close());
+  // Approval first reads the complete current change and shows it for review.
+  const review = { proposal: { proposal_id: "p-other", kind: "import_record", revision: 1, retained_until: 9 },
+    proposed_by_you: false, contents: { drop_id: 41003, request_type: "DataDeletion" } };
+  const ui = await fixture({ intercept: (c) => (c.method === "GET" && c.url.pathname.endsWith("/proposals/p-other/review") ? review : undefined) });
+  t.after(() => ui.window.close());
   assert.equal(ui.rowButton("drop-waiting", "Other broker", "Approve"), undefined);
   assert.match(ui.el("drop-waiting").textContent, /You/);
   ui.rowButton("drop-waiting", "41003", "Approve").click(); await ui.settle();
+  assert.equal(ui.confirms.length, 1);
+  assert.match(ui.confirms[0], /DROP request: 41003/);
   const post = ui.calls.find((c) => c.url.pathname.endsWith("/proposals/p-other/approve"));
   assert.equal(JSON.parse(post.body).expected_revision, 1);
 });

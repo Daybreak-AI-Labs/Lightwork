@@ -321,13 +321,19 @@ def test_run_resume_skips_mode_picker(monkeypatch, tmp_path: Path):
     assert called["run_consumer"] is False
 
 
-def test_run_aborts_with_guidance_when_not_a_tty(monkeypatch):
+def test_run_aborts_with_guidance_when_not_a_tty(monkeypatch, tmp_path):
     """Non-interactive stdin (CI / Docker / `... | maverick init`) must yield
     actionable guidance and a clean exit, not questionary's terse 'Aborted!'."""
     import io
 
     from maverick_installer import wizard
     from rich.console import Console
+
+    # A fresh installation: the config paths are resolved once at import, so a
+    # real saved setup on the test machine must not answer for this case.
+    monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path / ".maverick")
+    monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / ".maverick" / "config.toml")
+    monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".maverick" / ".env")
 
     monkeypatch.setattr(
         wizard, "console",

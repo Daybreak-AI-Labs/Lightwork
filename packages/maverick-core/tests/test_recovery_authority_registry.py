@@ -18,6 +18,7 @@ from maverick.recovery_authorities import (
     GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES,
     GLOBAL_START_JSON_AUTHORITY_POLICIES,
     NON_AUTHORIZING_GOVERNED_NAMESPACES,
+    PERSONAL_PUSH_AUTHORITY_POLICIES,
     authority_policy,
 )
 
@@ -173,7 +174,16 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
         "f'identity_governance_{sink}_outcomes'",
         "f'identity_governance_{sink}_requests'",
         "'conversation-organization-' + context_for(request)",
+        # personal_push_devices.store: "<kind>-<32 hex owner digest>".
+        "kind + '-' + scope",
     }
+    for kind, policy in PERSONAL_PUSH_AUTHORITY_POLICIES.items():
+        relative = f"{kind}-{'c' * 32}/recovered.json"
+        assert authority_policy(relative, is_sqlite=False) == policy
+        assert authority_policy(relative.upper(), is_sqlite=False) == policy
+        assert GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES[relative] == policy
+        # Only the exact bounded expansion is classified this way.
+        assert authority_policy(f"{kind}-short/recovered.json", is_sqlite=False) is None
     for namespace, policy in DYNAMIC_JSON_AUTHORITY_POLICIES.items():
         relative = f"{namespace}/recovered.json"
         assert authority_policy(relative, is_sqlite=False) == policy
@@ -584,6 +594,7 @@ def test_installation_passphrases_and_link_signing_key_are_protected_authority()
     expected = {
         "dashboard-passphrases.json": "dashboard_local_passphrases",
         "notification-links/signing.key": "notification_link_signing_key",
+        "privacy_automation/discovery-data-use-key.sealed": "privacy_discovery_data_use_key",
     }
     for relative, policy in expected.items():
         assert authority_policy(relative, is_sqlite=False) == policy

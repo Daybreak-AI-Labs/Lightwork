@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from maverick import third_party_intelligence as intelligence
@@ -66,15 +67,31 @@ class Store:
         self.acknowledgement_error = acknowledgement_error
         self.failures: list[dict[str, object]] = []
         self.acknowledged: list[str] = []
+        self.events: list[str] = []
 
-    def claim_outbox(self, tenant_id, *, worker_id, limit, lease_seconds):
+    def claim_outbox(self, tenant_id, *, worker_id, limit, lease_seconds,
+                     delivery_ids=None, effect_guard=None):
         assert (tenant_id, worker_id, limit, lease_seconds) == (
             "tenant-a",
             "worker-1",
             10,
             60.0,
         )
+        assert delivery_ids is None and effect_guard is None
         return (self.item,)
+
+    def get_vendor(self, tenant_id, vendor_id):
+        assert (tenant_id, vendor_id) == ("tenant-a", "vendor-1")
+        return SimpleNamespace(vendor_id=vendor_id, display_label="Example Vendor")
+
+    def assert_delivery_authority(self, item):
+        assert item.delivery_id == "delivery-1"
+        self.events.append("authority")
+
+    def mark_outbox_dispatch(self, item, *, ambiguous=False):
+        assert item.lease_token == "lease-token-1234567890"
+        self.events.append("ambiguous" if ambiguous else "dispatching")
+        return replace(item, state="dispatching")
 
     def get_monitoring_alert(self, tenant_id, alert_id):
         assert (tenant_id, alert_id) == ("tenant-a", "alert-1")
@@ -125,11 +142,14 @@ class Store:
 
 
 class Transport:
-    def __init__(self, error: Exception | None = None):
+    def __init__(self, error: Exception | None = None, store: Store | None = None):
         self.error = error
+        self.store = store
         self.calls: list[dict[str, str]] = []
 
     def send(self, **kwargs):
+        if self.store is not None:
+            self.store.events.append("send")
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
@@ -137,7 +157,7 @@ class Transport:
 
 def test_delivers_digest_bounded_alert_and_acknowledges() -> None:
     store = Store()
-    transport = Transport()
+    transport = Transport(store=store)
     result = delivery.deliver_alert_batch(
         store,
         tenant_id="tenant-a",
@@ -153,8 +173,10 @@ def test_delivers_digest_bounded_alert_and_acknowledges() -> None:
     assert result.semantics == "at_least_once"
     assert transport.calls[0]["recipient"] == "risk@example.com"
     assert transport.calls[0]["idempotency_key"] == "delivery-1"
-    assert "Vendor reference: vendor-1" in transport.calls[0]["body"]
-    assert "not a sanctions" in transport.calls[0]["body"]
+    assert "Example Vendor" in transport.calls[0]["body"]
+    assert "does not approve the vendor or make a legal or compliance decision" in transport.calls[0]["body"]
+    # The send is durably admitted and its authority re-checked before the effect.
+    assert store.events == ["dispatching", "authority", "send"]
     assert "risk@example.com" not in repr(result)
     assert store.acknowledged == ["delivery-1"]
 
@@ -184,7 +206,24 @@ def test_destination_failure_is_sanitized_and_retried(resolved: str) -> None:
 
 
 def test_transport_failure_dead_letters_at_attempt_limit() -> None:
+    from maverick.mailer import MailerNotSent
+
+    # A send refused before any effect started is retryable up to the limit.
     store = Store(item=_item(attempt=5, maximum_attempts=5))
+    result = delivery.deliver_alert_batch(
+        store,
+        tenant_id="tenant-a",
+        worker_id="worker-1",
+        resolve_destination=lambda _tenant, _ref: "risk@example.com",
+        transport=Transport(MailerNotSent("secret provider detail")),
+    )
+    assert result.dead_lettered == 1
+    assert result.outcomes[0].error_code == "delivery_error"
+    assert "secret provider detail" not in repr(result)
+
+
+def test_interrupted_send_after_admission_is_ambiguous_and_never_retried() -> None:
+    store = Store(item=_item(attempt=1, maximum_attempts=5))
     result = delivery.deliver_alert_batch(
         store,
         tenant_id="tenant-a",
@@ -192,8 +231,11 @@ def test_transport_failure_dead_letters_at_attempt_limit() -> None:
         resolve_destination=lambda _tenant, _ref: "risk@example.com",
         transport=Transport(ConnectionError("secret provider detail")),
     )
-    assert result.dead_lettered == 1
-    assert result.outcomes[0].error_code == "transport_unavailable"
+    assert result.acknowledgement_ambiguous == 1 and result.retry_pending == 0
+    assert result.outcomes[0].state == "ambiguous"
+    assert result.outcomes[0].error_code == "send_unconfirmed"
+    assert store.failures == [] and store.acknowledged == []
+    assert store.events[-1] == "ambiguous"
     assert "secret provider detail" not in repr(result)
 
 
@@ -211,25 +253,33 @@ def test_post_send_acknowledgement_failure_is_explicitly_ambiguous() -> None:
     assert result.acknowledgement_ambiguous == 1
     assert result.outcomes[0].state == "ack_ambiguous"
     assert store.failures == []
+    assert store.events[-1] == "ambiguous"  # retained, never made retryable
 
 
 def test_smtp_transport_reuses_platform_mailer(monkeypatch: pytest.MonkeyPatch) -> None:
     from maverick import mailer
 
-    calls: list[tuple[str, str, str]] = []
+    calls: list[tuple[str, str, str, object]] = []
     monkeypatch.setattr(
         mailer,
         "send",
-        lambda recipient, subject, body: calls.append((recipient, subject, body)),
+        lambda recipient, subject, body, *, before_effect=None: calls.append(
+            (recipient, subject, body, before_effect)),
     )
+
+    def guard():
+        return None
+
     delivery.SmtpThirdPartyAlertTransport().send(
         recipient="risk@example.com",
         subject="Third-party change",
         body="Review evidence.",
         idempotency_key="delivery-1",
+        before_effect=guard,
     )
     assert calls[0][0] == "risk@example.com"
     assert "delivery-1" in calls[0][2]
+    assert calls[0][3] is guard  # the mailer re-checks authority at the effect
 
 
 @pytest.mark.parametrize(

@@ -109,7 +109,7 @@
         </button>
       {% endif %}
       {% if dsar.status in ('open', 'fulfilled') and dsar.kind not in ('access', 'portability', 'erasure') %}
-        <button type="button" class="btn btn--primary" id="dsar-handle">Record action and response</button>
+        <button type="button" class="btn" id="dsar-handle">Record action and response</button>
       {% endif %}
       {% if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') %}
         <button type="button" class="btn btn--primary" id="dsar-download">Review collected data</button>

@@ -1730,11 +1730,22 @@ class TestDsarClocks:
         assert all(rt == "dsar" and rid == r["id"] for _e, rt, rid in sent)
         assert {"dsar.verified", "dsar.acknowledged", "dsar.extended"} <= webhook_events.EVENT_TYPES
 
-    def test_manual_kinds_are_marked_answered(self):
+    def test_manual_kinds_need_a_recorded_answer(self):
+        # A button click no longer marks a manual right answered: the action,
+        # answer date and proof must be recorded when closing.
         r = privacy_ops.open_dsar("casey@example.com", "opt_out", jurisdiction="us_ca_ccpa")
-        done = privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")
-        assert done["status"] == "fulfilled"
-        assert done["fulfillment"] == {"handled": "manually"}
+        with pytest.raises(ValueError, match="Record what was changed or stopped"):
+            privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")
+        assert privacy_ops.get_dsar(r["id"])["status"] == "open"
+        today = _day(time.time())
+        with pytest.raises(ValueError, match="what was changed or stopped"):
+            privacy_ops.close_dsar(r["id"], closed_by="ops", outcome={
+                "kind": "answered", "answered_on": today, "reference": "Opt-out ticket 7"})
+        done = privacy_ops.close_dsar(r["id"], closed_by="ops", outcome={
+            "kind": "answered", "answered_on": today, "reference": "Opt-out ticket 7",
+            "note": "Stopped sale and sharing in the CRM and ad platforms"})
+        assert done["status"] == "closed"
+        assert done["outcome"]["kind"] == "answered" and done["outcome"]["reference"] == "Opt-out ticket 7"
 
 
 def _day(ts: float) -> str:
@@ -1771,7 +1782,9 @@ class TestDsarOutcomes:
             "kind": "refused", "answered_on": today, "lawful_basis": "Manifestly unfounded",
             "reference": "Letter 12"})
         manual = privacy_ops.open_dsar("c@example.com", "opt_out", jurisdiction="us_ca_ccpa")
-        privacy_ops.fulfill_dsar(manual["id"], fulfilled_by="ops")
+        privacy_ops.close_dsar(manual["id"], closed_by="ops", outcome={
+            "kind": "answered", "answered_on": today, "reference": "Opt-out ticket 9",
+            "note": "Stopped sale and sharing in the CRM and ad platforms"})
         withdrawn = privacy_ops.open_dsar("d@example.com", "access")
         privacy_ops.close_dsar(withdrawn["id"], closed_by="dpo",
                                outcome={"kind": "withdrawn", "note": "Requester withdrew by phone"})
@@ -1815,8 +1828,11 @@ class TestDsarOutcomes:
 
     def test_a_request_marked_answered_stays_answered_when_closed(self):
         r = privacy_ops.open_dsar("k@example.com", "opt_out", jurisdiction="us_ca_ccpa")
-        privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")
-        privacy_ops.close_dsar(r["id"], closed_by="ops")
+        with pytest.raises(ValueError):
+            privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")  # no click-through answer
+        privacy_ops.close_dsar(r["id"], closed_by="ops", outcome={
+            "kind": "answered", "answered_on": _day(time.time()), "reference": "Opt-out ticket 11",
+            "note": "Stopped sale and sharing in the CRM and ad platforms"})
         dsar = self._report()
         assert dsar["answered"] == 1 and dsar["closed_without_response"] == 0
         # A deletion handed over for erasure is not an answer by itself.
