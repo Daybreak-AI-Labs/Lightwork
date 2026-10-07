@@ -118,7 +118,9 @@ test("Tasks: arrow keys choose a filter, show only its rows and keep it in the a
     ["failed", "Failed", "failed"], ["done", "Done", "done"]];
   const html = '<input id="run-search-q">' + panelTabs("Show tasks", items, "all", { id: "g-filter", data: "g-filter", controls: "run-list" }) +
     '<div class="g-list" id="run-list" role="tabpanel" aria-labelledby="g-filter-tab-all"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div><div class="g-row" data-status="blocked"></div></div>' +
-    '<p id="run-search-status"></p><button id="run-search-retry"></button>';
+    '<p id="run-search-status"></p><button id="run-search-retry"></button>' +
+    // As goals.html renders them: older-work search and Show more tasks.
+    '<button id="run-search-older" hidden></button><button id="run-more" data-next-offset="" hidden></button>';
   const w = dom(html, "https://lightwork.test/goals"), d = w.document;
   w.fetch = async () => ({ ok: true, status: 200, json: async () => [] });
   w.eval(goalsScript);
