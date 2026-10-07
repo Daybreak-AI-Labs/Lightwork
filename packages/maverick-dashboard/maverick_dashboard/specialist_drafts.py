@@ -100,8 +100,40 @@ def _draft(request, name, entered, source):
     if errors:
         raise HTTPException(422, "; ".join(errors))
     _allowed_draft_models(asdict(profile), source)
+    _allowed_draft_servers(asdict(profile), source)
     _bounded(patch)
     return patch, asdict(profile)
+
+
+def _server_state(names=()):
+    from maverick.mcp_tools import current_mcp_servers
+
+    try:
+        current = current_mcp_servers()
+    except Exception as exc:
+        raise HTTPException(503, "Current tool services could not be checked. Open Tool servers to review their setup; your draft has been kept.") from exc
+    names = set(names)
+    if len(set(current) | names) > 5000:
+        raise HTTPException(409, "The complete tool-service choices exceed the supported limit. Nothing was shortened.")
+    choices = []
+    for name in sorted(set(current) | set(names)):
+        row = current.get(name)
+        available = bool(row and row["enabled"] and row["spec"] is not None)
+        status = "Configured; connects for new work" if available else "Turned off" if row and row["spec"] else "Setup unavailable"
+        choices.append({"value": name, "label": name.replace("_", " ").replace("-", " ") + " · " + status,
+                        "available": available})
+    binding = digest([(name, current[name]["revision"] if name in current else "missing") for name in sorted(set(names))])
+    return {"choices": choices, "binding": binding}
+
+
+def _allowed_draft_servers(profile, source):
+    names = profile["mcp_servers"]
+    if len(names) > 5000 or len(set(names)) != len(names) or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name) for name in names):
+        raise HTTPException(422, "Choose distinct named tool services from the complete editor.")
+    retained = set((source.get("profile") or {}).get("mcp_servers", []))
+    choices = {row["value"]: row for row in _server_state(names)["choices"]}
+    if any(name not in retained and not choices[name]["available"] for name in names):
+        raise HTTPException(409, "A newly selected tool service is unavailable or turned off. Set it up in Tool servers, then refresh and review this draft again.")
 
 
 def _allowed_draft_models(profile, source):
@@ -169,6 +201,7 @@ def original_history(request):
 def inventory(request, name):
     actor, context = authority(request)
     source = _source(request, name)
+    services = _server_state((source["profile"] or {}).get("mcp_servers", []))
     rows = _rows(request, name)
     versions = [{"value": row["id"], "label": (row.get("title") or ACTIONS[row["action"]]) + " · " +
                  time.strftime("%b %d, %Y %H:%M", time.localtime(row["created_at"]))}
@@ -181,7 +214,7 @@ def inventory(request, name):
     authority(request, context)
     return {"context": context, "binding": digest(source), "name": name, "editor": source["raw"],
             "current": source["profile"], "generation": source["generation"], "drafts": versions,
-            "earlier": earlier, "originals": originals, "notice": NOTICE, "actor": actor}
+            "earlier": earlier, "originals": originals, "notice": NOTICE, "actor": actor, "tool_services": services}
 
 
 def saved_draft(request, identifier):
@@ -263,6 +296,7 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
                 "selected_revision": selected_revision, "task": task, "title": title,
                 "reason": reason, "cases": cases, "connection": connection, "expires": time.time() + TTL,
                 "uncertain": uncertain, "acknowledge_previous": acknowledge_previous}
+    prepared["tool_services"] = _server_state(profile["mcp_servers"])
     if action in {"publish", "restore"} and _publication_verdict(prepared)["blocked"] and len(reason.strip()) < 8:
         raise HTTPException(409, "This complete draft needs a finished passing check of every current saved question, or a reason of at least eight characters for proceeding without one.")
     _bounded(prepared)
@@ -277,6 +311,10 @@ def changes(request, prepared):
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},
             {"label": "AI used for answer checks", "after": model_label(prepared["connection"]["model"])}]
+    if prepared.get("tool_services"):
+        selected = set(prepared["profile"]["mcp_servers"])
+        rows.append({"label": "Selected tool services", "after": [row["label"] for row in prepared["tool_services"]["choices"] if row["value"] in selected] or "None selected"})
+        rows.append({"label": "Tool-service limits", "after": "Only tools discovered from these connected services can be added for new work. Server tools are high risk unless an administrator has explicitly changed an action's classification. The specialist's risk limit, blocked actions and the caller's permissions still apply. Saving or trying this draft does not connect or test a service."})
     if prepared["action"] == "try":
         rows.append({"label": "Fictional sample request", "after": prepared["task"]})
     if prepared["action"] == "check":
@@ -334,6 +372,9 @@ def _guard(request, prepared, *, budget=None, published=None):
     if asdict(domain_edit.preview_override(prepared["name"], prepared["patch"])) != prepared["profile"]:
         raise HTTPException(409, "The draft's inherited settings changed. Review its complete current definition again.")
     _allowed_draft_models(prepared["profile"], prepared["before"])
+    _allowed_draft_servers(prepared["profile"], prepared["before"])
+    if prepared.get("tool_services") and _server_state(prepared["profile"]["mcp_servers"])["binding"] != prepared["tool_services"]["binding"]:
+        raise HTTPException(409, "A selected tool service changed. Refresh its setup and review the complete draft again.")
     if _connection(prepared["name"], models=prepared["profile"]["models"]) != prepared["connection"]:
         raise HTTPException(409, "The AI connection or current settings changed. Review the draft again before proceeding.")
     if prepared["selected"] is not None:

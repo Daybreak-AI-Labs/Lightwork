@@ -75,8 +75,8 @@
   .fld{ margin: 0 0 var(--space-4); }
   .fld > label{ display: block; font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
   .fld .sub{ font-weight: var(--font-normal); color: var(--muted); }
-  #agent-model-choices{ min-inline-size: 0; border: 0; padding: 0; margin: var(--space-4) 0; }
-  #agent-model-choices legend{ font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
+  #agent-model-choices, #agent-tool-services{ min-inline-size: 0; border: 0; padding: 0; margin: var(--space-4) 0; }
+  #agent-model-choices legend, #agent-tool-services legend{ font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
   #agent-model-choices > label{ display: block; margin-bottom: var(--space-2); }
   @media (max-width: 560px){ .topbar__controls{ column-gap: var(--space-0-5); } }
   .af-card input[type="text"], .af-card textarea, .af-card select{
@@ -419,6 +419,18 @@
           <p class="sub" id="agent-actions-error" role="alert" hidden></p>
         </div>
 
+        <fieldset class="fld" id="agent-tool-services">
+          <legend>Connected tool services</legend>
+          <p class="sub">Choose the services this {{ kind_word }} may use. Your team’s permissions and approval rules still apply.</p>
+          <div id="agent-tool-service-choices"></div>
+          <p class="sub"><a href="/mcp">Manage connections</a></p>
+          <details>
+            <summary>Setup and access limits</summary>
+            <p class="sub">Configured services are checked when new work starts. Choosing one does not connect or test it. Their actions are high risk unless an administrator changes that classification; this {{ kind_word }}’s risk limits and blocked actions still apply.</p>
+            <p class="sub" id="agent-tool-service-status" role="status">Reading the current service choices…</p>
+          </details>
+        </fieldset>
+
         <div class="fld">
           <label>Guardrails <span class="sub">— the safety limits it works within</span></label>
           <div class="guard-row">
@@ -756,6 +768,7 @@
         set('f-persona', d.persona);
         set('f-allow', (d.allow_tools || []).join(' '));
         set('f-deny', (d.deny_tools || []).join(' '));
+        if (Array.isArray(d.mcp_servers)) form.dataset.toolServices = JSON.stringify(d.mcp_servers);
         if (d.max_risk) {
           set('f-risk', d.max_risk);
           var seg = document.getElementById('risk-seg');
@@ -1159,6 +1172,26 @@
       const msg = document.getElementById('agent-msg');
       let retainedDraftName = '';
       let editorPrivateLocked = false;
+      let serviceDraft = {{ selected.mcp_servers | tojson if selected else '[]' }};
+      if (form.dataset.toolServices) { try { serviceDraft = JSON.parse(form.dataset.toolServices); } catch (_) {} }
+      let serviceChoices = null;
+      function renderServices() {
+        const host = document.getElementById('agent-tool-service-choices'); host.replaceChildren();
+        const rows = new Map((serviceChoices || []).map(row => [row.value, row]));
+        serviceDraft.forEach(name => { if (!rows.has(name)) rows.set(name, {value: name, label: name.replace(/[_-]/g, ' ') + (serviceChoices ? ' · Setup unavailable' : ' · Setup not yet checked'), available: false}); });
+        rows.forEach(row => {
+          const label = document.createElement('label'), choice = document.createElement('input');
+          choice.type = 'checkbox'; choice.value = row.value; choice.checked = serviceDraft.includes(row.value);
+          choice.disabled = editorPrivateLocked || (!row.available && !choice.checked); label.style.display = 'block';
+          label.append(choice, document.createTextNode(' ' + row.label)); host.append(label);
+          choice.addEventListener('change', () => {
+            serviceDraft = choice.checked ? [...serviceDraft, row.value] : serviceDraft.filter(name => name !== row.value);
+            renderServices(); host.dispatchEvent(new Event('input', {bubbles: true}));
+          });
+        });
+        document.getElementById('agent-tool-service-status').textContent = serviceChoices === null ? 'Refresh the complete draft to read current service choices.' : rows.size ? 'Your entered selections are kept when service choices refresh. Unavailable saved services can be removed.' : 'No tool services are configured. Add one in Tool servers, then refresh this draft.';
+      }
+      renderServices();
       // The target agent name: the pre-selected pack, or (new mode) the id typed
       // in. Normalized to the lowercase/underscore shape packs use.
       function targetName() {
@@ -1360,6 +1393,7 @@
           max_risk: document.getElementById('f-risk').value,
           workflow: gatherWorkflow(),
           models: gatherModels(),
+          mcp_servers: [...serviceDraft],
           ...(autonomy ? { autonomy } : {}),
         };
       }
@@ -1498,8 +1532,10 @@
         name: targetName,
         identify: name => { if (!editorPrivateLocked && creating && idInput && !idInput.value.trim()) { retainedDraftName = name; idInput.value = name; idTouched = true; } },
         get: () => { if (editorPrivateLocked) throw new Error('Reopen Agent Factory after current access is restored.'); return {...(loadedDraftProfile || {}), ...payload()}; },
+        toolServices: value => { if (editorPrivateLocked || !Array.isArray(value?.choices)) return false; serviceChoices = value.choices; renderServices(); return true; },
         clearPrivate: () => {
-          editorPrivateLocked = true; loadedDraftProfile = null; modelDraft = {}; retainedDraftName = ''; form.dataset.name = '';
+          editorPrivateLocked = true; loadedDraftProfile = null; modelDraft = {}; serviceDraft = []; serviceChoices = null; retainedDraftName = ''; form.dataset.name = '';
+          document.getElementById('agent-tool-service-choices').replaceChildren(); document.getElementById('agent-tool-service-status').textContent = '';
           form.querySelectorAll('input, textarea, select').forEach(field => { field.value = ''; if ('checked' in field) field.checked = false; });
           document.getElementById('f-model').replaceChildren(); document.getElementById('agent-supporting-models').replaceChildren(); stepsEl.replaceChildren();
           form.querySelectorAll('input, textarea, select, button').forEach(field => { field.disabled = true; }); form.hidden = true;
@@ -1509,6 +1545,7 @@
           if (editorPrivateLocked) return false;
           if (creating && idInput) { retainedDraftName = value.name; idInput.value = value.name; idTouched = true; }
           loadedDraftProfile = structuredClone(value);
+          serviceDraft = [...(value.mcp_servers || [])]; renderServices();
           applyModels(value.models);
           document.getElementById('f-description').value = value.description;
           document.getElementById('f-persona').value = value.persona;

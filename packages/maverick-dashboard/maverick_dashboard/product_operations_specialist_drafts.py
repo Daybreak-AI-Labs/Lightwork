@@ -45,6 +45,7 @@ class SaveInput(NameInput):
     max_risk: Literal["low", "medium", "high"]
     model_role: str = Field(default="", max_length=128)
     model: str = Field(default="", max_length=200)
+    mcp_servers: list[str] | None = Field(default=None, max_length=5000)
     acknowledge_previous: bool = False
 
 
@@ -176,7 +177,9 @@ def save_snapshot(request, selection):
     model_choices += [{"value": spec, "label": model_label(spec)} for spec, _label in models]
     available = {spec for spec, _label in models}
     model_choices += [{"value": spec, "label": "Saved choice · " + model_label(spec)} for spec in sorted(retained_models - available)]
-    return Snapshot(digest([state.revision, role_choices, model_choices]), state.source, "Save a draft of these changes while preserving its other complete settings. Use Open complete specialist editor to change every field.",
+    services = native._server_state([server for item in profiles.values() for server in item.mcp_servers])
+    server_choices = [{"value": row["value"], "label": row["label"]} for row in services["choices"]]
+    return Snapshot(digest([state.revision, role_choices, model_choices, services]), state.source, "Save a draft of these changes while preserving its other complete settings. Use Open complete specialist editor to change every field. Tool services connect only for new work; risk limits and the caller's permissions still apply.",
         fields=state.fields + [{"name": "title", "label": "Draft name (optional)", "kind": "text", "max_length": 120},
             {"name": "description", "label": "Name people see", "kind": "text", "required": True, "max_length": 1000, "value": profile.get("description", "")},
             {"name": "persona", "label": "What should it do?", "kind": "textarea", "required": True, "max_length": 16000, "value": profile.get("persona", "")},
@@ -187,6 +190,7 @@ def save_snapshot(request, selection):
             {"name": "model_role", "label": "Change the AI for (optional)", "kind": "select", "value": "", "depends_on": "name",
                 "choices": role_choices.get(name, []), "choices_by": role_choices},
             {"name": "model", "label": "AI choice (used only when a part is selected above)", "kind": "select", "value": "", "choices": model_choices},
+            {"name": "mcp_servers", "label": "Connected tool services", "kind": "multiselect", "choices": server_choices, "value": profile.get("mcp_servers", [])},
             _ack_field()], blocked=state.blocked)
 
 
@@ -204,6 +208,8 @@ def prepare_for(action):
                 raise HTTPException(409, "This unpublished draft is no longer available. Choose a current owned draft again.")
             retained = saved["patch"] if saved else {}
             entered = {**retained, **{key: arguments[key] for key in ("description", "persona", "allow_tools", "deny_tools", "max_risk")}}
+            if arguments.get("mcp_servers") is not None:
+                entered["mcp_servers"] = arguments["mcp_servers"]
             role = arguments.get("model_role", "")
             model = arguments.get("model", "")
             if role:

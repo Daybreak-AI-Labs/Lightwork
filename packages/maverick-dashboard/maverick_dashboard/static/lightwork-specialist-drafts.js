@@ -3,7 +3,7 @@
   const API = '/api/v1/specialist-drafts';
   const first = ['Decision', 'Complete draft', 'Currently used definition', 'AI used for answer checks'];
   const last = ['Limits and consequences', 'If the response is lost'];
-  const optional = ['Fictional sample request', 'Every saved question and passing condition', 'Publication tests', 'Reason for publishing without a complete passing check', 'Earlier unconfirmed decisions'];
+  const optional = ['Selected tool services', 'Tool-service limits', 'Fictional sample request', 'Every saved question and passing condition', 'Publication tests', 'Reason for publishing without a complete passing check', 'Earlier unconfirmed decisions'];
   function node(tag, text, parent) { const value = document.createElement(tag); if (text !== undefined) value.textContent = text; if (parent) parent.append(value); return value; }
   function display(parent, value, limits, depth) {
     if (--limits.nodes < 0 || depth > 12) throw new Error('The complete specialist review exceeds its supported display limit. Nothing can be confirmed.');
@@ -19,7 +19,7 @@
     else throw new Error('The complete specialist review contains an unsupported value.');
   }
   function renderReview(host, changes) {
-    if (!Array.isArray(changes) || changes.length < 6 || changes.length > 11 || JSON.stringify(changes).length > 1200000 ||
+    if (!Array.isArray(changes) || changes.length < 6 || changes.length > 13 || JSON.stringify(changes).length > 1200000 ||
         changes.some(row => !row || Object.keys(row).sort().join('|') !== 'after|label' || typeof row.label !== 'string') ||
         first.some((label, index) => changes[index].label !== label) || last.some((label, index) => changes[changes.length - 2 + index].label !== label) ||
         changes.slice(4, -2).some(row => !optional.includes(row.label)) || new Set(changes.map(row => row.label)).size !== changes.length) {
@@ -128,7 +128,7 @@
     return data;
   }
   function choices(select, rows) { const selected = select.value; select.replaceChildren(); const blank = node('option', 'Choose…', select); blank.value = ''; rows.forEach(row => { const item = node('option', row.label, select); item.value = row.value; }); if (rows.some(row => row.value === selected)) select.value = selected; }
-  function useState(value) { state = value; root.hidden = false; choices(draft, value.drafts); choices(earlier, value.earlier); choices(originals, value.originals); lock(false); }
+  function useState(value) { state = value; editor()?.toolServices?.(value.tool_services); root.hidden = false; choices(draft, value.drafts); choices(earlier, value.earlier); choices(originals, value.originals); lock(false); }
   async function bootstrapDraft(current, selected) {
     if (form?.dataset.creating !== '1' || name() || draftChanged || !/^SPD-[a-f0-9]{32}$/.test(selected || '')) return null;
     const saved = await request('/drafts/' + encodeURIComponent(selected), undefined, current);

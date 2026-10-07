@@ -1,5 +1,23 @@
 # Post-install operation coverage
 
+October 7 UX644 connected services: the complete specialist editor and typed
+Copilot can select named configured services, review the complete definition,
+save it and publish it separately. New specialist bindings use only the exact
+selected, enabled services connected in the current workspace. Parent access,
+explicit denials and the existing high-risk tool defaults still apply. An
+empty allow list retains its existing inheritance rules. Current source checks
+run at native HTTP send admission and after the local transport lock; invalid
+configuration or a withdrawn source refuses the binding. Selection does not
+automatically connect a service or prove that an external service works.
+
+Actual ordinary and Copilot saves, separate publication, pure Original reads,
+source withdrawal, complete private clearing and the final 320-pixel form
+passed. The real native agent registry performed one fictional local transport
+write; source withdrawal after its lock prevented another. Parent inheritance
+and the legal read fallback remained intact. No provider or external call was
+made. Existing inherited/manual grants keep their original rules; no in-flight
+cancellation or live connection acceptance is established by this witness.
+
 October 7 UX658 model defaults: a person's encrypted Preferences can select a
 named permitted Chat model and its supported thinking depth. Copilot reviews
 the same changes, including any required depth reset. An untouched new composer

@@ -1,5 +1,14 @@
 # Product changes delivered on October 6
 
+UX644, connected-service portion: ordinary complete editing and typed Copilot
+retain named configured services through reviewed Save, separate publication
+and exact Original. Real specialist construction binds exact current connected
+services while retaining parent access, denials, risk rules and empty-list
+inheritance. Source withdrawal, corrupt configuration, complete access clearing
+and the final phone layout passed. One fictional local transport write and
+post-lock refusal exercised the native registry. Selection does not connect a
+service; no external delivery or in-flight cancellation is claimed.
+
 UX658, model portion: encrypted personal Preferences and typed Copilot now
 select a current permitted Chat model and supported thinking depth. Untouched
 new composers prefill it; explicit or recovered choices and newer drafts win.
@@ -15,8 +24,8 @@ answer-check preparation resolve the entered map; actual specialist spawns and
 supporting agents use private copied maps while explicit task/installation
 choices and current model policy keep priority. The complete renderer preserves
 legitimate custom role names, the overlay safely quotes those keys, and an
-explicit empty map clears inherited choices. Selected connected-server binding
-is a separate remaining UX644 portion; this model repair does not close it.
+explicit empty map clears inherited choices. The connected-service portion is
+qualified separately above; these witnesses do not establish provider quality.
 
 UX610: Studio lists the first approved installed evidence definition without an
 existing blueprint. Named source, supported result and control choices retain

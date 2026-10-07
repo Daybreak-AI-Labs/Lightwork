@@ -671,7 +671,8 @@ def data_grounding_enabled(override: bool | None = None) -> bool:
 
 
 def domain_capability(profile: DomainProfile, parent_cap, principal: str, *,
-                      levels: bool | None = None, grounding: bool | None = None):
+                      levels: bool | None = None, grounding: bool | None = None,
+                      mcp_tool_names=()):
     """The Capability a domain agent runs under.
 
     With a parent grant present, attenuate it by the profile's scopes (never
@@ -689,6 +690,11 @@ def domain_capability(profile: DomainProfile, parent_cap, principal: str, *,
     setting. Nothing global changes either way.
     """
     allow = set(profile.allow_tools)
+    # Only the factory supplies exact validated names from selected, currently
+    # connected clients. Extend an explicit list before risk/parent attenuation;
+    # an empty profile list must continue inheriting the existing parent grant.
+    if allow:
+        allow.update(mcp_tool_names)
     max_risk = profile.max_risk
     if allow:  # only a real allowlist is expanded (empty == inherit, untouched)
         try:
@@ -1069,7 +1075,16 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
             parent_cap = getattr(ctx, "capability", None)
             if parent_cap is not None and run_principal is None:
                 principal = parent_cap.principal
-    cap = domain_capability(profile, parent_cap, principal)
+    selected_mcp, mcp_guards, registry = [], {}, {}
+    if profile.mcp_servers:
+        from .mcp_tools import selected_tools_from_mcp
+        selected_mcp = selected_tools_from_mcp(
+            getattr(ctx, "mcp_clients", ()), profile.mcp_servers,
+            authorize=lambda name: bool(registry.get("tools") and registry["tools"]._acl_allows(name)),
+            binding_guards=mcp_guards,
+        )
+    cap = domain_capability(profile, parent_cap, principal,
+                            mcp_tool_names=(tool.name for tool in selected_mcp))
     memory = _department_memory(
         profile, task,
         channel=getattr(ctx, "channel", None),
@@ -1096,6 +1111,11 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         # kernel mechanics keyed on "am I this goal's root", not the persona.
         is_goal_root=(depth == 0 and parent is None),
     )
+    registry["tools"] = agent.tools
+    for tool in selected_mcp:
+        agent.tools.register(tool)
+        if tool.name in mcp_guards:
+            agent.tools._mcp_bindings[tool.name] = mcp_guards[tool.name]
     # Validate the *assembled* instance, including operator plugins and MCP
     # bindings. The plain base catalog cannot establish deployment readiness.
     names = {tool.name for tool in agent.tools.all()}

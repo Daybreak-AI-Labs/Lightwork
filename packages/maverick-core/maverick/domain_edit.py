@@ -472,6 +472,7 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
         "max_risk": prof.max_risk,
         "base_max_risk": base.max_risk if base else None,
         "knowledge_sources": list(prof.knowledge_sources),
+        "mcp_servers": list(prof.mcp_servers),
         "models": dict(prof.models),
         "workflow": [_step_dict(s) for s in prof.workflow],
         "output": _output_dict(prof.output),

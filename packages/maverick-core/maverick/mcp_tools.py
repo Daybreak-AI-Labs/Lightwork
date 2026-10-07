@@ -9,14 +9,16 @@ mcp_client.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 from collections.abc import Callable
+from dataclasses import asdict
 
 from .connector_attempts import CONTROL_ERRORS
 from .mcp_catalog import bind_call_guard
-from .mcp_client import MCPClient
+from .mcp_client import MCPClient, MCPServerSpec
 from .tools import Tool
 
 log = logging.getLogger(__name__)
@@ -35,7 +37,80 @@ _MODEL_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _MAX_SCHEMA_SCAN_DEPTH = 64
 
 
-def tools_from_mcp(client: MCPClient, *, authorize: Callable[[str], bool] | None = None, binding_guards: dict[str, Callable[[], bool]] | None = None) -> list[Tool]:
+def current_mcp_servers() -> dict[str, dict]:
+    """Current exact configuration, privately held; never connects a server.
+
+    New specialist grants require the physical overlay, not the legacy reader's
+    last-known-good fallback. Reuse its bounded parser, schema and secret codec.
+    """
+    from . import config, runtime_overrides
+    from .paths import current_tenant_id_strict
+
+    cfg = config.load_config()
+    if config.config_source_errors():
+        raise ValueError("Current tool-server settings could not be checked.")
+    configured = cfg.get("mcp_servers", {})
+    if not isinstance(configured, dict):
+        raise ValueError("Current tool-server settings could not be checked.")
+    path = runtime_overrides.overrides_path()
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        overlay = {}
+    else:
+        state = runtime_overrides._validate_loaded_state(runtime_overrides._read_overlay(path))
+        overlay = {name: runtime_overrides._unseal_mcp_spec(value)
+                   for name, value in state.get("mcp_servers", {}).items()}
+    scope = current_tenant_id_strict()
+    result = {}
+    for name, raw in {**overlay, **configured}.items():
+        spec, enabled = None, False
+        try:
+            if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name)
+                    or name.endswith("_") or "__" in name or not isinstance(raw, dict)
+                    or type(raw.get("enabled", True)) is not bool):
+                raise ValueError("Unsupported tool-server configuration")
+            enabled = raw.get("enabled", True)
+            spec = MCPServerSpec.from_config(name, raw)
+            material = asdict(spec)
+        except (TypeError, ValueError, KeyError):
+            material = raw
+        revision = hashlib.sha256(json.dumps([scope, name, enabled, material],
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        result[name] = {"spec": spec, "enabled": enabled, "revision": revision}
+    return result
+
+
+def selected_tools_from_mcp(clients, servers, *, authorize=None, binding_guards=None):
+    """Bind selected already-connected clients; discovery grants no new tools later."""
+    from .paths import current_tenant_id_strict
+
+    scope = current_tenant_id_strict()
+    current = current_mcp_servers()
+    selected = set(servers)
+    out = []
+    for client in clients or ():
+        name = client.spec.name
+        row = current.get(name)
+        if name not in selected or not row or not row["enabled"] or row["spec"] != client.spec:
+            continue
+        expected = row["revision"]
+
+        def source_current(n=name, revision=expected, workspace=scope):
+            try:
+                if current_tenant_id_strict() != workspace:
+                    return False
+                row = current_mcp_servers().get(n)
+                return bool(row and row["enabled"] and row["spec"] is not None and row["revision"] == revision)
+            except Exception:
+                return False
+
+        out.extend(tools_from_mcp(client, authorize=authorize, binding_guards=binding_guards,
+                                  source_guard=source_current))
+    return out
+
+
+def tools_from_mcp(client: MCPClient, *, authorize: Callable[[str], bool] | None = None, binding_guards: dict[str, Callable[[], bool]] | None = None, source_guard: Callable[[], bool] | None = None) -> list[Tool]:
     """Return a Tool per MCP-exposed tool, namespaced by server.
 
     Council finding (Tier 0): MCP tool descriptions and inputSchema
@@ -91,9 +166,11 @@ def tools_from_mcp(client: MCPClient, *, authorize: Callable[[str], bool] | None
             continue
         if hasattr(client, "catalog") and client.catalog.identity(name) != identity:
             continue
-        out.append(_build_tool(client, prefixed, name, spec, identity=identity, authorize=authorize))
+        if source_guard is not None and not source_guard():
+            continue
+        out.append(_build_tool(client, prefixed, name, spec, identity=identity, authorize=authorize, source_guard=source_guard))
         if binding_guards is not None and identity is not None:
-            binding_guards[prefixed] = lambda c=client.catalog, n=name, i=identity: c.identity(n) == i
+            binding_guards[prefixed] = lambda c=client.catalog, n=name, i=identity, s=source_guard: c.identity(n) == i and (s is None or s())
     return out
 
 
@@ -175,7 +252,7 @@ def _spec_passes_shield(name: str, spec: dict, shield) -> bool:
         return False
 
 
-def _build_tool(client: MCPClient, prefixed: str, original: str, spec: dict, *, identity: str | None = None, authorize: Callable[[str], bool] | None = None) -> Tool:
+def _build_tool(client: MCPClient, prefixed: str, original: str, spec: dict, *, identity: str | None = None, authorize: Callable[[str], bool] | None = None, source_guard: Callable[[], bool] | None = None) -> Tool:
     description = spec.get("description", "") or "(no description)"
     schema = spec.get("inputSchema") or {"type": "object", "properties": {}}
 
@@ -185,6 +262,7 @@ def _build_tool(client: MCPClient, prefixed: str, original: str, spec: dict, *, 
                 return (
                     (identity is None or client.catalog.identity(original) == identity)
                     and (authorize is None or authorize(prefixed))
+                    and (source_guard is None or source_guard())
                 )
 
             with bind_call_guard(admitted):
