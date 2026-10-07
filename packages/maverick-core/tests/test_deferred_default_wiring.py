@@ -86,4 +86,7 @@ def test_knob_off_restores_identity_catalog(ctx, monkeypatch):
     agent = _agent(ctx)
     offered = {t["name"] for t in agent.tools.to_anthropic()}
     assert "acumatica" in offered
-    assert "find_tools" not in offered
+    # Knob off = the identity catalog: everything registered is described.
+    # find_tools stays registered (a provider's tool ceiling may still truncate
+    # the catalog, and overflow must remain discoverable), but nothing hides.
+    assert offered == {t.name for t in agent.tools.all()}
