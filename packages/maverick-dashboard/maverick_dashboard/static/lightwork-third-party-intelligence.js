@@ -663,7 +663,7 @@
       { label: "Vendor", value: function (d) { var a = S.alerts.filter(function (a) { return a.alert_id === d.alert_id; })[0]; return a ? vendorName(a.vendor_id) : "Retained alert"; } },
       { label: "Outcome", value: function (d) { return outcomes[d.state] || "Needs review"; } },
       { label: "Next try", value: function (d) { return d.state === "pending" ? R.when(d.next_attempt_at) : "—"; } },
-    ], S.deliveries, [], { text: "No emails have been queued yet." });
+    ], S.deliveries, [], { text: "No emails have been queued yet. An email is queued when a watched vendor has a change and a saved alert recipient." });
   }
   function watch(v) {
     var kinds = availableKinds("monitoring");
