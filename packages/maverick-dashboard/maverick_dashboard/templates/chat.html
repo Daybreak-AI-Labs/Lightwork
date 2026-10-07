@@ -147,7 +147,9 @@
     </label>
     <p class="muted" id="chat-specialist-found" role="status">{{ ui('Type part of a name, then choose from the list below.') }}</p>
     <label for="chat-specialist">{{ ui('Published specialist') }}
-      <select id="chat-specialist" name="domain" class="select" aria-describedby="chat-specialist-help">
+      <select id="chat-specialist" name="domain" class="select" aria-describedby="chat-specialist-help"
+              data-notice="{{ specialist_work_notice }}" data-saved="{{ published_specialists.personal_default or '' }}"
+              data-requested="{{ '' if requested_specialist is none else '1' }}">
         <option value="">{{ ui('Let Lightwork choose the team') }}</option>
         {% for choice in published_specialists.choices %}
         <option value="{{ choice.value }}" data-revision="{{ choice.revision }}"{% if choice.value == requested_specialist %} selected{% endif %}>{{ choice.label }}</option>
@@ -272,10 +274,11 @@
     function selected() {
       revision.value = choice.selectedOptions[0]?.dataset.revision || '';
       if (choice.value && !revision.value) chatCopy(document.getElementById('chat-specialist-help'), 'Your saved specialist is kept but is unavailable here. Choose a current specialist or let Lightwork choose the team before starting.');
-      else if (!unavailable) chatCopy(document.getElementById('chat-specialist-help'), {{ specialist_work_notice | tojson }});
+      else if (!unavailable) chatCopy(document.getElementById('chat-specialist-help'), choice.dataset.notice);
     }
-    var saved = {{ published_specialists.personal_default | default('') | tojson }};
-    if ({{ (requested_specialist is none) | tojson }} && saved && !choice.value && !form.querySelector('[name="title"]').value.trim() && !form.querySelector('[name="description"]').value.trim()) {
+    // Server values travel as data attributes, so this script stays plain JavaScript.
+    var saved = choice.dataset.saved || '';
+    if (!choice.dataset.requested && saved && !choice.value && !form.querySelector('[name="title"]').value.trim() && !form.querySelector('[name="description"]').value.trim()) {
       if (!Array.from(choice.options).some(function (item) { return item.value === saved; })) {
         var missing = document.createElement('option'); missing.value = saved; missing.textContent = chatText('Saved specialist — unavailable'); choice.append(missing);
       }

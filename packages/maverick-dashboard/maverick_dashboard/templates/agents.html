@@ -1166,6 +1166,8 @@
   </script>
 
   {% if (selected or creating) and editable %}
+  {# Server values for the editor script below, so that script stays plain JavaScript. #}
+  <script type="application/json" id="agent-editor-data">{{ {"services": (selected.mcp_servers if selected else []), "model_options": (model_options | default([])), "model_roles": (model_roles | default([])), "models": (selected.models if selected else {})} | tojson }}</script>
   <script>
     // ---- save / validate / reset (real agent-override endpoints) ----
     (function () {
@@ -1176,7 +1178,8 @@
       const msg = document.getElementById('agent-msg');
       let retainedDraftName = '';
       let editorPrivateLocked = false;
-      let serviceDraft = {{ selected.mcp_servers | tojson if selected else '[]' }};
+      const editorData = JSON.parse((document.getElementById('agent-editor-data') || {}).textContent || '{}');
+      let serviceDraft = editorData.services || [];
       if (form.dataset.toolServices) { try { serviceDraft = JSON.parse(form.dataset.toolServices); } catch (_) {} }
       let serviceChoices = null;
       function renderServices() {
@@ -1203,9 +1206,9 @@
         if (retainedDraftName && idInput.value.trim() === retainedDraftName) return retainedDraftName;
         return (idInput ? idInput.value : '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       }
-      const modelOptions = {{ model_options | default([]) | tojson }};
-      const modelRoles = {{ model_roles | default([]) | tojson }};
-      let modelDraft = {{ selected.models | tojson if selected else '{}' }};
+      const modelOptions = editorData.model_options || [];
+      const modelRoles = editorData.model_roles || [];
+      let modelDraft = editorData.models || {};
       function modelSelect(field, value) {
         field.replaceChildren(new Option('Use the workspace choice', ''));
         modelOptions.forEach(([spec, label]) => field.add(new Option(label, spec)));
