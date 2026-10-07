@@ -129,7 +129,7 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
             "keep using that version. Leave empty to keep the built-in choice. A choice "
             "set on the server takes priority. Hosted image edits use your connected "
             "Replicate account and may cost money; saving this choice makes no image.",
-            "text", "AI models", "", "maverick.tools.image_edit", subgroup="Images",
+            "text", "AI models", "", "maverick.image_edit_models", subgroup="Images",
             env=(env,), pattern=MODEL_PATTERN, max_length=MAX_MODEL_LENGTH,
             aliases="image picture edit inpaint variation upscale replicate")
           for field, env, label in CHOICES),
