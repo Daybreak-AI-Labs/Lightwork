@@ -39,6 +39,7 @@ def intake(monkeypatch, tmp_path):
 
     monkeypatch.setattr(world, "create_goal", recording_create_goal)
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world, srv.llm, srv.sandbox, srv.max_depth = world, object(), object(), 3
     srv._channels, srv._tasks, srv._shield = [], [], None
 

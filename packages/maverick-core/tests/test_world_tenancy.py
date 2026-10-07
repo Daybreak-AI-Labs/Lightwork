@@ -169,6 +169,7 @@ def _build_server(monkeypatch):
     monkeypatch.setattr("maverick.config.load_config", dict)
     shared = WorldModel(maverick_home() / "world.db")
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world = shared
     srv.llm = object()
     srv.sandbox = object()

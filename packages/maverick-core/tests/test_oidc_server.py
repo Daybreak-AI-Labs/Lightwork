@@ -35,6 +35,7 @@ class _Principal:
 
 def _server(server_mod):
     srv = server_mod.Server.__new__(server_mod.Server)
+    srv._db_path = None  # set by Server.__init__
     srv.world = _World()
     srv.llm = object()
     srv.sandbox = object()
