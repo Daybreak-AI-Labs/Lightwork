@@ -1,5 +1,22 @@
 # Post-install operation coverage
 
+October 7 UX658 model defaults: a person's encrypted Preferences can select a
+named permitted Chat model and its supported thinking depth. Copilot reviews
+the same changes, including any required depth reset. An untouched new composer
+prefills these choices once; explicit workspace choices, restored drafts and
+newer selections win. A retired choice remains visibly unavailable instead of
+being silently substituted. Native authority, scope, exact prior revision and
+current model/depth availability are checked after the writer waits.
+
+One ordinary encrypted Save with a lost reply recovered through exact Original
+without a second write, keeping a newer Unicode draft. Current role and model
+policy withdrawal at the native writer refused further writes; another user's
+default was blank and could not read the owner's Original. New Chat, explicit
+reset, delayed refresh, Copilot review, 320-pixel layout and private clearing
+passed without task submission or model calls. Original confirms only the
+latest save per scope; older requests remain unconfirmed. A default specialist
+is separate from this delivered model/depth portion.
+
 October 7 UX644 model follow-through: the complete specialist editor offers
 named AI choices for the specialist and its supporting parts. Typed Copilot
 Save can change one part while preserving the complete remaining definition.

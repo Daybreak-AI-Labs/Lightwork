@@ -1,5 +1,14 @@
 # Product changes delivered on October 6
 
+UX658, model portion: encrypted personal Preferences and typed Copilot now
+select a current permitted Chat model and supported thinking depth. Untouched
+new composers prefill it; explicit or recovered choices and newer drafts win.
+Native checks after writer waits refuse withdrawn access/model policy. One
+actual lost-reply Save recovered without replay, with separate-user isolation,
+complete reset review, private clearing and the 320-pixel form qualified.
+Only the latest native save per scope can be confirmed by Original. Default
+specialist selection remains a separate portion of the original item.
+
 UX644, model portion: the ordinary complete editor and typed Copilot Save now
 retain usable specialist and supporting-part AI choices. Complete review and
 answer-check preparation resolve the entered map; actual specialist spawns and

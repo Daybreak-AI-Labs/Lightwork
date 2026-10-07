@@ -2,7 +2,7 @@
 {% block title %}Your preferences · Lightwork{% endblock %}
 {% block content %}
 {% from "_hero.html" import hero %}
-{{ hero(ui('Your account'), ui('Your preferences'), subtitle=ui('Make Lightwork fit your work'), lede=ui('Choose writing and display preferences. These choices never grant tools or change security, memory retention, or approval rules.')) }}
+{{ hero(ui('Your account'), ui('Your preferences'), subtitle=ui('Make Lightwork fit your work'), lede=ui('Choose writing, display and future Chat defaults. These choices never grant tools or change security, spending limits, memory retention or approval rules.')) }}
 <p><a class="btn btn--ghost" href="/account">{{ ui("Your account") }}</a> <a class="btn btn--ghost" href="/today">{{ ui("Today") }}</a> <a class="btn btn--ghost" href="/notifications">{{ ui("Your notifications") }}</a>{% if can_open_page('/styles') %} <a class="btn btn--ghost" href="/styles">{{ ui("Response styles") }}</a>{% endif %}</p>
 {% if preference_thread %}<p class="panel">{{ ui("These response preferences apply to this conversation. Clear an override to follow your personal defaults.") }}</p>{% endif %}
 {% if not preference_thread %}<details class="panel"><summary>{{ ui("Portable writing and display profile") }}</summary><p>{{ ui("Export your saved writing and display choices to reuse on another account. Names, pins, notifications, tools, memory and security policies are excluded. Imports remain a draft until you review and save.") }}</p><button class="btn btn--ghost" type="button" id="personal-profile-export">{{ ui("Export saved profile") }}</button><label>{{ ui("Profile file") }} <input type="file" accept=".json,application/json" id="personal-profile-file"></label><button class="btn btn--ghost" type="button" id="personal-profile-import">{{ ui("Load profile for review") }}</button><p id="personal-profile-status" role="status" aria-live="polite"></p></details>{% endif %}
@@ -29,6 +29,12 @@
 </div>
 {% if not preference_thread %}
 <fieldset class="preference-grid"><legend>{{ ui("Conversation defaults") }}</legend><p>{{ ui('Choose the initial execution boundary while a task runs. Every message still shows its selected mode; administrator policy may disable a mode.') }}</p>
+{% if preference_can_operate %}
+<p>These AI defaults belong to your account in this workspace. They prefill a new Chat task; your entered task choices take precedence. Running tasks and specialist AI settings stay unchanged.</p>
+<label class="preference-field">Default Chat model<select class="select" id="preference-chat_model" data-pref="chat_model"><option value="">Use workspace settings</option>{% for row in preference_state.chat_models %}<option value="{{ row.value }}">{{ row.label }}</option>{% endfor %}</select><span data-source-for="chat_model" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="chat_model"> Use workspace settings</span></label>
+<label class="preference-field">Default thinking depth<select class="select" id="preference-chat_effort" data-pref="chat_effort"><option value="">Use the model’s usual thinking depth</option></select><span data-source-for="chat_effort" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="chat_effort"> Use the model’s usual thinking depth</span></label>
+<p id="preference-chat-status" class="muted" role="status"></p>
+{% endif %}
 {% for key,label,options in [('conversation_mode','While a task runs',[('queue','Queue next message'),('guidance','Review guidance for this task'),('independent','Start a separate task')]),('conversation_detail','Inbox detail',[('brief','Brief'),('balanced','Balanced'),('detailed','Detailed')])] %}<label class="preference-field">{{ ui(label) }}<select class="select" data-pref="{{ key }}">{% for value,title in options %}{% set builtin = key != 'theme' or value in ['system','light','dark','solarized','hicontrast'] %}<option value="{{ value }}" lang="{{ ul(title) if builtin else 'und' }}" dir="auto"{% if not builtin %} data-user-content{% endif %}>{{ ut(title) if builtin else title }}</option>{% endfor %}</select><span data-source-for="{{ key }}" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="{{ key }}"> {{ ui("Use inherited value") }}</span></label>{% endfor %}</fieldset>
 <fieldset class="preference-grid"><legend>{{ ui("Display defaults for this scope") }}</legend><label class="preference-field">{{ ui("Interface language") }}<select class="select" data-pref="interface_language"><option value="" lang="{{ ul("Follow response language") }}">{{ ut("Follow response language") }}</option>{% for code, label in [('en','English'),('fr','French'),('de','German'),('ja','Japanese'),('ar','Arabic'),('zh','Chinese')] %}<option value="{{ code }}" lang="{{ ul(label) }}">{{ ut(label) }}</option>{% endfor %}</select><span data-source-for="interface_language" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="interface_language"> {{ ui("Use inherited value") }}</span></label><p>{{ ui("These saved defaults follow your account. The header can temporarily save a different choice on this device.") }}</p>
 {% for key,label,options in [('theme','Theme', preference_themes),('font','Font',[('default','Default'),('dyslexic','Dyslexia-friendly')]),('density','Page spacing',[('comfortable','Comfortable'),('compact','Compact')]),('text_size','Text size',[('standard','Standard'),('large','Large'),('larger','Larger')]),('glass','Glass effects',[('off','Off'),('on','On')])] %}<label class="preference-field">{{ ui(label) }}<select class="select" id="preference-{{ key }}" data-pref="{{ key }}">{% for value,title in options %}{% set builtin = key != 'theme' or value in ['system','light','dark','solarized','hicontrast'] %}<option value="{{ value }}" lang="{{ ul(title) if builtin else 'und' }}" dir="auto"{% if not builtin %} data-user-content{% endif %}>{{ ut(title) if builtin else title }}</option>{% endfor %}</select><span data-source-for="{{ key }}" class="preference-source"></span><span><input type="checkbox" data-inherit-pref="{{ key }}"> {{ ui("Use inherited value") }}</span></label>{% endfor %}
@@ -45,6 +51,13 @@
 <button class="btn btn--ghost" type="button" id="preference-compare" hidden>{{ ui("Compare current values and keep my draft") }}</button>
 <p id="preference-status" role="status" aria-live="polite"></p>
 </form>
+<section class="panel" id="preference-original" hidden>
+  <h2>Check the original preference save</h2>
+  <p>A missing reply does not mean the save failed. Read its original result before saving again. Only the latest save in each scope can be confirmed; older results stay unconfirmed.</p>
+  <button class="btn" type="button" id="preference-original-read">Check original save</button>
+  <button class="btn btn--ghost" type="button" id="preference-original-new" hidden>Start a fresh review</button>
+  <p id="preference-original-status" role="status"></p>
+</section>
 {% if memory_preferences %}
 <section class="panel" aria-labelledby="preference-memory-title">
   <h2 id="preference-memory-title">{{ ui("Your personal memory") }}</h2>

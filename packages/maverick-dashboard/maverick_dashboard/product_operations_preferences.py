@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Literal
 
 from fastapi import HTTPException
+from maverick.governed_operations import digest
 from pydantic import Field
 
 from . import auth
@@ -13,7 +14,7 @@ from . import preferences_api as native
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 KEYS = ("preferred_name", "tone", "language", "verbosity", "output_style", "custom_style_name",
-        "custom_style", "theme", "font", "density", "text_size", "glass", "conversation_mode", "conversation_detail")
+        "custom_style", "theme", "font", "density", "text_size", "glass", "conversation_mode", "conversation_detail", "chat_model", "chat_effort")
 STYLE_KEYS = {"tone", "language", "verbosity", "output_style", "custom_style_name", "custom_style"}
 
 
@@ -48,10 +49,13 @@ def _authorize_scope(request, scope):
         auth.require_permission(request, "admin")
 
 
-def _choices():
+def _choices(current):
     from maverick.persona import style_choices
     from maverick.styles import BUILTIN_STYLES
     return {
+        "chat_model": (("", "Use workspace settings"), *tuple((row["value"], row["label"]) for row in current["chat_models"])),
+        "chat_effort": (("", "Use the model’s usual thinking depth"), *tuple((row["value"], row["label"])
+            for model in current["chat_models"] if model["value"] == current["values"]["chat_model"] for row in model["efforts"])),
         "tone": style_choices(), "language": (("en", "English"), ("fr", "French"), ("de", "German"), ("ja", "Japanese"), ("ar", "Arabic"), ("zh", "Chinese")),
         "verbosity": (("brief", "Brief"), ("balanced", "Balanced"), ("detailed", "Detailed")),
         "output_style": (("", "Ordinary response style"), *tuple((key, key.capitalize()) for key in BUILTIN_STYLES), ("custom", "My named style")),
@@ -67,17 +71,18 @@ def _choices():
 
 def snapshot(request, selection):
     thread, current = _current(request, selection)
-    choices = _choices()
-    keys = [key for key in KEYS if key not in current["locked"] and (thread is None or key in STYLE_KEYS)]
-    return Snapshot(current["revision"], "Your saved preferences in the current workspace",
-                    "Review writing and display choices with their effective source. Personal names never become shared defaults.",
+    choices = _choices(current)
+    keys = [key for key in KEYS if key not in current["locked"] and (thread is None or key in STYLE_KEYS)
+            and (key not in {"chat_model", "chat_effort"} or auth.has_permission(request, "operate"))]
+    return Snapshot(digest([current["revision"], current["chat_models"]]), "Your saved preferences in the current workspace",
+                    "Review writing, display and future Chat choices with their effective source. Personal names never become shared defaults.",
                     {"values": {key: current["values"][key] for key in KEYS},
                      "sources": {key: current["sources"][key] for key in KEYS}, "locked": current["locked"]},
                     [{"name": "scope", "label": "Apply to", "kind": "select", "value": "personal",
                       "choices": [{"value": value, "label": "This conversation" if thread else value.capitalize()}
                                   for value in (["personal"] if thread else current["scopes"])]},
                      {"name": "key", "label": "Preference", "kind": "select", "required": True,
-                      "choices": [{"value": key, "label": key.replace("_", " ").capitalize()} for key in keys]},
+                      "choices": [{"value": key, "label": {"chat_model":"Default Chat model", "chat_effort":"Default Chat thinking depth"}.get(key, key.replace("_", " ").capitalize())} for key in keys]},
                      {"name": "value", "label": "New value", "kind": "text", "value": "", "depends_on": "key",
                       "choices_by": {key: [{"value": value, "label": label} for value, label in options] for key, options in choices.items()}},
                      {"name": "inherit", "label": "Use inherited value instead", "kind": "boolean", "value": False}],
@@ -111,14 +116,23 @@ def _plan(request, selection, args):
 def preview(request, selection, args):
     current, thread, value, effective, inherited = _plan(request, selection, args)
     key = args["key"]
-    return Preview("Save one reviewed preference for " + ("this conversation" if thread else args["scope"]) +
-                   ". This changes presentation only; tools, memory, retention and security remain governed separately.",
-                   [{"label": key.replace("_", " "), "before": effective["values"][key],
-                     "after": inherited["values"][key] if value is None else value,
-                     "source": effective["sources"][key], "scope": "conversation" if thread else args["scope"],
-                     "resulting_source": inherited["sources"][key] if value is None else args["scope"]}],
+    changes = {key: value}
+    if key == "chat_model":
+        changes["chat_effort"] = None
+    native._validate_chat_defaults(request, native.PreferenceUpdate(expected_revision=current["revision"], context=current["context"],
+        scope=args["scope"], thread=thread, changes=changes))
+    choices = _choices(current)
+    def label(field, item):
+        return dict(choices.get(field, ()) ).get(item, item)
+    return Preview("Save reviewed preferences for " + ("this conversation" if thread else args["scope"]) +
+                   ". Chat AI defaults prefill future tasks only; each composer can choose workspace settings or another permitted model. Running tasks, tools, spending limits and approvals are unchanged.",
+                   [{"label": {"chat_model":"Default Chat model", "chat_effort":"Default Chat thinking depth"}.get(field, field.replace("_", " ")),
+                     "before": label(field, effective["values"][field]),
+                     "after": label(field, inherited["values"][field] if item is None else item),
+                     "source": effective["sources"][field], "scope": "conversation" if thread else args["scope"],
+                     "resulting_source": inherited["sources"][field] if item is None else args["scope"]} for field, item in changes.items()],
                    {"revision": current["revision"], "context": current["context"], "thread": thread,
-                    "scope": args["scope"], "changes": {key: value}})
+                    "scope": args["scope"], "changes": changes})
 
 
 def execute(request, selection, args, prepared, operation_id):
@@ -155,8 +169,9 @@ def entries():
     return (
         Adapter("preferences.status", "Show my preferences", "preferences", "/preferences", pages,
                 EmptyInput, lambda request, selection: replace(snapshot(request, selection), fields=[]), _read_preview,
-                aliases=("my preferences", "show my writing style", "what are my preferences")),
+                aliases=("my preferences", "show my writing style", "what are my preferences", "show my Chat defaults")),
         Adapter("preferences.update", "Change my preferences", "preferences", "/preferences", pages,
                 ChangeInput, snapshot, preview, execute, recover,
-                aliases=("change my writing style", "change my theme", "change my preferences", "make my replies shorter", "use inherited preferences")),
+                read_recovery=recover,
+                aliases=("change my writing style", "change my theme", "change my preferences", "make my replies shorter", "use inherited preferences", "change my Chat defaults", "change my default Chat model", "change my default thinking depth")),
     )

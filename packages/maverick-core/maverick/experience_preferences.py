@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -24,19 +25,20 @@ DEFAULTS = {
     "today_days": "7", "template_favorites": [],
     "notification_preferences": {},
     "conversation_mode": "queue", "conversation_detail": "balanced",
+    "chat_model": "", "chat_effort": "",
     # Navigation style ("" follows the installation's [dashboard] navigation;
     # used only while [dashboard] navigation_personal lets people choose) and
     # the person's own order of sidebar areas ([] = their role's preset).
     "navigation": "", "navigation_areas": [],
 }
 PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences",
-                           "navigation", "navigation_areas"})
+                           "navigation", "navigation_areas", "chat_model", "chat_effort"})
 CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"},
            "conversation_mode": {"queue", "guidance", "independent"},
            "conversation_detail": {"brief", "balanced", "detailed"}, "verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
            "text_size": {"standard", "large", "larger"}, "glass": {"off", "on"}, "today_days": {"1", "7", "30"},
-           "navigation": {"", "classic", "areas"}}
+           "navigation": {"", "classic", "areas"}, "chat_effort": {"", "low", "medium", "high", "xhigh", "max"}}
 
 
 class PreferenceConflict(ValueError):
@@ -147,6 +149,8 @@ def _validate(key: str, value):
         if not isinstance(value, str):
             raise ValueError("Enter a preferred name as text.")
         return _clean_user_name(value)
+    if key == "chat_model" and (not isinstance(value, str) or value and not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", value)):
+        raise ValueError("Choose an available Chat model.")
     if key in {*CHOICES, "tone", "output_style"} and not isinstance(value, str):
         raise ValueError("Choose an available preference value.")
     if key in CHOICES:
@@ -166,7 +170,8 @@ def _validate(key: str, value):
 
 
 def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
-         thread: int | None = None, operation_id: str | None = None) -> dict:
+         thread: int | None = None, operation_id: str | None = None,
+         before_effect: Callable[[], None] | None = None) -> dict:
     if not enabled():
         raise ValueError("Personal preferences are turned off by your administrator.")
     # One installation fence serializes hierarchy writes against each other.
@@ -203,8 +208,11 @@ def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
                 values[key] = _validate(key, value)
         ensure_private_directory(path.parent)
         with deployment_key_scope() if scope == "organization" else nullcontext():
-            atomic_write_bytes(path, seal(json.dumps({"revision": record["revision"] + 1, "values": values,
-                                                   "last_operation": {"id": operation_id, "digest": operation_digest} if operation_id else None}).encode()), mode=0o600)
+            payload = seal(json.dumps({"revision": record["revision"] + 1, "values": values,
+                "last_operation": {"id": operation_id, "digest": operation_digest} if operation_id else None}).encode())
+            if before_effect is not None:
+                before_effect()
+            atomic_write_bytes(path, payload, mode=0o600)
         return state(principal, thread=thread)
 
 

@@ -23,6 +23,22 @@ def _app():
 
 
 def _principal(request: Request) -> str:
+    with auth.fresh_configuration():
+        return _fresh_principal(request)
+
+
+def _fresh_principal(request: Request) -> str:
+    principal = getattr(request.state, "principal", None)
+    refresh = {"session": auth._session_principal, "invite": auth._invite_session_principal,
+               "proxy": auth._proxy_principal}.get((getattr(principal, "claims", None) or {}).get("via"))
+    if refresh is not None:
+        fresh = refresh(request)
+        if fresh is None or fresh.principal != principal.principal:
+            raise HTTPException(401, "Sign in again to use your private preferences.")
+        request.state.principal = principal = fresh
+    if principal is not None:
+        auth._enforce_scim_active(principal)
+        auth._enforce_workspace_policies(request, principal)
     auth.require_permission(request, "view")
     principal = auth.caller_principal(request)
     if not principal:
@@ -50,6 +66,11 @@ def _thread(request: Request, thread: int | None) -> int | None:
 
 
 def _state(request: Request, thread: int | None = None) -> dict:
+    with auth.fresh_configuration():
+        return _current_state(request, thread)
+
+
+def _current_state(request: Request, thread: int | None = None) -> dict:
     principal = _principal(request)
     state = preferences.state(principal, thread=_thread(request, thread))
     destinations = _destinations(request)
@@ -59,7 +80,11 @@ def _state(request: Request, thread: int | None = None) -> dict:
     state["values"]["favorites"], _preset = pin_hrefs(state, destinations, _app()._page_role(request))
     if state["values"]["start_page"] not in destinations:
         state["values"]["start_page"] = "/chat"
-    return {**state, "context": context_for(request), "destinations": destinations,
+    ai_models = []
+    if thread is None and auth.has_permission(request, "operate"):
+        from .task_model_selection_api import choices
+        ai_models = choices(request)
+    return {**state, "context": context_for(request), "destinations": destinations, "chat_models": ai_models,
             "scopes": ["personal"] + (["workspace"] if auth.has_permission(request, "admin") else []) +
                       (["organization"] if auth.has_global_permission(request, "admin") else [])}
 
@@ -75,6 +100,7 @@ def preferences_page(request: Request, thread: int | None = None):
     state = _state(request, thread)
     return _app().templates.TemplateResponse(request, 'preferences.html', {
         "preference_state": state, "preference_thread": thread, "tones": style_choices(),
+        "preference_can_operate": auth.has_permission(request, "operate"),
         "memory_preferences": describe(request) if thread is None else None,
         "navigation_choice": navigation_settings()[1],
         "output_styles": BUILTIN_STYLES, "preference_themes": [("system", "Follow system")] + [(name, {"light": "Light", "dark": "Dark", "solarized": "Solarized", "hicontrast": "High contrast"}.get(name, name)) for name in sorted(_app()._valid_theme_names())], "legacy_name": load_persona().get("user_name", "") if auth.has_global_permission(request, "admin") else "",
@@ -143,9 +169,11 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
             choices = template_choices(request)
             if not isinstance(value, list) or any(not isinstance(item, str) or item not in choices for item in value):
                 raise HTTPException(403, "Only currently accessible templates can be pinned.")
+    _validate_chat_defaults(request, body)
     try:
         preferences.save(principal, scope=body.scope, changes=body.changes,
-                         expected_revision=body.expected_revision, thread=_thread(request, body.thread), operation_id=body.operation_id)
+                         expected_revision=body.expected_revision, thread=_thread(request, body.thread), operation_id=body.operation_id,
+                         before_effect=_effect_guard(request, body, principal))
     except preferences.PreferenceConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
@@ -155,6 +183,66 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
         for key in set(body.changes) & {'theme', 'font', 'density', 'text_size', 'glass', 'interface_language'}:
             response.delete_cookie('mvk_lang' if key == 'interface_language' else 'mvk_' + key)
     return response
+
+
+def _effect_guard(request, body, principal):
+    def guard():
+        with auth.fresh_configuration():
+            if _principal(request) != principal or not hmac.compare_digest(body.context, context_for(request)):
+                raise HTTPException(409, "Your account, workspace or access changed. Review your retained choices again.")
+            if body.scope == "organization":
+                auth.require_global_permission(request, "admin")
+            elif body.scope == "workspace":
+                auth.require_permission(request, "admin")
+            _thread(request, body.thread)
+            _validate_chat_defaults(request, body)
+    return guard
+
+
+def _validate_chat_defaults(request, body):
+    if not set(body.changes) & {"chat_model", "chat_effort"}:
+        return
+    if body.scope != "personal" or body.thread is not None:
+        raise HTTPException(422, "Chat AI defaults belong to your account in this workspace. Choose Personal scope.")
+    from .task_model_selection_api import choices, current_authority
+    current_authority(request)
+    values = preferences.state(_principal(request))["values"]
+    picked = {key: body.changes.get(key, values[key]) or "" for key in ("chat_model", "chat_effort")}
+    if not picked["chat_model"]:
+        if picked["chat_effort"]:
+            raise HTTPException(422, "Choose a Chat model before choosing its thinking depth.")
+        return
+    row = next((row for row in choices(request) if row["value"] == picked["chat_model"]), None)
+    if row is None or picked["chat_effort"] and picked["chat_effort"] not in {item["value"] for item in row["efforts"]}:
+        raise HTTPException(409, "This Chat model or thinking depth is no longer available. Your draft is kept; choose current options.")
+
+
+@router.post('/api/v1/preferences/original')
+def original_preferences(request: Request, body: PreferenceUpdate):
+    _app()._require_same_origin(request)
+    principal = _principal(request)
+    if not body.operation_id or not hmac.compare_digest(body.context, context_for(request)):
+        raise HTTPException(409, "The account or workspace changed. This original save cannot be read here.")
+    if body.scope == "organization":
+        auth.require_global_permission(request, "admin")
+    elif body.scope == "workspace":
+        auth.require_permission(request, "admin")
+    elif body.scope != "personal":
+        raise HTTPException(422, "Choose a supported preference scope.")
+    confirmed = preferences.operation_confirmed(principal, scope=body.scope, changes=body.changes,
+        expected_revision=body.expected_revision, operation_id=body.operation_id, thread=_thread(request, body.thread))
+    current = _state(request, body.thread)
+    if _principal(request) != principal or not hmac.compare_digest(body.context, context_for(request)):
+        raise HTTPException(409, "Your account, workspace or access changed. Private preferences cannot be released.")
+    with auth.fresh_configuration():
+        if body.scope == "organization":
+            auth.require_global_permission(request, "admin")
+        elif body.scope == "workspace":
+            auth.require_permission(request, "admin")
+    return JSONResponse({"confirmed": confirmed, "state": current,
+        "message": "The original preference save is confirmed. Nothing was repeated." if confirmed else
+                   "This original save is unconfirmed or is older than the latest saved change. Matching current values are not proof. Nothing was repeated."},
+        headers={"Cache-Control":"private, no-store"})
 
 
 class DisplayUpdate(BaseModel):
