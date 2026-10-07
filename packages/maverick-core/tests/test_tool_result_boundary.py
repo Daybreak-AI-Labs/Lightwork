@@ -385,9 +385,24 @@ def test_artifact_quota_does_not_evict_live_result(monkeypatch):
     assert artifacts.read_complete(ref["artifact_id"], goal_id=1, principal="alice") == "first"
 
 
+def _approve_code(monkeypatch):
+    """A person approved this script and its declared calls (code_exec permit)."""
+    from contextlib import nullcontext
+
+    from maverick.tools import code_exec
+
+    async def permit(_agent, _code, _declared):
+        return "approved-permit"
+
+    monkeypatch.setattr(code_exec, "_request_code_permit", permit)
+    monkeypatch.setattr(code_exec, "consume_operation_consent", lambda _permit: nullcontext())
+
+
 @pytest.mark.asyncio
 async def test_programmatic_execution_receives_full_screened_tail(monkeypatch):
     from maverick.tools.code_exec import code_exec_tool
+
+    _approve_code(monkeypatch)
 
     full = "row,42\n" * 8000 + "CRITICAL_FINAL_ROW"
     agent, run, _rows, _seen = agent_boundary(monkeypatch, lambda _: full)
@@ -414,6 +429,8 @@ async def _full(run):
 @pytest.mark.asyncio
 async def test_programmatic_aggregate_quota_never_runs_partial_script(monkeypatch):
     from maverick.tools.code_exec import code_exec_tool
+
+    _approve_code(monkeypatch)
 
     monkeypatch.setattr(stream, "MAX_RESULT_BYTES", 1024)
     agent, run, rows, _seen = agent_boundary(monkeypatch, lambda _: "business" * 100)
