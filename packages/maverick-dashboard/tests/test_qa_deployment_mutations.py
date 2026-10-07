@@ -23,7 +23,11 @@ def test_learning_mutations_confirm_targets_and_recover_for_retry():
     assert "sw.label + '” for this deployment? ' + impact" in source
     assert "Scheduled and triggered workflows may start running" in source
     assert "Disable automatic rollback of workflow regressions?" in source
-    assert "Disable automatic application of workflow improvements?" in source
+    # Automatic application of workflow improvements was retired: suggestions
+    # now wait for complete human review, so no unconfirmed toggle may return.
+    assert "lrn-auto-apply" not in source
+    assert "wire('lrn-auto-evolve', 'auto_evolve');" in source
+    assert "Workflow suggestions require your review." in source
     assert "Stop these experiments? Results so far are kept." in source
     assert source.count("if (btn.dataset.inFlight === 'true') return;") >= 5
     assert source.count("btn.setAttribute('aria-busy', 'true')") >= 5
