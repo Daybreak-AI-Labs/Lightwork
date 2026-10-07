@@ -50,6 +50,9 @@ def _render(template_name: str, **context: Any) -> _ControlMarkup:
     from maverick_dashboard.app import templates as app_templates
 
     templates.env.filters.update(app_templates.env.filters)
+    # The app's own template helpers (comments_enabled, static_url, ...), as
+    # every real page render has them.
+    templates.env.globals.update(app_templates.env.globals)
     templates.env.globals.update(
         nav_groups=[],
         show_settings_link=False,
@@ -247,7 +250,12 @@ def test_continuous_evidence_and_external_enrollment_fail_closed() -> None:
         trc_continuous_evidence_enabled=False,
     )
     _assert_disabled(evidence, "trc-refresh", "trc-run-cycle")
-    assert "trc-root" not in evidence.by_id
+    # Turned off, the page keeps only a way to read an earlier setup result:
+    # its root says it is off (the script then loads nothing) and none of the
+    # live source or collection controls render.
+    assert evidence.by_id["trc-root"].get("data-enabled") == "false"
+    for live in ("trc-source-new", "trc-source-save", "trc-composition", "trc-scheduler"):
+        assert live not in evidence.by_id, live
     _assert_activation_outside_disabled_controls(evidence)
 
     evidence_unready = _render(
