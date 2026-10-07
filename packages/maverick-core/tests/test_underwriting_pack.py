@@ -91,7 +91,12 @@ def test_pack_summarizes_and_stays_externally_verifiable():
     assert summary["inventory_count"] == 1
     assert summary["evidence_by_kind"]["model_card"]["passed"] == 1
     assert summary["eu_conformity"] == {"enabled": False}
-    assert summary["serious_incidents"] == {"enabled": False}
+    # Incident posture now reports both reporting registers with a notice,
+    # even when neither is enabled (73fc1e4d).
+    incidents = summary["serious_incidents"]
+    assert incidents["enabled"] is False
+    assert incidents["declarations"] == 0 and incidents["overdue"] == 0
+    assert incidents["notice"]
     assert summary["ai_literacy"] == {"enabled": False}
     assert summary["assurance_pack_sha256"] == pack["assurance_pack"]["pack_sha256"]
 
